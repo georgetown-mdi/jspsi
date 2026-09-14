@@ -16,6 +16,10 @@
  * the origin and by whoever holds the disk (see
  * docs/SECURITY_DESIGN.md, "Results of a scheduled run at rest").
  *
+ * What it keeps is bounded by size as well as by time: a results file above
+ * {@link ./resultSizeProjection.ts}'s bound is kept nowhere here, neither parked
+ * nor shortened to fit, and the run records the too-large state in its place.
+ *
  * Retention is arithmetic over each entry's own run instant rather than a stored
  * expiry or a sweep timer: the store applies {@link retainParkedResults} on every
  * read and every write, so the retention the surface states is the one enforced
@@ -28,6 +32,7 @@ import { z } from "zod";
 import { parseStoredInstant } from "./managed/managedExchangeRecord";
 import { recordFileStamp } from "./runOutputs";
 
+import type { PairTableFactors } from "./resultSizeProjection";
 import type { ZodType } from "zod";
 
 /** The single recognized format version for a stored set of parked results. A
@@ -50,12 +55,25 @@ const MS_PER_DAY = 86_400_000;
  * parking case. */
 export type ParkedResultsFallback = "ungranted" | "write-failed";
 
-/** One scheduled run's results, waiting for the operator. */
-export interface ParkedRunResults {
-  kind: "results";
+/** What every entry a run leaves here holds, whatever became of the results.
+ *
+ * The two declared record counts are the run's own, kept so the next visit can
+ * project the size of the result a further run on these terms would produce
+ * ({@link ./resultSizeProjection.ts}) before that run happens. They are counts,
+ * not row values, and absent where the agreed cardinality puts no product on the
+ * pair table. */
+interface ParkedRunEntry {
   /** ISO 8601 UTC instant of the run, taken from the run's own bookkeeping stamp
    * so this entry and the run history name the same moment. */
   runAt: string;
+  /** The two counts the run declared at the terms exchange, where their product
+   * is what bounds its pair table ({@link PairTableFactors}). */
+  pairTableFactors?: PairTableFactors;
+}
+
+/** One scheduled run's results, waiting for the operator. */
+export interface ParkedRunResults extends ParkedRunEntry {
+  kind: "results";
   /** The name the download is offered under, stamped so repeated downloads
    * accumulate rather than collide ({@link runResultsFileName}). */
   fileName: string;
@@ -71,10 +89,8 @@ export interface ParkedRunResults {
 /** One scheduled run's results as written into the folder the operator granted.
  * The rows are in that folder and nothing of them is kept here: this entry is the
  * note that says where they went, so the operator's next visit can say it. */
-export interface WrittenRunResults {
+export interface WrittenRunResults extends ParkedRunEntry {
   kind: "written";
-  /** ISO 8601 UTC instant of the run whose results were written. */
-  runAt: string;
   /** The name the results were written under. */
   fileName: string;
   /** The granted folder's own name, as the picker reported it -- the leaf, not a
@@ -88,15 +104,27 @@ export interface WrittenRunResults {
  * completed, rotated, and filed its disclosure, and the rows are gone. The state
  * is kept so the operator meets it at the next visit instead of finding nothing
  * where results should be. */
-export interface RefusedRunResults {
+export interface RefusedRunResults extends ParkedRunEntry {
   kind: "storage-refused";
-  /** ISO 8601 UTC instant of the run whose results were refused. */
-  runAt: string;
+}
+
+/** A scheduled run whose results were larger than this browser keeps
+ * ({@link MAX_PARKED_RESULT_BYTES}). Nothing of the results is here: they are
+ * kept whole or not at all, never shortened to fit. The run itself completed,
+ * rotated, and filed its disclosure; what the operator's next visit meets is this
+ * state and the remedy for it, which is the output-folder grant. */
+export interface TooLargeRunResults extends ParkedRunEntry {
+  kind: "too-large";
+  /** The size of the results file that was not kept, in bytes, so the state names
+   * what it weighed against the bound. */
+  resultBytes: number;
+  /** How many rows the results table had, where the run reported it. */
+  matchedRecordCount?: number;
 }
 
 /** One entry of a managed exchange's parked results. */
 export type ParkedResultsEntry =
-  ParkedRunResults | WrittenRunResults | RefusedRunResults;
+  ParkedRunResults | WrittenRunResults | RefusedRunResults | TooLargeRunResults;
 
 /** One managed exchange's parked results, oldest run first. */
 export interface ParkedResults {
@@ -104,11 +132,23 @@ export interface ParkedResults {
   entries: ReadonlyArray<ParkedResultsEntry>;
 }
 
+const pairTableFactorsSchema: ZodType<PairTableFactors> = z
+  .object({ local: z.int().min(0), partner: z.int().min(0) })
+  .strict();
+
+/** The fields every entry holds, spread into each shape below: the union is
+ * `.strict()` shape by shape, so a shared base has to be spread rather than
+ * extended. */
+const runEntryFields = {
+  runAt: z.iso.datetime(),
+  pairTableFactors: pairTableFactorsSchema.optional(),
+};
+
 const entrySchema: ZodType<ParkedResultsEntry> = z.discriminatedUnion("kind", [
   z
     .object({
+      ...runEntryFields,
       kind: z.literal("results"),
-      runAt: z.iso.datetime(),
       fileName: z.string().min(1),
       // A Blob has no structure Zod can describe, so the check is the runtime
       // brand itself: a value read back from the store is the Blob structured
@@ -120,8 +160,8 @@ const entrySchema: ZodType<ParkedResultsEntry> = z.discriminatedUnion("kind", [
     .strict(),
   z
     .object({
+      ...runEntryFields,
       kind: z.literal("written"),
-      runAt: z.iso.datetime(),
       fileName: z.string().min(1),
       directoryName: z.string().min(1),
       matchedRecordCount: z.int().min(0).optional(),
@@ -129,8 +169,16 @@ const entrySchema: ZodType<ParkedResultsEntry> = z.discriminatedUnion("kind", [
     .strict(),
   z
     .object({
+      ...runEntryFields,
       kind: z.literal("storage-refused"),
-      runAt: z.iso.datetime(),
+    })
+    .strict(),
+  z
+    .object({
+      ...runEntryFields,
+      kind: z.literal("too-large"),
+      resultBytes: z.int().min(0),
+      matchedRecordCount: z.int().min(0).optional(),
     })
     .strict(),
 ]);

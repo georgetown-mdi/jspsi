@@ -17,8 +17,10 @@ import { listReadableManagedExchanges } from "../../../src/psi/managed/managedEx
 import {
   parkRunResults,
   recordParkedResultsRefusal,
+  recordResultsTooLarge,
   recordResultsWrittenToFolder,
 } from "../../../src/psi/parkedResultsStore.js";
+import { MAX_PARKED_RESULT_BYTES } from "../../../src/psi/resultSizeProjection.js";
 
 import type { ManagedExchangeRecord } from "../../../src/psi/managed/managedExchangeRecord.js";
 import type { ManagedExchangeRunResult } from "../../../src/psi/managed/managedExchangeRun.js";
@@ -58,6 +60,7 @@ vi.mock("@openmined/psi.js/psi_wasm_web", () => ({
 vi.mock("../../../src/psi/parkedResultsStore.js", () => ({
   parkRunResults: vi.fn(),
   recordParkedResultsRefusal: vi.fn(),
+  recordResultsTooLarge: vi.fn(),
   recordResultsWrittenToFolder: vi.fn(),
 }));
 
@@ -65,6 +68,7 @@ const mockedRun = vi.mocked(runManagedExchangeInBrowser);
 const mockedPark = vi.mocked(parkRunResults);
 const mockedRefusal = vi.mocked(recordParkedResultsRefusal);
 const mockedWrittenNote = vi.mocked(recordResultsWrittenToFolder);
+const mockedTooLarge = vi.mocked(recordResultsTooLarge);
 
 const RECORD = {
   id: "record-under-test",
@@ -154,6 +158,23 @@ function matchedRun(config: ManagedRunDriverConfig, csv = "id,value\n1,a\n") {
     kind: "matched",
     resultsUrl: config.urls.create(new Blob([csv], { type: "text/csv" })),
     matchedRecordCount: 1,
+  });
+}
+
+/** A run whose result file is `sizeBytes` long. The size is stated rather than
+ * allocated: the delivery weighs `Blob.size` and hands the same object on, and a
+ * real allocation past the bound would cost this suite a hundred megabytes to
+ * assert an integer comparison. */
+function sizedRun(config: ManagedRunDriverConfig, sizeBytes: number) {
+  const blob = {
+    size: sizeBytes,
+    type: "text/csv",
+    text: () => Promise.resolve("id,value\n1,a\n"),
+  } as unknown as Blob;
+  return completedRun({
+    kind: "matched",
+    resultsUrl: config.urls.create(blob),
+    matchedRecordCount: 4_000_000,
   });
 }
 
@@ -319,6 +340,7 @@ describe("where a completed unattended run's results go", () => {
     mockedPark.mockResolvedValue(undefined);
     mockedRefusal.mockResolvedValue(undefined);
     mockedWrittenNote.mockResolvedValue(undefined);
+    mockedTooLarge.mockResolvedValue(undefined);
   });
 
   test("into the folder the operator granted, with nothing kept in this browser", async () => {
@@ -431,6 +453,152 @@ describe("where a completed unattended run's results go", () => {
     expect(mockedPark).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
+  });
+});
+
+describe("a result larger than this browser keeps", () => {
+  beforeEach(() => {
+    mockedPark.mockResolvedValue(undefined);
+    mockedRefusal.mockResolvedValue(undefined);
+    mockedWrittenNote.mockResolvedValue(undefined);
+    mockedTooLarge.mockResolvedValue(undefined);
+  });
+
+  test("parks nothing, cuts nothing down, and records the state in their place", async () => {
+    const warn = vi.spyOn(log, "warn").mockImplementation(() => undefined);
+    mockedRun.mockImplementation((config) =>
+      Promise.resolve(sizedRun(config, MAX_PARKED_RESULT_BYTES + 1)),
+    );
+
+    await browserScheduleTickSeams(new AbortController().signal).runAttempt(
+      attempt(),
+    );
+
+    expect(mockedPark).not.toHaveBeenCalled();
+    expect(mockedRefusal).not.toHaveBeenCalled();
+    expect(mockedTooLarge).toHaveBeenCalledTimes(1);
+    const [id, tooLarge] = mockedTooLarge.mock.calls[0];
+    expect(id).toBe(RECORD.id);
+    expect(tooLarge).toMatchObject({
+      kind: "too-large",
+      runAt: RUN_AT,
+      resultBytes: MAX_PARKED_RESULT_BYTES + 1,
+      matchedRecordCount: 4_000_000,
+    });
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  test("still parks a result at the bound itself", async () => {
+    mockedRun.mockImplementation((config) =>
+      Promise.resolve(sizedRun(config, MAX_PARKED_RESULT_BYTES)),
+    );
+
+    await browserScheduleTickSeams(new AbortController().signal).runAttempt(
+      attempt(),
+    );
+
+    expect(mockedPark).toHaveBeenCalledTimes(1);
+    expect(mockedTooLarge).not.toHaveBeenCalled();
+  });
+
+  test("goes to the granted folder, which the bound does not apply to", async () => {
+    const folder = grantedFolder();
+    mockedRun.mockImplementation((config) =>
+      Promise.resolve(sizedRun(config, MAX_PARKED_RESULT_BYTES + 1)),
+    );
+
+    await browserScheduleTickSeams(new AbortController().signal).runAttempt(
+      attemptFor(folder.record),
+    );
+
+    expect(folder.written).toHaveLength(1);
+    expect(mockedTooLarge).not.toHaveBeenCalled();
+    expect(mockedPark).not.toHaveBeenCalled();
+  });
+
+  test("never turns a completed run into a failed attempt when the state cannot be recorded", async () => {
+    const error = vi.spyOn(log, "error").mockImplementation(() => undefined);
+    const warn = vi.spyOn(log, "warn").mockImplementation(() => undefined);
+    mockedRun.mockImplementation((config) =>
+      Promise.resolve(sizedRun(config, MAX_PARKED_RESULT_BYTES + 1)),
+    );
+    mockedTooLarge.mockRejectedValue(new Error("the store is gone"));
+
+    await expect(
+      browserScheduleTickSeams(new AbortController().signal).runAttempt(
+        attempt(),
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(error).toHaveBeenCalled();
+    error.mockRestore();
+    warn.mockRestore();
+  });
+});
+
+describe("the counts a run declared", () => {
+  beforeEach(() => {
+    mockedPark.mockResolvedValue(undefined);
+    mockedWrittenNote.mockResolvedValue(undefined);
+    mockedTooLarge.mockResolvedValue(undefined);
+  });
+
+  test("are kept beside what the run left, so the next visit can project the next result", async () => {
+    mockedRun.mockImplementation((config) => {
+      config.onPairTableFactors?.({ local: 12_000, partner: 9_000 });
+      return Promise.resolve(matchedRun(config));
+    });
+
+    await browserScheduleTickSeams(new AbortController().signal).runAttempt(
+      attempt(),
+    );
+
+    expect(mockedPark.mock.calls[0][1].pairTableFactors).toEqual({
+      local: 12_000,
+      partner: 9_000,
+    });
+  });
+
+  test("reach the note of a folder write and the too-large state alike", async () => {
+    const folder = grantedFolder();
+    mockedRun.mockImplementation((config) => {
+      config.onPairTableFactors?.({ local: 12_000, partner: 9_000 });
+      return Promise.resolve(matchedRun(config));
+    });
+    await browserScheduleTickSeams(new AbortController().signal).runAttempt(
+      attemptFor(folder.record),
+    );
+    expect(mockedWrittenNote.mock.calls[0][1].pairTableFactors).toEqual({
+      local: 12_000,
+      partner: 9_000,
+    });
+
+    const warn = vi.spyOn(log, "warn").mockImplementation(() => undefined);
+    mockedRun.mockImplementation((config) => {
+      config.onPairTableFactors?.({ local: 12_000, partner: 9_000 });
+      return Promise.resolve(sizedRun(config, MAX_PARKED_RESULT_BYTES + 1));
+    });
+    await browserScheduleTickSeams(new AbortController().signal).runAttempt(
+      attempt(),
+    );
+    expect(mockedTooLarge.mock.calls[0][1].pairTableFactors).toEqual({
+      local: 12_000,
+      partner: 9_000,
+    });
+    warn.mockRestore();
+  });
+
+  test("are absent from an entry for a run that declared none", async () => {
+    // Under every cardinality but many-to-many a single record count bounds the
+    // pair table, there is no product to project, and the driver reports nothing.
+    mockedRun.mockImplementation((config) =>
+      Promise.resolve(matchedRun(config)),
+    );
+    await browserScheduleTickSeams(new AbortController().signal).runAttempt(
+      attempt(),
+    );
+    expect(mockedPark.mock.calls[0][1].pairTableFactors).toBeUndefined();
   });
 });
 

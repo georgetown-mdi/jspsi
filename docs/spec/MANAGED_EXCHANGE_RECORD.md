@@ -1271,13 +1271,17 @@ to answer a prompt, so a grant that is not already in force is the second row,
 not a prompt nobody sees. Neither a failed write nor a failed park may restate
 the run's outcome: it rotated, disclosed, and succeeded before any of this.
 
-**What an entry holds.** One entry per run, in run order, as one of three shapes:
+**What an entry holds.** One entry per run, in run order, as one of four shapes.
+Every shape holds `runAt` (ISO 8601 UTC, the run's own bookkeeping stamp) and an
+optional `pairTableFactors`, the two declared record counts described under
+"What a run projects and what it keeps" below:
 
-| Shape | Fields | What it means |
+| Shape | Further fields | What it means |
 | --- | --- | --- |
-| Results | `runAt` (ISO 8601 UTC, the run's own bookkeeping stamp), `fileName` (the download name: the exchange's label and the run's stamp), `csv` (the results file as a `Blob`), optional `matchedRecordCount`, optional `fallback` (`"ungranted"` \| `"write-failed"`) | The run's results, waiting for the operator; `fallback` names why a granted folder did not take them, and is absent where no grant was held |
-| Written | `kind: "written"`, `runAt`, `fileName`, `directoryName` (the granted folder's own name, the leaf a handle reports -- no path is disclosed to the app), optional `matchedRecordCount` | The run's results are in the granted folder; this entry is the note saying where, and holds no rows |
-| Storage refused | `kind: "storage-refused"`, `runAt` | This browser would not store that run's results; the rows are gone and the run itself stands |
+| Results | `fileName` (the download name: the exchange's label and the run's stamp), `csv` (the results file as a `Blob`), optional `matchedRecordCount`, optional `fallback` (`"ungranted"` \| `"write-failed"`) | The run's results, waiting for the operator; `fallback` names why a granted folder did not take them, and is absent where no grant was held |
+| Written | `kind: "written"`, `fileName`, `directoryName` (the granted folder's own name, the leaf a handle reports -- no path is disclosed to the app), optional `matchedRecordCount` | The run's results are in the granted folder; this entry is the note saying where, and holds no rows |
+| Storage refused | `kind: "storage-refused"` | This browser would not store that run's results; the rows are gone and the run itself stands |
+| Too large | `kind: "too-large"`, `resultBytes` (what the results file weighed), optional `matchedRecordCount` | The run's results were above the size this browser keeps; none of them are here, none were shortened to fit, and the run itself stands |
 
 A written entry is the one shape that leaves no row value at rest in the browser:
 the rows are in the operator's own folder, under whatever protection that
@@ -1289,6 +1293,33 @@ disclosures](#the-accounting-of-disclosures), and parking a second copy of it
 beside the rows would put the same artifact in two stores with two lifetimes. A
 run that produced no result table -- a count-only run, or one whose agreed terms
 give this party no output -- parks nothing.
+
+**What a run projects and what it keeps.** Two sizes, one measurement.
+
+- **The bound.** A parked results file is bounded at **`MAX_PARKED_RESULT_BYTES`,
+  which IS the web app's CSV intake cap `MAX_CSV_FILE_BYTES`**
+  (`apps/web/src/psi/resultSizeProjection.ts`, `apps/web/src/components/csvIntake.ts`),
+  not a second figure: a result too large for this app to read back as an input
+  is not one it holds at rest for the operator, so raising the intake cap raises
+  this bound in the same edit. A unit test pins the derivation. The bound is
+  weighed against the built file's own bytes, and only on the parking route --
+  the granted folder takes a result of any size.
+- **The projection.** The results file holds one row per matched pair, so a
+  projected pair count converts to a file size through the writer's bytes per
+  pair -- the arithmetic behind the pair-table advisory
+  ([PROTOCOL.md](PROTOCOL.md#deriving-one-table-from-the-exchanged-association-maps),
+  "The advisory bound is 10,000,000 projected pairs"), whose measurement this
+  reads: **`RESULT_BYTES_PER_PAIR` = 41**, the widest of the shapes measured
+  there. The pair count is the product of the two DECLARED
+  record counts, which is what `pairTableFactors` holds -- present only where the
+  agreed cardinality makes the pair table their product (`many-to-many`), absent
+  under every other, where a single record count bounds it and there is no
+  product to project.
+- **Why the widest cost.** The projection warns rather than refuses, so it takes
+  the direction that warns early: at the widest measured shape it reaches the
+  bound while a narrower result of the same pair count still fits. A run whose
+  projection is over the bound is warned about where the operator enters the
+  schedule and in the run history, before the run it speaks about.
 
 **Why it cannot be a record field.** Two reasons, either sufficient. The export
 artifact must not hold row values, and a sibling store makes that exclusion
@@ -1313,6 +1344,23 @@ instants take -- is dropped by that same rule: it can be held to no retention at
 all, and content at rest that nothing bounds is what the rule exists to prevent.
 A read that empties the value removes the key, leaving no envelope behind.
 
+**Clearing is the operator's own bound, beside the retention.** One step removes
+everything this exchange's runs left in the store -- the parked rows, the written
+notes, and the recorded states -- and removes the key itself, so no envelope is
+left at rest. It reads nothing first, so it also removes a value this build
+refuses, the one state the read offers no other way out of. The written notes go
+with the rows rather than staying behind them: a note holds the granted folder's
+own name, which [SECURITY_DESIGN.md](../SECURITY_DESIGN.md#metadata-at-rest-presence-and-shape)
+classes as presence and shape at rest. What is in the operator's own folder stays
+there, and the accounting of disclosures is untouched.
+
+**A result above the bound is a recorded state too, and parks nothing.** The
+results are kept whole or not at all: nothing is parked, nothing is shortened,
+and the too-large shape above stands in their place under the same `runAt`,
+naming what the file weighed. Its remedy is the output-folder grant, which the
+bound does not apply to. The run's own bookkeeping is untouched, as it is for a
+refusal: the run rotated, disclosed, and succeeded before any of this.
+
 **A storage refusal is a recorded state, not a silent drop.** A run whose results
 the store will not take -- the quota refusing the rows is the expected case --
 records the refused shape above under the same `runAt`. The entry holds no rows,
@@ -1323,7 +1371,7 @@ either leaves only a diagnostic-log line; nothing else is claimed.
 
 **Reader-rejects-unknown, with no recovery arm.** The stored value carries its
 own format literal (`psilink-parked-results/v1`), and a reader refuses an
-unrecognized version, an unknown key, or an entry that is not one of the three
+unrecognized version, an unknown key, or an entry that is not one of the four
 shapes, rather than loading a shortened set. The refused value is left exactly
 where it is, and neither recovery arm the accounting offers is offered here: no
 export, because the bytes are matched rows no reading of which this build can

@@ -22,6 +22,9 @@
  * window's outcome is recorded, and the results CSV is delivered -- written into
  * the folder the operator granted, or parked for the operator's next visit where
  * there is no such grant or it does not hold ({@link ../parkedResultsStore.ts}).
+ * Parking has a size bound the folder does not: a result above it is kept whole
+ * nowhere here and shortened nowhere either, and the too-large state stands in
+ * its place ({@link ../resultSizeProjection.ts}).
  * The object URLs the outputs were built into are revoked as the attempt settles
  * either way -- nobody is present to download one, and a runtime that stays open
  * for weeks would accumulate them -- so the written file or the parked copy is
@@ -37,8 +40,13 @@ import { CLOSE_OUTCOME_WARNINGS } from "../exchangeLifecycle";
 import { delayUntilAborted } from "../delayUntilAborted";
 
 import {
+  MAX_PARKED_RESULT_BYTES,
+  resultFitsParkedBound,
+} from "../resultSizeProjection";
+import {
   parkRunResults,
   recordParkedResultsRefusal,
+  recordResultsTooLarge,
   recordResultsWrittenToFolder,
 } from "../parkedResultsStore";
 import { runResultsFileName } from "../parkedResults";
@@ -57,9 +65,12 @@ import { runManagedExchangeInBrowser } from "./managedRunDriver";
 import { tickManagedSchedules } from "./managedScheduleRunner";
 
 import type { ObjectUrls, RunOutputs } from "../runOutputs";
+import type { ParkedResultsFallback, ParkedRunResults } from "../parkedResults";
+
+import type { PairTableFactors } from "../resultSizeProjection";
+
 import type { ManagedExchangeRecord } from "./managedExchangeRecord";
 import type { ManagedExchangeRunResult } from "./managedExchangeRun";
-import type { ParkedResultsFallback } from "../parkedResults";
 
 import type {
   ManagedScheduleAttempt,
@@ -199,6 +210,11 @@ async function runUnattendedAttempt(
   signal: AbortSignal,
 ): Promise<void> {
   const created = new Map<string, Blob>();
+  // The counts this run declared at the terms exchange, where their product is
+  // what bounds its pair table. Kept beside whatever this run leaves, so the next
+  // visit can say how large a result a further run on these terms would produce
+  // before that run happens.
+  let pairTableFactors: PairTableFactors | undefined;
   const urls: ObjectUrls = {
     create: (blob) => {
       const url = window.URL.createObjectURL(blob);
@@ -221,6 +237,9 @@ async function runUnattendedAttempt(
         lock: { ifAvailable: true },
         onDataExchangeStart: attempt.onDataExchangeStart,
       },
+      onPairTableFactors: (factors) => {
+        pairTableFactors = factors;
+      },
       onWarning: (message) => {
         // Seven notices reach this sink, not one kind: the close-outcome notice
         // speaks to an operator watching the run and is dropped. The rest --
@@ -235,7 +254,12 @@ async function runUnattendedAttempt(
           log.warn(UNATTENDED_RUN_NOTICE_PREFIX, notice);
       },
     });
-    await deliverUnattendedResults(attempt.record, result, created);
+    await deliverUnattendedResults(
+      attempt.record,
+      result,
+      created,
+      pairTableFactors,
+    );
   } finally {
     for (const url of created.keys()) window.URL.revokeObjectURL(url);
   }
@@ -260,6 +284,7 @@ async function deliverUnattendedResults(
   record: ManagedExchangeRecord,
   result: ManagedExchangeRunResult<RunOutputs>,
   created: ReadonlyMap<string, Blob>,
+  pairTableFactors: PairTableFactors | undefined,
 ): Promise<void> {
   const outputs = result.exchange;
   if (outputs.kind !== "matched") return;
@@ -275,25 +300,34 @@ async function deliverUnattendedResults(
     return;
   }
   const fileName = runResultsFileName(record.label, runAt);
-  const matched =
-    outputs.matchedRecordCount !== undefined
+  const details: RunEntryDetails = {
+    ...(outputs.matchedRecordCount !== undefined
       ? { matchedRecordCount: outputs.matchedRecordCount }
-      : {};
+      : {}),
+    ...(pairTableFactors !== undefined ? { pairTableFactors } : {}),
+  };
   const fallback = await writeUnattendedResultsToFolder(
     record,
     fileName,
     csv,
     runAt,
-    matched,
+    details,
   );
   if (fallback === undefined) return;
+  // The folder took nothing, so what is left is this browser -- which holds a
+  // result only up to its own bound. Above it nothing is kept and nothing is
+  // shortened: the state goes in the rows' place, and its remedy is the folder.
+  if (!resultFitsParkedBound(csv.size)) {
+    await recordResultsTooLargeToPark(id, runAt, csv.size, details);
+    return;
+  }
   try {
     await parkRunResults(id, {
       kind: "results",
       runAt,
       fileName,
       csv,
-      ...matched,
+      ...details,
       ...(fallback === "none" ? {} : { fallback }),
     });
     return;
@@ -305,12 +339,57 @@ async function deliverUnattendedResults(
     );
   }
   try {
+    // The smallest entry there is, written where a larger one just failed; the
+    // run's declared counts are left off it for that reason.
     await recordParkedResultsRefusal(id, runAt);
   } catch (error) {
     log.error(
       `scheduled managed exchange ${id}: this browser would not store the ` +
         `run's results, and would not record that either; the run itself ` +
         `stands and its disclosure is filed:`,
+      error,
+    );
+  }
+}
+
+/** What a run's entry holds beside the delivery itself: the row count where the
+ * run reported one, and the two counts it declared where their product is what
+ * bounds its pair table. */
+type RunEntryDetails = Pick<
+  ParkedRunResults,
+  "matchedRecordCount" | "pairTableFactors"
+>;
+
+/**
+ * Record that a run's results were above the size this browser keeps, so the next
+ * visit meets the state and its remedy rather than a gap. Never rejects: the run
+ * rotated and filed its disclosure before any of this, and a state the store will
+ * not take leaves only the diagnostic log.
+ */
+async function recordResultsTooLargeToPark(
+  id: string,
+  runAt: string,
+  resultBytes: number,
+  details: RunEntryDetails,
+): Promise<void> {
+  log.warn(
+    `scheduled managed exchange ${id}: the run's results are ` +
+      `${String(resultBytes)} bytes, above the ` +
+      `${String(MAX_PARKED_RESULT_BYTES)} this browser keeps, so none of them ` +
+      `were kept; granting an output folder is what takes a result this size`,
+  );
+  try {
+    await recordResultsTooLarge(id, {
+      kind: "too-large",
+      runAt,
+      resultBytes,
+      ...details,
+    });
+  } catch (error) {
+    log.error(
+      `scheduled managed exchange ${id}: the run's results were above the ` +
+        `size this browser keeps, and it would not record that either; the ` +
+        `run itself stands and its disclosure is filed:`,
       error,
     );
   }
@@ -331,7 +410,7 @@ async function writeUnattendedResultsToFolder(
   fileName: string,
   csv: Blob,
   runAt: string,
-  matched: { matchedRecordCount?: number },
+  details: RunEntryDetails,
 ): Promise<ParkedResultsFallback | "none" | undefined> {
   const directory = record.outputDirectoryHandle;
   if (directory === undefined || !storedOutputDirectoryUsable(directory))
@@ -365,7 +444,7 @@ async function writeUnattendedResultsToFolder(
       runAt,
       fileName: delivery.fileName,
       directoryName: delivery.directoryName,
-      ...matched,
+      ...details,
     });
   } catch (error) {
     log.warn(

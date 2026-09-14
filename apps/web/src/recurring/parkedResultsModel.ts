@@ -1,8 +1,10 @@
 /**
  * The pure derivation and copy behind what a scheduled run left for the
- * operator's next visit: one row per run, newest first, and the two statements
- * the app owes the operator about keeping row values at rest -- one where they
- * schedule, one where they collect. No React, no IndexedDB.
+ * operator's next visit: one row per run, newest first, the statements the app
+ * owes the operator about keeping row values at rest -- where they schedule,
+ * where they collect, and where they clear what is kept -- and the warning a run
+ * projecting a result larger than this browser keeps raises before it happens.
+ * No React, no IndexedDB.
  *
  * Nothing here holds a partner-authored value: a row states an instant, a count
  * this browser produced, the name of a folder the operator themselves chose, and
@@ -12,17 +14,24 @@
  */
 
 import {
+  MAX_PARKED_RESULT_BYTES,
+  projectedPairs,
+  projectionOverParkedBound,
+} from "@psi/resultSizeProjection";
+import {
   PARKED_RESULTS_RETENTION_DAYS,
   parkedResultsExpiryMs,
 } from "@psi/parkedResults";
-import { dateTimeLabel } from "@psi/formatting";
+import { byteSizeLabel, dateTimeLabel } from "@psi/formatting";
 
 import type {
   ParkedResults,
   ParkedResultsEntry,
   ParkedRunResults,
+  TooLargeRunResults,
   WrittenRunResults,
 } from "@psi/parkedResults";
+import type { PairTableFactors } from "@psi/resultSizeProjection";
 
 /** One parked run as the surface shows it: when it ran, what it left, and -- for
  * results that are still there -- the file to hand over. */
@@ -107,11 +116,18 @@ export const UNAVAILABLE_PARKED_RESULTS_NOTE =
   "running an older version of this app can hold that storage for a while; " +
   "close any other tab this app is open in, then try again.";
 
+/** A count with grouped digits, so a figure in the millions reads as one. */
+function formatRecordCount(count: number | bigint): string {
+  return new Intl.NumberFormat("en-US").format(count);
+}
+
 /** How many rows a run's results hold, as a phrase to open a summary with, or
  * `undefined` where the run reported no count. */
 function matchedRecordPhrase(count: number | undefined): string | undefined {
   if (count === undefined) return undefined;
-  return count === 1 ? "1 matched record" : `${String(count)} matched records`;
+  return count === 1
+    ? "1 matched record"
+    : `${formatRecordCount(count)} matched records`;
 }
 
 /** What a row says about a run whose results went into the granted folder: where
@@ -148,20 +164,103 @@ function parkedSummary(entry: ParkedRunResults): string {
         `or grant a different one.`;
 }
 
+/** How large a result this browser keeps, as the surfaces state it. */
+const PARKED_SIZE_PHRASE = byteSizeLabel(MAX_PARKED_RESULT_BYTES);
+
+/** What a row says about a run whose results were larger than this browser keeps:
+ * what they weighed against the bound, that none of them are here and none were
+ * shortened to fit, and the one thing that takes a result this size. */
+function tooLargeSummary(entry: TooLargeRunResults): string {
+  const matched = matchedRecordPhrase(entry.matchedRecordCount);
+  const size = byteSizeLabel(entry.resultBytes);
+  const opening =
+    matched === undefined
+      ? `This run's results were ${size}`
+      : `${matched}, ${size} of results`;
+  return (
+    `${opening} -- more than the ${PARKED_SIZE_PHRASE} this browser keeps, so ` +
+    `none of them were kept here and none were cut down to fit. The run itself ` +
+    `completed and filed its disclosure. Choose a folder for this exchange's ` +
+    `results, and a run of any size writes them there instead.`
+  );
+}
+
 /** What a row says about a run that wrote its results to the granted folder, one
- * that left them here, or one this browser would not store them for. A refusal
- * names the run's own standing -- it completed and filed its disclosure -- so the
- * state is not read as a failed run. */
+ * that left them here, one this browser would not store them for, or one whose
+ * results were larger than it keeps. Each state names the run's own standing --
+ * it completed and filed its disclosure -- so none is read as a failed run. */
 function rowSummary(entry: ParkedResultsEntry): string {
   if (entry.kind === "storage-refused")
     return (
       "This browser would not store this run's results, so they are gone. " +
       "The run itself completed and filed its disclosure."
     );
+  if (entry.kind === "too-large") return tooLargeSummary(entry);
   return entry.kind === "written"
     ? writtenSummary(entry)
     : parkedSummary(entry);
 }
+
+/** The declared counts the most recent run that reported any left here, or
+ * `undefined` where no entry holds a pair-table product -- no run has left
+ * anything, or every cardinality the runs resolved to bounds its table by a
+ * single record count. */
+function latestPairTableFactors(
+  results: ParkedResults,
+): PairTableFactors | undefined {
+  for (let index = results.entries.length - 1; index >= 0; index -= 1) {
+    const factors = results.entries[index].pairTableFactors;
+    if (factors !== undefined) return factors;
+  }
+  return undefined;
+}
+
+/**
+ * What the operator is told where a further run on the terms the last one
+ * declared projects a result larger than this browser keeps, or `undefined` where
+ * it does not: the figures behind the projection, what would become of such a
+ * result, and the folder grant that takes one of any size.
+ *
+ * Shown where the operator enters the schedule, while they are present to act on
+ * it, and in the run history, so a visit that is not editing the schedule meets it
+ * too -- both before the run it speaks about, which is the only time either is
+ * worth saying. The projection is the worst case (see
+ * {@link ../psi/resultSizeProjection.ts}): it reaches the bound while a narrower
+ * result of the same pair count still fits, so it warns rather than predicts.
+ */
+export function projectedResultSizeWarning(
+  results: ParkedResults | undefined,
+  folderGranted: boolean,
+): string | undefined {
+  if (results === undefined) return undefined;
+  const factors = latestPairTableFactors(results);
+  if (factors === undefined || !projectionOverParkedBound(factors))
+    return undefined;
+  return (
+    `Your last scheduled run declared ${formatRecordCount(factors.local)} ` +
+    `records against your partner's ${formatRecordCount(factors.partner)}, and ` +
+    `the terms let every record on each side match every record on the other: ` +
+    `up to ${formatRecordCount(projectedPairs(factors))} matched pairs, one ` +
+    `row each. A result ` +
+    `that size is larger than the ${PARKED_SIZE_PHRASE} this browser keeps, so ` +
+    `a run with nobody present would leave nothing here. ` +
+    (folderGranted
+      ? `Results written to the folder you granted are not held to that size; ` +
+        `a run that cannot write there leaves nothing.`
+      : `Choose a folder for this exchange's results: results written there ` +
+        `are not held to that size.`)
+  );
+}
+
+/** What the control that clears what this browser kept says it does, shown beside
+ * it. It names everything that goes, because a note of a result written to the
+ * granted folder goes with the rows it is not holding. */
+export const CLEAR_PARKED_RESULTS_NOTE =
+  "Clearing removes everything this exchange's scheduled runs left here: the " +
+  "results kept in this browser, the notes saying where results were written, " +
+  "and the states recorded where results were not kept. The results already in " +
+  "a folder you granted stay there, and the runs themselves stay in the " +
+  "accounting of disclosures. It cannot be undone.";
 
 /**
  * The parked runs as rows, newest run first -- the order a returning operator

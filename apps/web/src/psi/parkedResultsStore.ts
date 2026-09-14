@@ -34,6 +34,7 @@ import type {
   ParkedResults,
   ParkedResultsEntry,
   ParkedRunResults,
+  TooLargeRunResults,
   WrittenRunResults,
 } from "./parkedResults";
 
@@ -246,4 +247,56 @@ export async function recordParkedResultsRefusal(
   now: number = Date.now(),
 ): Promise<void> {
   await appendEntry(id, { kind: "storage-refused", runAt }, now);
+}
+
+/**
+ * Record that a run's results were larger than this browser keeps, so the
+ * operator meets the size and its remedy at the next visit. The entry holds no
+ * rows and no part of them: the results are kept whole or not at all.
+ *
+ * @throws if the entry cannot be written; the caller reports the run to the
+ *   diagnostic log instead.
+ */
+export async function recordResultsTooLarge(
+  id: string,
+  tooLarge: TooLargeRunResults,
+  now: number = Date.now(),
+): Promise<void> {
+  await appendEntry(id, tooLarge, now);
+}
+
+/**
+ * Remove everything this exchange's scheduled runs left here, in one transaction:
+ * the parked rows, the notes saying where results were written, and the states
+ * recorded where results were not kept. The key itself goes, so no envelope is
+ * left at rest either.
+ *
+ * The notes go with the rows rather than staying behind them: a note holds the
+ * granted folder's own name, which is presence and shape at rest (see
+ * docs/SECURITY_DESIGN.md, "Results of a scheduled run at rest"), and an operator
+ * clearing what this browser kept is not asking to keep part of it.
+ *
+ * The delete reads nothing first, so it also removes a stored value this build
+ * refuses -- the one state the read offers no other way out of.
+ *
+ * @throws if the database does not open or the transaction does not complete; the
+ *   caller reports the failure rather than showing a clear that did not happen.
+ */
+export async function clearParkedResults(id: string): Promise<void> {
+  const db = await openManagedExchangeDatabase();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction(
+        MANAGED_EXCHANGE_RESULTS_STORE_NAME,
+        "readwrite",
+        { durability: "strict" },
+      );
+      transaction.objectStore(MANAGED_EXCHANGE_RESULTS_STORE_NAME).delete(id);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
+  } finally {
+    db.close();
+  }
 }

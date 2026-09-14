@@ -1,12 +1,18 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  CLEAR_PARKED_RESULTS_NOTE,
   NO_PARKED_RESULTS_NOTE,
   PARKED_RESULTS_RETENTION_NOTE,
   PARKED_RESULTS_SCHEDULE_NOTE,
   UNREADABLE_PARKED_RESULTS_NOTE,
   parkedResultsRows,
+  projectedResultSizeWarning,
 } from "../../../src/recurring/parkedResultsModel.js";
+import {
+  MAX_PARKED_RESULT_BYTES,
+  RESULT_BYTES_PER_PAIR,
+} from "../../../src/psi/resultSizeProjection.js";
 import {
   PARKED_RESULTS_RETENTION_DAYS,
   PARKED_RESULTS_VERSION,
@@ -163,6 +169,113 @@ describe("the row a run written to the granted folder reads as", () => {
   });
 });
 
+describe("the row a run too large to keep reads as", () => {
+  function tooLarge(matchedRecordCount?: number): ParkedResults {
+    return {
+      version: PARKED_RESULTS_VERSION,
+      entries: [
+        {
+          kind: "too-large",
+          runAt: EARLIER,
+          resultBytes: 210 * 1024 ** 2,
+          ...(matchedRecordCount !== undefined ? { matchedRecordCount } : {}),
+        },
+      ],
+    };
+  }
+
+  test("names the size, that nothing was kept or cut down, and the folder", () => {
+    const summary = parkedResultsRows(tooLarge(4_000_000))[0].summary;
+    expect(summary).toContain("4,000,000 matched records");
+    expect(summary).toContain("210.0 MB");
+    expect(summary).toContain("100.0 MB this browser keeps");
+    expect(summary).toContain("none of them were kept here");
+    expect(summary).toContain("none were cut down to fit");
+    expect(summary).toContain("Choose a folder");
+  });
+
+  test("states the run itself as standing, so it is not read as a failed run", () => {
+    expect(parkedResultsRows(tooLarge())[0].summary).toContain(
+      "The run itself completed and filed its disclosure",
+    );
+  });
+
+  test("offers no download, the entry holding no part of the results", () => {
+    expect(parkedResultsRows(tooLarge())[0].entry.kind).toBe("too-large");
+  });
+});
+
+describe("the warning a projected result size raises", () => {
+  /** A set of parked results whose newest entry holds the counts a run declared,
+   * which is what a projection of the next run's result size is drawn from. */
+  function declaring(local: number, partner: number): ParkedResults {
+    return {
+      version: PARKED_RESULTS_VERSION,
+      entries: [
+        {
+          kind: "results",
+          runAt: EARLIER,
+          fileName: "psilink-results-earlier.csv",
+          csv: new Blob(["id\n1\n"], { type: "text/csv" }),
+          pairTableFactors: { local, partner },
+        },
+        { kind: "storage-refused", runAt: LATER },
+      ],
+    };
+  }
+
+  /** Two counts whose product projects a result past the bound. */
+  const over = Math.ceil(
+    Math.sqrt(MAX_PARKED_RESULT_BYTES / RESULT_BYTES_PER_PAIR) + 1,
+  );
+
+  test("names both declared counts, the pairs they project, and the bound", () => {
+    const warning = projectedResultSizeWarning(declaring(12_000, 9_000), false);
+    expect(warning).toContain("12,000 records");
+    expect(warning).toContain("9,000");
+    expect(warning).toContain("108,000,000 matched pairs");
+    expect(warning).toContain("100.0 MB this browser keeps");
+    expect(warning).toContain("nothing here");
+  });
+
+  test("offers the folder grant as the remedy, and names the grant where one is held", () => {
+    expect(projectedResultSizeWarning(declaring(over, over), false)).toContain(
+      "Choose a folder for this exchange's results",
+    );
+    const granted = projectedResultSizeWarning(declaring(over, over), true);
+    expect(granted).toContain("folder you granted");
+    expect(granted).not.toContain("Choose a folder");
+  });
+
+  test("is silent where the projection is inside the bound", () => {
+    expect(
+      projectedResultSizeWarning(declaring(over - 2, over - 2), false),
+    ).toBeUndefined();
+  });
+
+  test("is silent where no run left counts to project from", () => {
+    expect(projectedResultSizeWarning(results(), false)).toBeUndefined();
+    expect(projectedResultSizeWarning(undefined, false)).toBeUndefined();
+  });
+
+  test("reads the most recent run that declared counts, not the oldest", () => {
+    const stale = declaring(over, over);
+    const fresh: ParkedResults = {
+      version: PARKED_RESULTS_VERSION,
+      entries: [
+        ...stale.entries,
+        {
+          kind: "too-large",
+          runAt: "2026-03-15T09:00:00.000Z",
+          resultBytes: 210 * 1024 ** 2,
+          pairTableFactors: { local: 2, partner: 2 },
+        },
+      ],
+    };
+    expect(projectedResultSizeWarning(fresh, false)).toBeUndefined();
+  });
+});
+
 describe("what the operator is told about keeping results here", () => {
   const days = `${String(PARKED_RESULTS_RETENTION_DAYS)} days`;
 
@@ -225,6 +338,17 @@ describe("what the operator is told about keeping results here", () => {
       "complete and file their disclosures",
     );
     expect(UNREADABLE_PARKED_RESULTS_NOTE).toContain("Deleting the exchange");
+  });
+
+  test("the clear statement names everything that goes and what stays", () => {
+    expect(CLEAR_PARKED_RESULTS_NOTE).toContain("results kept in this browser");
+    expect(CLEAR_PARKED_RESULTS_NOTE).toContain("notes saying where results");
+    expect(CLEAR_PARKED_RESULTS_NOTE).toContain(
+      "states recorded where results",
+    );
+    expect(CLEAR_PARKED_RESULTS_NOTE).toContain("stay there");
+    expect(CLEAR_PARKED_RESULTS_NOTE).toContain("accounting of disclosures");
+    expect(CLEAR_PARKED_RESULTS_NOTE).toContain("cannot be undone");
   });
 
   test("the empty state says nothing was left, not that nothing is known", () => {

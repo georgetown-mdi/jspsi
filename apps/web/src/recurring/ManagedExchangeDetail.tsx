@@ -73,13 +73,16 @@ import {
   scheduleEntryUnchanged,
   scheduleEntryUsable,
 } from "./scheduleEntryModel";
+
 import {
+  CLEAR_PARKED_RESULTS_NOTE,
   NO_PARKED_RESULTS_NOTE,
   PARKED_RESULTS_RETENTION_NOTE,
   PARKED_RESULTS_SCHEDULE_NOTE,
   UNAVAILABLE_PARKED_RESULTS_NOTE,
   UNREADABLE_PARKED_RESULTS_NOTE,
   parkedResultsRows,
+  projectedResultSizeWarning,
 } from "./parkedResultsModel";
 import { REPEATED_MISS_TITLE } from "./scheduleSurfacingModel";
 
@@ -120,6 +123,7 @@ export function ManagedExchangeDetail({
   onResetAccounting,
   onRetryAccountingRead,
   onRetryParkedResultsRead,
+  onClearParkedResults,
   onSaveLocalFields,
   onGrantOutputFolder,
   onStopUsingOutputFolder,
@@ -149,6 +153,10 @@ export function ManagedExchangeDetail({
   onRetryAccountingRead: () => void;
   /** Read the parked results again, for a read that never reached the store. */
   onRetryParkedResultsRead: () => void;
+  /** Remove everything this exchange's scheduled runs left in this browser, and
+   * read the store again so the section shows what it actually holds. Rejects on
+   * a store failure; the confirm shows the failure and stays open. */
+  onClearParkedResults: () => Promise<void>;
   /** Persist an in-place edit to the local fields (label, max-token-age policy).
    * Rejects on a store failure; the editor shows the failure and keeps the
    * form. */
@@ -178,6 +186,19 @@ export function ManagedExchangeDetail({
    * failure beside it. Shared with the run surface's re-invite state. */
   reinviteFailed: boolean;
 }) {
+  // The last run's own declared counts are what a projection of the next run's
+  // result size is drawn from, and they are kept beside what that run left. The
+  // warning they raise is shown twice: where the schedule is entered, and in the
+  // run history for a visit that is not editing it.
+  const parked =
+    parkedResultsRead?.kind === "parked"
+      ? parkedResultsRead.results
+      : undefined;
+  const resultSizeWarning = projectedResultSizeWarning(
+    parked,
+    record.outputDirectoryHandle !== undefined &&
+      storedOutputDirectoryUsable(record.outputDirectoryHandle),
+  );
   return (
     <>
       <ConfigurationView
@@ -189,16 +210,18 @@ export function ManagedExchangeDetail({
       />
       <LocalFieldsEditor
         record={record}
+        resultSizeWarning={resultSizeWarning}
         onSave={onSaveLocalFields}
         onGrantOutputFolder={onGrantOutputFolder}
         onStopUsingOutputFolder={onStopUsingOutputFolder}
       />
       <RunSchedule record={record} />
-      <RunHistory record={record} />
+      <RunHistory record={record} resultSizeWarning={resultSizeWarning} />
       <ParkedResultsView
         read={parkedResultsRead}
         scheduled={record.schedule !== undefined}
         onRetryRead={onRetryParkedResultsRead}
+        onClear={onClearParkedResults}
       />
       <DisclosureAccountingView
         read={accountingRead}
@@ -350,11 +373,16 @@ function ConfigurationView({
  */
 function LocalFieldsEditor({
   record,
+  resultSizeWarning,
   onSave,
   onGrantOutputFolder,
   onStopUsingOutputFolder,
 }: {
   record: ManagedExchangeRecord;
+  /** What a further run on the terms the last one declared projects for the size
+   * of its result, where that is more than this browser keeps; absent otherwise
+   * (see {@link ./parkedResultsModel.ts}). */
+  resultSizeWarning: string | undefined;
   onSave: (edits: ManagedExchangeLocalEdits) => Promise<void>;
   onGrantOutputFolder: () => Promise<void>;
   onStopUsingOutputFolder: () => Promise<void>;
@@ -520,6 +548,15 @@ function LocalFieldsEditor({
           mt="sm"
         >
           {PARKED_RESULTS_SCHEDULE_NOTE}
+        </Alert>
+      )}
+      {scheduleEnabled && resultSizeWarning !== undefined && (
+        <Alert
+          color="yellow"
+          title="A result this size is not kept in this browser"
+          mt="sm"
+        >
+          {resultSizeWarning}
         </Alert>
       )}
       <Checkbox
@@ -849,11 +886,31 @@ function RunSchedule({ record }: { record: ManagedExchangeRecord }) {
  * before disclosing never enters it. A saved-but-never-run exchange renders the
  * plain empty state.
  */
-function RunHistory({ record }: { record: ManagedExchangeRecord }) {
+function RunHistory({
+  record,
+  resultSizeWarning,
+}: {
+  record: ManagedExchangeRecord;
+  /** What a further run projects for the size of its result, where that is more
+   * than this browser keeps. It stands here as well as at schedule entry so a
+   * visit that is not editing the schedule still meets it before the run it
+   * speaks about. */
+  resultSizeWarning: string | undefined;
+}) {
   const entries = runHistoryEntries(record);
   return (
     <div className={styles.callout}>
       <h2 className={styles.eyebrow}>Run history</h2>
+      {resultSizeWarning !== undefined && (
+        <Alert
+          color="yellow"
+          title="The next run's results would not be kept in this browser"
+          mt="sm"
+          mb="sm"
+        >
+          {resultSizeWarning}
+        </Alert>
+      )}
       {entries.length === 0 ? (
         <p className={styles.small}>
           This exchange has not run yet. Its runs will appear here.
@@ -913,12 +970,16 @@ export function ParkedResultsView({
   read,
   scheduled,
   onRetryRead,
+  onClear,
 }: {
   read: ParkedResultsRead | undefined;
   /** Whether this exchange has an agreed schedule, so the section stands with
    * its empty state for an exchange whose runs will land here. */
   scheduled: boolean;
   onRetryRead: () => void;
+  /** Remove everything this exchange's scheduled runs left here. Rejects on a
+   * store failure, which the confirm shows while staying open. */
+  onClear: () => Promise<void>;
 }) {
   const rows = read?.kind === "parked" ? parkedResultsRows(read.results) : [];
   const shownBefore = useRef(false);
@@ -988,7 +1049,93 @@ export function ParkedResultsView({
           );
         })
       )}
+      {/* Offered for anything this exchange has here, including a value this
+          build cannot read -- the delete needs no parse, and it is the only way
+          out of that state short of deleting the exchange. Withheld only where
+          the read found nothing to clear or did not reach the store, which a
+          clear could not speak for either. */}
+      {(read?.kind === "parked" || read?.kind === "unreadable") && (
+        <ClearParkedResultsControl onClear={onClear} />
+      )}
     </div>
+  );
+}
+
+/**
+ * The control that removes what this exchange's scheduled runs left in this
+ * browser, now rather than at the retention: the rows, the notes of results
+ * written to the granted folder, and the states recorded where results were not
+ * kept, in one step.
+ *
+ * Behind a confirm, because the rows are the run's own result and this browser
+ * holds no second copy of them. A rejected clear keeps the confirm open with the
+ * failure beside it, so nothing reads as a delete that did not happen.
+ */
+function ClearParkedResultsControl({
+  onClear,
+}: {
+  onClear: () => Promise<void>;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  const [clearFailed, setClearFailed] = useState(false);
+
+  function confirmClear() {
+    setClearing(true);
+    setClearFailed(false);
+    void onClear()
+      .then(() => setConfirming(false))
+      .catch(() => setClearFailed(true))
+      .finally(() => setClearing(false));
+  }
+
+  return (
+    <>
+      <div className={styles.savedRowActions} style={{ marginTop: "1rem" }}>
+        <Button
+          variant="subtle"
+          color="red"
+          disabled={clearing}
+          onClick={() => {
+            setClearFailed(false);
+            setConfirming(true);
+          }}
+        >
+          Clear what is kept here
+        </Button>
+      </div>
+      <Modal
+        opened={confirming}
+        onClose={() => setConfirming(false)}
+        title="Clear what is kept here"
+        centered
+        transitionProps={{ duration: 0 }}
+      >
+        <p>{CLEAR_PARKED_RESULTS_NOTE}</p>
+        <p className={`${styles.small} ${styles.sub}`}>
+          Download anything you still want before clearing: this browser holds
+          no other copy of results kept here.
+        </p>
+        {clearFailed && (
+          <Alert color="red" title="Nothing was cleared" mt="sm" mb="sm">
+            What is kept here was not removed. Nothing changed; try again.
+          </Alert>
+        )}
+        <div className={styles.savedRowActions} style={{ marginTop: "1rem" }}>
+          <Button variant="default" onClick={() => setConfirming(false)}>
+            Cancel
+          </Button>
+          <Button
+            color="red"
+            variant="light"
+            loading={clearing}
+            onClick={confirmClear}
+          >
+            Clear these results
+          </Button>
+        </div>
+      </Modal>
+    </>
   );
 }
 

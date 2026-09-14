@@ -758,6 +758,7 @@ describe("naming what the agreed terms resolved to", () => {
   async function runCapturingBothSlots(signal: AbortSignal) {
     const onWarning = vi.fn();
     const onResolvedMatching = vi.fn();
+    const onPairTableFactors = vi.fn();
     await runManagedExchangeInBrowser({
       record: RECORD,
       source: SOURCE,
@@ -765,8 +766,9 @@ describe("naming what the agreed terms resolved to", () => {
       urls: URLS,
       onWarning,
       onResolvedMatching,
+      onPairTableFactors,
     });
-    return { onWarning, onResolvedMatching };
+    return { onWarning, onResolvedMatching, onPairTableFactors };
   }
 
   /** The three fields of a run shape the status slot is handed: the record
@@ -814,6 +816,24 @@ describe("naming what the agreed terms resolved to", () => {
     ]);
   });
 
+  test("reports the two declared counts where their product is the pair table", async () => {
+    // What an unattended run keeps beside its results, so the next visit can
+    // project the size of the result a further run on these terms produces. The
+    // counts are the DECLARED ones, which both parties hold for each other.
+    const { mc } = makeParkedCloseMc();
+    mockedOpen.mockResolvedValue(mc);
+    acquireResources();
+    exchangeConfirming(OVER_BOUND_SHAPE);
+
+    const { onPairTableFactors } = await runCapturingBothSlots(
+      new AbortController().signal,
+    );
+
+    expect(onPairTableFactors.mock.calls).toEqual([
+      [{ local: 3163, partner: 3164 }],
+    ]);
+  });
+
   test("states the resolved matching alone on a one-to-one run within the bound", async () => {
     // The cardinality notice and the projection advisory both stay off this
     // shape, so an ordinary re-run raises no notice at all and the pair the two
@@ -841,6 +861,26 @@ describe("naming what the agreed terms resolved to", () => {
     expect(onResolvedMatching.mock.calls).toEqual([[matchingOf(shape)]]);
   });
 
+  test("reports no counts under a cardinality one record count bounds", async () => {
+    // Only many-to-many makes the table the two counts' product; under the rest
+    // there is nothing to project, and a product reported anyway would warn
+    // about a result the run cannot produce.
+    const { mc } = makeParkedCloseMc();
+    mockedOpen.mockResolvedValue(mc);
+    acquireResources();
+    exchangeConfirming({
+      ...OVER_BOUND_SHAPE,
+      cardinality: "many-to-one",
+      partnerDeduplicate: false,
+    });
+
+    const { onPairTableFactors } = await runCapturingBothSlots(
+      new AbortController().signal,
+    );
+
+    expect(onPairTableFactors).not.toHaveBeenCalled();
+  });
+
   test("drops the notices on a run the operator already stopped", async () => {
     // The live gate every call site of this wiring takes: a cancelled run's notices
     // are noise, and the caller's surface may be gone. The resolved pair takes the
@@ -852,12 +892,12 @@ describe("naming what the agreed terms resolved to", () => {
     const controller = new AbortController();
     controller.abort();
 
-    const { onWarning, onResolvedMatching } = await runCapturingBothSlots(
-      controller.signal,
-    );
+    const { onWarning, onResolvedMatching, onPairTableFactors } =
+      await runCapturingBothSlots(controller.signal);
 
     expect(onWarning).not.toHaveBeenCalled();
     expect(onResolvedMatching).not.toHaveBeenCalled();
+    expect(onPairTableFactors).not.toHaveBeenCalled();
   });
 });
 
