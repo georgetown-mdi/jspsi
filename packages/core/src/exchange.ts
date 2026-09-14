@@ -1435,7 +1435,8 @@ export interface ExchangeResult {
    * its keys can never be present apart. Absent only if building the record
    * threw after the exchange already disclosed, in which case the caller skips
    * persisting -- the record is a secondary audit artifact, so its failure is
-   * non-fatal and never discards the exchange result.
+   * non-fatal and never discards the exchange result. {@link recordOwedButUnbuilt}
+   * states that loss.
    *
    * This is the returning half of the record's delivery. A run that terminates
    * after its payload exchange never reaches this field, and hands the same pair
@@ -1443,6 +1444,21 @@ export interface ExchangeResult {
    * {@link exchangeRecordFromFailure}.
    */
   audit?: BuiltExchangeRecord;
+  /**
+   * Whether this run owed a self-attested record that could not be built, so
+   * {@link audit} is absent for a disclosure that occurred.
+   *
+   * The completed path's half of the answer {@link exchangeRecordOwedButUnbuilt}
+   * gives the terminated one, and it is here for the same reason: the failed
+   * build warns on the operator log, which an unattended run discards, so a
+   * caller reporting the loss on a machine interface reads it from the run.
+   *
+   * False on every run whose record built. A result exists only past this party's
+   * payload send, which is where the record starts being owed
+   * (docs/spec/PROTOCOL.md, Self-attested record), so a completed run owing no
+   * record does not arise.
+   */
+  recordOwedButUnbuilt: boolean;
   /**
    * The dual-signed record (Phase 2 of exchange receipts): the mutually-verifiable
    * receipt content plus both parties' certificates and signatures. Present only
@@ -1514,12 +1530,12 @@ export function exchangeRecordFromFailure(
  *
  * True only past this party's payload send: the record was owed (docs/spec/PROTOCOL.md,
  * Self-attested record) and {@link buildExchangeRecord} threw, which the build
- * warns about on the operator log with its cause. This is the same loss the
- * completed path reports as a missing artifact, made queryable on the failing path
- * so a caller can report it on a machine interface rather than only in a log line
- * an unattended run discards. False when the failure owed no record at all, and
- * false once the record is in hand -- the two answers a bare `undefined` from
- * {@link exchangeRecordFromFailure} cannot tell apart.
+ * warns about on the operator log with its cause. This is the same loss
+ * {@link ExchangeResult.recordOwedButUnbuilt} states on the completed path, asked
+ * of the failure here so a caller can report it on a machine interface rather
+ * than only in a log line an unattended run discards. False when the failure owed
+ * no record at all, and false once the record is in hand -- the two answers a bare
+ * `undefined` from {@link exchangeRecordFromFailure} cannot tell apart.
  *
  * The lookup walks the `cause` chain, as its record-bearing sibling does.
  */
@@ -2415,6 +2431,9 @@ export async function runExchange(
   // discard its result: catch, warn, and continue without a record. The caller
   // treats the audit field as optional.
   let audit: BuiltExchangeRecord | undefined;
+  // The completed path's report of the loss the terminated path marks on its
+  // failure below (carryingExchangeRecord).
+  let recordOwedButUnbuilt = false;
   try {
     audit = await buildExchangeRecord({
       localTerms: linkageTerms,
@@ -2437,6 +2456,7 @@ export async function runExchange(
       receiptBinder,
     });
   } catch (err) {
+    recordOwedButUnbuilt = true;
     // Two warnings rather than one conditional tail: on a terminated run there is
     // no result to be unaffected -- the throw below discards it -- so the
     // completed path's reassurance would be a false claim there.
@@ -2482,6 +2502,7 @@ export async function runExchange(
     resolvedRole,
     partnerPayload,
     audit,
+    recordOwedButUnbuilt,
     bootstrap,
     signedReceipt,
   };

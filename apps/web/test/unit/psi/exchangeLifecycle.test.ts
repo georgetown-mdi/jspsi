@@ -124,6 +124,7 @@ const STUB_EXCHANGE_RESULT = {
   },
   resolvedRole: "receiver",
   partnerPayload: { columns: [], rowIndices: [], rows: [] },
+  recordOwedButUnbuilt: false,
 } satisfies ExchangeResult;
 
 /** Flush pending microtasks (and any queued macrotask) so the owner advances. */

@@ -97,6 +97,7 @@ vi.mock("@psilink/core", async (importActual) => {
         },
         resolvedRole: "receiver",
         partnerPayload: { columns: [], rowIndices: [], rows: [] },
+        recordOwedButUnbuilt: false,
       } satisfies ExchangeResult;
     }),
     describeExchangeStages: vi.fn().mockReturnValue([]),

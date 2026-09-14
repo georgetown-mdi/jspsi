@@ -518,6 +518,42 @@ test("retention/disposition pointer is per-party and self-facing end-to-end", as
   expect(init.record.termsHash).toBe(resp.record.termsHash);
 });
 
+test("a completed run whose owed record could not be built states the loss on its result", async () => {
+  // The build is a secondary artifact: its failure leaves the exchange and its
+  // result whole and warns on the operator log alone, which an unattended run
+  // discards. The result states the loss itself, so a caller reports the
+  // accounting's missing entry from the run in hand rather than from an absent
+  // record. The responder's empty retention disposition is past what the record
+  // schema allows, so its build throws on a run that completed and disclosed.
+  const both: Output = { expectsOutput: true, shareWithPartner: true };
+  const [connInitiator, connResponder] = createMessagePipe();
+  const [initiator, responder] = await Promise.all([
+    runExchange(
+      connInitiator,
+      "initiator",
+      prepared("Initiator Co", both, clientRows),
+      { psiLibrary },
+    ),
+    runExchange(
+      connResponder,
+      "responder",
+      {
+        ...prepared("Responder Co", both, serverRows),
+        retentionDisposition: "",
+      },
+      { psiLibrary },
+    ),
+  ]);
+
+  expect(responder.audit).toBeUndefined();
+  expect(responder.recordOwedButUnbuilt).toBe(true);
+  // The result the record would have attested is untouched.
+  expect(responder.associationTable).toBeDefined();
+  // The loss is one party's: the partner's record built and reports none.
+  expect(initiator.audit).toBeDefined();
+  expect(initiator.recordOwedButUnbuilt).toBe(false);
+});
+
 test("single-output: result size omitted, but each party records its own exposure", async () => {
   // Initiator receives output; responder only sends. resolveRole makes the
   // initiator the receiver (it expects output and the partner does not).

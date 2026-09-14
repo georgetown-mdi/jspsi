@@ -1109,7 +1109,11 @@ raises a notice of its own, on the terms the failed append takes: beside the run
 failure rather than in place of it, with no record download to offer, and in the
 diagnostic log as well. The notice states the consequence -- this run has no entry
 in the accounting -- because the cause is written where the build failed, on the
-operator log an unattended run discards.
+operator log an unattended run discards. A run that FINISHED in that state raises
+the matching notice, before its outputs are built. It names no download either --
+the build produced no record file to offer -- and that ordering is what keeps it
+independent of the completion surface, which a run whose outputs also fail to
+build never reaches.
 
 **What a stopped run's entry states.** The entry is the record, so what it states
 is the record's fields and nothing beside them: the columns this party consented
