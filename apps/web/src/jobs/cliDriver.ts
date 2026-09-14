@@ -7,6 +7,7 @@ import {
   WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
   createPrivateKeyStreamRedactor,
   parseBoundedJson,
+  partnerOriginText,
   sanitizeErrorChainLinks,
   sanitizeForDisplay,
 } from "@psilink/core";
@@ -14,6 +15,7 @@ import {
 import { ERROR_MESSAGE_CHAIN_FIELD } from "@psi/relayErrorChain";
 
 import type { ChildProcess } from "node:child_process";
+import type { PartnerOriginText } from "@psilink/core";
 import type { Readable } from "node:stream";
 
 /**
@@ -130,13 +132,19 @@ export interface CliRunDiagnostics {
   /**
    * The child's retained stderr tail, bounded to the retention cap and with
    * private-key material already redacted out of the stream it was clipped
-   * from ({@link attachStderrTail}); the empty string when the child wrote
-   * none. Otherwise RAW, because its sink is the console seat, which escapes
-   * the cause link it rides once as it renders it: escaping here as well
-   * would double every literal backslash on its way to the operator
+   * from ({@link attachStderrTail}); null when the child wrote none.
+   *
+   * BRANDED at that read, which is this console's decode chokepoint for the
+   * child's output: the bytes are whatever the run wrote, a partner fragment
+   * it rendered into a message among them, so the type refuses the forms that
+   * would compose them into this console's own copy and leaves
+   * `errorWithPartnerCauseLinks` the one way to put them in front of an
+   * operator. Otherwise RAW, because its sink is the console seat, which
+   * escapes the cause link it rides once as it renders it: escaping here as
+   * well would double every literal backslash on its way to the operator
    * (CONTRIBUTING.md, Operator-facing escaping).
    */
-  stderrTail: string;
+  stderrTail: PartnerOriginText | null;
 }
 
 /** Callbacks the job manager wires into a driven run. */
@@ -632,7 +640,9 @@ function sanitizeValue(value: unknown): unknown {
  * {@link attachTerminalReconciliation} -- is short by up to a marker's
  * lookahead (`PRIVATE_KEY_MARKER_LOOKAHEAD` code units) of the last delivery.
  */
-function attachStderrTail(child: ChildProcess): { get: () => string } {
+function attachStderrTail(child: ChildProcess): {
+  get: () => PartnerOriginText | null;
+} {
   let tail = "";
   const redactor = createPrivateKeyStreamRedactor();
   const retain = (text: string): void => {
@@ -648,7 +658,16 @@ function attachStderrTail(child: ChildProcess): { get: () => string } {
       retain(redactor.close());
     });
   }
-  return { get: () => tail };
+  // Trimmed and tested for emptiness HERE, the last place the bytes are a
+  // plain string: past the brand nothing can read a length or a boundary off
+  // them, and a run whose child wrote nothing must carry no cause link rather
+  // than an empty one.
+  return {
+    get: () => {
+      const trimmed = tail.trim();
+      return trimmed.length === 0 ? null : partnerOriginText(trimmed);
+    },
+  };
 }
 
 /**
@@ -672,7 +691,7 @@ function attachStderrTail(child: ChildProcess): { get: () => string } {
 function attachTerminalReconciliation(
   child: ChildProcess,
   handlers: CliDriverHandlers,
-  stderrTail: { get: () => string },
+  stderrTail: { get: () => PartnerOriginText | null },
 ): void {
   let delivered = false;
   const deliver = (exitCode: number | null, signal: NodeJS.Signals | null) => {

@@ -5,8 +5,8 @@ import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
-  DEFAULT_MAX_DISPLAY_LENGTH,
   DISPLAY_TRUNCATION_MARKER,
+  PARTNER_LABELLED_VALUE_BUDGET,
   renderedDisplayCost,
 } from "@psilink/core";
 
@@ -328,12 +328,14 @@ describe("JobManager end-to-end via the stub CLI", () => {
     ).toBe(true);
   });
 
-  test("a hostile stderr tail crosses raw on its own link, fitted to the seat's budget", async () => {
-    // The tail is child output, not first-party copy. It stays RAW here -- the
-    // seat that renders the chain is the one altitude that escapes it (the
-    // end-to-end escape count is pinned by stderrTailBudget.test.ts) -- so what
-    // this holds is that it rides its own link and costs the seat no more than
-    // one value's budget.
+  test("a hostile stderr tail crosses on its own link, fitted to one value's budget", async () => {
+    // The tail is child output, not first-party copy. Its control characters
+    // are REPLACED where the link is composed -- the treatment the branded
+    // type's elimination applies, which is not an escape and so does not double
+    // at the seat that renders the chain (the end-to-end escape count is pinned
+    // by stderrTailBudget.test.ts). Everything else stays raw, and what this
+    // holds is that the tail rides its own link and costs the seat no more than
+    // one labelled value's budget.
     const manager = makeManager({
       exitCode: 64,
       stderr: "\u001b[2J\u0007\u202eevil\r\nconfig load failed",
@@ -344,11 +346,11 @@ describe("JobManager end-to-end via the stub CLI", () => {
     const terminal = record.events[record.events.length - 1].event;
     const chain = terminal[ERROR_MESSAGE_CHAIN_FIELD] as Array<string>;
     expect(chain[1]).toBe(
-      "the CLI last wrote on stderr: \u001b[2J\u0007\u202eevil\r\n" +
+      "the CLI last wrote on stderr: <1b>[2J<07>\u202eevil<0d><0a>" +
         "config load failed",
     );
     expect(renderedDisplayCost(chain[1])).toBeLessThanOrEqual(
-      DEFAULT_MAX_DISPLAY_LENGTH,
+      PARTNER_LABELLED_VALUE_BUDGET,
     );
   });
 
@@ -371,7 +373,7 @@ describe("JobManager end-to-end via the stub CLI", () => {
       "the CLI last wrote on stderr: ".length,
     );
     expect(renderedDisplayCost(link)).toBeLessThanOrEqual(
-      DEFAULT_MAX_DISPLAY_LENGTH,
+      PARTNER_LABELLED_VALUE_BUDGET,
     );
   });
 
@@ -690,7 +692,7 @@ describe("event cap fails the job", () => {
 
     handlers.onTerminal(
       { outcome: "succeeded", exitCode: 0, signal: null },
-      { stderrTail: "" },
+      { stderrTail: null },
     );
     expect(record.status).toBe("failed");
     const terminal = record.events[record.events.length - 1].event;
@@ -1792,7 +1794,7 @@ describe("the single exchange slot", () => {
     // The child's close frees the slot; a successor create then succeeds.
     handlersRef.current!.onTerminal(
       { outcome: "failed", exitCode: null, signal: "SIGKILL" },
-      { stderrTail: "" },
+      { stderrTail: null },
     );
     const secondId = await manager.createJob(validIntent());
     expect(secondId).not.toBe(firstId);
@@ -1861,7 +1863,7 @@ describe("occupiedSlotId reports the slot occupant", () => {
     // The child's close frees the slot; the probe then reads free.
     handlersRef.current!.onTerminal(
       { outcome: "failed", exitCode: null, signal: "SIGKILL" },
-      { stderrTail: "" },
+      { stderrTail: null },
     );
     expect(manager.occupiedSlotId()).toBeNull();
   });

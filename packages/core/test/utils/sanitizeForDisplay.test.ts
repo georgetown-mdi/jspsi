@@ -4,6 +4,7 @@ import {
   sanitizeForDisplay,
   boundRawFragmentForFit,
   clipToRenderedCost,
+  clipToRenderedCostKeepingEnd,
   controlCharacterMarker,
   renderedDisplayCost,
   replaceControlCharactersForDisplay,
@@ -338,6 +339,34 @@ describe("a cut lands outside a control-character marker", () => {
       sawCut ||=
         escaped.endsWith(DISPLAY_TRUNCATION_MARKER) &&
         clipped.endsWith(DISPLAY_TRUNCATION_MARKER);
+    }
+    // Non-vacuous: the sweep covered widths that cut the value and widths that
+    // held the whole marker.
+    expect(sawWholeMarker).toBe(true);
+    expect(sawCut).toBe(true);
+  });
+
+  test("at no width does the end window open on a fragment of a marker", () => {
+    // The mirror of the sweep above, on the routine that keeps a value's END:
+    // the cut falls at the FRONT of what it kept, so what it may not leave is a
+    // proper SUFFIX of the marker rather than a proper prefix.
+    const suffixes = Array.from(
+      { length: MARKER.length - 1 },
+      (_unused, index) => MARKER.slice(index + 1),
+    );
+    let sawWholeMarker = false;
+    let sawCut = false;
+    for (let width = 0; width <= treated.length + 4; width += 1) {
+      const clipped = clipToRenderedCostKeepingEnd(treated, width);
+      const kept = clipped.startsWith(DISPLAY_TRUNCATION_MARKER)
+        ? clipped.slice(DISPLAY_TRUNCATION_MARKER.length)
+        : clipped;
+      for (const suffix of suffixes)
+        expect(kept.startsWith(suffix), `budget ${width}`).toBe(false);
+      // What it kept is a SUFFIX of the value, whatever the back-off moved.
+      expect(treated.endsWith(kept), `budget ${width}`).toBe(true);
+      sawWholeMarker ||= clipped.includes(MARKER);
+      sawCut ||= clipped.startsWith(DISPLAY_TRUNCATION_MARKER);
     }
     // Non-vacuous: the sweep covered widths that cut the value and widths that
     // held the whole marker.

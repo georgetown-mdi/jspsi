@@ -294,6 +294,31 @@ const LONGEST_PARTIAL_CONTROL_CHARACTER_MARKER = Math.max(
 );
 
 /**
+ * Every proper, non-empty SUFFIX of a marker -- what a cut that keeps the END
+ * of a value leaves in front of what it kept, the mirror of
+ * {@link PARTIAL_CONTROL_CHARACTER_MARKERS}. Read off the treatment the same
+ * way, so neither set can drift from the marker's shape.
+ */
+const PARTIAL_CONTROL_CHARACTER_MARKER_SUFFIXES: ReadonlySet<string> = new Set(
+  Array.from({ length: 0xa0 }, (_unused, codePoint) =>
+    String.fromCodePoint(codePoint),
+  ).flatMap((character) => {
+    const treated = replaceControlCharactersForDisplay(character);
+    if (treated === character) return [];
+    return Array.from({ length: treated.length - 1 }, (_unused, index) =>
+      treated.slice(index + 1),
+    );
+  }),
+);
+
+const LONGEST_PARTIAL_CONTROL_CHARACTER_MARKER_SUFFIX = Math.max(
+  ...Array.from(
+    PARTIAL_CONTROL_CHARACTER_MARKER_SUFFIXES,
+    (partial) => partial.length,
+  ),
+);
+
+/**
  * `text` with ONE trailing fragment of a control-character marker removed,
  * so a routine that cut `text` to a budget hands on whole markers or none.
  *
@@ -330,6 +355,32 @@ export function trimPartialControlCharacterMarker(text: string): string {
   )
     if (PARTIAL_CONTROL_CHARACTER_MARKERS.has(text.slice(-length)))
       return text.slice(0, text.length - length);
+  return text;
+}
+
+/**
+ * `text` with ONE LEADING fragment of a control-character marker removed, for a
+ * cut that kept the END of a value ({@link clipToRenderedCostKeepingEnd}); the
+ * mirror of {@link trimPartialControlCharacterMarker} and bounded to one
+ * fragment for the mirror of its reason. No proper suffix of a marker holds the
+ * marker's opening `<`, so removing the longest matching head removes exactly
+ * the split marker's tail and cannot expose a second one behind it.
+ *
+ * It leaves the same residual: kept text can still OPEN on marker-shaped
+ * literal characters the value spelled itself, shown faithfully rather than
+ * trimmed as a marker the cut split.
+ */
+export function trimPartialControlCharacterMarkerAtStart(text: string): string {
+  for (
+    let length = Math.min(
+      LONGEST_PARTIAL_CONTROL_CHARACTER_MARKER_SUFFIX,
+      text.length,
+    );
+    length > 0;
+    length -= 1
+  )
+    if (PARTIAL_CONTROL_CHARACTER_MARKER_SUFFIXES.has(text.slice(0, length)))
+      return text.slice(length);
   return text;
 }
 
@@ -439,6 +490,40 @@ export function clipToRenderedCost(value: string, budget: number): string {
     cost = next;
   }
   return `${trimPartialControlCharacterMarker(kept)}${DISPLAY_TRUNCATION_MARKER}`;
+}
+
+/**
+ * Longest SUFFIX of `value` whose {@link renderedDisplayCost} fits `budget`,
+ * with {@link DISPLAY_TRUNCATION_MARKER} in FRONT of it -- and paid for out of
+ * that same budget -- when anything was dropped. The mirror of
+ * {@link clipToRenderedCost}, for a fragment whose LAST bytes are the ones the
+ * operator needs: a failing run writes its diagnosis last, so a cut taken from
+ * the front deletes exactly what the fragment was shown for.
+ *
+ * Every constraint {@link clipToRenderedCost} states holds here unchanged --
+ * `value` arrives raw for the sink's single escape, a code point is kept only
+ * when its whole rendered cost fits, and redaction runs BEFORE the cut. The
+ * back-off is the mirror too: a cut landing inside a control-character marker
+ * already in `value` backs off to after it
+ * ({@link trimPartialControlCharacterMarkerAtStart}), so the budget is an upper
+ * bound rather than a width the result meets.
+ */
+export function clipToRenderedCostKeepingEnd(
+  value: string,
+  budget: number,
+): string {
+  if (renderedDisplayCost(value) <= budget) return value;
+  const room = budget - DISPLAY_TRUNCATION_MARKER.length;
+  const points = Array.from(value);
+  let kept = "";
+  let cost = 0;
+  for (let index = points.length - 1; index >= 0; index -= 1) {
+    const next = cost + renderedDisplayCost(points[index]!);
+    if (next > room) break;
+    kept = `${points[index]!}${kept}`;
+    cost = next;
+  }
+  return `${DISPLAY_TRUNCATION_MARKER}${trimPartialControlCharacterMarkerAtStart(kept)}`;
 }
 
 /**

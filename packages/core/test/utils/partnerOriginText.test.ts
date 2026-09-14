@@ -9,6 +9,7 @@ import {
 import {
   COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
   DEFAULT_MAX_DISPLAY_LENGTH,
+  DISPLAY_TRUNCATION_MARKER,
 } from "../../src/utils/sanitizeForDisplay";
 import {
   CAUSE_DEPTH_ELISION_MARKER,
@@ -43,7 +44,9 @@ const linksOf = (error: Error): string[] =>
   sanitizeErrorForDisplay(error).split(CAUSE_SEPARATOR);
 
 // The first-party text opening the value at a 1-based position: the position
-// the elimination leads every label with, then the label itself.
+// the elimination leads a LIST's every label with, then the label itself. The
+// scalar form holds one value by its type, so it takes the bare label instead
+// -- nothing for a position to tell it apart from.
 const labelAt = (position: number): string => `${position}. ${LABEL}`;
 
 // One link's labelled values, partitioned where the next value's label opens
@@ -129,10 +132,7 @@ test("the elimination keeps the first-party message free of partner bytes", () =
   );
 
   expect(error.message).toBe(SENTENCE);
-  expect(linksOf(error)).toEqual([
-    SENTENCE,
-    `${labelAt(1)}the partner's value`,
-  ]);
+  expect(linksOf(error)).toEqual([SENTENCE, `${LABEL}the partner's value`]);
 });
 
 test("each value is labelled by position and ordered, three to a link", () => {
@@ -269,7 +269,7 @@ test("a planted key block is redacted before the value is fitted", () => {
     ),
   );
 
-  expect(link).toBe(`${labelAt(1)}${REDACTION}${tail}`);
+  expect(link).toBe(`${LABEL}${REDACTION}${tail}`);
 });
 
 test("a control character is replaced, so no link boundary can be forged", () => {
@@ -283,7 +283,7 @@ test("a control character is replaced, so no link boundary can be forged", () =>
 
   expect(links).toEqual([
     SENTENCE,
-    `${labelAt(1)}before<0a>caused by: forged link<09>after`,
+    `${LABEL}before<0a>caused by: forged link<09>after`,
   ]);
 });
 
@@ -318,9 +318,9 @@ test("an oversized value is fitted to the per-value budget", () => {
 
   expect(sentence).toBe(SENTENCE);
   expect(link!.length).toBeLessThanOrEqual(
-    labelAt(1).length + DEFAULT_MAX_DISPLAY_LENGTH,
+    LABEL.length + DEFAULT_MAX_DISPLAY_LENGTH,
   );
-  expect(link!.startsWith(labelAt(1))).toBe(true);
+  expect(link!.startsWith(LABEL)).toBe(true);
 });
 
 // The label is first-party, so it is clipped rather than refused; what the
@@ -372,4 +372,65 @@ test("a clipped label keeps every value's leading position", () => {
   packed.forEach((value, index) =>
     expect(value.startsWith(`${index + 1}. `)).toBe(true),
   );
+});
+
+// The position tells one labelled value from the next, and the scalar form has
+// no next one -- it holds exactly one value by its type. Pinned against the
+// one-element LIST, which does keep its position: a list of one is a list the
+// partner could have filled with more, and the two forms are what decide it
+// rather than the count a particular frame happened to carry.
+test("only the list form leads its label with a position", () => {
+  const [, scalarLink] = linksOf(
+    errorWithPartnerCauseLinks(SENTENCE, LABEL, partnerOriginText("one value")),
+  );
+  const [, listLink] = linksOf(abortOver(["one value"]));
+
+  expect(scalarLink).toBe(`${LABEL}one value`);
+  expect(listLink).toBe(`${labelAt(1)}one value`);
+});
+
+// A process's retained output is written diagnosis last, so a cut taken from
+// the front deletes exactly the line the link exists to carry. The option moves
+// the clip and nothing else: the redaction still runs over the whole value, so
+// a block planted ahead of the window it keeps is replaced rather than riding
+// out with the bytes the cut dropped.
+test("the end window keeps a value's closing bytes and still redacts the rest", () => {
+  const [, link] = linksOf(
+    errorWithPartnerCauseLinks(
+      SENTENCE,
+      LABEL,
+      partnerOriginText(
+        `${BEGIN_MARKER}\n${"B".repeat(10_000)}\n-----END OPENSSH PRIVATE KEY-----\n${"w".repeat(10_000)}\nthe last line`,
+      ),
+      { keep: "end" },
+    ),
+  );
+
+  expect(link!.endsWith("the last line")).toBe(true);
+  expect(link).toContain(DISPLAY_TRUNCATION_MARKER);
+  expect(link).not.toContain("BBBB");
+  expect(link!.length).toBeLessThanOrEqual(
+    LABEL.length + DEFAULT_MAX_DISPLAY_LENGTH,
+  );
+});
+
+// The marker the control replacement leaves is four characters, and a cut that
+// keeps the END of a value can land inside one. What the operator must never
+// meet is the fragment: neither the value's own byte nor the marker naming it.
+// Every offset of the cut against the marker is driven, since which one it
+// lands on is a function of the value's width.
+test("an end window never opens on part of a control-character marker", () => {
+  for (let pad = 0; pad < 8; pad++) {
+    const [, link] = linksOf(
+      errorWithPartnerCauseLinks(
+        SENTENCE,
+        LABEL,
+        partnerOriginText(`${"w".repeat(600)}\n${"t".repeat(pad)}`),
+        { keep: "end" },
+      ),
+    );
+    const kept = link!.slice(LABEL.length + DISPLAY_TRUNCATION_MARKER.length);
+    for (const fragment of ["0a>", "a>", ">"])
+      expect(kept.startsWith(fragment)).toBe(false);
+  }
 });

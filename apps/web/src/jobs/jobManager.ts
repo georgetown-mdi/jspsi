@@ -1,10 +1,8 @@
 import path from "node:path";
 
 import {
-  DEFAULT_MAX_DISPLAY_LENGTH,
-  DISPLAY_TRUNCATION_MARKER,
-  redactPrivateKeyMaterial,
-  renderedDisplayCost,
+  MAX_ERROR_CAUSE_DEPTH,
+  errorWithPartnerCauseLinks,
 } from "@psilink/core";
 
 import { ERROR_MESSAGE_CHAIN_FIELD } from "@psi/relayErrorChain";
@@ -81,7 +79,8 @@ import type {
   JobSigningIdentityLocation,
   JobSigningPaths,
 } from "./intentSchemas";
-import type { ExchangeRecordOutcome } from "@psilink/core";
+
+import type { ExchangeRecordOutcome, PartnerOriginText } from "@psilink/core";
 import type { JobHandoff } from "./handoff";
 import type { JobSftpServerEntry } from "./sftpServer";
 import type { RendezvousLeg } from "./jobRendezvous";
@@ -1576,83 +1575,74 @@ function liveRecordAvailability(record: JobRecord):
 const STDERR_CAUSE_LABEL = "the CLI last wrote on stderr: ";
 
 /**
- * What one such link may render to at the seat that shows it: the per-value
- * display budget, label included, the same budget every other labelled cause
- * link charges a chooser's value at (`fittedCauseLink` in
- * apps/cli/src/connection/causeLink.ts).
- */
-const STDERR_CAUSE_BUDGET = DEFAULT_MAX_DISPLAY_LENGTH;
-
-/**
  * A synthesized terminal naming what the CLI printed on stderr, so an operator
  * whose run emitted no terminal event reads the cause rather than only that the
  * stream broke.
  *
  * The tail rides a LABELLED CAUSE LINK of its own rather than being
- * interpolated into the first-party message: a chooser's bytes composed into
- * that sentence can spell whatever delimiter closes them and read on as console
- * copy, which on the persistence-loss terminal is a do-not-repeat instruction
- * the operator must not misread. The flat `message` field stays this console's
- * own text at every width of tail, and a run whose child wrote nothing carries
- * no chain at all, which the seat reads as the flat field.
+ * interpolated into the first-party message, and it is the branded type that
+ * holds that apart rather than this site's own care: the tail arrives as a
+ * {@link PartnerOriginText}, which no `+`, template or `join` accepts, so
+ * `errorWithPartnerCauseLinks` is the only way to put it in front of an
+ * operator and the labelling, redacting, control-replacing and fitting are its
+ * obligation. What that buys the reader of this console: a chooser's bytes
+ * composed into the first-party sentence could spell whatever delimiter closed
+ * them and read on as console copy, which on the persistence-loss terminal is a
+ * do-not-repeat instruction the operator must not misread.
+ *
+ * The flat `message` field stays this console's own text at every width of
+ * tail, and a run whose child wrote nothing carries no chain at all, which the
+ * seat reads as the flat field.
+ *
+ * `keep: "end"` is what the tail needs of the fit: a run writes its diagnosis
+ * last, so a cut taken from the front deletes exactly the line the link exists
+ * to carry.
  */
 function diagnosedTerminal(
   category: "output" | "exchange",
   message: string,
-  stderrTail: string,
+  stderrTail: PartnerOriginText | null,
 ): RelayEvent {
-  const link = stderrCauseLink(stderrTail);
+  const chain =
+    stderrTail === null
+      ? null
+      : rawChainLinks(
+          errorWithPartnerCauseLinks(message, STDERR_CAUSE_LABEL, stderrTail, {
+            keep: "end",
+          }),
+        );
   return {
     v: 1,
     type: "error",
     category,
     message,
-    ...(link === null ? {} : { [ERROR_MESSAGE_CHAIN_FIELD]: [message, link] }),
+    ...(chain === null ? {} : { [ERROR_MESSAGE_CHAIN_FIELD]: chain }),
   };
 }
 
 /**
- * The cause link for a retained stderr tail, or null when the child wrote none.
+ * An error's own message and each of its causes' messages, in order, as the
+ * relay's chain field holds them -- RAW, since the seat rendering the chain
+ * escapes each link once ({@link CliRunDiagnostics}).
  *
- * The tail is redacted and then fitted, in that order: fitting first could leave
- * a `BEGIN` marker in what is kept for the fail-closed dangling rule to consume.
- * What is kept is RAW, since the seat rendering the chain escapes each link once
- * ({@link CliRunDiagnostics}), and it is fitted by RENDERED cost, so
- * the budget bounds what that seat displays rather than what the child wrote.
- */
-function stderrCauseLink(stderrTail: string): string | null {
-  const tail = redactPrivateKeyMaterial(stderrTail.trim());
-  if (tail.length === 0) return null;
-  return `${STDERR_CAUSE_LABEL}${lastRenderedWindow(
-    tail,
-    STDERR_CAUSE_BUDGET - renderedDisplayCost(STDERR_CAUSE_LABEL),
-  )}`;
-}
-
-/**
- * Longest SUFFIX of `value` whose rendered cost fits `budget`, with
- * {@link DISPLAY_TRUNCATION_MARKER} in FRONT of it -- and paid for out of that
- * same budget -- when anything was dropped.
+ * It reads a plain `Error`, so it is no second way out of the branded type: the
+ * links it returns are whatever built the error, and for a synthesized terminal
+ * that is the one elimination, which has already labelled, redacted,
+ * control-replaced and fitted every partner byte on them.
  *
- * The suffix, not the prefix `clipToRenderedCost` keeps: a run writes its
- * diagnosis last, so a verbose failure's final line is exactly what a cut taken
- * from the front deletes. A code point is kept only when its whole rendered cost
- * fits, so the cut falls on a code-point boundary and the budget is an upper
- * bound rather than a width the result meets.
+ * Walked to `MAX_ERROR_CAUSE_DEPTH`, the depth the relay's own derivation of
+ * this field stops at (`sanitizeErrorChainLinks` in {@link CliRunDiagnostics}'s
+ * module), so the field holds the same shape whichever route filled it and no
+ * chain can walk without end.
  */
-function lastRenderedWindow(value: string, budget: number): string {
-  if (renderedDisplayCost(value) <= budget) return value;
-  const room = budget - DISPLAY_TRUNCATION_MARKER.length;
-  const points = Array.from(value);
-  let kept = "";
-  let cost = 0;
-  for (let index = points.length - 1; index >= 0; index -= 1) {
-    const next = cost + renderedDisplayCost(points[index]);
-    if (next > room) break;
-    kept = `${points[index]}${kept}`;
-    cost = next;
+function rawChainLinks(error: Error): Array<string> {
+  const links: Array<string> = [];
+  let link: unknown = error;
+  while (link instanceof Error && links.length < MAX_ERROR_CAUSE_DEPTH) {
+    links.push(link.message);
+    link = (link as { cause?: unknown }).cause;
   }
-  return `${DISPLAY_TRUNCATION_MARKER}${kept}`;
+  return links;
 }
 
 /**

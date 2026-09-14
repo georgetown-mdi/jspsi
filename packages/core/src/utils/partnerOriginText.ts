@@ -4,6 +4,7 @@ import {
 } from "./sanitizeErrorForDisplay";
 import {
   clipToRenderedCost,
+  clipToRenderedCostKeepingEnd,
   COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
   DEFAULT_MAX_DISPLAY_LENGTH,
   renderedDisplayCost,
@@ -65,13 +66,10 @@ export type PartnerOriginTextList = symbol & {
 };
 
 /**
- * Brand one decoded wire-frame string as partner-chosen. Called at the decode
- * chokepoint (a wire schema's `.transform`), never at a consumer: a value that
- * reaches a consumer unbranded has already lost the guarantee.
- *
- * No wire schema takes it yet -- the branded chokepoint is the abort reasons'
- * LIST -- and it is exported for the scalar field the next chokepoint brands,
- * so that PR adds a `.transform` rather than this form beside it.
+ * Brand one decoded string as partner-chosen. Called at the decode chokepoint
+ * -- a wire schema's `.transform`, or the read that takes the bytes off a
+ * stream somebody else fills -- never at a consumer: a value that reaches a
+ * consumer unbranded has already lost the guarantee.
  */
 export const partnerOriginText = (value: string): PartnerOriginText =>
   value as unknown as PartnerOriginText;
@@ -106,6 +104,15 @@ const PARTNER_LABEL_BUDGET = 64;
  * `test/connection/transportRefusalBudget.test.ts` pins).
  */
 const PARTNER_VALUE_BUDGET = DEFAULT_MAX_DISPLAY_LENGTH;
+
+/**
+ * What one labelled value may render to, label included: the two budgets
+ * above. Exported so a site adopting the type can assert what its own link
+ * costs the operator against the number the composition uses rather than
+ * against a copy of it.
+ */
+export const PARTNER_LABELLED_VALUE_BUDGET =
+  PARTNER_LABEL_BUDGET + PARTNER_VALUE_BUDGET;
 
 /**
  * The separator between two labelled values on one link: two line breaks,
@@ -185,9 +192,17 @@ export const MAX_PARTNER_VALUES_SHOWN =
  * two positions are equal, so no two links this builds are either, whatever
  * bytes the partner picks. The position leads the label so that a label
  * clipped to the budget is cut behind it and the positions stay distinct.
+ *
+ * A {@link PartnerOriginText} takes {@link bareLabel} instead: the position
+ * distinguishes one labelled value from the next, and the scalar form holds
+ * exactly one by its type, so there is no next one to tell it from.
  */
 const positionedLabel = (label: string, position: number): string =>
   clipToRenderedCost(`${position}. ${label}`, PARTNER_LABEL_BUDGET);
+
+/** {@link positionedLabel} for the scalar form: the call site's label alone. */
+const bareLabel = (label: string): string =>
+  clipToRenderedCost(label, PARTNER_LABEL_BUDGET);
 
 /**
  * One value as it sits on a link: the label's first-party text, then the
@@ -207,12 +222,25 @@ const positionedLabel = (label: string, position: number): string =>
  * Each value carries the label rather than the link carrying it once, so the
  * text opening a value is first-party on every value: a value that spells the
  * separator's shape still cannot open a labelled one.
+ *
+ * `keep` chooses which window of an over-budget value the fit leaves standing;
+ * it moves the clip, not the treatments, so every value is redacted and
+ * control-replaced whole either way.
  */
-const labelledValue = (label: string, value: string): string =>
-  `${label}${clipToRenderedCost(
-    replaceControlCharactersForDisplay(redactPrivateKeyMaterial(value)),
-    PARTNER_VALUE_BUDGET,
-  )}`;
+const labelledValue = (
+  label: string,
+  value: string,
+  keep: PartnerValueWindow,
+): string => {
+  const treated = replaceControlCharactersForDisplay(
+    redactPrivateKeyMaterial(value),
+  );
+  return `${label}${
+    keep === "end"
+      ? clipToRenderedCostKeepingEnd(treated, PARTNER_VALUE_BUDGET)
+      : clipToRenderedCost(treated, PARTNER_VALUE_BUDGET)
+  }`;
+};
 
 /**
  * The first-party link closing a chain that hit {@link MAX_PARTNER_VALUES_SHOWN},
@@ -227,11 +255,33 @@ const elidedValuesLink = (count: number): string =>
     : `${count} further values the partner sent are not shown`;
 
 /**
+ * Which window of an over-budget value survives the fit: the value's opening
+ * bytes, or its closing ones.
+ */
+export type PartnerValueWindow = "start" | "end";
+
+/** What a call site may vary about {@link errorWithPartnerCauseLinks}. */
+export interface PartnerCauseLinkOptions {
+  /**
+   * Which window of a value too wide for its budget the operator is shown.
+   * Defaults to `"start"`; `"end"` is for a value whose closing bytes are the
+   * disclosure -- a process's retained output, where the diagnosis is the last
+   * thing written and a cut taken from the front deletes exactly it.
+   *
+   * It moves the clip alone. The redaction and the control replacement run
+   * over the whole value either way, so neither window can be chosen to carry
+   * out of the value something the other would have treated.
+   */
+  readonly keep?: PartnerValueWindow;
+}
+
+/**
  * The ONE elimination form for {@link PartnerOriginText}: an `Error` whose own
  * message is `message` -- first-party text, and only first-party text -- and
  * whose `cause` chain holds the partner's values, in order, each fitted and
  * labelled with its position, packed {@link PARTNER_VALUES_PER_LINK} to a
- * link.
+ * link. A {@link PartnerOriginText} is one value and takes one link, labelled
+ * without a position ({@link bareLabel}).
  *
  * It returns the `Error` rather than the link text because the guarantee is
  * about where a partner byte can land: a helper returning a string would put
@@ -261,15 +311,24 @@ export function errorWithPartnerCauseLinks(
   message: string,
   label: string,
   partnerText: PartnerOriginText | PartnerOriginTextList,
+  options?: PartnerCauseLinkOptions,
 ): Error {
   const raw = partnerText as unknown as string | readonly string[];
-  const values = typeof raw === "string" ? [raw] : raw;
+  const scalar = typeof raw === "string";
+  const values = scalar ? [raw] : raw;
+  const keep = options?.keep ?? "start";
   const links: string[] = [];
   const shown = Math.min(values.length, MAX_PARTNER_VALUES_SHOWN);
   for (let i = 0; i < shown; i += PARTNER_VALUES_PER_LINK) {
     const packed: string[] = [];
     for (let j = i; j < Math.min(i + PARTNER_VALUES_PER_LINK, shown); j++)
-      packed.push(labelledValue(positionedLabel(label, j + 1), values[j]!));
+      packed.push(
+        labelledValue(
+          scalar ? bareLabel(label) : positionedLabel(label, j + 1),
+          values[j]!,
+          keep,
+        ),
+      );
     links.push(packed.join(PARTNER_VALUE_SEPARATOR));
   }
   if (values.length > shown)
