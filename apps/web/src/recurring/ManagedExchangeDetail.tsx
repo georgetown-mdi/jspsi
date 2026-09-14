@@ -189,16 +189,20 @@ export function ManagedExchangeDetail({
   // The last run's own declared counts are what a projection of the next run's
   // result size is drawn from, and they are kept beside what that run left. The
   // warning they raise is shown twice: where the schedule is entered, and in the
-  // run history for a visit that is not editing it.
+  // run history for a visit that is not editing it. The size bound only binds an
+  // unattended run, so both are withheld once the schedule is off.
+  const scheduled = record.schedule !== undefined;
   const parked =
     parkedResultsRead?.kind === "parked"
       ? parkedResultsRead.results
       : undefined;
-  const resultSizeWarning = projectedResultSizeWarning(
-    parked,
-    record.outputDirectoryHandle !== undefined &&
-      storedOutputDirectoryUsable(record.outputDirectoryHandle),
-  );
+  const resultSizeWarning = scheduled
+    ? projectedResultSizeWarning(
+        parked,
+        record.outputDirectoryHandle !== undefined &&
+          storedOutputDirectoryUsable(record.outputDirectoryHandle),
+      )
+    : undefined;
   return (
     <>
       <ConfigurationView
@@ -219,7 +223,7 @@ export function ManagedExchangeDetail({
       <RunHistory record={record} resultSizeWarning={resultSizeWarning} />
       <ParkedResultsView
         read={parkedResultsRead}
-        scheduled={record.schedule !== undefined}
+        scheduled={scheduled}
         onRetryRead={onRetryParkedResultsRead}
         onClear={onClearParkedResults}
       />

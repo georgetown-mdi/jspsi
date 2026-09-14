@@ -2781,6 +2781,45 @@ describe("the results a scheduled run left for this visit", () => {
     ).toHaveLength(2);
   });
 
+  test("no such warning in the run history once the schedule is off", async () => {
+    // The size bound applies only to an unattended scheduled run: an attended
+    // run downloads its result directly rather than parking it, so the
+    // warning does not belong in the run history once the schedule is off,
+    // even where the last run's own counts still project past the bound.
+    renderParked(
+      {
+        kind: "parked",
+        results: {
+          version: PARKED_RESULTS_VERSION,
+          entries: [
+            {
+              kind: "results",
+              runAt: RUN_AT,
+              fileName: runResultsFileName(RESULTS_LABEL, RUN_AT),
+              csv: new Blob([RESULTS_CSV], { type: "text/csv" }),
+              pairTableFactors: { local: 12_000, partner: 9_000 },
+            },
+          ],
+        },
+      },
+      { schedule: false },
+    );
+
+    // Waited on so the assertions below run against a rendered page rather
+    // than one still mounting.
+    await expect
+      .element(page.getByRole("heading", { name: "Run history" }))
+      .toBeInTheDocument();
+    expect(
+      page.getByText("A result this size is not kept in this browser").query(),
+    ).toBeNull();
+    expect(
+      page
+        .getByText("The next run's results would not be kept in this browser")
+        .query(),
+    ).toBeNull();
+  });
+
   test("no such warning where the last run projects a result this browser keeps", async () => {
     renderParked(parkedRead());
     // Waited on so the assertions below run against a rendered section rather
