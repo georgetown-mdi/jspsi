@@ -292,6 +292,13 @@ export interface JobRecord {
    * at all rather than a path that happens to name no file.
    */
   receiptPath: string | null;
+  /**
+   * Whether this run's intent named a partner fingerprint, so the configuration
+   * composed for it held a pin before the child started. A first contact is a
+   * run that held none, which is what the console's own pin notice states
+   * ({@link rewrittenPartnerPinNotice}).
+   */
+  partnerFingerprintPinnedAtCreation: boolean;
   status: JobStatus;
   events: Array<BufferedEvent>;
   /** True once a terminal event has been buffered; the SSE stream closes after it. */
@@ -956,6 +963,9 @@ export class JobManager {
       keysPath,
       logPath,
       receiptPath,
+      partnerFingerprintPinnedAtCreation:
+        intent.mode !== "zeroSetup" &&
+        intent.signing?.partnerFingerprint !== undefined,
       status: "running",
       events: [],
       terminalEmitted: false,
@@ -1680,12 +1690,21 @@ function relayedForConsole(record: JobRecord, event: RelayEvent): RelayEvent {
  * relayed warning is no exception. The value is read out of that same
  * configuration rather than out of the sentence
  * ({@link recordedPartnerFingerprint}).
+ *
+ * A run whose composed configuration already named a partner fingerprint had no
+ * first contact to report, so its warning relays in the CLI's own words rather
+ * than taking console copy stating a pin was adopted
+ * ({@link JobRecord.partnerFingerprintPinnedAtCreation}).
  */
 function rewrittenPartnerPinNotice(
   record: JobRecord,
   event: RelayEvent,
 ): RelayEvent {
-  if (event.source !== PARTNER_CERTIFICATE_PINNED_SOURCE) return event;
+  if (
+    event.source !== PARTNER_CERTIFICATE_PINNED_SOURCE ||
+    record.partnerFingerprintPinnedAtCreation
+  )
+    return event;
   return {
     ...event,
     message: partnerCertificatePinnedNotice(

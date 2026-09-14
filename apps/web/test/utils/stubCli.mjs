@@ -19,7 +19,10 @@
 //                     tests); written BEFORE STUB_FD3_EVENTS so a malformed
 //                     preamble is observed before any terminal event.
 //   STUB_EXIT_CODE    Integer exit code (default 0).
-//   STUB_STDERR       Text written to stderr before exit.
+//   STUB_STDERR       Text written to stderr before exit. The
+//                     CONFIG_FILE_PLACEHOLDER token is replaced as it is in
+//                     STUB_FD3_EVENTS, so a test can stage a refusal the real
+//                     CLI prints before its event stream is open.
 //   STUB_STDOUT       Text written to stdout before exit.
 //   STUB_OUTPUT_FILE  When set, the output positional (last argv) is written
 //                     with this content (so the result route has a file).
@@ -216,15 +219,12 @@ function runExchangeStub() {
   if (process.env.STUB_FD3_RAW !== undefined)
     writeFd3(process.env.STUB_FD3_RAW);
   const events = JSON.parse(
-    (process.env.STUB_FD3_EVENTS ?? "[]").replaceAll(
-      CONFIG_FILE_PLACEHOLDER,
-      separatedFlagValue(process.argv, "--config-file") ?? "",
-    ),
+    withConfigFile(process.env.STUB_FD3_EVENTS ?? "[]"),
   );
   for (const event of events) writeFd3(JSON.stringify(event) + "\n");
 
   if (process.env.STUB_STDERR !== undefined)
-    process.stderr.write(process.env.STUB_STDERR);
+    process.stderr.write(withConfigFile(process.env.STUB_STDERR));
   if (process.env.STUB_STDOUT !== undefined)
     process.stdout.write(process.env.STUB_STDOUT);
 
@@ -255,6 +255,15 @@ function runExchangeStub() {
     fs.writeFileSync(process.env.STUB_READY_FILE, "ready");
 
   exitAfterDelay(exitCode);
+}
+
+/** Text with the placeholder token spelled as the --config-file value, so a
+ * staged message names the file the real CLI would name. */
+function withConfigFile(text) {
+  return text.replaceAll(
+    CONFIG_FILE_PLACEHOLDER,
+    separatedFlagValue(process.argv, "--config-file") ?? "",
+  );
 }
 
 function writeFd3(line) {

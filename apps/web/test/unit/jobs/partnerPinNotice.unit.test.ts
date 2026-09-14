@@ -89,6 +89,52 @@ function composedConfigFile(pin: string | undefined): string {
   return configPath;
 }
 
+/** One certificate-mode job driven to its terminal event under the given stub
+ * environment, created with `partnerFingerprint` pinned when one is given: the
+ * data root it ran under and the buffered record. */
+async function runCertificateJob(
+  label: string,
+  childEnv: Record<string, string>,
+  partnerFingerprint?: string,
+): Promise<{ dataRoot: string; record: JobRecord }> {
+  const dataRoot = scratchDir(`${label}-root`);
+  const manager = new JobManager({
+    dataRoot,
+    binaryPath: STUB_CLI_PATH,
+    jobRendezvousDir: scratchDir(`${label}-rvz`),
+    childEnv,
+  });
+  managers.push(manager);
+  const id = await manager.createJob(
+    validIntent({
+      linkageTerms: { ...validLinkageTerms(), identity: "Agency A" },
+      signing: {
+        mode: "certificate",
+        ...(partnerFingerprint !== undefined ? { partnerFingerprint } : {}),
+      },
+    }),
+  );
+  return { dataRoot, record: await awaitTerminal(manager, id) };
+}
+
+/** The single terminal failure among the events a record buffered. */
+function soleFailure(record: JobRecord): RelayEvent {
+  const failures = record.events
+    .map((entry) => entry.event)
+    .filter((event) => event.type === "error");
+  expect(failures).toHaveLength(1);
+  return failures[0];
+}
+
+/** The single warning among the events a record buffered. */
+function soleWarning(record: JobRecord): RelayEvent {
+  const warnings = record.events
+    .map((entry) => entry.event)
+    .filter((event) => event.type === "warning");
+  expect(warnings).toHaveLength(1);
+  return warnings[0];
+}
+
 describe("the recorded pin is read back from the composed configuration", () => {
   test("a pin on file is found under the key the composer emits", () => {
     expect(
@@ -146,53 +192,65 @@ describe("the notice states the pin without naming a file", () => {
   });
 });
 
-describe("the relayed notice carries no container path", () => {
-  test("the CLI's wording is replaced by the console's, holding the pin", async () => {
-    const dataRoot = scratchDir("pin-relay-root");
-    const manager = new JobManager({
-      dataRoot,
-      binaryPath: STUB_CLI_PATH,
-      jobRendezvousDir: scratchDir("pin-relay-rvz"),
-      childEnv: {
-        STUB_EXIT_CODE: "0",
-        STUB_PARTNER_PIN: ADOPTED_FINGERPRINT,
-        STUB_FD3_EVENTS: JSON.stringify([
-          {
-            v: 1,
-            type: "warning",
-            source: "partnerCertificatePinned",
-            // The real sentence, which names the configuration file: what must
-            // not reach the browser.
-            message:
-              "Pinned the partner's signing certificate on this first " +
-              `contact: fingerprint ${ADOPTED_FINGERPRINT}, recorded as ` +
-              "signing.partner_fingerprint in " +
-              `${dataRoot}/jobs/some-id/psilink.yaml.`,
-          },
-          { v: 1, type: "result", resultWritten: true },
-        ]),
+// The CLI's pin notice as it writes it, naming the configuration file it
+// recorded the value into (the token the stub replaces with the --config-file
+// value it was spawned with): what must not reach the browser.
+const PARTNER_PINNED_WARNING =
+  "Pinned the partner's signing certificate on this first contact: " +
+  `fingerprint ${ADOPTED_FINGERPRINT}, recorded as ` +
+  `signing.partner_fingerprint in ${STUB_CONFIG_FILE_TOKEN}.`;
+
+/** The stub environment of a run that adopts a pin and reports it in the CLI's
+ * own order: the value is written into the configuration before the warning
+ * naming it is emitted, so a relay reading the value back finds it on file. */
+function pinAdoptingChildEnv(): Record<string, string> {
+  return {
+    STUB_EXIT_CODE: "0",
+    STUB_PARTNER_PIN: ADOPTED_FINGERPRINT,
+    STUB_FD3_EVENTS: JSON.stringify([
+      {
+        v: 1,
+        type: "warning",
+        source: "partnerCertificatePinned",
+        message: PARTNER_PINNED_WARNING,
       },
-    });
-    managers.push(manager);
-    const id = await manager.createJob(
-      validIntent({
-        linkageTerms: { ...validLinkageTerms(), identity: "Agency A" },
-        signing: { mode: "certificate" },
-      }),
+      { v: 1, type: "result", resultWritten: true },
+    ]),
+  };
+}
+
+describe("the relayed notice states no container path", () => {
+  test("the CLI's wording is replaced by the console's, holding the pin", async () => {
+    const { dataRoot, record } = await runCertificateJob(
+      "pin-relay",
+      pinAdoptingChildEnv(),
     );
-    const record = await awaitTerminal(manager, id);
-    const warnings = record.events
-      .map((entry) => entry.event)
-      .filter((event) => event.type === "warning");
-    expect(warnings).toHaveLength(1);
-    const notice = warnings[0];
+    const notice = soleWarning(record);
     // The source is relayed unchanged, so a supervisor still switches on it.
     expect(notice.source).toBe("partnerCertificatePinned");
     expect(notice.message).toContain(ADOPTED_FINGERPRINT);
     expect(notice.message).not.toContain(dataRoot);
-    expect(notice.message).not.toContain("psilink.yaml");
+    expect(notice.message).not.toContain(JOB_FILE_NAMES.config);
     expect(notice.message).toBe(
       partnerCertificatePinnedNotice(ADOPTED_FINGERPRINT),
+    );
+  });
+
+  test("a run created with a pin on file relays the CLI's warning as written", async () => {
+    // The console's copy states a first contact -- nothing was on file, so the
+    // run adopted whatever the partner presented. A run whose composed
+    // configuration already named a fingerprint had no first contact to
+    // report, so its warning reaches the operator in the CLI's own words.
+    const { record } = await runCertificateJob(
+      "pin-on-file",
+      pinAdoptingChildEnv(),
+      ADOPTED_FINGERPRINT,
+    );
+    expect(soleWarning(record).message).toBe(
+      PARTNER_PINNED_WARNING.replace(
+        STUB_CONFIG_FILE_TOKEN,
+        path.join(record.workdir, JOB_FILE_NAMES.config),
+      ),
     );
   });
 });
@@ -200,7 +258,10 @@ describe("the relayed notice carries no container path", () => {
 // The CLI's two first-contact refusals as it writes them: each names the
 // configuration file the pin goes into (the token the stub replaces with the
 // --config-file value it was spawned with) and offers an edit of that file or a
-// writable mount of it, neither of which a console operator can act on.
+// writable mount of it, neither of which a console operator can act on. They
+// reach the console by different routes -- the adoption write fails inside the
+// protocol run, which reports it on the event stream, while the check before
+// connecting exits on stderr with no event stream open at all.
 const PRE_CONNECTION_REFUSAL =
   "this exchange signs receipts (signing.mode: certificate) and pins no " +
   "partner fingerprint, so its first authenticated contact records the " +
@@ -228,45 +289,24 @@ async function runWithTerminalFailure(
   label: string,
   message: string,
 ): Promise<{ dataRoot: string; events: string; failure: RelayEvent }> {
-  const dataRoot = scratchDir(`${label}-root`);
-  const manager = new JobManager({
-    dataRoot,
-    binaryPath: STUB_CLI_PATH,
-    jobRendezvousDir: scratchDir(`${label}-rvz`),
-    childEnv: {
-      STUB_EXIT_CODE: "64",
-      STUB_FD3_EVENTS: JSON.stringify([
-        { v: 1, type: "error", category: "config", message },
-      ]),
-    },
+  const { dataRoot, record } = await runCertificateJob(label, {
+    STUB_EXIT_CODE: "64",
+    STUB_FD3_EVENTS: JSON.stringify([
+      { v: 1, type: "error", category: "config", message },
+    ]),
   });
-  managers.push(manager);
-  const id = await manager.createJob(
-    validIntent({
-      linkageTerms: { ...validLinkageTerms(), identity: "Agency A" },
-      signing: { mode: "certificate" },
-    }),
-  );
-  const record = await awaitTerminal(manager, id);
-  const failures = record.events
-    .map((entry) => entry.event)
-    .filter((event) => event.type === "error");
-  expect(failures).toHaveLength(1);
   return {
     dataRoot,
     events: JSON.stringify(record.events),
-    failure: failures[0],
+    failure: soleFailure(record),
   };
 }
 
-describe("the relayed first-contact failure carries no container path", () => {
-  async function expectRebuiltFailure(
-    label: string,
-    cliMessage: string,
-  ): Promise<void> {
+describe("the relayed first-contact failure states no container path", () => {
+  test("the adoption write's own failure is rebuilt", async () => {
     const { dataRoot, events, failure } = await runWithTerminalFailure(
-      label,
-      cliMessage,
+      "pin-adoption",
+      ADOPTION_WRITE_FAILURE,
     );
     // Both fields, since the seat renders the chain where it holds text and the
     // flat field otherwise.
@@ -279,14 +319,31 @@ describe("the relayed first-contact failure carries no container path", () => {
     expect(failure.category).toBe("config");
     expect(events).not.toContain(dataRoot);
     expect(events).not.toContain(JOB_FILE_NAMES.config);
-  }
-
-  test("the refusal raised before connecting is rebuilt", async () => {
-    await expectRebuiltFailure("pin-preflight", PRE_CONNECTION_REFUSAL);
   });
 
-  test("the adoption write's own failure is rebuilt", async () => {
-    await expectRebuiltFailure("pin-adoption", ADOPTION_WRITE_FAILURE);
+  test("the refusal raised before connecting is left as the CLI reports it", async () => {
+    // The limit of the rebuild above. This check runs before the protocol does
+    // (assertPartnerFingerprintRecordable, apps/cli/src/commands/exchange.ts),
+    // so the CLI exits 64 on stderr with its event stream never opened: there
+    // is no event to rewrite, and what the operator reads is the terminal the
+    // manager synthesizes for a stream that broke, with the CLI's own sentence
+    // on its stderr cause link.
+    const { record } = await runCertificateJob("pin-preflight", {
+      STUB_EXIT_CODE: "64",
+      STUB_STDERR: PRE_CONNECTION_REFUSAL,
+    });
+    const failure = soleFailure(record);
+    expect(failure.category).toBe("exchange");
+    expect(failure.message).toContain("the event stream broke");
+    // The console's own sentence, then the stderr cause link holding the end of
+    // what the CLI printed.
+    expect(failure[ERROR_MESSAGE_CHAIN_FIELD]).toEqual([
+      failure.message,
+      expect.stringContaining("records the pin."),
+    ]);
+    expect(JSON.stringify(record.events)).not.toContain(
+      PARTNER_PIN_UNRECORDABLE_FAILURE,
+    );
   });
 
   test("a failure naming no console path is relayed as the CLI wrote it", async () => {
