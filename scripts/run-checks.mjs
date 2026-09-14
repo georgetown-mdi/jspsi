@@ -44,6 +44,11 @@ import { fileURLToPath } from "node:url";
  */
 export const CHECKS = [
   {
+    script: "check:config-integrity",
+    description:
+      "The configs the gates rest on still say what they are held to: every guarded tsconfig resolves with its strictness options over every source file in its workspace, and every vitest config declares the projects its suites run under.",
+  },
+  {
     script: "linkcheck",
     description:
       "Every Markdown link target and heading anchor across the repository resolves.",
