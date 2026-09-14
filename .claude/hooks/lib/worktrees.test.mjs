@@ -9,6 +9,7 @@ import {
   isStrictlyInside,
   owningWorktree,
   parseWorktreeRecords,
+  worktreeContext,
   worktreeRecords,
 } from "./worktrees.mjs";
 
@@ -142,5 +143,29 @@ describe("owningWorktree", () => {
 
   it("names no worktree for a path outside every one of them", () => {
     expect(owningWorktree("/elsewhere/file", paths)).toBeUndefined();
+  });
+});
+
+describe("worktreeContext", () => {
+  it("names the root and the single tree a path lies in", () => {
+    expect(
+      worktreeContext("/repo/.claude/worktrees/agent-one/src/main.ts"),
+    ).toEqual({
+      root: "/repo/.claude/worktrees",
+      tree: "/repo/.claude/worktrees/agent-one",
+    });
+  });
+
+  it("leaves the tree null for the root itself, which is no worktree", () => {
+    expect(worktreeContext("/repo/.claude/worktrees")).toEqual({
+      root: "/repo/.claude/worktrees",
+      tree: null,
+    });
+  });
+
+  it("names no context for a path nowhere near a worktrees root", () => {
+    expect(worktreeContext("/repo/packages/core")).toBeNull();
+    expect(worktreeContext("/repo/.claude/hooks")).toBeNull();
+    expect(worktreeContext("/repo/worktrees/agent-one")).toBeNull();
   });
 });

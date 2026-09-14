@@ -110,7 +110,11 @@ import { basename, resolve } from "node:path";
 
 import { commandOf, eventCwd, eventForTools } from "./lib/event.mjs";
 import { splitPipelines, splitStages, tokenize } from "./lib/shell.mjs";
-import { isInside, isStrictlyInside } from "./lib/worktrees.mjs";
+import {
+  isInside,
+  isStrictlyInside,
+  worktreeContext,
+} from "./lib/worktrees.mjs";
 
 const CLAUDE_DIR = ".claude";
 const WORKTREES_DIR = "worktrees";
@@ -292,21 +296,6 @@ function invocation(tokens) {
     args: tokens.slice(index + 1),
     environment,
   };
-}
-
-// The `.claude/worktrees` root a path lies under and the single worktree inside
-// it the path belongs to, or null when the path is nowhere near one.
-function worktreeContext(path) {
-  const parts = path.split("/");
-  for (let i = 0; i + 1 < parts.length; i++) {
-    if (parts[i] === CLAUDE_DIR && parts[i + 1] === WORKTREES_DIR) {
-      return {
-        root: parts.slice(0, i + 2).join("/"),
-        tree: parts.length > i + 2 ? parts.slice(0, i + 3).join("/") : null,
-      };
-    }
-  }
-  return null;
 }
 
 function treeCount(root) {
