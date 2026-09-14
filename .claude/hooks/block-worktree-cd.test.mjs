@@ -111,6 +111,49 @@ describe("block-worktree-cd hook", () => {
     ]);
   });
 
+  // zsh's `cd <old> <new>` substitutes the first occurrence of <old> in the
+  // pathname of the directory of the call with <new> and moves there, which
+  // hops between sibling worktrees without naming either. Every destination
+  // asserted here was measured against real zsh.
+  it("blocks a two-argument cd that hops to a sibling worktree", () => {
+    expectBlocked(
+      ["cd agent-own agent-sibling && npm test", "cd own sibling"],
+      OWN,
+    );
+    const { stderr } = verdict("cd agent-own agent-sibling", OWN);
+    expect(stderr).toContain(SIBLING);
+  });
+
+  it("allows a two-argument cd whose destination leaves every worktree", () => {
+    expectAllowed(
+      [
+        "cd .claude/worktrees/agent-own packages/core && npm test",
+        `cd ${ROOT}/agent-own /tmp/rebase-tree`,
+      ],
+      OWN,
+    );
+  });
+
+  it("allows a two-argument cd that stays in the tree of the call", () => {
+    expectAllowed(
+      ["cd apps/cli packages/core && npm run build"],
+      `${OWN}/apps/cli`,
+    );
+    expectAllowed(["cd agent-own agent-own"], OWN);
+  });
+
+  it("allows a two-argument cd whose destination it cannot compute", () => {
+    expectAllowed(
+      [
+        "cd agent-absent agent-sibling && npm test",
+        "cd $SOURCE agent-sibling",
+        "cd agent-own ~/agent-sibling",
+        `cd agent-own agent-sibling ${SIBLING}`,
+      ],
+      OWN,
+    );
+  });
+
   it("allows a target it cannot resolve rather than guessing", () => {
     expectAllowed([`cd "$TREE" && npm test`, "cd ~/worktrees/agent-sibling"]);
   });
