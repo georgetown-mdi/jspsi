@@ -12,6 +12,7 @@ import {
   StandardizedDataset,
   accumulationFateAtCharge,
   canProduceMultipleValues,
+  fanOutReachedMatchingRefusal,
   STANDARDIZATION_FUNCTION_NAMES,
 } from "../src/standardization";
 import * as standardizationModule from "../src/standardization";
@@ -40,6 +41,13 @@ import {
   isListedFanOutFunction,
   withNoListedFanOutFunctions,
 } from "../src/fanOutFunctions";
+import {
+  CANDIDATE_SET_IMPLEMENTED_BY_STRATEGY,
+  candidateSetIsImplementedForStrategy,
+  LINKAGE_CARDINALITIES,
+  manyToManyIsImplementedForStrategy,
+} from "../src/linkageTermsPolicy";
+import type { LinkageStrategy } from "../src/config/linkageTermsSchema";
 
 const col = (name: string, type: ColumnMetadata["type"]): ColumnMetadata => ({
   name,
@@ -3961,6 +3969,39 @@ describe("FAN_OUT_FUNCTION_NAMES", () => {
     expect(() => mutable.push("to_upper_case")).toThrow(TypeError);
     expect(() => (mutable.length = 0)).toThrow(TypeError);
     expect(FAN_OUT_FUNCTION_NAMES).toEqual(listed);
+  });
+});
+
+// --- fanOutReachedMatchingRefusal --------------------------------------------
+
+describe("the refusal a candidate set earns at a single-valued round", () => {
+  test("states the count-only reason and the declaration the rest read", () => {
+    const message = fanOutReachedMatchingRefusal().message;
+    expect(message).toContain(
+      "a count-only exchange never matches a candidate set",
+    );
+    expect(message).toContain(
+      "any other round matches one only where the agreed linkage terms and " +
+        "the standardization account for the expansion",
+    );
+  });
+
+  test("names no cardinality, none of which decides the refusal", () => {
+    // No cardinality reaches the sites that raise it (requireSingleCandidate,
+    // psi/link.ts), and both strategies match a candidate set under the
+    // both-sided one, so naming a cardinality would tell an operator a run
+    // they can configure matches a single value per record where it matches
+    // the whole set. A strategy added off either table turns this red beside
+    // the sentence it leaves incomplete.
+    for (const strategy of Object.keys(
+      CANDIDATE_SET_IMPLEMENTED_BY_STRATEGY,
+    ) as Array<LinkageStrategy>) {
+      expect(candidateSetIsImplementedForStrategy(strategy)).toBe(true);
+      expect(manyToManyIsImplementedForStrategy(strategy)).toBe(true);
+    }
+    const message = fanOutReachedMatchingRefusal().message;
+    for (const cardinality of LINKAGE_CARDINALITIES)
+      expect(message).not.toContain(cardinality);
   });
 });
 

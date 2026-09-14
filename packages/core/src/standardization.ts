@@ -91,7 +91,8 @@ const logger = getLogger("cleaning");
  *   subsequent element-wise steps are automatically deduplicated.
  *   {@link buildKeyStrings} crosses these candidates into the key's candidate
  *   set; both linkage strategies match on that set, and what refuses it is the
- *   count-only algorithm or a many-to-many match (see
+ *   count-only algorithm, or an expansion the agreed linkage terms and
+ *   standardization do not account for (see
  *   {@link fanOutReachedMatchingRefusal}).
  */
 export type FieldValue = string | null | Set<string>;
@@ -875,10 +876,10 @@ export const STANDARDIZATION_FUNCTION_NAMES: readonly string[] = [
 export function fanOutReachedMatchingRefusal(): UsageError {
   return new UsageError(
     "a transform expanded a record into several match candidates, but this " +
-      "round matches a single value per record: a count-only exchange and a " +
-      "many-to-many match run one value per record, and a single-pass party " +
-      "matches a candidate set only where its declared linkage terms and " +
-      "standardization account for the expansion. " +
+      "round matches a single value per record: a count-only exchange never " +
+      "matches a candidate set, and any other round matches one only where " +
+      "the agreed linkage terms and the standardization account for the " +
+      "expansion. " +
       "Continuing would drop the record from its linkage key rather than " +
       "match it on each candidate, so the exchange is refused instead. Remove " +
       `the step that expands this record's value -- a ` +
