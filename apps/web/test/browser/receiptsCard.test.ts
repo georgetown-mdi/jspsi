@@ -232,11 +232,8 @@ async function pickIdentityLocation(name: string): Promise<void> {
 
 async function renderCard(identity: string = IDENTITY): Promise<void> {
   app.render(createElement(ReceiptsHarness, { identity }));
-  // The card starts collapsed, as it does on both screens, so the test opens it
-  // the way an operator does, and waits out the open transition before anything
-  // reaches inside: a control clicked while the panel is still growing can be
-  // dispatched at a point it has already left, which lands the click on a
-  // neighbor and leaves the control untouched.
+  // The card starts collapsed on both screens, so the test opens it the way an
+  // operator does.
   await openDisclosure(RECEIPTS_CARD);
   await expect.element(modeSelect()).toBeInTheDocument();
 }
