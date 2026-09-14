@@ -21,6 +21,7 @@ import {
   OwnColumnSelectionSchema,
   SHARED_SECRET_REGEX,
   StandardizationSchema,
+  holdsPrivateKeyMaterial,
   safeParseFileSyncOptions,
 } from "@psilink/core";
 
@@ -107,6 +108,22 @@ export const IDENTITY_DIRECTION_CHAR_PATTERN = /[\u202a-\u202e\u2066-\u2069]/u;
  */
 export const IDENTITY_DIRECTION_CHAR_MESSAGE =
   "identity must not contain text-direction characters";
+
+/**
+ * The reason every boundary reports for a label holding private key material,
+ * the third rule core holds a terms `identity` to
+ * (`holdsPrivateKeyMaterial`, packages/core/src/utils/sanitizeErrorForDisplay.ts,
+ * under `PRIVATE_KEY_IDENTITY_MESSAGE`). A label is bound into a certificate
+ * the CLI compares against `linkage_terms.identity`, and a terms document may
+ * hold no such value, so a label admitted here would leave the operator a
+ * certificate no terms document can name.
+ *
+ * It names a field path and a shape reason and never the submitted bytes, for
+ * the reason {@link IDENTITY_CONTROL_CHAR_MESSAGE} gives, and because echoing
+ * a pasted key would write it into the response.
+ */
+export const IDENTITY_PRIVATE_KEY_MESSAGE =
+  "identity must not contain private key material";
 
 /**
  * Upper bound on a `peer_id`. It prefixes every filename this party writes into
@@ -1081,10 +1098,10 @@ const jobZeroSetupIntentCommonFields = {
   linkageStrategy: z.enum(["cascade", "single-pass"]).optional(),
   deduplicate: z.boolean().optional(),
   // Free text, unlike the closed strategy enum, so it takes the shared label
-  // contract's three shape rules (`@jobs/intentSchemas`): no leading `-`, no
-  // control character, and no text-direction character. The driver emits it as
-  // a single `--identity=<value>` token, which parses a `-`-leading value
-  // verbatim regardless.
+  // contract's four shape rules (`@jobs/intentSchemas`): no leading `-`, no
+  // control character, no text-direction character, and no private key
+  // material. The driver emits it as a single `--identity=<value>` token, which
+  // parses a `-`-leading value verbatim regardless.
   identity: z
     .string()
     .min(1)
@@ -1095,6 +1112,9 @@ const jobZeroSetupIntentCommonFields = {
     })
     .refine((label) => !IDENTITY_DIRECTION_CHAR_PATTERN.test(label), {
       message: IDENTITY_DIRECTION_CHAR_MESSAGE,
+    })
+    .refine((label) => !holdsPrivateKeyMaterial(label), {
+      message: IDENTITY_PRIVATE_KEY_MESSAGE,
     })
     .optional(),
 };

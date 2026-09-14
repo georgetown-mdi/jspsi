@@ -2,11 +2,14 @@ import { createFileRoute } from "@tanstack/react-router";
 
 import { z } from "zod";
 
+import { holdsPrivateKeyMaterial } from "@psilink/core";
+
 import {
   IDENTITY_CONTROL_CHAR_MESSAGE,
   IDENTITY_CONTROL_CHAR_PATTERN,
   IDENTITY_DIRECTION_CHAR_MESSAGE,
   IDENTITY_DIRECTION_CHAR_PATTERN,
+  IDENTITY_PRIVATE_KEY_MESSAGE,
   MAX_IDENTITY_LENGTH,
   jobSigningIdentityLocationSchema,
 } from "@jobs/intentSchemas";
@@ -35,10 +38,12 @@ import type { SigningFingerprintResult } from "@jobs/signingIdentity";
  * against `JOB_SECRETS_DIR`, so the request still cannot name a path to read
  * or write. The label is held to the shared label contract
  * (`@jobs/intentSchemas`): bounded by {@link MAX_IDENTITY_LENGTH}, refused a
- * leading `-`, and refused any control or text-direction character -- the last
- * two are critical rather than defensive, since the label binds into a
- * long-lived certificate every partner pins and displays, and a NUL would
- * otherwise be caught only incidentally, where the child is spawned.
+ * leading `-`, and refused any control or text-direction character and any
+ * private key material -- the last three are critical rather than defensive,
+ * since the label binds into a long-lived certificate every partner pins and
+ * displays, a NUL would otherwise be caught only incidentally where the child
+ * is spawned, and a certificate bound to a key-bearing label is one no terms
+ * document can name.
  */
 const fingerprintBodySchema = z.strictObject({
   identity: z
@@ -51,6 +56,9 @@ const fingerprintBodySchema = z.strictObject({
     })
     .refine((label) => !IDENTITY_DIRECTION_CHAR_PATTERN.test(label), {
       message: IDENTITY_DIRECTION_CHAR_MESSAGE,
+    })
+    .refine((label) => !holdsPrivateKeyMaterial(label), {
+      message: IDENTITY_PRIVATE_KEY_MESSAGE,
     }),
   exportCertificate: z.boolean().optional(),
   identityLocation: jobSigningIdentityLocationSchema.optional(),

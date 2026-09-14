@@ -14,7 +14,7 @@ import {
 import { IconAlertCircle } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
 
-import { LinkageStrategySchema } from "@psilink/core";
+import { LinkageStrategySchema, holdsPrivateKeyMaterial } from "@psilink/core";
 
 import { InvitationTerms } from "@components/InvitationTerms";
 import { unlinkableFileAlert } from "@components/UnlinkableFileAlert";
@@ -177,11 +177,12 @@ export function DirectConfirmSection({
   // on the value the run actually sends (the trimmed label; a blank field omits
   // identity and the run names no party, so it is not an error). Naming the fault
   // at the field keeps a label the schema refuses -- a leading dash, an over-long
-  // value, a control character, or a text-direction character -- from reaching
-  // the server as an opaque 400 that failureFor would misattribute to the file
-  // or SFTP destination -- the shared contract's own rules, which this guard
-  // cannot loosen. Each class gets its own words: the two rules refuse different
-  // characters, and an operator fixing one is not told about the other.
+  // value, a control character, a text-direction character, or a pasted private
+  // key -- from reaching the server as an opaque 400 that failureFor would
+  // misattribute to the file or SFTP destination -- the shared contract's own
+  // rules, which this guard cannot loosen. Each rule gets its own words: they
+  // refuse different values, and an operator fixing one is not told about the
+  // others.
   const trimmedIdentity = identity.trim();
   const identityError =
     trimmedIdentity.length === 0
@@ -194,7 +195,9 @@ export function DirectConfirmSection({
             ? "Identity cannot contain control characters (a line break or a tab, for instance)"
             : IDENTITY_DIRECTION_CHAR_PATTERN.test(trimmedIdentity)
               ? "Identity cannot contain text-direction characters (a right-to-left override, for instance)"
-              : undefined;
+              : holdsPrivateKeyMaterial(trimmedIdentity)
+                ? "Identity cannot contain a private key (a PEM key block, for instance)"
+                : undefined;
 
   return (
     <Stack gap="lg">

@@ -7,7 +7,9 @@ import {
   computeCertificateFingerprint,
   generateSigningIdentity,
   getLogger,
+  holdsPrivateKeyMaterial,
   MAX_TEXT_LENGTH,
+  PRIVATE_KEY_IDENTITY_MESSAGE,
   sanitizeErrorForDisplay,
   serializeCertificate,
   TEXT_CONTROL_CHAR_MESSAGE,
@@ -170,16 +172,20 @@ export function readConfigHints(
  * binding continued by a `--force` re-key included: what a new certificate
  * holds is what the check is about.
  *
- * It holds the length bound and both classes the terms document refuses in
- * that field: the control characters ({@link TEXT_CONTROL_CHAR_PATTERN}), and
- * the nine text-direction embedding, override and isolate characters
- * ({@link BIDI_CONTROL_PATTERN}), one of which opens a layout scope that
- * reorders the copy the certificate's identity is displayed beside. The
- * implicit marks U+200E, U+200F and U+061C stay admitted, as they do there.
+ * It holds the length bound and all three content rules the terms document
+ * holds that field to: the control characters
+ * ({@link TEXT_CONTROL_CHAR_PATTERN}), the nine text-direction embedding,
+ * override and isolate characters ({@link BIDI_CONTROL_PATTERN}), one of which
+ * opens a layout scope that reorders the copy the certificate's identity is
+ * displayed beside, and private key material
+ * ({@link holdsPrivateKeyMaterial}), which a terms document refuses so a
+ * redaction marker cannot stand where a party names itself. The implicit marks
+ * U+200E, U+200F and U+061C stay admitted, as they do there.
  *
  * No message echoes the label. The offending value is the operator's own text
  * and naming it back adds nothing to a rule about its shape, which is the
- * discipline the terms document's own refusals keep.
+ * discipline the terms document's own refusals keep -- and a label holding a
+ * key must not be written back out at all.
  */
 function assertBindableIdentity(identity: string): void {
   if (TEXT_CONTROL_CHAR_PATTERN.test(identity))
@@ -192,6 +198,12 @@ function assertBindableIdentity(identity: string): void {
     throw new UsageError(
       "the identity to bind into the signing certificate cannot be used: " +
         `${TEXT_DIRECTION_MESSAGE}. Supply one that has none, through ` +
+        "--identity or linkage_terms.identity.",
+    );
+  if (holdsPrivateKeyMaterial(identity))
+    throw new UsageError(
+      "the identity to bind into the signing certificate cannot be used: " +
+        `${PRIVATE_KEY_IDENTITY_MESSAGE}. Supply this party's name, through ` +
         "--identity or linkage_terms.identity.",
     );
   if (identity.length > MAX_TEXT_LENGTH)

@@ -401,17 +401,24 @@ test("a control-character label reaches the operator escaped, once", async () =>
 
 // --- a bound label the agreed terms cannot state ------------------------------
 // The certificate schema admits a label holding a control or text-direction
-// character and `psilink fingerprint` refuses to bind a new one, so a file
-// written before that check is how one still reaches this boundary. Its holder
-// cannot author linkage_terms.identity to match it -- the terms refuse the same
-// two classes -- so the remedy the divergence refusal offers first is one they
-// cannot perform, and this refusal names the exit that exists instead.
+// character or private key material, and `psilink fingerprint` refuses to bind
+// a new one, so a file written before that check is how one still reaches this
+// boundary. Its holder cannot author linkage_terms.identity to match it -- the
+// terms refuse the same three rules -- so the remedy the divergence refusal
+// offers first is one they cannot perform, and this refusal names the exit that
+// exists instead.
+
+/** An obviously fake key block on one line, since the label refuses a line feed
+ * before the key rule is reached. */
+const FAKE_KEY_IN_A_LABEL =
+  "-----BEGIN OPENSSH PRIVATE KEY----- MIIBytes -----END OPENSSH PRIVATE KEY-----";
 
 test("a bound label the terms cannot state is refused with the re-key exit", async () => {
   const esc = String.fromCharCode(0x1b);
   for (const [index, label] of [
     `Records ${esc}[31mUnit`,
     "Records \u202eUnit",
+    `Records Unit ${FAKE_KEY_IN_A_LABEL}`,
   ].entries()) {
     const config = certificateModeOver(
       path.join(dir, `signing-identity-${index}.json`),
@@ -438,6 +445,9 @@ test("a bound label the terms cannot state is refused with the re-key exit", asy
     expect(rendered).not.toContain("Records");
     expect(rendered).not.toContain("\\x1b");
     expect(rendered).not.toContain("\\u202e");
+    expect(rendered).not.toContain("MIIBytes");
+    expect(rendered).not.toContain("BEGIN OPENSSH PRIVATE KEY");
+    expect(rendered).not.toContain("[redacted private key]");
     expect(rendered).toContain('"Agency A, a@agency-a.gov"');
     expect(rendered).not.toContain(DISPLAY_TRUNCATION_MARKER);
   }

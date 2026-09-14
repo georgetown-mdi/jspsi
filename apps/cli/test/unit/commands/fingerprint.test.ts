@@ -433,6 +433,83 @@ test("the direction refusal names its own rule and echoes no label byte", async 
   expect(message).not.toContain(String.fromCodePoint(0x202e));
 });
 
+/** An obviously fake key block on one line, since the label refuses a line feed
+ * before the key rule is reached. */
+const FAKE_KEY_IN_A_LABEL =
+  "-----BEGIN OPENSSH PRIVATE KEY----- MIIBytes -----END OPENSSH PRIVATE KEY-----";
+
+test.each([
+  ["a whole key block", `Party A ${FAKE_KEY_IN_A_LABEL}`],
+  ["a key block with no END marker", "Party A -----BEGIN RSA PRIVATE KEY-----"],
+])(
+  "refuses to bind an identity holding %s, and writes no file",
+  async (_label, identityArg) => {
+    // The terms document refuses a key-bearing identity where it is decoded, so
+    // a certificate bound to one here could never be named by the terms the
+    // exchange agrees under: its holder would meet a divergence with no config
+    // edit that reconciles it.
+    const idPath = path.join(dir, "id.json");
+    await expect(
+      resolveSigningIdentity({
+        identityPath: idPath,
+        identityArg,
+        force: false,
+        log: noopLog,
+      }),
+    ).rejects.toThrow(UsageError);
+    expect(fs.existsSync(idPath)).toBe(false);
+  },
+);
+
+test("the key refusal names its own rule and echoes no part of the key", async () => {
+  const idPath = path.join(dir, "id.json");
+  let caught: unknown;
+  try {
+    await resolveSigningIdentity({
+      identityPath: idPath,
+      identityArg: `Party A ${FAKE_KEY_IN_A_LABEL}`,
+      force: false,
+      log: noopLog,
+    });
+  } catch (err) {
+    caught = err;
+  }
+  expect(caught).toBeInstanceOf(UsageError);
+  const message = (caught as Error).message;
+  expect(message).toContain("must not contain private key material");
+  expect(message).not.toContain("must not contain control characters");
+  expect(message).toContain("--identity");
+  expect(message).toContain("linkage_terms.identity");
+  // Refused rather than redacted: neither the material nor the marker that
+  // stands in for it is written back to the operator.
+  expect(message).not.toContain("MIIBytes");
+  expect(message).not.toContain("BEGIN OPENSSH PRIVATE KEY");
+  expect(message).not.toContain("[redacted private key]");
+});
+
+test("a key-bearing label from the config is refused too", async () => {
+  const idPath = path.join(dir, "id.json");
+  await expect(
+    resolveSigningIdentity({
+      identityPath: idPath,
+      configIdentity: `Party A ${FAKE_KEY_IN_A_LABEL}`,
+      force: false,
+      log: noopLog,
+    }),
+  ).rejects.toThrow(UsageError);
+  expect(fs.existsSync(idPath)).toBe(false);
+});
+
+test("binds an identity that mentions a private key without holding one", () =>
+  expect(
+    resolveSigningIdentity({
+      identityPath: path.join(dir, "mentions-a-key.json"),
+      identityArg: "Party A, private key holder, keys@party-a.gov",
+      force: false,
+      log: noopLog,
+    }),
+  ).resolves.toMatchObject({ action: "Created" }));
+
 test("a text-direction label from the config is refused too", async () => {
   // linkage_terms.identity is the other route into the same binding, so it
   // takes the same rule.
@@ -584,16 +661,17 @@ test("a non-ASCII label is escaped where the warning is logged", async () => {
 });
 
 test("a bound label the terms cannot state warns with the re-key exit", async () => {
-  // A new binding holding one of these characters is refused outright by the
-  // binding check above, but the certificate schema admits one already bound,
-  // so a loaded file is how such a label reaches this sink. Its holder cannot
-  // author linkage_terms.identity to match it -- the terms refuse the same two
-  // classes -- so the warning names the exit that exists, a re-key, and quotes
-  // no part of the label.
+  // A new binding holding any of these is refused outright by the binding check
+  // above, but the certificate schema admits one already bound, so a loaded file
+  // is how such a label reaches this sink. Its holder cannot author
+  // linkage_terms.identity to match it -- the terms refuse the same three
+  // rules -- so the warning names the exit that exists, a re-key, and quotes no
+  // part of the label.
   const esc = String.fromCharCode(0x1b);
   for (const [index, label] of [
     `Records ${esc}[31mUnit`,
     "Records \u202eUnit",
+    `Records Unit ${FAKE_KEY_IN_A_LABEL}`,
   ].entries()) {
     const idPath = path.join(dir, `id-${index}.json`);
     const warn = vi.fn();
@@ -616,6 +694,9 @@ test("a bound label the terms cannot state warns with the re-key exit", async ()
     expect(message).not.toContain("Records");
     expect(message).not.toContain("\\x1b");
     expect(message).not.toContain("\\u202e");
+    expect(message).not.toContain("MIIBytes");
+    expect(message).not.toContain("BEGIN OPENSSH PRIVATE KEY");
+    expect(message).not.toContain("[redacted private key]");
     expect(message).toContain('"Agency A"');
     expect(/[^\t\x20-\x7e]/.test(message)).toBe(false);
   }

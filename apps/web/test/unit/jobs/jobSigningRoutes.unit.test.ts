@@ -280,6 +280,49 @@ describe("POST /api/jobs/signing/fingerprint maps each condition", () => {
     }
   });
 
+  test("private key material in the identity is a 400 before any child is spawned", async () => {
+    // A terms document refuses a key-bearing identity where it is decoded, so a
+    // certificate bound to one here could never be named by the terms a run
+    // agrees under -- and the operator would meet that divergence with no edit
+    // that reconciles it. Refused on the way in instead, at both boundaries the
+    // shared contract holds.
+    for (const identity of [
+      "Agency A -----BEGIN OPENSSH PRIVATE KEY----- MIIBytes " +
+        "-----END OPENSSH PRIVATE KEY-----",
+      "Agency A -----BEGIN RSA PRIVATE KEY----- MIIBytes",
+    ]) {
+      const { dataRoot } = seedManager();
+      const response = await postFingerprint({ identity });
+      expect(response.status).toBe(400);
+      // A field path and a shape reason: neither the material nor the marker
+      // that stands in for it crosses.
+      const text = await response.text();
+      expect(text).not.toContain("Agency");
+      expect(text).not.toContain("MIIBytes");
+      expect(text).not.toContain("PRIVATE KEY");
+      expect(text).not.toContain("[redacted private key]");
+      expect(JSON.parse(text)).toMatchObject({ error: expect.any(String) });
+      // The stub CLI creates the identity file, so its absence proves no child ran.
+      expect(
+        fs.existsSync(path.join(dataRoot, SIGNING_IDENTITY_FILE_NAME)),
+      ).toBe(false);
+      expect(
+        jobZeroSetupIntentSchema.safeParse(validZeroSetupIntent({ identity }))
+          .success,
+      ).toBe(false);
+    }
+  });
+
+  test("an identity that mentions a private key without holding one binds normally", async () => {
+    seedManager();
+    const identity = "Agency A, private key holder, keys@agency-a.gov";
+    expect((await postFingerprint({ identity })).status).toBe(200);
+    expect(
+      jobZeroSetupIntentSchema.safeParse(validZeroSetupIntent({ identity }))
+        .success,
+    ).toBe(true);
+  });
+
   test("a direction mark in the identity binds normally", async () => {
     // U+200E, U+200F and U+061C set a direction for the neutral characters
     // around them and open no scope reaching past the label, so a party writing
