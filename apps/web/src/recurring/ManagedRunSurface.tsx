@@ -147,6 +147,9 @@ export function ManagedRunSurface({ id }: { id: string }) {
   // flight.
   const [parkedResultsRead, setParkedResultsRead] =
     useState<ParkedResultsRead>();
+  // Bumped to read the parked results again, on an explicit retry of a read that
+  // never reached the store.
+  const [parkedResultsReads, setParkedResultsReads] = useState(0);
   const [exportBusy, setExportBusy] = useState(false);
   const [exportFailed, setExportFailed] = useState(false);
   // A hand-off the store refused, and which refusal it was: a run held the
@@ -304,7 +307,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
     return () => {
       live = false;
     };
-  }, [id]);
+  }, [id, parkedResultsReads]);
 
   // Revoke the run's object URLs when they are replaced or the surface unmounts:
   // the results blob is matched-record PII and the keys blob is private material.
@@ -660,6 +663,17 @@ export function ManagedRunSurface({ id }: { id: string }) {
     readAccountingAgain();
   }
 
+  // Read the parked results again after a read that never reached the store,
+  // dropping the standing verdict as it goes so the section returns to its
+  // in-flight state rather than rendering a notice under a click already taken.
+  // Offered instead of a page reload for the reason the accounting's retry is:
+  // a reload ends a run in progress, and the blocked-open condition it recovers
+  // from clears on its own.
+  function retryParkedResultsRead(): void {
+    setParkedResultsRead(undefined);
+    setParkedResultsReads((reads) => reads + 1);
+  }
+
   return (
     <AppPage>
       <main className={styles.lobby}>
@@ -932,6 +946,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
               parkedResultsRead={parkedResultsRead}
               onResetAccounting={resetAccounting}
               onRetryAccountingRead={retryAccountingRead}
+              onRetryParkedResultsRead={retryParkedResultsRead}
               onSaveLocalFields={saveLocalFields}
               onReinviteToChangeTerms={() => reinviteNow("detail")}
               canReinvite={canReinviteFromRecord(record)}

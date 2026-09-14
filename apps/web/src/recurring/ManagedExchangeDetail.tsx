@@ -105,6 +105,7 @@ export function ManagedExchangeDetail({
   parkedResultsRead,
   onResetAccounting,
   onRetryAccountingRead,
+  onRetryParkedResultsRead,
   onSaveLocalFields,
   onReinviteToChangeTerms,
   canReinvite,
@@ -130,6 +131,8 @@ export function ManagedExchangeDetail({
   onResetAccounting: () => Promise<void>;
   /** Read the accounting again, for a read that never reached the store. */
   onRetryAccountingRead: () => void;
+  /** Read the parked results again, for a read that never reached the store. */
+  onRetryParkedResultsRead: () => void;
   /** Persist an in-place edit to the local fields (label, max-token-age policy).
    * Rejects on a store failure; the editor shows the failure and keeps the
    * form. */
@@ -165,6 +168,7 @@ export function ManagedExchangeDetail({
       <ParkedResultsView
         read={parkedResultsRead}
         scheduled={record.schedule !== undefined}
+        onRetryRead={onRetryParkedResultsRead}
       />
       <DisclosureAccountingView
         read={accountingRead}
@@ -714,22 +718,25 @@ function RunHistory({ record }: { record: ManagedExchangeRecord }) {
  * results of renders as its own row, so the operator meets the state rather than
  * a gap.
  *
- * An exchange with no schedule and nothing parked renders nothing at all: it
- * produces no unattended results, and the local-fields editor above is where a
- * schedule is entered.
+ * An exchange with no schedule renders nothing at all where the read FOUND
+ * nothing: it produces no unattended results, and the local-fields editor above
+ * is where a schedule is entered. Only that reading collapses the section --
+ * a store that did not answer knows nothing about what is stored, so it states
+ * itself here as it does on a scheduled exchange.
  */
 function ParkedResultsView({
   read,
   scheduled,
+  onRetryRead,
 }: {
   read: ParkedResultsRead | undefined;
   /** Whether this exchange has an agreed schedule, so the section stands with
    * its empty state for an exchange whose runs will land here. */
   scheduled: boolean;
+  onRetryRead: () => void;
 }) {
   const rows = read?.kind === "parked" ? parkedResultsRows(read.results) : [];
-  if (!scheduled && rows.length === 0 && read?.kind !== "unreadable")
-    return null;
+  if (!scheduled && read?.kind === "none") return null;
   return (
     <div className={styles.callout}>
       <h2 className={styles.eyebrow}>Results from scheduled runs</h2>
@@ -742,9 +749,16 @@ function ParkedResultsView({
           </p>
         </>
       ) : read.kind === "unavailable" ? (
-        <p className={`${styles.small} ${styles.sub}`}>
-          {UNAVAILABLE_PARKED_RESULTS_NOTE}
-        </p>
+        <Alert
+          color="blue"
+          title="Whether anything is kept here could not be read right now"
+          mt="sm"
+        >
+          <p>{UNAVAILABLE_PARKED_RESULTS_NOTE}</p>
+          <Button variant="default" mt="sm" onClick={onRetryRead}>
+            Try reading them again
+          </Button>
+        </Alert>
       ) : read.kind === "unreadable" ? (
         <Alert color="yellow" title="These results cannot be read" mt="sm">
           {UNREADABLE_PARKED_RESULTS_NOTE}

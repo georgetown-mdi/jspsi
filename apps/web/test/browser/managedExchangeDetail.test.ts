@@ -113,6 +113,7 @@ describe("managed exchange detail configuration", () => {
         accountingRead: { kind: "none" },
         onResetAccounting: () => Promise.resolve(),
         onRetryAccountingRead: () => undefined,
+        onRetryParkedResultsRead: () => undefined,
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -156,6 +157,7 @@ describe("managed exchange detail configuration", () => {
         accountingRead: { kind: "none" },
         onResetAccounting: () => Promise.resolve(),
         onRetryAccountingRead: () => undefined,
+        onRetryParkedResultsRead: () => undefined,
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: false,
@@ -212,6 +214,7 @@ describe("managed exchange detail configuration", () => {
         accountingRead: { kind: "none" },
         onResetAccounting: () => Promise.resolve(),
         onRetryAccountingRead: () => undefined,
+        onRetryParkedResultsRead: () => undefined,
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -249,6 +252,7 @@ describe("managed exchange detail configuration", () => {
           accountingRead: { kind: "none" },
           onResetAccounting: () => Promise.resolve(),
           onRetryAccountingRead: () => undefined,
+          onRetryParkedResultsRead: () => undefined,
           onSaveLocalFields: () => Promise.resolve(),
           onReinviteToChangeTerms: () => {
             reinviting = true;
@@ -307,6 +311,7 @@ describe("managed exchange detail local fields", () => {
         accountingRead: { kind: "none" },
         onResetAccounting: () => Promise.resolve(),
         onRetryAccountingRead: () => undefined,
+        onRetryParkedResultsRead: () => undefined,
         onSaveLocalFields: (edits) => {
           saved.push(edits);
           return Promise.resolve();
@@ -343,6 +348,7 @@ describe("managed exchange detail local fields", () => {
         accountingRead: { kind: "none" },
         onResetAccounting: () => Promise.resolve(),
         onRetryAccountingRead: () => undefined,
+        onRetryParkedResultsRead: () => undefined,
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -366,6 +372,7 @@ describe("managed exchange detail local fields", () => {
         accountingRead: { kind: "none" },
         onResetAccounting: () => Promise.resolve(),
         onRetryAccountingRead: () => undefined,
+        onRetryParkedResultsRead: () => undefined,
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -401,6 +408,7 @@ describe("managed exchange detail schedule entry", () => {
         accountingRead: { kind: "none" },
         onResetAccounting: () => Promise.resolve(),
         onRetryAccountingRead: () => undefined,
+        onRetryParkedResultsRead: () => undefined,
         onSaveLocalFields: (edits) => {
           saved.push(edits);
           return Promise.resolve();
@@ -730,6 +738,7 @@ describe("managed exchange detail local fields against the real store", () => {
         accountingRead: { kind: "none" },
         onResetAccounting: () => Promise.resolve(),
         onRetryAccountingRead: () => undefined,
+        onRetryParkedResultsRead: () => undefined,
         onSaveLocalFields: savingTo(stored.id),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -782,6 +791,7 @@ describe("managed exchange detail local fields against the real store", () => {
         accountingRead: { kind: "none" },
         onResetAccounting: () => Promise.resolve(),
         onRetryAccountingRead: () => undefined,
+        onRetryParkedResultsRead: () => undefined,
         onSaveLocalFields: savingTo(stored.id),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -843,6 +853,7 @@ describe("managed exchange detail run schedule", () => {
         accountingRead: { kind: "none" },
         onResetAccounting: () => Promise.resolve(),
         onRetryAccountingRead: () => undefined,
+        onRetryParkedResultsRead: () => undefined,
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -975,6 +986,7 @@ describe("managed exchange detail accounting of disclosures", () => {
         accountingRead: { kind: "none" },
         onResetAccounting: () => Promise.resolve(),
         onRetryAccountingRead: () => undefined,
+        onRetryParkedResultsRead: () => undefined,
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -1010,6 +1022,7 @@ describe("managed exchange detail accounting of disclosures", () => {
         accountingRead: { kind: "none" },
         onResetAccounting: () => Promise.resolve(),
         onRetryAccountingRead: () => undefined,
+        onRetryParkedResultsRead: () => undefined,
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -1072,6 +1085,7 @@ describe("managed exchange detail accounting of disclosures", () => {
           accountingRead: { kind: "none" },
           onResetAccounting: () => Promise.resolve(),
           onRetryAccountingRead: () => undefined,
+          onRetryParkedResultsRead: () => undefined,
           onSaveLocalFields: () => Promise.resolve(),
           onReinviteToChangeTerms: () => undefined,
           canReinvite: true,
@@ -1134,6 +1148,7 @@ describe("managed exchange detail accounting of disclosures", () => {
         accountingRead: { kind: "none" },
         onResetAccounting: () => Promise.resolve(),
         onRetryAccountingRead: () => undefined,
+        onRetryParkedResultsRead: () => undefined,
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -1204,6 +1219,7 @@ describe("managed exchange detail accounting of disclosures", () => {
         accountingRead: { kind: "accounting", accounting },
         onResetAccounting: () => Promise.resolve(),
         onRetryAccountingRead: () => undefined,
+        onRetryParkedResultsRead: () => undefined,
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -1254,6 +1270,7 @@ describe("managed exchange detail accounting of disclosures", () => {
         accountingRead: { kind: "accounting", accounting },
         onResetAccounting: () => Promise.resolve(),
         onRetryAccountingRead: () => undefined,
+        onRetryParkedResultsRead: () => undefined,
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -1307,6 +1324,7 @@ describe("managed exchange detail accounting of disclosures", () => {
         accountingRead: { kind: "accounting", accounting },
         onResetAccounting: () => Promise.resolve(),
         onRetryAccountingRead: () => undefined,
+        onRetryParkedResultsRead: () => undefined,
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -1366,6 +1384,7 @@ describe("managed exchange detail accounting of disclosures", () => {
         accountingRead: { kind: "accounting", accounting },
         onResetAccounting: () => Promise.resolve(),
         onRetryAccountingRead: () => undefined,
+        onRetryParkedResultsRead: () => undefined,
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -1403,6 +1422,7 @@ describe("managed exchange detail accounting of disclosures", () => {
         accountingRead: { kind: "accounting", accounting },
         onResetAccounting: () => Promise.resolve(),
         onRetryAccountingRead: () => undefined,
+        onRetryParkedResultsRead: () => undefined,
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -1454,6 +1474,7 @@ describe("managed exchange detail accounting of disclosures", () => {
         accountingRead: { kind: "accounting", accounting },
         onResetAccounting: () => Promise.resolve(),
         onRetryAccountingRead: () => undefined,
+        onRetryParkedResultsRead: () => undefined,
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -1498,6 +1519,7 @@ describe("managed exchange detail accounting of disclosures", () => {
         accountingRead: { kind: "unreadable", stored: undefined },
         onResetAccounting: () => Promise.resolve(),
         onRetryAccountingRead: () => undefined,
+        onRetryParkedResultsRead: () => undefined,
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -1530,6 +1552,7 @@ describe("managed exchange detail accounting of disclosures", () => {
         accountingRead: { kind: "unreadable", stored: undefined },
         onResetAccounting: () => Promise.resolve(),
         onRetryAccountingRead: () => undefined,
+        onRetryParkedResultsRead: () => undefined,
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -1612,6 +1635,7 @@ describe("recovering an accounting this version cannot read", () => {
         },
         onResetAccounting: () => Promise.resolve(),
         onRetryAccountingRead: () => undefined,
+        onRetryParkedResultsRead: () => undefined,
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -1665,6 +1689,7 @@ describe("recovering an accounting this version cannot read", () => {
           },
           onResetAccounting: () => Promise.resolve(),
           onRetryAccountingRead: () => undefined,
+          onRetryParkedResultsRead: () => undefined,
           onSaveLocalFields: () => Promise.resolve(),
           onReinviteToChangeTerms: () => undefined,
           canReinvite: true,
@@ -1711,6 +1736,7 @@ describe("recovering an accounting this version cannot read", () => {
         },
         onResetAccounting,
         onRetryAccountingRead: () => undefined,
+        onRetryParkedResultsRead: () => undefined,
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -1761,6 +1787,7 @@ describe("recovering an accounting this version cannot read", () => {
         },
         onResetAccounting: () => Promise.resolve(),
         onRetryAccountingRead: () => undefined,
+        onRetryParkedResultsRead: () => undefined,
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -1814,6 +1841,7 @@ describe("recovering an accounting this version cannot read", () => {
           },
           onResetAccounting: () => Promise.resolve(),
           onRetryAccountingRead: () => undefined,
+          onRetryParkedResultsRead: () => undefined,
           onSaveLocalFields: () => Promise.resolve(),
           onReinviteToChangeTerms: () => undefined,
           canReinvite: true,
@@ -1863,6 +1891,7 @@ describe("recovering an accounting this version cannot read", () => {
         },
         onResetAccounting: () => Promise.reject(new Error("store failed")),
         onRetryAccountingRead: () => undefined,
+        onRetryParkedResultsRead: () => undefined,
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -1894,6 +1923,7 @@ describe("recovering an accounting this version cannot read", () => {
         accountingRead: { kind: "unreadable", stored: undefined },
         onResetAccounting: () => Promise.resolve(),
         onRetryAccountingRead: () => undefined,
+        onRetryParkedResultsRead: () => undefined,
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -1931,6 +1961,7 @@ describe("recovering an accounting this version cannot read", () => {
         accountingRead: { kind: "accounting", accounting },
         onResetAccounting: () => Promise.resolve(),
         onRetryAccountingRead: () => undefined,
+        onRetryParkedResultsRead: () => undefined,
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -1981,6 +2012,7 @@ describe("an accounting a newer version of the app filed", () => {
       },
       onResetAccounting: () => Promise.resolve(),
       onRetryAccountingRead: () => undefined,
+      onRetryParkedResultsRead: () => undefined,
       onSaveLocalFields: () => Promise.resolve(),
       onReinviteToChangeTerms: () => undefined,
       canReinvite: true,
@@ -2090,6 +2122,7 @@ describe("an accounting that could not be read at all", () => {
       accountingRead: { kind: "unavailable" },
       onResetAccounting: () => Promise.resolve(),
       onRetryAccountingRead,
+      onRetryParkedResultsRead: () => undefined,
       onSaveLocalFields: () => Promise.resolve(),
       onReinviteToChangeTerms: () => undefined,
       canReinvite: true,
@@ -2170,6 +2203,7 @@ describe("an accounting read still in flight", () => {
       accountingRead: undefined,
       onResetAccounting: () => Promise.resolve(),
       onRetryAccountingRead: () => undefined,
+      onRetryParkedResultsRead: () => undefined,
       onSaveLocalFields: () => Promise.resolve(),
       onReinviteToChangeTerms: () => undefined,
       canReinvite: true,
@@ -2249,16 +2283,23 @@ describe("the results a scheduled run left for this visit", () => {
     };
   };
 
-  /** Render the detail sections of a scheduled exchange over one parked-results
-   * read. */
-  function renderParked(parkedResultsRead: ParkedResultsRead | undefined) {
+  /** Render the detail sections over one parked-results read, for an exchange
+   * that has a schedule unless the caller takes it away. */
+  function renderParked(
+    parkedResultsRead: ParkedResultsRead | undefined,
+    {
+      schedule = true,
+      onRetryParkedResultsRead = () => undefined,
+    }: { schedule?: boolean; onRetryParkedResultsRead?: () => void } = {},
+  ) {
     app.render(
       createElement(ManagedExchangeDetail, {
-        record: record("inviter", { schedule: scheduled() }),
+        record: record("inviter", schedule ? { schedule: scheduled() } : {}),
         parkedResultsRead,
         accountingRead: { kind: "none" },
         onResetAccounting: () => Promise.resolve(),
         onRetryAccountingRead: () => undefined,
+        onRetryParkedResultsRead,
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -2350,6 +2391,42 @@ describe("the results a scheduled run left for this visit", () => {
     await expect
       .element(page.getByText(UNAVAILABLE_PARKED_RESULTS_NOTE))
       .toBeInTheDocument();
+    expect(page.getByText(NO_PARKED_RESULTS_NOTE).query()).toBeNull();
+  });
+
+  test("the way out of that state is reading again, not a reload that would end a run", async () => {
+    const onRetryParkedResultsRead = vi.fn();
+    renderParked({ kind: "unavailable" }, { onRetryParkedResultsRead });
+
+    await page.getByRole("button", { name: "Try reading them again" }).click();
+
+    await vi.waitFor(() =>
+      expect(onRetryParkedResultsRead).toHaveBeenCalledTimes(1),
+    );
+  });
+
+  test("a store that did not answer says so on an exchange with no schedule too", async () => {
+    renderParked({ kind: "unavailable" }, { schedule: false });
+
+    // Turning a schedule off does not settle what a run parked while it was on,
+    // so the section stands here on exactly the reading it stands on elsewhere.
+    await expect
+      .element(page.getByText(UNAVAILABLE_PARKED_RESULTS_NOTE))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByRole("button", { name: "Try reading them again" }))
+      .toBeInTheDocument();
+  });
+
+  test("an exchange with no schedule and nothing kept renders no section at all", async () => {
+    renderParked({ kind: "none" }, { schedule: false });
+
+    // The sections below it are on screen, so this is an absent section rather
+    // than an unrendered page.
+    await expect
+      .element(page.getByRole("heading", { name: "Accounting of disclosures" }))
+      .toBeInTheDocument();
+    expect(page.getByText(PARKED_RESULTS_RETENTION_NOTE).query()).toBeNull();
     expect(page.getByText(NO_PARKED_RESULTS_NOTE).query()).toBeNull();
   });
 

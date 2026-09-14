@@ -77,10 +77,14 @@ export const UNREADABLE_PARKED_RESULTS_NOTE =
 
 /** The state a store that did not answer presents as, held apart from the empty
  * one: nothing is known about what is stored, so it may not read as "nothing is
- * here". */
+ * here". Its documented cause is transient (another tab holding an older version
+ * of the store open), so it names reading again rather than a page reload, which
+ * would end a run in progress. */
 export const UNAVAILABLE_PARKED_RESULTS_NOTE =
-  "Whether a scheduled run left results here could not be read just now. " +
-  "Reload the page to look again.";
+  "Whether a scheduled run left results here could not be read from this " +
+  "browser's storage. Nothing kept here has been changed or deleted. A tab " +
+  "running an older version of this app can hold that storage for a while; " +
+  "close any other tab this app is open in, then try again.";
 
 /** What a row says about a run that left results, or about one this browser
  * would not store them for. A refusal names the run's own standing -- it
