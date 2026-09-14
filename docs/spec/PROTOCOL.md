@@ -115,8 +115,9 @@ The rounds read raw byte frames: the masked setup, the request, the doubly-maske
 - Any other frame that is not binary is a classified `protocol` error naming the frame the round awaited. A peer that sends the wrong frame has refused nothing and is not reported as having refused.
 - A byte frame the PSI library's deserialization rejects keeps the cause it failed with, behind the same classification.
 - A byte frame the engine itself refuses past that deserialization ends the run on the engine's own message: the setup that holds no Raw data structure, and a request whose reveal flag disagrees with this party's mode (PSI-C, above). Each states the condition it refused on, so "failed to decode" would report the wrong fault. So does an engine precondition the calling party broke, which is a local fault in this implementation and is never presented as the partner's frame.
+- A fault in the PSI worker an engine runs behind ends the run on that fault's own message as well: a disposed engine, a caller breaking the worker's lockstep rule, and a worker that crashed or exited under the call (an out-of-memory kill on a large dataset is the practical one). Each is a fault on this party's own machine, so reporting it against the partner's frame would send the operator to the wrong party. The one worker fault outside this is a worker entry point that fails before it reaches the engine -- the browser's WebAssembly backend load -- which answers the call in flight without that marker, so where the answered call is one of the boundaries above it is still labeled a decode failure. A stated limit rather than a closed case.
 
-So no arrival at these boundaries ends a run on the PSI library's own decode message, which names nothing either operator can act on, and none is labeled a decode failure that was not one.
+So no arrival at these boundaries ends a run on the PSI library's own decode message, which names nothing either operator can act on, and none is labeled a decode failure that was not one, save the one stated limit above.
 
 #### The single-pass dataset ceiling: receiver memory and masking compute
 
