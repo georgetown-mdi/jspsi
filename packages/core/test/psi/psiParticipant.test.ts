@@ -406,19 +406,17 @@ test("computeValueMatches rejects a non-Raw server setup", async () => {
     UNBOUNDED_PSI_ELEMENTS,
   );
   const response = new psiLibrary.response().serializeBinary();
-  // The guard's own diagnosis, behind the decode boundary's classification of
-  // the frame it was reading (see psi/psiBinaryFrame.ts): a frame that fails
-  // to decode keeps what it failed with rather than being renamed.
   const refused = await receiver
     .computeValueMatches(nonRawServerSetupBytes(), response)
     .then(
       () => undefined,
       (err: unknown) => err as Error,
     );
-  expect(refused?.message).toMatch(/inbound PSI serverSetup failed to decode/);
-  expect((refused?.cause as Error).message).toMatch(
-    /server setup is not a Raw data structure/,
-  );
+  // The guard's own diagnosis stands as the top line: the frame deserialized,
+  // and it is the structure it deserialized to that the engine refused, so the
+  // decode boundary raises it unchanged (see psi/psiBinaryFrame.ts).
+  expect(refused?.message).toMatch(/server setup is not a Raw data structure/);
+  expect(refused?.message).not.toMatch(/failed to decode/);
 });
 
 test("cascade identifyIntersection (joiner) rejects a non-Raw server setup frame", async () => {
@@ -438,10 +436,8 @@ test("cascade identifyIntersection (joiner) rejects a non-Raw server setup frame
     () => undefined,
     (err: unknown) => err as Error,
   );
-  expect(refused?.message).toMatch(/inbound PSI serverSetup failed to decode/);
-  expect((refused?.cause as Error).message).toMatch(
-    /server setup is not a Raw data structure/,
-  );
+  expect(refused?.message).toMatch(/server setup is not a Raw data structure/);
+  expect(refused?.message).not.toMatch(/failed to decode/);
 });
 
 // --- the round's grouped frames, and the frame that stays at two elements ------

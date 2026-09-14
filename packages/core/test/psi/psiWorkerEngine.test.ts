@@ -145,6 +145,29 @@ test("an engine error propagates across the worker boundary", async () => {
   );
 });
 
+test("an engine refusal stays recognizable after the worker round trip", async () => {
+  // Only the message crosses the boundary, so without the reply's own marker
+  // a worker-backed run would lose the diagnosis and hand the frame boundary
+  // above an error it re-labels as a decode fault.
+  const participant = new PSIParticipant(
+    "receiver",
+    psiLibrary,
+    { role: "joiner", verbose: -1 },
+    UNBOUNDED_PSI_ELEMENTS,
+    inProcessWorkerEngine("joiner", "receiver"),
+  );
+  const nonRaw = new psiLibrary.serverSetup().serializeBinary();
+  const response = new psiLibrary.response().serializeBinary();
+
+  const refused = await participant.computeValueMatches(nonRaw, response).then(
+    () => undefined,
+    (err: unknown) => err as Error,
+  );
+
+  expect(refused?.message).toMatch(/server setup is not a Raw data structure/);
+  expect(refused?.message).not.toMatch(/failed to decode/);
+});
+
 test("dispose rejects pending calls and terminates the worker", async () => {
   let terminated = false;
   // A handle that never replies, so the call stays pending until dispose settles it.

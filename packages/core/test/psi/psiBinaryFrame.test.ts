@@ -7,7 +7,9 @@ import {
   ConnectionError,
   createMessagePipe,
 } from "../../src/connection/messageConnection";
-import { PeerAbortError } from "../../src/errors";
+import { markNamedDiagnosis, PeerAbortError } from "../../src/errors";
+import { decodePsiBinaryFrame } from "../../src/psi/psiBinaryFrame";
+import { InProcessPsiEngine } from "../../src/psi/psiEngine";
 import { sendAbort } from "../../src/protocolSetup";
 import { UNBOUNDED_PSI_ELEMENTS } from "../utils/psiElementBounds";
 
@@ -88,21 +90,111 @@ test("a non-binary frame that is no abort is not reported as a refusal", async (
   );
 });
 
-test("a malformed binary frame keeps its own decode cause", async () => {
-  // Bytes that pass the pre-deserialize element scan and fail the library's
-  // own decode. The boundary names itself and holds what failed as the cause,
-  // rather than replacing it with a refusal.
-  const ended = await endOfRoundAfter(new Uint8Array(0));
+test("a decode that fails unnamed is classified and keeps its cause", async () => {
+  // A failure raised inside the PSI library names no condition of its own, so
+  // the boundary names itself and holds what failed as the cause.
+  const failure = new Error("Tried to read past the end of the data 5 > 4");
+  const ended = await decodePsiBinaryFrame("joiner", "serverSetup", () =>
+    Promise.reject(failure),
+  ).then(
+    () => undefined,
+    (err: unknown) => err as Error,
+  );
 
-  expect(ended).not.toBeInstanceOf(PeerAbortError);
   expect(ended).toBeInstanceOf(ConnectionError);
   expect((ended as ConnectionError).kind).toBe("protocol");
   expect(ended?.message).toBe(
     "joiner protocol error: inbound PSI serverSetup failed to decode",
   );
-  expect((ended?.cause as Error).message).toBe(
+  expect(ended?.cause).toBe(failure);
+});
+
+test("a decode that fails with its own diagnosis is raised unchanged", async () => {
+  const failure = markNamedDiagnosis(new Error("the engine's own diagnosis"));
+  const ended = await decodePsiBinaryFrame("joiner", "serverSetup", () =>
+    Promise.reject(failure),
+  ).then(
+    () => undefined,
+    (err: unknown) => err as Error,
+  );
+
+  expect(ended).toBe(failure);
+});
+
+test("a frame the engine diagnoses keeps its diagnosis as the top line", async () => {
+  // A server setup that deserializes cleanly and holds no Raw data structure:
+  // the engine states that condition, so re-labeling it "failed to decode"
+  // would report the wrong fault to the operator.
+  const ended = await endOfRoundAfter(new Uint8Array(0));
+
+  expect(ended).not.toBeInstanceOf(PeerAbortError);
+  expect(ended?.message).toBe(
     "joiner protocol error: PSI server setup is not a Raw data structure",
   );
+});
+
+// A count-only sender parked on the request frame, which is where the two
+// parties' reveal flags are compared, and a joiner engine built for the other
+// mode to produce the diverging request.
+function countOnlySender(): PSIParticipant {
+  return new PSIParticipant(
+    "sender",
+    psiLibrary,
+    { role: "starter", verbose: 0 },
+    UNBOUNDED_PSI_ELEMENTS,
+    new InProcessPsiEngine(psiLibrary, "starter", "sender", "count-only"),
+  );
+}
+
+function revealingClientRequest(): Promise<Uint8Array> {
+  return new InProcessPsiEngine(
+    psiLibrary,
+    "joiner",
+    "joiner",
+    "identifier-revealing",
+  ).createClientRequest(["Carol"]);
+}
+
+test("a diverging reveal flag ends the round on the divergence, not a decode", async () => {
+  // The request deserializes and is well formed; what disagrees is the mode
+  // the two parties ran. Naming that is the whole point of the check, so it
+  // must stand as the top line rather than sit under "failed to decode".
+  const ended = await countOnlySender()
+    .processClientRequest(await revealingClientRequest())
+    .then(
+      () => undefined,
+      (err: unknown) => err as Error,
+    );
+
+  expect(ended?.message).toBe(
+    "sender protocol error: the partner's PSI request ran the " +
+      "identifier-revealing mode, where this exchange runs count-only",
+  );
+  expect(ended?.message).not.toMatch(/failed to decode/);
+});
+
+test("a role precondition this party broke is not reported as a bad frame", async () => {
+  // The engine holds no server, so the call never reaches a decode at all. A
+  // local invariant break must not be presented to the operator as the
+  // partner having sent something the round could not read.
+  const joinerSide = new PSIParticipant(
+    "joiner",
+    psiLibrary,
+    { role: "joiner", verbose: 0 },
+    UNBOUNDED_PSI_ELEMENTS,
+  );
+
+  const ended = await joinerSide
+    .processClientRequest(await revealingClientRequest())
+    .then(
+      () => undefined,
+      (err: unknown) => err as Error,
+    );
+
+  expect(ended?.message).toBe(
+    "joiner: processClientRequest requires the server role",
+  );
+  expect(ended).not.toBeInstanceOf(ConnectionError);
 });
 
 test("a frame the element scan rejects is unchanged by the classification", async () => {

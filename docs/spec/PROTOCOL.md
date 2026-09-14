@@ -113,9 +113,10 @@ The rounds read raw byte frames: the masked setup, the request, the doubly-maske
 
 - A partner's abort ends that run as a peer termination, naming the partner as the party that ended the exchange and holds the reason. The abort's reasons are partner-written text and are not read, so the refusing party's frame reaches no display.
 - Any other frame that is not binary is a classified `protocol` error naming the frame the round awaited. A peer that sends the wrong frame has refused nothing and is not reported as having refused.
-- A byte frame that fails to decode keeps the cause it failed with, behind the same classification.
+- A byte frame the PSI library's deserialization rejects keeps the cause it failed with, behind the same classification.
+- A byte frame the engine itself refuses past that deserialization ends the run on the engine's own message: the setup that holds no Raw data structure, and a request whose reveal flag disagrees with this party's mode (PSI-C, above). Each states the condition it refused on, so "failed to decode" would report the wrong fault. So does an engine precondition the calling party broke, which is a local fault in this implementation and is never presented as the partner's frame.
 
-So no arrival at these boundaries ends a run on the PSI library's own decode message, which names nothing either operator can act on.
+So no arrival at these boundaries ends a run on the PSI library's own decode message, which names nothing either operator can act on, and none is labeled a decode failure that was not one.
 
 #### The single-pass dataset ceiling: receiver memory and masking compute
 

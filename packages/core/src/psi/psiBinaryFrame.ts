@@ -11,7 +11,7 @@
 //   - Any other frame, which keeps the cause it failed with behind a psilink
 //     protocol error naming the boundary.
 import { ConnectionError } from "../connection/messageConnection";
-import { PeerAbortError } from "../errors";
+import { isNamedDiagnosis, PeerAbortError } from "../errors";
 import { isPartnerAbortFrame } from "../protocolSetup";
 
 import type { MessageConnection } from "../connection/messageConnection";
@@ -57,11 +57,19 @@ function asPsiBinaryFrame(
 }
 
 /**
- * Runs a PSI library decode, framing whatever it throws as a `protocol`
- * {@link ConnectionError} that names the frame and holds what failed as its
- * `cause` -- the library's own decode message, or the engine's check of the
- * structure it decoded to. A failure that is already a
- * {@link ConnectionError} is classified and passes through unchanged.
+ * Runs a PSI library decode, framing what it throws as a `protocol`
+ * {@link ConnectionError} that names the frame and holds the library's own
+ * decode message as its `cause`.
+ *
+ * Two failures keep their own message as the top line instead, because
+ * "failed to decode" would misreport them:
+ *
+ * - An error that is already a {@link ConnectionError}, which is classified.
+ * - An error the PSI engine raised itself, which {@link isNamedDiagnosis}
+ *   recognizes by tag because its message states the condition --
+ *   a precondition this party broke, which is a local fault and not the
+ *   partner's frame at all, or the reveal-flag divergence between the two
+ *   parties' rounds, named so it is read as the disagreement it is.
  *
  * @param participantId - This party's participant id, prefixed on the message.
  * @param what - The frame being decoded, named in the message.
@@ -76,6 +84,7 @@ export async function decodePsiBinaryFrame<T>(
     return await decode();
   } catch (err) {
     if (err instanceof ConnectionError) throw err;
+    if (isNamedDiagnosis(err)) throw err;
     throw new ConnectionError(
       `${participantId} protocol error: inbound PSI ${what} failed to decode`,
       "protocol",

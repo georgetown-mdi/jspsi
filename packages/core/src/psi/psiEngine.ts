@@ -2,6 +2,8 @@ import type { Client as PSIClient } from "@openmined/psi.js/implementation/clien
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 import type { Server as PSIServer } from "@openmined/psi.js/implementation/server.d.ts";
 
+import { markNamedDiagnosis } from "../errors";
+
 import type { Config } from "../types";
 
 // The deserialized server setup the joiner holds between receiving it and matching
@@ -42,6 +44,15 @@ function modeRevealsIdentifiers(mode: PsiEngineMode): boolean {
 // two states rather than echoing whatever string constructed the engine.
 function modeName(revealsIdentifiers: boolean): PsiEngineMode {
   return revealsIdentifiers ? "identifier-revealing" : "count-only";
+}
+
+// Every refusal the engine raises itself, as against a failure raised inside
+// the PSI library: each states the condition it refused on, so the frame
+// boundary above raises it unchanged rather than re-labeling it a decode
+// failure (decodePsiBinaryFrame, psi/psiBinaryFrame.ts). Routing every throw
+// through one constructor keeps a raise site from being added untagged.
+function engineRefusal(message: string): Error {
+  return markNamedDiagnosis(new Error(message));
 }
 
 /**
@@ -212,7 +223,9 @@ export class InProcessPsiEngine implements PsiEngine {
   ): Promise<{ setup: Uint8Array; permutation: Array<number> }> {
     const server = this.server;
     if (!server)
-      throw new Error(`${this.id}: createServerSetup requires the server role`);
+      throw engineRefusal(
+        `${this.id}: createServerSetup requires the server role`,
+      );
     const countOnly = !this.revealsIdentifiers;
     const sortingPermutation: Array<number> = [];
     const setup = server.createSetupMessage(
@@ -231,7 +244,7 @@ export class InProcessPsiEngine implements PsiEngine {
   processClientRequest(requestBytes: Uint8Array): Promise<Uint8Array> {
     const server = this.server;
     if (!server)
-      throw new Error(
+      throw engineRefusal(
         `${this.id}: processClientRequest requires the server role`,
       );
     const request = this.library.request.deserializeBinary(requestBytes);
@@ -243,7 +256,7 @@ export class InProcessPsiEngine implements PsiEngine {
     // opaque embind marshalling error, indistinguishable from a malformed
     // frame. Fixed literals only: the request is partner-supplied.
     if (request.getRevealIntersection() !== this.revealsIdentifiers)
-      throw new Error(
+      throw engineRefusal(
         `${this.id} protocol error: the partner's PSI request ran the ` +
           `${modeName(request.getRevealIntersection())} mode, where this ` +
           `exchange runs ${modeName(this.revealsIdentifiers)}`,
@@ -254,7 +267,7 @@ export class InProcessPsiEngine implements PsiEngine {
   createClientRequest(values: ReadonlyArray<string>): Promise<Uint8Array> {
     const client = this.client;
     if (!client)
-      throw new Error(
+      throw engineRefusal(
         `${this.id}: createClientRequest requires the client role`,
       );
     const contributed = this.revealsIdentifiers
@@ -275,7 +288,7 @@ export class InProcessPsiEngine implements PsiEngine {
     // fail-closed guard, not a memory bound -- the pre-deserialize element
     // scan in PSIParticipant already bounded the setup's allocation.)
     if (!setup.getRaw())
-      throw new Error(
+      throw engineRefusal(
         `${this.id} protocol error: PSI server setup is not a Raw data structure`,
       );
     this.pendingSetup = setup;
@@ -292,14 +305,14 @@ export class InProcessPsiEngine implements PsiEngine {
   ): { client: PSIClient; setup: DeserializedServerSetup } {
     const client = this.client;
     if (!client)
-      throw new Error(`${this.id}: ${operation} requires the client role`);
+      throw engineRefusal(`${this.id}: ${operation} requires the client role`);
     if (this.revealsIdentifiers !== modeRevealsIdentifiers(requiredMode))
-      throw new Error(
+      throw engineRefusal(
         `${this.id}: ${operation} requires a ${requiredMode} PSI engine; this one is ${modeName(this.revealsIdentifiers)}`,
       );
     const setup = this.pendingSetup;
     if (setup === undefined)
-      throw new Error(
+      throw engineRefusal(
         `${this.id}: ${operation} called before receiveServerSetup`,
       );
     this.pendingSetup = undefined;

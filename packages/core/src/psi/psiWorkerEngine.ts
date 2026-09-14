@@ -1,5 +1,6 @@
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
+import { isNamedDiagnosis, markNamedDiagnosis } from "../errors";
 import {
   InProcessPsiEngine,
   type PsiEngine,
@@ -63,7 +64,21 @@ export interface PsiWorkerRequest {
 /** A worker -> host reply, correlated to a request by its id. */
 export type PsiWorkerResponse =
   | { id: number; ok: true; result: unknown }
-  | { id: number; ok: false; error: string };
+  | {
+      id: number;
+      ok: false;
+      error: string;
+      /**
+       * Whether the engine raised this failure itself, its message stating
+       * the condition it refused on. Only the message crosses the boundary,
+       * so the host cannot read that off the error it rebuilds; carried here
+       * instead, it lets the rebuilt error keep the marker the PSI frame
+       * boundary reads before it re-labels a failure as a decode fault (see
+       * `markNamedDiagnosis`, `errors.ts`). Absent on a reply posted by a
+       * worker entry point that never reached the engine.
+       */
+      namedDiagnosis?: boolean;
+    };
 
 /**
  * The narrow, runtime-agnostic view {@link WorkerPsiEngine} needs of a spawned
@@ -123,7 +138,7 @@ export class WorkerPsiEngine implements PsiEngine {
     if (entry === undefined) return;
     this.pending.delete(response.id);
     if (response.ok) entry.resolve(response.result);
-    else entry.reject(new Error(response.error));
+    else entry.reject(rebuildWorkerFailure(response));
   }
 
   private failAll(error: unknown): void {
@@ -251,9 +266,24 @@ export function servePsiWorker(
             id: request.id,
             ok: false,
             error: error instanceof Error ? error.message : String(error),
+            namedDiagnosis: isNamedDiagnosis(error),
           }),
       );
   };
+}
+
+// Rebuilds a failed reply into the error the host raises. Only the message
+// crosses the boundary, so a refusal the engine named itself is re-marked
+// here from the reply's own flag -- otherwise the PSI frame boundary above
+// would re-label it as a decode fault on every worker-backed run.
+function rebuildWorkerFailure(response: {
+  error: string;
+  namedDiagnosis?: boolean;
+}): Error {
+  const failure = new Error(response.error);
+  return response.namedDiagnosis === true
+    ? markNamedDiagnosis(failure)
+    : failure;
 }
 
 // Worker-side sibling of relieveTransientMemory (link.ts): force a collection of the

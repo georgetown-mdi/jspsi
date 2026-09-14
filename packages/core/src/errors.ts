@@ -762,3 +762,44 @@ export function isPeerWaitTimeout(error: unknown): boolean {
     (link) => (link as Record<string, unknown>)[PEER_WAIT_TIMEOUT_TAG] === true,
   );
 }
+
+/** The property {@link markNamedDiagnosis} sets and {@link isNamedDiagnosis} reads. */
+const NAMED_DIAGNOSIS_TAG = "psilinkNamedDiagnosis";
+
+/**
+ * Tags an error whose own message states the condition that failed, so a
+ * boundary classifying whatever it catches raises it unchanged instead of
+ * re-labeling it. The PSI engine's refusals are the raise sites: a
+ * precondition its caller broke, and the reveal-flag divergence between the
+ * two parties' rounds, each named where the library beneath reports only an
+ * opaque marshalling failure (`psi/psiEngine.ts`).
+ *
+ * A property tag rather than a subclass, on {@link markPeerWaitTimeout}'s
+ * reasoning: it adds a machine-readable identity without changing the message
+ * or the `instanceof` classification the CLI's 64-vs-69 exit-code split
+ * reads. A tagged error must hold no value another party chose in its
+ * message, since that message becomes the top line an operator is shown.
+ *
+ * The PSI worker boundary carries an error as its message alone, so the tag
+ * rides its reply as a field of its own and is re-applied to the rebuilt
+ * error on the host side (`psi/psiWorkerEngine.ts`).
+ */
+export function markNamedDiagnosis<E extends object>(error: E): E {
+  return Object.assign(error, { [NAMED_DIAGNOSIS_TAG]: true });
+}
+
+/**
+ * Whether `error` itself holds the {@link markNamedDiagnosis} tag.
+ *
+ * Read off the value handed over rather than its `cause` chain, unlike
+ * {@link isPeerWaitTimeout}: what a classifying boundary asks is whether THIS
+ * error's message is fit to stand as the top line, and a wrapper holding a
+ * tagged cause has a message of its own that is not.
+ */
+export function isNamedDiagnosis(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    (error as Record<string, unknown>)[NAMED_DIAGNOSIS_TAG] === true
+  );
+}
