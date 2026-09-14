@@ -9,6 +9,9 @@
 
 import { git } from "./shell.mjs";
 
+const CLAUDE_DIR = ".claude";
+const WORKTREES_DIR = "worktrees";
+
 const WORKTREE_FIELD = "worktree ";
 const HEAD_FIELD = "HEAD ";
 const BRANCH_FIELD = "branch ";
@@ -67,6 +70,26 @@ export function isStrictlyInside(path, directory) {
 /** Whether `path` is `directory` or lies under it. */
 export function isInside(path, directory) {
   return path === directory || isStrictlyInside(path, directory);
+}
+
+/**
+ * The `.claude/worktrees` root a path lies under and the single worktree inside
+ * it the path belongs to, or null when the path is nowhere near one. The tree is
+ * null for the root itself, which is no worktree. Read from the path's own
+ * segments rather than from git, so it answers for a tree that is gone and for
+ * one no repository here registers.
+ */
+export function worktreeContext(path) {
+  const parts = path.split("/");
+  for (let i = 0; i + 1 < parts.length; i++) {
+    if (parts[i] === CLAUDE_DIR && parts[i + 1] === WORKTREES_DIR) {
+      return {
+        root: parts.slice(0, i + 2).join("/"),
+        tree: parts.length > i + 2 ? parts.slice(0, i + 3).join("/") : null,
+      };
+    }
+  }
+  return null;
 }
 
 /**
