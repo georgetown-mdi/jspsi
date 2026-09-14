@@ -219,7 +219,7 @@ test("a worker crash mid-call is reported as the local fault it is", async () =>
   // An out-of-memory kill or an early exit reaches the engine as a worker
   // death while a call is in flight. The exchange must send the operator to
   // their own machine, not to their partner's frame.
-  let fireError: (error: unknown) => void = () => {};
+  let fireError: (error: Error) => void = () => {};
   const engine = new WorkerPsiEngine({
     postMessage: () => fireError(new Error("PSI worker exited with code 1")),
     setHandlers: ({ onError }) => {
@@ -261,7 +261,7 @@ test("dispose rejects pending calls and terminates the worker", async () => {
 });
 
 test("a worker error fails every outstanding call", async () => {
-  let fireError: (error: unknown) => void = () => {};
+  let fireError: (error: Error) => void = () => {};
   const handle: PsiWorkerHandle = {
     postMessage: () => {},
     setHandlers: ({ onError }) => {
@@ -277,8 +277,32 @@ test("a worker error fails every outstanding call", async () => {
   await expect(pending).rejects.toThrow(/worker exited unexpectedly/);
 });
 
+test("a fault that is not an Error keeps the original value as its cause", async () => {
+  // onError is typed for an Error, so only a JavaScript caller reaches the
+  // coercion. What it produces must still hold the value it was given: String()
+  // alone renders most objects "[object Object]" and loses the fault entirely.
+  let fireError: (error: Error) => void = () => {};
+  const handle: PsiWorkerHandle = {
+    postMessage: () => {},
+    setHandlers: ({ onError }) => {
+      fireError = onError;
+    },
+    terminate: () => {},
+  };
+  const engine = new WorkerPsiEngine(handle);
+
+  const pending = engine.createServerSetup(["a"]);
+  const raw = { code: "ERR_WORKER_OUT_OF_MEMORY" };
+  (fireError as (error: unknown) => void)(raw);
+
+  const failure = await rejection(pending);
+  expect(failure?.message).toBe("[object Object]");
+  expect(failure?.cause).toBe(raw);
+  expect(isNamedDiagnosis(failure)).toBe(true);
+});
+
 test("a call after a worker error fails fast with the crash cause", async () => {
-  let fireError: (error: unknown) => void = () => {};
+  let fireError: (error: Error) => void = () => {};
   const handle: PsiWorkerHandle = {
     postMessage: () => {},
     setHandlers: ({ onError }) => {
