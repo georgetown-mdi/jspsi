@@ -9,6 +9,7 @@ import {
   renderedDisplayCost,
   replaceControlCharactersForDisplay,
   trimPartialControlCharacterMarker,
+  trimPartialControlCharacterMarkerAtStart,
   DISPLAY_TRUNCATION_MARKER,
   DEFAULT_MAX_DISPLAY_LENGTH,
 } from "../../src/utils/sanitizeForDisplay";
@@ -407,6 +408,28 @@ describe("a cut lands outside a control-character marker", () => {
           ).toBe(lead);
       }
     expect(trimPartialControlCharacterMarker("abc<0<0<0")).toBe("abc<0<0");
+  });
+
+  test("the back-off is one marker wide at the start too, whatever it lands beside", () => {
+    // The mirror of the back-off above: no proper suffix of a marker holds the
+    // marker's opening `<`, so one back-off removes the split marker's suffix
+    // and cannot expose a second one behind it. Read over the emitter's whole
+    // domain, at every cut inside a marker, and ahead of tails opening on a
+    // whole marker and on marker SHAPES the tail spells in its own bytes.
+    for (const tail of [TAIL, `${MARKER}${TAIL}`, `0a>${TAIL}`, `a>${TAIL}`])
+      for (const character of CONTROL_CHARACTERS) {
+        const marker = controlCharacterMarker(character.codePointAt(0)!);
+        for (let offset = 1; offset < marker.length; offset += 1)
+          expect(
+            trimPartialControlCharacterMarkerAtStart(
+              marker.slice(offset) + tail,
+            ),
+            `${JSON.stringify(tail)} cut at ${offset} of ${marker}`,
+          ).toBe(tail);
+      }
+    expect(trimPartialControlCharacterMarkerAtStart("0a>0a>0a>abc")).toBe(
+      "0a>0a>abc",
+    );
   });
 
   test("a value that spells the shape end to end keeps all but a cut's three", () => {
