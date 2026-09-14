@@ -120,6 +120,20 @@ Every release image is scanned for vulnerable packages before it is published. T
 
 **What it does not cover.** It reads the amd64 build, while a release publishes amd64 and arm64 for both images; each comes from the same digest-pinned base and the same committed lockfile, so the package set it reads is the one that ships, but a vulnerability in an architecture-specific binary alone is outside it.
 
+## A security update opened against main
+
+Every ecosystem block in `.github/dependabot.yml` sets `target-branch: staging`, and `main`'s copy of that file says the same, yet a Dependabot _security_ update can still arrive based on `main`. Observed once, on 2026-09-14: the alert for the js-yaml advisory was evaluated against `main`, which lags `staging`, and the bump opened as PR #1475 on `main` while `staging` had already taken the same bump by the ordinary route (PR #1416). One alert and one pull request are the whole of the evidence for reading this as security updates ignoring the configured target branch, so treat it as observed behavior rather than as a settled rule -- and expect a repeat, since the condition that produced it is the routine one.
+
+**Why it is not simply merged.** A merge puts a commit on `main` that `staging` does not have, so the next release promotion is no longer a fast-forward from `staging`. Repairing that costs either a merge of `main` back into `staging` or taking `main` back onto a `staging` commit, discarding the merge; the observed case took the second.
+
+**The default: close it, and let the promotion carry the fix.**
+
+1. Read `staging` for the package the alert names -- `package-lock.json`, or the `FROM` line for a base image pin. `staging` routinely holds the fix already, because the alert is evaluated against `main` (see [step 4](#4-review-and-audit-dependencies)).
+2. If `staging` has it, close the `main` pull request unmerged. Nothing further is owed: the next promotion moves the fix to `main` and clears the alert.
+3. If `staging` does not have it, take the bump on `staging` first -- a branch off `staging` carrying the same lockfile change, reviewed and merged the ordinary way -- and then close the `main` pull request. Re-pointing the Dependabot branch's own base at `staging` has not been driven here, and what Dependabot does with a retargeted branch on its next push is unknown; a branch of your own avoids the question.
+
+**When to merge it to `main` instead.** Only when the fix has to sit on `main` ahead of the next promotion -- something built or assessed from the default branch needs it now. Then merge it and reconverge the branches immediately, rather than leaving them apart: run [step 11](#11-merge-back-to-staging)'s merge-back outside a release, so `staging` contains `main`'s tip again and the next promotion is a fast-forward. Doing it while the divergence is one commit wide is what keeps that merge trivial.
+
 ## Release Checklist
 
 Work through these steps for every release. Steps marked with `[CI]` are automated; the remainder require a maintainer.
@@ -172,7 +186,7 @@ This covers the npm tree this repository declares. The image as built -- its OS 
 
 The unscoped `npm audit` additionally reports development-tree findings, which are triaged separately rather than at release time; how the last one was resolved, and what holds it resolved, is recorded in [DEPENDENCY_PINS.md](spec/DEPENDENCY_PINS.md#the-brace-expansion-advisory-is-fixed-by-a-root-override).
 
-A Dependabot alert in the repository's Security tab is evaluated against `main`, which routinely lags `staging` by dozens of commits, so an alert can still read as open against `main` after `staging` already has the fix -- check `staging`'s lockfile before triaging a default-branch alert. That check narrows the triage rather than closing it: a package `staging` has not yet patched still gets a full triage.
+A Dependabot alert in the repository's Security tab is evaluated against `main`, which routinely lags `staging` by dozens of commits, so an alert can still read as open against `main` after `staging` already has the fix -- check `staging`'s lockfile before triaging a default-branch alert. That check narrows the triage rather than closing it: a package `staging` has not yet patched still gets a full triage. When the same evaluation opens a security update as a pull request against `main`, handle it by [A security update opened against main](#a-security-update-opened-against-main) rather than merging it there.
 
 The same default-branch evaluation decides which `.github/dependabot.yml` Dependabot reads, so an `ignore` entry merged to `staging` suppresses no pull request until a promotion brings it to `main`, and a bump the entry names arrives anyway meanwhile. The evidence for that reading, what decides it, and how such a pull request is handled are in [DEPENDENCY_PINS.md](spec/DEPENDENCY_PINS.md#bumping-the-fips-base-image).
 
