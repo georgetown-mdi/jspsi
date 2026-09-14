@@ -33,7 +33,7 @@ import { inferMetadata } from "../../src/config/metadata";
 import { mintExchangeFile } from "../../src/config/exchangeFile";
 import { parseExchangeSpec } from "../../src/config/exchangeSpec";
 import { buildOutputTable } from "../../src/payloadExchange";
-import { UsageError } from "../../src/errors";
+import { PeerAbortError, UsageError } from "../../src/errors";
 
 import type { PreparedExchange, ExchangeResult } from "../../src/exchange";
 import type { MessageConnection } from "../../src/connection/messageConnection";
@@ -1275,13 +1275,18 @@ test("the one-sided refusal aborts the partner instead of leaving it parked", as
     "Presented Partner Identity",
   );
 
-  // The partner's run ends on its own: the terms exchange's decision slots
-  // already sit behind both parties, so nothing on that side reads the refusal
-  // reason, and the fault stays only with the refusing party. Its own run ends
-  // instead with the PSI library's raw "Type not convertible to a Uint8Array"
-  // error, reaching its binary boundary still awaiting the next round, with no
-  // psilink framing attached.
-  expect(await inviterRun).toBeInstanceOf(Error);
+  // The partner reads the frame at its PSI binary boundary, parked there
+  // awaiting the next round: the terms exchange's decision slots already sit
+  // behind both parties, so nothing on that side reads the refusal reason. The
+  // boundary classifies the arrival, so that run ends naming the partner's
+  // termination rather than on a PSI library decode message.
+  const inviter = await inviterRun;
+  expect(inviter).toBeInstanceOf(PeerAbortError);
+  expect(inviter?.message).toMatch(/aborted the exchange/);
+  // The fault stays with the refusing party: the partner is told to ask, and
+  // is shown neither the reason nor anything else the refusing side holds.
+  expect(inviter?.message).toMatch(/Contact your partner/);
+  expect(inviter?.message).not.toContain("deduplicate");
   await connAcceptor.close();
 });
 

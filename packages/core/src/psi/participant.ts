@@ -20,6 +20,7 @@ import {
   assertPartnerIndices,
   assertPartnerIndexTable,
 } from "../utils/partnerIndices";
+import { decodePsiBinaryFrame, receivePsiBinaryFrame } from "./psiBinaryFrame";
 import { InProcessPsiEngine, type PsiEngine } from "./psiEngine";
 import type { RoundGroupingField } from "./roundGrouping";
 
@@ -293,7 +294,9 @@ export class PSIParticipant {
       requestBytes,
       this.elementBounds.request,
     );
-    return this.engine.processClientRequest(requestBytes);
+    return decodePsiBinaryFrame(this.id, "request", () =>
+      this.engine.processClientRequest(requestBytes),
+    );
   }
 
   /**
@@ -337,7 +340,9 @@ export class PSIParticipant {
       setupBytes,
       this.elementBounds.setup,
     );
-    return this.engine.receiveServerSetup(setupBytes);
+    return decodePsiBinaryFrame(this.id, "serverSetup", () =>
+      this.engine.receiveServerSetup(setupBytes),
+    );
   }
 
   private computeAssociationTable(
@@ -348,7 +353,9 @@ export class PSIParticipant {
       responseBytes,
       this.elementBounds.response,
     );
-    return this.engine.computeAssociationTable(responseBytes);
+    return decodePsiBinaryFrame(this.id, "response", () =>
+      this.engine.computeAssociationTable(responseBytes),
+    );
   }
 
   // The count-only leg's counterpart to the guard above: the response is
@@ -364,7 +371,9 @@ export class PSIParticipant {
       responseBytes,
       this.elementBounds.response,
     );
-    return this.engine.computeIntersectionCardinality(responseBytes);
+    return decodePsiBinaryFrame(this.id, "response", () =>
+      this.engine.computeIntersectionCardinality(responseBytes),
+    );
   }
 
   /**
@@ -396,11 +405,13 @@ export class PSIParticipant {
       await conn.send(setup);
 
       this.log.debug(`${this.id}: waiting for client request`);
-      const clientRequestRaw = await conn.receive();
-
-      const serverResponse = await this.processClientRequest(
-        clientRequestRaw as Uint8Array,
+      const clientRequest = await receivePsiBinaryFrame(
+        conn,
+        this.id,
+        "request",
       );
+
+      const serverResponse = await this.processClientRequest(clientRequest);
       this.log.debug(
         `${this.id}: sending client data encrypted by both server and client`,
       );
@@ -413,19 +424,27 @@ export class PSIParticipant {
     }
 
     this.log.debug(`${this.id}: starting count-only protocol`);
-    const serverSetupRaw = await conn.receive();
+    const serverSetup = await receivePsiBinaryFrame(
+      conn,
+      this.id,
+      "serverSetup",
+    );
     this.log.debug(`${this.id}: receiving server data encrypted by server`);
-    await this.receiveServerSetup(serverSetupRaw as Uint8Array);
+    await this.receiveServerSetup(serverSetup);
 
     const clientRequest = await this.createClientRequest(set);
     this.log.debug(`${this.id}: sending client data encrypted by client`);
     await conn.send(clientRequest);
 
-    const serverResponseRaw = await conn.receive();
+    const serverResponse = await receivePsiBinaryFrame(
+      conn,
+      this.id,
+      "response",
+    );
     this.log.debug(
       `${this.id}: receiving server data encrypted by both server and client`,
     );
-    return this.computeIntersectionCardinality(serverResponseRaw as Uint8Array);
+    return this.computeIntersectionCardinality(serverResponse);
   }
 
   /**
@@ -452,12 +471,14 @@ export class PSIParticipant {
 
       this.log.debug(`${this.id}: waiting for client request`);
 
-      const clientRequestRaw = await conn.receive();
+      const clientRequest = await receivePsiBinaryFrame(
+        conn,
+        this.id,
+        "request",
+      );
       this.log.debug(`${this.id}: received client data encrypted by client`);
 
-      const serverResponse = await this.processClientRequest(
-        clientRequestRaw as Uint8Array,
-      );
+      const serverResponse = await this.processClientRequest(clientRequest);
 
       this.log.debug(
         `${this.id}: sending client data encrypted by both server and client`,
@@ -523,13 +544,17 @@ export class PSIParticipant {
     } else {
       this.log.debug(`${this.id}: starting identify-intersection protocol`);
 
-      const serverSetupRaw = await conn.receive();
+      const serverSetup = await receivePsiBinaryFrame(
+        conn,
+        this.id,
+        "serverSetup",
+      );
       this.log.debug(`${this.id}: receiving server data encrypted by server`);
 
       // Validate and hold the server setup the instant it arrives -- a fail-fast
       // before we send our own request -- while the response we match it against
       // arrives a round trip later.
-      await this.receiveServerSetup(serverSetupRaw as Uint8Array);
+      await this.receiveServerSetup(serverSetup);
 
       const clientRequest = await this.createClientRequest(set);
 
@@ -537,7 +562,11 @@ export class PSIParticipant {
 
       await conn.send(clientRequest);
 
-      const serverResponseRaw = await conn.receive();
+      const serverResponse = await receivePsiBinaryFrame(
+        conn,
+        this.id,
+        "response",
+      );
       this.log.debug(
         `${this.id}: receiving server data encrypted by both by server and ` +
           "client",
@@ -545,9 +574,8 @@ export class PSIParticipant {
 
       // Association table: indices into client data mapped to the (likely permuted)
       // indices given by the server, matched against the setup held above.
-      const associationTable = await this.computeAssociationTable(
-        serverResponseRaw as Uint8Array,
-      );
+      const associationTable =
+        await this.computeAssociationTable(serverResponse);
       const localIndices = associationTable[0];
 
       this.log.debug(

@@ -4,7 +4,12 @@ import PSI from "@openmined/psi.js";
 
 import { PSIParticipant } from "../../src/psi/participant";
 import { linkViaPSI, linkViaSinglePassPSI } from "../../src/psi/link";
-import { createMessagePipe } from "../../src/connection/messageConnection";
+import {
+  ConnectionError,
+  createMessagePipe,
+} from "../../src/connection/messageConnection";
+import type { PsiEngine } from "../../src/psi/psiEngine";
+import { isNamedDiagnosis } from "../../src/errors";
 import {
   WorkerPsiEngine,
   servePsiWorker,
@@ -54,6 +59,34 @@ function workerParticipant(
     { role, verbose: -1 },
     UNBOUNDED_PSI_ELEMENTS,
     inProcessWorkerEngine(role, id),
+  );
+}
+
+// A joiner participant over `engine`, for driving a fault raised inside the
+// engine through the PSI frame boundary the participant's methods wrap.
+function joinerOver(engine: PsiEngine): PSIParticipant {
+  return new PSIParticipant(
+    "receiver",
+    psiLibrary,
+    { role: "joiner", verbose: -1 },
+    UNBOUNDED_PSI_ELEMENTS,
+    engine,
+  );
+}
+
+// The frames computeValueMatches takes: well-formed and within the element
+// bounds, so the fault under test is the only thing that can fail the call.
+function joinerMatchFrames(): [Uint8Array, Uint8Array] {
+  return [
+    new psiLibrary.serverSetup().serializeBinary(),
+    new psiLibrary.response().serializeBinary(),
+  ];
+}
+
+async function rejection(call: Promise<unknown>): Promise<Error | undefined> {
+  return call.then(
+    () => undefined,
+    (err: unknown) => err as Error,
   );
 }
 
@@ -145,6 +178,67 @@ test("an engine error propagates across the worker boundary", async () => {
   );
 });
 
+test("an engine refusal stays recognizable after the worker round trip", async () => {
+  // Only the message crosses the boundary, so without the reply's own marker
+  // a worker-backed run would lose the diagnosis and hand the frame boundary
+  // above an error it re-labels as a decode fault.
+  const participant = joinerOver(inProcessWorkerEngine("joiner", "receiver"));
+  const [nonRaw, response] = joinerMatchFrames();
+
+  const refused = await rejection(
+    participant.computeValueMatches(nonRaw, response),
+  );
+
+  expect(refused?.message).toMatch(/server setup is not a Raw data structure/);
+  expect(refused?.message).not.toMatch(/failed to decode/);
+});
+
+test("a disposed engine is reported as the local fault it is", async () => {
+  // The decode callback wraps the whole worker round trip, so a fault of this
+  // party's own -- nothing the partner sent -- reaches the frame boundary on
+  // the same path a library decode failure does.
+  const engine = new WorkerPsiEngine({
+    postMessage: () => {},
+    setHandlers: () => {},
+    terminate: () => {},
+  });
+  const participant = joinerOver(engine);
+  const [setup, response] = joinerMatchFrames();
+  engine.dispose();
+
+  const failure = await rejection(
+    participant.computeValueMatches(setup, response),
+  );
+
+  expect(failure?.message).toBe("PSI worker engine is disposed");
+  expect(failure?.message).not.toMatch(/failed to decode/);
+  expect(failure).not.toBeInstanceOf(ConnectionError);
+});
+
+test("a worker crash mid-call is reported as the local fault it is", async () => {
+  // An out-of-memory kill or an early exit reaches the engine as a worker
+  // death while a call is in flight. The exchange must send the operator to
+  // their own machine, not to their partner's frame.
+  let fireError: (error: unknown) => void = () => {};
+  const engine = new WorkerPsiEngine({
+    postMessage: () => fireError(new Error("PSI worker exited with code 1")),
+    setHandlers: ({ onError }) => {
+      fireError = onError;
+    },
+    terminate: () => {},
+  });
+  const participant = joinerOver(engine);
+  const [setup, response] = joinerMatchFrames();
+
+  const failure = await rejection(
+    participant.computeValueMatches(setup, response),
+  );
+
+  expect(failure?.message).toBe("PSI worker exited with code 1");
+  expect(failure?.message).not.toMatch(/failed to decode/);
+  expect(failure).not.toBeInstanceOf(ConnectionError);
+});
+
 test("dispose rejects pending calls and terminates the worker", async () => {
   let terminated = false;
   // A handle that never replies, so the call stays pending until dispose settles it.
@@ -213,5 +307,10 @@ test("a second concurrent call is rejected as a lockstep violation", async () =>
   const engine = new WorkerPsiEngine(handle);
 
   void engine.createServerSetup(["a"]);
-  await expect(engine.createClientRequest(["b"])).rejects.toThrow(/lockstep/);
+  const failure = await rejection(engine.createClientRequest(["b"]));
+
+  expect(failure?.message).toMatch(/lockstep/);
+  // A caller bug on this side, so the frame boundary above states it rather
+  // than re-labeling it a decode failure.
+  expect(isNamedDiagnosis(failure)).toBe(true);
 });
