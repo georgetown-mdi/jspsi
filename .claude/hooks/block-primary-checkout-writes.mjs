@@ -64,10 +64,11 @@
 // Exit 0 allows the call; exit 2 blocks it and feeds stderr back to Claude.
 
 import { execFileSync } from "node:child_process";
-import { existsSync, realpathSync } from "node:fs";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { existsSync } from "node:fs";
+import { join, relative, resolve } from "node:path";
 
 import { eventCwd, eventForTools } from "./lib/event.mjs";
+import { canonicalPath, nearestExistingDirectory } from "./lib/paths.mjs";
 import { owningWorktree, worktreeRecords } from "./lib/worktrees.mjs";
 
 const GUARDED_TOOLS = new Set(["Edit", "Write", "NotebookEdit"]);
@@ -115,35 +116,6 @@ function targetPath(toolInput, cwd) {
   return null;
 }
 
-// The path with symlinks resolved through the part of it that exists on disk, so
-// a repository reached through a symlinked parent still matches the absolute
-// paths git reports. A file that does not exist yet (a fresh Write) keeps its
-// trailing components appended to the resolved prefix.
-function canonical(path) {
-  const trailing = [];
-  let current = path;
-  for (;;) {
-    try {
-      return join(realpathSync(current), ...trailing.reverse());
-    } catch {
-      const parent = dirname(current);
-      if (parent === current) return path;
-      trailing.push(basename(current));
-      current = parent;
-    }
-  }
-}
-
-function nearestExistingDirectory(path) {
-  let current = dirname(path);
-  for (;;) {
-    if (existsSync(current)) return current;
-    const parent = dirname(current);
-    if (parent === current) return null;
-    current = parent;
-  }
-}
-
 // Worktree paths of the repository the directory belongs to, main worktree
 // first, each resolved through its symlinks the way a target path is; null when
 // git would not answer.
@@ -151,7 +123,7 @@ function worktreePaths(directory) {
   const records = worktreeRecords(directory);
   return records === null
     ? null
-    : records.map((record) => canonical(record.path));
+    : records.map((record) => canonicalPath(record.path));
 }
 
 // The worktree the session itself is working in, or undefined when its directory
@@ -159,7 +131,7 @@ function worktreePaths(directory) {
 // repository. Undefined leaves the sibling rule silent.
 function sessionWorktree(cwd, paths) {
   if (cwd === null) return undefined;
-  return owningWorktree(canonical(cwd), paths);
+  return owningWorktree(canonicalPath(cwd), paths);
 }
 
 // Whether git ignores the path: true, false, or null when git declines to
@@ -190,7 +162,7 @@ function main() {
   const cwd = eventCwd(event);
   const target = targetPath(event.tool_input, cwd);
   if (target === null) process.exit(0);
-  const path = canonical(target);
+  const path = canonicalPath(target);
 
   const directory = nearestExistingDirectory(path);
   if (directory === null) process.exit(0);
