@@ -58,14 +58,7 @@ export const COLUMNS = ["package", "version", "license"];
  */
 export const RPM_ABSENT_TAG = "(none)";
 
-/**
- * Each image, its package-manager query, and the list it is written to.
- *
- * `architectures` is the two-architecture comparison the lists rest on, made
- * once against images built without a layer cache. A stale cached layer moved
- * one package's version between architectures on a first attempt, so a re-run
- * of that comparison builds with `--no-cache` or it measures the cache.
- */
+/** Each image, its package-manager query, and the list it is written to. */
 export const IMAGES = {
   default: {
     subject: "the default image",
@@ -73,12 +66,6 @@ export const IMAGES = {
     listFile: "NOTICE-os-packages-default.tsv",
     query: "apk list --installed",
     parse: parseApkListInstalled,
-    architectures: [
-      "linux/amd64 and linux/arm64 were built and queried on 2026-09-11 and",
-      "agree on every package's name, version and license, so one list holds",
-      "for both. The drift check on .github/workflows/image_smoke.yaml",
-      "compares linux/amd64 only, that job building no other architecture.",
-    ],
   },
   fips: {
     subject: "the FIPS variant image",
@@ -87,14 +74,46 @@ export const IMAGES = {
     query:
       'rpm -qa --qf "%{NAME}\\t%|EPOCH?{%{EPOCH}}:{0}|\\t%{VERSION}\\t%{RELEASE}\\t%{ARCH}\\t%{LICENSE}\\n"',
     parse: parseRpmQueryOutput,
-    architectures: [
-      "linux/amd64 and linux/arm64 were built and queried on 2026-09-11 and",
-      "agree on every package's name, version and license, so one list holds",
-      "for both. The drift check on .github/workflows/image_smoke.yaml",
-      "compares linux/amd64 only, that job building no other architecture.",
-    ],
   },
 };
+
+/** The shape a comparison date is stated in. */
+const COMPARISON_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * The `architectures:` block of a list header.
+ *
+ * The two-architecture comparison is a measurement someone makes, not one a
+ * generation re-derives from the image it queried, so the date comes from the
+ * run and a run naming none writes a header stating no comparison. A stale
+ * cached layer moved one package's version between architectures on a first
+ * attempt, so a re-run of that comparison builds with `--no-cache` or it
+ * measures the cache.
+ */
+export function architecturesStatement(comparedOn) {
+  if (comparedOn === null || comparedOn === undefined) {
+    return [
+      "no comparison between architectures is stated: this list was",
+      "generated from one queried image by a run that named no date on",
+      "which the two were compared. State one by re-running with",
+      "--architectures-compared <YYYY-MM-DD>, the day linux/amd64 and",
+      "linux/arm64 were built without a layer cache, queried, and found",
+      "to agree. The drift check on .github/workflows/image_smoke.yaml",
+      "compares linux/amd64 only, that job building no other architecture.",
+    ];
+  }
+  if (!COMPARISON_DATE.test(comparedOn)) {
+    throw new Error(
+      `the architectures were compared on "${comparedOn}", which is not a YYYY-MM-DD date`,
+    );
+  }
+  return [
+    `linux/amd64 and linux/arm64 were built and queried on ${comparedOn} and`,
+    "agree on every package's name, version and license, so one list holds",
+    "for both. The drift check on .github/workflows/image_smoke.yaml",
+    "compares linux/amd64 only, that job building no other architecture.",
+  ];
+}
 
 /** The configuration for one image, refusing a name no image answers to. */
 export function imageConfig(variant) {
@@ -253,7 +272,7 @@ export function basePin(dockerfileText, dockerfile) {
 }
 
 /** The list text for an image: a commented header, then one row per package. */
-export function renderList(variant, rows, pin) {
+export function renderList(variant, rows, pin, comparedOn = null) {
   const image = imageConfig(variant);
   const lines = [
     `# psilink OS-layer package attribution: ${image.subject}`,
@@ -268,7 +287,7 @@ export function renderList(variant, rows, pin) {
     `# base pin: ${pin}`,
     `# query: ${image.query}`,
     "# architectures:",
-    ...image.architectures.map((line) => `#   ${line}`),
+    ...architecturesStatement(comparedOn).map((line) => `#   ${line}`),
     "# license field: the string the package manager declares, not an audit of",
     "#   the package's contents. A disjunctive expression is recorded as",
     "#   declared and resolved nowhere. See docs/spec/CONTAINER_IMAGES.md,",
@@ -301,6 +320,24 @@ export function readListRows(text) {
 export function readListBasePin(text) {
   for (const line of text.split("\n")) {
     const stated = /^#\s*base pin:\s*(\S+)\s*$/.exec(line);
+    if (stated !== null) return stated[1];
+  }
+  return null;
+}
+
+// The sentence `architecturesStatement` writes for a stated comparison, read
+// back. The two are kept in step by a test that round-trips one through the
+// other rather than by these words appearing twice.
+const LIST_COMPARISON_DATE =
+  /^#\s+linux\/amd64 and linux\/arm64 were built and queried on (\d{4}-\d{2}-\d{2}) and$/;
+
+/**
+ * The date a committed list states its two architectures were compared on, or
+ * null where its header states no comparison.
+ */
+export function readListComparisonDate(text) {
+  for (const line of text.split("\n")) {
+    const stated = LIST_COMPARISON_DATE.exec(line.replace(/\r$/, ""));
     if (stated !== null) return stated[1];
   }
   return null;
@@ -388,13 +425,23 @@ function queryImage(variant, tag) {
 }
 
 /** The list text for an image, from raw package-manager output. */
-export function generateList(variant, queryOutput, root = repositoryRoot()) {
+export function generateList(
+  variant,
+  queryOutput,
+  root = repositoryRoot(),
+  comparedOn = null,
+) {
   const image = imageConfig(variant);
   const pin = basePin(
     readFileSync(resolve(root, image.dockerfile), "utf8"),
     image.dockerfile,
   );
-  return renderList(variant, normalizeRows(image.parse(queryOutput)), pin);
+  return renderList(
+    variant,
+    normalizeRows(image.parse(queryOutput)),
+    pin,
+    comparedOn,
+  );
 }
 
 function usage() {
@@ -405,7 +452,12 @@ function usage() {
       "names every package that moved, and fails when the package set or a\n" +
       "license moved; a version that moved it only reports. --image needs\n" +
       "a Docker daemon and an image built from this checkout; --query-output\n" +
-      "takes the raw stdout of that image's own package-manager query.",
+      "takes the raw stdout of that image's own package-manager query.\n\n" +
+      "--architectures-compared <YYYY-MM-DD> states the day linux/amd64 and\n" +
+      "linux/arm64 were built, queried and found to agree. A write run given\n" +
+      "none states no comparison rather than repeating the committed list's\n" +
+      "date; a --check run given none compares against the date that list\n" +
+      "already states, having compared no second architecture itself.",
   );
 }
 
@@ -417,10 +469,19 @@ function parseArguments(argv) {
       options.check = true;
       continue;
     }
-    if (flag === "--image" || flag === "--query-output") {
+    if (
+      flag === "--image" ||
+      flag === "--query-output" ||
+      flag === "--architectures-compared"
+    ) {
       const value = argv[index + 1];
       if (value === undefined) throw new Error(`${flag} needs a value`);
-      options[flag === "--image" ? "image" : "queryOutput"] = value;
+      const key = {
+        "--image": "image",
+        "--query-output": "queryOutput",
+        "--architectures-compared": "comparedOn",
+      }[flag];
+      options[key] = value;
       index += 1;
       continue;
     }
@@ -450,6 +511,13 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       : `--image ${options.image}`;
   try {
     const image = imageConfig(options.variant);
+    const listPath = resolve(root, image.listFile);
+    // A --check run queries one image and compares no second architecture, so
+    // the comparison it holds the header to is the one the list already states.
+    const committed = options.check ? readFileSync(listPath, "utf8") : null;
+    const comparedOn =
+      options.comparedOn ??
+      (committed === null ? null : readListComparisonDate(committed));
     const queryOutput =
       options.image === undefined
         ? readFileSync(
@@ -457,54 +525,64 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
             "utf8",
           )
         : queryImage(options.variant, options.image);
-    const generated = generateList(options.variant, queryOutput, root);
-    const listPath = resolve(root, image.listFile);
+    const generated = generateList(
+      options.variant,
+      queryOutput,
+      root,
+      comparedOn,
+    );
 
     if (!options.check) {
       writeFileSync(listPath, generated);
       const rows = readListRows(generated);
-      console.log(`${image.listFile}: ${rows.length} packages`);
+      console.log(
+        `${image.listFile}: ${rows.length} packages, ${
+          comparedOn === null
+            ? "stating no comparison between architectures; give --architectures-compared <YYYY-MM-DD> to state one"
+            : `linux/amd64 and linux/arm64 compared on ${comparedOn}`
+        }`,
+      );
+    } else if (committed === generated) {
+      console.log(
+        `${image.listFile}: ${readListRows(committed).length} packages, and the image holds each at the version and license the list states`,
+      );
     } else {
-      const committed = readFileSync(listPath, "utf8");
-      if (committed === generated) {
+      const { failing, informational } = classifyDifferences(
+        compareRows(readListRows(committed), readListRows(generated)),
+      );
+      const statedPin = readListBasePin(committed);
+      const generatedPin = readListBasePin(generated);
+      if (statedPin !== generatedPin)
+        failing.push(
+          `base pin: ${statedPin} -> ${generatedPin}, so ${image.dockerfile} names a base the list was not generated from`,
+        );
+      if (failing.length === 0 && informational.length === 0)
+        failing.push(
+          "the rows agree, so the header differs; regenerate the list",
+        );
+      // The regeneration states no architecture comparison unless the operator
+      // makes one: a base the list was not generated from is a base neither
+      // architecture was compared against.
+      const regenerate = `Regenerate it with: node scripts/generate-os-package-attribution.mjs ${options.variant} ${source}`;
+      if (failing.length === 0) {
         console.log(
-          `${image.listFile}: ${readListRows(committed).length} packages, and the image holds each at the version and license the list states`,
+          `${image.listFile} states a stale version for ${informational.length} ${informational.length === 1 ? "package" : "packages"}; its package set and every license string are what ${source} reports, so this check passes:`,
         );
+        for (const line of informational) console.log(`  ${line}`);
+        console.log(`\n${regenerate}`);
       } else {
-        const { failing, informational } = classifyDifferences(
-          compareRows(readListRows(committed), readListRows(generated)),
+        console.error(
+          `${image.listFile} does not state what ${source} reports:`,
         );
-        const statedPin = readListBasePin(committed);
-        const generatedPin = readListBasePin(generated);
-        if (statedPin !== generatedPin)
-          failing.push(
-            `base pin: ${statedPin} -> ${generatedPin}, so ${image.dockerfile} names a base the list was not generated from`,
-          );
-        if (failing.length === 0 && informational.length === 0)
-          failing.push(
-            "the rows agree, so the header differs; regenerate the list",
-          );
-        const regenerate = `Regenerate it with: node scripts/generate-os-package-attribution.mjs ${options.variant} ${source}`;
-        if (failing.length === 0) {
-          console.log(
-            `${image.listFile} states a stale version for ${informational.length} ${informational.length === 1 ? "package" : "packages"}; its package set and every license string are what ${source} reports, so this check passes:`,
-          );
-          for (const line of informational) console.log(`  ${line}`);
-          console.log(`\n${regenerate}`);
-        } else {
+        for (const line of failing) console.error(`  ${line}`);
+        if (informational.length > 0) {
           console.error(
-            `${image.listFile} does not state what ${source} reports:`,
+            "\nThese versions also moved, which this check reports rather than fails on:",
           );
-          for (const line of failing) console.error(`  ${line}`);
-          if (informational.length > 0) {
-            console.error(
-              "\nThese versions also moved, which this check reports rather than fails on:",
-            );
-            for (const line of informational) console.error(`  ${line}`);
-          }
-          console.error(`\n${regenerate}`);
-          process.exit(1);
+          for (const line of informational) console.error(`  ${line}`);
         }
+        console.error(`\n${regenerate}`);
+        process.exit(1);
       }
     }
   } catch (error) {

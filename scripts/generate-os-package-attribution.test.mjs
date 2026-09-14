@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
+  architecturesStatement,
   basePin,
   classifyDifferences,
   compareRows,
@@ -15,6 +16,7 @@ import {
   parseApkListInstalled,
   parseRpmQueryOutput,
   readListBasePin,
+  readListComparisonDate,
   readListRows,
   renderList,
   repositoryRoot,
@@ -202,6 +204,41 @@ describe("a package that records no license", () => {
   });
 });
 
+describe("the architectures block of a list header", () => {
+  it("states the date the run supplied, not one of its own", () => {
+    const stated = architecturesStatement("2024-03-04").join(" ");
+    expect(stated).toContain("built and queried on 2024-03-04");
+    expect(stated).toContain("linux/amd64 and linux/arm64");
+  });
+
+  it("states no two-architecture comparison when the run supplies no date", () => {
+    const stated = architecturesStatement(null).join(" ");
+    expect(stated).toContain("no comparison between architectures is stated");
+    expect(stated).not.toContain("agree on every package");
+    expect(stated).toContain("--architectures-compared");
+    expect(architecturesStatement(undefined)).toEqual(
+      architecturesStatement(null),
+    );
+  });
+
+  it("refuses a comparison date that is not a calendar date", () => {
+    for (const given of ["last Tuesday", "2024-3-4", "2024-03-04 09:00", ""]) {
+      expect(() => architecturesStatement(given)).toThrow(
+        /is not a YYYY-MM-DD date/,
+      );
+    }
+  });
+
+  it("reads back out of a rendered header exactly what went in", () => {
+    const rows = normalizeRows(parseApkListInstalled(APK_EXCERPT));
+    const pin = `node:26-alpine@sha256:${"0".repeat(64)}`;
+    expect(readListComparisonDate(renderList("default", rows, pin))).toBeNull();
+    expect(
+      readListComparisonDate(renderList("default", rows, pin, "2024-03-04")),
+    ).toBe("2024-03-04");
+  });
+});
+
 describe("drift against the committed list", () => {
   const committed = [
     { name: "busybox", version: "1.37.0-r31", license: "GPL-2.0-only" },
@@ -294,7 +331,7 @@ describe("--check against the committed default list", () => {
           `${row.name}-${row.version} x86_64 {${row.name}} (${row.license}) [installed]`,
       )
       .join("\n");
-  const check = (rows) =>
+  const check = (rows, ...extra) =>
     spawnSync(
       process.execPath,
       [
@@ -303,15 +340,26 @@ describe("--check against the committed default list", () => {
         "--query-output",
         "-",
         "--check",
+        ...extra,
       ],
       { input: apkListing(rows), encoding: "utf8" },
     );
 
+  // A --check run queries one image and compares no second architecture, so it
+  // is given no date and holds the header to the comparison the list states.
   it("passes when the image holds what the list states", () => {
     const result = check(listRows);
     expect(result.status).toBe(0);
     expect(result.stdout).toContain(
       "the image holds each at the version and license the list states",
+    );
+  });
+
+  it("fails when the run states a comparison date the list does not", () => {
+    const result = check(listRows, "--architectures-compared", "2024-03-04");
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      "the rows agree, so the header differs; regenerate the list",
     );
   });
 
@@ -396,6 +444,7 @@ describe("the committed lists", () => {
           variant,
           normalizeRows(readListRows(text)),
           readListBasePin(text),
+          readListComparisonDate(text),
         ),
       ).toBe(text);
     });
@@ -408,6 +457,17 @@ describe("the committed lists", () => {
       expect(header).toContain(imageConfig(variant).query);
       expect(header).toContain("linux/amd64 and linux/arm64");
       expect(header).toContain("compares linux/amd64 only");
+      expect(readListComparisonDate(text)).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    });
+
+    it(`a regeneration of ${image.listFile} restates no date of its own`, () => {
+      const regenerated = renderList(
+        variant,
+        normalizeRows(readListRows(text)),
+        readListBasePin(text),
+      );
+      expect(regenerated).not.toContain(readListComparisonDate(text));
+      expect(readListComparisonDate(regenerated)).toBeNull();
     });
   }
 });
