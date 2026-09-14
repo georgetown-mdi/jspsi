@@ -16,7 +16,9 @@ import { safeParseStandardization } from "../../src/config/standardizationSchema
 import {
   MAX_DISPLAYED_PARAMS,
   NULL_IF_BOTH_VALUE_PARAMS_MESSAGE,
+  PRIVATE_KEY_FUNCTION_MESSAGE,
   PRIVATE_KEY_PARAM_MESSAGE,
+  PRIVATE_KEY_PARAM_NAME_MESSAGE,
   TRANSFORM_PARAM_COUNT_MESSAGE,
   describedTransformParamEntry,
   transformParamDisplayRefusals,
@@ -180,6 +182,114 @@ describe("a transform param holding private key material", () => {
     expectAcceptedEverywhere({
       function: "coalesce",
       params: { default: "use the private key at /keys/id_ed25519" },
+    });
+  });
+});
+
+describe("a transform function name holding private key material", () => {
+  // A name-class value refuses a line feed before this rule is reached, so the
+  // block is written on one line.
+  const FAKE_KEY_IN_A_NAME = FAKE_PRIVATE_KEY.replaceAll("\n", " ");
+  const keyInFunctionName = { function: FAKE_KEY_IN_A_NAME };
+
+  test("is refused at every decode point", () => {
+    expectRefusedEverywhere(keyInFunctionName, PRIVATE_KEY_FUNCTION_MESSAGE);
+  });
+
+  test("is refused on a step that declares no params at all", () => {
+    // The function name is scanned before the params guard, which returns for a
+    // step holding none.
+    expect(
+      transformParamDisplayRefusals(keyInFunctionName, {
+        refusesStringParamsPast: undefined,
+      }),
+    ).toEqual([{ path: ["function"], message: PRIVATE_KEY_FUNCTION_MESSAGE }]);
+  });
+
+  test("is refused beside the count refusal on an over-wide step", () => {
+    // The count refusal stands in for the per-param issues, never for the
+    // step's own name, so an over-wide step still answers for both.
+    const messages = refusalsOf({
+      function: FAKE_KEY_IN_A_NAME,
+      params: Object.fromEntries(
+        Array.from({ length: MAX_DISPLAYED_PARAMS + 1 }, (_unused, i) => [
+          `p${i}`,
+          "partner_value",
+        ]),
+      ),
+    });
+    expect(messages.standardization).toEqual([
+      PRIVATE_KEY_FUNCTION_MESSAGE,
+      TRANSFORM_PARAM_COUNT_MESSAGE,
+    ]);
+  });
+
+  test("would have been displayed as the redaction marker", () => {
+    const summary = summarizeInvitation({
+      linkageTerms: termsWithStep(keyInFunctionName),
+    });
+    expect(
+      String(summary.linkageKeys[0].elements[0].transforms[0].function),
+    ).toBe("[redacted private key]");
+  });
+
+  test("a function name that mentions a key without holding one parses", () => {
+    expectAcceptedEverywhere({ function: "trim" });
+    expectAcceptedEverywhere({ function: "private_key_lookalike" });
+  });
+});
+
+describe("a transform param name holding private key material", () => {
+  const FAKE_KEY_IN_A_NAME = FAKE_PRIVATE_KEY.replaceAll("\n", " ");
+  const keyInParamName = {
+    function: "coalesce",
+    params: { [FAKE_KEY_IN_A_NAME]: "partner_value" },
+  };
+
+  test("is refused at every decode point", () => {
+    expectRefusedEverywhere(keyInParamName, PRIVATE_KEY_PARAM_NAME_MESSAGE);
+  });
+
+  test("is refused though the schema passes over the value for its length", () => {
+    // The name is scanned apart from the displayed line, so the skip that
+    // spares an over-long VALUE its rendered copy cannot take the name with it:
+    // the schema's own length refusal on the value and the name's key-material
+    // refusal both fire on the same document.
+    const LENGTH_MESSAGE = `a linkage key element transform param must not exceed ${MAX_TRANSFORM_PARAM_LENGTH} characters`;
+    const refusals = refusalsOf({
+      function: "coalesce",
+      params: {
+        [FAKE_KEY_IN_A_NAME]: "x".repeat(MAX_TRANSFORM_PARAM_LENGTH + 1),
+      },
+    });
+    expect(refusals.partnerTerms).toEqual(
+      expect.arrayContaining([LENGTH_MESSAGE, PRIVATE_KEY_PARAM_NAME_MESSAGE]),
+    );
+    expect(refusals.ownTerms).toEqual(
+      expect.arrayContaining([LENGTH_MESSAGE, PRIVATE_KEY_PARAM_NAME_MESSAGE]),
+    );
+  });
+
+  test("raises the name refusal alone where the value holds a key too", () => {
+    // One refusal per param, naming the half the material sits in: the entry
+    // line is not scanned a second time for a param already refused.
+    const refusals = refusalsOf({
+      function: "coalesce",
+      params: { [FAKE_KEY_IN_A_NAME]: FAKE_PRIVATE_KEY },
+    });
+    expect(refusals.partnerTerms).toEqual([PRIVATE_KEY_PARAM_NAME_MESSAGE]);
+  });
+
+  test("would have been displayed with the marker where the name goes", () => {
+    expect(displayedParamsOf(keyInParamName)).toEqual([
+      "[redacted private key]: partner_value",
+    ]);
+  });
+
+  test("a param name that mentions a key without holding one parses", () => {
+    expectAcceptedEverywhere({
+      function: "coalesce",
+      params: { default: "partner_value" },
     });
   });
 });

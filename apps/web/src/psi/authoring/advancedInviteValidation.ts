@@ -7,7 +7,10 @@ import {
   MAX_NAME_LENGTH,
   NAME_SHAPE_PATTERN,
   NULL_IF_BOTH_VALUE_PARAMS_MESSAGE,
+  PRIVATE_KEY_FUNCTION_MESSAGE,
+  PRIVATE_KEY_IDENTITY_MESSAGE,
   PRIVATE_KEY_PARAM_MESSAGE,
+  PRIVATE_KEY_PARAM_NAME_MESSAGE,
   TEXT_CONTROL_CHAR_MESSAGE,
   TEXT_DIRECTION_MESSAGE,
   TRANSFORM_PARAM_COUNT_MESSAGE,
@@ -198,8 +201,8 @@ const REFUSED_PARAM_NAME_MESSAGES: Record<ParamNameRefusal, string> = {
     REFUSED_PARAM_NAME_REMEDY,
 };
 
-/** What each params shape the terms schema refuses for the consent summary asks
- * the operator to change, keyed by core's own refusal message. All three land on
+/** What each step shape the terms schema refuses for the consent summary asks
+ * the operator to change, keyed by core's own refusal message. All of them land on
  * the `linkageKeys` path, which the generic mapping collapses to "Enable at least
  * one linkage key." on a draft whose keys are all enabled, so each needs words of
  * its own. Every remedy is {@link REFUSED_PARAM_NAME_REMEDY}: these shapes arrive
@@ -219,6 +222,14 @@ const REFUSED_PARAMS_SHAPE_MESSAGES: Record<string, string> = {
   [PRIVATE_KEY_PARAM_MESSAGE]:
     "A linkage key's transform has a parameter holding a private key, which " +
     "these terms cannot include. " +
+    REFUSED_PARAM_NAME_REMEDY,
+  [PRIVATE_KEY_PARAM_NAME_MESSAGE]:
+    "A linkage key's transform names a parameter with a private key in it, " +
+    "which these terms cannot include. " +
+    REFUSED_PARAM_NAME_REMEDY,
+  [PRIVATE_KEY_FUNCTION_MESSAGE]:
+    "A linkage key's transform has a step whose function name holds a private " +
+    "key, which these terms cannot include. " +
     REFUSED_PARAM_NAME_REMEDY,
   [TRANSFORM_PARAM_COUNT_MESSAGE]:
     `A linkage key's transform has a step with more than ${String(MAX_DISPLAYED_PARAMS)} ` +
@@ -503,9 +514,10 @@ export function validateAdvancedInvite(
   const parsed = safeParseLinkageTerms(terms);
   if (!parsed.success) {
     // Each control touched by a schema issue gets its control-specific message:
-    // the one its class of fault earns where the issue names a params shape the
-    // consent summary cannot state (refusedParamsShapeMessage) or a refused
-    // character class (refusedCharacterMessage), and the control's generic
+    // the one its class of fault earns where the issue names a step shape the
+    // consent summary cannot state (refusedParamsShapeMessage), private key
+    // material in the party name (refusedIdentityKeyMaterialMessage), or a
+    // refused character class (refusedCharacterMessage), and the control's generic
     // message otherwise, since the rest of the schema's issues are technical and
     // name a value no editor may echo. Keeps the first message per control: the
     // keys control sets its accurate message up front so it wins over the
@@ -528,6 +540,7 @@ export function validateAdvancedInvite(
       if (existing === undefined) {
         errors[field] =
           refusedParamsShapeMessage(field, issueMessages) ??
+          refusedIdentityKeyMaterialMessage(field, issueMessages) ??
           refusedCharacterMessage(field, issueMessages) ??
           messageForField(field);
       } else if (field === "payload") {
@@ -779,6 +792,13 @@ const REFUSED_CHARACTER_MESSAGES: Partial<
   },
 };
 
+/** The words the name control uses for the schema's private-key rule on a party
+ * `identity`. Its own message for the reason {@link REFUSED_CHARACTER_MESSAGES}
+ * gives, and echoing nothing of the value for the same one. The name is the only
+ * control this rule reaches: the schema applies it to `identity` alone. */
+const REFUSED_IDENTITY_KEY_MATERIAL_MESSAGE =
+  "Your name cannot contain a private key. Remove the key block from it.";
+
 /** The message for a control whose schema issues include one of the two refused
  * character classes, or undefined for a control with no such wording or a set of
  * issues holding neither class. Read on the schema's own message literals, so
@@ -794,6 +814,20 @@ function refusedCharacterMessage(
   if (issueMessages.has(TEXT_CONTROL_CHAR_MESSAGE)) return words.control;
   if (issueMessages.has(TEXT_DIRECTION_MESSAGE)) return words.direction;
   return undefined;
+}
+
+/** The message for the name control when its schema issues include the
+ * private-key rule, or undefined for any other control or a set of issues
+ * without it. Read on the schema's own message literal, as
+ * {@link refusedCharacterMessage} reads its two. */
+function refusedIdentityKeyMaterialMessage(
+  field: AdvancedField,
+  issueMessages: ReadonlySet<string>,
+): string | undefined {
+  if (field !== "identity") return undefined;
+  return issueMessages.has(PRIVATE_KEY_IDENTITY_MESSAGE)
+    ? REFUSED_IDENTITY_KEY_MATERIAL_MESSAGE
+    : undefined;
 }
 
 /** The message for the key list when its schema issues include one of the params

@@ -4,6 +4,7 @@ import { UNNAMED_PARTY_LABEL } from "@psilink/core";
 
 import {
   ACCEPTOR_NAME_CONTROL_CHAR_PROBLEM,
+  ACCEPTOR_NAME_PRIVATE_KEY_PROBLEM,
   ACCEPTOR_NAME_TEXT_DIRECTION_PROBLEM,
   ACCEPTOR_SEND_FORWARD_REFERENCE,
   acceptUnsupported,
@@ -553,6 +554,18 @@ describe("acceptor name shape", () => {
     // told about control characters would not know what to remove.
     expect(acceptorNameProblem(`County${character}Health`)).toBe(
       ACCEPTOR_NAME_TEXT_DIRECTION_PROBLEM,
+    );
+  });
+
+  test("reports the private-key rule for a name holding a key block, echoing no part of it", () => {
+    // The third rule core holds this value to. An obviously fake key with no
+    // END marker, matching the redaction the rule reads from its BEGIN marker
+    // to the end of the text.
+    const pasted =
+      "County Health -----BEGIN OPENSSH PRIVATE KEY-----MIIBunrepeatable-secret";
+    expect(acceptorNameProblem(pasted)).toBe(ACCEPTOR_NAME_PRIVATE_KEY_PROBLEM);
+    expect(ACCEPTOR_NAME_PRIVATE_KEY_PROBLEM).not.toContain(
+      "unrepeatable-secret",
     );
   });
 

@@ -17,6 +17,7 @@ import { transformParamDisplayRefusals } from "./transformParamDisplay.js";
 import { exceedsOwnKeyCount } from "../utils/objectKeyCount.js";
 import { loneSurrogateIndex } from "../utils/wellFormedString.js";
 import { BIDI_CONTROL_PATTERN } from "../utils/nameControls.js";
+import { holdsPrivateKeyMaterial } from "../utils/sanitizeErrorForDisplay.js";
 import {
   COUNT_ONLY_SHAPE_REFUSALS,
   countOnlyShapeViolation,
@@ -92,7 +93,10 @@ export const MAX_TEXT_LENGTH = 1024;
  * CLI's `psilink fingerprint` argument reach a certificate without passing
  * through this schema, so each refuses this class and the text-direction one
  * ({@link TEXT_DIRECTION_MESSAGE}) at its own boundary: a label bound into a
- * certificate holds only what this document's `identity` may hold.
+ * certificate holds no character this document's `identity` may not.
+ * {@link PRIVATE_KEY_IDENTITY_MESSAGE} is outside that parity -- it is a rule
+ * about a value rather than a character class, and neither label boundary
+ * applies it.
  */
 export const TEXT_CONTROL_CHAR_PATTERN = /[\u0000-\u001f\u007f-\u009f]/;
 
@@ -136,6 +140,25 @@ export const TEXT_CONTROL_CHAR_MESSAGE =
  */
 export const TEXT_DIRECTION_MESSAGE =
   "a linkage terms free-text value must not contain a text-direction character";
+
+/**
+ * Refusal message for a party `identity` the private-key redaction would
+ * replace on a consent surface. The identity is the one line of an invitation
+ * a reader reads as the partner naming itself, so a marker standing there is
+ * indistinguishable from one psilink placed over a key it found; the field is
+ * refused where the document is decoded instead
+ * ({@link holdsPrivateKeyMaterial}, the same detector a transform param and a
+ * transform name are held to in `config/transformParamDisplay.ts`).
+ *
+ * Named for the field rather than shared with the two free-text rules above:
+ * a reader correcting it has one value to change, and the other free-text
+ * fields are outside this rule.
+ *
+ * A fixed literal naming no submitted value, for the reason
+ * {@link TEXT_CONTROL_CHAR_MESSAGE} gives.
+ */
+export const PRIVATE_KEY_IDENTITY_MESSAGE =
+  "a linkage terms identity must not contain private key material";
 
 /**
  * The shape a name-class value of a terms document must match, beyond its
@@ -1387,11 +1410,13 @@ const linkageTermsBaseSchema = (options: TransformParamRefusalOptions) =>
       .regex(/^\d+\.\d+\.\d+$/, "version must be a valid semver string"),
     // Optional, and bounded where it is present: a party that names itself is held
     // to a non-empty, length-capped label with no control or text-direction
-    // character in it, and a party that supplies none omits the field rather than
-    // sending an empty string or a placeholder.
-    identity: recordedFreeTextValue(
-      z.string().min(1).max(MAX_TEXT_LENGTH),
-    ).optional(),
+    // character in it and no private-key material, and a party that supplies none
+    // omits the field rather than sending an empty string or a placeholder.
+    identity: recordedFreeTextValue(z.string().min(1).max(MAX_TEXT_LENGTH))
+      .refine((value) => !holdsPrivateKeyMaterial(value), {
+        message: PRIVATE_KEY_IDENTITY_MESSAGE,
+      })
+      .optional(),
     date: z.iso.date(),
     algorithm: AlgorithmSchema,
     linkageStrategy: LinkageStrategySchema.default("cascade"),

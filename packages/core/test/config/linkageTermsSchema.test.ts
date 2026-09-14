@@ -12,6 +12,7 @@ import {
   MAX_NAME_LENGTH,
   MAX_TEXT_LENGTH,
   NAME_SHAPE_MESSAGE,
+  PRIVATE_KEY_IDENTITY_MESSAGE,
   TEXT_CONTROL_CHAR_MESSAGE,
   TEXT_DIRECTION_MESSAGE,
   LONE_SURROGATE_MESSAGE,
@@ -36,6 +37,7 @@ import { pipelineAlwaysDrops } from "../../src/linkageSatisfiability";
 import { describeDecodeError } from "../../src/utils/describeDecodeError";
 import { transformParamTypeRows } from "../../src/config/transformParamTypes";
 import { TRANSFORM_PARAM_COUNT_MESSAGE } from "../../src/config/transformParamDisplay";
+import { summarizeInvitation } from "../../src/consent/invitationSummary";
 import {
   MAX_NODE_COUNT,
   NestingDepthExceededError,
@@ -2236,6 +2238,86 @@ test.each(BIDI_CONTROLS)(
     ).not.toThrow();
   },
 );
+
+// --- Party identity private-key rule -----------------------------------------
+// A party `identity` holding private-key material is refused where the document
+// is decoded, rather than displayed on a consent surface as the redaction marker
+// psilink puts in a key's place. The rule reaches this one field: the other
+// free-text values keep the redaction they already had.
+
+// An obviously fake key block written on one line, since the identity refuses a
+// line feed before this rule is reached.
+const FAKE_KEY_IN_A_LABEL =
+  "-----BEGIN OPENSSH PRIVATE KEY----- MIIBytes -----END OPENSSH PRIVATE KEY-----";
+
+test("rejects an identity holding private key material", () => {
+  expect(() =>
+    parseLinkageTerms(freeTextTerms({ identity: FAKE_KEY_IN_A_LABEL })),
+  ).toThrow(ZodError);
+});
+
+test("rejects an identity holding a key block with no END marker", () => {
+  // The redaction's dangling rule replaces from a lone BEGIN marker to the end
+  // of the text, so a sliced block is the same display difference.
+  expect(() =>
+    parseLinkageTerms(
+      freeTextTerms({ identity: "-----BEGIN RSA PRIVATE KEY----- MIIBytes" }),
+    ),
+  ).toThrow(ZodError);
+});
+
+test("accepts an identity that mentions a private key without holding one", () => {
+  expect(() =>
+    parseLinkageTerms(
+      freeTextTerms({
+        identity: "Agency A, private key holder, keys@agency-a.gov",
+      }),
+    ),
+  ).not.toThrow();
+});
+
+test("the identity private-key refusal names the field by path, not the value", () => {
+  const result = safeParseLinkageTerms(
+    freeTextTerms({ identity: `Agency A ${FAKE_KEY_IN_A_LABEL}` }),
+  );
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  expect(result.error.issues.map((issue) => issue.path.join("."))).toContain(
+    "identity",
+  );
+  const rendered = JSON.stringify(result.error.issues);
+  expect(rendered).toContain(PRIVATE_KEY_IDENTITY_MESSAGE);
+  expect(rendered).not.toContain("MIIBytes");
+  expect(rendered).not.toContain("BEGIN OPENSSH PRIVATE KEY");
+});
+
+test("what the identity refusal removes: a marker the partner declared", () => {
+  // The summary is built from terms that never passed a decode, so it still
+  // shows what the refusal above keeps off the consent surface: a marker a
+  // reader would read as psilink redacting a key it found.
+  const summary = summarizeInvitation({
+    linkageTerms: {
+      ...parseLinkageTerms(base),
+      identity: FAKE_KEY_IN_A_LABEL,
+    },
+  });
+  expect(String(summary.invitingParty)).toBe("[redacted private key]");
+});
+
+test("the private-key rule is the identity field's alone, not the free-text class's", () => {
+  const terms = freeTextTerms({
+    purpose: FAKE_KEY_IN_A_LABEL,
+    description: FAKE_KEY_IN_A_LABEL,
+    exclude: FAKE_KEY_IN_A_LABEL,
+  });
+  expect(() => parseLinkageTerms(terms)).not.toThrow();
+  const summary = summarizeInvitation({
+    linkageTerms: parseLinkageTerms(terms),
+  });
+  expect(String(summary.legalAgreement?.purpose)).toBe(
+    "[redacted private key]",
+  );
+});
 
 // --- Name-class shape rule ---------------------------------------------------
 // Every MAX_NAME_LENGTH-bounded name of the document holds NAME_SHAPE_PATTERN

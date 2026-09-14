@@ -3,6 +3,7 @@ import {
   TEXT_CONTROL_CHAR_PATTERN,
   disclosedColumnNames,
   displayPartyIdentity,
+  holdsPrivateKeyMaterial,
   summarizeInvitation,
 } from "@psilink/core";
 
@@ -387,12 +388,22 @@ export const ACCEPTOR_NAME_TEXT_DIRECTION_PROBLEM =
   "Your name cannot contain text-direction characters (a right-to-left override, for instance)";
 
 /**
+ * The same, for the third class core holds the value to: private key material
+ * ({@link holdsPrivateKeyMaterial}). Its own wording, for the reason the other
+ * two have theirs -- and because the message must not echo any part of the
+ * pasted value, naming the shape refused rather than quoting it back.
+ */
+export const ACCEPTOR_NAME_PRIVATE_KEY_PROBLEM =
+  "Your name cannot contain a private key (a PEM key block, for instance)";
+
+/**
  * The consent step's inline name problem, or undefined for a name this acceptance
  * can adopt. The committed name becomes the party `identity` of the terms the
- * acceptance derives, which core refuses outright for a control character and
- * for a text-direction character (`deriveAcceptedLinkageTerms`), so the field
- * names it where the operator can still fix it rather than letting the launch
- * fail as an exchange the surface would attribute to the invitation or the file.
+ * acceptance derives, which core refuses outright for a control character, a
+ * text-direction character, and private key material (`deriveAcceptedLinkageTerms`),
+ * so the field names it where the operator can still fix it rather than letting the
+ * launch fail as an exchange the surface would attribute to the invitation or the
+ * file.
  *
  * Read on the TRIMMED name, which is what the gate commits and what core sees. An
  * empty name is not reported here: that is the consent gate's own
@@ -405,6 +416,8 @@ export function acceptorNameProblem(name: string): string | undefined {
     return ACCEPTOR_NAME_CONTROL_CHAR_PROBLEM;
   if (BIDI_CONTROL_PATTERN.test(trimmed))
     return ACCEPTOR_NAME_TEXT_DIRECTION_PROBLEM;
+  if (holdsPrivateKeyMaterial(trimmed))
+    return ACCEPTOR_NAME_PRIVATE_KEY_PROBLEM;
   return undefined;
 }
 

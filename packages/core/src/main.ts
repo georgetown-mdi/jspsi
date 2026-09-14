@@ -174,6 +174,7 @@ export {
   redactPrivateKeyMaterial,
   redactAndSanitizeForDisplay,
   createPrivateKeyStreamRedactor,
+  holdsPrivateKeyMaterial,
   MAX_ERROR_CAUSE_DEPTH,
 } from "./utils/sanitizeErrorForDisplay";
 export type { PrivateKeyStreamRedactor } from "./utils/sanitizeErrorForDisplay";
@@ -269,6 +270,7 @@ export {
   MAX_TRANSFORM_PATTERN_LENGTH,
   NAME_SHAPE_MESSAGE,
   NAME_SHAPE_PATTERN,
+  PRIVATE_KEY_IDENTITY_MESSAGE,
   TEXT_CONTROL_CHAR_MESSAGE,
   TEXT_CONTROL_CHAR_PATTERN,
   TEXT_DIRECTION_MESSAGE,
@@ -279,7 +281,9 @@ export {
 export {
   MAX_DISPLAYED_PARAMS,
   NULL_IF_BOTH_VALUE_PARAMS_MESSAGE,
+  PRIVATE_KEY_FUNCTION_MESSAGE,
   PRIVATE_KEY_PARAM_MESSAGE,
+  PRIVATE_KEY_PARAM_NAME_MESSAGE,
   TRANSFORM_PARAM_COUNT_MESSAGE,
 } from "./config/transformParamDisplay";
 export {
