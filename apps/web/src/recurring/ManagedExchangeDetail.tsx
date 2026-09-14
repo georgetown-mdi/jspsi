@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import {
   Alert,
@@ -11,10 +11,11 @@ import {
 } from "@mantine/core";
 import { Link } from "@tanstack/react-router";
 
+import { downloadBlob, triggerBlobDownload } from "@components/blobDownload";
+
 import { DisclosureSection } from "@components/DisclosureSection";
 import { isInstalledRuntime } from "@utils/installedRuntime";
 import { storedInputHandleUsable } from "@psi/managed/managedInputHandle";
-import { triggerBlobDownload } from "@components/blobDownload";
 
 import { dateLabel } from "@psi/formatting";
 
@@ -61,6 +62,14 @@ import {
   scheduleEntryUnchanged,
   scheduleEntryUsable,
 } from "./scheduleEntryModel";
+import {
+  NO_PARKED_RESULTS_NOTE,
+  PARKED_RESULTS_RETENTION_NOTE,
+  PARKED_RESULTS_SCHEDULE_NOTE,
+  UNAVAILABLE_PARKED_RESULTS_NOTE,
+  UNREADABLE_PARKED_RESULTS_NOTE,
+  parkedResultsRows,
+} from "./parkedResultsModel";
 import { REPEATED_MISS_TITLE } from "./scheduleSurfacingModel";
 
 import type {
@@ -71,6 +80,7 @@ import type {
 import type { ConfigRow } from "./managedDetailModel";
 import type { DisclosureAccountingRead } from "@psi/disclosureAccountingStore";
 import type { DisclosureFact } from "./disclosureAccountingModel";
+import type { ParkedResultsRead } from "@psi/parkedResultsStore";
 import type { ScheduleEntryFields } from "./scheduleEntryModel";
 import type { StoredDisclosureAccounting } from "@psi/disclosureAccounting";
 
@@ -78,8 +88,9 @@ import type { StoredDisclosureAccounting } from "@psi/disclosureAccounting";
  * The managed exchange detail sections composed onto the per-partnership home at
  * `/saved/$id` (below the run affordance in {@link ./ManagedRunSurface.tsx}): the
  * read-only configuration, the local-fields editor, the agreed run schedule
- * where one exists, the run history, and the accounting of disclosures.
- * Derivations and copy come from {@link ./managedDetailModel.ts} and
+ * where one exists, the run history, the results a scheduled run left for this
+ * visit, and the accounting of disclosures. Derivations and copy come from
+ * {@link ./managedDetailModel.ts}, {@link ./parkedResultsModel.ts}, and
  * {@link ./disclosureAccountingModel.ts}.
  *
  * The agreed terms are read-only here and fixed for this partnership; changing
@@ -91,8 +102,10 @@ import type { StoredDisclosureAccounting } from "@psi/disclosureAccounting";
 export function ManagedExchangeDetail({
   record,
   accountingRead,
+  parkedResultsRead,
   onResetAccounting,
   onRetryAccountingRead,
+  onRetryParkedResultsRead,
   onSaveLocalFields,
   onReinviteToChangeTerms,
   canReinvite,
@@ -106,6 +119,11 @@ export function ManagedExchangeDetail({
    * disclosed" and a store that did not answer can never render as a value this
    * build refused. */
   accountingRead: DisclosureAccountingRead | undefined;
+  /** How reading the results a scheduled run left for this visit turned out;
+   * `undefined` while the read is in flight. Classified for the same reason the
+   * accounting read is: a store that did not answer must not render as "no run
+   * left anything here". */
+  parkedResultsRead: ParkedResultsRead | undefined;
   /** Destroy the stored accounting so the exchange can file disclosures again,
    * leaving the exchange itself untouched. Offered only from the unreadable state,
    * behind an explicit confirm, and after the export. Rejects on a store failure;
@@ -113,6 +131,8 @@ export function ManagedExchangeDetail({
   onResetAccounting: () => Promise<void>;
   /** Read the accounting again, for a read that never reached the store. */
   onRetryAccountingRead: () => void;
+  /** Read the parked results again, for a read that never reached the store. */
+  onRetryParkedResultsRead: () => void;
   /** Persist an in-place edit to the local fields (label, max-token-age policy).
    * Rejects on a store failure; the editor shows the failure and keeps the
    * form. */
@@ -145,6 +165,11 @@ export function ManagedExchangeDetail({
       <LocalFieldsEditor record={record} onSave={onSaveLocalFields} />
       <RunSchedule record={record} />
       <RunHistory record={record} />
+      <ParkedResultsView
+        read={parkedResultsRead}
+        scheduled={record.schedule !== undefined}
+        onRetryRead={onRetryParkedResultsRead}
+      />
       <DisclosureAccountingView
         read={accountingRead}
         completedRunOnRecord={completedRunRecorded(record)}
@@ -506,6 +531,11 @@ function LocalFieldsEditor({
  * The date and time are native inputs rather than a date picker: the value is a
  * cadence agreed with a partner and read off a message, and typing it back is
  * the shortest path from that message to the field.
+ *
+ * It also states what scheduling starts keeping at rest: a run with nobody
+ * present keeps its results in this browser, which is row values on this disk.
+ * The statement belongs here, before the save, because scheduling is the
+ * decision that produces them (see {@link ./parkedResultsModel.ts}).
  */
 function ScheduleEntryFieldset({
   fields,
@@ -580,6 +610,9 @@ function ScheduleEntryFieldset({
           later window is counted from it.
         </p>
       )}
+      <Alert color="blue" title="Where a scheduled run's results go" mt="sm">
+        {PARKED_RESULTS_SCHEDULE_NOTE}
+      </Alert>
     </>
   );
 }
@@ -668,6 +701,114 @@ function RunHistory({ record }: { record: ManagedExchangeRecord }) {
             </div>
           ))}
         </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The results a run nobody was present for left behind, and the one section that
+ * collects them. A scheduled run builds the same results file an attended run
+ * does, with nobody there to take it, so it keeps the file in this browser and
+ * this section hands it over at the next visit.
+ *
+ * It renders wherever this exchange's page stands: under the detail sections
+ * while the exchange runs here, and on the page of a copy a hand-off spent,
+ * where what earlier runs left is still at rest and still owed to the operator
+ * ({@link ./ManagedRunSurface.tsx}). A spent copy runs nothing further, so it
+ * is not `scheduled` and its empty state collapses as an unscheduled
+ * exchange's does.
+ *
+ * Every state a read can be in renders as itself: a store that did not answer
+ * says so, a stored value this build cannot read says so, and only a read that
+ * found nothing says nothing is here. A run this browser refused to store the
+ * results of renders as its own row, so the operator meets the state rather than
+ * a gap.
+ *
+ * An exchange with no schedule renders nothing at all where the read FOUND
+ * nothing: it produces no unattended results, and the local-fields editor
+ * above is where a schedule is entered. The read still being in flight is the
+ * same absence for a first visit -- there is nothing yet to show either way,
+ * so a visit to an unscheduled exchange never flashes the loading state only
+ * to collapse once the read lands on nothing. Once the section has shown
+ * something real, though, it holds its ground rather than vanishing under a
+ * retry the operator just asked for: a store that did not answer, or answered
+ * with a value this build cannot read, still states itself here as it does on
+ * a scheduled exchange.
+ */
+export function ParkedResultsView({
+  read,
+  scheduled,
+  onRetryRead,
+}: {
+  read: ParkedResultsRead | undefined;
+  /** Whether this exchange has an agreed schedule, so the section stands with
+   * its empty state for an exchange whose runs will land here. */
+  scheduled: boolean;
+  onRetryRead: () => void;
+}) {
+  const rows = read?.kind === "parked" ? parkedResultsRows(read.results) : [];
+  const shownBefore = useRef(false);
+  const emptyForNow =
+    !scheduled && (read === undefined || read.kind === "none");
+  if (emptyForNow && !shownBefore.current) return null;
+  shownBefore.current = true;
+  return (
+    <div className={styles.callout}>
+      <h2 className={styles.eyebrow}>Results from scheduled runs</h2>
+      <p className={styles.small}>{PARKED_RESULTS_RETENTION_NOTE}</p>
+      {read === undefined ? (
+        <>
+          <Loader size="sm" />
+          <p className={styles.small}>
+            Reading what this browser kept for you.
+          </p>
+        </>
+      ) : read.kind === "unavailable" ? (
+        <Alert
+          color="blue"
+          title="Whether anything is kept here could not be read right now"
+          mt="sm"
+        >
+          <p>{UNAVAILABLE_PARKED_RESULTS_NOTE}</p>
+          <Button variant="default" mt="sm" onClick={onRetryRead}>
+            Try reading them again
+          </Button>
+        </Alert>
+      ) : read.kind === "unreadable" ? (
+        <Alert color="yellow" title="These results cannot be read" mt="sm">
+          {UNREADABLE_PARKED_RESULTS_NOTE}
+        </Alert>
+      ) : rows.length === 0 ? (
+        <p className={`${styles.small} ${styles.sub}`}>
+          {NO_PARKED_RESULTS_NOTE}
+        </p>
+      ) : (
+        rows.map((row) => {
+          const parked = row.entry.kind === "results" ? row.entry : undefined;
+          return (
+            <div key={row.runAt} className={styles.dlRow}>
+              <span className={styles.dlLabel}>{row.when}</span>
+              <span>{row.summary}</span>
+              {parked !== undefined && (
+                <Button
+                  variant="light"
+                  mt="xs"
+                  onClick={() => downloadBlob(parked.fileName, parked.csv)}
+                >
+                  Download result
+                </Button>
+              )}
+              <span
+                className={`${styles.dlNote} ${styles.small} ${styles.sub}`}
+              >
+                {parked !== undefined
+                  ? `Kept until ${row.until}.`
+                  : `Recorded here until ${row.until}.`}
+              </span>
+            </div>
+          );
+        })
       )}
     </div>
   );

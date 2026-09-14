@@ -324,10 +324,12 @@ function BackupLine({ row }: { row: SavedExchangeRow }) {
 }
 
 /** The always-available per-row delete: a primary action with one simple confirm.
- * The confirm names the exchange, and states a custody note for each thing the
- * delete leaves behind -- an exported backup file (the row's backed-up state),
- * and the files a hand-off saved elsewhere ({@link handoff}), which keep running
- * the exchange from the machine that holds them. Deletion removes everything the
+ * The confirm names the exchange, names what the delete takes with it that the
+ * operator may still want -- the accounting of disclosures, and any results a
+ * scheduled run left for them -- and states a custody note for each thing the
+ * delete leaves behind: an exported backup file (the row's backed-up state), and
+ * the files a hand-off saved elsewhere ({@link handoff}), which keep running the
+ * exchange from the machine that holds them. Deletion removes everything the
  * browser holds for the exchange in one step ({@link deleteManagedExchange}),
  * local and unilateral, so the confirm says the partner is not notified.
  * Exported so the per-exchange detail surface reuses this one confirm component. */
@@ -396,9 +398,10 @@ export function DeleteExchangeButton({
       >
         <p>
           Delete {named}? This removes everything this browser holds for it --
-          the terms, the stored secret, its run history, and its accounting of
-          disclosures -- in one step. It cannot be undone here. Export the
-          accounting first if you need to keep it.
+          the terms, the stored secret, its run history, its accounting of
+          disclosures, and any results a scheduled run left here for you to
+          download -- in one step. It cannot be undone here. Download those
+          results and export the accounting first if you need to keep them.
         </p>
         <p className={`${styles.small} ${styles.sub}`}>
           This only removes your copy: your partner is not notified, and their

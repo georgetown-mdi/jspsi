@@ -29,6 +29,9 @@ import {
   readDisclosureAccounting,
   resetDisclosureAccounting,
 } from "@psi/disclosureAccountingStore";
+
+import { readParkedResults } from "@psi/parkedResultsStore";
+
 import { MANAGED_EXCHANGE_ARTIFACT_MIME } from "@psi/managed/managedExchangeArtifact";
 import { canReinviteFromRecord } from "@psi/managed/managedReinvite";
 import { deriveManagedBackupState } from "@psi/managed/managedBackupState";
@@ -61,6 +64,10 @@ import {
   managedRunRetryable,
 } from "./managedRunLaunchModel";
 import {
+  ManagedExchangeDetail,
+  ParkedResultsView,
+} from "./ManagedExchangeDetail";
+import {
   RECORD_GONE_HANDOFF_REASON,
   RECORD_GONE_HANDOFF_TITLE,
   RUN_IN_FLIGHT_HANDOFF_REASON,
@@ -70,7 +77,6 @@ import {
 } from "./managedHandoffGate";
 import { DeleteExchangeButton } from "./SavedExchanges";
 import { ManagedCronExportPanel } from "./ManagedCronExportPanel";
-import { ManagedExchangeDetail } from "./ManagedExchangeDetail";
 import { useManagedRunInFlight } from "./useManagedRunInFlight";
 
 import type { Ref } from "react";
@@ -90,6 +96,7 @@ import type { ManagedInputSource } from "@psi/managed/managedInputHandle";
 import type { ManagedReinvite } from "@psi/managed/managedReinvite";
 import type { ManagedRunFailureAlert } from "./managedRunLaunchModel";
 import type { ManagedSpentState } from "@psi/managed/managedLocalState";
+import type { ParkedResultsRead } from "@psi/parkedResultsStore";
 import type { RunOutputs } from "@psi/runOutputs";
 
 /**
@@ -137,6 +144,15 @@ export function ManagedRunSurface({ id }: { id: string }) {
   // store actually holds rather than assuming the delete took, and on an explicit
   // retry of a read that never reached the store.
   const [accountingReads, setAccountingReads] = useState(0);
+  // What a scheduled run left for this visit, as its own read classified it. Read
+  // here for the same reason the accounting is: a store that did not answer must
+  // not render as "no run left anything". `undefined` while the read is in
+  // flight.
+  const [parkedResultsRead, setParkedResultsRead] =
+    useState<ParkedResultsRead>();
+  // Bumped to read the parked results again, on an explicit retry of a read that
+  // never reached the store.
+  const [parkedResultsReads, setParkedResultsReads] = useState(0);
   const [exportBusy, setExportBusy] = useState(false);
   const [exportFailed, setExportFailed] = useState(false);
   // A hand-off the store refused, and which refusal it was: a run held the
@@ -275,6 +291,26 @@ export function ManagedRunSurface({ id }: { id: string }) {
       live = false;
     };
   }, [id, finishedAt, accountingReads]);
+
+  // The results a run with nobody present left here, read on its own for the
+  // reasons above. The read applies the retention as it goes, so what lands here
+  // is what is still offered, never an entry the stated retention has released.
+  useEffect(() => {
+    let live = true;
+    void readParkedResults(id)
+      .then((read) => {
+        if (live) setParkedResultsRead(read);
+      })
+      // The read classifies every failure rather than rejecting; this is the
+      // safety check for that contract lapsing, landing on the state that claims
+      // nothing about what is stored rather than stranding the section.
+      .catch(() => {
+        if (live) setParkedResultsRead({ kind: "unavailable" });
+      });
+    return () => {
+      live = false;
+    };
+  }, [id, parkedResultsReads]);
 
   // Revoke the run's object URLs when they are replaced or the surface unmounts:
   // the results blob is matched-record PII and the keys blob is private material.
@@ -630,6 +666,17 @@ export function ManagedRunSurface({ id }: { id: string }) {
     readAccountingAgain();
   }
 
+  // Read the parked results again after a read that never reached the store,
+  // dropping the standing verdict as it goes so the section returns to its
+  // in-flight state rather than rendering a notice under a click already taken.
+  // Offered instead of a page reload for the reason the accounting's retry is:
+  // a reload ends a run in progress, and the blocked-open condition it recovers
+  // from clears on its own.
+  function retryParkedResultsRead(): void {
+    setParkedResultsRead(undefined);
+    setParkedResultsReads((reads) => reads + 1);
+  }
+
   return (
     <AppPage>
       <main className={styles.lobby}>
@@ -653,7 +700,12 @@ export function ManagedRunSurface({ id }: { id: string }) {
             <SavedExchangesFoot />
           </>
         ) : loadFailure === "spent" ? (
-          <SpentSurface spent={spent} refusedRun={spentByRefusedRun} />
+          <SpentSurface
+            spent={spent}
+            refusedRun={spentByRefusedRun}
+            parkedResultsRead={parkedResultsRead}
+            onRetryParkedResultsRead={retryParkedResultsRead}
+          />
         ) : record === undefined ? (
           <>
             <h1>Loading exchange</h1>
@@ -899,8 +951,10 @@ export function ManagedRunSurface({ id }: { id: string }) {
             <ManagedExchangeDetail
               record={record}
               accountingRead={accountingRead}
+              parkedResultsRead={parkedResultsRead}
               onResetAccounting={resetAccounting}
               onRetryAccountingRead={retryAccountingRead}
+              onRetryParkedResultsRead={retryParkedResultsRead}
               onSaveLocalFields={saveLocalFields}
               onReinviteToChangeTerms={() => reinviteNow("detail")}
               canReinvite={canReinviteFromRecord(record)}
@@ -1256,17 +1310,38 @@ function BackupPanel({
  * durable copy: an operator who just pressed Run is owed what became of the run
  * they started, which the standing state cannot say. That account is the
  * hand-off tier's non-disclosure attestation, so its words are held beside the
- * gate resting on them ({@link MANAGED_RUN_HANDED_OFF_ATTESTATION}). */
+ * gate resting on them ({@link MANAGED_RUN_HANDED_OFF_ATTESTATION}).
+ *
+ * A hand-off takes the exchange's future runs, not what its earlier scheduled
+ * runs left at rest here, so this surface collects those too -- the same
+ * section the detail page offers them in. Without it the results sit in this
+ * browser for the rest of the retention with nothing offering them. */
 function SpentSurface({
   spent,
   refusedRun = false,
+  parkedResultsRead,
+  onRetryParkedResultsRead,
 }: {
   spent: ManagedSpentState | undefined;
   refusedRun?: boolean;
+  /** How reading this exchange's parked results turned out; `undefined` while
+   * the read is in flight. */
+  parkedResultsRead: ParkedResultsRead | undefined;
+  /** Read the parked results again, for a read that never reached the store. */
+  onRetryParkedResultsRead: () => void;
 }) {
   const refused = refusedRun ? (
     <p className={styles.small}>{MANAGED_RUN_HANDED_OFF_ATTESTATION}</p>
   ) : null;
+  // A spent copy runs nothing more here, so the section stands only on what is
+  // actually at rest.
+  const parked = (
+    <ParkedResultsView
+      read={parkedResultsRead}
+      scheduled={false}
+      onRetryRead={onRetryParkedResultsRead}
+    />
+  );
   if (spent === undefined)
     return (
       <>
@@ -1277,6 +1352,7 @@ function SpentSurface({
           you moved it to, or the machine running it from the command line.
         </p>
         {refused}
+        {parked}
         <SavedExchangesFoot />
       </>
     );
@@ -1294,6 +1370,7 @@ function SpentSurface({
         Those two files are this exchange&apos;s backup of record. Keep them
         somewhere only you can read.
       </p>
+      {parked}
       <SavedExchangesFoot />
     </>
   ) : (
@@ -1304,6 +1381,7 @@ function SpentSurface({
         no longer run here. Import the backup to run it on this device again.
       </p>
       {refused}
+      {parked}
       <SavedExchangesFoot />
     </>
   );

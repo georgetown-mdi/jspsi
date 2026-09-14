@@ -71,6 +71,10 @@ What managed **adds**:
   platforms that can support it -- with an attended one-action re-run as the
   named degradation (see [The automation
   goal](#the-automation-goal-and-its-platform-envelope)).
+- **The results of those runs kept for the next visit**, since nobody is present
+  to download them -- which puts linkage results at rest in the browser, bounded
+  by a stated retention and by deleting the exchange (see [Where a scheduled
+  run's results go](#where-a-scheduled-runs-results-go)).
 
 What managed does **not** add:
 
@@ -84,7 +88,9 @@ What managed does **not** add:
 - **No second copy of the input data.** The record never holds the input file's
   contents or any row value. Where the platform allows, it holds a file
   **handle** -- a pointer to the operator's file, not a copy (see
-  [MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md)).
+  [MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md)). A scheduled
+  run's kept results are the one thing at rest that does hold row values, and
+  they are the run's OUTPUT rather than a copy of the input.
 - **No server-side persistence.** There is one persistence target: the browser,
   origin-isolated, never a server. There is no profile-split persistence provider
   to choose between.
@@ -397,6 +403,46 @@ of a wrong automatic pause (a silently dead partnership) is worse for this
 persona than the failure mode of not pausing (cheap, visible, ignorable
 retries).
 
+### Where a scheduled run's results go
+
+A scheduled run produces the same results file an attended run produces, with
+nobody there to download it. The app **keeps that file in this browser** and the
+exchange's own page offers it at the operator's next visit. Keeping it is on by
+default: an unattended run that delivered nothing would leave the operator with
+outcome bookkeeping and never the results the run existed to produce.
+
+What that means for the operator, stated where they put an exchange on a schedule
+and again where they collect the results:
+
+- **The rows are at rest in the browser.** The kept file is the matched
+  identifiers and the payload values the partner disclosed, unencrypted, in reach
+  of any script running on the site and of anyone who can read the machine's
+  disk. It is the one thing a managed exchange keeps that is not presence and
+  shape (see
+  [SECURITY_DESIGN.md](SECURITY_DESIGN.md#results-of-a-scheduled-run-at-rest)).
+- **They stay at least 30 days, counted from the run**, and are removed the next
+  time the app reads or writes the store -- opening this exchange's page, or the
+  next scheduled run. That is not a timer: an exchange nobody revisits, and that
+  never runs again, keeps the bytes on disk past the 30 days until one of those
+  happens.
+- **Deleting the exchange removes them at once**, in the same one step that
+  removes everything else (see [Deleting a managed
+  exchange](#deleting-a-managed-exchange)).
+- **Downloading them does not remove them.** The download is a copy; the
+  retention and the delete are what remove the kept file.
+- **A run this browser would not store the results of says so.** The operator
+  meets that state at the next visit, beside the run's date, rather than finding
+  nothing where results should be -- and the run itself stands: it rotated the
+  secret and filed its disclosure.
+
+Each unattended run leaves its own entry, so two runs between visits leave two
+files. Only the results are kept; the run's disclosure record is already in [the
+accounting of disclosures](#the-accounting-of-disclosures), and a count-only run
+or one whose agreed terms give this party no output has no file to keep.
+
+The attended re-run is unchanged: the operator is present, and the completion
+screen hands the results over as it always has.
+
 ### The between-visit notification
 
 Between visits the operator is not watching the app, so the "this ran / this
@@ -477,14 +523,13 @@ does that the one-shot flow cannot. On the primary path the second run is
 4. **Rotate-and-persist, then the data exchange** -- the durability contract
    below, unchanged by nobody watching.
 5. **The outcome lands in the run bookkeeping**, the disclosure is filed to this
-   exchange's accounting, and the next visit's surfaces hold the result of all
-   that: the refreshed-backup prompt (the secret rotated), or the failure state.
-   An OS-level notification from the installed app is the "this ran / this needs
-   you" surface between visits (see [The between-visit
-   notification](#the-between-visit-notification)). The run's own **output files
-   are not delivered**: handing an unattended run's results to the operator is
-   not built, so a run that nobody is present for discards its outputs as it
-   settles, and only the bookkeeping above survives it.
+   exchange's accounting, and the **results are parked** for the operator to
+   collect at their next visit (see [Where a scheduled run's results
+   go](#where-a-scheduled-runs-results-go)). The next visit's surfaces hold the
+   result of all that: the results themselves, the refreshed-backup prompt (the
+   secret rotated), or the failure state. An OS-level notification from the
+   installed app is the "this ran / this needs you" surface between visits (see
+   [The between-visit notification](#the-between-visit-notification)).
 
 The **attended re-run** -- the degradations' path, available on any platform --
 is the same run with the operator present: open the app (the exchange shows
@@ -706,7 +751,11 @@ the exchange on this device. On confirmation the source record visibly
 transitions to a spent, handed-off state -- no Run affordance, no scheduled
 runs, labeled with the handoff date -- so the cooperation-not-cryptography
 invalidation below is clear at the one moment it is violable. A record spent this
-way can be deleted, or revived only by importing the artifact back.
+way can be deleted, or revived only by importing the artifact back. What its
+earlier scheduled runs left in this browser is still collected on that page: the
+hand-off takes the exchange's future runs, not the results already at rest here
+(see [Where a scheduled run's results
+go](#where-a-scheduled-runs-results-go)).
 
 **A hand-off refuses a copy a run has already superseded.** Confirming either
 hand-off -- the device migration here, or the command-line export below --
@@ -1383,9 +1432,11 @@ behind a detected loss.
 
 Removing a managed exchange is a fully supported, always-available action, and
 it removes **everything the browser holds for it in one step**: the record, the
-secret, the persisted input-file handle, the schedule, the run bookkeeping, and
-its [accounting of disclosures](#the-accounting-of-disclosures) -- which is why
-the confirm says to export the accounting first if it must be kept.
+secret, the persisted input-file handle, the schedule, the run bookkeeping, its
+[accounting of disclosures](#the-accounting-of-disclosures), and any [results a
+scheduled run kept](#where-a-scheduled-runs-results-go) -- which is why the
+confirm says to download those results and export the accounting first if they
+must be kept.
 Deletion is local and unilateral -- it does not notify the partner, whose own
 copy stands until they delete it or the partnership is re-established by
 re-invite -- and it is not secret expiry: an age bound (when set) caps how long
