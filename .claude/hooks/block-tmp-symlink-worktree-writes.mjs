@@ -56,6 +56,8 @@
 //     only the directory the call itself was made from does.
 //   - Resolution is read at the time of the call. A link created later on the
 //     same line is not the link this saw.
+//   - A path operand that starts with `-`, including one after `--`, is not read
+//     as a write target: isPathOperand drops it, so such a write passes.
 //
 // Exit 0 allows the call; exit 2 blocks it and feeds stderr back to Claude. Any
 // unexpected failure here falls through to exit 0 (fail open) so a bug in this
