@@ -156,7 +156,8 @@ export function minimalPreparedExchange(
  * The smallest complete {@link ExchangeResult}: no association table, no
  * intersection count, no entity-cluster summary, the built-in default linkage
  * terms standing in for the partner's, a one-to-one resolved matching (neither
- * party deduplicating), a receiver role, and an empty partner payload.
+ * party deduplicating), a receiver role, an empty partner payload, and no
+ * unbuilt record owed.
  * `overrides` replaces whichever fields a test's own assertions read. Stays out
  * of the main entry point for the same reason as
  * {@link minimalPreparedExchange}: it stands in for a real `runExchange` result
@@ -177,6 +178,7 @@ export function minimalExchangeResult(
     },
     resolvedRole: "receiver",
     partnerPayload: { columns: [], rowIndices: [], rows: [] },
+    recordOwedButUnbuilt: false,
     ...overrides,
   } satisfies ExchangeResult;
 }

@@ -196,10 +196,10 @@ async function runUnattendedAttempt(
         onDataExchangeStart: attempt.onDataExchangeStart,
       },
       onWarning: (message) => {
-        // Six notices reach this sink, not one kind: the close-outcome notice
+        // Seven notices reach this sink, not one kind: the close-outcome notice
         // speaks to an operator watching the run and is dropped. The rest --
         // the resolved-cardinality notice and pair-table advisory (raised at
-        // core's post-terms, pre-round boundary), plus the three for a
+        // core's post-terms, pre-round boundary), plus the four for a
         // disclosure the accounting did not get, which an unattended run has
         // no way to remedy -- go to the diagnostic log, folded through the
         // same display boundary a seat's surface uses so each is escaped

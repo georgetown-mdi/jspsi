@@ -55,6 +55,7 @@ import { acquireValidatedManagedInput } from "./managedInputHandle";
 
 import type {
   BuiltExchangeRecord,
+  ExchangeResult,
   MessageConnection,
   ResolvedMatching,
 } from "@psilink/core";
@@ -124,15 +125,16 @@ export interface ManagedRunDriverConfig {
    * instead ({@link ./managedRun.ts}, `rerunFailureLastRun`). Absent, both flows
    * keep their default budget. */
   peerWaitTimeoutMs?: number;
-  /** A non-fatal, operator-relevant notice raised mid-run, from five sources: the
+  /** A non-fatal, operator-relevant notice raised mid-run, from six sources: the
    * deduplicating cardinality and the pair-table projection the agreed terms
    * resolved to ({@link describeResolvedRunShape}); the clean
    * close ending on an exit with no delivery signal ({@link CLOSE_OUTCOME_WARNINGS});
    * a disclosure that could not be filed, on the run that completed
    * ({@link DISCLOSURE_NOT_FILED_WARNING}) or the run that stopped after sending
-   * ({@link STOPPED_DISCLOSURE_NOT_FILED_WARNING}); and a stopped run's disclosure
-   * whose record could not be built at all
-   * ({@link STOPPED_DISCLOSURE_RECORD_UNBUILT_WARNING}). Optional: a caller with no notice
+   * ({@link STOPPED_DISCLOSURE_NOT_FILED_WARNING}); and a disclosure whose record
+   * could not be built at all, on those same two runs
+   * ({@link DISCLOSURE_RECORD_UNBUILT_WARNING},
+   * {@link STOPPED_DISCLOSURE_RECORD_UNBUILT_WARNING}). Optional: a caller with no notice
    * surface omits it and all are dropped. Never a terminal -- the run still settles
    * exactly once, and a notice from the teardown's close can arrive after it. */
   onWarning?: (message: string) => void;
@@ -363,7 +365,7 @@ export function runManagedExchangeInBrowser(
           // local step throwing past this point must not cost a completed run
           // its entry. Awaited, unlike the teardown below: a local write of
           // bounded duration, not a wait the partner's peer picks.
-          await appendDisclosure(record.id, result.audit, onWarning);
+          await appendDisclosure(record.id, result, onWarning);
           const outputs = buildRunOutputs(result, carried.prepared, urls);
           builtOutputs = true;
           return outputs;
@@ -398,6 +400,15 @@ export function runManagedExchangeInBrowser(
 export const DISCLOSURE_NOT_FILED_WARNING =
   "This run's disclosure record could not be saved to this exchange's accounting of disclosures. Your results are complete. Download the record file below if you need to keep an account of this disclosure.";
 
+/** The notice a completed run raises when the record of its disclosure could not
+ * be built, so nothing reached the accounting to be saved. It offers no download,
+ * unlike the failed filing above -- the build produced no record file to offer --
+ * and says nothing of the results: it is raised before they are built, so a run
+ * that then fails to build them raises it too. What is left to do is record the
+ * disclosure outside this browser. */
+export const DISCLOSURE_RECORD_UNBUILT_WARNING =
+  "This run sent your payload, and no record of it could be built, so this exchange's accounting of disclosures has no entry for it. Note this run's time and partner if you keep an account of disclosures.";
+
 /** The notice a run that stopped after sending raises when its disclosure could
  * not be filed. It offers no download: the run has no results surface, so nothing
  * remains for the operator to take, and what is left to do is record the
@@ -419,17 +430,24 @@ export const STOPPED_DISCLOSURE_RECORD_UNBUILT_WARNING =
  * failed append can neither undo it nor make the run a failure -- it raises the
  * notice instead.
  *
- * A result with no audit appends nothing: core omits the audit only when
- * building the record threw after the exchange already succeeded (see
- * `ExchangeResult`), and that case reaches the operator through the completion
- * surface, which offers no record download either.
+ * A result with no audit appends nothing and raises
+ * {@link DISCLOSURE_RECORD_UNBUILT_WARNING} instead: the exchange disclosed, core
+ * could not build the record for it, and the accounting stays short an entry with
+ * core's own warning going to the operator log, which an unattended run discards.
+ * The notice is raised here rather than from the completion surface, which a run
+ * whose outputs also fail to build never reaches.
  */
 async function appendDisclosure(
   id: string,
-  audit: BuiltExchangeRecord | undefined,
+  result: Pick<ExchangeResult, "audit" | "recordOwedButUnbuilt">,
   onWarning: ((message: string) => void) | undefined,
 ): Promise<void> {
-  if (audit === undefined) return;
+  const { audit } = result;
+  if (audit === undefined) {
+    if (result.recordOwedButUnbuilt)
+      onWarning?.(DISCLOSURE_RECORD_UNBUILT_WARNING);
+    return;
+  }
   try {
     await appendDisclosureRecordToStore(id, audit.record);
   } catch (error) {

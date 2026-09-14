@@ -18,6 +18,7 @@ import {
 
 import {
   DISCLOSURE_NOT_FILED_WARNING,
+  DISCLOSURE_RECORD_UNBUILT_WARNING,
   STOPPED_DISCLOSURE_NOT_FILED_WARNING,
   STOPPED_DISCLOSURE_RECORD_UNBUILT_WARNING,
   runManagedExchangeInBrowser,
@@ -895,10 +896,13 @@ describe("filing the run's disclosure", () => {
     mockedOpen.mockResolvedValue(mc);
     acquireResources();
     const record = await exchangeYieldsRecord();
+    const onWarning = vi.fn();
 
-    await runDriver(new AbortController().signal);
+    await runDriver(new AbortController().signal, onWarning);
 
     expect(mockedAppendDisclosure.mock.calls).toEqual([[RECORD.id, record]]);
+    // The entry is in the accounting, so there is no loss to state.
+    expect(onWarning).not.toHaveBeenCalled();
   });
 
   test("files the disclosure before the run yields its outputs", async () => {
@@ -948,17 +952,67 @@ describe("filing the run's disclosure", () => {
     expect(record.outcome).toBe("completed");
   });
 
-  test("files nothing when the exchange produced no record", async () => {
-    // Core omits the audit only when building the record threw after the exchange
-    // succeeded; there is nothing to file, and inventing an entry would attest a
-    // record that does not exist.
+  test("files nothing and raises nothing when the run reports no record and no loss", async () => {
+    // There is nothing to file, and inventing an entry would attest a record that
+    // does not exist. Core reports no unbuilt record either, so the notice stays
+    // unraised rather than asserting a disclosure this run cannot show happened.
     const { mc } = makeParkedCloseMc();
     mockedOpen.mockResolvedValue(mc);
     acquireResources();
+    const onWarning = vi.fn();
 
-    await runDriver(new AbortController().signal);
+    await runDriver(new AbortController().signal, onWarning);
 
     expect(mockedAppendDisclosure).not.toHaveBeenCalled();
+    expect(onWarning).not.toHaveBeenCalled();
+  });
+
+  test("raises its own notice when the completed run's record could not be built", async () => {
+    // The disclosure happened and core could not produce the record for it, so
+    // there is nothing to file and the accounting stays short an entry. Core
+    // states the cause on the operator log, which an unattended run discards, so
+    // the consequence is raised where the run's other notices go.
+    const { mc } = makeParkedCloseMc();
+    mockedOpen.mockResolvedValue(mc);
+    acquireResources();
+    mockedRunExchange.mockResolvedValueOnce(
+      minimalExchangeResult({ recordOwedButUnbuilt: true }),
+    );
+    const onWarning = vi.fn();
+
+    const result = await runDriver(new AbortController().signal, onWarning);
+
+    expect(result.exchange).toBe(OUTPUTS);
+    expect(mockedAppendDisclosure).not.toHaveBeenCalled();
+    expect(onWarning.mock.calls).toEqual([[DISCLOSURE_RECORD_UNBUILT_WARNING]]);
+    // Not the failed-filing notice: nothing reached the accounting to be saved,
+    // so a notice pointing at a record download would name a file that was never
+    // built.
+    expect(DISCLOSURE_RECORD_UNBUILT_WARNING).not.toBe(
+      DISCLOSURE_NOT_FILED_WARNING,
+    );
+  });
+
+  test("raises the unbuilt-record notice when the run's outputs also fail to build", async () => {
+    // The completion surface is where a run's results and their record download
+    // are offered, and this run reaches neither: the notice is raised before the
+    // outputs are built, so it does not depend on a surface that never renders.
+    const { mc } = makeParkedCloseMc();
+    mockedOpen.mockResolvedValue(mc);
+    acquireResources();
+    mockedRunExchange.mockResolvedValueOnce(
+      minimalExchangeResult({ recordOwedButUnbuilt: true }),
+    );
+    mockedBuildRunOutputs.mockImplementationOnce(() => {
+      throw new Error("results blob failed");
+    });
+    const onWarning = vi.fn();
+
+    await expect(
+      runDriver(new AbortController().signal, onWarning),
+    ).rejects.toThrow("results blob failed");
+
+    expect(onWarning.mock.calls).toEqual([[DISCLOSURE_RECORD_UNBUILT_WARNING]]);
   });
 
   test("a failed filing warns the operator and leaves the run's results standing", async () => {
