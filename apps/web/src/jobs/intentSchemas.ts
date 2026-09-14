@@ -112,8 +112,8 @@ export const IDENTITY_DIRECTION_CHAR_MESSAGE =
 /**
  * The reason every boundary reports for a label holding private key material,
  * the third rule core holds a terms `identity` to
- * (`holdsPrivateKeyMaterial`, packages/core/src/utils/sanitizeErrorForDisplay.ts,
- * under `PRIVATE_KEY_IDENTITY_MESSAGE`). A label is bound into a certificate
+ * (`PRIVATE_KEY_IDENTITY_MESSAGE`, packages/core/src/config/linkageTermsSchema.ts,
+ * which detects it via `holdsPrivateKeyMaterial`). A label is bound into a certificate
  * the CLI compares against `linkage_terms.identity`, and a terms document may
  * hold no such value, so a label admitted here would leave the operator a
  * certificate no terms document can name.
@@ -713,9 +713,9 @@ export type JobZeroSetupLinkageStrategy = "cascade" | "single-pass";
  *   bind one to.
  * - `identity` is a bounded operator label forwarded to the CLI's
  *   `--identity` (the party name/org/contact string), bounded by
- *   {@link MAX_IDENTITY_LENGTH} and held to the shared label contract's three
- *   shape rules: no leading `-`, no control character, and no text-direction
- *   character.
+ *   {@link MAX_IDENTITY_LENGTH} and held to the shared label contract's four
+ *   shape rules: no leading `-`, no control character, no text-direction
+ *   character, and no private key material.
  *
  * None of the three is a path, host, or credential. Exactly one of `inputCsv`
  * or `inputFile` is set (enforced by {@link jobZeroSetupIntentSchema}),

@@ -161,7 +161,7 @@ export function readConfigHints(
  *
  * The label reaches this command from `--identity` or `linkage_terms.identity`
  * without passing through `LinkageTermsSchema`, which is where every other
- * route into that field is bounded and refused its two character classes; the
+ * route into that field is bounded and refused its three content rules; the
  * console's fingerprint route applies the same rules at its own boundary.
  * Unchecked here, the CLI would mint certificates holding labels the terms
  * document itself refuses -- and this one is not a transient: it is bound into
