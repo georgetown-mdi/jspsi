@@ -8,11 +8,7 @@ import { parse as parseYaml } from "yaml";
 import { MAX_TEXT_LENGTH, safeParseExchangeSpec } from "@psilink/core";
 
 import {
-  HANDOFF_SHARED_DIRECTORY_PLACEHOLDER,
-  HANDOFF_SIGNING_IDENTITY_PLACEHOLDER,
-  buildJobHandoff,
-} from "@jobs/handoff";
-import {
+  FIRST_CONTACT_PIN_ADVISORY,
   IDENTITY_AT_REST_NOTICE,
   IDENTITY_DEFAULT_LOCATION_LABEL,
   IDENTITY_DEFAULT_PATH_LEFTOVER_CAVEAT,
@@ -21,7 +17,6 @@ import {
   IDENTITY_PICKED_LOCATION_NOTICE,
   IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY,
   IDENTITY_SHARED_MOUNT_REFUSAL_ADVISORY,
-  NO_PARTNER_PIN_PROBLEM,
   PARTNER_FINGERPRINT_PROBLEM,
   RECEIPTS_DEFAULT,
   RECEIPT_LOCATION_NOTICE,
@@ -31,12 +26,18 @@ import {
   UNNAMED_PARTY_PROBLEM,
   fingerprintRequestProblem,
   identityLocationLabel,
+  partnerPinStatement,
   receiptsAdvisories,
   receiptsIntentFields,
   receiptsProblems,
   receiptsSummary,
   receiptsWithField,
 } from "@psi/receiptsModel";
+import {
+  HANDOFF_SHARED_DIRECTORY_PLACEHOLDER,
+  HANDOFF_SIGNING_IDENTITY_PLACEHOLDER,
+  buildJobHandoff,
+} from "@jobs/handoff";
 import {
   composeConfigDocument,
   composeSftpConfigDocument,
@@ -202,30 +203,33 @@ describe("the intent boundary admits only a mode an exchange honors", () => {
     expect(parsed.success).toBe(false);
   });
 
-  test("certificate mode with no pin is refused, on both channels and the create union", () => {
-    // The run this job would spawn cannot finish: core refuses an unpinned
-    // certificate-mode config before any connection is opened, having reached the
-    // refusal only inside the exchange -- after this party's payload crossed --
-    // if it started. Refusing at job creation is what keeps the workdir, the
-    // child, and that disclosure from happening at all.
+  test("certificate mode with no pin is admitted, on both channels and the create union", () => {
+    // The first authenticated contact: the spawned child pins the certificate
+    // its partner presents at the terms exchange and records the fingerprint, so
+    // the job is one the run can finish. The console asks for an out-of-band
+    // value and warns where it has none, rather than refusing the operator a run
+    // the command line accepts.
     for (const intent of [
       validIntent({ signing: { mode: "certificate" } }),
       validSftpIntent({ signing: { mode: "certificate" } }),
     ])
-      expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(false);
+      expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(true);
     // The create route parses the mode-discriminated union, not the exchange
     // schema directly, so the rule is asserted where the 400 is actually decided.
-    const parsed = jobCreateIntentSchema.safeParse(
-      validIntent({ signing: { mode: "certificate" } }),
-    );
-    expect(parsed.success).toBe(false);
-    if (parsed.success) throw new Error("unreachable");
-    // The issue names the field the operator has to fill, rather than failing the
-    // whole signing block anonymously.
-    expect(parsed.error.issues.map((issue) => issue.path)).toContainEqual([
-      "signing",
-      "partnerFingerprint",
-    ]);
+    expect(
+      jobCreateIntentSchema.safeParse(
+        validIntent({ signing: { mode: "certificate" } }),
+      ).success,
+    ).toBe(true);
+    // The pin stays admissible under certificate mode alone: relaxing the
+    // requirement does not admit one beside a run that signs nothing.
+    expect(
+      jobCreateIntentSchema.safeParse(
+        validIntent({
+          signing: { mode: "none", partnerFingerprint: PARTNER_FINGERPRINT },
+        }),
+      ).success,
+    ).toBe(false);
   });
 
   test("certificate mode with an unnamed party is refused, on both channels and the create union", () => {
@@ -423,28 +427,33 @@ describe("the composed signing block, per mode", () => {
     ).toThrow(/identity path/);
   });
 
-  test("certificate mode with no pinned fingerprint is a compose-time error too", () => {
-    // jobSigningChoiceSchema's refine guarantees a validated certificate intent
-    // always has partnerFingerprint, so an intent missing it is reachable
-    // here only by bypassing the schema -- exactly what this hand-built intent
-    // does. The guard is what turns that impossible state into a loud failure
-    // at compose time rather than a config the spawned child would refuse
-    // minutes later with a bare exit 64.
-    expect(() =>
-      composeConfigDocument(
-        validIntent({ signing: { mode: "certificate" } }),
-        "/rendezvous",
-        undefined,
-        signingPaths(),
+  test("certificate mode with no pinned fingerprint composes the key away", () => {
+    // What makes the run a first authenticated contact: the child reads a
+    // signing block with no pin, adopts the certificate its partner presents,
+    // and records the value back into this same document. Emitting the key with
+    // an empty value instead would be a pin the comparison fails closed on, so
+    // the key is absent rather than blank.
+    for (const composed of [
+      composedSpec(
+        composeConfigDocument(
+          validIntent({ signing: { mode: "certificate" } }),
+          "/rendezvous",
+          undefined,
+          signingPaths(),
+        ),
       ),
-    ).toThrow(/partner fingerprint/);
-    expect(() =>
-      composeSftpConfigDocument(
-        validSftpIntent({ signing: { mode: "certificate" } }),
-        testSftpServerEntry(),
-        signingPaths(),
+      composedSpec(
+        composeSftpConfigDocument(
+          validSftpIntent({ signing: { mode: "certificate" } }),
+          testSftpServerEntry(),
+          signingPaths(),
+        ),
       ),
-    ).toThrow(/partner fingerprint/);
+    ]) {
+      const signing = composed["signing"] as Record<string, unknown>;
+      expect(signing["mode"]).toBe("certificate");
+      expect(signing).not.toHaveProperty("partner_fingerprint");
+    }
   });
 });
 
@@ -904,6 +913,22 @@ describe("the receipts card's model", () => {
     expect(receiptsSummary(noted)).toBe("Retention note");
   });
 
+  test("the closed card states a signed run with nothing pinned", () => {
+    // The advisory is inside the disclosure, which an operator can create the
+    // job without ever opening, so the collapsed summary states the condition
+    // where they decide.
+    const unpinned = draft({
+      mode: "certificate",
+      ownFingerprint: OWN_FINGERPRINT,
+    });
+    expect(receiptsSummary(unpinned)).toBe(
+      "Signed receipt, no partner fingerprint pinned",
+    );
+    expect(
+      receiptsSummary({ ...unpinned, partnerFingerprint: PARTNER_FINGERPRINT }),
+    ).toBe("Signed receipt");
+  });
+
   test("every problem is a refusal the run itself would make", () => {
     expect(problemsFor(draft({ mode: "certificate" }))).toContain(
       IDENTITY_MISSING_PROBLEM,
@@ -959,23 +984,41 @@ describe("the receipts card's model", () => {
     ).toEqual([]);
   });
 
-  test("an unpinned partner blocks the run, as the job schema would", () => {
-    // The console's job schema refuses the intent at create time, so the card
-    // reports it as a problem rather than an advisory: a card that warned and
-    // proceeded would send the operator into a create request the server
-    // rejects. The requirement is the console's own, stricter than the spawned
-    // child, which pins the certificate its partner presents at the terms
-    // exchange.
+  test("an unpinned partner warns and guides rather than blocking", () => {
+    // Such a run is the first authenticated contact the spawned child adopts a
+    // certificate on, and the job schema admits it, so the card warns rather
+    // than blocking: a block would refuse the operator a run the command line
+    // accepts, and the console's posture toward their own choices is to warn
+    // and guide (CLAUDE.md, Applications).
     const unpinned = draft({
       mode: "certificate",
       ownFingerprint: OWN_FINGERPRINT,
     });
-    expect(problemsFor(unpinned)).toContain(NO_PARTNER_PIN_PROBLEM);
-    expect(
-      receiptsAdvisories(unpinned, SHARED_RENDEZVOUS).map(
-        (advisory) => advisory.message,
-      ),
-    ).not.toContain(NO_PARTNER_PIN_PROBLEM);
+    expect(problemsFor(unpinned)).toEqual([]);
+    expect(receiptsAdvisories(unpinned, SHARED_RENDEZVOUS)).toContainEqual({
+      message: FIRST_CONTACT_PIN_ADVISORY,
+      severity: "warning",
+    });
+  });
+
+  test("the card states what is pinned, and plainly when nothing is", () => {
+    // The one line an operator reads to learn what this exchange has on file.
+    // A draft signing nothing states none of it: no pin decides anything there.
+    const unpinned = draft({
+      mode: "certificate",
+      ownFingerprint: OWN_FINGERPRINT,
+    });
+    expect(partnerPinStatement(unpinned)).toMatch(
+      /No partner fingerprint pinned yet/,
+    );
+    expect(partnerPinStatement(unpinned)).toMatch(/first exchange pins/);
+    const pinned = draft({
+      mode: "certificate",
+      ownFingerprint: OWN_FINGERPRINT,
+      partnerFingerprint: PARTNER_FINGERPRINT,
+    });
+    expect(partnerPinStatement(pinned)).toContain(PARTNER_FINGERPRINT);
+    expect(partnerPinStatement(draft({ mode: "none" }))).toBeUndefined();
   });
 
   test("an unnamed party blocks the run, as the run itself would", () => {
@@ -1035,7 +1078,9 @@ describe("the receipts card's model", () => {
       signing: { mode: "certificate" },
       retentionDisposition: RETENTION_NOTE,
     });
-    expect(receiptsSummary(unpinned)).toBe("Signed receipt, retention note");
+    expect(receiptsSummary(unpinned)).toBe(
+      "Signed receipt, retention note, no partner fingerprint pinned",
+    );
     expect(fingerprintRequestProblem("Agency A")).toBeUndefined();
   });
 
@@ -1076,32 +1121,34 @@ describe("the receipts card's model", () => {
     ).toEqual([IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY]);
   });
 
-  test("the unpinned problem names what an out-of-band fingerprint buys", () => {
+  test("the unpinned advisory names what an out-of-band fingerprint buys", () => {
     // An exchange with no pin on file adopts the certificate its partner
     // presents, so what is lost by not entering one is the anchor rather than
     // the run: the pin would rest on the channel the invitation travelled.
     // Copy that said the run would fail would be describing something that
     // does not happen, and would teach the operator to expect a refusal.
-    expect(NO_PARTNER_PIN_PROBLEM).toMatch(/channel the invitation travelled/);
-    expect(NO_PARTNER_PIN_PROBLEM).toMatch(
-      /attest to whoever sent that invitation/,
+    expect(FIRST_CONTACT_PIN_ADVISORY).toMatch(
+      /channel the invitation travelled/,
     );
-    expect(NO_PARTNER_PIN_PROBLEM).toMatch(/ties a receipt to your partner/);
+    expect(FIRST_CONTACT_PIN_ADVISORY).toMatch(
+      /attests to whoever sent that invitation/,
+    );
+    expect(FIRST_CONTACT_PIN_ADVISORY).toMatch(/to nobody else/);
     // The channel it asks for is named concretely, since "a channel you trust"
     // alone leaves the one mistake that matters -- the invitation's own channel
     // -- looking acceptable.
-    expect(NO_PARTNER_PIN_PROBLEM).toMatch(
+    expect(FIRST_CONTACT_PIN_ADVISORY).toMatch(
       /a phone call, not the same email as the invitation/,
     );
   });
 
-  test("the unpinned problem names the exit for an operator without the pin yet", () => {
-    // Pinning is half of a two-sided ceremony, so the refusal has to leave a way
-    // to exchange today: run unsigned now, and switch once the fingerprint
-    // arrives. Copy that only refused would push an operator toward abandoning
-    // the receipt or waiting on the partner with nothing to do.
-    expect(NO_PARTNER_PIN_PROBLEM).toMatch(/choose 'No receipt' now/);
-    expect(NO_PARTNER_PIN_PROBLEM).toMatch(/psilink fingerprint/);
+  test("the unpinned advisory states what the run does about it", () => {
+    // The operator is told the run reports the value it pinned, so they know
+    // there is something to take away and compare. Copy that only warned would
+    // leave a first contact looking like a dead end rather than a step with a
+    // follow-up.
+    expect(FIRST_CONTACT_PIN_ADVISORY).toMatch(/reports the fingerprint/);
+    expect(FIRST_CONTACT_PIN_ADVISORY).toMatch(/psilink fingerprint/);
   });
 
   test("signing states where both durable files land, before the run", () => {

@@ -266,6 +266,26 @@ export class RelayedTerminalError extends Error {
   }
 }
 
+/**
+ * The relayed terminal failure whose own message states the next step, built
+ * for an `error` event carrying `recoveryHint` (docs/spec/CLI_EVENTS.md). It
+ * holds core's `psilinkRecoveryHintEmitted` tag, so {@link hasRecoveryHint}
+ * answers for a relayed failure exactly as it does for one this browser raised,
+ * and the seat shows the message rather than fixed copy that would contradict
+ * it.
+ *
+ * The assurance is the CLI's: its tagged messages are composed from local
+ * values, and the relay escapes every one before it crosses.
+ */
+export class RelayedSelfExplainingError extends RelayedTerminalError {
+  readonly psilinkRecoveryHintEmitted = true;
+
+  constructor(message: string) {
+    super(message);
+    this.name = "RelayedSelfExplainingError";
+  }
+}
+
 /** The result CSV of a server-driven job lives on the console, retrievable
  * through this endpoint rather than as a browser object URL. */
 function jobResultUrl(jobId: string): string {
@@ -1024,6 +1044,19 @@ function errorMessageOf(event: RelayEvent): string {
     : "the exchange failed";
 }
 
+/**
+ * Build the failure a relayed terminal `error` event raises, reading the
+ * event's `recoveryHint` to decide which of the two classes it is. The field is
+ * read strictly -- only the literal `true` the CLI emits counts -- so anything
+ * else takes the class that shows fixed copy.
+ */
+function relayedTerminalErrorOf(event: RelayEvent): RelayedTerminalError {
+  const message = errorMessageOf(event);
+  return event.recoveryHint === true
+    ? new RelayedSelfExplainingError(message)
+    : new RelayedTerminalError(message);
+}
+
 /** Build the {@link JobExchangeIntent} a run POSTs from the driver config: the
  * `transport` picks the arm (neither adds a connection field -- the sftp arm
  * has no `remote`, the console runs the one authored connection), and
@@ -1339,7 +1372,7 @@ async function consumeJobStream(
         case "error":
           onError({
             category: errorCategoryOf(event),
-            error: new RelayedTerminalError(errorMessageOf(event)),
+            error: relayedTerminalErrorOf(event),
           });
           return;
         default:

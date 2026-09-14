@@ -11,14 +11,25 @@
 //
 // Environment variables (all optional):
 //   STUB_FD3_EVENTS   JSON array of event objects to write to fd 3, in order.
+//                     Every occurrence of the CONFIG_FILE_PLACEHOLDER token is
+//                     replaced with the value of --config-file, so a test can
+//                     stage a message naming the configuration file the real CLI
+//                     would name without knowing the workdir the driver created.
 //   STUB_FD3_RAW      A raw string written verbatim to fd 3 (for malformed-line
 //                     tests); written BEFORE STUB_FD3_EVENTS so a malformed
 //                     preamble is observed before any terminal event.
 //   STUB_EXIT_CODE    Integer exit code (default 0).
-//   STUB_STDERR       Text written to stderr before exit.
+//   STUB_STDERR       Text written to stderr before exit. The
+//                     CONFIG_FILE_PLACEHOLDER token is replaced as it is in
+//                     STUB_FD3_EVENTS, so a test can stage a refusal the real
+//                     CLI prints before its event stream is open.
 //   STUB_STDOUT       Text written to stdout before exit.
 //   STUB_OUTPUT_FILE  When set, the output positional (last argv) is written
 //                     with this content (so the result route has a file).
+//   STUB_PARTNER_PIN  When set, signing.partner_fingerprint is written into the
+//                     document named by --config-file before the fd-3 events,
+//                     as the real first-contact adoption does (it persists the
+//                     pin and only then emits its warning).
 //   STUB_RECORD_JSON  When set, the record file named by --record-file is written
 //                     with this content, and its paired .keys.json alongside it
 //                     (so the record/keys routes have files). The keys path is
@@ -60,6 +71,13 @@
 //                     decides whose ./psilink.yaml the real CLI would resolve.
 
 import fs from "node:fs";
+
+import YAML from "yaml";
+
+// The token STUB_FD3_EVENTS spells the --config-file value with, paired with
+// STUB_CONFIG_FILE_TOKEN in ./jobFixtures.ts (this file is spawned as a
+// process, so the two cannot share one declaration).
+const CONFIG_FILE_PLACEHOLDER = "__CONFIG_FILE__";
 
 // The default probe line emitted when STUB_PROBE_STDOUT is unset (an all-A
 // canonical fingerprint), so the probe route's round-trip is deterministic even
@@ -172,6 +190,21 @@ function runExchangeStub() {
     fs.writeFileSync(outputPath, process.env.STUB_OUTPUT_FILE);
   }
 
+  // The real CLI persists an adopted pin into its configuration file and only
+  // then emits the warning naming it, so the stub writes before its fd-3 events
+  // too: a relay that reads the value back must find it already on file.
+  if (process.env.STUB_PARTNER_PIN !== undefined) {
+    const configPath = separatedFlagValue(process.argv, "--config-file");
+    if (configPath !== undefined) {
+      const document = YAML.parseDocument(fs.readFileSync(configPath, "utf8"));
+      document.setIn(
+        ["signing", "partner_fingerprint"],
+        process.env.STUB_PARTNER_PIN,
+      );
+      fs.writeFileSync(configPath, document.toString());
+    }
+  }
+
   if (process.env.STUB_RECORD_JSON !== undefined) {
     const recordPath = recordFilePath(process.argv);
     if (recordPath !== undefined) {
@@ -185,11 +218,13 @@ function runExchangeStub() {
 
   if (process.env.STUB_FD3_RAW !== undefined)
     writeFd3(process.env.STUB_FD3_RAW);
-  const events = JSON.parse(process.env.STUB_FD3_EVENTS ?? "[]");
+  const events = JSON.parse(
+    withConfigFile(process.env.STUB_FD3_EVENTS ?? "[]"),
+  );
   for (const event of events) writeFd3(JSON.stringify(event) + "\n");
 
   if (process.env.STUB_STDERR !== undefined)
-    process.stderr.write(process.env.STUB_STDERR);
+    process.stderr.write(withConfigFile(process.env.STUB_STDERR));
   if (process.env.STUB_STDOUT !== undefined)
     process.stdout.write(process.env.STUB_STDOUT);
 
@@ -222,6 +257,15 @@ function runExchangeStub() {
   exitAfterDelay(exitCode);
 }
 
+/** Text with the placeholder token spelled as the --config-file value, so a
+ * staged message names the file the real CLI would name. */
+function withConfigFile(text) {
+  return text.replaceAll(
+    CONFIG_FILE_PLACEHOLDER,
+    separatedFlagValue(process.argv, "--config-file") ?? "",
+  );
+}
+
 function writeFd3(line) {
   try {
     fs.writeSync(3, line);
@@ -235,11 +279,16 @@ function writeFd3(line) {
 // shape so a flag-shaped value cannot be misparsed); the real CLI's yargs accepts
 // both, so the stub resolves both.
 function recordFilePath(argv) {
-  const flagIndex = argv.indexOf("--record-file");
+  return separatedFlagValue(argv, "--record-file");
+}
+
+/** The value of a flag the exchange argv passes as two tokens, tolerating the
+ * `--flag=value` spelling as well. The exchange driver uses the separated form
+ * for every flag it passes; `flagValue` above answers the fingerprint and probe
+ * subcommands, which use the joined one. */
+function separatedFlagValue(argv, flag) {
+  const flagIndex = argv.indexOf(flag);
   if (flagIndex !== -1 && flagIndex + 1 < argv.length)
     return argv[flagIndex + 1];
-  const eqToken = argv.find((token) => token.startsWith("--record-file="));
-  return eqToken === undefined
-    ? undefined
-    : eqToken.slice("--record-file=".length);
+  return flagValue(argv, flag);
 }

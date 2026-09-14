@@ -6,7 +6,11 @@ import {
   prepareForExchange,
 } from "@psilink/core";
 
-import { JobApiRequestError } from "@psi/jobClient/serverJobExchangeDriver";
+import {
+  JobApiRequestError,
+  RelayedSelfExplainingError,
+  RelayedTerminalError,
+} from "@psi/jobClient/serverJobExchangeDriver";
 import { failureFor } from "@exchange/useInviterExchange";
 
 import type { CSVRow, LinkageTerms, Metadata } from "@psilink/core";
@@ -98,6 +102,39 @@ describe("failureFor", () => {
     expect(failure.category).toBe("security");
     expect(failure.title).toBe("This invitation can no longer be used");
     expect(failure.message).toContain("expired at 2026-07-08T19:32:00.000Z");
+  });
+
+  test("a relayed refusal that explains itself shows its own cause", () => {
+    // The partner certificate that does not match the pin is the case this
+    // exists for. The fixed copy below describes a failed check of the
+    // invitation's secret and sends the operator to re-invite, which pins
+    // nothing new and refuses identically -- so a refusal whose own message
+    // names the cause and the step displaces it.
+    const failure = failureFor(
+      "security",
+      new RelayedSelfExplainingError(
+        "the partner's signing certificate is not the one pinned in " +
+          "signing.partner_fingerprint, so this run cannot finish",
+      ),
+    );
+    expect(failure.category).toBe("security");
+    expect(failure.title).toBe("The exchange stopped on a trust check");
+    expect(failure.message).toContain("is not the one pinned in");
+    // Not the invitation-expiry title, whose copy would misname a certificate
+    // refusal even though the tag it reads is the same one.
+    expect(failure.title).not.toBe("This invitation can no longer be used");
+  });
+
+  test("a relayed failure making no such claim keeps the fixed copy", () => {
+    // The marker is an assurance, never a denial: a relayed terminal without it
+    // is a failure the CLI said nothing about, and takes the same copy an
+    // untagged browser-raised one does.
+    const failure = failureFor(
+      "security",
+      new RelayedTerminalError("kex transcript diverged"),
+    );
+    expect(failure.title).toBe("Could not verify your partner");
+    expect(failure.message).not.toContain("kex transcript diverged");
   });
 
   test("an untagged security error keeps the fixed non-oracular copy", () => {

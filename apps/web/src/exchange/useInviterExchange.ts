@@ -16,6 +16,7 @@ import {
 import {
   JobApiRequestError,
   JobIntentColumnNameError,
+  RelayedSelfExplainingError,
   RelayedTerminalError,
   createFetchJobApiClient,
   createServerJobExchangeDriver,
@@ -259,6 +260,21 @@ export function failureFor(
     };
   }
   if (category === "security") {
+    // A refusal the console relayed whose own message states the cause and the
+    // next step (docs/spec/CLI_EVENTS.md, `recoveryHint`): a partner
+    // certificate that does not match the pinned fingerprint is the case this
+    // exists for, and the fixed copy below would report it as a failed
+    // invitation check and send the operator to re-invite, which fixes
+    // nothing. Checked before the invitation branch, whose title is wrong
+    // here. Still the security category, so the alert offers no retry -- the
+    // same partner certificate is refused however many times it runs.
+    if (error instanceof RelayedSelfExplainingError) {
+      return {
+        category,
+        title: "The exchange stopped on a trust check",
+        message: sanitizedFailureMessage(error),
+      };
+    }
     // A tagged credential/expiry error's message is composed only from local
     // values and holds its own recovery guidance (core's recovery-hint
     // contract, preserved across authenticateExchange's re-wrap), so it is

@@ -23,6 +23,15 @@ export const STUB_CLI_PATH = fileURLToPath(
   new URL("./stubCli.mjs", import.meta.url),
 );
 
+/**
+ * The token the stub CLI replaces with its own `--config-file` value inside
+ * `STUB_FD3_EVENTS`, so a staged message can name the configuration file the
+ * driver composed without the test knowing which workdir that was. Paired with
+ * `CONFIG_FILE_PLACEHOLDER` in `./stubCli.mjs`, which the stub cannot import
+ * (it is spawned as a process, not loaded as a module).
+ */
+export const STUB_CONFIG_FILE_TOKEN = "__CONFIG_FILE__";
+
 /** A base64url shared secret matching the CLI key-file shape (43 chars). */
 export const VALID_SHARED_SECRET = "A".repeat(42) + "A";
 
