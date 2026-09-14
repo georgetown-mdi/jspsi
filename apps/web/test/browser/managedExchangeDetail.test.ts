@@ -40,6 +40,7 @@ import {
   PARKED_RESULTS_RETENTION_NOTE,
   PARKED_RESULTS_SCHEDULE_NOTE,
   UNAVAILABLE_PARKED_RESULTS_NOTE,
+  UNREADABLE_PARKED_RESULTS_NOTE,
 } from "@recurring/parkedResultsModel";
 import {
   PARKED_RESULTS_VERSION,
@@ -2403,6 +2404,18 @@ describe("the results a scheduled run left for this visit", () => {
     await vi.waitFor(() =>
       expect(onRetryParkedResultsRead).toHaveBeenCalledTimes(1),
     );
+  });
+
+  test("a value this build cannot read offers no download and no empty-state note", async () => {
+    renderParked({ kind: "unreadable" });
+
+    await expect
+      .element(page.getByText(UNREADABLE_PARKED_RESULTS_NOTE))
+      .toBeInTheDocument();
+    expect(
+      page.getByRole("button", { name: "Download result" }).query(),
+    ).toBeNull();
+    expect(page.getByText(NO_PARKED_RESULTS_NOTE).query()).toBeNull();
   });
 
   test("a store that did not answer says so on an exchange with no schedule too", async () => {

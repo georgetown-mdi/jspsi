@@ -420,9 +420,11 @@ and again where they collect the results:
   disk. It is the one thing a managed exchange keeps that is not presence and
   shape (see
   [SECURITY_DESIGN.md](SECURITY_DESIGN.md#results-of-a-scheduled-run-at-rest)).
-- **They stay 30 days, counted from the run**, and are then removed. The
-  retention is applied every time the app reads or writes the store, so it holds
-  whether or not the app was open when an entry aged out.
+- **They stay at least 30 days, counted from the run**, and are removed the next
+  time the app reads or writes the store -- opening this exchange's page, or the
+  next scheduled run. That is not a timer: an exchange nobody revisits, and that
+  never runs again, keeps the bytes on disk past the 30 days until one of those
+  happens.
 - **Deleting the exchange removes them at once**, in the same one step that
   removes everything else (see [Deleting a managed
   exchange](#deleting-a-managed-exchange)).

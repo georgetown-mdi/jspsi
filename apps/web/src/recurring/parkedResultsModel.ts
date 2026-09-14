@@ -50,16 +50,18 @@ export const PARKED_RESULTS_SCHEDULE_NOTE =
   `results are the matched rows themselves -- the identifiers that matched and ` +
   `the values your partner disclosed -- kept unencrypted in browser storage, ` +
   `where any script running on this site and anyone who can read this machine's ` +
-  `disk can read them. They stay for ${RETENTION_PHRASE} after the run and are ` +
-  `then removed; deleting the exchange removes them at once.`;
+  `disk can read them. After ${RETENTION_PHRASE}, your next visit here or the ` +
+  `next run, whichever comes first, removes them; until then the bytes stay on ` +
+  `disk, and deleting the exchange removes them at once.`;
 
 /** What the section holding parked results says about them: where they are, how
  * long they stay, and what removes them. */
 export const PARKED_RESULTS_RETENTION_NOTE =
   `Results from a run nobody was present for are kept in this browser so you ` +
   `can collect them here. They are the matched rows, kept unencrypted in ` +
-  `browser storage; they stay for ${RETENTION_PHRASE} after the run and are ` +
-  `then removed, and deleting this exchange removes them at once.`;
+  `browser storage; after ${RETENTION_PHRASE}, the next visit here or run, ` +
+  `whichever comes first, removes them, and until then the bytes stay on disk, ` +
+  `and deleting this exchange removes them at once.`;
 
 /** The empty state: no scheduled run has left anything here. Stated against the
  * schedule rather than as a bare blank, so an operator whose runs are not
@@ -73,7 +75,8 @@ export const NO_PARKED_RESULTS_NOTE =
  * can vouch for, and nothing else holds what they were. */
 export const UNREADABLE_PARKED_RESULTS_NOTE =
   "Results are stored here for this exchange, but this browser cannot read " +
-  "them. Deleting the exchange removes them.";
+  "them, so the retention that would otherwise remove them no longer applies. " +
+  "Deleting the exchange is the only way to remove them.";
 
 /** The state a store that did not answer presents as, held apart from the empty
  * one: nothing is known about what is stored, so it may not read as "nothing is

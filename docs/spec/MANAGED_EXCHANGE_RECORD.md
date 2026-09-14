@@ -1277,7 +1277,10 @@ every reading, so the number a surface states and the number enforced cannot
 drift apart. The rule is applied inside every transaction over the store, the
 read included, and an entry past it is deleted there rather than merely withheld
 -- so the stated retention holds whether or not any sweep fires, and no code path
-hands a caller an entry it has released. An entry whose `runAt` this reader
+hands a caller an entry it has released. A transaction runs only when the app
+reads or writes that exchange's store, so an exchange nobody revisits and that
+never runs again keeps a past-retention entry on disk until one of those two
+happens. An entry whose `runAt` this reader
 cannot place on the clock -- the same UTC-designator rule the record's stored
 instants take -- is dropped by that same rule: it can be held to no retention at
 all, and content at rest that nothing bounds is what the rule exists to prevent.
