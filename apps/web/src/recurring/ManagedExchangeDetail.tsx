@@ -756,7 +756,12 @@ export function ParkedResultsView({
   return (
     <div className={styles.callout}>
       <h2 className={styles.eyebrow}>Results from scheduled runs</h2>
-      <p className={styles.small}>{PARKED_RESULTS_RETENTION_NOTE}</p>
+      {/* Not shown for a value this build cannot read: the retention it states
+          is the one that does not apply to such a value, and the statement
+          below says so. */}
+      {read?.kind !== "unreadable" && (
+        <p className={styles.small}>{PARKED_RESULTS_RETENTION_NOTE}</p>
+      )}
       {read === undefined ? (
         <>
           <Loader size="sm" />

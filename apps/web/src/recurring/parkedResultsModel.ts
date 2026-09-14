@@ -50,8 +50,9 @@ export const PARKED_RESULTS_SCHEDULE_NOTE =
   `results are the matched rows themselves -- the identifiers that matched and ` +
   `the values your partner disclosed -- kept unencrypted in browser storage, ` +
   `where any script running on this site and anyone who can read this machine's ` +
-  `disk can read them. After ${RETENTION_PHRASE}, your next visit here or the ` +
-  `next run, whichever comes first, removes them; until then the bytes stay on ` +
+  `disk can read them. After ${RETENTION_PHRASE} they are no longer offered, ` +
+  `and your next visit to this page deletes them, as does a later run that ` +
+  `leaves results of its own; until one of those happens the bytes stay on ` +
   `disk, and deleting the exchange removes them at once.`;
 
 /** What the section holding parked results says about them: where they are, how
@@ -59,9 +60,10 @@ export const PARKED_RESULTS_SCHEDULE_NOTE =
 export const PARKED_RESULTS_RETENTION_NOTE =
   `Results from a run nobody was present for are kept in this browser so you ` +
   `can collect them here. They are the matched rows, kept unencrypted in ` +
-  `browser storage; after ${RETENTION_PHRASE}, the next visit here or run, ` +
-  `whichever comes first, removes them, and until then the bytes stay on disk, ` +
-  `and deleting this exchange removes them at once.`;
+  `browser storage; after ${RETENTION_PHRASE} they are no longer offered, and ` +
+  `your next visit to this page deletes them, as does a later run that leaves ` +
+  `results of its own. Until one of those happens the bytes stay on disk, and ` +
+  `deleting this exchange removes them at once.`;
 
 /** The empty state: no scheduled run has left anything here. Stated against the
  * schedule rather than as a bare blank, so an operator whose runs are not
@@ -72,11 +74,17 @@ export const NO_PARKED_RESULTS_NOTE =
 
 /** The state a value this build cannot read presents as. It offers no recovery:
  * unlike an accounting of disclosures, there is no reading of these bytes the app
- * can vouch for, and nothing else holds what they were. */
+ * can vouch for, and nothing else holds what they were. It is also a standing
+ * state rather than a passing one -- the parking write reads through the same
+ * parse -- so it states what later runs can no longer leave here. The refused
+ * value's shape is unknown, so it is not stated to hold results. */
 export const UNREADABLE_PARKED_RESULTS_NOTE =
-  "Results are stored here for this exchange, but this browser cannot read " +
-  "them, so the retention that would otherwise remove them no longer applies. " +
-  "Deleting the exchange is the only way to remove them.";
+  "Something is stored here for this exchange that this browser cannot read, " +
+  "so it cannot tell you whether any results are in it. The retention that " +
+  "would otherwise remove it does not apply, and while it is here a scheduled " +
+  "run cannot leave its results or record that it could not -- the runs " +
+  "themselves still complete and file their disclosures. Deleting the " +
+  "exchange is the only way to remove it.";
 
 /** The state a store that did not answer presents as, held apart from the empty
  * one: nothing is known about what is stored, so it may not read as "nothing is

@@ -2416,6 +2416,9 @@ describe("the results a scheduled run left for this visit", () => {
       page.getByRole("button", { name: "Download result" }).query(),
     ).toBeNull();
     expect(page.getByText(NO_PARKED_RESULTS_NOTE).query()).toBeNull();
+    // The retention it states is the one that does not apply to such a value,
+    // so it is not left standing above the statement saying so.
+    expect(page.getByText(PARKED_RESULTS_RETENTION_NOTE).query()).toBeNull();
   });
 
   test("a store that did not answer says so on an exchange with no schedule too", async () => {

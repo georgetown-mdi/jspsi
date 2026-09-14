@@ -4,6 +4,7 @@ import {
   NO_PARKED_RESULTS_NOTE,
   PARKED_RESULTS_RETENTION_NOTE,
   PARKED_RESULTS_SCHEDULE_NOTE,
+  UNREADABLE_PARKED_RESULTS_NOTE,
   parkedResultsRows,
 } from "../../../src/recurring/parkedResultsModel.js";
 import {
@@ -114,6 +115,39 @@ describe("what the operator is told about keeping results here", () => {
   test("the collection statement names the same retention the store enforces", () => {
     expect(PARKED_RESULTS_RETENTION_NOTE).toContain(days);
     expect(PARKED_RESULTS_RETENTION_NOTE).toContain("deleting this exchange");
+  });
+
+  test.each([
+    ["the schedule-entry statement", PARKED_RESULTS_SCHEDULE_NOTE],
+    ["the collection statement", PARKED_RESULTS_RETENTION_NOTE],
+  ])(
+    "%s names a run that leaves results as the removal, not any run at all",
+    (_name, note) => {
+      // Only a run that writes to this exchange's kept results applies the
+      // retention to them; a run that parks nothing leaves them where they are.
+      expect(note).toContain("your next visit to this page");
+      expect(note).toContain("a later run that leaves results of its own");
+    },
+  );
+
+  test("the unreadable statement says what is stored is unknown, not that results are", () => {
+    expect(UNREADABLE_PARKED_RESULTS_NOTE).toContain(
+      "this browser cannot read",
+    );
+    expect(UNREADABLE_PARKED_RESULTS_NOTE).toContain(
+      "whether any results are in it",
+    );
+    expect(UNREADABLE_PARKED_RESULTS_NOTE).not.toContain("Results are stored");
+  });
+
+  test("the unreadable statement says later runs can leave nothing while it is here", () => {
+    expect(UNREADABLE_PARKED_RESULTS_NOTE).toContain(
+      "cannot leave its results or record that it could not",
+    );
+    expect(UNREADABLE_PARKED_RESULTS_NOTE).toContain(
+      "complete and file their disclosures",
+    );
+    expect(UNREADABLE_PARKED_RESULTS_NOTE).toContain("Deleting the exchange");
   });
 
   test("the empty state says nothing was left, not that nothing is known", () => {

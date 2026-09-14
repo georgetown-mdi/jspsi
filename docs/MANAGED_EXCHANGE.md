@@ -421,10 +421,10 @@ and again where they collect the results:
   shape (see
   [SECURITY_DESIGN.md](SECURITY_DESIGN.md#results-of-a-scheduled-run-at-rest)).
 - **They stay at least 30 days, counted from the run**, and are removed the next
-  time the app reads or writes the store -- opening this exchange's page, or the
-  next scheduled run. That is not a timer: an exchange nobody revisits, and that
-  never runs again, keeps the bytes on disk past the 30 days until one of those
-  happens.
+  time the app reads or writes the store -- opening this exchange's page, or a
+  later run that keeps results of its own. That is not a timer: an exchange
+  nobody revisits, and that never runs again, keeps the bytes on disk past the
+  30 days until one of those happens.
 - **Deleting the exchange removes them at once**, in the same one step that
   removes everything else (see [Deleting a managed
   exchange](#deleting-a-managed-exchange)).
