@@ -58,15 +58,22 @@ export type ParkedResultsRead =
    * reading of them this build can vouch for. */
   | { kind: "unreadable" };
 
-/** Run `work` inside one strict-durability readwrite transaction over the parked
- * results store, resolving on the transaction's `complete` event. The read, the
- * retention, and the write-back therefore cannot interleave with another run's,
- * and what `work` writes is requested through to OS writeback before this
- * resolves.
+/** Read the stored value under `id` and hand it to `decide`, inside one
+ * strict-durability readwrite transaction over the parked results store,
+ * resolving on the transaction's `complete` event. The read, the retention, and
+ * the write-back therefore cannot interleave with another run's, and what
+ * `decide` writes is requested through to OS writeback before this resolves.
  *
- * @throws if the database does not open, or the transaction does not complete. */
-async function withResultsStore<T>(
-  work: (store: IDBObjectStore) => Promise<T> | T,
+ * `decide` runs synchronously inside the read request's own `onsuccess`, where
+ * the transaction is still active, so a write it issues from the value it just
+ * read is part of the same transaction rather than of a later microtask the
+ * transaction has already outlived.
+ *
+ * @throws if the database does not open, if `decide` throws -- the transaction
+ *   aborts and nothing is written -- or if the transaction does not complete. */
+async function withStoredResults<T>(
+  id: string,
+  decide: (raw: unknown, store: IDBObjectStore) => T,
 ): Promise<T> {
   const db = await openManagedExchangeDatabase();
   try {
@@ -76,18 +83,20 @@ async function withResultsStore<T>(
         "readwrite",
         { durability: "strict" },
       );
+      const store = transaction.objectStore(
+        MANAGED_EXCHANGE_RESULTS_STORE_NAME,
+      );
+      const read = store.get(id);
       let result: T;
       let failure: unknown;
-      void (async () => {
+      read.onsuccess = () => {
         try {
-          result = await work(
-            transaction.objectStore(MANAGED_EXCHANGE_RESULTS_STORE_NAME),
-          );
+          result = decide(read.result, store);
         } catch (error) {
           failure = error;
           transaction.abort();
         }
-      })();
+      };
       transaction.oncomplete = () => resolve(result);
       transaction.onerror = () => reject(failure ?? transaction.error);
       transaction.onabort = () => reject(failure ?? transaction.error);
@@ -95,15 +104,6 @@ async function withResultsStore<T>(
   } finally {
     db.close();
   }
-}
-
-/** The stored value under `id`, as one request inside `store`'s transaction. */
-function readStoredValue(store: IDBObjectStore, id: string): Promise<unknown> {
-  return new Promise<unknown>((resolve, reject) => {
-    const request = store.get(id);
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
 }
 
 /** What a stored value holds once the retention is applied: `undefined` where
@@ -150,34 +150,30 @@ export async function readParkedResults(
   id: string,
   now: number = Date.now(),
 ): Promise<ParkedResultsRead> {
-  // The landing state for a transaction that resolves without the work below
-  // having classified anything: it claims nothing about what is stored.
-  let read: ParkedResultsRead = { kind: "unavailable" };
   try {
-    await withResultsStore(async (store) => {
-      const raw = await readStoredValue(store, id);
+    return await withStoredResults<ParkedResultsRead>(id, (raw, store) => {
       try {
         const { retained, released } = retainedInStore(raw, now);
         // Written back only where the retention actually released something: a
         // read that rewrote the value every time would re-serialize every parked
         // results file on every visit.
         if (released) writeStoredValue(store, id, retained);
-        read =
-          retained === undefined
-            ? { kind: "none" }
-            : { kind: "parked", results: retained };
+        return retained === undefined
+          ? { kind: "none" }
+          : { kind: "parked", results: retained };
       } catch {
         // A value this build refuses is left exactly as it sits: the pruning
         // write above cannot describe it, and deleting it here would destroy an
         // operator's results on a parse a later build may well admit. Removing
         // the exchange removes it.
-        read = { kind: "unreadable" };
+        return { kind: "unreadable" };
       }
     });
   } catch {
+    // The store never answered -- the database did not open, or the transaction
+    // did not complete -- so nothing is known about what is stored.
     return { kind: "unavailable" };
   }
-  return read;
 }
 
 /** Add one entry for this run, replacing anything already stored for the same run
@@ -192,8 +188,7 @@ async function appendEntry(
   entry: ParkedResultsEntry,
   now: number,
 ): Promise<void> {
-  await withResultsStore(async (store) => {
-    const raw = await readStoredValue(store, id);
+  await withStoredResults(id, (raw, store) => {
     const { retained } = retainedInStore(raw, now);
     writeStoredValue(store, id, appendParkedResults(retained, entry));
   });

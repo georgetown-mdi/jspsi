@@ -749,7 +749,11 @@ the exchange on this device. On confirmation the source record visibly
 transitions to a spent, handed-off state -- no Run affordance, no scheduled
 runs, labeled with the handoff date -- so the cooperation-not-cryptography
 invalidation below is clear at the one moment it is violable. A record spent this
-way can be deleted, or revived only by importing the artifact back.
+way can be deleted, or revived only by importing the artifact back. What its
+earlier scheduled runs left in this browser is still collected on that page: the
+hand-off takes the exchange's future runs, not the results already at rest here
+(see [Where a scheduled run's results
+go](#where-a-scheduled-runs-results-go)).
 
 **A hand-off refuses a copy a run has already superseded.** Confirming either
 hand-off -- the device migration here, or the command-line export below --

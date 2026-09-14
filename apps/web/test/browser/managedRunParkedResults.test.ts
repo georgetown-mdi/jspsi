@@ -16,22 +16,25 @@ import {
 import {
   clearManagedExchanges,
   createManagedExchange,
+  spendManagedExchangeIfCurrent,
 } from "@psi/managed/managedExchangeStore";
 import { ManagedRunSurface } from "@recurring/ManagedRunSurface";
 import { composeManagedExchangeFile } from "@psi/managed/managedExchangeRecord";
 import { readParkedResults } from "@psi/parkedResultsStore";
 
 import { createAppMount, flushPendingUpdates } from "./renderApp";
+import { captureDownloads } from "./captureDownloads";
 
 import type { NewManagedExchange } from "@psi/managed/managedExchangeRecord";
 import type { ParkedResultsRead } from "@psi/parkedResultsStore";
 
 // How the run surface drives the parked-results read it owns: what the section
-// shows while a read is in flight, and that the retry offered where the store did
-// not answer reaches the store again. The read's own classification is the store
-// suite's; the store module is stubbed here because a read that hangs, and one
-// that never reaches the store, are states real IndexedDB will not produce on
-// demand.
+// shows while a read is in flight, that the retry offered where the store did
+// not answer reaches the store again, and that a copy a hand-off spent still
+// hands over what its earlier scheduled runs left. The read's own classification
+// is the store suite's; the store module is stubbed here because a read that
+// hangs, and one that never reaches the store, are states real IndexedDB will
+// not produce on demand.
 
 vi.mock("@tanstack/react-router", async () =>
   (await import("./moduleMocks")).reactRouterMock(),
@@ -50,6 +53,9 @@ vi.mock("@psi/parkedResultsStore", async (importOriginal) => ({
 const reads = vi.mocked(readParkedResults);
 
 const RUN_AT = "2026-03-01T09:00:00.000Z";
+
+/** The bytes a parked run's results hold, asserted back out of the download. */
+const RESULTS_CSV = "id,county\nA-19,Riverbend\n";
 
 /** A promise the test settles itself, standing in for a read still in flight. */
 function deferredRead(): {
@@ -91,7 +97,7 @@ function parked(): ParkedResultsRead {
           kind: "results",
           runAt: RUN_AT,
           fileName: parkedResultsFileName(RUN_AT),
-          csv: new Blob(["id,county\nA-19,Riverbend\n"], { type: "text/csv" }),
+          csv: new Blob([RESULTS_CSV], { type: "text/csv" }),
           matchedRecordCount: 1,
         },
       ],
@@ -156,5 +162,71 @@ describe("a re-read of the parked results", () => {
       .element(page.getByText("1 matched record", { exact: false }))
       .toBeInTheDocument();
     expect(reads).toHaveBeenCalledTimes(2);
+  });
+});
+
+/**
+ * A hand-off takes the exchange's future runs; it does not take the results its
+ * earlier scheduled runs left at rest in this browser. Without this section the
+ * spent surface would hold them for the rest of the retention with nothing
+ * offering them, against copy telling the operator to collect them here.
+ */
+describe("a copy a hand-off spent", () => {
+  async function spendNewExchange(): Promise<string> {
+    const created = await createManagedExchange(newExchange());
+    expect(
+      await spendManagedExchangeIfCurrent(
+        created.id,
+        created.sharedSecret,
+        "2026-03-02T10:00:00.000Z",
+        "command-line",
+      ),
+    ).toBe("spent");
+    return created.id;
+  }
+
+  test("hands over the results a scheduled run left before the hand-off", async () => {
+    const downloads = captureDownloads();
+    try {
+      reads.mockResolvedValue(parked());
+      const id = await spendNewExchange();
+
+      app.render(createElement(ManagedRunSurface, { id }));
+
+      await expect
+        .element(page.getByText("This exchange was handed off"))
+        .toBeInTheDocument();
+      await expect
+        .element(page.getByText("1 matched record", { exact: false }))
+        .toBeInTheDocument();
+      await page.getByRole("button", { name: "Download result" }).click();
+
+      await downloads.settled();
+      expect(downloads.captured).toHaveLength(1);
+      expect(downloads.captured[0].fileName).toBe(
+        parkedResultsFileName(RUN_AT),
+      );
+      expect(downloads.captured[0].text).toBe(RESULTS_CSV);
+    } finally {
+      downloads.restore();
+    }
+  });
+
+  test("shows no results section where no run left anything", async () => {
+    reads.mockResolvedValue({ kind: "none" });
+    const id = await spendNewExchange();
+
+    app.render(createElement(ManagedRunSurface, { id }));
+
+    await expect
+      .element(page.getByText("This exchange was handed off"))
+      .toBeInTheDocument();
+    // The read has landed by here, so the absence is the empty state collapsing
+    // rather than a section that has not rendered yet.
+    await flushPendingUpdates();
+    expect(page.getByText("Results from scheduled runs").query()).toBeNull();
+    expect(
+      page.getByRole("button", { name: "Download result" }).query(),
+    ).toBeNull();
   });
 });

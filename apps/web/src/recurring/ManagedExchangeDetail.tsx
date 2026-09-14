@@ -707,10 +707,17 @@ function RunHistory({ record }: { record: ManagedExchangeRecord }) {
 }
 
 /**
- * The results a run nobody was present for left behind, and the one place they
- * are collected. A scheduled run builds the same results file an attended run
+ * The results a run nobody was present for left behind, and the one section that
+ * collects them. A scheduled run builds the same results file an attended run
  * does, with nobody there to take it, so it keeps the file in this browser and
  * this section hands it over at the next visit.
+ *
+ * It renders wherever this exchange's page stands: under the detail sections
+ * while the exchange runs here, and on the page of a copy a hand-off spent,
+ * where what earlier runs left is still at rest and still owed to the operator
+ * ({@link ./ManagedRunSurface.tsx}). A spent copy runs nothing further, so it
+ * is not `scheduled` and its empty state collapses as an unscheduled
+ * exchange's does.
  *
  * Every state a read can be in renders as itself: a store that did not answer
  * says so, a stored value this build cannot read says so, and only a read that
@@ -729,7 +736,7 @@ function RunHistory({ record }: { record: ManagedExchangeRecord }) {
  * with a value this build cannot read, still states itself here as it does on
  * a scheduled exchange.
  */
-function ParkedResultsView({
+export function ParkedResultsView({
   read,
   scheduled,
   onRetryRead,

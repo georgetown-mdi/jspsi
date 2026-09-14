@@ -64,6 +64,10 @@ import {
   managedRunRetryable,
 } from "./managedRunLaunchModel";
 import {
+  ManagedExchangeDetail,
+  ParkedResultsView,
+} from "./ManagedExchangeDetail";
+import {
   RECORD_GONE_HANDOFF_REASON,
   RECORD_GONE_HANDOFF_TITLE,
   RUN_IN_FLIGHT_HANDOFF_REASON,
@@ -73,7 +77,6 @@ import {
 } from "./managedHandoffGate";
 import { DeleteExchangeButton } from "./SavedExchanges";
 import { ManagedCronExportPanel } from "./ManagedCronExportPanel";
-import { ManagedExchangeDetail } from "./ManagedExchangeDetail";
 import { useManagedRunInFlight } from "./useManagedRunInFlight";
 
 import type { Ref } from "react";
@@ -697,7 +700,12 @@ export function ManagedRunSurface({ id }: { id: string }) {
             <SavedExchangesFoot />
           </>
         ) : loadFailure === "spent" ? (
-          <SpentSurface spent={spent} refusedRun={spentByRefusedRun} />
+          <SpentSurface
+            spent={spent}
+            refusedRun={spentByRefusedRun}
+            parkedResultsRead={parkedResultsRead}
+            onRetryParkedResultsRead={retryParkedResultsRead}
+          />
         ) : record === undefined ? (
           <>
             <h1>Loading exchange</h1>
@@ -1302,17 +1310,38 @@ function BackupPanel({
  * durable copy: an operator who just pressed Run is owed what became of the run
  * they started, which the standing state cannot say. That account is the
  * hand-off tier's non-disclosure attestation, so its words are held beside the
- * gate resting on them ({@link MANAGED_RUN_HANDED_OFF_ATTESTATION}). */
+ * gate resting on them ({@link MANAGED_RUN_HANDED_OFF_ATTESTATION}).
+ *
+ * A hand-off takes the exchange's future runs, not what its earlier scheduled
+ * runs left at rest here, so this surface collects those too -- the same
+ * section the detail page offers them in. Without it the results sit in this
+ * browser for the rest of the retention with nothing offering them. */
 function SpentSurface({
   spent,
   refusedRun = false,
+  parkedResultsRead,
+  onRetryParkedResultsRead,
 }: {
   spent: ManagedSpentState | undefined;
   refusedRun?: boolean;
+  /** How reading this exchange's parked results turned out; `undefined` while
+   * the read is in flight. */
+  parkedResultsRead: ParkedResultsRead | undefined;
+  /** Read the parked results again, for a read that never reached the store. */
+  onRetryParkedResultsRead: () => void;
 }) {
   const refused = refusedRun ? (
     <p className={styles.small}>{MANAGED_RUN_HANDED_OFF_ATTESTATION}</p>
   ) : null;
+  // A spent copy runs nothing more here, so the section stands only on what is
+  // actually at rest.
+  const parked = (
+    <ParkedResultsView
+      read={parkedResultsRead}
+      scheduled={false}
+      onRetryRead={onRetryParkedResultsRead}
+    />
+  );
   if (spent === undefined)
     return (
       <>
@@ -1323,6 +1352,7 @@ function SpentSurface({
           you moved it to, or the machine running it from the command line.
         </p>
         {refused}
+        {parked}
         <SavedExchangesFoot />
       </>
     );
@@ -1340,6 +1370,7 @@ function SpentSurface({
         Those two files are this exchange&apos;s backup of record. Keep them
         somewhere only you can read.
       </p>
+      {parked}
       <SavedExchangesFoot />
     </>
   ) : (
@@ -1350,6 +1381,7 @@ function SpentSurface({
         no longer run here. Import the backup to run it on this device again.
       </p>
       {refused}
+      {parked}
       <SavedExchangesFoot />
     </>
   );
