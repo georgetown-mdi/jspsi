@@ -1325,6 +1325,9 @@ export interface ExchangeStageDefinition {
  * exchange and then replays them locally in-memory, so it emits no per-key stage
  * (the replay is instant); its only enumerated step is confirming protocol, and
  * the encrypt/match stages it emits pass through the caller's onStage unlabeled.
+ * Their ids -- which of them a party emits depends on the role the handshake
+ * resolves, so no list can enumerate them here -- are `SINGLE_PASS_STAGE_IDS`
+ * in psi/link.ts, for a caller that labels them.
  */
 export function describeExchangeStages(
   prepared: PreparedExchange,

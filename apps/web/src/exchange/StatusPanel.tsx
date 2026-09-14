@@ -3,6 +3,7 @@ import styles from "@styles/app.module.css";
 import {
   currentStageLabel,
   progressPercent,
+  stageIsKnown,
   timeOfDayLabel,
 } from "./exchangeRun";
 
@@ -30,13 +31,11 @@ export function StatusPanel({
   const percent = progressPercent(run);
   const lastVisit = run.visits[run.visits.length - 1];
   // runExchange emits stage ids from the same prepared exchange the tree was built
-  // from, so a mismatch is a desync bug. This is a development-only signal, not a
-  // guarantee: a production render degrades instead, taking the raw id as the label
-  // and holding the bar at the last known stage.
-  if (
-    import.meta.env.DEV &&
-    !run.stages.some((stage) => stage.id === run.stageId)
-  )
+  // from, or from the single-pass set the run model labels, so anything else is a
+  // desync bug. This is a development-only signal, not a guarantee: a production
+  // render degrades instead, taking the raw id as the label and holding the bar at
+  // the last known stage.
+  if (import.meta.env.DEV && !stageIsKnown(run, run.stageId))
     console.warn(`StatusPanel: unknown stageId "${run.stageId}"`);
   return (
     <section

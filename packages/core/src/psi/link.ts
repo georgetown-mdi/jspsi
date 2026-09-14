@@ -1702,6 +1702,23 @@ export interface SinglePassSessionBounds extends SessionBounds {
 }
 
 /**
+ * The stage ids {@link linkViaSinglePassPSI} passes to its `setStage` callback,
+ * one per phase of its single round trip. `describeExchangeStages` does not
+ * enumerate them -- which of them a party emits follows the role the handshake
+ * resolves -- so a front end that labels its stage events reads the ids from
+ * here.
+ */
+export const SINGLE_PASS_STAGE_IDS = {
+  encryptingOwnData: "encrypting my data",
+  encryptingPartnerData: "doubly-encrypting partner's data",
+  identifyingSharedValues: "identifying shared elements",
+} as const;
+
+/** One of the stage ids in {@link SINGLE_PASS_STAGE_IDS}. */
+export type SinglePassStageId =
+  (typeof SINGLE_PASS_STAGE_IDS)[keyof typeof SINGLE_PASS_STAGE_IDS];
+
+/**
  * The single-pass linkage strategy: an alternative to {@link linkViaPSI} that
  * produces the same matched row pairs but uses one network round-trip instead of
  * one per linkage key. exchange.ts chooses between the two on `linkageStrategy`.
@@ -1901,7 +1918,7 @@ export async function linkViaSinglePassPSI(
     // - this party's values, encrypted with own key ("setup" message)
     // - partner's data re-encrypted ("response")
     // - distinctValueIndexTable so partner knows how to reconstruct data
-    stage("encrypting my data");
+    stage(SINGLE_PASS_STAGE_IDS.encryptingOwnData);
     const { setup, permutation } =
       await participant.createServerSetup(distinctValues);
 
@@ -1912,7 +1929,7 @@ export async function linkViaSinglePassPSI(
     );
     // Collect the setup-masking transients before the re-encryption masking.
     relieveTransientMemory();
-    stage("doubly-encrypting partner's data");
+    stage(SINGLE_PASS_STAGE_IDS.encryptingPartnerData);
     const response = await participant.processClientRequest(request);
     // createServerSetup sorted distinctValues; remap the index table into that
     // sorted order so its indices match the sorted setup message.
@@ -2033,7 +2050,7 @@ export async function linkViaSinglePassPSI(
     return [table[0], table[1]];
   }
 
-  stage("encrypting my data");
+  stage(SINGLE_PASS_STAGE_IDS.encryptingOwnData);
   await conn.send(await participant.createClientRequest(distinctValues));
 
   // Tighten the read gate to the per-exchange derived cap before reading the
@@ -2136,7 +2153,7 @@ export async function linkViaSinglePassPSI(
 
   // Collect the request-masking transients before the match masking.
   relieveTransientMemory();
-  stage("identifying shared elements");
+  stage(SINGLE_PASS_STAGE_IDS.identifyingSharedValues);
   const [receiverDistinctValueIds, senderDistinctValueIds] =
     await participant.computeValueMatches(setupBytes, responseBytes);
   // Keyed by the SENDER's value id, because the resolution sweep walks the
