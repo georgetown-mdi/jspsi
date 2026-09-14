@@ -128,6 +128,24 @@ describe("the row a run written to the granted folder reads as", () => {
     expect(row.summary).toContain("Nothing of them is kept in this browser");
   });
 
+  test("reads as a sentence where the run reported no count", () => {
+    const row = parkedResultsRows({
+      version: PARKED_RESULTS_VERSION,
+      entries: [
+        {
+          kind: "written",
+          runAt: EARLIER,
+          fileName: "psilink-results-earlier.csv",
+          directoryName: "Riverbend results",
+        },
+      ],
+    })[0];
+    expect(row.summary).toBe(
+      "Results were written to psilink-results-earlier.csv in the folder you " +
+        "granted (Riverbend results). Nothing of them is kept in this browser.",
+    );
+  });
+
   test("names why a granted folder did not take them, rather than reading as a plain success", () => {
     const ungranted = parkedResultsRows(written("ungranted"))[0].summary;
     expect(ungranted).toContain("ready to download");

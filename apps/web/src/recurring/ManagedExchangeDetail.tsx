@@ -698,14 +698,16 @@ function OutputFolderGrantField({
   onStopUsing: () => Promise<void>;
 }) {
   const [busy, setBusy] = useState(false);
-  const [failed, setFailed] = useState(false);
+  const [failed, setFailed] = useState<"grant" | "stop-using" | undefined>(
+    undefined,
+  );
 
-  function take(action: () => Promise<void>) {
+  function take(which: "grant" | "stop-using", action: () => Promise<void>) {
     if (busy) return;
     setBusy(true);
-    setFailed(false);
+    setFailed(undefined);
     void action()
-      .catch(() => setFailed(true))
+      .catch(() => setFailed(which))
       .finally(() => setBusy(false));
   }
 
@@ -727,13 +729,28 @@ function OutputFolderGrantField({
           {outputFolderGrantedNote(grant.name)}
         </p>
       )}
-      {failed && (
+      {failed === "grant" && (
         <Alert color="yellow" title="That folder was not set" mt="sm" mb="sm">
           Nothing changed: scheduled runs keep using whatever they used before.
           Try choosing the folder again.
         </Alert>
       )}
-      <Button variant="default" loading={busy} onClick={() => take(onGrant)}>
+      {failed === "stop-using" && (
+        <Alert
+          color="yellow"
+          title="That folder was not removed"
+          mt="sm"
+          mb="sm"
+        >
+          Nothing changed: scheduled runs keep writing to this folder. Try
+          stopping again.
+        </Alert>
+      )}
+      <Button
+        variant="default"
+        loading={busy}
+        onClick={() => take("grant", onGrant)}
+      >
         {grant.kind === "granted"
           ? "Choose a different folder"
           : "Choose folder"}
@@ -743,7 +760,7 @@ function OutputFolderGrantField({
           variant="subtle"
           mt="xs"
           disabled={busy}
-          onClick={() => take(onStopUsing)}
+          onClick={() => take("stop-using", onStopUsing)}
         >
           Stop writing to this folder
         </Button>

@@ -419,6 +419,7 @@ describe("managed exchange detail schedule entry", () => {
   function renderEntry(
     stored?: ManagedExchangeSchedule,
     folder?: FileSystemDirectoryHandle,
+    stopUsingRejects?: boolean,
   ): {
     saved: Array<ManagedExchangeLocalEdits>;
     granted: Array<string>;
@@ -442,7 +443,9 @@ describe("managed exchange detail schedule entry", () => {
         },
         onStopUsingOutputFolder: () => {
           granted.push("stopped");
-          return Promise.resolve();
+          return stopUsingRejects === true
+            ? Promise.reject(new Error("store failed"))
+            : Promise.resolve();
         },
         onSaveLocalFields: (edits) => {
           saved.push(edits);
@@ -518,6 +521,19 @@ describe("managed exchange detail schedule entry", () => {
       .getByRole("button", { name: "Stop writing to this folder" })
       .click();
     expect(granted).toEqual(["chose", "stopped"]);
+  });
+
+  test("a failed stop says the folder is still being written to, not that a choice did not take", async () => {
+    renderEntry(undefined, await opfsDirectory("results-kept"), true);
+    await scheduleCheckbox().click();
+    await page
+      .getByRole("button", { name: "Stop writing to this folder" })
+      .click();
+
+    await expect
+      .element(page.getByText("That folder was not removed"))
+      .toBeInTheDocument();
+    expect(page.getByText("That folder was not set").query()).toBeNull();
   });
 
   test("scheduling is off by default, and the fields appear only once it is on", async () => {

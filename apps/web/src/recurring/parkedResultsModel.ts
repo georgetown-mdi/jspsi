@@ -119,10 +119,13 @@ function matchedRecordPhrase(count: number | undefined): string | undefined {
  * holding a copy of them. */
 function writtenSummary(entry: WrittenRunResults): string {
   const matched = matchedRecordPhrase(entry.matchedRecordCount);
+  const written =
+    matched === undefined
+      ? "Results were written to"
+      : `${matched}, written to`;
   return (
-    `${matched === undefined ? "Results were" : `${matched}, `}written to ` +
-    `${entry.fileName} in the folder you granted (${entry.directoryName}). ` +
-    `Nothing of them is kept in this browser.`
+    `${written} ${entry.fileName} in the folder you granted ` +
+    `(${entry.directoryName}). Nothing of them is kept in this browser.`
   );
 }
 

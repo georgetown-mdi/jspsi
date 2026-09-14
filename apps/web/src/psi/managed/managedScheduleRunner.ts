@@ -115,7 +115,7 @@ export interface ManagedScheduleAttempt {
   /** This run's input, always the persisted handle read UNATTENDED: a scheduled
    * run has no operator to answer a permission prompt, so a non-granted
    * permission must fail benignly rather than block on one (see
-   * {@link ./managedInputHandle.ts}, `ensureHandleReadPermission`). */
+   * {@link ./managedInputHandle.ts}, `ensureHandlePermission`). */
   source: ManagedInputSource;
   /** How long this attempt waits for the partner's runner, clamped to what is
    * left of the window so the last attempt ends AT the close rather than past
