@@ -206,11 +206,38 @@ export function appendParkedResults(
   return { version: PARKED_RESULTS_VERSION, entries: [...kept, entry] };
 }
 
-/** The name a scheduled run's results file takes: the run's own instant, made
- * filesystem-safe the same way the record downloads are stamped
- * ({@link ./runOutputs.ts}). It names the file both ways the results can reach
- * the operator, so two runs collide neither in the granted output folder nor in
- * the downloads folder a parked copy lands in. */
-export function runResultsFileName(runAt: string): string {
-  return `psilink-results-${recordFileStamp(runAt)}.csv`;
+/** How many characters of the exchange's label reach the results file name. The
+ * label's own cap is 120 characters; with the fixed prefix and the run stamp
+ * beside it, a name built from all of them approaches a filesystem's limit on one
+ * path component. */
+const MAX_RESULTS_FILE_LABEL_CHARS = 40;
+
+/** The exchange's label as a file-name fragment: ASCII letters and digits, every
+ * other run of characters reduced to one hyphen. A label reduces to the empty
+ * string where it holds none of those, and the name then omits the fragment
+ * rather than standing a bare hyphen in for it. The reduction is also what keeps
+ * a path separator or a traversal segment out of a name that reaches a real
+ * filesystem through the granted folder. */
+function resultsFileLabelSlug(label: string): string {
+  return label
+    .replace(/[^A-Za-z0-9]+/g, "-")
+    .slice(0, MAX_RESULTS_FILE_LABEL_CHARS)
+    .replace(/^-+|-+$/g, "");
+}
+
+/**
+ * The name a scheduled run's results file takes: the exchange's own label and the
+ * run's instant, made filesystem-safe the same way the record downloads are
+ * stamped ({@link ./runOutputs.ts}). It names the file both ways the results can
+ * reach the operator, so two runs collide neither in the granted output folder nor
+ * in the downloads folder a parked copy lands in, and an operator who granted one
+ * folder to two exchanges reads whose results a file holds off its name.
+ *
+ * Two runs at the same millisecond, or two exchanges whose labels reduce to the
+ * same fragment and run at it, still name one file; the later write takes it.
+ */
+export function runResultsFileName(label: string, runAt: string): string {
+  const slug = resultsFileLabelSlug(label);
+  const stamp = recordFileStamp(runAt);
+  return `psilink-results-${slug === "" ? "" : `${slug}-`}${stamp}.csv`;
 }

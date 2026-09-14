@@ -66,7 +66,10 @@ const mockedPark = vi.mocked(parkRunResults);
 const mockedRefusal = vi.mocked(recordParkedResultsRefusal);
 const mockedWrittenNote = vi.mocked(recordResultsWrittenToFolder);
 
-const RECORD = { id: "record-under-test" } as ManagedExchangeRecord;
+const RECORD = {
+  id: "record-under-test",
+  label: "Riverbend quarterly",
+} as ManagedExchangeRecord;
 
 /** The granted output folder, as the run reaches it: a permission state it
  * reports without prompting, and a write that either takes the bytes or throws.
@@ -100,6 +103,7 @@ function grantedFolder({
     written,
     record: {
       id: RECORD.id,
+      label: RECORD.label,
       outputDirectoryHandle: handle as unknown as FileSystemDirectoryHandle,
     } as ManagedExchangeRecord,
   };

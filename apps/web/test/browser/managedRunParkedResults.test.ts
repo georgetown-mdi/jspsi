@@ -51,6 +51,9 @@ const reads = vi.mocked(readParkedResults);
 
 const RUN_AT = "2026-03-01T09:00:00.000Z";
 
+/** The label the parked results file names are built from. */
+const RESULTS_LABEL = "Riverbend quarterly";
+
 /** The bytes a parked run's results hold, asserted back out of the download. */
 const RESULTS_CSV = "id,county\nA-19,Riverbend\n";
 
@@ -93,7 +96,7 @@ function parked(): ParkedResultsRead {
         {
           kind: "results",
           runAt: RUN_AT,
-          fileName: runResultsFileName(RUN_AT),
+          fileName: runResultsFileName(RESULTS_LABEL, RUN_AT),
           csv: new Blob([RESULTS_CSV], { type: "text/csv" }),
           matchedRecordCount: 1,
         },
@@ -200,7 +203,9 @@ describe("a copy a hand-off spent", () => {
 
       await downloads.settled();
       expect(downloads.captured).toHaveLength(1);
-      expect(downloads.captured[0].fileName).toBe(runResultsFileName(RUN_AT));
+      expect(downloads.captured[0].fileName).toBe(
+        runResultsFileName(RESULTS_LABEL, RUN_AT),
+      );
       expect(downloads.captured[0].text).toBe(RESULTS_CSV);
     } finally {
       downloads.restore();

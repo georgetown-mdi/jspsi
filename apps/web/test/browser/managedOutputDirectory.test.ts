@@ -55,6 +55,13 @@ function newExchange(
   };
 }
 
+/** The label the results file names are built from here. */
+const LABEL = "Riverbend quarterly";
+
+/** This suite's two run instants, a week apart. */
+const FIRST_RUN = "2026-03-01T09:00:00.000Z";
+const SECOND_RUN = "2026-03-08T09:00:00.000Z";
+
 const OPFS_NAMES: Array<string> = [];
 
 /** An origin-private-file-system directory, tracked for removal. */
@@ -131,7 +138,7 @@ describe("writing a run's results into a real granted folder", () => {
 
     const delivery = await writeResultsToOutputDirectory(
       folder,
-      runResultsFileName("2026-03-01T09:00:00.000Z"),
+      runResultsFileName(LABEL, FIRST_RUN),
       new Blob([csv], { type: "text/csv" }),
     );
 
@@ -140,26 +147,103 @@ describe("writing a run's results into a real granted folder", () => {
       directoryName: "results-written",
     });
     const written = await folder.getFileHandle(
-      runResultsFileName("2026-03-01T09:00:00.000Z"),
+      runResultsFileName(LABEL, FIRST_RUN),
     );
     expect(await (await written.getFile()).text()).toBe(csv);
   });
 
   test("leaves successive runs' results beside each other rather than overwriting", async () => {
     const folder = await trackedOpfsDirectory("results-accumulating");
-    for (const runAt of [
-      "2026-03-01T09:00:00.000Z",
-      "2026-03-08T09:00:00.000Z",
-    ])
+    for (const runAt of [FIRST_RUN, SECOND_RUN])
       await writeResultsToOutputDirectory(
         folder,
-        runResultsFileName(runAt),
+        runResultsFileName(LABEL, runAt),
         new Blob([`id\n${runAt}\n`], { type: "text/csv" }),
       );
 
     expect(await entryNames(folder)).toEqual([
-      runResultsFileName("2026-03-01T09:00:00.000Z"),
-      runResultsFileName("2026-03-08T09:00:00.000Z"),
+      runResultsFileName(LABEL, FIRST_RUN),
+      runResultsFileName(LABEL, SECOND_RUN),
     ]);
+  });
+});
+
+/**
+ * A granted folder whose write refuses the bytes, wrapping a REAL directory: the
+ * entry `getFileHandle` creates, the stream it hands back, the abort the failure
+ * path takes, and the removal that follows are all Chromium's own, so what the
+ * folder is left holding is the platform's answer rather than a fake's. `partial`
+ * is written through before the refusal, for the stream that already holds bytes.
+ */
+function refusingWriteFolder(
+  real: FileSystemDirectoryHandle,
+  partial?: Blob,
+): FileSystemDirectoryHandle {
+  return {
+    name: real.name,
+    getFileHandle: async (
+      fileName: string,
+      options?: FileSystemGetFileOptions,
+    ) => {
+      const file = await real.getFileHandle(fileName, options);
+      return {
+        createWritable: async () => {
+          const writable = await file.createWritable();
+          return {
+            write: async () => {
+              if (partial !== undefined) await writable.write(partial);
+              throw new Error("the folder refused the bytes");
+            },
+            close: () => writable.close(),
+            abort: () => writable.abort(),
+          };
+        },
+      };
+    },
+    removeEntry: (name: string, options?: FileSystemRemoveOptions) =>
+      real.removeEntry(name, options),
+  } as unknown as FileSystemDirectoryHandle;
+}
+
+describe("a write into a real granted folder that fails", () => {
+  // Chromium creates the entry at getFileHandle, before a byte is written, and
+  // aborting the stream discards what the stream held rather than the entry. A
+  // failed write would therefore leave an empty results-named file in the
+  // operator's folder while the next visit says the results are in the browser.
+  test("leaves no empty results file behind, whether or not bytes were written", async () => {
+    for (const partial of [undefined, new Blob(["id,county\n"])]) {
+      const tag = partial === undefined ? "before-any-byte" : "mid-stream";
+      const folder = await trackedOpfsDirectory(`results-failed-${tag}`);
+
+      const delivery = await writeResultsToOutputDirectory(
+        refusingWriteFolder(folder, partial),
+        runResultsFileName(LABEL, FIRST_RUN),
+        new Blob(["id,county\nA-19,Riverbend\n"], { type: "text/csv" }),
+      );
+
+      expect(delivery.kind).toBe("write-failed");
+      expect(await entryNames(folder)).toEqual([]);
+    }
+  });
+
+  test("leaves a file the folder already held exactly as it was", async () => {
+    const folder = await trackedOpfsDirectory("results-failed-over-existing");
+    const fileName = runResultsFileName(LABEL, FIRST_RUN);
+    const earlier = "id,county\nA-01,Riverbend\n";
+    const standing = await folder.getFileHandle(fileName, { create: true });
+    const opening = await standing.createWritable();
+    await opening.write(new Blob([earlier]));
+    await opening.close();
+
+    const delivery = await writeResultsToOutputDirectory(
+      refusingWriteFolder(folder, new Blob(["id,county\n"])),
+      fileName,
+      new Blob(["id,county\nA-19,Riverbend\n"], { type: "text/csv" }),
+    );
+
+    expect(delivery.kind).toBe("write-failed");
+    expect(await entryNames(folder)).toEqual([fileName]);
+    const kept = await folder.getFileHandle(fileName);
+    expect(await (await kept.getFile()).text()).toBe(earlier);
   });
 });

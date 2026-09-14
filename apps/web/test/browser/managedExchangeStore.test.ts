@@ -113,6 +113,9 @@ function newExchange(
  * would assert nothing from that day on. */
 const DAY_MS = 86_400_000;
 const RUN_AT = new Date(Date.now() - 2 * DAY_MS).toISOString();
+
+/** The label the parked results file names are built from. */
+const RESULTS_LABEL = "Riverbend quarterly";
 const LATER_RUN_AT = new Date(Date.now() - DAY_MS).toISOString();
 
 /** The bytes a parked run's results hold, asserted back out of the store. */
@@ -123,7 +126,7 @@ function parkedRun(runAt = RUN_AT) {
   return {
     kind: "results" as const,
     runAt,
-    fileName: runResultsFileName(runAt),
+    fileName: runResultsFileName(RESULTS_LABEL, runAt),
     csv: new Blob([RESULTS_CSV], { type: "text/csv" }),
     matchedRecordCount: 1,
   };
@@ -1249,7 +1252,7 @@ describe("a scheduled run's results wait for the next visit", () => {
     expect(entry.kind).toBe("results");
     if (entry.kind !== "results") return;
     expect(entry.runAt).toBe(RUN_AT);
-    expect(entry.fileName).toBe(runResultsFileName(RUN_AT));
+    expect(entry.fileName).toBe(runResultsFileName(RESULTS_LABEL, RUN_AT));
     expect(entry.matchedRecordCount).toBe(1);
     // The bytes themselves, not a reference to a blob URL the run's runtime
     // revoked as it settled.

@@ -452,10 +452,11 @@ export function outputFolderGrant(
  * when the run happens. */
 export const OUTPUT_FOLDER_GRANT_NOTE =
   "Choose a folder for this exchange's results. A run that happens with nobody " +
-  "present writes its results there, one file per run, named by the run's date " +
-  "and time so later runs do not overwrite earlier ones. Your browser only lets " +
-  "you choose a folder while you are here, so choose it now; the run itself " +
-  "never asks.";
+  "present writes its results there, one file per run, named by this " +
+  "exchange's label and the run's date and time, so later runs do not " +
+  "overwrite earlier ones and another exchange's results are not mistaken for " +
+  "these. Your browser only lets you choose a folder while you are here, so " +
+  "choose it now; the run itself never asks.";
 
 /** What the operator is told where this browser cannot take a folder grant at
  * all, so the choice is not presented as one they declined to make. */
@@ -471,6 +472,14 @@ export function outputFolderGrantedNote(name: string): string {
     `you choose another or stop using one; deleting this exchange drops it too.`
   );
 }
+
+/** What the operator is told about a folder they granted while this exchange is
+ * not on a schedule: the runs are what stopped, not the grant, and dropping the
+ * grant is the control beside this line. */
+export const OUTPUT_FOLDER_UNSCHEDULED_NOTE =
+  "This exchange is not on a schedule, so no run writes to this folder until " +
+  "you put it on one. The grant stands either way, until you stop using the " +
+  "folder here or delete the exchange.";
 
 /** The guidance the grant carries on which folder to choose. A folder granted to
  * this site is readable and writable by it, so a folder of its own is the

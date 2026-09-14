@@ -60,6 +60,7 @@ import {
   MIN_SCHEDULE_WINDOW_HOURS,
   OUTPUT_FOLDER_GRANT_NOTE,
   OUTPUT_FOLDER_SCOPE_NOTE,
+  OUTPUT_FOLDER_UNSCHEDULED_NOTE,
   OUTPUT_FOLDER_UNSUPPORTED_NOTE,
   buildScheduleFromEntry,
   cadenceAgainstTokenBound,
@@ -335,6 +336,17 @@ function ConfigurationView({
  * stored secret between runs, and the operator needs both values in front of
  * them to weigh that (see {@link cadenceAgainstTokenBound}). One Save writes
  * both through the store's single local-fields edit.
+ *
+ * Where a scheduled run's results go is settled here too, under the cadence and
+ * in the order the operator should decide it: the folder grant first, as the path
+ * to take ({@link OutputFolderGrantField}), and what happens without one --
+ * results kept in this browser, which is row values on this disk
+ * ({@link ./parkedResultsModel.ts}) -- after it. Both statements belong before
+ * the save, because scheduling is the decision that starts producing results
+ * nobody is present to take. The grant, unlike them, is not the schedule's: it
+ * takes effect on its own gesture rather than on a save, and it is shown for as
+ * long as one is held, so the operator who turns the schedule off still has the
+ * folder named and the control to stop using it.
  */
 function LocalFieldsEditor({
   record,
@@ -387,6 +399,11 @@ function LocalFieldsEditor({
     ? cadenceAgainstTokenBound(schedule.intervalDays, tokenMaxAgeDays)
     : undefined;
   const labelValid = labelWithinCap(label);
+  const grant = outputFolderGrant(
+    record.outputDirectoryHandle,
+    storedOutputDirectoryUsable(record.outputDirectoryHandle),
+    outputDirectoryGrantSupported(),
+  );
   const canSave =
     labelValid &&
     scheduleValid &&
@@ -483,14 +500,27 @@ function LocalFieldsEditor({
           fields={schedule}
           errors={scheduleErrors}
           onEdit={editSchedule}
-          grant={outputFolderGrant(
-            record.outputDirectoryHandle,
-            storedOutputDirectoryUsable(record.outputDirectoryHandle),
-            outputDirectoryGrantSupported(),
-          )}
-          onGrantOutputFolder={onGrantOutputFolder}
-          onStopUsingOutputFolder={onStopUsingOutputFolder}
         />
+      )}
+      {/* A granted folder stands until the operator drops it, so what names it
+          and what stops using it are shown whenever one is held, schedule or no
+          schedule. */}
+      {(scheduleEnabled || grant.kind === "granted") && (
+        <OutputFolderGrantField
+          grant={grant}
+          scheduled={scheduleEnabled}
+          onGrant={onGrantOutputFolder}
+          onStopUsing={onStopUsingOutputFolder}
+        />
+      )}
+      {scheduleEnabled && (
+        <Alert
+          color="blue"
+          title="Where a scheduled run's results go without a folder"
+          mt="sm"
+        >
+          {PARKED_RESULTS_SCHEDULE_NOTE}
+        </Alert>
       )}
       <Checkbox
         label="Set a maximum age for the stored secret"
@@ -572,28 +602,17 @@ function LocalFieldsEditor({
  * cadence agreed with a partner and read off a message, and typing it back is
  * the shortest path from that message to the field.
  *
- * It also settles where a scheduled run's results go, in the order the operator
- * should decide it: the folder grant first, as the path to take, and what happens
- * without one -- results kept in this browser, which is row values on this disk --
- * after it ({@link OutputFolderGrantField},
- * {@link ./parkedResultsModel.ts}). Both statements belong here, before the save,
- * because scheduling is the decision that starts producing results nobody is
- * present to take.
+ * Where those runs' results go is settled below it rather than in it, by
+ * {@link LocalFieldsEditor}: the grant stands whether or not the schedule does.
  */
 function ScheduleEntryFieldset({
   fields,
   errors,
   onEdit,
-  grant,
-  onGrantOutputFolder,
-  onStopUsingOutputFolder,
 }: {
   fields: ScheduleEntryFields;
   errors: ReturnType<typeof scheduleEntryErrors>;
   onEdit: (edits: Partial<ScheduleEntryFields>) => void;
-  grant: OutputFolderGrant;
-  onGrantOutputFolder: () => Promise<void>;
-  onStopUsingOutputFolder: () => Promise<void>;
 }) {
   const resolved = resolvedFirstWindowLabel(fields);
   // NumberInput rounds what it displays and clamps an out-of-range value to
@@ -659,18 +678,6 @@ function ScheduleEntryFieldset({
           later window is counted from it.
         </p>
       )}
-      <OutputFolderGrantField
-        grant={grant}
-        onGrant={onGrantOutputFolder}
-        onStopUsing={onStopUsingOutputFolder}
-      />
-      <Alert
-        color="blue"
-        title="Where a scheduled run's results go without a folder"
-        mt="sm"
-      >
-        {PARKED_RESULTS_SCHEDULE_NOTE}
-      </Alert>
     </>
   );
 }
@@ -687,13 +694,22 @@ function ScheduleEntryFieldset({
  * A browser that cannot grant a folder says so rather than offering a control
  * that would fail, and the folder's own reach -- everything in it, readable and
  * writable while the grant stands -- is stated where the folder is chosen.
+ *
+ * A grant held while `scheduled` is false is the state the caller keeps this
+ * shown for: turning the schedule off stops the runs, not the grant, so the
+ * folder is named and the stop-using control offered with the runs off, over copy
+ * saying that nothing writes there until a schedule is set again.
  */
 function OutputFolderGrantField({
   grant,
+  scheduled,
   onGrant,
   onStopUsing,
 }: {
   grant: OutputFolderGrant;
+  /** Whether the form has this exchange on a schedule, so the copy states what a
+   * standing grant does while the runs are off. */
+  scheduled: boolean;
   onGrant: () => Promise<void>;
   onStopUsing: () => Promise<void>;
 }) {
@@ -727,6 +743,11 @@ function OutputFolderGrantField({
       {grant.kind === "granted" && (
         <p className={`${styles.small} ${styles.sub}`}>
           {outputFolderGrantedNote(grant.name)}
+        </p>
+      )}
+      {grant.kind === "granted" && !scheduled && (
+        <p className={`${styles.small} ${styles.sub}`}>
+          {OUTPUT_FOLDER_UNSCHEDULED_NOTE}
         </p>
       )}
       {failed === "grant" && (

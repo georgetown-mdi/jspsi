@@ -460,8 +460,9 @@ put an exchange on a schedule and again where they collect the results:
   secret and filed its disclosure.
 
 Each unattended run leaves its own entry, so two runs between visits leave two
-files -- in the granted folder as in the browser, each named by its own run's
-date and time, so a later run never overwrites an earlier one. Only the results
+files -- in the granted folder as in the browser, each named by the exchange's
+label and its own run's date and time, so a later run never overwrites an earlier
+one and two exchanges granted the same folder stay told apart. Only the results
 are kept; the run's disclosure record is already in [the accounting of
 disclosures](#the-accounting-of-disclosures), and a count-only run or one whose
 agreed terms give this party no output has no file to keep.

@@ -39,17 +39,25 @@ function fakePermission(state: "granted" | "denied" | "prompt") {
   return seam as typeof seam & HandlePermissionQuery;
 }
 
-/** A granted folder built to the calls the write makes: `getFileHandle` with
- * `create`, then one writable the bytes go through. `failWrite` makes the stream
- * refuse them, as a full disk or a removed folder would. */
-function fakeFolder(failWrite?: Error) {
+/** A granted folder built to the calls the write makes: `getFileHandle`, with
+ * `create` for the entry it writes and without it to ask whether the folder
+ * already holds that name, then one writable the bytes go through, and
+ * `removeEntry` for the entry a failed write leaves empty. `failWrite` makes the
+ * stream refuse the bytes, as a full disk or a removed folder would; `holding`
+ * are the names the folder already has. */
+function fakeFolder(failWrite?: Error, holding: Array<string> = []) {
   const written: Array<{ fileName: string; text: string }> = [];
   const aborted: Array<string> = [];
+  const opened: Array<{ fileName: string; create: boolean }> = [];
+  const names = new Set(holding);
   const handle = {
     name: "Riverbend results",
     getFileHandle: (fileName: string, options?: { create?: boolean }) => {
-      if (options?.create !== true)
-        return Promise.reject(new Error("the write must create the entry"));
+      const create = options?.create === true;
+      opened.push({ fileName, create });
+      if (!create && !names.has(fileName))
+        return Promise.reject(new Error("this folder holds no such entry"));
+      names.add(fileName);
       return Promise.resolve({
         createWritable: () =>
           Promise.resolve({
@@ -65,10 +73,16 @@ function fakeFolder(failWrite?: Error) {
           }),
       });
     },
+    removeEntry: (fileName: string) =>
+      names.delete(fileName)
+        ? Promise.resolve()
+        : Promise.reject(new Error("this folder holds no such entry")),
   };
   return {
     written,
     aborted,
+    opened,
+    names,
     handle: handle as unknown as FileSystemDirectoryHandle,
   };
 }
@@ -143,6 +157,9 @@ describe("writing a run's results into the granted folder", () => {
     expect(folder.written).toEqual([
       { fileName: "psilink-results-2026-03-01.csv", text: RESULTS_CSV },
     ]);
+    // The entry is opened with `create`, which is what makes a first run's file
+    // exist at all.
+    expect(folder.opened.at(-1)?.create).toBe(true);
     // The write is queried in readwrite, and never prompted: nobody is present.
     expect(permission.modes).toEqual(["readwrite"]);
     expect(permission.requested).toBe(false);
@@ -177,6 +194,54 @@ describe("writing a run's results into the granted folder", () => {
     expect(delivery.kind).toBe("write-failed");
     expect(folder.written).toHaveLength(0);
     expect(folder.aborted).toEqual(["psilink-results-2026-03-01.csv"]);
+  });
+
+  test("removes the empty entry a failed write created", async () => {
+    const folder = fakeFolder(new Error("the disk is full"));
+    await writeResultsToOutputDirectory(
+      folder.handle,
+      "psilink-results-2026-03-01.csv",
+      new Blob([RESULTS_CSV]),
+      fakePermission("granted"),
+    );
+
+    expect([...folder.names]).toEqual([]);
+  });
+
+  test("keeps a file the folder already held when the write fails", async () => {
+    const folder = fakeFolder(new Error("the disk is full"), [
+      "psilink-results-2026-03-01.csv",
+      "last-quarter.csv",
+    ]);
+    await writeResultsToOutputDirectory(
+      folder.handle,
+      "psilink-results-2026-03-01.csv",
+      new Blob([RESULTS_CSV]),
+      fakePermission("granted"),
+    );
+
+    expect([...folder.names].sort()).toEqual([
+      "last-quarter.csv",
+      "psilink-results-2026-03-01.csv",
+    ]);
+  });
+
+  test("never rejects over a folder that will not take the removal", async () => {
+    const folder = fakeFolder(new Error("the disk is full"));
+    const refusingRemoval = {
+      name: "Riverbend results",
+      getFileHandle: folder.handle.getFileHandle,
+      removeEntry: () => Promise.reject(new Error("the folder is read-only")),
+    } as unknown as FileSystemDirectoryHandle;
+
+    await expect(
+      writeResultsToOutputDirectory(
+        refusingRemoval,
+        "psilink-results-2026-03-01.csv",
+        new Blob([RESULTS_CSV]),
+        fakePermission("granted"),
+      ),
+    ).resolves.toMatchObject({ kind: "write-failed" });
   });
 
   test("never rejects: the run it belongs to has already completed", async () => {

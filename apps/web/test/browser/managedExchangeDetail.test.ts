@@ -43,6 +43,7 @@ import {
   UNREADABLE_PARKED_RESULTS_NOTE,
 } from "@recurring/parkedResultsModel";
 import { PARKED_RESULTS_VERSION, runResultsFileName } from "@psi/parkedResults";
+import { OUTPUT_FOLDER_UNSCHEDULED_NOTE } from "@recurring/scheduleEntryModel";
 
 import {
   disclosureRecord,
@@ -534,6 +535,58 @@ describe("managed exchange detail schedule entry", () => {
       .element(page.getByText("That folder was not removed"))
       .toBeInTheDocument();
     expect(page.getByText("That folder was not set").query()).toBeNull();
+  });
+
+  test("a granted folder stays shown with scheduling off, and can still be dropped", async () => {
+    // Turning the schedule off stops the runs, not the grant: a surface gated on
+    // the schedule would leave the folder granted with nothing naming it and no
+    // way to drop it short of deleting the exchange.
+    const anchor = new Date(Date.now() + 3600_000).toISOString();
+    const { granted } = renderEntry(
+      {
+        anchor,
+        intervalDays: 7,
+        windowSeconds: 10_800,
+        nextWindow: anchor,
+        consecutiveMisses: 0,
+      },
+      await opfsDirectory("results-unscheduled"),
+    );
+
+    await expect.element(scheduleCheckbox()).toBeChecked();
+    await scheduleCheckbox().click();
+
+    // The cadence fields are gone with the schedule; the grant is not.
+    expect(
+      page.getByLabelText("A window opens every (days)").query(),
+    ).toBeNull();
+    await expect
+      .element(page.getByText("results-unscheduled", { exact: false }))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText(OUTPUT_FOLDER_UNSCHEDULED_NOTE))
+      .toBeInTheDocument();
+    await page
+      .getByRole("button", { name: "Stop writing to this folder" })
+      .click();
+    expect(granted).toEqual(["stopped"]);
+  });
+
+  test("shows nothing of the results folder with scheduling off and no folder granted", async () => {
+    renderEntry();
+
+    await expect.element(scheduleCheckbox()).not.toBeChecked();
+    expect(page.getByRole("heading", { name: "Results folder" }).query()).toBe(
+      null,
+    );
+    expect(page.getByRole("button", { name: "Choose folder" }).query()).toBe(
+      null,
+    );
+    expect(
+      page
+        .getByText("Where a scheduled run's results go without a folder")
+        .query(),
+    ).toBe(null);
   });
 
   test("scheduling is off by default, and the fields appear only once it is on", async () => {
@@ -2431,6 +2484,8 @@ describe("an accounting read still in flight", () => {
 
 describe("the results a scheduled run left for this visit", () => {
   const RUN_AT = "2026-03-01T09:00:00.000Z";
+  /** The label the parked results file names are built from. */
+  const RESULTS_LABEL = "Riverbend quarterly";
   const RESULTS_CSV = "id,county\nA-19,Riverbend\n";
 
   const scheduled = (): ManagedExchangeSchedule => {
@@ -2481,7 +2536,7 @@ describe("the results a scheduled run left for this visit", () => {
           {
             kind: "results",
             runAt: RUN_AT,
-            fileName: runResultsFileName(RUN_AT),
+            fileName: runResultsFileName(RESULTS_LABEL, RUN_AT),
             csv: new Blob([RESULTS_CSV], { type: "text/csv" }),
             matchedRecordCount: 1,
           },
@@ -2502,7 +2557,9 @@ describe("the results a scheduled run left for this visit", () => {
 
       await downloads.settled();
       expect(downloads.captured).toHaveLength(1);
-      expect(downloads.captured[0].fileName).toBe(runResultsFileName(RUN_AT));
+      expect(downloads.captured[0].fileName).toBe(
+        runResultsFileName(RESULTS_LABEL, RUN_AT),
+      );
       expect(downloads.captured[0].text).toBe(RESULTS_CSV);
     } finally {
       downloads.restore();

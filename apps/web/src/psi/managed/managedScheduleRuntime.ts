@@ -274,7 +274,7 @@ async function deliverUnattendedResults(
     );
     return;
   }
-  const fileName = runResultsFileName(runAt);
+  const fileName = runResultsFileName(record.label, runAt);
   const matched =
     outputs.matchedRecordCount !== undefined
       ? { matchedRecordCount: outputs.matchedRecordCount }

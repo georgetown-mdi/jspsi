@@ -114,14 +114,44 @@ export type ResultsDelivery =
    * created, or the stream refused the bytes. */
   | { kind: "write-failed"; error: unknown };
 
+/** Whether the folder already holds an entry under this name, so a failed write
+ * removes only an entry that write created itself. */
+async function entryHeldAlready(
+  directory: FileSystemDirectoryHandle,
+  fileName: string,
+): Promise<boolean> {
+  return directory.getFileHandle(fileName).then(
+    () => true,
+    () => false,
+  );
+}
+
+/** Drop the entry a failed write created, best-effort: a folder that refuses the
+ * removal leaves the empty file behind, which a completed run may not fail
+ * over. */
+async function dropCreatedEntry(
+  directory: FileSystemDirectoryHandle,
+  fileName: string,
+): Promise<void> {
+  try {
+    await directory.removeEntry(fileName);
+  } catch {
+    return;
+  }
+}
+
 /**
  * Write one run's results CSV into the granted folder, under a name that holds
- * the run's own instant so successive runs accumulate rather than overwrite
- * ({@link ../parkedResults.ts}, `runResultsFileName`).
+ * the exchange's label and the run's own instant so successive runs accumulate
+ * rather than overwrite ({@link ../parkedResults.ts}, `runResultsFileName`).
  *
  * The permission is QUERIED in `readwrite` and never prompted: this runs with
  * nobody present. `permission` is the injectable permission layer, defaulting to
  * the platform's.
+ *
+ * A write that fails leaves the folder as it found it: the platform creates the
+ * entry before any byte reaches it, so the empty file is removed rather than left
+ * standing for results the caller then keeps in the browser.
  */
 export async function writeResultsToOutputDirectory(
   directory: FileSystemDirectoryHandle,
@@ -143,7 +173,9 @@ export async function writeResultsToOutputDirectory(
     };
   }
   let writable: FileSystemWritableFileStream | undefined;
+  let heldAlready = true;
   try {
+    heldAlready = await entryHeldAlready(directory, fileName);
     const file = await directory.getFileHandle(fileName, { create: true });
     writable = await file.createWritable();
     await writable.write(csv);
@@ -151,8 +183,11 @@ export async function writeResultsToOutputDirectory(
     return { kind: "written", fileName, directoryName: directory.name };
   } catch (error) {
     // Aborting releases the stream a failed write left open; a stream that never
-    // closes commits nothing.
+    // closes commits nothing. What it does not undo is the entry `getFileHandle`
+    // created, which the removal takes -- and only when this write created it, so
+    // a file the folder already held is never the one dropped.
     if (writable !== undefined) await writable.abort().catch(() => undefined);
+    if (!heldAlready) await dropCreatedEntry(directory, fileName);
     return { kind: "write-failed", error };
   }
 }
