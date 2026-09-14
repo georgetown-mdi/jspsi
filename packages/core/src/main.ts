@@ -293,6 +293,7 @@ export {
   TEXT_CONTROL_CHAR_MESSAGE,
   TEXT_CONTROL_CHAR_PATTERN,
   TEXT_DIRECTION_MESSAGE,
+  reasonTermsCannotStateIdentity,
   referencedLinkageFieldNames,
   safeParseLinkageTerms,
   safeParseLinkageTermsTheReaderWrote,

@@ -1,8 +1,7 @@
 import {
-  BIDI_CONTROL_PATTERN,
   OperatorConfigError,
-  TEXT_CONTROL_CHAR_PATTERN,
   certificateAuthorizesIdentity,
+  reasonTermsCannotStateIdentity,
   redactAndDisplayPartyIdentity,
 } from "@psilink/core";
 import type { CertificateBody } from "@psilink/core";
@@ -47,12 +46,14 @@ const RECONCILE_GUIDANCE =
   "fingerprint your partner pins, so it needs a coordinated re-pin.";
 
 // The exit for the one divergence the guidance above cannot resolve: a
-// certificate bound to a label holding a character the terms refuse in
-// `identity`. No terms document may state that label, so the local config edit
-// is closed to its holder and a re-key is the only exit left. Core names the
-// same exit at its own boundary
-// (assertLocalCertificateAuthorizesAgreedIdentity in @psilink/core), which an
-// exchange reaches only after this one.
+// certificate bound to a label the terms refuse in `identity`. No terms
+// document may state that label, so the local config edit is closed to its
+// holder and a re-key is the only exit left. Which labels those are, and the
+// clause naming the class without quoting the label, are core's own answer
+// (reasonTermsCannotStateIdentity in @psilink/core), read rather than restated
+// so this boundary and the exchange boundary cannot disagree. Core names the
+// same exit at that boundary (assertLocalCertificateAuthorizesAgreedIdentity),
+// which an exchange reaches only after this one.
 const REKEY_GUIDANCE =
   "Re-key the signing identity with 'psilink fingerprint --force --identity' " +
   "under a label the terms admit, then have every partner re-pin the new " +
@@ -83,36 +84,13 @@ function divergesFromAgreedTerms(
 }
 
 /**
- * Whether the label `certificate` is bound to holds one of the two character
- * classes a terms document refuses in `identity`: the control characters
- * (`TEXT_CONTROL_CHAR_PATTERN`) and the nine text-direction embedding,
- * override and isolate characters (`BIDI_CONTROL_PATTERN`), both from
- * `@psilink/core`. `psilink fingerprint` refuses to bind such a label and the
- * certificate schema admits one already bound, so what reaches here was bound
- * by an earlier build or by another tool.
- *
- * The divergence it names has no reconciliation: no terms document may state
- * the label, so the local config edit the ordinary remedy offers first is not
- * one its holder can perform. Neither disposition below quotes any part of the
- * label -- the label is the offending text itself, and naming it back would
- * put those characters in front of the operator, which is the discipline the
- * binding check keeps.
- */
-function termsCannotStateBoundLabel(certificate: CertificateBody): boolean {
-  return (
-    TEXT_CONTROL_CHAR_PATTERN.test(certificate.identity) ||
-    BIDI_CONTROL_PATTERN.test(certificate.identity)
-  );
-}
-
-/**
  * Warn when `certificate` is bound to an identity other than `termsIdentity`,
  * naming both values and the two ways to reconcile them. Silent when they agree
  * and when there is nothing to diverge from (see {@link divergesFromAgreedTerms}).
  * `psilink fingerprint`'s disposition of the divergence.
  *
  * A bound label the terms cannot state takes the re-key exit instead and is
- * not named at all (see {@link termsCannotStateBoundLabel}).
+ * not named at all (`reasonTermsCannotStateIdentity` in `@psilink/core`).
  *
  * Both identities are escaped here, the single escape site since neither
  * value ever becomes an `Error` on this path (CONTRIBUTING.md,
@@ -127,12 +105,13 @@ export function warnOnIdentityDivergence(
 ): void {
   if (!divergesFromAgreedTerms(certificate, termsIdentity)) return;
   const termsLabel = redactAndDisplayPartyIdentity(termsIdentity);
-  if (termsCannotStateBoundLabel(certificate)) {
+  const unstatable = reasonTermsCannotStateIdentity(certificate.identity);
+  if (unstatable !== undefined) {
     log.warn(
       "the signing identity is bound to a label the linkage terms cannot " +
-        "state -- it holds a control or text-direction character -- so it " +
-        `differs from linkage_terms.identity "${termsLabel}" in the config, ` +
-        "and no edit of that field can bring the two into agreement. " +
+        `state -- ${unstatable} -- so it differs from ` +
+        `linkage_terms.identity "${termsLabel}" in the config, and no edit ` +
+        "of that field can bring the two into agreement. " +
         `${DIVERGENCE_CONSEQUENCE} ${REKEY_GUIDANCE}`,
     );
     return;
@@ -173,9 +152,9 @@ export function warnOnIdentityDivergence(
  * this paragraph (`exchangeSigning.test.ts`).
  *
  * A bound label the terms cannot state takes a refusal of its own, naming the
- * re-key exit and no part of the label (see
- * {@link termsCannotStateBoundLabel}). It names one value rather than two, so
- * the room the paragraph above reserves covers it as well.
+ * re-key exit and no part of the label (`reasonTermsCannotStateIdentity` in
+ * `@psilink/core`). It names one value rather than two, so the room the
+ * paragraph above reserves covers it as well.
  *
  * @throws {OperatorConfigError} when the certificate is bound to a different
  *   identity than the run's agreed terms hold.
@@ -185,12 +164,13 @@ export function assertIdentityMatchesAgreedTerms(
   termsIdentity: string | undefined,
 ): void {
   if (!divergesFromAgreedTerms(certificate, termsIdentity)) return;
-  if (termsCannotStateBoundLabel(certificate))
+  const unstatable = reasonTermsCannotStateIdentity(certificate.identity);
+  if (unstatable !== undefined)
     throw new OperatorConfigError(
       "this exchange signs receipts (signing.mode: certificate), but the " +
         "signing identity is bound to a label the linkage terms cannot " +
-        "state -- it holds a control or text-direction character -- so it " +
-        "cannot finish: your partner authorizes the certificate against the " +
+        `state -- ${unstatable} -- so it cannot finish: your partner ` +
+        "authorizes the certificate against the " +
         "agreed terms and rejects it, and no edit of linkage_terms.identity " +
         "can bring the two into agreement, because the terms refuse that " +
         `label too. ${REKEY_GUIDANCE} ` +

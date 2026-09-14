@@ -133,11 +133,14 @@ const RECORDED_SITES: readonly ConfigErrorSite[] = [
     file: "packages/core/src/exchange.ts",
     anchor: "assertLocalCertificateAuthorizesAgreedIdentity",
     raises: "OperatorConfigError",
-    interpolates: ["agreedIdentity"],
+    interpolates: ["agreedIdentity", "unstatable"],
     provenance:
       "the refusal for a certificate bound to a label a terms document cannot " +
-      "state names only `agreedIdentity`, whose provenance the entry below " +
-      "reaches; the bound label is not quoted here at all.",
+      "state names `agreedIdentity`, whose provenance the entry below " +
+      "reaches, and `unstatable`, one of the fixed clauses " +
+      "reasonTermsCannotStateIdentity returns (config/linkageTermsSchema.ts), " +
+      "each naming a class and no value; the bound label is not quoted here " +
+      "at all.",
   },
   {
     file: "packages/core/src/exchange.ts",
@@ -289,11 +292,13 @@ const RECORDED_SITES: readonly ConfigErrorSite[] = [
     file: "apps/cli/src/signingIdentityDivergence.ts",
     anchor: "assertIdentityMatchesAgreedTerms",
     raises: "OperatorConfigError",
-    interpolates: ["termsIdentity"],
+    interpolates: ["termsIdentity", "unstatable"],
     provenance:
       "the refusal for a certificate bound to a label the linkage terms " +
-      "cannot state names only `termsIdentity`, whose provenance the entry " +
-      "below reaches; the bound label is not quoted here at all.",
+      "cannot state names `termsIdentity`, whose provenance the entry below " +
+      "reaches, and `unstatable`, one of the fixed clauses core's " +
+      "reasonTermsCannotStateIdentity returns, each naming a class and no " +
+      "value; the bound label is not quoted here at all.",
   },
   {
     file: "apps/cli/src/signingIdentityDivergence.ts",

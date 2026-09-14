@@ -7,7 +7,11 @@ import {
   computeCertificateFingerprint,
   generateSigningIdentity,
   getLogger,
+  holdsPrivateKeyMaterial,
   MAX_TEXT_LENGTH,
+  PRIVATE_KEY_IDENTITY_MESSAGE,
+  reasonTermsCannotStateIdentity,
+  redactAndDisplayPartyIdentity,
   sanitizeErrorForDisplay,
   serializeCertificate,
   TEXT_CONTROL_CHAR_MESSAGE,
@@ -159,7 +163,7 @@ export function readConfigHints(
  *
  * The label reaches this command from `--identity` or `linkage_terms.identity`
  * without passing through `LinkageTermsSchema`, which is where every other
- * route into that field is bounded and refused its two character classes; the
+ * route into that field is bounded and refused its three content rules; the
  * console's fingerprint route applies the same rules at its own boundary.
  * Unchecked here, the CLI would mint certificates holding labels the terms
  * document itself refuses -- and this one is not a transient: it is bound into
@@ -170,16 +174,20 @@ export function readConfigHints(
  * binding continued by a `--force` re-key included: what a new certificate
  * holds is what the check is about.
  *
- * It holds the length bound and both classes the terms document refuses in
- * that field: the control characters ({@link TEXT_CONTROL_CHAR_PATTERN}), and
- * the nine text-direction embedding, override and isolate characters
- * ({@link BIDI_CONTROL_PATTERN}), one of which opens a layout scope that
- * reorders the copy the certificate's identity is displayed beside. The
- * implicit marks U+200E, U+200F and U+061C stay admitted, as they do there.
+ * It holds the length bound and all three content rules the terms document
+ * holds that field to: the control characters
+ * ({@link TEXT_CONTROL_CHAR_PATTERN}), the nine text-direction embedding,
+ * override and isolate characters ({@link BIDI_CONTROL_PATTERN}), one of which
+ * opens a layout scope that reorders the copy the certificate's identity is
+ * displayed beside, and private key material
+ * ({@link holdsPrivateKeyMaterial}), which a terms document refuses so a
+ * redaction marker cannot stand where a party names itself. The implicit marks
+ * U+200E, U+200F and U+061C stay admitted, as they do there.
  *
  * No message echoes the label. The offending value is the operator's own text
  * and naming it back adds nothing to a rule about its shape, which is the
- * discipline the terms document's own refusals keep.
+ * discipline the terms document's own refusals keep -- and a label holding a
+ * key must not be written back out at all.
  */
 function assertBindableIdentity(identity: string): void {
   if (TEXT_CONTROL_CHAR_PATTERN.test(identity))
@@ -192,6 +200,12 @@ function assertBindableIdentity(identity: string): void {
     throw new UsageError(
       "the identity to bind into the signing certificate cannot be used: " +
         `${TEXT_DIRECTION_MESSAGE}. Supply one that has none, through ` +
+        "--identity or linkage_terms.identity.",
+    );
+  if (holdsPrivateKeyMaterial(identity))
+    throw new UsageError(
+      "the identity to bind into the signing certificate cannot be used: " +
+        `${PRIVATE_KEY_IDENTITY_MESSAGE}. Supply this party's name, through ` +
         "--identity or linkage_terms.identity.",
     );
   if (identity.length > MAX_TEXT_LENGTH)
@@ -269,12 +283,24 @@ export async function resolveSigningIdentity(
     if (
       input.identityArg !== undefined &&
       input.identityArg !== existing.certificate.identity
-    )
-      input.log.warn(
-        `--identity is ignored: the existing identity is bound to ` +
-          `"${existing.certificate.identity}". Use --force to regenerate ` +
-          "(this invalidates any fingerprint your partner has pinned).",
+    ) {
+      // The bound label is never written out raw. One the linkage terms cannot
+      // state is named by its class alone -- it may hold a private key -- and
+      // any other reaches this log sink under the redaction and single escape
+      // pass every party identity takes (CONTRIBUTING.md, Operator-facing
+      // escaping).
+      const unstatable = reasonTermsCannotStateIdentity(
+        existing.certificate.identity,
       );
+      input.log.warn(
+        "--identity is ignored: the existing identity is bound to " +
+          (unstatable === undefined
+            ? `"${redactAndDisplayPartyIdentity(existing.certificate.identity)}"`
+            : `a label the linkage terms cannot state -- ${unstatable}`) +
+          ". Use --force to regenerate (this invalidates any fingerprint your " +
+          "partner has pinned).",
+      );
+    }
     warnIfDivergent(existing);
     return { identity: existing, action: "Loaded" };
   }

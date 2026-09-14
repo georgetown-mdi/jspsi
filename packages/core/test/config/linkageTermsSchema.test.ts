@@ -13,6 +13,7 @@ import {
   MAX_TEXT_LENGTH,
   NAME_SHAPE_MESSAGE,
   PRIVATE_KEY_IDENTITY_MESSAGE,
+  reasonTermsCannotStateIdentity,
   TEXT_CONTROL_CHAR_MESSAGE,
   TEXT_DIRECTION_MESSAGE,
   LONE_SURROGATE_MESSAGE,
@@ -2289,6 +2290,65 @@ test("the identity private-key refusal names the field by path, not the value", 
   expect(rendered).toContain(PRIVATE_KEY_IDENTITY_MESSAGE);
   expect(rendered).not.toContain("MIIBytes");
   expect(rendered).not.toContain("BEGIN OPENSSH PRIVATE KEY");
+});
+
+// --- The labels a terms document cannot state --------------------------------
+// The one answer both certificate-divergence dispositions read -- core's
+// exchange refusal and the CLI's warning -- about the label a signing
+// certificate is bound to. It must agree with the schema above on every rule
+// that schema holds `identity` to -- its own content rules, its length cap, and
+// the document-wide well-formedness rule alike: a label it admitted that the
+// schema refuses would send the holder to the reconcile remedy the schema then
+// refuses, and one it refused that the schema admits would deny a holder the
+// reconcile that works.
+
+test.each([
+  ["a control character", `Agency${NUL}A`],
+  ["a text-direction character", `Agency${RLO}A`],
+  ["private key material", `Agency A ${FAKE_KEY_IN_A_LABEL}`],
+  [
+    "a key block with no END marker",
+    "Agency A -----BEGIN RSA PRIVATE KEY-----",
+  ],
+  ["an unpaired UTF-16 surrogate", "Agency\ud800A"],
+  ["more characters than the field admits", "A".repeat(MAX_TEXT_LENGTH + 1)],
+])("no terms document states a label holding %s", (_class, label) => {
+  expect(reasonTermsCannotStateIdentity(label)).toBeTypeOf("string");
+  expect(
+    safeParseLinkageTerms(freeTextTerms({ identity: label })).success,
+  ).toBe(false);
+});
+
+test.each([
+  ["a plain name", "Agency A, a@agency-a.gov"],
+  ["a right-to-left name", "וכולה A"],
+  ["a direction mark", `Agency${LRM}A`],
+  ["a mention of a private key", "Agency A, private key holder"],
+  ["a paired surrogate", "Agency 🏢 A"],
+  ["exactly the characters the field admits", "A".repeat(MAX_TEXT_LENGTH)],
+])("a terms document states a label holding %s", (_class, label) => {
+  expect(reasonTermsCannotStateIdentity(label)).toBeUndefined();
+  expect(
+    safeParseLinkageTerms(freeTextTerms({ identity: label })).success,
+  ).toBe(true);
+});
+
+test("the reason names the class and no part of the label", () => {
+  for (const label of [
+    `Agency${RLO}A`,
+    `Agency A ${FAKE_KEY_IN_A_LABEL}`,
+    "Agency\ud800A",
+    "A".repeat(MAX_TEXT_LENGTH + 1),
+  ]) {
+    const reason = reasonTermsCannotStateIdentity(label) ?? "";
+    expect(reason.length).toBeGreaterThan(0);
+    // Short enough that no clause can be echoing a label of any length.
+    expect(reason.length).toBeLessThan(80);
+    expect(reason).not.toContain("Agency");
+    expect(reason).not.toContain("MIIBytes");
+    expect(reason).not.toContain("PRIVATE KEY");
+    expect(/[^\t\x20-\x7e]/.test(reason)).toBe(false);
+  }
 });
 
 test("what the identity refusal removes: a marker the partner declared", () => {

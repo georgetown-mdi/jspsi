@@ -95,8 +95,10 @@ export const MAX_TEXT_LENGTH = 1024;
  * ({@link TEXT_DIRECTION_MESSAGE}) at its own boundary: a label bound into a
  * certificate holds no character this document's `identity` may not.
  * {@link PRIVATE_KEY_IDENTITY_MESSAGE} is outside that parity -- it is a rule
- * about a value rather than a character class, and neither label boundary
- * applies it.
+ * about a value rather than a character class -- and both label boundaries
+ * refuse it beside these two classes, so a bound label is one a terms document
+ * can state on all three rules (three of the rules
+ * {@link reasonTermsCannotStateIdentity} asks).
  */
 export const TEXT_CONTROL_CHAR_PATTERN = /[\u0000-\u001f\u007f-\u009f]/;
 
@@ -159,6 +161,56 @@ export const TEXT_DIRECTION_MESSAGE =
  */
 export const PRIVATE_KEY_IDENTITY_MESSAGE =
   "a linkage terms identity must not contain private key material";
+
+/**
+ * Why no terms document may state `identity` as a party name, phrased as a
+ * clause a sentence reads inside, or undefined when a document may state it.
+ * The question a certificate-divergence refusal asks about the label a signing
+ * certificate is bound to: where the answer is a reason, the local config edit
+ * that reconciles an ordinary divergence is closed to the certificate's holder,
+ * and a re-key is the exit -- the CLI's warning and refusal
+ * (`apps/cli/src/signingIdentityDivergence.ts`) and core's own
+ * (`assertLocalCertificateAuthorizesAgreedIdentity`, exchange.ts), which read
+ * this one answer so they cannot come to disagree about which labels have one.
+ *
+ * It asks every rule this document holds the `identity` field to. Three are
+ * the field's own CONTENT rules: the control characters
+ * {@link TEXT_CONTROL_CHAR_PATTERN}, the nine text-direction characters
+ * `BIDI_CONTROL_PATTERN`, and private key material
+ * ({@link holdsPrivateKeyMaterial}); the first two share a clause, since an
+ * operator's remedy for either is the same re-key. Two more are the field's
+ * {@link MAX_TEXT_LENGTH} cap and the well-formed UTF-16 rule the whole
+ * document holds ({@link LONE_SURROGATE_MESSAGE}), neither of which the
+ * on-disk certificate schema bounds a bound label by
+ * (records/signingIdentity.ts): an over-long label answered statable would
+ * send its holder to a config edit the document then refuses, while a
+ * lone-surrogate one is answered for
+ * agreement with the schema rather than for a run that meets it -- canonical
+ * encoding refuses that label before any disposition compares it
+ * (test/records/signedReceiptEndToEnd.test.ts). The non-empty floor is the one
+ * `identity` rule left out, since that schema holds a bound label to it too.
+ *
+ * The clause names the class and never any part of the label: with a control,
+ * text-direction, or surrogate code unit the label IS the offending text, with
+ * key material quoting it back would put a private key on the screen, and
+ * echoing an over-long label would spend the message on the value whose length
+ * is the complaint.
+ */
+export function reasonTermsCannotStateIdentity(
+  identity: string,
+): string | undefined {
+  if (
+    TEXT_CONTROL_CHAR_PATTERN.test(identity) ||
+    BIDI_CONTROL_PATTERN.test(identity)
+  )
+    return "it holds a control or text-direction character";
+  if (holdsPrivateKeyMaterial(identity)) return "it holds private key material";
+  if (loneSurrogateIndex(identity) >= 0)
+    return "it holds an unpaired UTF-16 surrogate";
+  if (identity.length > MAX_TEXT_LENGTH)
+    return `it is longer than ${MAX_TEXT_LENGTH} characters`;
+  return undefined;
+}
 
 /**
  * The shape a name-class value of a terms document must match, beyond its

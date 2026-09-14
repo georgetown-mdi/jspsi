@@ -785,32 +785,64 @@ test("the local-certificate refusal's fixed prose leaves the identity pair room 
   );
 });
 
-test("a certificate bound to a label the terms refuse names the re-key exit and no part of the label", () => {
-  // The identity file admits any non-empty label (records/signingIdentity.ts),
-  // so a certificate can hold one the terms refuse -- and its holder meets this
-  // refusal with no linkage_terms.identity edit that reconciles the pair.
-  const boundLabel = "Initiator\u202eCo";
-  const agreedIdentity = "Initiator Co";
-  expect(
-    safeParseLinkageTerms({ ...firstNameTerms, identity: boundLabel }).success,
-  ).toBe(false);
+test.each([
+  ["a text-direction character", "Initiator\u202eCo"],
+  [
+    "private key material",
+    "Initiator Co -----BEGIN OPENSSH PRIVATE KEY----- MIIBytes " +
+      "-----END OPENSSH PRIVATE KEY-----",
+  ],
+  ["more characters than the terms admit", `Initiator ${"o".repeat(1024)}`],
+])(
+  "a certificate bound to a label holding %s names the re-key exit and no part of the label",
+  (_class, boundLabel) => {
+    // The identity file admits any non-empty label (records/signingIdentity.ts),
+    // so a certificate can hold one the terms refuse -- and its holder meets this
+    // refusal with no linkage_terms.identity edit that reconciles the pair.
+    const agreedIdentity = "Initiator Co";
+    expect(
+      safeParseLinkageTerms({ ...firstNameTerms, identity: boundLabel })
+        .success,
+    ).toBe(false);
 
-  let thrown: unknown;
-  try {
-    assertLocalCertificateAuthorizesAgreedIdentity(
+    let thrown: unknown;
+    try {
+      assertLocalCertificateAuthorizesAgreedIdentity(
+        { ...identityA.certificate, identity: boundLabel },
+        agreedIdentity,
+      );
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(OperatorConfigError);
+    const message = (thrown as Error).message;
+    expect(message).toContain("psilink fingerprint --force --identity");
+    expect(message).toContain("re-pin the new fingerprint");
+    expect(message).not.toContain("linkage_terms.identity to the name on the");
+    expect(message).not.toContain(boundLabel);
+    expect(message).not.toContain("\u202e");
+    // The key-bearing label is refused rather than redacted, so neither the
+    // material nor a marker standing in for it reaches the message.
+    expect(message).not.toContain("BEGIN OPENSSH PRIVATE KEY");
+    expect(message).not.toContain("MIIBytes");
+    expect(message).not.toContain("[redacted private key]");
+  },
+);
+
+test("a lone-surrogate label reaches no disposition of a divergence", async () => {
+  // reasonTermsCannotStateIdentity answers this label class so that it agrees
+  // with the terms schema on every rule, not because a run can meet one here:
+  // a certificate body is canonically encoded both to be signed and to be
+  // compared, and a lone surrogate has no UTF-8 form, so binding refuses the
+  // label and the comparison each disposition opens with refuses it too.
+  const boundLabel = "Initiator\ud800Co";
+  await expect(generateSigningIdentity(boundLabel)).rejects.toThrow();
+  expect(() =>
+    certificateAuthorizesIdentity(
       { ...identityA.certificate, identity: boundLabel },
-      agreedIdentity,
-    );
-  } catch (err) {
-    thrown = err;
-  }
-  expect(thrown).toBeInstanceOf(OperatorConfigError);
-  const message = (thrown as Error).message;
-  expect(message).toContain("psilink fingerprint --force --identity");
-  expect(message).toContain("re-pin the new fingerprint");
-  expect(message).not.toContain("linkage_terms.identity to the name on the");
-  expect(message).not.toContain(boundLabel);
-  expect(message).not.toContain("\u202e");
+      "Initiator Co",
+    ),
+  ).toThrow();
 });
 
 // --- Pairing a receipt to one run --------------------------------------------
