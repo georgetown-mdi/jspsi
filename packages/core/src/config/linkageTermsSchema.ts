@@ -912,8 +912,9 @@ const TransformStepBoundsSchema = TransformStepBaseSchema
   // expanded regex is closed by the linear-time engine (standardization.ts),
   // not by this cap. Full reasoning: docs/spec/CHANNEL_SECURITY.md,
   // "Unbounded transform-parameter rejection". This refine and the empty-format
-  // one under it name their params the way the document writes them, as every
-  // param refusal does (transformParamTypes.ts).
+  // one under it write out `input_format`/`output_format` as literals rather
+  // than deriving them through snakeizeKey (transformParamTypes.ts); the
+  // literals are pinned by tests.
   .refine(
     (step) => {
       if (step.function !== "parse_date") return true;

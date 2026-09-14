@@ -437,9 +437,13 @@ function stepCountRefusal(
  * surface: the web element editor marks a malformed param on the input that has
  * to change (`StepListEditor`). What reaches here is what that does not cover --
  * an imported document, an invitation the partner authored, or a caller that
- * mints without the editor. It runs once per mint and per accept and on no
- * editor pass, because compiling a whole document's transforms costs enough to
- * need bounding.
+ * mints without the editor. It runs per mint, per accept, and via the summary's
+ * deduplicate probe on display paths (`acceptTakesPartnerDeduplicate`,
+ * `consent/invitationSummary.ts`, which compose per render) -- roughly 1.4ms
+ * per 100-step document each time. That probe's catch swallows a refusal, so a
+ * document that both fans out and deduplicates withholds the grouping
+ * sentence for an uncompilable step; acceptable, since the accept gate
+ * refuses such a document before consent is acted on.
  *
  * Two bounds hold that cost, and they hold this walk alone. The declared step
  * count ({@link TRANSFORM_COMPILE_MAX_STEPS}) is checked before anything
