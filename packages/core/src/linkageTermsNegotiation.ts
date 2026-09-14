@@ -23,11 +23,13 @@ import {
 import {
   LinkageTermsSchema,
   MAX_TEXT_LENGTH,
+  PRIVATE_KEY_IDENTITY_MESSAGE,
   TEXT_CONTROL_CHAR_MESSAGE,
   TEXT_CONTROL_CHAR_PATTERN,
   TEXT_DIRECTION_MESSAGE,
 } from "./config/linkageTermsSchema.js";
 import { BIDI_CONTROL_PATTERN } from "./utils/nameControls.js";
+import { holdsPrivateKeyMaterial } from "./utils/sanitizeErrorForDisplay.js";
 import type {
   LinkageField,
   LinkageRuleSetReference,
@@ -106,7 +108,8 @@ import type {
  * deduplicating cardinality takes it from neither party.
  *
  * @throws {UsageError} when `acceptorIdentity` contains a control or
- *   text-direction character, is empty, or exceeds {@link MAX_TEXT_LENGTH},
+ *   text-direction character or private key material, is empty, or exceeds
+ *   {@link MAX_TEXT_LENGTH},
  *   or when either party's terms are `psi-c` outside the count-only shape or
  *   declare `deduplicate` under a strategy that matches no deduplicating
  *   cardinality.
@@ -123,7 +126,7 @@ export function deriveAcceptedLinkageTerms(
   // This party's own name takes the rules the schema holds a party `identity` to
   // here, before it is substituted (see the doc comment): left to the re-check at
   // the end, the same value is refused as an invitation that cannot be accepted --
-  // an account of an input the operator supplied itself. Both character rules the
+  // an account of an input the operator supplied itself. Every content rule the
   // field holds, each under the message the schema states it by.
   if (TEXT_CONTROL_CHAR_PATTERN.test(acceptorIdentity))
     throw new UsageError(
@@ -134,6 +137,11 @@ export function deriveAcceptedLinkageTerms(
     throw new UsageError(
       "the identity supplied for this party cannot be used: " +
         `${TEXT_DIRECTION_MESSAGE}. Supply one that has none.`,
+    );
+  if (holdsPrivateKeyMaterial(acceptorIdentity))
+    throw new UsageError(
+      "the identity supplied for this party cannot be used: " +
+        `${PRIVATE_KEY_IDENTITY_MESSAGE}. Supply one that has none.`,
     );
   if (acceptorIdentity.length === 0)
     throw new UsageError(

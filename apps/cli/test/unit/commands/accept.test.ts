@@ -6119,12 +6119,13 @@ const ARMORED_COLUMN = `diagnosis ${ARMOR_DANGLING}`;
 /**
  * The plantings the surface renders as text. Each must reach the transcript in
  * exactly its redacted form, so the check below is reading a fixture that arrived
- * rather than a surface that dropped it. {@link ARMORED_FIELD_NAME} is not among
- * them: a declared linkage field is rendered by the label of its semantic type
- * rather than by the name the partner gave it.
+ * rather than a surface that dropped it. Two values are not among them.
+ * {@link ARMORED_FIELD_NAME}: a declared linkage field is rendered by the label
+ * of its semantic type rather than by the name the partner gave it.
+ * {@link ARMORED_IDENTITY}: the party identity refuses key material at the
+ * decode, so no surface ever renders one (the case below pins that refusal).
  */
 const ARMORED_RENDERED = [
-  ARMORED_IDENTITY,
   ARMORED_REFERENCE,
   ARMORED_PURPOSE,
   ARMORED_SEND_COLUMN,
@@ -6135,12 +6136,12 @@ const ARMORED_RENDERED = [
 /**
  * An invitation holding key material in the partner-declared values the
  * consent surface renders that this fixture plants (the rule-set citation names
- * and the transform names and parameters are left plain): the inviting party's
- * identity, the payload names declared in each direction, a linkage key's name,
- * a linkage field's name (with the keys citing it), and the legal agreement's
- * reference and purpose. The declared `receive` names the column {@link
- * armoredFixture} discloses, so the acceptance renders it in this party's own
- * outbound set too.
+ * and the transform names and parameters are left plain): the payload names
+ * declared in each direction, a linkage key's name, a linkage field's name (with
+ * the keys citing it), and the legal agreement's reference and purpose. The
+ * inviting party's identity is left plain because the decode refuses one holding
+ * key material. The declared `receive` names the column {@link armoredFixture}
+ * discloses, so the acceptance renders it in this party's own outbound set too.
  */
 function armoredToken(): InvitationToken {
   const base = sampleToken(FUTURE());
@@ -6151,7 +6152,6 @@ function armoredToken(): InvitationToken {
     ...base,
     linkageTerms: {
       ...terms,
-      identity: ARMORED_IDENTITY,
       legalAgreement: {
         reference: ARMORED_REFERENCE,
         purpose: ARMORED_PURPOSE,
@@ -6258,6 +6258,27 @@ describe("handler: the prompt's copy has the redaction on its own", () => {
     const message = (err as Error).message;
     expect(message).toContain("allowedCharacters");
     expect(redactPrivateKeyMaterial(message)).toBe(message);
+  });
+
+  test("handler: an armored inviting-party identity is refused at the decode", async () => {
+    // The other rendered partner value the fixture above cannot plant. The
+    // surface would have shown the redaction marker where the partner names
+    // itself, which a reader cannot tell from a marker psilink placed, so the
+    // decode refuses the invitation and the refusal reaches the operator
+    // redacted.
+    const base = sampleToken(FUTURE());
+    const crafted = await encodeRaw({
+      ...base,
+      linkageTerms: { ...base.linkageTerms, identity: ARMORED_IDENTITY },
+    });
+    const err = await decodeAndValidateInvitation(crafted).catch(
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(UsageError);
+    const message = (err as Error).message;
+    expect(message).toContain("identity");
+    expect(redactPrivateKeyMaterial(message)).toBe(message);
+    for (const body of ARMOR_BODIES) expect(message).not.toContain(body);
   });
 
   test("handler: --consent-to-terms leaves the terms in the --log-file, not on the terminal", async () => {

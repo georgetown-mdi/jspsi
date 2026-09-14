@@ -6,6 +6,7 @@ import {
 } from "../src/linkageTermsNegotiation";
 import {
   MAX_TEXT_LENGTH,
+  PRIVATE_KEY_IDENTITY_MESSAGE,
   TEXT_CONTROL_CHAR_MESSAGE,
   TEXT_DIRECTION_MESSAGE,
   safeParseLinkageTerms,
@@ -1024,6 +1025,33 @@ test("deriveAcceptedLinkageTerms refuses a text-direction character in the ACCEP
   expect(message).not.toContain("cannot be accepted unchanged");
   expect(message).not.toContain("quarantined-county");
   expect(message).not.toContain("\u202e");
+});
+
+test("deriveAcceptedLinkageTerms refuses private key material in the ACCEPTOR's own identity", () => {
+  // The third rule the schema holds this field to, applied where the two
+  // character rules are and for the same reason.
+  let thrown: unknown;
+  try {
+    deriveAcceptedLinkageTerms(
+      inviterBase,
+      "Agency A of quarantined-county -----BEGIN OPENSSH PRIVATE KEY----- MIIBytes",
+    );
+  } catch (e) {
+    thrown = e;
+  }
+  expect(thrown).toBeInstanceOf(UsageError);
+  const { message } = thrown as Error;
+  expect(message).toContain(PRIVATE_KEY_IDENTITY_MESSAGE);
+  expect(message).not.toContain("cannot be accepted unchanged");
+  expect(message).not.toContain("quarantined-county");
+  expect(message).not.toContain("MIIBytes");
+});
+
+test("deriveAcceptedLinkageTerms accepts an identity that mentions a private key", () => {
+  const identity = "Agency A, private key holder, keys@agency-a.gov";
+  expect(deriveAcceptedLinkageTerms(inviterBase, identity).identity).toBe(
+    identity,
+  );
 });
 
 test.each([

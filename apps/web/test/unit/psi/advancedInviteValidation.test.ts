@@ -569,10 +569,10 @@ describe("a transform params key the terms schema refuses", () => {
   });
 });
 
-describe("a transform params shape the consent summary cannot state", () => {
-  // Core refuses three params shapes where a document is decoded, because the
+describe("a transform step shape the consent summary cannot state", () => {
+  // Core refuses several step shapes where a document is decoded, because the
   // summary an acceptor reads would state something other than what the run
-  // applies. All three are refused on the `linkageKeys` path, which the generic
+  // applies. Each is refused on the `linkageKeys` path, which the generic
   // mapping answers with "Enable at least one linkage key." -- the one step this
   // draft has already taken -- so each needs a message of its own. Each is keyed
   // on core's own refusal message, which these cases drive through a real
@@ -622,6 +622,23 @@ describe("a transform params shape the consent summary cannot state", () => {
       params: { value: FAKE_PRIVATE_KEY },
     });
     expect(keys).toMatch(/holding a private key/);
+    expect(rendered).not.toContain("unrepeatable-secret");
+    expect(rendered).not.toContain("BEGIN");
+  });
+
+  test("a param name holding a private key names it and echoes none of it", () => {
+    const { keys, rendered } = refusalFor({
+      function: "null_if",
+      params: { [FAKE_PRIVATE_KEY]: "UNKNOWN" },
+    });
+    expect(keys).toMatch(/names a parameter with a private key/);
+    expect(rendered).not.toContain("unrepeatable-secret");
+    expect(rendered).not.toContain("BEGIN");
+  });
+
+  test("a function name holding a private key names it and echoes none of it", () => {
+    const { keys, rendered } = refusalFor({ function: FAKE_PRIVATE_KEY });
+    expect(keys).toMatch(/function name holds a private key/);
     expect(rendered).not.toContain("unrepeatable-secret");
     expect(rendered).not.toContain("BEGIN");
   });
@@ -690,6 +707,28 @@ describe("a free-text value holding a character the terms refuse", () => {
     const rendered = Object.values(result.errors).join("\n");
     expect(rendered).not.toContain("unrepeatable-name");
     expect(rendered).not.toContain("\u202e");
+  });
+
+  test("names the private-key rule on the identity control and echoes no part of the name", () => {
+    const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const pasted =
+      "Org unrepeatable-name -----BEGIN OPENSSH PRIVATE KEY-----MIIBsecret";
+    expect(
+      safeParseLinkageTerms(buildAdvancedTerms({ ...draft, identity: pasted }))
+        .success,
+    ).toBe(false);
+
+    const result = validateAdvancedInvite(
+      { ...draft, identity: pasted },
+      seed,
+      now,
+    );
+    expect(result.canGenerate).toBe(false);
+    expect(result.errors.identity).toMatch(/cannot contain a private key/);
+    expect(result.errors.identity).not.toMatch(/Enter a name/);
+    const rendered = Object.values(result.errors).join("\n");
+    expect(rendered).not.toContain("unrepeatable-name");
+    expect(rendered).not.toContain("MIIBsecret");
   });
 
   test("names the class on the purpose control and echoes no part of the purpose", () => {

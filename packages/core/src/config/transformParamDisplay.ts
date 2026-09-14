@@ -98,6 +98,25 @@ export const NULL_IF_BOTH_VALUE_PARAMS_MESSAGE =
 export const PRIVATE_KEY_PARAM_MESSAGE =
   "a transform param must not contain private key material";
 
+/**
+ * Refusal message for a step whose FUNCTION NAME the private-key redaction
+ * would replace. The name is displayed on its own line of the consent summary
+ * rather than inside a parameter's, so it takes a refusal of its own naming
+ * the field the offending text sits in. A fixed literal echoing no part of
+ * that name, for the reason {@link PRIVATE_KEY_PARAM_MESSAGE} gives.
+ */
+export const PRIVATE_KEY_FUNCTION_MESSAGE =
+  "a transform function name must not contain private key material";
+
+/**
+ * Refusal message for a parameter whose NAME the private-key redaction would
+ * replace, separate from {@link PRIVATE_KEY_PARAM_MESSAGE} so a refusal names
+ * the half of the entry the material sits in. A fixed literal, for the reason
+ * that message gives.
+ */
+export const PRIVATE_KEY_PARAM_NAME_MESSAGE =
+  "a transform param name must not contain private key material";
+
 /** Refusal message for a step declaring more parameters than are displayed. */
 export const TRANSFORM_PARAM_COUNT_MESSAGE = `a transform step must not declare more than ${MAX_DISPLAYED_PARAMS} params`;
 
@@ -128,19 +147,23 @@ export interface TransformParamDisplayRefusal {
 }
 
 /**
- * Every parameter shape of `step` a consent summary would state as something
- * other than what the run applies. An empty array is a step whose declared
- * parameters the summary states as they run.
+ * Every shape of `step` a consent summary would state as something other than
+ * what the run applies. An empty array is a step the summary states as it
+ * runs.
  *
- * Three shapes, each refused where the document is decoded rather than shown
- * as it stands: `null_if` declaring both `value` and `values`, of which the
- * run applies only `values`; a parameter whose displayed line the private-key
- * redaction would replace with its marker; and a step declaring more
- * parameters than the summary shows, whose remainder it states as a count.
+ * Each is refused where the document is decoded rather than shown as it
+ * stands: `null_if` declaring both `value` and `values`, of which the run
+ * applies only `values`; a step declaring more parameters than the summary
+ * shows, whose remainder it states as a count; and the function name, a
+ * parameter name, or a parameter's displayed line that the private-key
+ * redaction would replace with its marker. The three key-material refusals
+ * name their own field, so a reader of the refusal knows which text to
+ * correct.
  *
- * An over-count step yields that refusal alone, so the issues one step raises
- * stay bounded by {@link MAX_DISPLAYED_PARAMS} however many entries the
- * record holds -- the bound the safe-parse contract rests on
+ * An over-count step yields no per-parameter refusal, so the issues one step
+ * raises stay bounded by {@link MAX_DISPLAYED_PARAMS} plus the one its
+ * function name can raise, however many entries the record holds -- the bound
+ * the safe-parse contract rests on
  * (docs/spec/CHANNEL_SECURITY.md, "Application-layer parsed-input bounds").
  * A string value the caller already refuses for its length is skipped by the
  * key-material scan for the same reason
@@ -157,15 +180,24 @@ export function transformParamDisplayRefusals(
   },
   options: TransformParamDisplayOptions,
 ): TransformParamDisplayRefusal[] {
+  const refusals: TransformParamDisplayRefusal[] = [];
+  // Scanned before the params guard below, so a step declaring no params is
+  // judged on its name too.
+  if (holdsPrivateKeyMaterial(step.function))
+    refusals.push({
+      path: ["function"],
+      message: PRIVATE_KEY_FUNCTION_MESSAGE,
+    });
   const params = step.params;
   // The shape guard {@link declaredParamEntries} makes, repeated to narrow
   // `params` for the own-property lookups below, which throw on a null.
   if (params === null || typeof params !== "object" || Array.isArray(params))
-    return [];
+    return refusals;
   const entries = declaredParamEntries(params);
-  if (entries.length > MAX_DISPLAYED_PARAMS)
-    return [{ path: ["params"], message: TRANSFORM_PARAM_COUNT_MESSAGE }];
-  const refusals: TransformParamDisplayRefusal[] = [];
+  if (entries.length > MAX_DISPLAYED_PARAMS) {
+    refusals.push({ path: ["params"], message: TRANSFORM_PARAM_COUNT_MESSAGE });
+    return refusals;
+  }
   // Declared as `nullIfFactory` reads it: `textParam` passes over an undefined
   // value, so neither the refusal nor the run counts one.
   const declares = (param: string): boolean =>
@@ -176,6 +208,16 @@ export function transformParamDisplayRefusals(
       message: NULL_IF_BOTH_VALUE_PARAMS_MESSAGE,
     });
   for (const [param, value] of entries) {
+    // The name is scanned apart from the line it is displayed in, so the skip
+    // below -- which passes over a VALUE the caller refuses for its length --
+    // cannot take the name with it.
+    if (holdsPrivateKeyMaterial(param)) {
+      refusals.push({
+        path: ["params", param],
+        message: PRIVATE_KEY_PARAM_NAME_MESSAGE,
+      });
+      continue;
+    }
     // Read as the caller's own length refine reads it: a string value, and
     // only a string, is bounded there, so key material nested in a list entry
     // is scanned however long that entry is.
