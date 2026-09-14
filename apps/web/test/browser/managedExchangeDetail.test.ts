@@ -2430,6 +2430,18 @@ describe("the results a scheduled run left for this visit", () => {
     expect(page.getByText(NO_PARKED_RESULTS_NOTE).query()).toBeNull();
   });
 
+  test("an exchange with no schedule renders no section while the read is still in flight", async () => {
+    renderParked(undefined, { schedule: false });
+
+    // The sections below it are on screen, so this is an absent section rather
+    // than an unrendered page, and no spinner flashes before the read resolves.
+    await expect
+      .element(page.getByRole("heading", { name: "Accounting of disclosures" }))
+      .toBeInTheDocument();
+    expect(page.getByText(PARKED_RESULTS_RETENTION_NOTE).query()).toBeNull();
+    expect(page.getByText(NO_PARKED_RESULTS_NOTE).query()).toBeNull();
+  });
+
   test("the schedule fields state what a scheduled run will keep here, before it runs", async () => {
     renderParked({ kind: "none" });
     await expect

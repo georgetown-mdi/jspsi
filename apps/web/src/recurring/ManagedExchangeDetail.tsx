@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import {
   Alert,
@@ -719,10 +719,15 @@ function RunHistory({ record }: { record: ManagedExchangeRecord }) {
  * a gap.
  *
  * An exchange with no schedule renders nothing at all where the read FOUND
- * nothing: it produces no unattended results, and the local-fields editor above
- * is where a schedule is entered. Only that reading collapses the section --
- * a store that did not answer knows nothing about what is stored, so it states
- * itself here as it does on a scheduled exchange.
+ * nothing: it produces no unattended results, and the local-fields editor
+ * above is where a schedule is entered. The read still being in flight is the
+ * same absence for a first visit -- there is nothing yet to show either way,
+ * so a visit to an unscheduled exchange never flashes the loading state only
+ * to collapse once the read lands on nothing. Once the section has shown
+ * something real, though, it holds its ground rather than vanishing under a
+ * retry the operator just asked for: a store that did not answer, or answered
+ * with a value this build cannot read, still states itself here as it does on
+ * a scheduled exchange.
  */
 function ParkedResultsView({
   read,
@@ -736,7 +741,11 @@ function ParkedResultsView({
   onRetryRead: () => void;
 }) {
   const rows = read?.kind === "parked" ? parkedResultsRows(read.results) : [];
-  if (!scheduled && read?.kind === "none") return null;
+  const shownBefore = useRef(false);
+  const emptyForNow =
+    !scheduled && (read === undefined || read.kind === "none");
+  if (emptyForNow && !shownBefore.current) return null;
+  shownBefore.current = true;
   return (
     <div className={styles.callout}>
       <h2 className={styles.eyebrow}>Results from scheduled runs</h2>
