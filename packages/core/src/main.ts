@@ -174,6 +174,7 @@ export {
   redactPrivateKeyMaterial,
   redactAndSanitizeForDisplay,
   createPrivateKeyStreamRedactor,
+  holdsPrivateKeyMaterial,
   MAX_ERROR_CAUSE_DEPTH,
 } from "./utils/sanitizeErrorForDisplay";
 export type { PrivateKeyStreamRedactor } from "./utils/sanitizeErrorForDisplay";
