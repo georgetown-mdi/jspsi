@@ -91,8 +91,8 @@ const logger = getLogger("cleaning");
  *   subsequent element-wise steps are automatically deduplicated.
  *   {@link buildKeyStrings} crosses these candidates into the key's candidate
  *   set; both linkage strategies match on that set, and what refuses it is the
- *   count-only algorithm, or an expansion the party's declared linkage terms
- *   and standardization do not account for (see
+ *   count-only algorithm, or an expansion the agreed linkage terms and
+ *   standardization do not account for (see
  *   {@link fanOutReachedMatchingRefusal}).
  */
 export type FieldValue = string | null | Set<string>;
