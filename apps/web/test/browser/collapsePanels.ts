@@ -28,8 +28,12 @@ import { page, userEvent } from "vitest/browser";
 // which panel never committed instead of the case reporting a bare timeout.
 const DEFERRED_COMMIT_TIMEOUT_MS = 10_000;
 
-/** A disclosure's toggle button, located by the accessible name it holds. */
-export function disclosureToggle(name: string) {
+/**
+ * A disclosure's toggle button, located by the accessible name it holds. A
+ * toggle whose name carries the panel's collapsed summary beside its label is
+ * matched by a pattern for the label part.
+ */
+export function disclosureToggle(name: string | RegExp) {
   return page.getByRole("button", { name });
 }
 
@@ -37,7 +41,7 @@ export function disclosureToggle(name: string) {
 // assistive tech follows the reference. The id lives on this wrapper (not the
 // Collapse panel) so it never dangles when Mantine unmounts the closed panel under
 // a reduced-motion preference.
-function panelFor(name: string): HTMLElement {
+function panelFor(name: string | RegExp): HTMLElement {
   const id = disclosureToggle(name).element().getAttribute("aria-controls");
   const panel = id ? document.getElementById(id) : null;
   if (!panel) throw new Error(`disclosure panel not found for ${name}`);
@@ -46,7 +50,7 @@ function panelFor(name: string): HTMLElement {
 
 // The Mantine Collapse panel inside the wrapper, with the aria-hidden + inert
 // (and display:none) that hide the collapsed detail from assistive tech.
-function collapseFor(name: string): HTMLElement {
+function collapseFor(name: string | RegExp): HTMLElement {
   const panel = panelFor(name).firstElementChild;
   if (!(panel instanceof HTMLElement))
     throw new Error(`collapse panel not found for ${name}`);
@@ -56,7 +60,7 @@ function collapseFor(name: string): HTMLElement {
 /**
  * The disclosure wrapper named `name`, resolved once its content has committed.
  */
-export async function readyPanel(name: string): Promise<HTMLElement> {
+export async function readyPanel(name: string | RegExp): Promise<HTMLElement> {
   await expect
     .poll(
       () => {
@@ -82,7 +86,9 @@ export async function readyPanel(name: string): Promise<HTMLElement> {
  * The Mantine Collapse element inside a ready panel -- the aria-hidden + inert
  * host -- resolved only after its content has committed.
  */
-export async function readyCollapse(name: string): Promise<HTMLElement> {
+export async function readyCollapse(
+  name: string | RegExp,
+): Promise<HTMLElement> {
   await readyPanel(name);
   return collapseFor(name);
 }
@@ -139,7 +145,9 @@ export async function readyDisclosures(container: HTMLElement): Promise<void> {
  * transition has finished with, under both endings Mantine gives it: the inline
  * height cleared, or pinned to a content height re-measured at the end.
  */
-export async function openDisclosure(name: string): Promise<HTMLElement> {
+export async function openDisclosure(
+  name: string | RegExp,
+): Promise<HTMLElement> {
   const panel = await readyPanel(name);
   await userEvent.click(disclosureToggle(name));
   const collapse = collapseFor(name);
