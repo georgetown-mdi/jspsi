@@ -148,21 +148,6 @@ export function compileLinearRegex(pattern: string): CompiledLinearRegex {
 }
 
 /**
- * Coerce a transform param to the pattern string the engine compiles. A
- * declared pattern is text or absent by the time a decoded document reaches a
- * factory (`config/transformParamTypes.ts`), and an absent one is what this
- * still renders: `RE2JS.compile` throws a bare `TypeError` on
- * `null`/`undefined`/an array rather than coercing, so the dialect gate and the
- * factories must render the value the same way -- with `String(...)` -- or the
- * gate's verdict would not match what the factory runs. A coerced value still
- * runs on the linear-time engine, so it has no ReDoS risk; this only fixes
- * which literal it compiles to.
- */
-export function coerceToPatternString(raw: unknown): string {
-  return typeof raw === "string" ? raw : String(raw);
-}
-
-/**
  * Whether `pattern` is in the linear-time dialect: it compiles under the
  * engine. The single conformance oracle for both the terms-validation gate
  * ({@link linkageTermsHaveNonConformantTransformRegex}) and the editor-facing

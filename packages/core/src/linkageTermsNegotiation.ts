@@ -20,6 +20,7 @@ import {
   assertCountOnlyTermsShape,
   assertDeduplicateImplemented,
 } from "./linkageTermsPolicy.js";
+import { assertTransformsCompile } from "./linkageSatisfiability.js";
 import {
   LinkageTermsSchema,
   MAX_TEXT_LENGTH,
@@ -107,12 +108,19 @@ import type {
  * count-only document sets it false, and a strategy matching no
  * deduplicating cardinality takes it from neither party.
  *
+ * It also compiles every element transform the inviter's terms declare
+ * ({@link assertTransformsCompile}), so a step whose factory refuses its
+ * declared params is refused here rather than at key realization, where the
+ * run reaches it. The invitation's own transforms alone: a standardization is
+ * per-party and local, and this party's own is checked at its prepare step.
+ *
  * @throws {UsageError} when `acceptorIdentity` contains a control or
  *   text-direction character or private key material, is empty, or exceeds
  *   {@link MAX_TEXT_LENGTH},
  *   or when either party's terms are `psi-c` outside the count-only shape or
  *   declare `deduplicate` under a strategy that matches no deduplicating
- *   cardinality.
+ *   cardinality, or when an element transform the inviter declared does not
+ *   compile.
  * @throws {Error} when the derived document fails
  *   {@link LinkageTermsSchema}: the inviter's terms cannot be coherently
  *   accepted for the mirrored output direction, or `acceptorDeduplicate` is
@@ -155,6 +163,13 @@ export function deriveAcceptedLinkageTerms(
     );
   assertCountOnlyTermsShape(inviterTerms);
   assertDeduplicateImplemented(inviterTerms);
+  // The element transforms are compiled here rather than left to key
+  // realization, which is the first point a run would reach them: the accept
+  // boundary is where this party still holds the decision, and a step whose
+  // factory refuses its params makes the exchange the invitation offers one
+  // that cannot run. The standardization is omitted -- this reads the
+  // invitation's own content, and a standardization is per-party and local.
+  assertTransformsCompile(inviterTerms);
   const derived: LinkageTerms = {
     ...inviterTerms,
     identity: acceptorIdentity,

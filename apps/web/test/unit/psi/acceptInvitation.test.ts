@@ -142,6 +142,54 @@ describe("prepareAcceptedInvitation", () => {
       expect(messages.join("\n")).not.toContain(authored);
   });
 
+  test("rejects an element transform that cannot compile, before the consent screen", async () => {
+    // A `pad_left` with no `length` parses and decodes: the factory reads its
+    // params only when the pipeline is built, which on a run is key
+    // realization. `prepareAcceptedInvitation` compiles the invitation's
+    // element transforms, so the operator is never shown terms for an exchange
+    // the run cannot start, and the console's server-job route inherits it.
+    const encoded = await encodeRawToken({
+      version: "1",
+      linkageTerms: {
+        version: "1.0.0",
+        identity: "Partner Authored Identity",
+        date: "2025-01-01",
+        algorithm: "psi",
+        linkageStrategy: "cascade",
+        output: { expectsOutput: true, shareWithPartner: false },
+        deduplicate: false,
+        linkageFields: [{ name: "partner_given", type: "first_name" }],
+        linkageKeys: [
+          {
+            name: "Partner Key Name",
+            elements: [
+              { field: "partner_given", transform: [{ function: "pad_left" }] },
+            ],
+          },
+        ],
+      },
+      connectionEndpoint: webrtcEndpoint,
+      sharedSecret: generateSharedSecret(),
+    });
+
+    const raised: unknown = await prepareAcceptedInvitation(encoded, {
+      profile: "hosted",
+    }).then(
+      () => undefined,
+      (err: unknown) => err,
+    );
+
+    expect(raised).toBeInstanceOf(Error);
+    const message = (raised as Error).message;
+    expect(message).toContain("pad_left");
+    for (const authored of [
+      "Partner Authored Identity",
+      "partner_given",
+      "Partner Key Name",
+    ])
+      expect(message).not.toContain(authored);
+  });
+
   test("rejects an expired invitation (before any connect)", async () => {
     // encodeInvitation refuses a past `expires`, so encode with a future expiry
     // and evaluate acceptance at an instant after it -- the same fail-closed

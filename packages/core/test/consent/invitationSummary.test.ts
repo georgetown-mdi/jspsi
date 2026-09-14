@@ -1296,13 +1296,12 @@ describe("a transform param the consent summary displays", () => {
   // step REBUILT from the lines the summary displays must transform every probe
   // row exactly as the step the document decoded to does.
   //
-  // Two transformations survive between the display and the run, pinned in
-  // their own cases below rather than measured away: the compile NFC-normalizes
-  // the literal a step injects or compares against, and a regex step with no
-  // pattern compiles the literal `undefined`. A third difference is a rendering
-  // of the value rather than a change to it -- the display doubles a backslash
-  // (docs/spec/CHANNEL_SECURITY.md, Display sanitization escape format) -- and
-  // is reversed here before the comparison.
+  // One transformation survives between the display and the run, pinned in its
+  // own case below rather than measured away: the compile NFC-normalizes the
+  // literal a step injects or compares against. A second difference is a
+  // rendering of the value rather than a change to it -- the display doubles a
+  // backslash (docs/spec/CHANNEL_SECURITY.md, Display sanitization escape
+  // format) -- and is reversed here before the comparison.
   const PROBE_ROWS = [
     "",
     "7",
@@ -1437,7 +1436,7 @@ describe("a transform param the consent summary displays", () => {
   });
 
   test("the compile normalizes a declared literal to NFC", () => {
-    // The first of the two surviving transformations. replace_regex, null_if,
+    // The surviving transformation. replace_regex, null_if,
     // pad_left and coalesce normalize the literal they inject or compare
     // against, so a document authoring one in another normal form runs its NFC
     // equivalent while the display shows the form the document wrote.
@@ -1459,24 +1458,16 @@ describe("a transform param the consent summary displays", () => {
     ).not.toContain(executed);
   });
 
-  test("a regex step with no pattern runs the literal 'undefined'", () => {
-    // The second. An absent pattern is rendered as a string on its way to the
-    // engine, so the step matches the six characters of the word while the
-    // display states no pattern at all -- the one param whose absence changes
-    // what runs rather than taking a documented default.
+  test("a regex step with no pattern never reaches the display", () => {
+    // The difference that used to survive: an absent pattern was rendered as a
+    // string on its way to the engine, so the step matched the nine characters
+    // of the word while the display stated no pattern at all. The decode
+    // refuses the step instead, so no summary of it is composed.
     const steps: TransformStep[] = [
       { function: "replace_regex", params: { replacement: "Z" } },
     ];
-    const terms = parseLinkageTerms(documentWith([steps]));
-    const displayed = summarizeInvitation({
-      linkageTerms: terms,
-    }).linkageKeys[0].elements[0].transforms[0].params;
-    expect(displayed).toEqual(["replacement: Z"]);
-    expect(
-      runPipeline(
-        "a-undefined-b",
-        terms.linkageKeys[0].elements[0].transform as TransformStep[],
-      ),
-    ).toBe("a-Z-b");
+    expect(() => parseLinkageTerms(documentWith([steps]))).toThrow(
+      /replace_regex pattern must be declared/,
+    );
   });
 });

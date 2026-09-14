@@ -1,6 +1,7 @@
 import {
   UsageError,
   assertDeduplicateImplemented,
+  assertTransformsCompile,
   countOnlyShapeViolation,
   decodeInvitation,
   deriveAcceptedLinkageTerms,
@@ -60,7 +61,9 @@ export interface AcceptableInvitation {
  * {@link selectExchangeDriver}'s own allowlist; a non-drivable or missing
  * endpoint is rejected. It also rejects a token whose linkage terms declare a
  * `deduplicate` strategy the run cannot honor (`assertDeduplicateImplemented`),
- * before the consent screen or any connection. Every failure throws.
+ * and one whose linkage-key element transforms do not compile
+ * (`assertTransformsCompile`), both before the consent screen or any
+ * connection. Every failure throws.
  *
  * @param encoded  The encoded invitation string (bare code or deep-link
  *                 fragment).
@@ -73,7 +76,8 @@ export interface AcceptableInvitation {
  *   drive.
  * @throws {UsageError} on a token whose linkage terms declare `deduplicate`
  *   under a strategy that matches no deduplicating cardinality
- *   (`assertDeduplicateImplemented`).
+ *   (`assertDeduplicateImplemented`), or declare an element transform step
+ *   whose factory refuses its params (`assertTransformsCompile`).
  * @throws {Error}    on invalid base64url or a checksum mismatch (`decodeInvitation`).
  * @throws {ZodError} on schema validation failure (`decodeInvitation`).
  * @throws {NestingDepthExceededError|NodeCountExceededError} on a token whose
@@ -107,6 +111,13 @@ export async function prepareAcceptedInvitation(
   // consent screen or any rendezvous, matching the refusal
   // `deriveAcceptedLinkageTerms` applies on the launch path.
   assertDeduplicateImplemented(token.linkageTerms);
+
+  // The transform half of the same check: a linkage-key element step whose
+  // factory refuses its declared params is refused before the consent screen or
+  // any rendezvous, matching the refusal `deriveAcceptedLinkageTerms` applies on
+  // the launch path. Without it the compile lands at key realization, once the
+  // run has started.
+  assertTransformsCompile(token.linkageTerms);
 
   return { token, endpoint };
 }

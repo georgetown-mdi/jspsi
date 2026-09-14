@@ -955,7 +955,7 @@ test("an over-large parse_date inputFormat is rejected by the length cap", () =>
   if (result.success) return;
   expect(result.error.issues[0].path).toContain("params");
   expect(result.error.issues[0].message).toMatch(
-    /parse_date inputFormat and outputFormat must not exceed/,
+    /parse_date input_format and output_format must not exceed/,
   );
 });
 
@@ -1032,7 +1032,7 @@ test("an empty parse_date outputFormat is rejected", () => {
   if (result.success) return;
   expect(result.error.issues[0].path).toContain("outputFormat");
   expect(result.error.issues[0].message).toMatch(
-    /parse_date outputFormat must not be empty/,
+    /parse_date output_format must not be empty/,
   );
   // One character is the narrowest layout that renders anything, and it parses.
   expect(
@@ -1054,7 +1054,7 @@ test("a non-text parse_date format is refused at validation", () => {
   if (result.success) return;
   expect(
     result.error.issues.some((i) =>
-      /parse_date inputFormat must be text/.test(i.message),
+      /parse_date input_format must be text/.test(i.message),
     ),
   ).toBe(true);
 });

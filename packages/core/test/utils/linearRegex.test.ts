@@ -2,7 +2,6 @@ import { describe, expect, test } from "vitest";
 
 import {
   compileLinearRegex,
-  coerceToPatternString,
   patternConformsToDialect,
 } from "../../src/utils/linearRegex";
 
@@ -88,37 +87,6 @@ describe("patternConformsToDialect", () => {
     ]) {
       expect(patternConformsToDialect(pattern)).toBe(false);
     }
-  });
-});
-
-// --- Param coercion ----------------------------------------------------------
-
-describe("coerceToPatternString", () => {
-  test("passes a string through unchanged", () => {
-    expect(coerceToPatternString("^\\d+$")).toBe("^\\d+$");
-  });
-
-  test("renders a non-string deterministically, like the old new RegExp path", () => {
-    expect(coerceToPatternString(5)).toBe("5");
-    expect(coerceToPatternString(true)).toBe("true");
-    expect(coerceToPatternString(null)).toBe("null");
-    expect(coerceToPatternString(undefined)).toBe("undefined");
-    // An array renders via String(...) to its comma-joined elements -- NOT a short
-    // literal: this is the value a partner can grow without bound, so the source
-    // it compiles to is what MAX_TRANSFORM_PATTERN_LENGTH must measure.
-    expect(coerceToPatternString(["a", "b"])).toBe("a,b");
-    expect(coerceToPatternString({})).toBe("[object Object]");
-  });
-
-  test("a coerced non-string still compiles under the engine (no TypeError)", () => {
-    // RE2JS.compile throws a bare TypeError on null/undefined/array; coercing
-    // first guarantees the gate and the factory see the same compilable string.
-    expect(patternConformsToDialect(coerceToPatternString(5))).toBe(true);
-    expect(patternConformsToDialect(coerceToPatternString(null))).toBe(true);
-    expect(patternConformsToDialect(coerceToPatternString(["a", "b"]))).toBe(
-      true,
-    );
-    expect(patternConformsToDialect(coerceToPatternString({}))).toBe(true);
   });
 });
 

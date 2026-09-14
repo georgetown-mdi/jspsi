@@ -542,6 +542,44 @@ describe("validateAccept (the no-commit phase, before the prompt)", () => {
     ).rejects.toThrow(IDENTITY_STILL_PLACEHOLDER);
   });
 
+  test("validateAccept: an element transform that cannot compile is refused before the prompt", async () => {
+    // A `pad_left` with no `length` parses, decodes, and prepares: the factory
+    // reads its params only when the pipeline is built, which on a run is key
+    // realization. validateAccept compiles the invitation's element transforms
+    // where it derives this party's terms, ahead of the input, the connection,
+    // and the consent display, so the operator is never asked to consent to an
+    // exchange the run cannot start.
+    const base = sampleToken(FUTURE());
+    const terms = base.linkageTerms;
+    const encoded = await encodeInvitation({
+      ...base,
+      linkageTerms: {
+        ...terms,
+        linkageKeys: [
+          {
+            ...terms.linkageKeys[0],
+            elements: [
+              {
+                ...terms.linkageKeys[0].elements[0],
+                transform: [{ function: "pad_left" }],
+              },
+            ],
+          },
+          ...terms.linkageKeys.slice(1),
+        ],
+      },
+    });
+
+    await expect(
+      validateAccept({
+        resolved: { mode: "offline", invitation: encoded },
+        options: testOptions(),
+        log: silentLog,
+      }),
+    ).rejects.toThrow(/pad_left/);
+    expect(promptConfirmMock).not.toHaveBeenCalled();
+  });
+
   test("validateAccept: a deduplicating invitation leaves this party one-to-one", async () => {
     // The hostile-flip guard at the CLI accept entry point. validateAccept derives
     // the acceptor's own terms (deriveAcceptedLinkageTerms) ahead of reading the

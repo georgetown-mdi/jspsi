@@ -12,6 +12,7 @@ import {
   MAX_EFFECTIVE_KEY_COUNT,
   MAX_KEY_CANDIDATE_WIDTH,
 } from "../../src/fanOutFunctions";
+import { REGEX_STEP_PATTERN_PARAM } from "../../src/config/transformRegexDialect";
 
 // The strings a partner authors in the document below. A refusal locates the
 // offending key by its position and states a fixed literal, so none of these
@@ -217,6 +218,90 @@ test("terms above the effective key count ceiling are refused at the decode", as
     `above the ${MAX_EFFECTIVE_KEY_COUNT} an exchange derives`,
   );
   expectNoPartnerText(messages);
+});
+
+// Each raw-pattern function keyed to the param it matches on, which the
+// function reads no default for. Driven from the shipped table rather than a
+// copy of it, so a function added to one is refused here or says so.
+const patternSteps = Object.entries(REGEX_STEP_PATTERN_PARAM).map(
+  ([fn, param]) => ({ fn, param }),
+);
+
+test.each(patternSteps)(
+  "$fn with no $param is refused at the parse",
+  ({ fn, param }) => {
+    const messages = refusalsOf(
+      partnerTerms({
+        linkageKeys: [
+          {
+            name: "Partner Key Name",
+            elements: [
+              { field: "partner_given", transform: [{ function: fn }] },
+            ],
+          },
+        ],
+      }),
+    );
+    expect(messages).toContain(
+      `${fn} ${param} must be declared, and this step declares none`,
+    );
+    expectNoPartnerText(messages);
+  },
+);
+
+test.each(patternSteps)(
+  "$fn with no $param is refused at the decode",
+  async ({ fn, param }) => {
+    // Without the refusal the step compiles the literal `undefined` and
+    // matches, splits, or filters on those nine characters, which is a wrong
+    // result rather than a failed run.
+    const messages = await decodeRefusalsOf(
+      partnerTerms({
+        linkageKeys: [
+          {
+            name: "Partner Key Name",
+            elements: [
+              { field: "partner_given", transform: [{ function: fn }] },
+            ],
+          },
+        ],
+      }),
+    );
+    expect(messages).toContain(
+      `${fn} ${param} must be declared, and this step declares none`,
+    );
+    expectNoPartnerText(messages);
+  },
+);
+
+test("a mistyped param is named the way the document writes it", () => {
+  // Validation runs on the camelized shape, and the paths that locate a
+  // refusal stop at `params`, so the message is the only part that names the
+  // key -- and it names the one the operator can find in the file.
+  const messages = refusalsOf(
+    partnerTerms({
+      linkageKeys: [
+        {
+          name: "Partner Key Name",
+          elements: [
+            {
+              field: "partner_given",
+              transform: [
+                {
+                  function: "split_on",
+                  params: { delimiter: ",", include_original: 5 },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    }),
+  );
+  expect(messages).toContain(
+    "split_on include_original must be true or false, not a number",
+  );
+  expect(messages.join("\n")).not.toContain("includeOriginal");
 });
 
 test("terms an exchange can run still parse and decode", async () => {
