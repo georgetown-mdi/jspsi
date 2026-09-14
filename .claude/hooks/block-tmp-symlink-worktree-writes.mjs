@@ -80,7 +80,8 @@ const TMP_ROOTS = [
 
 // Commands whose path operands are files they create or overwrite. `sed` is here
 // only for its in-place spelling; without one it writes to standard output, and
-// the redirect that captures it is read on its own.
+// the redirect that captures it is read on its own. `ln` is read by its own rule
+// in `linkTargets`, since only the link name it creates is a write.
 const WRITING_COMMANDS = new Set([
   "cp",
   "dd",
@@ -126,6 +127,13 @@ const NOCLOBBER = />\|/g;
 
 // dd names its operands by keyword rather than by position.
 const DD_OPERAND = /^(?:of|if)=/;
+
+// The `ln` flag naming the directory the links are made in, in its two
+// spellings. The short one takes the rest of its own cluster as the directory
+// when there is any (`-st DIR`, `-tDIR`), which is why the value is captured
+// here rather than assumed to be the next word.
+const TARGET_DIRECTORY_LONG = /^--target-directory(?:=(.*))?$/;
+const TARGET_DIRECTORY_SHORT = /^-[a-zA-Z]*?t(.*)$/;
 
 function isPathOperand(token) {
   return token.length > 0 && !token.startsWith("-");
@@ -179,14 +187,50 @@ function isInPlaceFlag(arg) {
   return arg === "--in-place" || /^-[a-hj-z]*i/.test(arg);
 }
 
+// The path an `ln` call creates. `ln [-s] TARGET LINK_NAME` writes LINK_NAME
+// alone: TARGET is text the new link holds, which `ln` neither reads nor writes,
+// so reading it as a write refuses a command that touches nothing. Two or more
+// operands write the last one -- the link name, or the directory the links are
+// made in; one operand writes the link named after it in the current directory;
+// `-t DIRECTORY` writes into that directory instead. A shape not read here names
+// no write, the way a fail-open guard must.
+function linkTargets(args) {
+  const operands = [];
+  let directory = null;
+  let index = 0;
+  while (index < args.length) {
+    const arg = args[index];
+    index++;
+    if (arg === "--") {
+      operands.push(...args.slice(index));
+      break;
+    }
+    if (!arg.startsWith("-") || arg === "-") {
+      operands.push(arg);
+      continue;
+    }
+    const long = TARGET_DIRECTORY_LONG.exec(arg);
+    const short = TARGET_DIRECTORY_SHORT.exec(arg);
+    if (long === null && short === null) continue;
+    const attached = long === null ? short[1] : (long[1] ?? "");
+    directory = attached.length > 0 ? attached : (args[index++] ?? null);
+  }
+  if (directory !== null) return [directory];
+  if (operands.length > 1) return [operands[operands.length - 1]];
+  if (operands.length === 1) return [basename(operands[0])];
+  return [];
+}
+
 // The paths a writing command names. Every path operand counts, the sources of a
 // copy included: a source read through a resolved-away /tmp path is the same
 // mistake reaching the same file, and which operand is the destination varies by
-// command and flag.
+// command and flag. `ln` is the exception, read by the rule above.
 function writingCommandTargets(tokens) {
   const command = invocation(tokens);
   if (command === null || !WRITING_COMMANDS.has(command.name)) return [];
   if (command.name === "sed" && !command.args.some(isInPlaceFlag)) return [];
+  if (command.name === "ln")
+    return linkTargets(command.args).filter(isPathOperand);
   return command.args
     .map((arg) => arg.replace(DD_OPERAND, ""))
     .filter(isPathOperand);

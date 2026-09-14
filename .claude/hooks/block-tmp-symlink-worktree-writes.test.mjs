@@ -136,6 +136,32 @@ describe("block-tmp-symlink-worktree-writes hook", () => {
     );
   });
 
+  it("reads the link ln creates, not the target it is pointed at", () => {
+    const { scratch, repo } = scene();
+    const through = join(scratch, "into-repo", "tracked.ts");
+    const intoRepo = join(scratch, "into-repo");
+    const intoRepoDir = join(intoRepo, "scratch");
+    expectAllowed(
+      [
+        `ln -s ${through} ${join(scratch, "real", "link.ts")}`,
+        `ln ${through} ${join(scratch, "real", "hard.ts")}`,
+        `ln -s ${through}`,
+      ],
+      repo,
+    );
+    expectBlocked(
+      [
+        `ln -s report.md ${join(intoRepo, "link.ts")}`,
+        `ln -s ${through} ${join(intoRepo, "link.ts")}`,
+        `ln -s report.md ${intoRepoDir}`,
+        `ln -st ${intoRepoDir} report.md`,
+        `ln -s --target-directory=${intoRepoDir} report.md`,
+      ],
+      repo,
+    );
+    expectBlocked([`ln -s ${join(scratch, "real", "notes.md")}`], intoRepo);
+  });
+
   it("blocks a write into the main worktree and into a linked one alike", () => {
     const { scratch, tree, repo } = scene();
     const intoTree = join(scratch, "into-tree", "tracked.ts");
