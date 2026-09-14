@@ -2293,7 +2293,7 @@ test("the identity private-key refusal names the field by path, not the value", 
 
 test("what the identity refusal removes: a marker the partner declared", () => {
   // The summary is built from terms that never passed a decode, so it still
-  // shows what the refusal above now keeps off the consent surface: a marker a
+  // shows what the refusal above keeps off the consent surface: a marker a
   // reader would read as psilink redacting a key it found.
   const summary = summarizeInvitation({
     linkageTerms: {
@@ -2302,6 +2302,21 @@ test("what the identity refusal removes: a marker the partner declared", () => {
     },
   });
   expect(String(summary.invitingParty)).toBe("[redacted private key]");
+});
+
+test("the private-key rule is the identity field's alone, not the free-text class's", () => {
+  const terms = freeTextTerms({
+    purpose: FAKE_KEY_IN_A_LABEL,
+    description: FAKE_KEY_IN_A_LABEL,
+    exclude: FAKE_KEY_IN_A_LABEL,
+  });
+  expect(() => parseLinkageTerms(terms)).not.toThrow();
+  const summary = summarizeInvitation({
+    linkageTerms: parseLinkageTerms(terms),
+  });
+  expect(String(summary.legalAgreement?.purpose)).toBe(
+    "[redacted private key]",
+  );
 });
 
 // --- Name-class shape rule ---------------------------------------------------
