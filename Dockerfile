@@ -9,7 +9,7 @@ ARG VITE_DEPLOYMENT_PROFILE=console
 # Base pinned to node:26-alpine's multi-arch index digest (both stages) so builds
 # resolve one exact image; a base bump for a node or musl patch is a deliberate
 # digest update, not an automatic float. See docs/spec/DEPENDENCY_PINS.md.
-FROM node:26-alpine@sha256:2d984a15c9b54fd0aeb608b8e0d0d83529eb34d2966db27a1fb4f1edc3d298a3 AS builder
+FROM node:26-alpine@sha256:ef24c5053d50fdc3e4e56eb4e7ddb7861874ab0fdc797046ba897581deb8e868 AS builder
 
 WORKDIR /build
 
@@ -104,7 +104,7 @@ RUN --mount=type=cache,target=/root/.npm \
   rm -rf node_modules \
   && npm ci --omit=dev --omit=optional -w packages/core -w apps/cli
 
-FROM node:26-alpine@sha256:2d984a15c9b54fd0aeb608b8e0d0d83529eb34d2966db27a1fb4f1edc3d298a3
+FROM node:26-alpine@sha256:ef24c5053d50fdc3e4e56eb4e7ddb7861874ab0fdc797046ba897581deb8e868
 
 # The runtime stage resolves no npm dependency: it copies the builder's
 # production node_modules and mirrors the workspace layout around it so the
