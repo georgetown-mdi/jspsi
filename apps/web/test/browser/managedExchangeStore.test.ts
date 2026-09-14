@@ -333,6 +333,31 @@ async function openRawHeldConnection(version: number): Promise<IDBDatabase> {
   });
 }
 
+/** The version a later build that bumped {@link IDB_VERSION} would open at. */
+const NEXT_BUILD_IDB_VERSION = IDB_VERSION + 1;
+
+/**
+ * Shift the store module's opens of the managed-exchange database to
+ * {@link NEXT_BUILD_IDB_VERSION}, so a connection held at {@link IDB_VERSION}
+ * blocks them the way an old tab's connection blocks a later build's
+ * version-change open. Only a version-change open is ever blocked, and while
+ * this build opens at version 1 -- the lowest a database can hold -- nothing can
+ * hold a connection below it, so the block is staged from this side instead.
+ * Every other open is passed through untouched. Returns the restore, which the
+ * caller runs before the test ends; the database is left at the shifted version,
+ * so the caller deletes it too.
+ */
+function openManagedDatabaseAtNextBuildVersion(): () => void {
+  const realOpen = indexedDB.open.bind(indexedDB);
+  indexedDB.open = (name: string, version?: number) =>
+    name === MANAGED_EXCHANGE_DB_NAME && version === IDB_VERSION
+      ? realOpen(name, NEXT_BUILD_IDB_VERSION)
+      : realOpen(name, version);
+  return () => {
+    indexedDB.open = realOpen;
+  };
+}
+
 beforeEach(async () => {
   await clearManagedExchanges();
 });
@@ -1068,20 +1093,23 @@ describe("an unreadable accounting recovers without deleting the exchange", () =
   });
 
   test("a store that will not open is transient, never the unreadable state", async () => {
-    // The real blocked open, driven as the store's own suite drives it: an older
-    // connection that never yields holds off this build's version-change open.
+    // The real blocked open, driven as the store's own suite drives it: an
+    // older connection that never yields holds off a version-change open.
     // Whatever else is true, the accounting was never READ -- so classifying this
     // as unreadable would offer the irreversible reset over a condition that
     // clears when the other tab closes, and classifying it as "none" would claim
     // nothing was disclosed.
     await deleteDatabase();
-    const held = await openRawHeldConnection(IDB_VERSION - 1);
+    const held = await openRawHeldConnection(IDB_VERSION);
+    const restoreOpen = openManagedDatabaseAtNextBuildVersion();
     try {
       expect(await readDisclosureAccounting("any-exchange")).toEqual({
         kind: "unavailable",
       });
     } finally {
+      restoreOpen();
       held.close();
+      await deleteDatabase();
     }
   });
 
@@ -1494,13 +1522,27 @@ describe("persistent storage request", () => {
 });
 
 describe("a blocked open settles instead of hanging", () => {
-  test("a version-change open held off by an older connection rejects, not hangs", async () => {
-    // Recreate the database one version below this build, then hold that older
-    // connection open WITHOUT the module's onversionchange self-close, modelling an old
-    // tab that never yields. The module's open (at IDB_VERSION) is a version-change open
-    // the older connection blocks: it must reject rather than hang forever.
+  // Each test here stages the block by shifting the store module's own open to the
+  // next build's version (openManagedDatabaseAtNextBuildVersion), which leaves the
+  // database above what this build can open; the restore and the delete run here so
+  // no test hands the next one a database it cannot reach.
+  let restoreOpen: (() => void) | undefined;
+
+  afterEach(async () => {
+    restoreOpen?.();
+    restoreOpen = undefined;
     await deleteDatabase();
-    const held = await openRawHeldConnection(IDB_VERSION - 1);
+  });
+
+  test("a version-change open held off by an older connection rejects, not hangs", async () => {
+    // Recreate the database at this build's version, then hold that connection open
+    // WITHOUT the module's onversionchange self-close, modelling an old tab that never
+    // yields. The module's open, shifted to the next build's version, is a
+    // version-change open the held connection blocks: it must reject rather than hang
+    // forever.
+    await deleteDatabase();
+    const held = await openRawHeldConnection(IDB_VERSION);
+    restoreOpen = openManagedDatabaseAtNextBuildVersion();
     try {
       await expect(openManagedExchangeDatabase()).rejects.toThrow();
     } finally {
@@ -1513,12 +1555,13 @@ describe("a blocked open settles instead of hanging", () => {
     // succeeds. This pins the self-healing property the degrade relies on -- a reload
     // (or the other tab closing) recovers a store the first open found blocked.
     await deleteDatabase();
-    const held = await openRawHeldConnection(IDB_VERSION - 1);
+    const held = await openRawHeldConnection(IDB_VERSION);
+    restoreOpen = openManagedDatabaseAtNextBuildVersion();
     await expect(openManagedExchangeDatabase()).rejects.toThrow();
     held.close();
     const db = await openManagedExchangeDatabase();
     try {
-      expect(db.version).toBe(IDB_VERSION);
+      expect(db.version).toBe(NEXT_BUILD_IDB_VERSION);
     } finally {
       db.close();
     }
@@ -1534,7 +1577,8 @@ describe("a blocked open settles instead of hanging", () => {
     const closeSpy = vi.spyOn(IDBDatabase.prototype, "close");
     try {
       await deleteDatabase();
-      const held = await openRawHeldConnection(IDB_VERSION - 1);
+      const held = await openRawHeldConnection(IDB_VERSION);
+      restoreOpen = openManagedDatabaseAtNextBuildVersion();
       await expect(openManagedExchangeDatabase()).rejects.toThrow();
       held.close();
       // Give the same request's now-unblocked onupgradeneeded/onsuccess a beat to fire,
@@ -1561,7 +1605,10 @@ describe("a blocked open settles instead of hanging", () => {
     await deleteDatabase();
     const moduleConnection = await openManagedExchangeDatabase();
     const higher = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open(MANAGED_EXCHANGE_DB_NAME, IDB_VERSION + 1);
+      const request = indexedDB.open(
+        MANAGED_EXCHANGE_DB_NAME,
+        NEXT_BUILD_IDB_VERSION,
+      );
       request.onupgradeneeded = () => undefined;
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);

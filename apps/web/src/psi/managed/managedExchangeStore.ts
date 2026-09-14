@@ -80,7 +80,7 @@ export const MANAGED_EXCHANGE_RESULTS_STORE_NAME = "results";
  * structural migration (a new object store or index), never for a change to the
  * record's own `schemaVersion`, which the record schema governs.
  * @internal */
-export const IDB_VERSION = 4;
+export const IDB_VERSION = 1;
 
 /**
  * Open (creating or upgrading) the managed-exchange database. The records store is
