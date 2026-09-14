@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 
 import {
   CONFIRMING_PROTOCOL_STAGE_ID,
+  SINGLE_PASS_STAGE_IDS,
   getDefaultLinkageTerms,
 } from "@psilink/core";
 import { minimalPreparedExchange } from "@psilink/core/testing";
@@ -19,6 +20,7 @@ import {
   runWithFailure,
   runWithStage,
   runWithStages,
+  stageIsKnown,
   stagesFor,
   timeOfDayLabel,
   timelineSteps,
@@ -396,5 +398,96 @@ describe("the acceptor timeline and labels", () => {
     expect(
       currentStageLabel(runWithStage(initialRun(), WAITING_STAGE_ID, at(32))),
     ).toBe("Waiting for your partner");
+  });
+});
+
+describe("single-pass stage labels", () => {
+  const at = (minute: number) => new Date(2026, 6, 8, 14, minute);
+
+  function singlePassConfirming(): ExchangeRun {
+    const seeded = runWithStages(
+      initialRun(),
+      stagesFor(preparedWith("single-pass", 3)),
+    );
+    return runWithStage(
+      runWithStage(seeded, WAITING_STAGE_ID, at(32)),
+      CONFIRMING_PROTOCOL_STAGE_ID,
+      at(39),
+    );
+  }
+
+  function labelOf(stageId: string): string {
+    return currentStageLabel(
+      runWithStage(singlePassConfirming(), stageId, at(41)),
+    );
+  }
+
+  test("the encryption stages read as display labels", () => {
+    expect(labelOf(SINGLE_PASS_STAGE_IDS.encryptingOwnData)).toBe(
+      "Encrypting your data",
+    );
+    expect(labelOf(SINGLE_PASS_STAGE_IDS.encryptingPartnerData)).toBe(
+      "Encrypting your partner's data",
+    );
+  });
+
+  test("the matching stage reads as a display label", () => {
+    expect(labelOf(SINGLE_PASS_STAGE_IDS.identifyingSharedValues)).toBe(
+      "Finding matches",
+    );
+  });
+
+  test("the history rows hold the labels, not the raw ids", () => {
+    const encrypting = runWithStage(
+      singlePassConfirming(),
+      SINGLE_PASS_STAGE_IDS.encryptingOwnData,
+      at(41),
+    );
+    const matching = runWithStage(
+      encrypting,
+      SINGLE_PASS_STAGE_IDS.identifyingSharedValues,
+      at(44),
+    );
+    expect(matching.visits.slice(3)).toEqual([
+      {
+        id: SINGLE_PASS_STAGE_IDS.encryptingOwnData,
+        label: "Encrypting your data",
+        completedAt: at(44),
+      },
+      {
+        id: SINGLE_PASS_STAGE_IDS.identifyingSharedValues,
+        label: "Finding matches",
+      },
+    ]);
+  });
+
+  test("the cascade's per-key and confirmation labels are unchanged", () => {
+    const seeded = runWithStages(
+      initialRun(),
+      stagesFor(preparedWith("cascade", 2)),
+    );
+    const confirming = runWithStage(
+      seeded,
+      CONFIRMING_PROTOCOL_STAGE_ID,
+      at(39),
+    );
+    expect(currentStageLabel(confirming)).toBe("Confirming protocol");
+    expect(
+      currentStageLabel(runWithStage(confirming, "stage 1 / 2", at(41))),
+    ).toBe("Linking key 1 / 2");
+  });
+
+  test("an unlabelled stage id renders the id, and an empty one a readable label", () => {
+    expect(labelOf("surprise stage")).toBe("surprise stage");
+    expect(labelOf("   ")).toBe("Working");
+  });
+
+  test("only a stage neither the tree nor the labels name is unknown", () => {
+    const run = singlePassConfirming();
+    expect(stageIsKnown(run, CONFIRMING_PROTOCOL_STAGE_ID)).toBe(true);
+    expect(stageIsKnown(run, SINGLE_PASS_STAGE_IDS.encryptingPartnerData)).toBe(
+      true,
+    );
+    expect(stageIsKnown(run, "surprise stage")).toBe(false);
   });
 });

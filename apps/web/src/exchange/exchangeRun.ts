@@ -1,10 +1,15 @@
 import {
   CONFIRMING_PROTOCOL_STAGE_ID,
   ProcessState,
+  SINGLE_PASS_STAGE_IDS,
   describeExchangeStages,
 } from "@psilink/core";
 
-import type { PreparedExchange, ResolvedMatching } from "@psilink/core";
+import type {
+  PreparedExchange,
+  ResolvedMatching,
+  SinglePassStageId,
+} from "@psilink/core";
 import type { StageDefinition } from "@psi/exchangeLifecycle";
 
 /**
@@ -141,6 +146,42 @@ function closedVisits(visits: Array<StageVisit>, at: Date): Array<StageVisit> {
   );
 }
 
+/** The label for a stage event whose id holds no text of its own, so that its
+ * history row states the run is under way rather than rendering empty. */
+const UNNAMED_STAGE_LABEL = "Working";
+
+/** Display labels for the stage events single-pass linkage emits mid-run. A
+ * single-pass stage tree enumerates the protocol-confirmation step alone --
+ * which encrypt and match stages a party emits follows the role the handshake
+ * resolves -- so those rows take their label from here instead of the tree. */
+const SINGLE_PASS_STAGE_LABELS = new Map<string, string>(
+  Object.entries({
+    [SINGLE_PASS_STAGE_IDS.encryptingOwnData]: "Encrypting your data",
+    [SINGLE_PASS_STAGE_IDS.encryptingPartnerData]:
+      "Encrypting your partner's data",
+    [SINGLE_PASS_STAGE_IDS.identifyingSharedValues]: "Finding matches",
+  } satisfies Record<SinglePassStageId, string>),
+);
+
+/** The label a stage event shows in the status panel and the run history: the
+ * stage tree's, then the single-pass label, then the id itself. */
+function stageLabel(run: ExchangeRun, stageId: string): string {
+  return (
+    run.stages.find((stage) => stage.id === stageId)?.label ??
+    SINGLE_PASS_STAGE_LABELS.get(stageId) ??
+    (stageId.trim() === "" ? UNNAMED_STAGE_LABEL : stageId)
+  );
+}
+
+/** Whether the stage tree or the single-pass labels name this stage id -- what
+ * the status panel's development-only desync warning reports on. */
+export function stageIsKnown(run: ExchangeRun, stageId: string): boolean {
+  return (
+    run.stages.some((stage) => stage.id === stageId) ||
+    SINGLE_PASS_STAGE_LABELS.has(stageId)
+  );
+}
+
 /** Advance to a stage: the open visit closes at `at` and the new stage's visit
  * opens. A repeat of the current stage is a no-op, so a re-emitted stage id
  * cannot duplicate a history row. The terminal done stage belongs to
@@ -153,12 +194,13 @@ export function runWithStage(
   at: Date,
 ): ExchangeRun {
   if (stageId === run.stageId || stageId === DONE_STAGE_ID) return run;
-  const label =
-    run.stages.find((stage) => stage.id === stageId)?.label ?? stageId;
   return {
     ...run,
     stageId,
-    visits: [...closedVisits(run.visits, at), { id: stageId, label }],
+    visits: [
+      ...closedVisits(run.visits, at),
+      { id: stageId, label: stageLabel(run, stageId) },
+    ],
   };
 }
 
