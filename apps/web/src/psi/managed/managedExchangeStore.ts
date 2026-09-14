@@ -3,9 +3,10 @@
  * origin-isolated by IndexedDB's same-origin model. A thin platform layer over
  * the pure record schema in {@link ./managedExchangeRecord.ts}: every record
  * written or read here is built or re-validated there. The whole exchange --
- * record, secret, input handle, schedule, and run bookkeeping -- is one object
- * under one key, so a delete removes it entirely; there is no separate
- * secret-only retirement (see docs/spec/MANAGED_EXCHANGE_RECORD.md).
+ * record, secret, input handle, output-folder grant, schedule, and run
+ * bookkeeping -- is one object under one key, so a delete removes it entirely;
+ * there is no separate secret-only retirement (see
+ * docs/spec/MANAGED_EXCHANGE_RECORD.md).
  */
 
 import {
@@ -16,6 +17,7 @@ import {
   applyManagedExchangeInputHandle,
   applyManagedExchangeLastRun,
   applyManagedExchangeLocalEdits,
+  applyManagedExchangeOutputDirectory,
   applyManagedExchangeReinviteRotation,
   applyManagedExchangeRotation,
   applyManagedExchangeScheduleAdvance,
@@ -945,6 +947,32 @@ export async function persistManagedExchangeInputHandle(
 }
 
 /**
+ * Persist an output-folder grant onto the stored record, or drop it with `null`,
+ * advancing only `outputDirectoryHandle` and nothing else. The read, the
+ * field-scoped application through {@link applyManagedExchangeOutputDirectory}
+ * (which re-validates), and the write-back run inside one strict-durability
+ * readwrite transaction ({@link readModifyWriteRecord}), so the grant the operator
+ * just took cannot carry a stale secret or document back over a concurrent
+ * rotation write. Used where the operator grants or re-points the folder a
+ * scheduled run writes its results into.
+ *
+ * @throws {Error} if no record with `id` exists.
+ * @throws {ZodError} if the stored value is not a valid v1 record or the result is
+ *   invalid; the transaction aborts and nothing is written.
+ */
+export async function persistManagedExchangeOutputDirectory(
+  id: string,
+  handle: FileSystemDirectoryHandle | null,
+): Promise<ManagedExchangeRecord> {
+  return readModifyWriteRecord(id, (stored) => {
+    if (stored === undefined)
+      throw new Error(`no managed exchange with id ${id}`);
+    const existing = parseManagedExchangeRecord(stored);
+    return applyManagedExchangeOutputDirectory(existing, handle);
+  });
+}
+
+/**
  * How {@link reviveSpentManagedExchange} reconciled an artifact against the spent
  * records in the store:
  *
@@ -970,8 +998,8 @@ export type ManagedReviveOutcome =
  *
  * A match spent by the DEVICE MIGRATION is revived in place: the record's fields
  * are updated from the artifact (keeping its own `id` and any persisted input
- * handle), its spent state cleared, and the backup and import markers stamped as
- * of `at`.
+ * handle or output-folder grant), its spent state cleared, and the backup and
+ * import markers stamped as of `at`.
  *
  * A match spent under a `handoff` is NOT revived and nothing is written -- the
  * migration is the only spend that leaves `handoff` absent, so a hand-off route
@@ -1058,6 +1086,9 @@ export async function reviveSpentManagedExchange(
             ...(match.inputFileHandle !== undefined
               ? { inputFileHandle: match.inputFileHandle }
               : {}),
+            ...(match.outputDirectoryHandle !== undefined
+              ? { outputDirectoryHandle: match.outputDirectoryHandle }
+              : {}),
           });
           records.put(revived);
           local.put(
@@ -1084,12 +1115,13 @@ export async function reviveSpentManagedExchange(
 
 /**
  * Delete a managed exchange in one step, removing everything the browser holds
- * for it -- the record, the secret, the input-file handle, the schedule, the run
- * bookkeeping, the local sibling state (the backup marker and any spent state),
- * its accounting of disclosures, AND the results a scheduled run parked for the
- * operator -- so nothing is left behind. All four are removed in one transaction
- * spanning the four stores, so a delete cannot leave a stranded sibling entry.
- * Idempotent: a delete of a missing id resolves without error.
+ * for it -- the record, the secret, the input-file handle, the output-folder
+ * grant, the schedule, the run bookkeeping, the local sibling state (the backup
+ * marker and any spent state), its accounting of disclosures, AND the results a
+ * scheduled run parked for the operator -- so nothing is left behind. All four
+ * are removed in one transaction spanning the four stores, so a delete cannot
+ * leave a stranded sibling entry. Idempotent: a delete of a missing id resolves
+ * without error.
  *
  * The accounting goes with the exchange: it is this exchange's own disclosure
  * history, and leaving it behind would strand cleartext partner and agreement

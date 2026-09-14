@@ -17,6 +17,7 @@ import { listReadableManagedExchanges } from "../../../src/psi/managed/managedEx
 import {
   parkRunResults,
   recordParkedResultsRefusal,
+  recordResultsWrittenToFolder,
 } from "../../../src/psi/parkedResultsStore.js";
 
 import type { ManagedExchangeRecord } from "../../../src/psi/managed/managedExchangeRecord.js";
@@ -57,13 +58,61 @@ vi.mock("@openmined/psi.js/psi_wasm_web", () => ({
 vi.mock("../../../src/psi/parkedResultsStore.js", () => ({
   parkRunResults: vi.fn(),
   recordParkedResultsRefusal: vi.fn(),
+  recordResultsWrittenToFolder: vi.fn(),
 }));
 
 const mockedRun = vi.mocked(runManagedExchangeInBrowser);
 const mockedPark = vi.mocked(parkRunResults);
 const mockedRefusal = vi.mocked(recordParkedResultsRefusal);
+const mockedWrittenNote = vi.mocked(recordResultsWrittenToFolder);
 
-const RECORD = { id: "record-under-test" } as ManagedExchangeRecord;
+const RECORD = {
+  id: "record-under-test",
+  label: "Riverbend quarterly",
+} as ManagedExchangeRecord;
+
+/** The granted output folder, as the run reaches it: a permission state it
+ * reports without prompting, and a write that either takes the bytes or throws.
+ * A real directory handle needs a picker grant no unit project can summon, so
+ * the handle is built to the two platform calls the delivery makes. */
+function grantedFolder({
+  permission = "granted",
+  write,
+}: {
+  permission?: "granted" | "denied" | "prompt";
+  write?: () => Promise<never>;
+} = {}) {
+  const written: Array<{ fileName: string; text: string }> = [];
+  const handle = {
+    name: "Riverbend results",
+    queryPermission: () => Promise.resolve(permission),
+    getFileHandle: (fileName: string) =>
+      Promise.resolve({
+        createWritable: () =>
+          Promise.resolve({
+            write: async (blob: Blob) => {
+              if (write !== undefined) await write();
+              written.push({ fileName, text: await blob.text() });
+            },
+            close: () => Promise.resolve(),
+            abort: () => Promise.resolve(),
+          }),
+      }),
+  };
+  return {
+    written,
+    record: {
+      id: RECORD.id,
+      label: RECORD.label,
+      outputDirectoryHandle: handle as unknown as FileSystemDirectoryHandle,
+    } as ManagedExchangeRecord,
+  };
+}
+
+/** An attempt against `record` rather than the folderless one above. */
+function attemptFor(record: ManagedExchangeRecord) {
+  return { ...attempt(), record };
+}
 
 const SOURCE = {
   kind: "handle" as const,
@@ -116,6 +165,9 @@ beforeEach(() => {
       revokeObjectURL: vi.fn(),
     },
   });
+  // The feature detection the delivery gates the stored grant on; Node has no
+  // File System Access API of its own.
+  vi.stubGlobal("FileSystemDirectoryHandle", class {});
 });
 
 afterEach(() => {
@@ -257,6 +309,128 @@ describe("what a completed unattended run leaves for the next visit", () => {
     ).rejects.toThrow("the channel dropped");
     expect(mockedPark).not.toHaveBeenCalled();
     expect(mockedRefusal).not.toHaveBeenCalled();
+  });
+});
+
+describe("where a completed unattended run's results go", () => {
+  // Each case states its own store outcome rather than inheriting the failure a
+  // preceding case installed.
+  beforeEach(() => {
+    mockedPark.mockResolvedValue(undefined);
+    mockedRefusal.mockResolvedValue(undefined);
+    mockedWrittenNote.mockResolvedValue(undefined);
+  });
+
+  test("into the folder the operator granted, with nothing kept in this browser", async () => {
+    const folder = grantedFolder();
+    mockedRun.mockImplementation((config) =>
+      Promise.resolve(matchedRun(config)),
+    );
+
+    await browserScheduleTickSeams(new AbortController().signal).runAttempt(
+      attemptFor(folder.record),
+    );
+
+    // The results are in the folder, under the run's own instant so a later run
+    // does not overwrite them.
+    expect(folder.written).toHaveLength(1);
+    expect(folder.written[0].fileName).toContain("2026-03-01");
+    expect(folder.written[0].text).toBe("id,value\n1,a\n");
+    // And the next visit is told where they went, without a second copy of the
+    // rows at rest here.
+    expect(mockedPark).not.toHaveBeenCalled();
+    expect(mockedRefusal).not.toHaveBeenCalled();
+    expect(mockedWrittenNote).toHaveBeenCalledTimes(1);
+    const [id, note] = mockedWrittenNote.mock.calls[0];
+    expect(id).toBe(RECORD.id);
+    expect(note).toMatchObject({
+      kind: "written",
+      runAt: RUN_AT,
+      directoryName: "Riverbend results",
+      matchedRecordCount: 1,
+    });
+  });
+
+  test("into this browser when the grant is not one a run with nobody present may use", async () => {
+    const warn = vi.spyOn(log, "warn").mockImplementation(() => undefined);
+    // A grant the platform will not honour unattended, or one the operator
+    // revoked: the run may query but never prompt, so the results are kept here.
+    const folder = grantedFolder({ permission: "prompt" });
+    mockedRun.mockImplementation((config) =>
+      Promise.resolve(matchedRun(config)),
+    );
+
+    await browserScheduleTickSeams(new AbortController().signal).runAttempt(
+      attemptFor(folder.record),
+    );
+
+    expect(folder.written).toHaveLength(0);
+    expect(mockedWrittenNote).not.toHaveBeenCalled();
+    expect(mockedPark).toHaveBeenCalledTimes(1);
+    const [, parked] = mockedPark.mock.calls[0];
+    // Named rather than reported as a plain success: the operator is owed which
+    // of the two happened.
+    expect(parked.fallback).toBe("ungranted");
+    expect(await parked.csv.text()).toBe("id,value\n1,a\n");
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  test("into this browser when the write to the granted folder throws", async () => {
+    const warn = vi.spyOn(log, "warn").mockImplementation(() => undefined);
+    const folder = grantedFolder({
+      write: () => Promise.reject(new Error("the disk is full")),
+    });
+    mockedRun.mockImplementation((config) =>
+      Promise.resolve(matchedRun(config)),
+    );
+
+    await browserScheduleTickSeams(new AbortController().signal).runAttempt(
+      attemptFor(folder.record),
+    );
+
+    expect(folder.written).toHaveLength(0);
+    expect(mockedWrittenNote).not.toHaveBeenCalled();
+    expect(mockedPark).toHaveBeenCalledTimes(1);
+    expect(mockedPark.mock.calls[0][1].fallback).toBe("write-failed");
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  test("into this browser with no reason stated where no folder was granted", async () => {
+    // The plain parking case: nothing failed, so the row says nothing about a
+    // folder.
+    mockedRun.mockImplementation((config) =>
+      Promise.resolve(matchedRun(config)),
+    );
+
+    await browserScheduleTickSeams(new AbortController().signal).runAttempt(
+      attempt(),
+    );
+
+    expect(mockedWrittenNote).not.toHaveBeenCalled();
+    expect(mockedPark.mock.calls[0][1].fallback).toBeUndefined();
+  });
+
+  test("never turns a completed run into a failed attempt when the written note is refused", async () => {
+    const warn = vi.spyOn(log, "warn").mockImplementation(() => undefined);
+    const folder = grantedFolder();
+    mockedRun.mockImplementation((config) =>
+      Promise.resolve(matchedRun(config)),
+    );
+    mockedWrittenNote.mockRejectedValue(new Error("the store is gone"));
+
+    await expect(
+      browserScheduleTickSeams(new AbortController().signal).runAttempt(
+        attemptFor(folder.record),
+      ),
+    ).resolves.toBeUndefined();
+
+    // The results are in the folder, so the lost note parks no second copy.
+    expect(folder.written).toHaveLength(1);
+    expect(mockedPark).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
   });
 });
 

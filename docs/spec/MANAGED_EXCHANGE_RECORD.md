@@ -99,6 +99,7 @@ are the standing definition of the managed exchange.
 | `exchangeFile` | object | This party's exchange-file document, verbatim: the validated `ExchangeSpec` shape both applications share (see [EXCHANGE_FILE.md](EXCHANGE_FILE.md), "The artifact is the CLI config schema") -- the linkage terms both parties validated (column **shape** and disclosed payload column **names**, never a row value), metadata, standardization, any payload-column commitments, the acceptor's own outbound-payload consent record (see [EXCHANGE_FILE.md](EXCHANGE_FILE.md#payload-disclosure-consent), "Payload-disclosure consent"), the acceptor's `expectedPartnerDeduplicate` -- the cardinality side the accepted invitation declared for the partner, which a re-run holds the partner to (see [EXCHANGE_FILE.md](EXCHANGE_FILE.md#terms-binding-consent), "Terms-binding consent") -- this party's own `includeOwnColumns` output-composition choice, a closed two-value enum naming no column, and the connection block. It has **no `authentication` block** (the secret lives in `sharedSecret` below) and is composed exactly as the mint layer composes a downloadable file: assembled from a credential-free locator input, validated through the shared schema, with the **parse result** (never the raw input) persisted. The document's operator-authored free-text fields persist verbatim with it: each metadata column's optional `description` (no schema length bound), each standardization step's `params` (an open parameter map -- an authored cleaning step can embed a literal value, a pattern or a replacement string), and `retentionDisposition` (bounded at 1024 characters, the config schema's text bound), plus the terms' own 1024-bounded payload `description` and legal-agreement `purpose` strings. The record stores the document as minted, so the content guidance for these fields is the same **operator cooperation** the `label` row describes, and no additional bound or strip pass runs at persist time: the document is kept verbatim, and a document the mint layer accepts must remain saveable as managed (see [Metadata at rest](../SECURITY_DESIGN.md#metadata-at-rest-presence-and-shape)). The document is immutable for the partnership: a re-invite re-issues it verbatim with only a fresh secret, and exchanging on different terms is a new exchange, not an edit or re-invite of this record. |
 | `side` | enum (`"inviter"` \| `"acceptor"`) | This party's side of the partnership; dispatches a re-run to the matching rendezvous flow (see [Role: a local `side` field](#role-a-local-side-field-not-the-document)). Local-only by design -- not the document's `connection.role`, which no web path reads. |
 | `inputFileHandle` | `FileSystemFileHandle` or absent | A persisted **pointer** to the operator's input file, held where the File System Access API exists (Chromium), with persistent read permission where the platform grants it (an installed app), so an unattended run reads the standing file with nobody present and an attended re-run is one action. It is a reference, never a copy: no input content or row value derived from it persists, which is where the no-second-copy invariant is enforced. It is also live, not a snapshot: each run calls `getFile()` at run start and reads whatever file currently exists at the path -- a `File` object is a point-in-time reference, so `File` objects are never retained across runs -- which is what makes dropping the current period's extract over the same name the data-refresh workflow. A missing entry at run start fails the file read with a clean not-found, recorded as a benign `"input"` failure (see `lastRun`), never routed through desync/attack framing. What it does add to the store's disclosure is the input file's **name**, and the granted read permission extends an in-origin reader's reach to the file's current contents (see [Metadata at rest](../SECURITY_DESIGN.md#metadata-at-rest-presence-and-shape)). Absent on browsers without the API (each attended run re-selects the file) and in any imported record: the handle is a device- and profile-local platform object stored by structured clone, with no file serialization, so the export artifact omits it and the first run after an import re-acquires one by selection. |
+| `outputDirectoryHandle` | `FileSystemDirectoryHandle` or absent | A persisted **pointer** to the folder the operator granted for a scheduled run's results, held where the File System Access API exists. A run with nobody present writes its results CSV into that folder, under a name holding the exchange's label and the run's own instant, so successive runs accumulate rather than overwrite and two exchanges granted one folder are told apart by name; a run whose grant is absent, not honoured unattended, or revoked, and one whose write fails, parks the results instead (see [The parked results of a scheduled run](#the-parked-results-of-a-scheduled-run)). The grant is taken at schedule entry and by re-pointing, never at run time: the directory picker requires a user gesture, and at run time the permission is **queried and never prompted**, the same unattended rule `inputFileHandle` takes. The mode is `readwrite`, a larger grant than the input side's single-file read -- an in-origin script can read and write everything in that folder while it stands (see [Metadata at rest](../SECURITY_DESIGN.md#metadata-at-rest-presence-and-shape)). Absent on browsers without the API, and never in the export artifact, for the reason `inputFileHandle` is: it is a device- and profile-local platform object stored by structured clone, with no serialization. What an import then holds depends on which import it is: one that installs a fresh record has no handle and re-grants, while a [revive-in-place](#the-backup-marker-the-spent-state-and-the-import-marker-local-siblings-never-in-the-artifact) -- this profile's own spent record, updated rather than duplicated -- keeps the grant that record already held, since the folder was granted to this profile and the handle never left it. |
 | `sharedSecret` | string (base64url, 43 chars / 32 bytes) | The **current** rotated shared secret, matching `SHARED_SECRET_REGEX` (see [EXCHANGE_FILE.md](EXCHANGE_FILE.md)) -- the `.psilink.key` analog the exchange-file document never holds. This is the one at-rest secret in the record. Rotated after every successful run and re-persisted before the run is treated as succeeded (see [Persist-before-success ordering](#persist-before-success-ordering)). |
 | `expires` | string (ISO 8601, UTC `Z`) or absent | The instant after which `sharedSecret` must not be used; the recovery when it lapses is re-invite. Absent means no bound is in force. The record inherits the CLI key file's **consumer** semantics for `expires` -- one field, one meaning to every consumer (see [Token age and rotation policy](../SECURITY_DESIGN.md#token-age-and-rotation-policy), a citation about meaning, not sourcing) -- while its **provenance** is single-source: only the max-age stamp writes it, the invitation's setup lifetime having been consumed at provisioning. Two write paths stamp it -- a successful run's rotation write-back and an operator's in-place edit of `tokenMaxAgeDays` -- both under the same never-move-later rule (see [Edit-time re-derivation of `expires`](#edit-time-re-derivation-of-expires)). |
 | `tokenMaxAgeDays` | integer or absent | The operator's max-token-age policy for this exchange, the browser analog of the CLI `authentication.token_max_age_days`, and like it **off by default**: absent means no bound is in force, and a record is created with it absent unless the operator sets one. When set, each successful run stamps `expires` this many days out onto the rotated secret. The reason to opt in is a dormant partnership: rotation caps exposure only for an exchange that actually runs, so an idle stored secret has no automatic exposure bound without it (see [The primary controls](../SECURITY_DESIGN.md#the-primary-controls)). It is a **local field** the operator may edit in place without a re-invite; what the edit does to `expires` is [Edit-time re-derivation of `expires`](#edit-time-re-derivation-of-expires). |
@@ -954,7 +955,8 @@ record, in a separate origin-local store keyed by the record `id`, and are
   **Revive by import is the migration spend's recovery, and only its.** The
   migration export downloads the artifact that clears its own spend (a
   **revive-in-place**: an import whose secret matches the spent record's updates
-  that record's fields, keeps its `id` and input handle, clears the spent state,
+  that record's fields, keeps its `id` and its platform handles -- the input file
+  and the granted output folder -- clears the spent state,
   and marks it imported and backed-up, rather than installing a duplicate). The
   command-line export downloads the CLI's `psilink.yaml` and `.psilink.key`, which
   the import flow does not accept, so that hand-off leaves nothing of its own to
@@ -1248,17 +1250,38 @@ ship past the obligation.
 ## The parked results of a scheduled run
 
 A run with nobody present builds the same results file an attended run builds and
-has no one to hand it to. It therefore **parks** that file: a third local
-sibling, in its own origin-local store keyed by the record `id`, holding what
-each unattended run produced until the operator returns for it or the retention
-releases it.
+has no one to hand it to. Where the operator granted an output folder
+(`outputDirectoryHandle` under [Persisted across runs](#persisted-across-runs))
+the run **writes** the file there; otherwise, and whenever that grant or write
+does not hold, it **parks** the file: a third local sibling, in its own
+origin-local store keyed by the record `id`, holding what each unattended run
+produced until the operator returns for it or the retention releases it.
 
-**What an entry holds.** One entry per run, in run order, as one of two shapes:
+**Which of the two a run takes.** The folder first, parking as the fallback:
+
+| The run finds | What it does | What the next visit is told |
+| --- | --- | --- |
+| A grant held, permission `"granted"`, write lands | Writes the results into the folder | The folder and file name the results went to |
+| A grant held, permission not `"granted"` (never honoured unattended, or revoked) | Parks the results; never prompts | The results, and that the folder could not be written to without asking |
+| A grant held, write throws | Parks the results | The results, and that the write to the folder failed |
+| No grant held | Parks the results | The results |
+
+The permission is queried, never requested: a run with nobody present has nobody
+to answer a prompt, so a grant that is not already in force is the second row,
+not a prompt nobody sees. Neither a failed write nor a failed park may restate
+the run's outcome: it rotated, disclosed, and succeeded before any of this.
+
+**What an entry holds.** One entry per run, in run order, as one of three shapes:
 
 | Shape | Fields | What it means |
 | --- | --- | --- |
-| Results | `runAt` (ISO 8601 UTC, the run's own bookkeeping stamp), `fileName` (the stamped download name), `csv` (the results file as a `Blob`), optional `matchedRecordCount` | The run's results, waiting for the operator |
+| Results | `runAt` (ISO 8601 UTC, the run's own bookkeeping stamp), `fileName` (the download name: the exchange's label and the run's stamp), `csv` (the results file as a `Blob`), optional `matchedRecordCount`, optional `fallback` (`"ungranted"` \| `"write-failed"`) | The run's results, waiting for the operator; `fallback` names why a granted folder did not take them, and is absent where no grant was held |
+| Written | `kind: "written"`, `runAt`, `fileName`, `directoryName` (the granted folder's own name, the leaf a handle reports -- no path is disclosed to the app), optional `matchedRecordCount` | The run's results are in the granted folder; this entry is the note saying where, and holds no rows |
 | Storage refused | `kind: "storage-refused"`, `runAt` | This browser would not store that run's results; the rows are gone and the run itself stands |
+
+A written entry is the one shape that leaves no row value at rest in the browser:
+the rows are in the operator's own folder, under whatever protection that
+filesystem gives them, and the retention below applies to the note alone.
 
 The results CSV is the whole of what is parked. The run's exchange record and its
 verification keys are not: the record is already filed to [the accounting of
@@ -1300,7 +1323,7 @@ either leaves only a diagnostic-log line; nothing else is claimed.
 
 **Reader-rejects-unknown, with no recovery arm.** The stored value carries its
 own format literal (`psilink-parked-results/v1`), and a reader refuses an
-unrecognized version, an unknown key, or an entry that is not one of the two
+unrecognized version, an unknown key, or an entry that is not one of the three
 shapes, rather than loading a shortened set. The refused value is left exactly
 where it is, and neither recovery arm the accounting offers is offered here: no
 export, because the bytes are matched rows no reading of which this build can
@@ -1313,7 +1336,8 @@ Deleting the exchange removes the value.
 
 **What it discloses at rest** is not what the rest of this document describes.
 Every other store here holds presence, shape, and aggregate counts; this one
-holds matched identifiers and disclosed payload values, unencrypted. See
+holds matched identifiers and disclosed payload values, unencrypted -- for every
+entry but the written one, whose rows are in the granted folder instead. See
 [SECURITY_DESIGN.md](../SECURITY_DESIGN.md#results-of-a-scheduled-run-at-rest),
 which states the reach and the bounds, and claims no at-rest protection.
 

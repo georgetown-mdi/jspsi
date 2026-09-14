@@ -11,11 +11,11 @@ import {
 } from "@psilink/core";
 
 import {
-  HandleReadPermissionError,
+  HandlePermissionError,
   acquireManagedInput,
   acquireValidatedManagedInput,
   capturedInputHandle,
-  ensureHandleReadPermission,
+  ensureHandlePermission,
   fileSystemAccessSupported,
   storedInputHandleUsable,
 } from "@psi/managed/managedInputHandle";
@@ -31,8 +31,8 @@ import { runManagedExchange } from "@psi/managed/managedExchangeRun";
 
 import type { ExchangeSpec, WebRTCExchangeLocator } from "@psilink/core";
 import type {
-  HandleReadPermissionQuery,
-  HandleReadPermissionState,
+  HandlePermissionQuery,
+  HandlePermissionState,
 } from "@psi/managed/managedInputHandle";
 import type { NewManagedExchange } from "@psi/managed/managedExchangeRecord";
 
@@ -105,9 +105,9 @@ async function writeOpfsFile(
  * so the unattended-never-prompts and attended-prompts paths can be asserted
  * against a handle that (being OPFS) implements no real permission extension. */
 function fakePermission(
-  queryState: HandleReadPermissionState,
-  requestState: HandleReadPermissionState = "granted",
-): HandleReadPermissionQuery & { requested: boolean } {
+  queryState: HandlePermissionState,
+  requestState: HandlePermissionState = "granted",
+): HandlePermissionQuery & { requested: boolean } {
   const seam = {
     requested: false,
     query: () => Promise.resolve(queryState),
@@ -336,7 +336,7 @@ describe("permission layer (injected)", () => {
       CONFORMING_HEADER,
     );
     const permission = fakePermission("granted");
-    await ensureHandleReadPermission(handle, "unattended", permission);
+    await ensureHandlePermission(handle, "unattended", "read", permission);
     expect(permission.requested).toBe(false);
   });
 
@@ -347,8 +347,8 @@ describe("permission layer (injected)", () => {
     );
     const permission = fakePermission("prompt");
     await expect(
-      ensureHandleReadPermission(handle, "unattended", permission),
-    ).rejects.toBeInstanceOf(HandleReadPermissionError);
+      ensureHandlePermission(handle, "unattended", "read", permission),
+    ).rejects.toBeInstanceOf(HandlePermissionError);
     // A scheduled run has nobody to answer a prompt, so it must not request.
     expect(permission.requested).toBe(false);
   });
@@ -359,7 +359,7 @@ describe("permission layer (injected)", () => {
       CONFORMING_HEADER,
     );
     const permission = fakePermission("prompt", "granted");
-    await ensureHandleReadPermission(handle, "attended", permission);
+    await ensureHandlePermission(handle, "attended", "read", permission);
     expect(permission.requested).toBe(true);
   });
 
@@ -370,8 +370,8 @@ describe("permission layer (injected)", () => {
     );
     const permission = fakePermission("prompt", "denied");
     await expect(
-      ensureHandleReadPermission(handle, "attended", permission),
-    ).rejects.toBeInstanceOf(HandleReadPermissionError);
+      ensureHandlePermission(handle, "attended", "read", permission),
+    ).rejects.toBeInstanceOf(HandlePermissionError);
     expect(permission.requested).toBe(true);
   });
 
@@ -393,7 +393,7 @@ describe("permission layer (injected)", () => {
     expect(error).toBeInstanceOf(ManagedInputError);
     expect((error as ManagedInputError).rejection.reason).toBe("acquire");
     expect((error as ManagedInputError).cause).toBeInstanceOf(
-      HandleReadPermissionError,
+      HandlePermissionError,
     );
   });
 });

@@ -19,12 +19,14 @@
  *
  * WHAT AN UNATTENDED RUN PRODUCES: the rotated secret is persisted and the
  * disclosure is filed to this exchange's accounting (both inside the driver), the
- * window's outcome is recorded, and the results CSV is parked for the operator's
- * next visit ({@link ../parkedResultsStore.ts}). The object URLs the outputs were
- * built into are revoked as the attempt settles either way -- nobody is present
- * to download one, and a runtime that stays open for weeks would accumulate them
- * -- so the parked copy is what the operator returns to. The record pair is not
- * parked: the run's disclosure record is already in the accounting.
+ * window's outcome is recorded, and the results CSV is delivered -- written into
+ * the folder the operator granted, or parked for the operator's next visit where
+ * there is no such grant or it does not hold ({@link ../parkedResultsStore.ts}).
+ * The object URLs the outputs were built into are revoked as the attempt settles
+ * either way -- nobody is present to download one, and a runtime that stays open
+ * for weeks would accumulate them -- so the written file or the parked copy is
+ * what the operator returns to. The record pair is neither written nor parked:
+ * the run's disclosure record is already in the accounting.
  */
 
 import { getLogger } from "@psilink/core";
@@ -37,8 +39,14 @@ import { delayUntilAborted } from "../delayUntilAborted";
 import {
   parkRunResults,
   recordParkedResultsRefusal,
+  recordResultsWrittenToFolder,
 } from "../parkedResultsStore";
-import { parkedResultsFileName } from "../parkedResults";
+import { runResultsFileName } from "../parkedResults";
+
+import {
+  storedOutputDirectoryUsable,
+  writeResultsToOutputDirectory,
+} from "./managedOutputDirectory";
 
 import {
   listReadableManagedExchanges,
@@ -49,7 +57,9 @@ import { runManagedExchangeInBrowser } from "./managedRunDriver";
 import { tickManagedSchedules } from "./managedScheduleRunner";
 
 import type { ObjectUrls, RunOutputs } from "../runOutputs";
+import type { ManagedExchangeRecord } from "./managedExchangeRecord";
 import type { ManagedExchangeRunResult } from "./managedExchangeRun";
+import type { ParkedResultsFallback } from "../parkedResults";
 
 import type {
   ManagedScheduleAttempt,
@@ -176,11 +186,11 @@ export function browserScheduleTickSeams(
 }
 
 /**
- * Run one scheduled attempt through the browser driver: park the results it
- * produced for the operator's next visit, then revoke the object URLs its outputs
- * were built into once the attempt settles.
+ * Run one scheduled attempt through the browser driver: deliver the results it
+ * produced to the operator, then revoke the object URLs its outputs were built
+ * into once the attempt settles.
  *
- * The blob behind each URL is held as it is created, so the parking writes the
+ * The blob behind each URL is held as it is created, so the delivery writes the
  * same bytes the attended download would offer rather than reading them back out
  * of a URL.
  */
@@ -225,15 +235,17 @@ async function runUnattendedAttempt(
           log.warn(UNATTENDED_RUN_NOTICE_PREFIX, notice);
       },
     });
-    await parkUnattendedResults(attempt.record.id, result, created);
+    await deliverUnattendedResults(attempt.record, result, created);
   } finally {
     for (const url of created.keys()) window.URL.revokeObjectURL(url);
   }
 }
 
 /**
- * Park a completed unattended run's results CSV, or record the named state where
- * this browser will not store it.
+ * Deliver a completed unattended run's results CSV: write it into the folder the
+ * operator granted, and keep it in this browser where there is no such grant or
+ * the grant does not hold. Either way the operator's next visit is told which
+ * happened.
  *
  * Never rejects: the run has already rotated its secret and filed its disclosure,
  * so nothing here may turn a completed run into a failed attempt or restate its
@@ -241,16 +253,17 @@ async function runUnattendedAttempt(
  * diagnostic log, which is all that is left.
  *
  * A run with no results table -- a count-only run, or one whose agreed terms give
- * this party no output -- parks nothing: there is no file for the next visit, and
+ * this party no output -- delivers nothing: there is no file to write or keep, and
  * the run's own bookkeeping already states what it did.
  */
-async function parkUnattendedResults(
-  id: string,
+async function deliverUnattendedResults(
+  record: ManagedExchangeRecord,
   result: ManagedExchangeRunResult<RunOutputs>,
   created: ReadonlyMap<string, Blob>,
 ): Promise<void> {
   const outputs = result.exchange;
   if (outputs.kind !== "matched") return;
+  const id = record.id;
   const runAt = result.lastRun.at;
   const csv = created.get(outputs.resultsUrl);
   if (csv === undefined) {
@@ -261,15 +274,27 @@ async function parkUnattendedResults(
     );
     return;
   }
+  const fileName = runResultsFileName(record.label, runAt);
+  const matched =
+    outputs.matchedRecordCount !== undefined
+      ? { matchedRecordCount: outputs.matchedRecordCount }
+      : {};
+  const fallback = await writeUnattendedResultsToFolder(
+    record,
+    fileName,
+    csv,
+    runAt,
+    matched,
+  );
+  if (fallback === undefined) return;
   try {
     await parkRunResults(id, {
       kind: "results",
       runAt,
-      fileName: parkedResultsFileName(runAt),
+      fileName,
       csv,
-      ...(outputs.matchedRecordCount !== undefined
-        ? { matchedRecordCount: outputs.matchedRecordCount }
-        : {}),
+      ...matched,
+      ...(fallback === "none" ? {} : { fallback }),
     });
     return;
   } catch (error) {
@@ -289,6 +314,68 @@ async function parkUnattendedResults(
       error,
     );
   }
+}
+
+/**
+ * Write one run's results into the granted output folder, reporting what the
+ * caller owes the operator next: `undefined` where the results are in the folder
+ * and nothing more is owed, `"none"` where no grant was held at all, and the
+ * fallback reason where a grant was held and did not take them.
+ *
+ * The note recording a successful write is best-effort: the results are in the
+ * folder either way, so a store that will not hold the note reaches the
+ * diagnostic log rather than parking a second copy of the rows.
+ */
+async function writeUnattendedResultsToFolder(
+  record: ManagedExchangeRecord,
+  fileName: string,
+  csv: Blob,
+  runAt: string,
+  matched: { matchedRecordCount?: number },
+): Promise<ParkedResultsFallback | "none" | undefined> {
+  const directory = record.outputDirectoryHandle;
+  if (directory === undefined || !storedOutputDirectoryUsable(directory))
+    return "none";
+  const id = record.id;
+  const delivery = await writeResultsToOutputDirectory(
+    directory,
+    fileName,
+    csv,
+  );
+  if (delivery.kind === "ungranted") {
+    log.warn(
+      `scheduled managed exchange ${id}: the granted output folder reports ` +
+        `permission ${delivery.state} with nobody present, so the run's ` +
+        `results are kept in this browser instead`,
+    );
+    return "ungranted";
+  }
+  if (delivery.kind === "write-failed") {
+    log.warn(
+      `scheduled managed exchange ${id}: the run's results could not be ` +
+        `written to the granted output folder, so they are kept in this ` +
+        `browser instead:`,
+      delivery.error,
+    );
+    return "write-failed";
+  }
+  try {
+    await recordResultsWrittenToFolder(id, {
+      kind: "written",
+      runAt,
+      fileName: delivery.fileName,
+      directoryName: delivery.directoryName,
+      ...matched,
+    });
+  } catch (error) {
+    log.warn(
+      `scheduled managed exchange ${id}: the run's results were written to the ` +
+        `granted output folder as ${delivery.fileName}, and this browser would ` +
+        `not store the note saying so:`,
+      error,
+    );
+  }
+  return undefined;
 }
 
 /** Write one tick's entries to the diagnostic log: a failed bookkeeping write

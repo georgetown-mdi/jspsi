@@ -1,3 +1,5 @@
+import { readFileSync, readdirSync } from "node:fs";
+
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
@@ -26,11 +28,13 @@ import type { ManagedLocalState } from "@psi/managed/managedLocalStateShape";
 import type { ManagedScheduleTickSeams } from "@psi/managed/managedScheduleRunner";
 
 /**
- * The two runtime boundaries the unattended runner rests on, as checks rather
+ * The three runtime boundaries the unattended runner rests on, as checks rather
  * than as prose: an exchange is executed by the app runtime and by nothing else,
- * and a scheduled run never applies a waiting app-shell update.
+ * a scheduled run never applies a waiting app-shell update, and the folder the
+ * operator granted is written by the unattended run alone -- an attended run
+ * hands its results to the operator who is there.
  *
- * Both are claims about what does NOT happen, which is exactly the kind a
+ * All three are claims about what does NOT happen, which is exactly the kind a
  * comment cannot keep true (CONTRIBUTING.md, Code Conventions).
  */
 
@@ -236,5 +240,58 @@ describe("a scheduled run and a waiting app-shell update", () => {
 
     expect(reload).not.toHaveBeenCalled();
     expect(appShellUpdateReady()).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The granted output folder is written by the unattended run alone.
+
+/** The app source tree, walked for what reaches the folder write. */
+const WEB_SOURCE_ROOT = new URL("../../../src/", import.meta.url);
+
+/** Every source file under {@link WEB_SOURCE_ROOT}, as paths relative to it. */
+function webSourceFiles(within = ""): Array<string> {
+  return readdirSync(new URL(within, WEB_SOURCE_ROOT), {
+    withFileTypes: true,
+  }).flatMap((entry) =>
+    entry.isDirectory()
+      ? webSourceFiles(`${within}${entry.name}/`)
+      : entry.name.endsWith(".ts") || entry.name.endsWith(".tsx")
+        ? [`${within}${entry.name}`]
+        : [],
+  );
+}
+
+/** Which modules name `symbol`, other than the one that defines it. */
+function modulesReaching(symbol: string, definedIn: string): Array<string> {
+  return webSourceFiles()
+    .filter((file) => file !== definedIn)
+    .filter((file) =>
+      readFileSync(new URL(file, WEB_SOURCE_ROOT), "utf8").includes(symbol),
+    )
+    .sort();
+}
+
+describe("writing a run's results into the granted folder", () => {
+  test("is reached from the unattended runner and from nowhere else", () => {
+    // The attended run is unchanged by the grant: the operator is present and
+    // takes the download, so no attended path may write into the folder.
+    expect(
+      modulesReaching(
+        "writeResultsToOutputDirectory",
+        "psi/managed/managedOutputDirectory.ts",
+      ),
+    ).toEqual(["psi/managed/managedScheduleRuntime.ts"]);
+  });
+
+  test("is guarded by a check that would catch a second caller", () => {
+    // A guard nothing can fail asserts nothing: the same walk finds the several
+    // modules that legitimately reach the picker and the support check.
+    expect(
+      modulesReaching(
+        "managedOutputDirectory",
+        "psi/managed/managedOutputDirectory.ts",
+      ).length,
+    ).toBeGreaterThan(1);
   });
 });

@@ -149,10 +149,12 @@ export function keyFileFieldsFromRecord(
 
 /**
  * Encode a stored record as the export artifact (see
- * {@link serializeExchangeDocument} for the embedded document). The input-file
- * handle is dropped -- it does not serialize, so the first run after an import
- * re-acquires one -- and the record's `id` is not included, since an import mints
- * a fresh local record rather than copying this one.
+ * {@link serializeExchangeDocument} for the embedded document). Both platform
+ * handles are dropped -- neither the input file's nor the granted output
+ * folder's serializes, so a record imported from this artifact re-acquires the
+ * input file by selection and re-grants the folder -- and the record's `id` is
+ * not included, since an import mints a fresh local record rather than copying
+ * this one.
  */
 export function encodeManagedExchangeArtifact(
   record: ManagedExchangeRecord,

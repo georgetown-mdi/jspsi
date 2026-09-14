@@ -18,10 +18,15 @@
  * The permission layer is a non-standard File System Access extension
  * (`queryPermission` / `requestPermission`) the DOM lib does not type; some handle
  * sources (a picker handle) offer it while others (an origin-private-file-system
- * handle) do not. Reached through {@link browserHandleReadPermission}, which
+ * handle) do not. Reached through {@link browserHandlePermission}, which
  * feature-detects the methods and treats their absence as an already-usable grant;
- * {@link HandleReadPermissionQuery} stays injectable for tests that cannot summon
+ * {@link HandlePermissionQuery} stays injectable for tests that cannot summon
  * a real picker grant.
+ *
+ * That layer is the whole app's, not the input side's: it takes any
+ * {@link FileSystemHandle} in either mode, so the output-folder grant a scheduled
+ * run writes through ({@link ./managedOutputDirectory.ts}) applies the same
+ * unattended rule -- query, never prompt -- rather than restating it.
  */
 
 import { loadCSVFileOffMainThread } from "../workers/csvParseController";
@@ -87,107 +92,124 @@ export function capturedInputHandle(
 }
 
 /**
- * The read-permission state a handle reports: `"granted"` reads through without a
- * prompt, `"denied"` cannot be read, and `"prompt"` needs an operator gesture to
- * grant. Mirrors the `PermissionState` the File System Access permission methods
- * return. A handle whose source does not implement the permission extension is
- * treated as `"granted"` -- there is no separate permission to hold, so the read is
- * governed only by whether the file still exists.
+ * The permission state a handle reports: `"granted"` is used without a prompt,
+ * `"denied"` cannot be used, and `"prompt"` needs an operator gesture to grant.
+ * Mirrors the `PermissionState` the File System Access permission methods return.
+ * A handle whose source does not implement the permission extension is treated as
+ * `"granted"` -- there is no separate permission to hold, so the access is
+ * governed only by whether the entry still exists.
  */
-export type HandleReadPermissionState = "granted" | "denied" | "prompt";
+export type HandlePermissionState = "granted" | "denied" | "prompt";
+
+/** What a handle is being used for: reading the input file, or writing a results
+ * file into a granted output folder. The mode the grant is queried and requested
+ * under, and a `"read"` grant does not admit a write. */
+export type HandlePermissionMode = "read" | "readwrite";
 
 /** The `queryPermission` / `requestPermission` extension a File System Access
  * handle MAY hold (a picker handle does; an origin-private-file-system handle does
  * not). Declared locally because the DOM lib does not type these non-standard
- * methods; a handle is narrowed to it by {@link handleReadPermission} through a
+ * methods; a handle is narrowed to it by {@link browserHandlePermission} through a
  * runtime feature check rather than an unchecked cast. */
 interface FileSystemHandlePermission {
   queryPermission?: (descriptor: {
-    mode: "read" | "readwrite";
-  }) => Promise<HandleReadPermissionState>;
+    mode: HandlePermissionMode;
+  }) => Promise<HandlePermissionState>;
   requestPermission?: (descriptor: {
-    mode: "read" | "readwrite";
-  }) => Promise<HandleReadPermissionState>;
+    mode: HandlePermissionMode;
+  }) => Promise<HandlePermissionState>;
 }
 
 /** The one operation the permission layer performs, factored into an interface so
  * a run path can query without prompting (unattended) or request with a gesture
  * (attended), and so a test can inject an outcome a real origin-private-file-
- * system handle cannot report. The default is {@link browserHandleReadPermission},
+ * system handle cannot report. The default is {@link browserHandlePermission},
  * the feature-detecting platform implementation. */
-export interface HandleReadPermissionQuery {
-  /** Report the handle's current read-permission state WITHOUT prompting -- the
-   * only check the unattended path may make, since a scheduled run has no operator
-   * to answer a prompt. */
-  query: (handle: FileSystemFileHandle) => Promise<HandleReadPermissionState>;
-  /** Prompt for read permission where the state is `"prompt"`, returning the state
-   * after the operator answers. Called only on an attended path (a gesture is
+export interface HandlePermissionQuery {
+  /** Report the handle's current permission state for `mode` WITHOUT prompting --
+   * the only check the unattended path may make, since a scheduled run has no
+   * operator to answer a prompt. */
+  query: (
+    handle: FileSystemHandle,
+    mode: HandlePermissionMode,
+  ) => Promise<HandlePermissionState>;
+  /** Prompt for permission in `mode` where the state is `"prompt"`, returning the
+   * state after the operator answers. Called only on an attended path (a gesture is
    * present). */
-  request: (handle: FileSystemFileHandle) => Promise<HandleReadPermissionState>;
+  request: (
+    handle: FileSystemHandle,
+    mode: HandlePermissionMode,
+  ) => Promise<HandlePermissionState>;
 }
 
 /**
  * The platform permission layer: feature-detects the handle's non-standard
  * `queryPermission` / `requestPermission` methods and, when they are absent (an
  * origin-private-file-system handle, a runtime without the extension), reports
- * `"granted"` -- there is no separate read permission to hold, so the read is
- * governed only by whether the file still exists. Never prompts on `query`; prompts
+ * `"granted"` -- there is no separate permission to hold, so the access is
+ * governed only by whether the entry still exists. Never prompts on `query`; prompts
  * on `request` only where the method exists.
  */
-const browserHandleReadPermission: HandleReadPermissionQuery = {
-  query: (handle) => {
+const browserHandlePermission: HandlePermissionQuery = {
+  query: (handle, mode) => {
     const permission = handle as unknown as FileSystemHandlePermission;
     if (permission.queryPermission === undefined)
       return Promise.resolve("granted");
-    return permission.queryPermission({ mode: "read" });
+    return permission.queryPermission({ mode });
   },
-  request: (handle) => {
+  request: (handle, mode) => {
     const permission = handle as unknown as FileSystemHandlePermission;
     if (permission.requestPermission === undefined)
       return Promise.resolve("granted");
-    return permission.requestPermission({ mode: "read" });
+    return permission.requestPermission({ mode });
   },
 };
 
-/** Raised when a handle is held but its read permission cannot be secured for a
- * run: the unattended path found a non-`"granted"` state (it must not prompt), or
- * an attended request was denied. Set as the `cause` of the benign
- * {@link ManagedInputError} `"acquire"` rejection, so a gone permission records the
- * same benign `"input"` failure as a missing file, never desync/attack framing. */
-export class HandleReadPermissionError extends Error {
-  /** The permission state that blocked the read. */
-  readonly state: HandleReadPermissionState;
-  constructor(state: HandleReadPermissionState) {
-    super(`managed exchange input handle read permission is ${state}`);
-    this.name = "HandleReadPermissionError";
+/** Raised when a handle is held but its permission cannot be secured for a run:
+ * the unattended path found a non-`"granted"` state (it must not prompt), or an
+ * attended request was denied. On the input side it is set as the `cause` of the
+ * benign {@link ManagedInputError} `"acquire"` rejection, so a gone permission
+ * records the same benign `"input"` failure as a missing file, never desync/attack
+ * framing. */
+export class HandlePermissionError extends Error {
+  /** The permission state that blocked the access. */
+  readonly state: HandlePermissionState;
+  /** The mode the blocked access needed. */
+  readonly mode: HandlePermissionMode;
+  constructor(state: HandlePermissionState, mode: HandlePermissionMode) {
+    super(`managed exchange handle ${mode} permission is ${state}`);
+    this.name = "HandlePermissionError";
     this.state = state;
+    this.mode = mode;
   }
 }
 
-/** How a run acquires its input-file read permission: an unattended (scheduled)
- * run may only proceed on an EXISTING grant and must never prompt; an attended run
- * may request the grant with the operator's gesture. */
-type ManagedRunAttendance = "unattended" | "attended";
+/** How a run secures a handle's permission: an unattended (scheduled) run may only
+ * proceed on an EXISTING grant and must never prompt; an attended run may request
+ * the grant with the operator's gesture. */
+export type ManagedRunAttendance = "unattended" | "attended";
 
 /**
- * Secure read permission for `handle` for a run of the given `attendance`, or
- * throw {@link HandleReadPermissionError}. The unattended path queries only: a
+ * Secure permission in `mode` for `handle` for a run of the given `attendance`, or
+ * throw {@link HandlePermissionError}. The unattended path queries only: a
  * non-`"granted"` state throws (the unattended path may only proceed on an
  * existing grant; it must not prompt). The attended path may additionally
  * request where the state is `"prompt"`.
  */
-export async function ensureHandleReadPermission(
-  handle: FileSystemFileHandle,
+export async function ensureHandlePermission(
+  handle: FileSystemHandle,
   attendance: ManagedRunAttendance,
-  permission: HandleReadPermissionQuery = browserHandleReadPermission,
+  mode: HandlePermissionMode,
+  permission: HandlePermissionQuery = browserHandlePermission,
 ): Promise<void> {
-  const current = await permission.query(handle);
+  const current = await permission.query(handle, mode);
   if (current === "granted") return;
-  if (attendance === "unattended") throw new HandleReadPermissionError(current);
-  if (current === "denied") throw new HandleReadPermissionError("denied");
-  const afterPrompt = await permission.request(handle);
+  if (attendance === "unattended")
+    throw new HandlePermissionError(current, mode);
+  if (current === "denied") throw new HandlePermissionError("denied", mode);
+  const afterPrompt = await permission.request(handle, mode);
   if (afterPrompt !== "granted")
-    throw new HandleReadPermissionError(afterPrompt);
+    throw new HandlePermissionError(afterPrompt, mode);
 }
 
 /** A read input for one run: the `File` read through the handle at run start
@@ -242,14 +264,15 @@ export type ManagedInputSource =
  */
 export async function acquireManagedInput(
   source: ManagedInputSource,
-  permission: HandleReadPermissionQuery = browserHandleReadPermission,
+  permission: HandlePermissionQuery = browserHandlePermission,
 ): Promise<AcquiredManagedInput> {
   let file: File;
   try {
     if (source.kind === "handle") {
-      await ensureHandleReadPermission(
+      await ensureHandlePermission(
         source.handle,
         source.attendance,
+        "read",
         permission,
       );
       // getFile() rejects on a missing entry, which is the clean not-found this
@@ -289,7 +312,7 @@ export async function acquireManagedInput(
 export async function acquireValidatedManagedInput(
   exchangeFile: ExchangeSpec,
   source: ManagedInputSource,
-  permission: HandleReadPermissionQuery = browserHandleReadPermission,
+  permission: HandlePermissionQuery = browserHandlePermission,
 ): Promise<AcquiredManagedInput> {
   const acquired = await acquireManagedInput(source, permission);
   const rejection = assessManagedInputColumns(exchangeFile, acquired.columns);

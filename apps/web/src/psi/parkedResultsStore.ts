@@ -10,7 +10,9 @@
  * outside the export artifact as the local state and the accounting of
  * disclosures do (the exporter reads only the records store), and how a run's
  * results were delivered adds no value to the record schema, where the
- * reader-rejects-unknown rule makes every addition a compatibility event.
+ * reader-rejects-unknown rule makes every addition a compatibility event. Which
+ * is also why the note a folder write leaves lands here rather than on the
+ * record: it is one more thing a run's delivery says.
  *
  * Retention is applied inside every transaction here, the read included, so an
  * entry past it is neither offered to a caller nor left at rest waiting for a
@@ -32,6 +34,7 @@ import type {
   ParkedResults,
   ParkedResultsEntry,
   ParkedRunResults,
+  WrittenRunResults,
 } from "./parkedResults";
 
 /**
@@ -209,6 +212,23 @@ export async function parkRunResults(
   now: number = Date.now(),
 ): Promise<void> {
   await appendEntry(id, results, now);
+}
+
+/**
+ * Record that a run's results went into the folder the operator granted, so the
+ * next visit says where they are. The entry holds no rows -- the rows are in that
+ * folder -- which is what keeps the folder route from leaving a second copy at
+ * rest here.
+ *
+ * @throws if the note cannot be written; the results themselves are in the folder
+ *   either way, so the caller reports the lost note to the diagnostic log.
+ */
+export async function recordResultsWrittenToFolder(
+  id: string,
+  written: WrittenRunResults,
+  now: number = Date.now(),
+): Promise<void> {
+  await appendEntry(id, written, now);
 }
 
 /**

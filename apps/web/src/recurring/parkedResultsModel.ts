@@ -1,13 +1,14 @@
 /**
- * The pure derivation and copy behind the results a scheduled run left for the
- * operator's next visit: one row per parked run, newest first, and the two
- * statements the app owes the operator about keeping row values at rest -- one
- * where they schedule, one where they collect. No React, no IndexedDB.
+ * The pure derivation and copy behind what a scheduled run left for the
+ * operator's next visit: one row per run, newest first, and the two statements
+ * the app owes the operator about keeping row values at rest -- one where they
+ * schedule, one where they collect. No React, no IndexedDB.
  *
  * Nothing here holds a partner-authored value: a row states an instant, a count
- * this browser produced, and fixed first-party copy, so there is no display
- * sanitization boundary in this module. The results themselves are never
- * rendered -- they are handed to the operator as the file the run built.
+ * this browser produced, the name of a folder the operator themselves chose, and
+ * fixed first-party copy, so there is no display sanitization boundary in this
+ * module. The results themselves are never rendered -- they are handed to the
+ * operator as the file the run built, or written to the folder they granted.
  */
 
 import {
@@ -16,7 +17,12 @@ import {
 } from "@psi/parkedResults";
 import { dateTimeLabel } from "@psi/formatting";
 
-import type { ParkedResults, ParkedResultsEntry } from "@psi/parkedResults";
+import type {
+  ParkedResults,
+  ParkedResultsEntry,
+  ParkedRunResults,
+  WrittenRunResults,
+} from "@psi/parkedResults";
 
 /** One parked run as the surface shows it: when it ran, what it left, and -- for
  * results that are still there -- the file to hand over. */
@@ -45,21 +51,23 @@ const RETENTION_PHRASE = `${String(PARKED_RESULTS_RETENTION_DAYS)} days`;
  * decision that starts producing them.
  */
 export const PARKED_RESULTS_SCHEDULE_NOTE =
-  `A scheduled run has nobody present to take its results, so it keeps them in ` +
-  `this browser and this exchange's page offers them at your next visit. Those ` +
-  `results are the matched rows themselves -- the identifiers that matched and ` +
-  `the values your partner disclosed -- kept unencrypted in browser storage, ` +
-  `where any script running on this site and anyone who can read this machine's ` +
-  `disk can read them. After ${RETENTION_PHRASE} they are no longer offered, ` +
-  `and your next visit to this page deletes them, as does a later run that ` +
-  `leaves results of its own; until one of those happens the bytes stay on ` +
-  `disk, and deleting the exchange removes them at once.`;
+  `Without a folder to write to, a scheduled run keeps its results in this ` +
+  `browser and this exchange's page offers them at your next visit. That also ` +
+  `happens whenever the folder you granted cannot be written to. Those results ` +
+  `are the matched rows themselves -- the identifiers that matched and the ` +
+  `values your partner disclosed -- kept unencrypted in browser storage, where ` +
+  `any script running on this site and anyone who can read this machine's disk ` +
+  `can read them. After ${RETENTION_PHRASE} they are no longer offered, and ` +
+  `your next visit to this page deletes them, as does a later run that leaves ` +
+  `results of its own; until one of those happens the bytes stay on disk, and ` +
+  `deleting the exchange removes them at once.`;
 
 /** What the section holding parked results says about them: where they are, how
  * long they stay, and what removes them. */
 export const PARKED_RESULTS_RETENTION_NOTE =
-  `Results from a run nobody was present for are kept in this browser so you ` +
-  `can collect them here. They are the matched rows, kept unencrypted in ` +
+  `Results from a run nobody was present for are written to the folder you ` +
+  `granted, and kept in this browser where there is no such folder or it could ` +
+  `not be written to. What is kept here is the matched rows, unencrypted in ` +
   `browser storage; after ${RETENTION_PHRASE} they are no longer offered, and ` +
   `your next visit to this page deletes them, as does a later run that leaves ` +
   `results of its own. Until one of those happens the bytes stay on disk, and ` +
@@ -69,8 +77,10 @@ export const PARKED_RESULTS_RETENTION_NOTE =
  * schedule rather than as a bare blank, so an operator whose runs are not
  * producing results reads it as the fact it is. */
 export const NO_PARKED_RESULTS_NOTE =
-  "No scheduled run has left results here. A run that happens with nobody " +
-  "present puts its results here for you to collect.";
+  "No scheduled run has left anything here. A run that happens with nobody " +
+  "present writes its results to the folder you granted and says here where " +
+  "they went, or, without such a folder, leaves the results here for you to " +
+  "collect.";
 
 /** The state a value this build cannot read presents as. It offers no recovery:
  * unlike an accounting of disclosures, there is no reading of these bytes the app
@@ -97,21 +107,60 @@ export const UNAVAILABLE_PARKED_RESULTS_NOTE =
   "running an older version of this app can hold that storage for a while; " +
   "close any other tab this app is open in, then try again.";
 
-/** What a row says about a run that left results, or about one this browser
- * would not store them for. A refusal names the run's own standing -- it
- * completed and filed its disclosure -- so the state is not read as a failed
- * run. */
+/** How many rows a run's results hold, as a phrase to open a summary with, or
+ * `undefined` where the run reported no count. */
+function matchedRecordPhrase(count: number | undefined): string | undefined {
+  if (count === undefined) return undefined;
+  return count === 1 ? "1 matched record" : `${String(count)} matched records`;
+}
+
+/** What a row says about a run whose results went into the granted folder: where
+ * they are, so the operator can go and get them, and that this browser is not
+ * holding a copy of them. */
+function writtenSummary(entry: WrittenRunResults): string {
+  const matched = matchedRecordPhrase(entry.matchedRecordCount);
+  const written =
+    matched === undefined
+      ? "Results were written to"
+      : `${matched}, written to`;
+  return (
+    `${written} ${entry.fileName} in the folder you granted ` +
+    `(${entry.directoryName}). Nothing of them is kept in this browser.`
+  );
+}
+
+/** What a row says about results kept in this browser, including the reason a
+ * granted folder did not take them -- the operator is owed which of the two
+ * happened, not a plain success. */
+function parkedSummary(entry: ParkedRunResults): string {
+  const matched = matchedRecordPhrase(entry.matchedRecordCount);
+  const ready =
+    matched === undefined
+      ? "Results ready to download."
+      : `${matched}, ready to download.`;
+  if (entry.fallback === undefined) return ready;
+  return entry.fallback === "ungranted"
+    ? `${ready} The folder you granted could not be written to without asking ` +
+        `you, and a run with nobody present cannot ask, so the results were ` +
+        `kept here instead. Granting the folder again restores it for later runs.`
+    : `${ready} Writing to the folder you granted failed, so the results were ` +
+        `kept here instead. Check that the folder still exists and has room, ` +
+        `or grant a different one.`;
+}
+
+/** What a row says about a run that wrote its results to the granted folder, one
+ * that left them here, or one this browser would not store them for. A refusal
+ * names the run's own standing -- it completed and filed its disclosure -- so the
+ * state is not read as a failed run. */
 function rowSummary(entry: ParkedResultsEntry): string {
   if (entry.kind === "storage-refused")
     return (
       "This browser would not store this run's results, so they are gone. " +
       "The run itself completed and filed its disclosure."
     );
-  return entry.matchedRecordCount === undefined
-    ? "Results ready to download."
-    : entry.matchedRecordCount === 1
-      ? "1 matched record, ready to download."
-      : `${String(entry.matchedRecordCount)} matched records, ready to download.`;
+  return entry.kind === "written"
+    ? writtenSummary(entry)
+    : parkedSummary(entry);
 }
 
 /**

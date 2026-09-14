@@ -5,9 +5,9 @@ import {
   PARKED_RESULTS_VERSION,
   appendParkedResults,
   parkedResultsExpiryMs,
-  parkedResultsFileName,
   parseParkedResults,
   retainParkedResults,
+  runResultsFileName,
 } from "../../../src/psi/parkedResults.js";
 
 import type {
@@ -23,12 +23,13 @@ import type {
 
 const DAY_MS = 86_400_000;
 const RUN_AT = "2026-03-01T09:00:00.000Z";
+const LABEL = "Riverbend quarterly";
 
 function parked(runAt = RUN_AT): ParkedRunResults {
   return {
     kind: "results",
     runAt,
-    fileName: parkedResultsFileName(runAt),
+    fileName: runResultsFileName(LABEL, runAt),
     csv: new Blob(["id,value\n1,a\n"], { type: "text/csv" }),
     matchedRecordCount: 1,
   };
@@ -45,6 +46,46 @@ describe("what a stored set of parked results admits", () => {
       runAt: "2026-03-08T09:00:00.000Z",
     });
     expect(parseParkedResults(value)).toEqual(value);
+  });
+
+  test("round-trips a run written to the granted folder, holding no rows", () => {
+    const value = results({
+      kind: "written",
+      runAt: RUN_AT,
+      fileName: runResultsFileName(LABEL, RUN_AT),
+      directoryName: "Riverbend results",
+      matchedRecordCount: 1,
+    });
+    expect(parseParkedResults(value)).toEqual(value);
+  });
+
+  test("round-trips the reason a granted folder did not take a run's results", () => {
+    for (const fallback of ["ungranted", "write-failed"] as const) {
+      const value = results({ ...parked(), fallback });
+      expect(parseParkedResults(value)).toEqual(value);
+    }
+    expect(() =>
+      parseParkedResults({
+        version: PARKED_RESULTS_VERSION,
+        entries: [{ ...parked(), fallback: "elsewhere" }],
+      }),
+    ).toThrow();
+  });
+
+  test("rejects a written entry that names no folder to have written to", () => {
+    expect(() =>
+      parseParkedResults({
+        version: PARKED_RESULTS_VERSION,
+        entries: [
+          {
+            kind: "written",
+            runAt: RUN_AT,
+            fileName: runResultsFileName(LABEL, RUN_AT),
+            directoryName: "",
+          },
+        ],
+      }),
+    ).toThrow();
   });
 
   test("rejects an unrecognized version rather than migrating it", () => {
@@ -154,13 +195,41 @@ describe("adding a run's entry", () => {
   });
 });
 
-describe("the name a parked result downloads under", () => {
-  test("stamps the run, so two runs' results do not collide", () => {
-    expect(parkedResultsFileName(RUN_AT)).toBe(
-      "psilink-results-2026-03-01T09-00-00-000Z.csv",
+describe("the name a run's results file takes", () => {
+  test("holds the label and the run, so neither two runs nor two exchanges collide", () => {
+    expect(runResultsFileName(LABEL, RUN_AT)).toBe(
+      "psilink-results-Riverbend-quarterly-2026-03-01T09-00-00-000Z.csv",
     );
-    expect(parkedResultsFileName("2026-03-08T09:00:00.000Z")).not.toBe(
-      parkedResultsFileName(RUN_AT),
+    expect(runResultsFileName(LABEL, "2026-03-08T09:00:00.000Z")).not.toBe(
+      runResultsFileName(LABEL, RUN_AT),
+    );
+    expect(runResultsFileName("Northside pilot", RUN_AT)).not.toBe(
+      runResultsFileName(LABEL, RUN_AT),
+    );
+  });
+
+  test("reduces the label to ASCII letters and digits, so no label reaches the folder as typed", () => {
+    // A path separator, a traversal segment, and a leading dot all reduce: the
+    // name is written into a folder the operator granted.
+    expect(runResultsFileName("../etc/passwd", RUN_AT)).toBe(
+      "psilink-results-etc-passwd-2026-03-01T09-00-00-000Z.csv",
+    );
+    expect(runResultsFileName("Riverbend / Q3 (2026)", RUN_AT)).toBe(
+      "psilink-results-Riverbend-Q3-2026-2026-03-01T09-00-00-000Z.csv",
+    );
+  });
+
+  test("omits the label where it reduces to nothing, rather than standing a hyphen in for it", () => {
+    for (const label of ["", "   ", "......", "月次"])
+      expect(runResultsFileName(label, RUN_AT)).toBe(
+        "psilink-results-2026-03-01T09-00-00-000Z.csv",
+      );
+  });
+
+  test("truncates a long label, keeping the run stamp whole", () => {
+    const name = runResultsFileName("R".repeat(120), RUN_AT);
+    expect(name).toBe(
+      `psilink-results-${"R".repeat(40)}-2026-03-01T09-00-00-000Z.csv`,
     );
   });
 });
