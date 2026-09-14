@@ -238,6 +238,15 @@ describe("the warning a projected result size raises", () => {
     expect(warning).toContain("nothing here");
   });
 
+  test("states the figure as the most the terms allow, not what the run will match", () => {
+    // The projection is the worst case: it reaches the bound while a narrower
+    // result of the same pair count still fits, so the warning may not read as
+    // a prediction of the next run.
+    const warning = projectedResultSizeWarning(declaring(12_000, 9_000), false);
+    expect(warning).toContain("the most these terms allow");
+    expect(warning).toContain("may leave a result that fits");
+  });
+
   test("offers the folder grant as the remedy, and names the grant where one is held", () => {
     expect(projectedResultSizeWarning(declaring(over, over), false)).toContain(
       "Choose a folder for this exchange's results",
@@ -310,6 +319,16 @@ describe("what the operator is told about keeping results here", () => {
   test.each([
     ["the schedule-entry statement", PARKED_RESULTS_SCHEDULE_NOTE],
     ["the collection statement", PARKED_RESULTS_RETENTION_NOTE],
+  ])("%s names the clear as a removal the operator can take now", (_, note) => {
+    // The control stands beside both statements, so a list of what removes
+    // these results that omitted it would send the operator to the retention or
+    // to deleting the exchange for something one click does.
+    expect(note).toContain("Clearing what is kept here");
+  });
+
+  test.each([
+    ["the schedule-entry statement", PARKED_RESULTS_SCHEDULE_NOTE],
+    ["the collection statement", PARKED_RESULTS_RETENTION_NOTE],
   ])(
     "%s names a run that leaves results as the removal, not any run at all",
     (_name, note) => {
@@ -337,7 +356,17 @@ describe("what the operator is told about keeping results here", () => {
     expect(UNREADABLE_PARKED_RESULTS_NOTE).toContain(
       "complete and file their disclosures",
     );
-    expect(UNREADABLE_PARKED_RESULTS_NOTE).toContain("Deleting the exchange");
+  });
+
+  test("the unreadable statement names the clear, which is offered in that state", () => {
+    // The clear control renders directly below this statement and removes the
+    // value without reading it, so the statement may not send the operator to
+    // the exchange delete as the only way out.
+    expect(UNREADABLE_PARKED_RESULTS_NOTE).toContain(
+      "Clearing what is kept here removes it",
+    );
+    expect(UNREADABLE_PARKED_RESULTS_NOTE).toContain("deleting the exchange");
+    expect(UNREADABLE_PARKED_RESULTS_NOTE).not.toContain("only way");
   });
 
   test("the clear statement names everything that goes and what stays", () => {

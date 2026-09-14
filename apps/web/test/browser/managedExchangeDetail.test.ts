@@ -2521,6 +2521,13 @@ describe("the results a scheduled run left for this visit", () => {
   /** The label the parked results file names are built from. */
   const RESULTS_LABEL = "Riverbend quarterly";
   const RESULTS_CSV = "id,county\nA-19,Riverbend\n";
+  /** The two titles the projected-size warning stands under, one where the
+   * schedule is entered and one in the run history. Both state a worst case, so
+   * neither is asserted as a prediction of what the next run will match. */
+  const SCHEDULE_SIZE_WARNING_TITLE =
+    "A result on these terms could exceed what this browser keeps";
+  const HISTORY_SIZE_WARNING_TITLE =
+    "The next run's results could exceed what this browser keeps";
 
   const scheduled = (): ManagedExchangeSchedule => {
     const anchor = new Date(2026, 7, 4, 9, 0, 0, 0).toISOString();
@@ -2765,14 +2772,10 @@ describe("the results a scheduled run left for this visit", () => {
     });
 
     await expect
-      .element(page.getByText("A result this size is not kept in this browser"))
+      .element(page.getByText(SCHEDULE_SIZE_WARNING_TITLE))
       .toBeInTheDocument();
     await expect
-      .element(
-        page.getByText(
-          "The next run's results would not be kept in this browser",
-        ),
-      )
+      .element(page.getByText(HISTORY_SIZE_WARNING_TITLE))
       .toBeInTheDocument();
     // The same figures in both places, composed once: the two alerts differ in
     // where they stand, not in what they say.
@@ -2810,14 +2813,8 @@ describe("the results a scheduled run left for this visit", () => {
     await expect
       .element(page.getByRole("heading", { name: "Run history" }))
       .toBeInTheDocument();
-    expect(
-      page.getByText("A result this size is not kept in this browser").query(),
-    ).toBeNull();
-    expect(
-      page
-        .getByText("The next run's results would not be kept in this browser")
-        .query(),
-    ).toBeNull();
+    expect(page.getByText(SCHEDULE_SIZE_WARNING_TITLE).query()).toBeNull();
+    expect(page.getByText(HISTORY_SIZE_WARNING_TITLE).query()).toBeNull();
   });
 
   test("no such warning where the last run projects a result this browser keeps", async () => {
@@ -2827,14 +2824,8 @@ describe("the results a scheduled run left for this visit", () => {
     await expect
       .element(page.getByText(PARKED_RESULTS_RETENTION_NOTE))
       .toBeInTheDocument();
-    expect(
-      page.getByText("A result this size is not kept in this browser").query(),
-    ).toBeNull();
-    expect(
-      page
-        .getByText("The next run's results would not be kept in this browser")
-        .query(),
-    ).toBeNull();
+    expect(page.getByText(SCHEDULE_SIZE_WARNING_TITLE).query()).toBeNull();
+    expect(page.getByText(HISTORY_SIZE_WARNING_TITLE).query()).toBeNull();
   });
 
   test("clearing removes what is kept here, behind a confirm, and reads the store again", async () => {
@@ -2864,6 +2855,31 @@ describe("the results a scheduled run left for this visit", () => {
     await expect
       .element(page.getByRole("button", { name: "Clear these results" }))
       .toBeInTheDocument();
+  });
+
+  test("clears a value this build cannot read, which the statement beside it offers", async () => {
+    // The clear needs no parse, so it is the way out of the unreadable state
+    // short of deleting the exchange -- and the statement standing above the
+    // control says so. Re-rendering on the read the clear leaves is how the
+    // surface learns the value is gone.
+    const onClearParkedResults = vi.fn(() => Promise.resolve());
+    renderParked({ kind: "unreadable" }, { onClearParkedResults });
+
+    await expect
+      .element(page.getByText(UNREADABLE_PARKED_RESULTS_NOTE))
+      .toBeInTheDocument();
+    await page.getByRole("button", { name: "Clear what is kept here" }).click();
+    await page.getByRole("button", { name: "Clear these results" }).click();
+
+    await vi.waitFor(() =>
+      expect(onClearParkedResults).toHaveBeenCalledTimes(1),
+    );
+
+    renderParked({ kind: "none" }, { onClearParkedResults });
+    await expect
+      .element(page.getByText(NO_PARKED_RESULTS_NOTE))
+      .toBeInTheDocument();
+    expect(page.getByText(UNREADABLE_PARKED_RESULTS_NOTE).query()).toBeNull();
   });
 
   test("offers no clear where the read found nothing to clear", async () => {

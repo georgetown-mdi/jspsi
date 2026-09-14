@@ -56,7 +56,7 @@ const RETENTION_PHRASE = `${String(PARKED_RESULTS_RETENTION_DAYS)} days`;
  * What the operator is told about parked results BEFORE they schedule anything,
  * shown with the cadence fields. It states the disclosure plainly -- row values
  * at rest, unencrypted, in reach of any script on this site and of whoever holds
- * the disk -- and the two things that remove them, because the schedule is the
+ * the disk -- and everything that removes them, because the schedule is the
  * decision that starts producing them.
  */
 export const PARKED_RESULTS_SCHEDULE_NOTE =
@@ -68,8 +68,9 @@ export const PARKED_RESULTS_SCHEDULE_NOTE =
   `any script running on this site and anyone who can read this machine's disk ` +
   `can read them. After ${RETENTION_PHRASE} they are no longer offered, and ` +
   `your next visit to this page deletes them, as does a later run that leaves ` +
-  `results of its own; until one of those happens the bytes stay on disk, and ` +
-  `deleting the exchange removes them at once.`;
+  `results of its own; until one of those happens the bytes stay on disk. ` +
+  `Clearing what is kept here removes them at once, as does deleting the ` +
+  `exchange.`;
 
 /** What the section holding parked results says about them: where they are, how
  * long they stay, and what removes them. */
@@ -79,8 +80,9 @@ export const PARKED_RESULTS_RETENTION_NOTE =
   `not be written to. What is kept here is the matched rows, unencrypted in ` +
   `browser storage; after ${RETENTION_PHRASE} they are no longer offered, and ` +
   `your next visit to this page deletes them, as does a later run that leaves ` +
-  `results of its own. Until one of those happens the bytes stay on disk, and ` +
-  `deleting this exchange removes them at once.`;
+  `results of its own. Until one of those happens the bytes stay on disk. ` +
+  `Clearing what is kept here removes them at once, as does deleting this ` +
+  `exchange.`;
 
 /** The empty state: no scheduled run has left anything here. Stated against the
  * schedule rather than as a bare blank, so an operator whose runs are not
@@ -96,14 +98,17 @@ export const NO_PARKED_RESULTS_NOTE =
  * can vouch for, and nothing else holds what they were. It is also a standing
  * state rather than a passing one -- the parking write reads through the same
  * parse -- so it states what later runs can no longer leave here. The refused
- * value's shape is unknown, so it is not stated to hold results. */
+ * value's shape is unknown, so it is not stated to hold results. The retention
+ * arithmetic never runs over bytes the parse refuses, while the clear and the
+ * exchange delete each remove the value without reading it, which is the way out
+ * the statement offers (see {@link ../psi/parkedResultsStore.ts}). */
 export const UNREADABLE_PARKED_RESULTS_NOTE =
   "Something is stored here for this exchange that this browser cannot read, " +
   "so it cannot tell you whether any results are in it. The retention that " +
   "would otherwise remove it does not apply, and while it is here a scheduled " +
   "run cannot leave its results or record that it could not -- the runs " +
-  "themselves still complete and file their disclosures. Deleting the " +
-  "exchange is the only way to remove it.";
+  "themselves still complete and file their disclosures. Clearing what is kept " +
+  "here removes it without reading it, as does deleting the exchange.";
 
 /** The state a store that did not answer presents as, held apart from the empty
  * one: nothing is known about what is stored, so it may not read as "nothing is
@@ -242,8 +247,10 @@ export function projectedResultSizeWarning(
     `the terms let every record on each side match every record on the other: ` +
     `up to ${formatRecordCount(projectedPairs(factors))} matched pairs, one ` +
     `row each. A result ` +
-    `that size is larger than the ${PARKED_SIZE_PHRASE} this browser keeps, so ` +
-    `a run with nobody present would leave nothing here. ` +
+    `that size is more than the ${PARKED_SIZE_PHRASE} this browser keeps, so ` +
+    `a run with nobody present would leave nothing here. That is the most ` +
+    `these terms allow rather than what the next run will match: a run that ` +
+    `matches fewer records may leave a result that fits. ` +
     (folderGranted
       ? `Results written to the folder you granted are not held to that size; ` +
         `a run that cannot write there leaves nothing.`

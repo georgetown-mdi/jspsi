@@ -1379,6 +1379,9 @@ describe("clearing what scheduled runs left takes the bytes with it", () => {
     await clearParkedResults(created.id);
 
     expect(await rawParkedStored(created.id)).toBeUndefined();
+    // The read the surface renders from no longer reports the unreadable state,
+    // so the statement naming the clear as its remedy is stating what happens.
+    expect(await readParkedResults(created.id)).toEqual({ kind: "none" });
   });
 
   test("leaves the exchange itself, and its accounting, standing", async () => {

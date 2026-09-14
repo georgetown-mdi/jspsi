@@ -557,7 +557,7 @@ function LocalFieldsEditor({
       {scheduleEnabled && resultSizeWarning !== undefined && (
         <Alert
           color="yellow"
-          title="A result this size is not kept in this browser"
+          title="A result on these terms could exceed what this browser keeps"
           mt="sm"
         >
           {resultSizeWarning}
@@ -908,7 +908,7 @@ function RunHistory({
       {resultSizeWarning !== undefined && (
         <Alert
           color="yellow"
-          title="The next run's results would not be kept in this browser"
+          title="The next run's results could exceed what this browser keeps"
           mt="sm"
           mb="sm"
         >

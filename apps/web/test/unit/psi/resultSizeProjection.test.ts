@@ -21,8 +21,8 @@ import {
 describe("the size a parked result is bounded by", () => {
   test("is the CSV intake cap itself, not a second figure", () => {
     // The derivation, pinned: raising what this app will read raises what it
-    // will keep, in the same edit. A bound restated as a literal fails here even
-    // where the two happen to be equal today.
+    // will keep, in the same edit. A bound that does not move with the intake
+    // cap fails here.
     expect(MAX_PARKED_RESULT_BYTES).toBe(MAX_CSV_FILE_BYTES);
   });
 
