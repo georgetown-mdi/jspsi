@@ -4315,9 +4315,9 @@ describe("declared transform param types", () => {
 
   // The pattern params have no default to fall back to: unread through the
   // accessor, an unquoted `007` renders into the compile source as the pattern
-  // `7` rather than being refused, and an absent one renders as the nine
-  // characters `undefined`. Each is read through the same accessor as every
-  // other declared text param, one function at a time.
+  // `7` rather than being refused, and an absent one is refused rather than
+  // matching on the literal `undefined`. Each is read through the same
+  // accessor as every other declared text param, one function at a time.
   const patternParams: Array<{
     fn: string;
     param: string;

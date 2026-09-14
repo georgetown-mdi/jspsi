@@ -1459,10 +1459,8 @@ describe("a transform param the consent summary displays", () => {
   });
 
   test("a regex step with no pattern never reaches the display", () => {
-    // The difference that used to survive: an absent pattern was rendered as a
-    // string on its way to the engine, so the step matched the nine characters
-    // of the word while the display stated no pattern at all. The decode
-    // refuses the step instead, so no summary of it is composed.
+    // An absent pattern is refused at decode, so no summary of the step is
+    // composed.
     const steps: TransformStep[] = [
       { function: "replace_regex", params: { replacement: "Z" } },
     ];
