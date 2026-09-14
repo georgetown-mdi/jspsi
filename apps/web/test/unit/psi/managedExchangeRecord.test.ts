@@ -13,6 +13,7 @@ import {
   applyManagedExchangeInputHandle,
   applyManagedExchangeLastRun,
   applyManagedExchangeLocalEdits,
+  applyManagedExchangeOutputDirectory,
   applyManagedExchangeReinviteRotation,
   applyManagedExchangeRotation,
   applyManagedExchangeScheduleAdvance,
@@ -557,6 +558,44 @@ describe("applyManagedExchangeInputHandle", () => {
     const record = buildManagedExchangeRecord(newExchange());
     applyManagedExchangeInputHandle(record, fakeHandle);
     expect(record.inputFileHandle).toBeUndefined();
+  });
+});
+
+describe("applyManagedExchangeOutputDirectory", () => {
+  // Opaque to the schema for the same reason the input handle is; the real
+  // handle's structured-clone round-trip is the browser suite's.
+  const folder = { kind: "directory", name: "Results" } as unknown as never;
+
+  test("sets the grant, touching nothing else", () => {
+    const record = buildManagedExchangeRecord(
+      newExchange({ tokenMaxAgeDays: 90, schedule }),
+    );
+    const granted = applyManagedExchangeOutputDirectory(record, folder);
+    expect(granted.outputDirectoryHandle).toBe(folder);
+    expect(granted.sharedSecret).toBe(record.sharedSecret);
+    expect(granted.exchangeFile).toEqual(record.exchangeFile);
+    expect(granted.schedule).toEqual(schedule);
+    expect(granted.inputFileHandle).toBeUndefined();
+  });
+
+  test("re-points to a replacement folder, and a null drops the grant", () => {
+    const record = applyManagedExchangeOutputDirectory(
+      buildManagedExchangeRecord(newExchange()),
+      folder,
+    );
+    const other = { kind: "directory", name: "Other" } as unknown as never;
+    expect(
+      applyManagedExchangeOutputDirectory(record, other).outputDirectoryHandle,
+    ).toBe(other);
+    expect(
+      applyManagedExchangeOutputDirectory(record, null),
+    ).not.toHaveProperty("outputDirectoryHandle");
+  });
+
+  test("does not mutate the input record", () => {
+    const record = buildManagedExchangeRecord(newExchange());
+    applyManagedExchangeOutputDirectory(record, folder);
+    expect(record.outputDirectoryHandle).toBeUndefined();
   });
 });
 

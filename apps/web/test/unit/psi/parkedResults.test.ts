@@ -5,9 +5,9 @@ import {
   PARKED_RESULTS_VERSION,
   appendParkedResults,
   parkedResultsExpiryMs,
-  parkedResultsFileName,
   parseParkedResults,
   retainParkedResults,
+  runResultsFileName,
 } from "../../../src/psi/parkedResults.js";
 
 import type {
@@ -28,7 +28,7 @@ function parked(runAt = RUN_AT): ParkedRunResults {
   return {
     kind: "results",
     runAt,
-    fileName: parkedResultsFileName(runAt),
+    fileName: runResultsFileName(runAt),
     csv: new Blob(["id,value\n1,a\n"], { type: "text/csv" }),
     matchedRecordCount: 1,
   };
@@ -45,6 +45,46 @@ describe("what a stored set of parked results admits", () => {
       runAt: "2026-03-08T09:00:00.000Z",
     });
     expect(parseParkedResults(value)).toEqual(value);
+  });
+
+  test("round-trips a run written to the granted folder, holding no rows", () => {
+    const value = results({
+      kind: "written",
+      runAt: RUN_AT,
+      fileName: runResultsFileName(RUN_AT),
+      directoryName: "Riverbend results",
+      matchedRecordCount: 1,
+    });
+    expect(parseParkedResults(value)).toEqual(value);
+  });
+
+  test("round-trips the reason a granted folder did not take a run's results", () => {
+    for (const fallback of ["ungranted", "write-failed"] as const) {
+      const value = results({ ...parked(), fallback });
+      expect(parseParkedResults(value)).toEqual(value);
+    }
+    expect(() =>
+      parseParkedResults({
+        version: PARKED_RESULTS_VERSION,
+        entries: [{ ...parked(), fallback: "elsewhere" }],
+      }),
+    ).toThrow();
+  });
+
+  test("rejects a written entry that names no folder to have written to", () => {
+    expect(() =>
+      parseParkedResults({
+        version: PARKED_RESULTS_VERSION,
+        entries: [
+          {
+            kind: "written",
+            runAt: RUN_AT,
+            fileName: runResultsFileName(RUN_AT),
+            directoryName: "",
+          },
+        ],
+      }),
+    ).toThrow();
   });
 
   test("rejects an unrecognized version rather than migrating it", () => {
@@ -156,11 +196,11 @@ describe("adding a run's entry", () => {
 
 describe("the name a parked result downloads under", () => {
   test("stamps the run, so two runs' results do not collide", () => {
-    expect(parkedResultsFileName(RUN_AT)).toBe(
+    expect(runResultsFileName(RUN_AT)).toBe(
       "psilink-results-2026-03-01T09-00-00-000Z.csv",
     );
-    expect(parkedResultsFileName("2026-03-08T09:00:00.000Z")).not.toBe(
-      parkedResultsFileName(RUN_AT),
+    expect(runResultsFileName("2026-03-08T09:00:00.000Z")).not.toBe(
+      runResultsFileName(RUN_AT),
     );
   });
 });

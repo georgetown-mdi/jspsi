@@ -9,10 +9,7 @@ import { createElement } from "react";
 
 import "@mantine/core/styles.css";
 
-import {
-  PARKED_RESULTS_VERSION,
-  parkedResultsFileName,
-} from "@psi/parkedResults";
+import { PARKED_RESULTS_VERSION, runResultsFileName } from "@psi/parkedResults";
 import {
   clearManagedExchanges,
   createManagedExchange,
@@ -96,7 +93,7 @@ function parked(): ParkedResultsRead {
         {
           kind: "results",
           runAt: RUN_AT,
-          fileName: parkedResultsFileName(RUN_AT),
+          fileName: runResultsFileName(RUN_AT),
           csv: new Blob([RESULTS_CSV], { type: "text/csv" }),
           matchedRecordCount: 1,
         },
@@ -203,9 +200,7 @@ describe("a copy a hand-off spent", () => {
 
       await downloads.settled();
       expect(downloads.captured).toHaveLength(1);
-      expect(downloads.captured[0].fileName).toBe(
-        parkedResultsFileName(RUN_AT),
-      );
+      expect(downloads.captured[0].fileName).toBe(runResultsFileName(RUN_AT));
       expect(downloads.captured[0].text).toBe(RESULTS_CSV);
     } finally {
       downloads.restore();

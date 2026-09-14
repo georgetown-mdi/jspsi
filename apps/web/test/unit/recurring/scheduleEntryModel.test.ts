@@ -4,9 +4,14 @@ import {
   MAX_SCHEDULE_INTERVAL_DAYS,
   MAX_SCHEDULE_WINDOW_HOURS,
   MIN_SCHEDULE_WINDOW_HOURS,
+  OUTPUT_FOLDER_GRANT_NOTE,
+  OUTPUT_FOLDER_SCOPE_NOTE,
+  OUTPUT_FOLDER_UNSUPPORTED_NOTE,
   buildScheduleFromEntry,
   cadenceAgainstTokenBound,
   defaultScheduleEntryFields,
+  outputFolderGrant,
+  outputFolderGrantedNote,
   resolvedFirstWindowLabel,
   scheduleEntryErrors,
   scheduleEntryFieldsFrom,
@@ -500,5 +505,58 @@ describe("a stored schedule the entry form did not write", () => {
     );
     expect(fields.windowHours).toBe(MAX_SCHEDULE_WINDOW_HOURS);
     expect(scheduleEntryErrors(fields)).toEqual({});
+  });
+});
+
+describe("the output-folder grant the entry surface offers", () => {
+  const folder = { name: "Riverbend results" } as FileSystemDirectoryHandle;
+
+  test("names the granted folder where one is held and this runtime can follow it", () => {
+    expect(outputFolderGrant(folder, true, true)).toEqual({
+      kind: "granted",
+      name: "Riverbend results",
+    });
+  });
+
+  test("offers the grant where none is held, on a browser that can take one", () => {
+    expect(outputFolderGrant(undefined, false, true)).toEqual({ kind: "none" });
+  });
+
+  test("states the absence rather than the choice where no grant can be taken", () => {
+    // A held handle this engine cannot follow reads the same way: the surface
+    // must not name a folder the run cannot write to.
+    expect(outputFolderGrant(undefined, false, false)).toEqual({
+      kind: "unsupported",
+    });
+    expect(outputFolderGrant(folder, false, false)).toEqual({
+      kind: "unsupported",
+    });
+  });
+
+  test("states why the grant is taken at entry rather than when the run happens", () => {
+    expect(OUTPUT_FOLDER_GRANT_NOTE).toContain("nobody");
+    expect(OUTPUT_FOLDER_GRANT_NOTE).toContain("choose it now");
+    expect(OUTPUT_FOLDER_GRANT_NOTE).toContain("never asks");
+    // Successive runs accumulate rather than overwrite, which is what the
+    // run-stamped name buys the operator.
+    expect(OUTPUT_FOLDER_GRANT_NOTE).toContain("do not overwrite");
+  });
+
+  test("states the reach of the folder where the folder is chosen", () => {
+    expect(OUTPUT_FOLDER_SCOPE_NOTE).toContain("read and write everything");
+    expect(OUTPUT_FOLDER_SCOPE_NOTE).toContain("used for nothing else");
+  });
+
+  test("names the folder in force, and what ends it", () => {
+    expect(outputFolderGrantedNote("Riverbend results")).toContain(
+      "Riverbend results",
+    );
+    expect(outputFolderGrantedNote("Riverbend results")).toContain(
+      "deleting this exchange",
+    );
+  });
+
+  test("says what happens instead where this browser cannot grant a folder", () => {
+    expect(OUTPUT_FOLDER_UNSUPPORTED_NOTE).toContain("keeps its results");
   });
 });

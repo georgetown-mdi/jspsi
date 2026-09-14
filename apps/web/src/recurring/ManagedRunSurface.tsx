@@ -21,6 +21,7 @@ import {
 } from "@psi/managed/managedExchangeExport";
 import {
   getManagedExchange,
+  persistManagedExchangeOutputDirectory,
   readRecordAndMarkBackedUp,
   spendManagedExchangeIfCurrent,
   updateManagedExchangeLocalFields,
@@ -34,6 +35,7 @@ import { readParkedResults } from "@psi/parkedResultsStore";
 
 import { MANAGED_EXCHANGE_ARTIFACT_MIME } from "@psi/managed/managedExchangeArtifact";
 import { canReinviteFromRecord } from "@psi/managed/managedReinvite";
+import { chooseManagedOutputDirectory } from "@psi/managed/managedOutputDirectory";
 import { deriveManagedBackupState } from "@psi/managed/managedBackupState";
 import { getManagedLocalState } from "@psi/managed/managedLocalState";
 import { managedRerunCompletion } from "@psi/managed/managedCompletionSurface";
@@ -641,6 +643,25 @@ export function ManagedRunSurface({ id }: { id: string }) {
     setRecord(updated);
   }
 
+  // The picker is reached with no awaited work in front of it: a browser hands a
+  // site a folder only under the operator's own gesture, and an await before the
+  // call spends it. A dismissed picker yields no handle and changes nothing.
+  function grantOutputFolder(): Promise<void> {
+    const held = record;
+    if (held === undefined) return Promise.resolve();
+    return chooseManagedOutputDirectory().then(async (directory) => {
+      if (directory === undefined) return;
+      setRecord(
+        await persistManagedExchangeOutputDirectory(held.id, directory),
+      );
+    });
+  }
+
+  async function stopUsingOutputFolder(): Promise<void> {
+    if (record === undefined) return;
+    setRecord(await persistManagedExchangeOutputDirectory(record.id, null));
+  }
+
   // Queue a fresh read of the accounting, dropping the standing verdict as it
   // goes: the section returns to its in-flight state rather than rendering the
   // previous verdict and its buttons under a click that has already been taken --
@@ -956,6 +977,8 @@ export function ManagedRunSurface({ id }: { id: string }) {
               onRetryAccountingRead={retryAccountingRead}
               onRetryParkedResultsRead={retryParkedResultsRead}
               onSaveLocalFields={saveLocalFields}
+              onGrantOutputFolder={grantOutputFolder}
+              onStopUsingOutputFolder={stopUsingOutputFolder}
               onReinviteToChangeTerms={() => reinviteNow("detail")}
               canReinvite={canReinviteFromRecord(record)}
               reinviting={reinviting}

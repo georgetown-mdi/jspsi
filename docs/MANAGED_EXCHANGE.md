@@ -406,13 +406,37 @@ retries).
 ### Where a scheduled run's results go
 
 A scheduled run produces the same results file an attended run produces, with
-nobody there to download it. The app **keeps that file in this browser** and the
-exchange's own page offers it at the operator's next visit. Keeping it is on by
-default: an unattended run that delivered nothing would leave the operator with
-outcome bookkeeping and never the results the run existed to produce.
+nobody there to download it. It has two places to put that file, and the operator
+chooses between them where they put the exchange on a schedule:
 
-What that means for the operator, stated where they put an exchange on a schedule
-and again where they collect the results:
+- **A folder they grant**, which the run writes the results into. This is the
+  path the app offers first, because the results land where the operator's own
+  filesystem protections apply rather than in browser storage.
+- **This browser**, which is what happens without such a folder and whenever the
+  granted folder cannot be written to. The exchange's own page then offers the
+  file at the operator's next visit.
+
+Keeping the file one way or the other is on by default: an unattended run that
+delivered nothing would leave the operator with outcome bookkeeping and never the
+results the run existed to produce.
+
+**The folder is granted while the operator is there.** A browser hands a site a
+folder only under the operator's own gesture, so the grant is taken at schedule
+entry, and re-pointed the same way. At run time the app only checks whether the
+grant still stands -- it never asks, because there is nobody to answer. A grant
+the browser will not honour with nobody present, one the operator revoked, and a
+write that fails all land the results in the browser instead, and the next visit
+says which happened rather than reporting a plain success. The folder's own name
+and the file written into it are what the visit names.
+
+**A folder used for nothing else** is the practice to follow: while the grant
+stands the site can read and write everything in that folder, not only the
+results it writes there (see
+[SECURITY_DESIGN.md](SECURITY_DESIGN.md#metadata-at-rest-presence-and-shape)).
+Deleting the exchange drops the grant with the record.
+
+What keeping the file in the browser means for the operator, stated where they
+put an exchange on a schedule and again where they collect the results:
 
 - **The rows are at rest in the browser.** The kept file is the matched
   identifiers and the payload values the partner disclosed, unencrypted, in reach
@@ -436,9 +460,11 @@ and again where they collect the results:
   secret and filed its disclosure.
 
 Each unattended run leaves its own entry, so two runs between visits leave two
-files. Only the results are kept; the run's disclosure record is already in [the
-accounting of disclosures](#the-accounting-of-disclosures), and a count-only run
-or one whose agreed terms give this party no output has no file to keep.
+files -- in the granted folder as in the browser, each named by its own run's
+date and time, so a later run never overwrites an earlier one. Only the results
+are kept; the run's disclosure record is already in [the accounting of
+disclosures](#the-accounting-of-disclosures), and a count-only run or one whose
+agreed terms give this party no output has no file to keep.
 
 The attended re-run is unchanged: the operator is present, and the completion
 screen hands the results over as it always has.
@@ -523,8 +549,9 @@ does that the one-shot flow cannot. On the primary path the second run is
 4. **Rotate-and-persist, then the data exchange** -- the durability contract
    below, unchanged by nobody watching.
 5. **The outcome lands in the run bookkeeping**, the disclosure is filed to this
-   exchange's accounting, and the **results are parked** for the operator to
-   collect at their next visit (see [Where a scheduled run's results
+   exchange's accounting, and the **results are written to the folder the
+   operator granted**, or kept in the browser for them to collect at their next
+   visit where there is no such folder (see [Where a scheduled run's results
    go](#where-a-scheduled-runs-results-go)). The next visit's surfaces hold the
    result of all that: the results themselves, the refreshed-backup prompt (the
    secret rotated), or the failure state. An OS-level notification from the

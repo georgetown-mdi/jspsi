@@ -3,10 +3,11 @@
  * IndexedDB-free half of {@link ./parkedResultsStore.ts}, so the shape, the
  * retention rule, and the append are unit-testable in Node with no database.
  *
- * A run with nobody present has no taker for its result file. Rather than
- * building the file into an object URL and dropping it as the attempt settles,
- * an unattended run keeps the results CSV here, beside the record it ran from,
- * until the operator returns for it.
+ * A run with nobody present has no taker for its result file. Where the operator
+ * granted an output folder the run writes the file there and leaves only a note
+ * of where it went; otherwise, and whenever that grant or write does not hold, it
+ * keeps the results CSV here, beside the record it ran from, until the operator
+ * returns for it.
  *
  * What this holds at rest is NOT what the managed record and the accounting of
  * disclosures hold. Those hold presence, shape, and aggregate counts; an entry
@@ -42,6 +43,13 @@ export const PARKED_RESULTS_RETENTION_DAYS = 30;
 
 const MS_PER_DAY = 86_400_000;
 
+/** Why a run that held an output-folder grant kept its results in the browser
+ * instead of writing them there: the grant was not one the run could use with
+ * nobody present (never taken, not honoured unattended, or revoked), or the write
+ * itself did not land. Absent where no grant was held at all, which is the plain
+ * parking case. */
+export type ParkedResultsFallback = "ungranted" | "write-failed";
+
 /** One scheduled run's results, waiting for the operator. */
 export interface ParkedRunResults {
   kind: "results";
@@ -49,10 +57,29 @@ export interface ParkedRunResults {
    * so this entry and the run history name the same moment. */
   runAt: string;
   /** The name the download is offered under, stamped so repeated downloads
-   * accumulate rather than collide ({@link parkedResultsFileName}). */
+   * accumulate rather than collide ({@link runResultsFileName}). */
   fileName: string;
   /** The results CSV, exactly as an attended run's download would hold it. */
   csv: Blob;
+  /** How many rows the results table has, where the run reported it. */
+  matchedRecordCount?: number;
+  /** Why the granted output folder did not take these results, where one was
+   * held ({@link ParkedResultsFallback}). */
+  fallback?: ParkedResultsFallback;
+}
+
+/** One scheduled run's results as written into the folder the operator granted.
+ * The rows are in that folder and nothing of them is kept here: this entry is the
+ * note that says where they went, so the operator's next visit can say it. */
+export interface WrittenRunResults {
+  kind: "written";
+  /** ISO 8601 UTC instant of the run whose results were written. */
+  runAt: string;
+  /** The name the results were written under. */
+  fileName: string;
+  /** The granted folder's own name, as the picker reported it -- the leaf, not a
+   * path: a directory handle discloses no path to the app. */
+  directoryName: string;
   /** How many rows the results table has, where the run reported it. */
   matchedRecordCount?: number;
 }
@@ -68,7 +95,8 @@ export interface RefusedRunResults {
 }
 
 /** One entry of a managed exchange's parked results. */
-export type ParkedResultsEntry = ParkedRunResults | RefusedRunResults;
+export type ParkedResultsEntry =
+  ParkedRunResults | WrittenRunResults | RefusedRunResults;
 
 /** One managed exchange's parked results, oldest run first. */
 export interface ParkedResults {
@@ -86,6 +114,16 @@ const entrySchema: ZodType<ParkedResultsEntry> = z.discriminatedUnion("kind", [
       // brand itself: a value read back from the store is the Blob structured
       // clone rebuilt, and anything else is a stored value this reader refuses.
       csv: z.custom<Blob>((value) => value instanceof Blob),
+      matchedRecordCount: z.int().min(0).optional(),
+      fallback: z.enum(["ungranted", "write-failed"]).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("written"),
+      runAt: z.iso.datetime(),
+      fileName: z.string().min(1),
+      directoryName: z.string().min(1),
       matchedRecordCount: z.int().min(0).optional(),
     })
     .strict(),
@@ -168,10 +206,11 @@ export function appendParkedResults(
   return { version: PARKED_RESULTS_VERSION, entries: [...kept, entry] };
 }
 
-/** The name a parked results CSV downloads under: the run's own instant, made
+/** The name a scheduled run's results file takes: the run's own instant, made
  * filesystem-safe the same way the record downloads are stamped
- * ({@link ./runOutputs.ts}), so two runs' results do not collide in the
- * operator's downloads folder. */
-export function parkedResultsFileName(runAt: string): string {
+ * ({@link ./runOutputs.ts}). It names the file both ways the results can reach
+ * the operator, so two runs collide neither in the granted output folder nor in
+ * the downloads folder a parked copy lands in. */
+export function runResultsFileName(runAt: string): string {
   return `psilink-results-${recordFileStamp(runAt)}.csv`;
 }

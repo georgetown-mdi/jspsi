@@ -46,7 +46,7 @@ import {
 import {
   PARKED_RESULTS_RETENTION_DAYS,
   PARKED_RESULTS_VERSION,
-  parkedResultsFileName,
+  runResultsFileName,
 } from "@psi/parkedResults";
 
 import {
@@ -123,7 +123,7 @@ function parkedRun(runAt = RUN_AT) {
   return {
     kind: "results" as const,
     runAt,
-    fileName: parkedResultsFileName(runAt),
+    fileName: runResultsFileName(runAt),
     csv: new Blob([RESULTS_CSV], { type: "text/csv" }),
     matchedRecordCount: 1,
   };
@@ -1249,7 +1249,7 @@ describe("a scheduled run's results wait for the next visit", () => {
     expect(entry.kind).toBe("results");
     if (entry.kind !== "results") return;
     expect(entry.runAt).toBe(RUN_AT);
-    expect(entry.fileName).toBe(parkedResultsFileName(RUN_AT));
+    expect(entry.fileName).toBe(runResultsFileName(RUN_AT));
     expect(entry.matchedRecordCount).toBe(1);
     // The bytes themselves, not a reference to a blob URL the run's runtime
     // revoked as it settled.

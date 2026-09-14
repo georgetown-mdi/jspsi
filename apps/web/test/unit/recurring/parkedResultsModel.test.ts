@@ -95,8 +95,67 @@ describe("the rows a returning operator reads", () => {
   });
 });
 
+describe("the row a run written to the granted folder reads as", () => {
+  function written(fallback?: "ungranted" | "write-failed"): ParkedResults {
+    return {
+      version: PARKED_RESULTS_VERSION,
+      entries: [
+        fallback === undefined
+          ? {
+              kind: "written",
+              runAt: EARLIER,
+              fileName: "psilink-results-earlier.csv",
+              directoryName: "Riverbend results",
+              matchedRecordCount: 42,
+            }
+          : {
+              kind: "results",
+              runAt: EARLIER,
+              fileName: "psilink-results-earlier.csv",
+              csv: new Blob(["id\n1\n"], { type: "text/csv" }),
+              matchedRecordCount: 42,
+              fallback,
+            },
+      ],
+    };
+  }
+
+  test("says where the results went, and that none of them are kept here", () => {
+    const row = parkedResultsRows(written())[0];
+    expect(row.summary).toContain("42 matched records");
+    expect(row.summary).toContain("psilink-results-earlier.csv");
+    expect(row.summary).toContain("Riverbend results");
+    expect(row.summary).toContain("Nothing of them is kept in this browser");
+  });
+
+  test("names why a granted folder did not take them, rather than reading as a plain success", () => {
+    const ungranted = parkedResultsRows(written("ungranted"))[0].summary;
+    expect(ungranted).toContain("ready to download");
+    expect(ungranted).toContain("without asking you");
+    expect(ungranted).toContain("Granting the folder again");
+
+    const failed = parkedResultsRows(written("write-failed"))[0].summary;
+    expect(failed).toContain("Writing to the folder you granted failed");
+    expect(failed).toContain("still exists");
+  });
+
+  test("says nothing about a folder for results kept here with no grant held", () => {
+    const row = parkedResultsRows(results())[1];
+    expect(row.summary).toBe("42 matched records, ready to download.");
+  });
+});
+
 describe("what the operator is told about keeping results here", () => {
   const days = `${String(PARKED_RESULTS_RETENTION_DAYS)} days`;
+
+  test("the schedule-entry statement states keeping results here as what happens without a folder", () => {
+    // The grant is the path the surface offers first; this statement is what
+    // happens without one, and whenever the granted folder cannot be written to.
+    expect(PARKED_RESULTS_SCHEDULE_NOTE).toContain("Without a folder");
+    expect(PARKED_RESULTS_SCHEDULE_NOTE).toContain(
+      "the folder you granted cannot be written to",
+    );
+  });
 
   test("the schedule-entry statement names the content, the reach, and both removals", () => {
     // Every existing statement about what a managed exchange keeps at rest says
@@ -152,7 +211,11 @@ describe("what the operator is told about keeping results here", () => {
 
   test("the empty state says nothing was left, not that nothing is known", () => {
     expect(NO_PARKED_RESULTS_NOTE).toContain(
-      "No scheduled run has left results",
+      "No scheduled run has left anything here",
     );
+    // Both routes a run's results can take, so the empty state is read against
+    // what a run would do rather than as a bare blank.
+    expect(NO_PARKED_RESULTS_NOTE).toContain("folder you granted");
+    expect(NO_PARKED_RESULTS_NOTE).toContain("leaves the results here");
   });
 });

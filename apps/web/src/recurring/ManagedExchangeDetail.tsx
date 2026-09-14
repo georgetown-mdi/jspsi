@@ -13,6 +13,11 @@ import { Link } from "@tanstack/react-router";
 
 import { downloadBlob, triggerBlobDownload } from "@components/blobDownload";
 
+import {
+  outputDirectoryGrantSupported,
+  storedOutputDirectoryUsable,
+} from "@psi/managed/managedOutputDirectory";
+
 import { DisclosureSection } from "@components/DisclosureSection";
 import { isInstalledRuntime } from "@utils/installedRuntime";
 import { storedInputHandleUsable } from "@psi/managed/managedInputHandle";
@@ -53,9 +58,14 @@ import {
   MAX_SCHEDULE_INTERVAL_DAYS,
   MAX_SCHEDULE_WINDOW_HOURS,
   MIN_SCHEDULE_WINDOW_HOURS,
+  OUTPUT_FOLDER_GRANT_NOTE,
+  OUTPUT_FOLDER_SCOPE_NOTE,
+  OUTPUT_FOLDER_UNSUPPORTED_NOTE,
   buildScheduleFromEntry,
   cadenceAgainstTokenBound,
   defaultScheduleEntryFields,
+  outputFolderGrant,
+  outputFolderGrantedNote,
   resolvedFirstWindowLabel,
   scheduleEntryErrors,
   scheduleEntryFieldsFrom,
@@ -77,11 +87,14 @@ import type {
   ManagedExchangeRecord,
   ManagedExchangeSchedule,
 } from "@psi/managed/managedExchangeRecord";
+import type {
+  OutputFolderGrant,
+  ScheduleEntryFields,
+} from "./scheduleEntryModel";
 import type { ConfigRow } from "./managedDetailModel";
 import type { DisclosureAccountingRead } from "@psi/disclosureAccountingStore";
 import type { DisclosureFact } from "./disclosureAccountingModel";
 import type { ParkedResultsRead } from "@psi/parkedResultsStore";
-import type { ScheduleEntryFields } from "./scheduleEntryModel";
 import type { StoredDisclosureAccounting } from "@psi/disclosureAccounting";
 
 /**
@@ -107,6 +120,8 @@ export function ManagedExchangeDetail({
   onRetryAccountingRead,
   onRetryParkedResultsRead,
   onSaveLocalFields,
+  onGrantOutputFolder,
+  onStopUsingOutputFolder,
   onReinviteToChangeTerms,
   canReinvite,
   reinviting,
@@ -137,6 +152,15 @@ export function ManagedExchangeDetail({
    * Rejects on a store failure; the editor shows the failure and keeps the
    * form. */
   onSaveLocalFields: (edits: ManagedExchangeLocalEdits) => Promise<void>;
+  /** Ask the operator for the folder a scheduled run writes its results into and
+   * persist the grant. MUST reach the picker without an intervening await: the
+   * browser grants a folder only under the operator's own gesture. Resolves
+   * unchanged where they dismissed the picker, and rejects where the grant or its
+   * write failed; the fieldset shows that. */
+  onGrantOutputFolder: () => Promise<void>;
+  /** Drop the stored grant, returning this exchange's scheduled runs to keeping
+   * their results in the browser. Rejects on a store failure. */
+  onStopUsingOutputFolder: () => Promise<void>;
   /** Enter the fast re-invite flow -- refresh the partnership with a new secret on
    * the SAME terms (it does not change them; a terms change is a new exchange). The
    * inviter mints a fresh invitation; the acceptor's affordance names asking the
@@ -162,7 +186,12 @@ export function ManagedExchangeDetail({
         reinviting={reinviting}
         reinviteFailed={reinviteFailed}
       />
-      <LocalFieldsEditor record={record} onSave={onSaveLocalFields} />
+      <LocalFieldsEditor
+        record={record}
+        onSave={onSaveLocalFields}
+        onGrantOutputFolder={onGrantOutputFolder}
+        onStopUsingOutputFolder={onStopUsingOutputFolder}
+      />
       <RunSchedule record={record} />
       <RunHistory record={record} />
       <ParkedResultsView
@@ -310,9 +339,13 @@ function ConfigurationView({
 function LocalFieldsEditor({
   record,
   onSave,
+  onGrantOutputFolder,
+  onStopUsingOutputFolder,
 }: {
   record: ManagedExchangeRecord;
   onSave: (edits: ManagedExchangeLocalEdits) => Promise<void>;
+  onGrantOutputFolder: () => Promise<void>;
+  onStopUsingOutputFolder: () => Promise<void>;
 }) {
   const [label, setLabel] = useState(record.label);
   const [maxAgeEnabled, setMaxAgeEnabled] = useState(
@@ -450,6 +483,13 @@ function LocalFieldsEditor({
           fields={schedule}
           errors={scheduleErrors}
           onEdit={editSchedule}
+          grant={outputFolderGrant(
+            record.outputDirectoryHandle,
+            storedOutputDirectoryUsable(record.outputDirectoryHandle),
+            outputDirectoryGrantSupported(),
+          )}
+          onGrantOutputFolder={onGrantOutputFolder}
+          onStopUsingOutputFolder={onStopUsingOutputFolder}
         />
       )}
       <Checkbox
@@ -532,19 +572,28 @@ function LocalFieldsEditor({
  * cadence agreed with a partner and read off a message, and typing it back is
  * the shortest path from that message to the field.
  *
- * It also states what scheduling starts keeping at rest: a run with nobody
- * present keeps its results in this browser, which is row values on this disk.
- * The statement belongs here, before the save, because scheduling is the
- * decision that produces them (see {@link ./parkedResultsModel.ts}).
+ * It also settles where a scheduled run's results go, in the order the operator
+ * should decide it: the folder grant first, as the path to take, and what happens
+ * without one -- results kept in this browser, which is row values on this disk --
+ * after it ({@link OutputFolderGrantField},
+ * {@link ./parkedResultsModel.ts}). Both statements belong here, before the save,
+ * because scheduling is the decision that starts producing results nobody is
+ * present to take.
  */
 function ScheduleEntryFieldset({
   fields,
   errors,
   onEdit,
+  grant,
+  onGrantOutputFolder,
+  onStopUsingOutputFolder,
 }: {
   fields: ScheduleEntryFields;
   errors: ReturnType<typeof scheduleEntryErrors>;
   onEdit: (edits: Partial<ScheduleEntryFields>) => void;
+  grant: OutputFolderGrant;
+  onGrantOutputFolder: () => Promise<void>;
+  onStopUsingOutputFolder: () => Promise<void>;
 }) {
   const resolved = resolvedFirstWindowLabel(fields);
   // NumberInput rounds what it displays and clamps an out-of-range value to
@@ -610,10 +659,96 @@ function ScheduleEntryFieldset({
           later window is counted from it.
         </p>
       )}
-      <Alert color="blue" title="Where a scheduled run's results go" mt="sm">
+      <OutputFolderGrantField
+        grant={grant}
+        onGrant={onGrantOutputFolder}
+        onStopUsing={onStopUsingOutputFolder}
+      />
+      <Alert
+        color="blue"
+        title="Where a scheduled run's results go without a folder"
+        mt="sm"
+      >
         {PARKED_RESULTS_SCHEDULE_NOTE}
       </Alert>
     </>
+  );
+}
+
+/**
+ * The output-folder grant, offered where the operator schedules the exchange: the
+ * folder a run with nobody present writes its results into.
+ *
+ * The grant is taken HERE rather than when the run happens, because the browser
+ * hands a site a folder only under the operator's own gesture and a scheduled run
+ * has nobody to make one. The click therefore reaches the picker with no awaited
+ * work in front of it.
+ *
+ * A browser that cannot grant a folder says so rather than offering a control
+ * that would fail, and the folder's own reach -- everything in it, readable and
+ * writable while the grant stands -- is stated where the folder is chosen.
+ */
+function OutputFolderGrantField({
+  grant,
+  onGrant,
+  onStopUsing,
+}: {
+  grant: OutputFolderGrant;
+  onGrant: () => Promise<void>;
+  onStopUsing: () => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+
+  function take(action: () => Promise<void>) {
+    if (busy) return;
+    setBusy(true);
+    setFailed(false);
+    void action()
+      .catch(() => setFailed(true))
+      .finally(() => setBusy(false));
+  }
+
+  if (grant.kind === "unsupported")
+    return (
+      <p className={`${styles.small} ${styles.sub}`}>
+        {OUTPUT_FOLDER_UNSUPPORTED_NOTE}
+      </p>
+    );
+  return (
+    <div className={styles.callout}>
+      <h3 className={styles.eyebrow}>Results folder</h3>
+      <p className={styles.small}>{OUTPUT_FOLDER_GRANT_NOTE}</p>
+      <p className={`${styles.small} ${styles.sub}`}>
+        {OUTPUT_FOLDER_SCOPE_NOTE}
+      </p>
+      {grant.kind === "granted" && (
+        <p className={`${styles.small} ${styles.sub}`}>
+          {outputFolderGrantedNote(grant.name)}
+        </p>
+      )}
+      {failed && (
+        <Alert color="yellow" title="That folder was not set" mt="sm" mb="sm">
+          Nothing changed: scheduled runs keep using whatever they used before.
+          Try choosing the folder again.
+        </Alert>
+      )}
+      <Button variant="default" loading={busy} onClick={() => take(onGrant)}>
+        {grant.kind === "granted"
+          ? "Choose a different folder"
+          : "Choose folder"}
+      </Button>
+      {grant.kind === "granted" && (
+        <Button
+          variant="subtle"
+          mt="xs"
+          disabled={busy}
+          onClick={() => take(onStopUsing)}
+        >
+          Stop writing to this folder
+        </Button>
+      )}
+    </div>
   );
 }
 
