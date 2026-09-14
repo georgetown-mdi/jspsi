@@ -17,13 +17,14 @@
  * it queues behind. The tick reads that refusal as the window's `"unattempted"`
  * disposition.
  *
- * WHAT AN UNATTENDED RUN PRODUCES, and does not: the rotated secret is persisted
- * and the disclosure is filed to this exchange's accounting (both inside the
- * driver), and the window's outcome is recorded. The run's OUTPUT files are
- * built into object URLs that nobody is present to download, so they are revoked
- * as the attempt settles rather than accumulating in a runtime that stays open
- * for weeks; delivering an unattended run's results to the operator is a surface
- * this slice does not have.
+ * WHAT AN UNATTENDED RUN PRODUCES: the rotated secret is persisted and the
+ * disclosure is filed to this exchange's accounting (both inside the driver), the
+ * window's outcome is recorded, and the results CSV is parked for the operator's
+ * next visit ({@link ../parkedResultsStore.ts}). The object URLs the outputs were
+ * built into are revoked as the attempt settles either way -- nobody is present
+ * to download one, and a runtime that stays open for weeks would accumulate them
+ * -- so the parked copy is what the operator returns to. The record pair is not
+ * parked: the run's disclosure record is already in the accounting.
  */
 
 import { getLogger } from "@psilink/core";
@@ -34,6 +35,12 @@ import { CLOSE_OUTCOME_WARNINGS } from "../exchangeLifecycle";
 import { delayUntilAborted } from "../delayUntilAborted";
 
 import {
+  parkRunResults,
+  recordParkedResultsRefusal,
+} from "../parkedResultsStore";
+import { parkedResultsFileName } from "../parkedResults";
+
+import {
   listReadableManagedExchanges,
   persistManagedExchangeScheduleAdvance,
 } from "./managedExchangeStore";
@@ -41,7 +48,8 @@ import { listManagedLocalState } from "./managedLocalState";
 import { runManagedExchangeInBrowser } from "./managedRunDriver";
 import { tickManagedSchedules } from "./managedScheduleRunner";
 
-import type { ObjectUrls } from "../runOutputs";
+import type { ObjectUrls, RunOutputs } from "../runOutputs";
+import type { ManagedExchangeRunResult } from "./managedExchangeRun";
 
 import type {
   ManagedScheduleAttempt,
@@ -167,25 +175,33 @@ export function browserScheduleTickSeams(
   };
 }
 
-/** Run one scheduled attempt through the browser driver, revoking the object
- * URLs its outputs were built into once the attempt settles. */
+/**
+ * Run one scheduled attempt through the browser driver: park the results it
+ * produced for the operator's next visit, then revoke the object URLs its outputs
+ * were built into once the attempt settles.
+ *
+ * The blob behind each URL is held as it is created, so the parking writes the
+ * same bytes the attended download would offer rather than reading them back out
+ * of a URL.
+ */
 async function runUnattendedAttempt(
   attempt: ManagedScheduleAttempt,
   signal: AbortSignal,
 ): Promise<void> {
-  const created: Array<string> = [];
+  const created = new Map<string, Blob>();
   const urls: ObjectUrls = {
     create: (blob) => {
       const url = window.URL.createObjectURL(blob);
-      created.push(url);
+      created.set(url, blob);
       return url;
     },
     revoke: (url) => {
       window.URL.revokeObjectURL(url);
+      created.delete(url);
     },
   };
   try {
-    await runManagedExchangeInBrowser({
+    const result = await runManagedExchangeInBrowser({
       record: attempt.record,
       source: attempt.source,
       signal,
@@ -209,8 +225,69 @@ async function runUnattendedAttempt(
           log.warn(UNATTENDED_RUN_NOTICE_PREFIX, notice);
       },
     });
+    await parkUnattendedResults(attempt.record.id, result, created);
   } finally {
-    for (const url of created) window.URL.revokeObjectURL(url);
+    for (const url of created.keys()) window.URL.revokeObjectURL(url);
+  }
+}
+
+/**
+ * Park a completed unattended run's results CSV, or record the named state where
+ * this browser will not store it.
+ *
+ * Never rejects: the run has already rotated its secret and filed its disclosure,
+ * so nothing here may turn a completed run into a failed attempt or restate its
+ * outcome. A refusal the store will not even record the state of ends in the
+ * diagnostic log, which is all that is left.
+ *
+ * A run with no results table -- a count-only run, or one whose agreed terms give
+ * this party no output -- parks nothing: there is no file for the next visit, and
+ * the run's own bookkeeping already states what it did.
+ */
+async function parkUnattendedResults(
+  id: string,
+  result: ManagedExchangeRunResult<RunOutputs>,
+  created: ReadonlyMap<string, Blob>,
+): Promise<void> {
+  const outputs = result.exchange;
+  if (outputs.kind !== "matched") return;
+  const runAt = result.lastRun.at;
+  const csv = created.get(outputs.resultsUrl);
+  if (csv === undefined) {
+    log.error(
+      `scheduled managed exchange ${id}: the run's results file was not built ` +
+        `through this runtime's own allocation, so nothing was kept for the ` +
+        `next visit`,
+    );
+    return;
+  }
+  try {
+    await parkRunResults(id, {
+      kind: "results",
+      runAt,
+      fileName: parkedResultsFileName(runAt),
+      csv,
+      ...(outputs.matchedRecordCount !== undefined
+        ? { matchedRecordCount: outputs.matchedRecordCount }
+        : {}),
+    });
+    return;
+  } catch (error) {
+    log.warn(
+      `scheduled managed exchange ${id}: this browser would not store the ` +
+        `run's results:`,
+      error,
+    );
+  }
+  try {
+    await recordParkedResultsRefusal(id, runAt);
+  } catch (error) {
+    log.error(
+      `scheduled managed exchange ${id}: this browser would not store the ` +
+        `run's results, and would not record that either; the run itself ` +
+        `stands and its disclosure is filed:`,
+      error,
+    );
   }
 }
 

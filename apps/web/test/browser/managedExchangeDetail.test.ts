@@ -36,6 +36,17 @@ import {
 } from "@recurring/disclosureAccountingModel";
 
 import {
+  NO_PARKED_RESULTS_NOTE,
+  PARKED_RESULTS_RETENTION_NOTE,
+  PARKED_RESULTS_SCHEDULE_NOTE,
+  UNAVAILABLE_PARKED_RESULTS_NOTE,
+} from "@recurring/parkedResultsModel";
+import {
+  PARKED_RESULTS_VERSION,
+  parkedResultsFileName,
+} from "@psi/parkedResults";
+
+import {
   disclosureRecord,
   neighbouringRecordVersion,
 } from "../utils/disclosureFixtures";
@@ -49,6 +60,7 @@ import type {
   ManagedExchangeSide,
   NewManagedExchange,
 } from "@psi/managed/managedExchangeRecord";
+import type { ParkedResultsRead } from "@psi/parkedResultsStore";
 import type { WebRTCExchangeLocator } from "@psilink/core";
 
 // The managed exchange detail sections, rendered: the read-only configuration with
@@ -97,6 +109,7 @@ describe("managed exchange detail configuration", () => {
     app.render(
       createElement(ManagedExchangeDetail, {
         record: record("inviter"),
+        parkedResultsRead: { kind: "none" },
         accountingRead: { kind: "none" },
         onResetAccounting: () => Promise.resolve(),
         onRetryAccountingRead: () => undefined,
@@ -139,6 +152,7 @@ describe("managed exchange detail configuration", () => {
     app.render(
       createElement(ManagedExchangeDetail, {
         record: record("acceptor"),
+        parkedResultsRead: { kind: "none" },
         accountingRead: { kind: "none" },
         onResetAccounting: () => Promise.resolve(),
         onRetryAccountingRead: () => undefined,
@@ -194,6 +208,7 @@ describe("managed exchange detail configuration", () => {
     app.render(
       createElement(ManagedExchangeDetail, {
         record: stored,
+        parkedResultsRead: { kind: "none" },
         accountingRead: { kind: "none" },
         onResetAccounting: () => Promise.resolve(),
         onRetryAccountingRead: () => undefined,
@@ -230,6 +245,7 @@ describe("managed exchange detail configuration", () => {
       app.render(
         createElement(ManagedExchangeDetail, {
           record: record("inviter"),
+          parkedResultsRead: { kind: "none" },
           accountingRead: { kind: "none" },
           onResetAccounting: () => Promise.resolve(),
           onRetryAccountingRead: () => undefined,
@@ -287,6 +303,7 @@ describe("managed exchange detail local fields", () => {
     app.render(
       createElement(ManagedExchangeDetail, {
         record: record("inviter"),
+        parkedResultsRead: { kind: "none" },
         accountingRead: { kind: "none" },
         onResetAccounting: () => Promise.resolve(),
         onRetryAccountingRead: () => undefined,
@@ -322,6 +339,7 @@ describe("managed exchange detail local fields", () => {
           tokenMaxAgeDays: 90,
           expires: "2026-10-01T00:00:00.000Z",
         }),
+        parkedResultsRead: { kind: "none" },
         accountingRead: { kind: "none" },
         onResetAccounting: () => Promise.resolve(),
         onRetryAccountingRead: () => undefined,
@@ -344,6 +362,7 @@ describe("managed exchange detail local fields", () => {
     app.render(
       createElement(ManagedExchangeDetail, {
         record: record("inviter"),
+        parkedResultsRead: { kind: "none" },
         accountingRead: { kind: "none" },
         onResetAccounting: () => Promise.resolve(),
         onRetryAccountingRead: () => undefined,
@@ -378,6 +397,7 @@ describe("managed exchange detail schedule entry", () => {
           "inviter",
           stored !== undefined ? { schedule: stored } : {},
         ),
+        parkedResultsRead: { kind: "none" },
         accountingRead: { kind: "none" },
         onResetAccounting: () => Promise.resolve(),
         onRetryAccountingRead: () => undefined,
@@ -706,6 +726,7 @@ describe("managed exchange detail local fields against the real store", () => {
     app.render(
       createElement(ManagedExchangeDetail, {
         record: stored,
+        parkedResultsRead: { kind: "none" },
         accountingRead: { kind: "none" },
         onResetAccounting: () => Promise.resolve(),
         onRetryAccountingRead: () => undefined,
@@ -757,6 +778,7 @@ describe("managed exchange detail local fields against the real store", () => {
     app.render(
       createElement(ManagedExchangeDetail, {
         record: stored,
+        parkedResultsRead: { kind: "none" },
         accountingRead: { kind: "none" },
         onResetAccounting: () => Promise.resolve(),
         onRetryAccountingRead: () => undefined,
@@ -817,6 +839,7 @@ describe("managed exchange detail run schedule", () => {
           "inviter",
           scheduled !== undefined ? { schedule: scheduled } : {},
         ),
+        parkedResultsRead: { kind: "none" },
         accountingRead: { kind: "none" },
         onResetAccounting: () => Promise.resolve(),
         onRetryAccountingRead: () => undefined,
@@ -948,6 +971,7 @@ describe("managed exchange detail accounting of disclosures", () => {
     app.render(
       createElement(ManagedExchangeDetail, {
         record: record("inviter"),
+        parkedResultsRead: { kind: "none" },
         accountingRead: { kind: "none" },
         onResetAccounting: () => Promise.resolve(),
         onRetryAccountingRead: () => undefined,
@@ -982,6 +1006,7 @@ describe("managed exchange detail accounting of disclosures", () => {
     app.render(
       createElement(ManagedExchangeDetail, {
         record: record("inviter"),
+        parkedResultsRead: { kind: "none" },
         accountingRead: { kind: "none" },
         onResetAccounting: () => Promise.resolve(),
         onRetryAccountingRead: () => undefined,
@@ -1043,6 +1068,7 @@ describe("managed exchange detail accounting of disclosures", () => {
               failureKind,
             },
           }),
+          parkedResultsRead: { kind: "none" },
           accountingRead: { kind: "none" },
           onResetAccounting: () => Promise.resolve(),
           onRetryAccountingRead: () => undefined,
@@ -1104,6 +1130,7 @@ describe("managed exchange detail accounting of disclosures", () => {
         record: record("inviter", {
           lastRun: { at: "2026-07-01T09:00:00.000Z", outcome: "succeeded" },
         }),
+        parkedResultsRead: { kind: "none" },
         accountingRead: { kind: "none" },
         onResetAccounting: () => Promise.resolve(),
         onRetryAccountingRead: () => undefined,
@@ -1173,6 +1200,7 @@ describe("managed exchange detail accounting of disclosures", () => {
     app.render(
       createElement(ManagedExchangeDetail, {
         record: record("inviter"),
+        parkedResultsRead: { kind: "none" },
         accountingRead: { kind: "accounting", accounting },
         onResetAccounting: () => Promise.resolve(),
         onRetryAccountingRead: () => undefined,
@@ -1222,6 +1250,7 @@ describe("managed exchange detail accounting of disclosures", () => {
     app.render(
       createElement(ManagedExchangeDetail, {
         record: record("inviter"),
+        parkedResultsRead: { kind: "none" },
         accountingRead: { kind: "accounting", accounting },
         onResetAccounting: () => Promise.resolve(),
         onRetryAccountingRead: () => undefined,
@@ -1274,6 +1303,7 @@ describe("managed exchange detail accounting of disclosures", () => {
     app.render(
       createElement(ManagedExchangeDetail, {
         record: record("inviter"),
+        parkedResultsRead: { kind: "none" },
         accountingRead: { kind: "accounting", accounting },
         onResetAccounting: () => Promise.resolve(),
         onRetryAccountingRead: () => undefined,
@@ -1332,6 +1362,7 @@ describe("managed exchange detail accounting of disclosures", () => {
     app.render(
       createElement(ManagedExchangeDetail, {
         record: record("inviter"),
+        parkedResultsRead: { kind: "none" },
         accountingRead: { kind: "accounting", accounting },
         onResetAccounting: () => Promise.resolve(),
         onRetryAccountingRead: () => undefined,
@@ -1368,6 +1399,7 @@ describe("managed exchange detail accounting of disclosures", () => {
     app.render(
       createElement(ManagedExchangeDetail, {
         record: record("inviter"),
+        parkedResultsRead: { kind: "none" },
         accountingRead: { kind: "accounting", accounting },
         onResetAccounting: () => Promise.resolve(),
         onRetryAccountingRead: () => undefined,
@@ -1418,6 +1450,7 @@ describe("managed exchange detail accounting of disclosures", () => {
     app.render(
       createElement(ManagedExchangeDetail, {
         record: record("inviter"),
+        parkedResultsRead: { kind: "none" },
         accountingRead: { kind: "accounting", accounting },
         onResetAccounting: () => Promise.resolve(),
         onRetryAccountingRead: () => undefined,
@@ -1461,6 +1494,7 @@ describe("managed exchange detail accounting of disclosures", () => {
     app.render(
       createElement(ManagedExchangeDetail, {
         record: record("inviter"),
+        parkedResultsRead: { kind: "none" },
         accountingRead: { kind: "unreadable", stored: undefined },
         onResetAccounting: () => Promise.resolve(),
         onRetryAccountingRead: () => undefined,
@@ -1492,6 +1526,7 @@ describe("managed exchange detail accounting of disclosures", () => {
     app.render(
       createElement(ManagedExchangeDetail, {
         record: record("inviter"),
+        parkedResultsRead: { kind: "none" },
         accountingRead: { kind: "unreadable", stored: undefined },
         onResetAccounting: () => Promise.resolve(),
         onRetryAccountingRead: () => undefined,
@@ -1570,6 +1605,7 @@ describe("recovering an accounting this version cannot read", () => {
     app.render(
       createElement(ManagedExchangeDetail, {
         record: record("inviter"),
+        parkedResultsRead: { kind: "none" },
         accountingRead: {
           kind: "unreadable",
           stored: { version: DISCLOSURE_ACCOUNTING_VERSION, entries },
@@ -1622,6 +1658,7 @@ describe("recovering an accounting this version cannot read", () => {
       app.render(
         createElement(ManagedExchangeDetail, {
           record: record("inviter"),
+          parkedResultsRead: { kind: "none" },
           accountingRead: {
             kind: "unreadable",
             stored: { version: DISCLOSURE_ACCOUNTING_VERSION, entries },
@@ -1664,6 +1701,7 @@ describe("recovering an accounting this version cannot read", () => {
     app.render(
       createElement(ManagedExchangeDetail, {
         record: record("inviter"),
+        parkedResultsRead: { kind: "none" },
         accountingRead: {
           kind: "unreadable",
           stored: {
@@ -1713,6 +1751,7 @@ describe("recovering an accounting this version cannot read", () => {
     app.render(
       createElement(ManagedExchangeDetail, {
         record: record("inviter"),
+        parkedResultsRead: { kind: "none" },
         accountingRead: {
           kind: "unreadable",
           stored: {
@@ -1765,6 +1804,7 @@ describe("recovering an accounting this version cannot read", () => {
       app.render(
         createElement(ManagedExchangeDetail, {
           record: record("inviter"),
+          parkedResultsRead: { kind: "none" },
           accountingRead: {
             kind: "unreadable",
             stored: {
@@ -1813,6 +1853,7 @@ describe("recovering an accounting this version cannot read", () => {
     app.render(
       createElement(ManagedExchangeDetail, {
         record: record("inviter"),
+        parkedResultsRead: { kind: "none" },
         accountingRead: {
           kind: "unreadable",
           stored: {
@@ -1849,6 +1890,7 @@ describe("recovering an accounting this version cannot read", () => {
     app.render(
       createElement(ManagedExchangeDetail, {
         record: record("inviter"),
+        parkedResultsRead: { kind: "none" },
         accountingRead: { kind: "unreadable", stored: undefined },
         onResetAccounting: () => Promise.resolve(),
         onRetryAccountingRead: () => undefined,
@@ -1885,6 +1927,7 @@ describe("recovering an accounting this version cannot read", () => {
     app.render(
       createElement(ManagedExchangeDetail, {
         record: record("inviter"),
+        parkedResultsRead: { kind: "none" },
         accountingRead: { kind: "accounting", accounting },
         onResetAccounting: () => Promise.resolve(),
         onRetryAccountingRead: () => undefined,
@@ -1931,6 +1974,7 @@ describe("an accounting a newer version of the app filed", () => {
   const stalePage = (entries: Array<unknown>) =>
     createElement(ManagedExchangeDetail, {
       record: record("inviter"),
+      parkedResultsRead: { kind: "none" },
       accountingRead: {
         kind: "stale-page",
         stored: { version: DISCLOSURE_ACCOUNTING_VERSION, entries },
@@ -2042,6 +2086,7 @@ describe("an accounting that could not be read at all", () => {
   const unavailable = (onRetryAccountingRead: () => void) =>
     createElement(ManagedExchangeDetail, {
       record: record("inviter"),
+      parkedResultsRead: { kind: "none" },
       accountingRead: { kind: "unavailable" },
       onResetAccounting: () => Promise.resolve(),
       onRetryAccountingRead,
@@ -2121,6 +2166,7 @@ describe("an accounting read still in flight", () => {
   const inFlight = () =>
     createElement(ManagedExchangeDetail, {
       record: record("inviter"),
+      parkedResultsRead: { kind: "none" },
       accountingRead: undefined,
       onResetAccounting: () => Promise.resolve(),
       onRetryAccountingRead: () => undefined,
@@ -2185,5 +2231,132 @@ describe("an accounting read still in flight", () => {
     expect(
       page.getByRole("button", { name: "Try reading it again" }).query(),
     ).toBeNull();
+  });
+});
+
+describe("the results a scheduled run left for this visit", () => {
+  const RUN_AT = "2026-03-01T09:00:00.000Z";
+  const RESULTS_CSV = "id,county\nA-19,Riverbend\n";
+
+  const scheduled = (): ManagedExchangeSchedule => {
+    const anchor = new Date(2026, 7, 4, 9, 0, 0, 0).toISOString();
+    return {
+      anchor,
+      intervalDays: 7,
+      windowSeconds: 10_800,
+      nextWindow: anchor,
+      consecutiveMisses: 0,
+    };
+  };
+
+  /** Render the detail sections of a scheduled exchange over one parked-results
+   * read. */
+  function renderParked(parkedResultsRead: ParkedResultsRead | undefined) {
+    app.render(
+      createElement(ManagedExchangeDetail, {
+        record: record("inviter", { schedule: scheduled() }),
+        parkedResultsRead,
+        accountingRead: { kind: "none" },
+        onResetAccounting: () => Promise.resolve(),
+        onRetryAccountingRead: () => undefined,
+        onSaveLocalFields: () => Promise.resolve(),
+        onReinviteToChangeTerms: () => undefined,
+        canReinvite: true,
+        reinviting: false,
+        reinviteFailed: false,
+      }),
+    );
+  }
+
+  function parkedRead(): ParkedResultsRead {
+    return {
+      kind: "parked",
+      results: {
+        version: PARKED_RESULTS_VERSION,
+        entries: [
+          {
+            kind: "results",
+            runAt: RUN_AT,
+            fileName: parkedResultsFileName(RUN_AT),
+            csv: new Blob([RESULTS_CSV], { type: "text/csv" }),
+            matchedRecordCount: 1,
+          },
+        ],
+      },
+    };
+  }
+
+  test("hands over the results file the run built, under its stamped name", async () => {
+    const downloads = captureDownloads();
+    try {
+      renderParked(parkedRead());
+
+      await expect
+        .element(page.getByText("1 matched record", { exact: false }))
+        .toBeInTheDocument();
+      await page.getByRole("button", { name: "Download result" }).click();
+
+      await downloads.settled();
+      expect(downloads.captured).toHaveLength(1);
+      expect(downloads.captured[0].fileName).toBe(
+        parkedResultsFileName(RUN_AT),
+      );
+      expect(downloads.captured[0].text).toBe(RESULTS_CSV);
+    } finally {
+      downloads.restore();
+    }
+  });
+
+  test("states where the results are, how long they stay, and what removes them", async () => {
+    renderParked(parkedRead());
+    await expect
+      .element(page.getByText(PARKED_RESULTS_RETENTION_NOTE))
+      .toBeInTheDocument();
+  });
+
+  test("stops offering them once the store holds nothing, which is what a delete leaves", async () => {
+    renderParked({ kind: "none" });
+    expect(
+      page.getByRole("button", { name: "Download result" }).query(),
+    ).toBeNull();
+    await expect
+      .element(page.getByText(NO_PARKED_RESULTS_NOTE))
+      .toBeInTheDocument();
+  });
+
+  test("reports a run this browser would not store the results of, and offers no file", async () => {
+    renderParked({
+      kind: "parked",
+      results: {
+        version: PARKED_RESULTS_VERSION,
+        entries: [{ kind: "storage-refused", runAt: RUN_AT }],
+      },
+    });
+
+    await expect
+      .element(page.getByText("would not store", { exact: false }))
+      .toBeInTheDocument();
+    // The run itself stands: the state speaks for the results, not the exchange.
+    await expect
+      .element(page.getByText("filed its disclosure", { exact: false }))
+      .toBeInTheDocument();
+    expect(
+      page.getByRole("button", { name: "Download result" }).query(),
+    ).toBeNull();
+  });
+
+  test("a store that did not answer never renders as nothing being here", async () => {
+    renderParked({ kind: "unavailable" });
+    await expect
+      .element(page.getByText(UNAVAILABLE_PARKED_RESULTS_NOTE))
+      .toBeInTheDocument();
+    expect(page.getByText(NO_PARKED_RESULTS_NOTE).query()).toBeNull();
+  });
+
+  test("the schedule fields state what a scheduled run will keep here, before it runs", async () => {
+    renderParked({ kind: "none" });
+    await expect
+      .element(page.getByText(PARKED_RESULTS_SCHEDULE_NOTE))
+      .toBeInTheDocument();
   });
 });

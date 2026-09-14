@@ -1,7 +1,7 @@
 ---
 title: "psilink Security Design"
 review_owner: "psilink maintainers"
-last_reviewed: "2026-09-11"
+last_reviewed: "2026-09-14"
 ---
 
 # psilink security
@@ -357,6 +357,20 @@ The exchange's [accounting of disclosures](MANAGED_EXCHANGE.md#the-accounting-of
 It is removed by deleting the managed exchange, which deletes it in the same one step, and the operator's alternative to keeping it at rest is exporting it and deleting the exchange.
 
 What this section enumerates is what the record persists; the origin's ambient runtime surfaces are out of scope here. The IndexedDB database name is a fixed constant, and the Web Locks name a run holds includes the record's local UUID and so reveals that a run and its rotation are in flight right now, but both sit below the in-origin ceiling already stated: they are visible only to a script that can read the whole record outright.
+
+### Results of a scheduled run at rest
+
+Everything above says "never a row value". A scheduled run's parked results are the exception, and the only one: **content at rest, not presence and shape**.
+
+A run that happens with nobody present produces the same results file an attended run produces, and no one is there to take it. Rather than discard it, the app keeps it in browser storage for the operator's next visit (see [MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md#the-parked-results-of-a-scheduled-run)). What is then at rest is the linkage result itself: the identifiers that matched and the payload values the partner disclosed, one file per unattended run, unencrypted.
+
+- **Who can read it.** Any script running in the origin, and anyone who can read the disk -- a disk image, a profile backup, a second local account with access to the browser profile. That is the same reach the persisted secret has, applied to content rather than to a credential.
+- **No at-rest protection is claimed.** Encryption keyed by material the app itself holds would not change the in-origin reading, for the reason [Why the browser at-rest secret is weaker than the CLI on-disk key](#why-the-browser-at-rest-secret-is-weaker-than-the-cli-on-disk-key) gives: an unattended runtime holds any key it would use. It is secondary hygiene here as it is there, not a control.
+- **What bounds it.** Two things and nothing else: a stated retention of 30 days from the run, enforced on every read and write of the store rather than by a sweep that may not fire, and deleting the managed exchange, which removes the parked results in the same one step. Downloading a result does not remove the parked copy; the retention or the delete does.
+- **What the operator is told, and when.** The statement is made where the exchange is put on a schedule -- before any unattended run exists to produce results -- and again where the results are collected. Parking is on by default: a scheduled run that delivered nothing is the failure this exists to close.
+- **What is not parked.** The results file alone. The run's self-attested exchange record is already in the accounting of disclosures, whose contents are the presence-and-shape material the section above covers.
+
+An operator who does not want linkage results at rest in a browser has one answer: run the exchange attended rather than on a schedule, where the results go straight to the download the operator takes and nothing of them is kept.
 
 ### Egress hardening and its limits
 

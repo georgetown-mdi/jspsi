@@ -29,6 +29,9 @@ import {
   readDisclosureAccounting,
   resetDisclosureAccounting,
 } from "@psi/disclosureAccountingStore";
+
+import { readParkedResults } from "@psi/parkedResultsStore";
+
 import { MANAGED_EXCHANGE_ARTIFACT_MIME } from "@psi/managed/managedExchangeArtifact";
 import { canReinviteFromRecord } from "@psi/managed/managedReinvite";
 import { deriveManagedBackupState } from "@psi/managed/managedBackupState";
@@ -90,6 +93,7 @@ import type { ManagedInputSource } from "@psi/managed/managedInputHandle";
 import type { ManagedReinvite } from "@psi/managed/managedReinvite";
 import type { ManagedRunFailureAlert } from "./managedRunLaunchModel";
 import type { ManagedSpentState } from "@psi/managed/managedLocalState";
+import type { ParkedResultsRead } from "@psi/parkedResultsStore";
 import type { RunOutputs } from "@psi/runOutputs";
 
 /**
@@ -137,6 +141,12 @@ export function ManagedRunSurface({ id }: { id: string }) {
   // store actually holds rather than assuming the delete took, and on an explicit
   // retry of a read that never reached the store.
   const [accountingReads, setAccountingReads] = useState(0);
+  // What a scheduled run left for this visit, as its own read classified it. Read
+  // here for the same reason the accounting is: a store that did not answer must
+  // not render as "no run left anything". `undefined` while the read is in
+  // flight.
+  const [parkedResultsRead, setParkedResultsRead] =
+    useState<ParkedResultsRead>();
   const [exportBusy, setExportBusy] = useState(false);
   const [exportFailed, setExportFailed] = useState(false);
   // A hand-off the store refused, and which refusal it was: a run held the
@@ -275,6 +285,26 @@ export function ManagedRunSurface({ id }: { id: string }) {
       live = false;
     };
   }, [id, finishedAt, accountingReads]);
+
+  // The results a run with nobody present left here, read on its own for the
+  // reasons above. The read applies the retention as it goes, so what lands here
+  // is what is still offered, never an entry the stated retention has released.
+  useEffect(() => {
+    let live = true;
+    void readParkedResults(id)
+      .then((read) => {
+        if (live) setParkedResultsRead(read);
+      })
+      // The read classifies every failure rather than rejecting; this is the
+      // safety check for that contract lapsing, landing on the state that claims
+      // nothing about what is stored rather than stranding the section.
+      .catch(() => {
+        if (live) setParkedResultsRead({ kind: "unavailable" });
+      });
+    return () => {
+      live = false;
+    };
+  }, [id]);
 
   // Revoke the run's object URLs when they are replaced or the surface unmounts:
   // the results blob is matched-record PII and the keys blob is private material.
@@ -899,6 +929,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
             <ManagedExchangeDetail
               record={record}
               accountingRead={accountingRead}
+              parkedResultsRead={parkedResultsRead}
               onResetAccounting={resetAccounting}
               onRetryAccountingRead={retryAccountingRead}
               onSaveLocalFields={saveLocalFields}

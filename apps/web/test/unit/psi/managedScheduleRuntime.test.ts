@@ -14,9 +14,16 @@ import {
 import { CLOSE_OUTCOME_WARNINGS } from "../../../src/psi/exchangeLifecycle.js";
 import { listReadableManagedExchanges } from "../../../src/psi/managed/managedExchangeStore.js";
 
+import {
+  parkRunResults,
+  recordParkedResultsRefusal,
+} from "../../../src/psi/parkedResultsStore.js";
+
 import type { ManagedExchangeRecord } from "../../../src/psi/managed/managedExchangeRecord.js";
+import type { ManagedExchangeRunResult } from "../../../src/psi/managed/managedExchangeRun.js";
 import type { ManagedRunDriverConfig } from "../../../src/psi/managed/managedRunDriver.js";
 import type { ManagedScheduleTickSeams } from "../../../src/psi/managed/managedScheduleRunner.js";
+import type { RunOutputs } from "../../../src/psi/runOutputs.js";
 
 const log = getLogger("managedScheduleRuntime");
 
@@ -44,8 +51,17 @@ vi.mock(
 vi.mock("@openmined/psi.js/psi_wasm_web", () => ({
   default: () => Promise.resolve({}),
 }));
+// The parking store is IndexedDB, which this project has none of: its own suite
+// is test/browser/managedExchangeStore.test.ts, and what is asserted here is
+// which of its two writes a run reaches and with what.
+vi.mock("../../../src/psi/parkedResultsStore.js", () => ({
+  parkRunResults: vi.fn(),
+  recordParkedResultsRefusal: vi.fn(),
+}));
 
 const mockedRun = vi.mocked(runManagedExchangeInBrowser);
+const mockedPark = vi.mocked(parkRunResults);
+const mockedRefusal = vi.mocked(recordParkedResultsRefusal);
 
 const RECORD = { id: "record-under-test" } as ManagedExchangeRecord;
 
@@ -69,6 +85,29 @@ function driverConfig(): ManagedRunDriverConfig {
   return mockedRun.mock.calls[0][0];
 }
 
+/** The instant the runs below stamp, which is also the instant their parked
+ * results are held to their retention from. */
+const RUN_AT = "2026-03-01T09:00:00.000Z";
+
+/** A completed run as the driver reports one: the outputs it built and the
+ * `succeeded` stamp it wrote. Defaults to a run whose agreed terms gave this
+ * party no result table, which has nothing to park. */
+function completedRun(
+  outputs: RunOutputs = { kind: "withheld" },
+): ManagedExchangeRunResult<RunOutputs> {
+  return { exchange: outputs, lastRun: { at: RUN_AT, outcome: "succeeded" } };
+}
+
+/** A run that produced a result table, built through the runtime's own URL
+ * boundary exactly as the outputs builder does. */
+function matchedRun(config: ManagedRunDriverConfig, csv = "id,value\n1,a\n") {
+  return completedRun({
+    kind: "matched",
+    resultsUrl: config.urls.create(new Blob([csv], { type: "text/csv" })),
+    matchedRecordCount: 1,
+  });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.stubGlobal("window", {
@@ -86,11 +125,7 @@ afterEach(() => {
 
 describe("what a scheduled attempt hands the run driver", () => {
   test("is the same entry, lock discipline, and unattended handle read an attended run takes", async () => {
-    mockedRun.mockResolvedValue(
-      undefined as unknown as Awaited<
-        ReturnType<typeof runManagedExchangeInBrowser>
-      >,
-    );
+    mockedRun.mockResolvedValue(completedRun());
     const controller = new AbortController();
     const onDataExchangeStart = vi.fn();
 
@@ -121,11 +156,7 @@ describe("what a scheduled attempt hands the run driver", () => {
 
     mockedRun.mockImplementation((config) => {
       built(config);
-      return Promise.resolve(
-        undefined as unknown as Awaited<
-          ReturnType<typeof runManagedExchangeInBrowser>
-        >,
-      );
+      return Promise.resolve(completedRun());
     });
     await seams.runAttempt(attempt());
     expect(window.URL.revokeObjectURL).toHaveBeenCalledTimes(2);
@@ -138,6 +169,94 @@ describe("what a scheduled attempt hands the run driver", () => {
       "the channel dropped",
     );
     expect(window.URL.revokeObjectURL).toHaveBeenCalledTimes(4);
+  });
+});
+
+describe("what a completed unattended run leaves for the next visit", () => {
+  test("parks the results file, under the run's own instant", async () => {
+    mockedRun.mockImplementation((config) =>
+      Promise.resolve(matchedRun(config)),
+    );
+
+    await browserScheduleTickSeams(new AbortController().signal).runAttempt(
+      attempt(),
+    );
+
+    expect(mockedPark).toHaveBeenCalledTimes(1);
+    const [id, parked] = mockedPark.mock.calls[0];
+    expect(id).toBe(RECORD.id);
+    expect(parked.kind).toBe("results");
+    expect(parked.runAt).toBe(RUN_AT);
+    expect(parked.matchedRecordCount).toBe(1);
+    expect(parked.fileName).toContain("2026-03-01");
+    // The bytes are the ones the run built, not a re-read of a revoked URL.
+    expect(await parked.csv.text()).toBe("id,value\n1,a\n");
+    expect(mockedRefusal).not.toHaveBeenCalled();
+    // And the URL is still revoked: nobody is present to download one, and the
+    // parked copy is what the next visit reads.
+    expect(window.URL.revokeObjectURL).toHaveBeenCalledTimes(1);
+  });
+
+  test("parks nothing for a run that produced no result table", async () => {
+    // A count-only run, or one whose agreed terms give this party no output: the
+    // run's own bookkeeping already states what it did, and there is no file.
+    mockedRun.mockResolvedValue(completedRun());
+    await browserScheduleTickSeams(new AbortController().signal).runAttempt(
+      attempt(),
+    );
+    expect(mockedPark).not.toHaveBeenCalled();
+    expect(mockedRefusal).not.toHaveBeenCalled();
+  });
+
+  test("records the refused state when this browser will not store the results", async () => {
+    const warn = vi.spyOn(log, "warn").mockImplementation(() => undefined);
+    mockedRun.mockImplementation((config) =>
+      Promise.resolve(matchedRun(config)),
+    );
+    mockedPark.mockRejectedValue(new Error("the quota refused it"));
+
+    await browserScheduleTickSeams(new AbortController().signal).runAttempt(
+      attempt(),
+    );
+
+    // A named state under the same run instant, so the operator meets it at the
+    // next visit rather than finding nothing where results should be.
+    expect(mockedRefusal).toHaveBeenCalledWith(RECORD.id, RUN_AT);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  test("never turns a completed run into a failed attempt, however the parking goes", async () => {
+    // The run rotated its secret and filed its disclosure before this point, so
+    // nothing the parking does may restate the attempt's outcome.
+    const error = vi.spyOn(log, "error").mockImplementation(() => undefined);
+    const warn = vi.spyOn(log, "warn").mockImplementation(() => undefined);
+    mockedRun.mockImplementation((config) =>
+      Promise.resolve(matchedRun(config)),
+    );
+    mockedPark.mockRejectedValue(new Error("the quota refused it"));
+    mockedRefusal.mockRejectedValue(new Error("the store is gone"));
+
+    await expect(
+      browserScheduleTickSeams(new AbortController().signal).runAttempt(
+        attempt(),
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(error).toHaveBeenCalled();
+    error.mockRestore();
+    warn.mockRestore();
+  });
+
+  test("parks nothing for a run that failed", async () => {
+    mockedRun.mockRejectedValue(new Error("the channel dropped"));
+    await expect(
+      browserScheduleTickSeams(new AbortController().signal).runAttempt(
+        attempt(),
+      ),
+    ).rejects.toThrow("the channel dropped");
+    expect(mockedPark).not.toHaveBeenCalled();
+    expect(mockedRefusal).not.toHaveBeenCalled();
   });
 });
 
@@ -163,11 +282,7 @@ describe("the notices an unattended run can raise", () => {
     mockedRun.mockImplementation((config) => {
       config.onWarning?.(closeOutcome as string);
       config.onWarning?.(DISCLOSURE_NOT_FILED_WARNING);
-      return Promise.resolve(
-        undefined as unknown as Awaited<
-          ReturnType<typeof runManagedExchangeInBrowser>
-        >,
-      );
+      return Promise.resolve(completedRun());
     });
 
     await browserScheduleTickSeams(new AbortController().signal).runAttempt(
@@ -202,11 +317,7 @@ describe("the notices an unattended run can raise", () => {
     mockedRun.mockImplementation((config) => {
       config.onWarning?.(cardinalityNotice!);
       config.onWarning?.(pairTableAdvisory!);
-      return Promise.resolve(
-        undefined as unknown as Awaited<
-          ReturnType<typeof runManagedExchangeInBrowser>
-        >,
-      );
+      return Promise.resolve(completedRun());
     });
 
     await browserScheduleTickSeams(new AbortController().signal).runAttempt(

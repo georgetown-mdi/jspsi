@@ -22,7 +22,14 @@ export function triggerBlobDownload(
   content: string,
   mimeType: string,
 ): void {
-  const blob = new Blob([content], { type: mimeType });
+  downloadBlob(fileName, new Blob([content], { type: mimeType }));
+}
+
+/** Trigger a client-side download of a blob the caller already holds as
+ * `fileName` -- a results file read back out of the browser's own store, where
+ * the bytes were never a string here. Same two steps and the same deferred
+ * revoke as {@link triggerBlobDownload}, which composes on this. */
+export function downloadBlob(fileName: string, blob: Blob): void {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;

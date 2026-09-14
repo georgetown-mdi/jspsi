@@ -12,9 +12,9 @@ record's field-by-field shape -- what persists across runs versus what is
 supplied at each run -- the field types, and the key-derivation implications of
 the persisted secret. It also covers the schedule and run bookkeeping the
 unattended path relies on, the local sibling stores beside the record (the
-backup, spent, and import markers, and the accounting of disclosures each run
-files its record into), and the export artifact's custody model and rollback
-caveats. It is the
+backup, spent, and import markers, the accounting of disclosures each run files
+its record into, and the results a scheduled run parks for the operator's next
+visit), and the export artifact's custody model and rollback caveats. It is the
 implementation-level complement to the **Managed exchange lifecycle** overview in
 [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md), which says what the feature is for,
 its automation goal and platform envelope, its durability and single-owner
@@ -1240,6 +1240,79 @@ A bump is held to re-taking this decision by
 `npm run check:exchange-record-version`,
 which pins the record version literal and fails the move rather than letting it
 ship past the obligation.
+
+## The parked results of a scheduled run
+
+A run with nobody present builds the same results file an attended run builds and
+has no one to hand it to. It therefore **parks** that file: a third local
+sibling, in its own origin-local store keyed by the record `id`, holding what
+each unattended run produced until the operator returns for it or the retention
+releases it.
+
+**What an entry holds.** One entry per run, in run order, as one of two shapes:
+
+| Shape | Fields | What it means |
+| --- | --- | --- |
+| Results | `runAt` (ISO 8601 UTC, the run's own bookkeeping stamp), `fileName` (the stamped download name), `csv` (the results file as a `Blob`), optional `matchedRecordCount` | The run's results, waiting for the operator |
+| Storage refused | `kind: "storage-refused"`, `runAt` | This browser would not store that run's results; the rows are gone and the run itself stands |
+
+The results CSV is the whole of what is parked. The run's exchange record and its
+verification keys are not: the record is already filed to [the accounting of
+disclosures](#the-accounting-of-disclosures), and parking a second copy of it
+beside the rows would put the same artifact in two stores with two lifetimes. A
+run that produced no result table -- a count-only run, or one whose agreed terms
+give this party no output -- parks nothing.
+
+**Why it cannot be a record field.** Two reasons, either sufficient. The export
+artifact must not hold row values, and a sibling store makes that exclusion
+structural, as it does for the markers and the accounting: the exporter reads
+only the record. And the record schema is reader-rejects-unknown, so a
+delivery-state field on the record would make every later delivery shape a
+`schemaVersion` event.
+
+**The retention is arithmetic, not a timer.** An entry is offered and kept while
+`now` is before `runAt` plus the retention, which is **30 days**. There is no
+stored expiry field: the bound is derived from the entry's own run instant at
+every reading, so the number a surface states and the number enforced cannot
+drift apart. The rule is applied inside every transaction over the store, the
+read included, and an entry past it is deleted there rather than merely withheld
+-- so the stated retention holds whether or not any sweep fires, and no code path
+hands a caller an entry it has released. An entry whose `runAt` this reader
+cannot place on the clock -- the same UTC-designator rule the record's stored
+instants take -- is dropped by that same rule: it can be held to no retention at
+all, and content at rest that nothing bounds is what the rule exists to prevent.
+A read that empties the value removes the key, leaving no envelope behind.
+
+**A storage refusal is a recorded state, not a silent drop.** A run whose results
+the store will not take -- the quota refusing the rows is the expected case --
+records the refused shape above under the same `runAt`. The entry holds no rows,
+which is what lets it be written where the results were not. The run's own
+bookkeeping is untouched by either outcome: it rotated, disclosed, and succeeded,
+and the parking is downstream of all three. A refusal the store will not record
+either leaves only a diagnostic-log line; nothing else is claimed.
+
+**Reader-rejects-unknown, with no recovery arm.** The stored value carries its
+own format literal (`psilink-parked-results/v1`), and a reader refuses an
+unrecognized version, an unknown key, or an entry that is not one of the two
+shapes, rather than loading a shortened set. The refused value is left exactly
+where it is, and neither recovery arm the accounting offers is offered here: no
+export, because the bytes are matched rows no reading of which this build can
+vouch for, and no reset, because destroying results an operator may still want is
+not something a read may do on their behalf. The parking write re-reads through
+the same parse, so while such a value sits there a later run parks nothing and
+cannot record the refused state either; what the operator meets is the unreadable
+state itself, and the run's own bookkeeping still states what the run did.
+Deleting the exchange removes the value.
+
+**What it discloses at rest** is not what the rest of this document describes.
+Every other store here holds presence, shape, and aggregate counts; this one
+holds matched identifiers and disclosed payload values, unencrypted. See
+[SECURITY_DESIGN.md](../SECURITY_DESIGN.md#results-of-a-scheduled-run-at-rest),
+which states the reach and the bounds, and claims no at-rest protection.
+
+Deleting a managed exchange deletes its parked results in the same one-step
+delete (see [Deleting a managed
+exchange](../MANAGED_EXCHANGE.md#deleting-a-managed-exchange)).
 
 ## See also
 

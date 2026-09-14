@@ -9,6 +9,7 @@ import {
   MANAGED_EXCHANGE_DB_NAME,
   MANAGED_EXCHANGE_DISCLOSURE_STORE_NAME,
   MANAGED_EXCHANGE_LOCAL_STORE_NAME,
+  MANAGED_EXCHANGE_RESULTS_STORE_NAME,
   MANAGED_EXCHANGE_STORE_NAME,
   clearManagedExchanges,
   createManagedExchange,
@@ -36,6 +37,18 @@ import {
   readDisclosureAccounting,
   resetDisclosureAccounting,
 } from "@psi/disclosureAccountingStore";
+import {
+  parkRunResults,
+  readParkedResults,
+  recordParkedResultsRefusal,
+} from "@psi/parkedResultsStore";
+
+import {
+  PARKED_RESULTS_RETENTION_DAYS,
+  PARKED_RESULTS_VERSION,
+  parkedResultsFileName,
+} from "@psi/parkedResults";
+
 import {
   getManagedLocalState,
   markManagedExchangeBackedUp,
@@ -91,6 +104,28 @@ function newExchange(
     side: "inviter",
     sharedSecret: generateSharedSecret(),
     ...overrides,
+  };
+}
+
+/** The instants the parked runs below stamp: two recent runs a day apart. They
+ * are relative to the clock this suite runs on, because these entries are read
+ * back under the real retention -- a fixed date would age past it and the suite
+ * would assert nothing from that day on. */
+const DAY_MS = 86_400_000;
+const RUN_AT = new Date(Date.now() - 2 * DAY_MS).toISOString();
+const LATER_RUN_AT = new Date(Date.now() - DAY_MS).toISOString();
+
+/** The bytes a parked run's results hold, asserted back out of the store. */
+const RESULTS_CSV = "id,county\nA-19,Riverbend\n";
+
+/** One scheduled run's results, as the unattended runner hands them over. */
+function parkedRun(runAt = RUN_AT) {
+  return {
+    kind: "results" as const,
+    runAt,
+    fileName: parkedResultsFileName(runAt),
+    csv: new Blob([RESULTS_CSV], { type: "text/csv" }),
+    matchedRecordCount: 1,
   };
 }
 
@@ -189,6 +224,48 @@ async function accountingEntries(
   const read = await readDisclosureAccounting(id);
   expect(read.kind).toBe("accounting");
   return read.kind === "accounting" ? read.accounting.entries : [];
+}
+
+/** The raw parked-results value under a key, read straight from its sibling store,
+ * so a test can assert what is actually at rest: that the retention removed the
+ * bytes rather than merely hiding them from the read, and that a delete takes the
+ * matched rows with the exchange. */
+async function rawParkedStored(id: string): Promise<unknown> {
+  const db = await openManagedExchangeDatabase();
+  try {
+    return await new Promise<unknown>((resolve, reject) => {
+      const request = db
+        .transaction(MANAGED_EXCHANGE_RESULTS_STORE_NAME, "readonly")
+        .objectStore(MANAGED_EXCHANGE_RESULTS_STORE_NAME)
+        .get(id);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  } finally {
+    db.close();
+  }
+}
+
+/** Put a value into the parked-results store past the write path's validation, so
+ * a test can stage what a build this one does not admit LEFT at rest. */
+async function putRawParkedStored(id: string, value: unknown): Promise<void> {
+  const db = await openManagedExchangeDatabase();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction(
+        MANAGED_EXCHANGE_RESULTS_STORE_NAME,
+        "readwrite",
+      );
+      transaction
+        .objectStore(MANAGED_EXCHANGE_RESULTS_STORE_NAME)
+        .put(value, id);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
+  } finally {
+    db.close();
+  }
 }
 
 /** Overwrite the stored value under a key with an arbitrary object, so a test can
@@ -821,11 +898,17 @@ describe("one-step delete leaves nothing behind", () => {
     // otherwise the delete strands cleartext partner and agreement metadata under
     // an id nothing shows.
     await appendDisclosureRecordToStore(created.id, await disclosureRecord());
+    // And park a scheduled run's results, the one sibling holding matched rows:
+    // a delete that spared them would leave row values at rest under an id no
+    // surface offers, with only the retention left to remove them.
+    await parkRunResults(created.id, parkedRun());
     // Everything the browser holds for the exchange -- the record under its key,
-    // the sibling local-state entry, and the accounting -- exists before the delete.
+    // the sibling local-state entry, the accounting, and the parked results --
+    // exists before the delete.
     expect(await rawStored(created.id)).toBeDefined();
     expect(await rawLocalStored(created.id)).toBeDefined();
     expect(await rawDisclosureStored(created.id)).toBeDefined();
+    expect(await rawParkedStored(created.id)).toBeDefined();
 
     await deleteManagedExchange(created.id);
 
@@ -841,6 +924,8 @@ describe("one-step delete leaves nothing behind", () => {
     expect(await readDisclosureAccounting(created.id)).toEqual({
       kind: "none",
     });
+    expect(await rawParkedStored(created.id)).toBeUndefined();
+    expect(await readParkedResults(created.id)).toEqual({ kind: "none" });
     await root.removeEntry("managed-input.csv");
   });
 
@@ -1119,13 +1204,130 @@ describe("a refused accounting is classified by which side is behind", () => {
   });
 });
 
+describe("a scheduled run's results wait for the next visit", () => {
+  test("a parked run round-trips its results, readable by a later visit", async () => {
+    const created = await createManagedExchange(newExchange());
+
+    await parkRunResults(created.id, parkedRun());
+
+    // Every call here opens its own connection and closes it, so this read is
+    // the next visit's read: nothing of the parking survives in memory between
+    // them.
+    const read = await readParkedResults(created.id);
+    expect(read.kind).toBe("parked");
+    if (read.kind !== "parked") return;
+    expect(read.results.version).toBe(PARKED_RESULTS_VERSION);
+    const [entry] = read.results.entries;
+    expect(entry.kind).toBe("results");
+    if (entry.kind !== "results") return;
+    expect(entry.runAt).toBe(RUN_AT);
+    expect(entry.fileName).toBe(parkedResultsFileName(RUN_AT));
+    expect(entry.matchedRecordCount).toBe(1);
+    // The bytes themselves, not a reference to a blob URL the run's runtime
+    // revoked as it settled.
+    expect(await entry.csv.text()).toBe(RESULTS_CSV);
+  });
+
+  test("a second run parks beside the first, oldest run first", async () => {
+    const created = await createManagedExchange(newExchange());
+    await parkRunResults(created.id, parkedRun());
+    await parkRunResults(created.id, parkedRun(LATER_RUN_AT));
+
+    const read = await readParkedResults(created.id);
+    expect(
+      read.kind === "parked" && read.results.entries.map((e) => e.runAt),
+    ).toEqual([RUN_AT, LATER_RUN_AT]);
+  });
+
+  test("a refused write records its named state, holding no rows", async () => {
+    const created = await createManagedExchange(newExchange());
+
+    await recordParkedResultsRefusal(created.id, RUN_AT);
+
+    const read = await readParkedResults(created.id);
+    expect(read.kind === "parked" && read.results.entries).toEqual([
+      { kind: "storage-refused", runAt: RUN_AT },
+    ]);
+  });
+
+  test("the stated retention is applied on every read, and takes the bytes with it", async () => {
+    const created = await createManagedExchange(newExchange());
+    await parkRunResults(created.id, parkedRun());
+    const pastRetention =
+      Date.parse(RUN_AT) + (PARKED_RESULTS_RETENTION_DAYS + 1) * DAY_MS;
+
+    expect(await readParkedResults(created.id, pastRetention)).toEqual({
+      kind: "none",
+    });
+    // Not merely withheld from the read: no sweep timer runs in this app, so a
+    // read that hid the entry while leaving it at rest would state a retention
+    // nothing enforces.
+    expect(await rawParkedStored(created.id)).toBeUndefined();
+  });
+
+  test("the retention is applied on a write too, so one run's results cannot outlive it", async () => {
+    const created = await createManagedExchange(newExchange());
+    await parkRunResults(created.id, parkedRun());
+    const laterRun =
+      Date.parse(RUN_AT) + (PARKED_RESULTS_RETENTION_DAYS + 1) * DAY_MS;
+
+    await parkRunResults(
+      created.id,
+      parkedRun(new Date(laterRun).toISOString()),
+      laterRun,
+    );
+
+    const read = await readParkedResults(created.id, laterRun);
+    expect(
+      read.kind === "parked" && read.results.entries.map((e) => e.runAt),
+    ).toEqual([new Date(laterRun).toISOString()]);
+  });
+
+  test("an exchange nothing has parked for reads as nothing, never as unavailable", async () => {
+    const created = await createManagedExchange(newExchange());
+    expect(await readParkedResults(created.id)).toEqual({ kind: "none" });
+  });
+
+  test("a stored value this build refuses reads as unreadable, and is left where it is", async () => {
+    const created = await createManagedExchange(newExchange());
+    await putRawParkedStored(created.id, {
+      version: "psilink-parked-results/v2",
+      entries: [],
+    });
+
+    expect(await readParkedResults(created.id)).toEqual({ kind: "unreadable" });
+    // Left at rest: a later build may read it, and the read has no way to tell a
+    // value it cannot parse from results this operator still wants.
+    expect(await rawParkedStored(created.id)).toBeDefined();
+  });
+
+  test("a value this build refuses refuses the next run's parking too, and is not overwritten", async () => {
+    const created = await createManagedExchange(newExchange());
+    const stored = { version: "psilink-parked-results/v2", entries: [] };
+    await putRawParkedStored(created.id, stored);
+
+    // The write re-reads through the same parse, so a run cannot append to a set
+    // this build cannot vouch for -- nor replace it with one of its own, which
+    // would destroy whatever the refused value holds.
+    await expect(parkRunResults(created.id, parkedRun())).rejects.toThrow();
+    await expect(
+      recordParkedResultsRefusal(created.id, RUN_AT),
+    ).rejects.toThrow();
+    expect(await rawParkedStored(created.id)).toEqual(stored);
+  });
+});
+
 describe("clearing the store leaves no accounting behind", () => {
   test("a cleared store takes every accounting of disclosures with it", async () => {
     const created = await createManagedExchange(newExchange());
     await appendDisclosureRecordToStore(created.id, await disclosureRecord());
+    await parkRunResults(created.id, parkedRun());
     expect(await rawDisclosureStored(created.id)).toBeDefined();
+    expect(await rawParkedStored(created.id)).toBeDefined();
 
     await clearManagedExchanges();
+
+    expect(await rawParkedStored(created.id)).toBeUndefined();
 
     // The raw sibling value is gone, not merely absent through a validating read:
     // a clear that spared the accounting would leave cleartext partner and
