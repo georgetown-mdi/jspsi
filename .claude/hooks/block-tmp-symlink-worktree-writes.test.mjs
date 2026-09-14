@@ -131,6 +131,46 @@ describe("block-tmp-symlink-worktree-writes hook", () => {
         `mkdir -p ${join(scratch, "into-repo", "fresh", "deeper")}`,
         `env FOO=1 cp report.md ${through}`,
         `mkdir -p /tmp/keep && cp report.md ${through}`,
+        `sed --in-place=.bak s/a/b/ ${through}`,
+      ],
+      repo,
+    );
+  });
+
+  it("reads the directory a target-directory flag names, in both spellings", () => {
+    const { scratch, repo } = scene();
+    const intoRepoDir = join(scratch, "into-repo", "scratch");
+    expectBlocked(
+      [
+        `cp --target-directory=${intoRepoDir} report.md`,
+        `cp -t${intoRepoDir} report.md`,
+        `cp -t ${intoRepoDir} report.md`,
+        `mv --target-directory=${intoRepoDir} report.md`,
+        `mv -t${intoRepoDir} report.md`,
+        `install -m 644 --target-directory=${intoRepoDir} report.md`,
+        `install -t${intoRepoDir} report.md`,
+      ],
+      repo,
+    );
+  });
+
+  it("reads what an rm reaches through the link, not the link itself", () => {
+    const { scratch, repo } = scene();
+    const link = join(scratch, "into-repo");
+    expectBlocked(
+      [
+        `rm ${join(link, "tracked.ts")}`,
+        `rm -rf ${link}/`,
+        `rm -rf ${join(link, "src")}`,
+        `rm -f -- ${join(link, "tracked.ts")}`,
+      ],
+      repo,
+    );
+    expectAllowed(
+      [
+        `rm ${link}`,
+        `rm -rf ${link}`,
+        `rm -f ${join(scratch, "real", "notes.md")}`,
       ],
       repo,
     );

@@ -30,10 +30,13 @@
 // author spelled as scratch.
 //
 // WHAT IT READS as a write: a redirection target, and the path operands of the
-// writing commands in WRITING_COMMANDS below. Reading through such a path, and
-// removing the stale link itself (`rm /tmp/<name>`), are deliberately left alone
-// -- removing the link is the fix, and blocking it would leave the session no way
-// to clear what it just tripped over.
+// writing commands in WRITING_COMMANDS below. Reading through such a path is
+// left alone, and so is removing the stale link itself (`rm /tmp/<name>`, which
+// takes the link and not what it points at) -- removing the link is the fix, and
+// blocking it would leave the session no way to clear what it just tripped over.
+// A removal that reaches THROUGH the link is a write like any other: a deeper
+// operand (`rm /tmp/<name>/file`), or a trailing slash, which makes `rm -rf
+// /tmp/<name>/` empty the checkout and leave the link standing.
 //
 // STATED LIMITS. This reads a plain command line, so each of these reaches a
 // worktree. They are recorded rather than closed: closing them means a
@@ -60,7 +63,7 @@
 
 import { statSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join, relative, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 
 import { commandOf, eventCwd, eventForTools } from "./lib/event.mjs";
 import { canonicalPath, nearestExistingDirectory } from "./lib/paths.mjs";
@@ -81,8 +84,9 @@ const TMP_ROOTS = [
 
 // Commands whose path operands are files they create or overwrite. `sed` is here
 // only for its in-place spelling; without one it writes to standard output, and
-// the redirect that captures it is read on its own. `ln` is read by its own rule
-// in `linkTargets`, since only the link name it creates is a write.
+// the redirect that captures it is read on its own. `ln` and `rm` are each read
+// by their own rule below, in `linkTargets` and `removalTargets`, since neither
+// writes the path it is handed the way the rest do.
 const WRITING_COMMANDS = new Set([
   "cp",
   "dd",
@@ -90,6 +94,7 @@ const WRITING_COMMANDS = new Set([
   "ln",
   "mkdir",
   "mv",
+  "rm",
   "rsync",
   "sed",
   "tee",
@@ -129,12 +134,20 @@ const NOCLOBBER = />\|/g;
 // dd names its operands by keyword rather than by position.
 const DD_OPERAND = /^(?:of|if)=/;
 
-// The `ln` flag naming the directory the links are made in, in its two
-// spellings. The short one takes the rest of its own cluster as the directory
-// when there is any (`-st DIR`, `-tDIR`), which is why the value is captured
-// here rather than assumed to be the next word.
+// The flag naming the directory a command writes into, in its two spellings.
+// The short one takes the rest of its own cluster as the directory when there is
+// any (`-st DIR`, `-tDIR`), which is why the value is captured here rather than
+// assumed to be the next word.
 const TARGET_DIRECTORY_LONG = /^--target-directory(?:=(.*))?$/;
 const TARGET_DIRECTORY_SHORT = /^-[a-zA-Z]*?t(.*)$/;
+
+// The commands that take that flag. Read for no other command, since `-t` names
+// something else entirely elsewhere (`touch -t STAMP`).
+const TARGET_DIRECTORY_COMMANDS = new Set(["cp", "install", "ln", "mv"]);
+
+// One trailing slash or more at the end of a path, which decides whether `rm`
+// operates on a final symlink or through it.
+const TRAILING_SLASHES = /\/+$/;
 
 function isPathOperand(token) {
   return token.length > 0 && !token.startsWith("-");
@@ -185,17 +198,18 @@ function redirectionTargets(tokens) {
 }
 
 function isInPlaceFlag(arg) {
-  return arg === "--in-place" || /^-[a-hj-z]*i/.test(arg);
+  return (
+    arg === "--in-place" ||
+    arg.startsWith("--in-place=") ||
+    /^-[a-hj-z]*i/.test(arg)
+  );
 }
 
-// The path an `ln` call creates. `ln [-s] TARGET LINK_NAME` writes LINK_NAME
-// alone: TARGET is text the new link holds, which `ln` neither reads nor writes,
-// so reading it as a write refuses a command that touches nothing. Two or more
-// operands write the last one -- the link name, or the directory the links are
-// made in; one operand writes the link named after it in the current directory;
-// `-t DIRECTORY` writes into that directory instead. A shape not read here names
-// no write, the way a fail-open guard must.
-function linkTargets(args) {
+// A command's operands and the directory its target-directory flag names, with
+// `--` ending option parsing. A flag this does not know is stepped over and
+// nothing else is, so the value of one standing as its own word is read as an
+// operand -- an extra candidate path, never a lost one.
+function operandsAndDirectory(args, readsTargetDirectory) {
   const operands = [];
   let directory = null;
   let index = 0;
@@ -210,29 +224,66 @@ function linkTargets(args) {
       operands.push(arg);
       continue;
     }
+    if (!readsTargetDirectory) continue;
     const long = TARGET_DIRECTORY_LONG.exec(arg);
     const short = TARGET_DIRECTORY_SHORT.exec(arg);
     if (long === null && short === null) continue;
     const attached = long === null ? short[1] : (long[1] ?? "");
     directory = attached.length > 0 ? attached : (args[index++] ?? null);
   }
+  return { operands, directory };
+}
+
+// The path an `ln` call creates. `ln [-s] TARGET LINK_NAME` writes LINK_NAME
+// alone: TARGET is text the new link holds, which `ln` neither reads nor writes,
+// so reading it as a write refuses a command that touches nothing. Two or more
+// operands write the last one -- the link name, or the directory the links are
+// made in; one operand writes the link named after it in the current directory;
+// `-t DIRECTORY` writes into that directory instead. A shape not read here names
+// no write, the way a fail-open guard must.
+function linkTargets(args) {
+  const { operands, directory } = operandsAndDirectory(args, true);
   if (directory !== null) return [directory];
   if (operands.length > 1) return [operands[operands.length - 1]];
   if (operands.length === 1) return [basename(operands[0])];
   return [];
 }
 
+// The directory each operand of an `rm` call is removed from, which is what the
+// removal reaches into. `rm` does not follow a symlink named as its own operand,
+// so `rm /tmp/<name>` takes the link and the directory read here is the scratch
+// directory holding it -- no redirect, and the fix this hook recommends. A
+// trailing slash makes `rm` operate on the directory the link points at
+// (`rm -rf /tmp/<name>/` empties it and leaves the link), so that shape reads the
+// operand itself, the same as a deeper operand reads the link above it. Measured
+// against GNU coreutils 9.1.
+function removalTargets(args) {
+  return operandsAndDirectory(args, false)
+    .operands.filter(isPathOperand)
+    .map((operand) => {
+      const trimmed = operand.replace(TRAILING_SLASHES, "");
+      if (trimmed === operand) return dirname(operand);
+      return trimmed.length > 0 ? trimmed : "/";
+    });
+}
+
 // The paths a writing command names. Every path operand counts, the sources of a
 // copy included: a source read through a resolved-away /tmp path is the same
 // mistake reaching the same file, and which operand is the destination varies by
-// command and flag. `ln` is the exception, read by the rule above.
+// command and flag. The directory a target-directory flag names counts with
+// them. `ln` and `rm` are the exceptions, read by the rules above.
 function writingCommandTargets(tokens) {
   const command = invocation(tokens);
   if (command === null || !WRITING_COMMANDS.has(command.name)) return [];
   if (command.name === "sed" && !command.args.some(isInPlaceFlag)) return [];
   if (command.name === "ln")
     return linkTargets(command.args).filter(isPathOperand);
-  return command.args
+  if (command.name === "rm") return removalTargets(command.args);
+  const { operands, directory } = operandsAndDirectory(
+    command.args,
+    TARGET_DIRECTORY_COMMANDS.has(command.name),
+  );
+  return [...(directory === null ? [] : [directory]), ...operands]
     .map((arg) => arg.replace(DD_OPERAND, ""))
     .filter(isPathOperand);
 }
@@ -302,8 +353,9 @@ function block(target, resolved, worktree) {
       "line would still report success. A fixed /tmp name left behind as a symlink by an " +
       "earlier session is how a path does this. Create the scratch directory with `mktemp -d` " +
       "and write under the path it prints, never a fixed /tmp name. If that leftover link is " +
-      "what this tripped over, remove it (`rm <link>`, which this hook does not gate) and " +
-      "start again from a fresh `mktemp -d`. If the destination really is in the repository, " +
+      "what this tripped over, remove it (`rm <link>`, which this hook allows) and start again " +
+      "from a fresh `mktemp -d`. Name the link itself and give it no trailing slash: a trailing " +
+      "slash empties what it points at instead. If the destination really is in the repository, " +
       "write it by its own path rather than through /tmp.\n",
   );
   process.exit(2);
