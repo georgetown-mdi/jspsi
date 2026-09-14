@@ -748,7 +748,9 @@ base's digest against `staging` (PR #1166). The same default-branch evaluation
 governs Dependabot's security alerts, which
 [RELEASES.md](../RELEASES.md#4-review-and-audit-dependencies) records for
 triage and whose pull requests against `main` it handles in
-[A security update opened against main](../RELEASES.md#a-security-update-opened-against-main). What determines the reading: the first docker-ecosystem run after a
+[A security update opened against
+main](../RELEASES.md#a-security-update-opened-against-main). What
+determines the reading: the first docker-ecosystem run after a
 promotion moves the entry to `main` shows an `ignore-conditions` entry naming
 `amazonlinux` instead of an empty list. While the list reads empty the entry is
 inert and an `amazonlinux` pull request that arrives is closed unmerged -- what
