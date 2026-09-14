@@ -25,10 +25,11 @@ import type { MessageConnection } from "../connection/messageConnection";
  * side can state. The abort's own reasons are partner-written text and are not
  * read here, so the error holds no partner byte.
  *
- * Anything else that is not a byte frame is a `protocol`
- * {@link ConnectionError} naming the frame this round awaited. It is not
- * reported as a refusal: a non-conforming peer that sends the wrong frame has
- * not refused anything.
+ * Bytes delivered as an `ArrayBuffer` are viewed as a `Uint8Array`, the one
+ * shape everything below reads. Anything else that is not a byte frame is a
+ * `protocol` {@link ConnectionError} naming the frame this round awaited. It is
+ * not reported as a refusal: a non-conforming peer that sends the wrong frame
+ * has not refused anything.
  *
  * @param conn - The connection to read from.
  * @param participantId - This party's participant id, prefixed on the message.
@@ -48,6 +49,10 @@ function asPsiBinaryFrame(
   what: string,
 ): Uint8Array {
   if (frame instanceof Uint8Array) return frame;
+  // The browser WebRTC transport hands a sent Uint8Array over as an
+  // ArrayBuffer, which the element scan beneath reads as a zero-length frame,
+  // so it is viewed as bytes here.
+  if (frame instanceof ArrayBuffer) return new Uint8Array(frame);
   if (isPartnerAbortFrame(frame)) throw new PeerAbortError();
   throw new ConnectionError(
     `${participantId} protocol error: inbound PSI ${what} is not a binary ` +

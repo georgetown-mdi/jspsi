@@ -90,6 +90,29 @@ test("a non-binary frame that is no abort is not reported as a refusal", async (
   );
 });
 
+test("a frame delivered as an ArrayBuffer is read as the bytes it holds", async () => {
+  // What the browser WebRTC transport delivers for a sent Uint8Array. The
+  // element scan reads an ArrayBuffer as a zero-length frame, so a boundary
+  // that passed one through would take every browser-run frame past the
+  // amplification guard uncounted.
+  const malformed = await endOfRoundAfter(
+    new Uint8Array([9, 9, 9, 9, 9, 9, 9, 9]).buffer,
+  );
+
+  expect(malformed?.message).toBe(
+    "joiner protocol error: malformed inbound PSI serverSetup frame",
+  );
+
+  // And an ArrayBuffer the scan accepts reaches the library, rather than being
+  // classified as the wrong frame before any byte is read.
+  const decoded = await endOfRoundAfter(new ArrayBuffer(0));
+
+  expect(decoded).not.toBeInstanceOf(PeerAbortError);
+  expect(decoded?.message).toBe(
+    "joiner protocol error: PSI server setup is not a Raw data structure",
+  );
+});
+
 test("a decode that fails unnamed is classified and keeps its cause", async () => {
   // A failure raised inside the PSI library names no condition of its own, so
   // the boundary names itself and holds what failed as the cause.
