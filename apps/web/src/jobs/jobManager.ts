@@ -17,6 +17,7 @@ import {
 
 import {
   PARTNER_CERTIFICATE_PINNED_SOURCE,
+  PARTNER_PIN_UNRECORDABLE_FAILURE,
   partnerCertificatePinnedNotice,
   recordedPartnerFingerprint,
 } from "./partnerPinNotice";
@@ -1222,7 +1223,7 @@ export class JobManager {
     }
     const entry: BufferedEvent = {
       id: record.events.length + 1,
-      event: rewrittenPartnerPinNotice(record, event),
+      event: relayedForConsole(record, event),
     };
     record.events.push(entry);
     this.notifyListeners(record, entry);
@@ -1659,6 +1660,18 @@ function workdirArtifactPath(workdir: string, name: string): string {
 }
 
 /**
+ * The event the browser is served in place of the one the child emitted: the
+ * first-contact pin messages, whose CLI wording names the configuration file
+ * the pin is written into, a path inside this container. Every other event
+ * passes through untouched.
+ */
+function relayedForConsole(record: JobRecord, event: RelayEvent): RelayEvent {
+  if (event.type === "warning") return rewrittenPartnerPinNotice(record, event);
+  if (event.type === "error") return rewrittenPartnerPinFailure(record, event);
+  return event;
+}
+
+/**
  * Replace the CLI's first-contact pin notice with the console's own, which
  * states the recorded fingerprint and names no file.
  *
@@ -1667,18 +1680,12 @@ function workdirArtifactPath(workdir: string, name: string): string {
  * relayed warning is no exception. The value is read out of that same
  * configuration rather than out of the sentence
  * ({@link recordedPartnerFingerprint}).
- *
- * Every other event passes through untouched.
  */
 function rewrittenPartnerPinNotice(
   record: JobRecord,
   event: RelayEvent,
 ): RelayEvent {
-  if (
-    event.type !== "warning" ||
-    event.source !== PARTNER_CERTIFICATE_PINNED_SOURCE
-  )
-    return event;
+  if (event.source !== PARTNER_CERTIFICATE_PINNED_SOURCE) return event;
   return {
     ...event,
     message: partnerCertificatePinnedNotice(
@@ -1687,6 +1694,48 @@ function rewrittenPartnerPinNotice(
       ),
     ),
   };
+}
+
+/**
+ * Replace the terminal failure of a first contact whose pin could not be
+ * recorded with the console's own, which names no file and asks for the value
+ * out of band -- the CLI's remedies are an edit of that file and a writable
+ * mount of it, neither of which a console operator can act on.
+ *
+ * The failure is identified from what this server knows rather than from the
+ * child's wording: the run signs receipts, its composed configuration holds no
+ * pin, so no first contact has been recorded, and the message states the path
+ * of that configuration, which is the whole of what must not cross. Both the
+ * flat field and the derived chain are read, since the path may sit in either,
+ * and both are replaced together so the seat shows the console's sentence
+ * whichever it reads ({@link ERROR_MESSAGE_CHAIN_FIELD}).
+ */
+function rewrittenPartnerPinFailure(
+  record: JobRecord,
+  event: RelayEvent,
+): RelayEvent {
+  if (event.category !== "config" || record.receiptPath === null) return event;
+  const configPath = workdirArtifactPath(record.workdir, JOB_FILE_NAMES.config);
+  if (
+    !errorDisplayStrings(event).some((text) => text.includes(configPath)) ||
+    recordedPartnerFingerprint(configPath) !== undefined
+  )
+    return event;
+  return {
+    ...event,
+    message: PARTNER_PIN_UNRECORDABLE_FAILURE,
+    [ERROR_MESSAGE_CHAIN_FIELD]: [PARTNER_PIN_UNRECORDABLE_FAILURE],
+  };
+}
+
+/** Every string a relayed `error` event puts in front of the operator: the flat
+ * message field and the links of the chain the relay derived from it, which is
+ * what the seat renders when it holds any text. */
+function errorDisplayStrings(event: RelayEvent): Array<string> {
+  const chain = event[ERROR_MESSAGE_CHAIN_FIELD];
+  return [event.message, ...(Array.isArray(chain) ? chain : [])].filter(
+    (text): text is string => typeof text === "string",
+  );
 }
 
 /** The live view of an in-memory record, mirroring what the routes report. */

@@ -913,6 +913,22 @@ describe("the receipts card's model", () => {
     expect(receiptsSummary(noted)).toBe("Retention note");
   });
 
+  test("the closed card states a signed run with nothing pinned", () => {
+    // The advisory is inside the disclosure, which an operator can create the
+    // job without ever opening, so the collapsed summary states the condition
+    // where they decide.
+    const unpinned = draft({
+      mode: "certificate",
+      ownFingerprint: OWN_FINGERPRINT,
+    });
+    expect(receiptsSummary(unpinned)).toBe(
+      "Signed receipt, no partner fingerprint pinned",
+    );
+    expect(
+      receiptsSummary({ ...unpinned, partnerFingerprint: PARTNER_FINGERPRINT }),
+    ).toBe("Signed receipt");
+  });
+
   test("every problem is a refusal the run itself would make", () => {
     expect(problemsFor(draft({ mode: "certificate" }))).toContain(
       IDENTITY_MISSING_PROBLEM,
@@ -1062,7 +1078,9 @@ describe("the receipts card's model", () => {
       signing: { mode: "certificate" },
       retentionDisposition: RETENTION_NOTE,
     });
-    expect(receiptsSummary(unpinned)).toBe("Signed receipt, retention note");
+    expect(receiptsSummary(unpinned)).toBe(
+      "Signed receipt, retention note, no partner fingerprint pinned",
+    );
     expect(fingerprintRequestProblem("Agency A")).toBeUndefined();
   });
 

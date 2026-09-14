@@ -3,14 +3,16 @@ import fs from "node:fs";
 import { FINGERPRINT_REGEX, parseSensitiveYaml } from "@psilink/core";
 
 /**
- * What the console says when a run pinned the partner's signing certificate on
- * a first authenticated contact.
+ * What the console says about a first authenticated contact with a partner:
+ * the notice a run that pinned the certificate raises, and the failure a run
+ * that could not record the pin stops on.
  *
- * The CLI's own notice names the configuration file it recorded the pin into,
- * which on a console run is a path inside the container the browser must never
- * learn. The notice is rebuilt here from console copy plus the recorded value,
- * read back out of the composed configuration rather than parsed out of the
- * CLI's sentence.
+ * The CLI's own messages name the configuration file the pin goes into, which
+ * on a console run is a path inside the container the browser must never learn,
+ * and the failures prescribe an edit of that file, which is not an action a
+ * console operator can take. Each is rebuilt here from console copy plus, for
+ * the notice, the recorded value read back out of the composed configuration
+ * rather than parsed out of the CLI's sentence.
  */
 
 /** The CLI warning source a first-contact pin rides (docs/spec/CLI_EVENTS.md). */
@@ -80,3 +82,24 @@ export function partnerCertificatePinnedNotice(
     "adopted is not carried forward on its own."
   );
 }
+
+/**
+ * The console's own wording for a first contact whose pin could not be
+ * recorded, which the CLI refuses two ways: before connecting, where the
+ * configuration's directory is not writable, and at the terms exchange, where
+ * the adoption write itself fails. Neither sends any of this party's data.
+ *
+ * One sentence answers both, since what the operator has to do is the same:
+ * each CLI message names the configuration file the pin goes into, and offers
+ * an edit of that file or a writable mount of it -- a path inside this
+ * container, and two remedies a console operator cannot act on, the console
+ * composing a fresh configuration for every run.
+ */
+export const PARTNER_PIN_UNRECORDABLE_FAILURE =
+  "This exchange signs receipts and has no partner fingerprint on file, so it " +
+  "has to record the certificate your partner presents -- and this run could " +
+  "not record it, so it stopped and sent none of your data. Ask your partner " +
+  "to run 'psilink fingerprint' and send you the value over a channel you " +
+  "trust -- a phone call, not the same email as the invitation -- then enter " +
+  "it under your partner's fingerprint and run the exchange again. If the run " +
+  "stops here a second time, check that the folder you mounted is writable.";

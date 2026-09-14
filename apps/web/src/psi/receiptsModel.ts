@@ -617,13 +617,22 @@ export function receiptsAdvisories(
  * ordinary record, shown even while the card is closed. Lives with the
  * model rather than the card because which fields count is the emission
  * rule ({@link receiptsIntentFields}), not a presentation choice.
+ *
+ * A signed run with nothing pinned states that here as well as inside the
+ * card, since it is the one state of this card an operator has to act on
+ * before starting and the only other statement of it
+ * ({@link FIRST_CONTACT_PIN_ADVISORY}) is behind the disclosure.
  */
 export function receiptsSummary(draft: ReceiptsDraft): string {
   const fields = receiptsIntentFields(draft);
   const signed = fields.signing !== undefined;
   const noted = fields.retentionDisposition !== undefined;
-  if (signed && noted) return "Signed receipt, retention note";
-  if (signed) return "Signed receipt";
+  const unpinned =
+    signed && fields.signing?.partnerFingerprint === undefined
+      ? ", no partner fingerprint pinned"
+      : "";
+  if (signed && noted) return `Signed receipt, retention note${unpinned}`;
+  if (signed) return `Signed receipt${unpinned}`;
   if (noted) return "Retention note";
   return "Unsigned record only";
 }

@@ -11,6 +11,10 @@
 //
 // Environment variables (all optional):
 //   STUB_FD3_EVENTS   JSON array of event objects to write to fd 3, in order.
+//                     Every occurrence of the CONFIG_FILE_PLACEHOLDER token is
+//                     replaced with the value of --config-file, so a test can
+//                     stage a message naming the configuration file the real CLI
+//                     would name without knowing the workdir the driver created.
 //   STUB_FD3_RAW      A raw string written verbatim to fd 3 (for malformed-line
 //                     tests); written BEFORE STUB_FD3_EVENTS so a malformed
 //                     preamble is observed before any terminal event.
@@ -66,6 +70,11 @@
 import fs from "node:fs";
 
 import YAML from "yaml";
+
+// The token STUB_FD3_EVENTS spells the --config-file value with, paired with
+// STUB_CONFIG_FILE_TOKEN in ./jobFixtures.ts (this file is spawned as a
+// process, so the two cannot share one declaration).
+const CONFIG_FILE_PLACEHOLDER = "__CONFIG_FILE__";
 
 // The default probe line emitted when STUB_PROBE_STDOUT is unset (an all-A
 // canonical fingerprint), so the probe route's round-trip is deterministic even
@@ -206,7 +215,12 @@ function runExchangeStub() {
 
   if (process.env.STUB_FD3_RAW !== undefined)
     writeFd3(process.env.STUB_FD3_RAW);
-  const events = JSON.parse(process.env.STUB_FD3_EVENTS ?? "[]");
+  const events = JSON.parse(
+    (process.env.STUB_FD3_EVENTS ?? "[]").replaceAll(
+      CONFIG_FILE_PLACEHOLDER,
+      separatedFlagValue(process.argv, "--config-file") ?? "",
+    ),
+  );
   for (const event of events) writeFd3(JSON.stringify(event) + "\n");
 
   if (process.env.STUB_STDERR !== undefined)
