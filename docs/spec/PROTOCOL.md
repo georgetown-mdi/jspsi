@@ -119,6 +119,8 @@ The rounds read raw byte frames: the masked setup, the request, the doubly-maske
 
 So no arrival at these boundaries ends a run on the PSI library's own decode message, which names nothing either operator can act on, and none is labeled a decode failure that was not one, save the one stated limit above.
 
+**The abort discriminant is unauthenticated in its content.** The classifier recognizes the abort by shape alone -- a frame whose `decision` is `abort` -- and nothing in the frame binds it to a refusal the sender actually derived, so a partner that has refused nothing still ends this side's run as a definitive peer termination, holding back the retry advisory and this side's own abort. That is a stated limit rather than a closed case: past the key exchange the frame can only come from the partner this party mutually authenticated, and a partner ending an exchange it has no reason to end is a counterparty acting against the terms it is contractually bound by, not an attacker this protocol undertakes to stop.
+
 #### The single-pass dataset ceiling: receiver memory and masking compute
 
 Single-pass exists to collapse a many-round-trip exchange over a minute-scale-latency channel (a 15-minute directory poll, times one dependent round per key, is hours of waiting) into one sweep, at the cost of more disclosure (the receiver sees the sender's full per-key duplicate structure and the weaker-key matches the cascade filters out, above). It is therefore an operator opt-in, agreed up front in the `linkage_strategy` term -- never a default, never selected automatically.
