@@ -764,8 +764,8 @@ what holds the base either way.
 - An advisory, or a certificate-lifecycle event, read by hand against the pins
   in [CONTAINER_IMAGES.md](CONTAINER_IMAGES.md#the-fips-variant-images-pins).
 
-**The same-diff quartet.** A base move lands with all four of these or not at
-all, verified against one release:
+**The same-diff quintet.** A base move lands with all five of these or not at
+all; the first four are verified against one release:
 
 1. The digest in `Dockerfile.fips`'s `FROM`, resolved as the multi-arch index
    digest -- `docker buildx imagetools inspect amazonlinux:2023` -- because a
@@ -786,6 +786,19 @@ all, verified against one release:
    package name fails the `rpm -qf` and `openssl list` assertions that follow.
    A snapshot still serving the pinned NVR leaves all three values unchanged --
    a result those assertions establish, not one the diff may assume.
+5. The `# base pin:` header line in `NOTICE-os-packages-fips.tsv`, the
+   OS-layer attribution list described in
+   [CONTAINER_IMAGES.md](CONTAINER_IMAGES.md#the-os-layer-attribution-lists).
+   `scripts/generate-os-package-attribution.mjs --check` compares that line
+   against the digest `Dockerfile.fips` names, so `image_smoke.yaml`'s drift
+   leg fails the pull request until the list is regenerated from an image built
+   on the new base; `npm run test:scripts` reddens on the same mismatch without
+   a Docker daemon. The regeneration takes new rows, not an edited header line,
+   and it states no comparison between architectures unless the run is given
+   `--architectures-compared <YYYY-MM-DD>` -- a day both architectures were
+   built without a layer cache, queried, and found to agree. The architecture
+   split below is why that comparison is hand work rather than something the
+   pull request's own run re-takes.
 
 Read the release out of the new rootfs to learn what to write in (3):
 `rpm -q --qf '%{VERSION}' system-release` inside it, or `docker create` plus
@@ -888,11 +901,12 @@ updates the mirrored literal below, so the pull request arrives with
 `npm run test:scripts` red by construction -- the freeze test's whole point,
 not a defect in the pull request.
 
-**The same-diff pair.** A digest bump lands with both of these or not at all:
+**The same-diff trio.** A digest bump lands with all three of these or not at
+all:
 
 1. The digest in both of `Dockerfile`'s `FROM node:26-alpine@sha256:...`
    lines. This is what the Dependabot pull request edits, and the only one of
-   the two it moves on its own.
+   the three it moves on its own.
 2. The `DEFAULT_BASE` literal in `scripts/dockerfile-freeze.test.mjs`.
    `npm run test:scripts` stays red until it matches, so push the
    reconciling edit onto the same pull request as a second commit on the
@@ -901,6 +915,19 @@ not a defect in the pull request.
    check. How Dependabot's own next push treats a manually edited branch
    has not been driven here; if the branch is recreated, re-push the
    reconciling commit with it.
+3. The `# base pin:` header line in `NOTICE-os-packages-default.tsv`, the
+   OS-layer attribution list described in
+   [CONTAINER_IMAGES.md](CONTAINER_IMAGES.md#the-os-layer-attribution-lists).
+   `scripts/generate-os-package-attribution.mjs --check` compares that line
+   against the digest `Dockerfile` names, so `image_smoke.yaml`'s drift leg
+   fails the pull request until the list is regenerated from an image built on
+   the new base; `npm run test:scripts` reddens on the same mismatch without a
+   Docker daemon. The regeneration takes new rows, not an edited header line:
+   a new base is a new package layer. It states no comparison between
+   architectures unless the run is given `--architectures-compared
+   <YYYY-MM-DD>`, which names a day both architectures were built without a
+   layer cache, queried, and found to agree -- a comparison the new base
+   requires again, and one the generator states for no other run.
 
 **What re-proves the result.** `image_smoke.yaml`'s pull-request path filter
 lists `Dockerfile`, so the pull request runs the full matrix: both the
