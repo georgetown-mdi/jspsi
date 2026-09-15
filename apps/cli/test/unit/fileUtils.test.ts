@@ -1622,6 +1622,53 @@ describe.skipIf(process.platform !== "win32")("Windows owner-only ACL", () => {
       `access list the check read: ${JSON.stringify(loosened)}`,
     ).toHaveBeenCalled();
   });
+
+  test("a file inheriting a foreign grant is reported unchecked by icacls", () => {
+    const parent = path.join(dir, "inheriting");
+    fs.mkdirSync(parent);
+    // The Guests group by SID (S-1-5-32-546), since icacls resolves the display
+    // name of a built-in principal per locale. (OI)(CI) makes the grant
+    // inheritable, so the file created below receives it as an inherited entry.
+    childProcess.execFileSync(
+      "icacls",
+      [parent, "/grant", "*S-1-5-32-546:(OI)(CI)R"],
+      { stdio: "ignore" },
+    );
+    const p = path.join(parent, "secret");
+    fs.writeFileSync(p, "x");
+
+    // The setup is asserted so a host that propagates the grant differently
+    // reports that, rather than the warning it expects going missing.
+    const inherited = readAcl(p);
+    const listing = `access list on the inheriting file: ${JSON.stringify(inherited)}`;
+    expect(
+      inherited.every((ace) => ace.rights.includes("(I)")),
+      listing,
+    ).toBe(true);
+    expect(
+      inherited.some(
+        (ace) => ace.rights.includes("(I)") && ace.rights.includes("(R)"),
+      ),
+      listing,
+    ).toBe(true);
+
+    const warnings = captureWarnings(getLogger("file-utils"));
+    warnIfFileOverPermissive(p, "shared secret");
+    expect(warnings, listing).toHaveLength(1);
+
+    // On the icacls tier every entry here is one it does not inspect, so it has
+    // examined nothing and must say so instead of passing the file silently.
+    warnings.length = 0;
+    execFile.respond = (file) => {
+      if (file === "powershell") throw UNSPAWNABLE;
+      return undefined;
+    };
+    warnIfFileOverPermissive(p, "shared secret");
+    expect(warnings, listing).toHaveLength(1);
+    expect(warnings[0]).toContain("could not be checked");
+    expect(warnings[0]).toContain("inherited or a deny entry");
+    expect(warnings[0]).toContain("icacls");
+  });
 });
 
 // --- expandTilde -------------------------------------------------------------

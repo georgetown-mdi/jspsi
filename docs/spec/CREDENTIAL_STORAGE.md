@@ -324,7 +324,9 @@ still exits successfully with nothing listed.
 The load check has three results:
 
 - The access list was checked and grants no principal other than the owner and
-  the two exempt ones read access. Nothing is logged.
+  the two exempt ones read access, across the entries the tier that checked it
+  inspects -- inherited and explicit ones for the PowerShell tier, explicit
+  allow entries alone for `icacls`. Nothing is logged.
 - It was checked and does grant another principal read access. The
   over-permissive warning names the file, the secret it holds, and the
   remediation.
