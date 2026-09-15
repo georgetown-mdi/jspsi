@@ -11,20 +11,26 @@ import {
 } from "@psi/managed/managedSchedule";
 import {
   REPEATED_MISS_ESCALATION,
+  UNCHANGED_INPUT_TITLE,
   repeatedMissCoordination,
   scheduleAttendanceNote,
   scheduleCadenceLine,
   scheduleDueLine,
   scheduleDueness,
+  unchangedInputNote,
 } from "@recurring/scheduleSurfacingModel";
 import { withTimeZone } from "../../utils/hostTimeZone";
 
-import type { ManagedExchangeSchedule } from "@psi/managed/managedExchangeRecord";
+import type {
+  ManagedExchangeLastRun,
+  ManagedExchangeSchedule,
+} from "@psi/managed/managedExchangeRecord";
 import type { ScheduleDueness } from "@recurring/scheduleSurfacingModel";
 
 // The schedule's display derivation in Node, with the clock injected: where
 // the recurrence stands at an instant, the cadence in words, and the
-// coordination state a run of missed windows earns. Every window instant
+// coordination state a run of missed windows earns, and the note an input
+// file unchanged since the last successful run raises. Every window instant
 // comes from the schedule arithmetic in @psi/managed/managedSchedule, read
 // off the lattice rather than the record's planned `nextWindow`, with the
 // agreed instant held across a daylight-saving transition.
@@ -361,5 +367,86 @@ describe("every schedule the record schema admits renders", () => {
         MAX_TIME_VALUE,
       ),
     ).toThrow(RangeError);
+  });
+});
+
+describe("an input file that has not changed since the last run", () => {
+  const ranAt = "2026-07-14T12:00:00.000Z";
+
+  function lastRun(
+    outcome: ManagedExchangeLastRun["outcome"],
+    instant = ranAt,
+  ): ManagedExchangeLastRun {
+    return { at: instant, outcome };
+  }
+
+  /** The note read with the host zone pinned to UTC, so the instants it renders
+   * are the same on every machine the suite runs on. */
+  function noteAtUtc(
+    run: ManagedExchangeLastRun | undefined,
+    modifiedAt: number | undefined,
+  ): string | undefined {
+    return withTimeZone("UTC", () => unchangedInputNote(run, modifiedAt));
+  }
+
+  test("a file last changed before the last successful run raises the note", () => {
+    const note = noteAtUtc(
+      lastRun("succeeded"),
+      at("2026-07-10T09:15:00.000Z"),
+    );
+    expect(note).toMatch(/July 10, 2026.*9:15 AM UTC/);
+    expect(note).toMatch(/July 14, 2026.*12:00 PM UTC/);
+    // Warn and guide: what is true, then the one move that clears it.
+    expect(note).toMatch(/link the same data again/);
+    expect(note).toMatch(/Put this period's extract at that file's name/);
+    expect(UNCHANGED_INPUT_TITLE).toMatch(/has not changed since the last run/);
+  });
+
+  test("a file refreshed since that run raises nothing", () => {
+    expect(
+      noteAtUtc(lastRun("succeeded"), at("2026-07-15T06:00:00.000Z")),
+    ).toBeUndefined();
+  });
+
+  test("a file changed at the run's own instant raises nothing", () => {
+    // The note is for an instant that PREDATES the run; a file the run itself
+    // could have read at that instant is not evidence of a refresh that did not
+    // happen.
+    expect(noteAtUtc(lastRun("succeeded"), at(ranAt))).toBeUndefined();
+  });
+
+  test("an unread modification instant raises nothing", () => {
+    // No pointer, no standing read grant, or an entry that is missing or
+    // unreadable: each keeps the state it already has -- a re-selection note here,
+    // and the run's own benign input failure at the run -- rather than earning a
+    // second account of the same file.
+    expect(noteAtUtc(lastRun("succeeded"), undefined)).toBeUndefined();
+    expect(noteAtUtc(lastRun("succeeded"), Number.NaN)).toBeUndefined();
+  });
+
+  test("an exchange with no successful run recorded raises nothing", () => {
+    const stale = at("2026-07-10T09:15:00.000Z");
+    expect(noteAtUtc(undefined, stale)).toBeUndefined();
+    expect(noteAtUtc(lastRun("failed"), stale)).toBeUndefined();
+    expect(noteAtUtc(lastRun("missed"), stale)).toBeUndefined();
+    expect(noteAtUtc(lastRun("desynced"), stale)).toBeUndefined();
+  });
+
+  test("a run instant that does not parse raises nothing", () => {
+    expect(
+      noteAtUtc(lastRun("succeeded", "not an instant"), at(ranAt) - 1),
+    ).toBeUndefined();
+  });
+
+  test("a run stamp with no UTC designator raises nothing", () => {
+    // Read through the record module's shared stored-instant reader, which takes
+    // `Z` and never a bare offset, so no surface reads a stored stamp against the
+    // host zone.
+    expect(
+      noteAtUtc(
+        lastRun("succeeded", "2026-07-14T12:00:00.000+00:00"),
+        at("2026-07-10T09:15:00.000Z"),
+      ),
+    ).toBeUndefined();
   });
 });

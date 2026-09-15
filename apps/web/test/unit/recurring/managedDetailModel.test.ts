@@ -519,4 +519,61 @@ describe("scheduleView", () => {
     expect(twice?.coordination?.prompt).toMatch(/this device's clock/i);
     expect(twice?.coordination?.prompt).toMatch(/the schedule stands/i);
   });
+
+  const succeededAt: ManagedExchangeLastRun = {
+    at: "2026-07-13T11:30:00.000Z",
+    outcome: "succeeded",
+  };
+  const lastRunMs = Date.parse(succeededAt.at);
+
+  test("an input unchanged since the last successful run raises the note", () => {
+    const view = scheduleView(
+      record("inviter", { schedule: daily, lastRun: succeededAt }),
+      true,
+      false,
+      NOW,
+      lastRunMs - 3_600_000,
+    );
+    expect(view?.unchangedInputNote).toMatch(/link the same data again/);
+  });
+
+  test("an input refreshed since that run raises no note", () => {
+    const view = scheduleView(
+      record("inviter", { schedule: daily, lastRun: succeededAt }),
+      true,
+      false,
+      NOW,
+      lastRunMs + 3_600_000,
+    );
+    expect(view?.unchangedInputNote).toBeUndefined();
+  });
+
+  test("an input this browser could not read raises no note", () => {
+    // A missing, unreadable, or ungranted file reaches the section with no
+    // instant at all, and its own failure state is the run's to report.
+    const view = scheduleView(
+      record("inviter", { schedule: daily, lastRun: succeededAt }),
+      true,
+      false,
+      NOW,
+    );
+    expect(view?.unchangedInputNote).toBeUndefined();
+    expect(view?.dueLine).toMatch(/^Run window open now, until /);
+  });
+
+  test("a stale input raises the note without withdrawing anything beside it", () => {
+    // Warn and guide, not a bar: the cadence, where the recurrence stands, and
+    // what this runtime does with a schedule all stand unchanged beside it.
+    const view = scheduleView(
+      record("inviter", { schedule: daily, lastRun: succeededAt }),
+      true,
+      true,
+      NOW,
+      lastRunMs - 3_600_000,
+    );
+    expect(view?.unchangedInputNote).toBeDefined();
+    expect(view?.cadence).toMatch(/^A run window opens every day/);
+    expect(view?.dueLine).toMatch(/^Run window open now, until /);
+    expect(view?.attendanceNote).toMatch(/installed/i);
+  });
 });

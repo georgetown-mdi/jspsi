@@ -44,14 +44,15 @@ import {
 } from "@recurring/parkedResultsModel";
 import { PARKED_RESULTS_VERSION, runResultsFileName } from "@psi/parkedResults";
 import { OUTPUT_FOLDER_UNSCHEDULED_NOTE } from "@recurring/scheduleEntryModel";
+import { UNCHANGED_INPUT_TITLE } from "@recurring/scheduleSurfacingModel";
 
 import {
   disclosureRecord,
   neighbouringRecordVersion,
 } from "../utils/disclosureFixtures";
 
+import { createAppMount, flushPendingUpdates } from "./renderApp";
 import { captureDownloads } from "./captureDownloads";
-import { createAppMount } from "./renderApp";
 
 import type {
   ManagedExchangeLocalEdits,
@@ -1018,13 +1019,16 @@ describe("managed exchange detail run schedule", () => {
     };
   }
 
-  function renderWithSchedule(scheduled?: ManagedExchangeSchedule) {
+  function renderWithSchedule(
+    scheduled?: ManagedExchangeSchedule,
+    overrides: Partial<NewManagedExchange> = {},
+  ) {
     app.render(
       createElement(ManagedExchangeDetail, {
-        record: record(
-          "inviter",
-          scheduled !== undefined ? { schedule: scheduled } : {},
-        ),
+        record: record("inviter", {
+          ...(scheduled !== undefined ? { schedule: scheduled } : {}),
+          ...overrides,
+        }),
         parkedResultsRead: { kind: "none" },
         accountingRead: { kind: "none" },
         onResetAccounting: () => Promise.resolve(),
@@ -1153,6 +1157,89 @@ describe("managed exchange detail run schedule", () => {
     await expect
       .element(page.getByText("the schedule stands", { exact: false }))
       .toBeInTheDocument();
+  });
+
+  /** A stub input-file pointer that counts the platform reads made through it and
+   * hands back a file stamped at `lastModifiedMs`. A picker handle, the only real
+   * one carrying the permission extension, cannot be summoned from a test, and an
+   * origin-private file is stamped at the moment the suite writes it. */
+  function inputHandleStub(lastModifiedMs: number) {
+    const reads: Array<string> = [];
+    const handle = {
+      kind: "file",
+      name: "input.csv",
+      queryPermission: () => {
+        reads.push("queryPermission");
+        return Promise.resolve("granted");
+      },
+      getFile: () => {
+        reads.push("getFile");
+        return Promise.resolve(
+          new File(["id\n1\n"], "input.csv", { lastModified: lastModifiedMs }),
+        );
+      },
+    };
+    return { handle: handle as unknown as FileSystemFileHandle, reads };
+  }
+
+  const succeededAt = "2026-07-14T12:00:00.000Z";
+
+  test("an input file last changed before the last successful run raises the note", async () => {
+    const input = inputHandleStub(Date.parse("2026-07-10T09:15:00.000Z"));
+    renderWithSchedule(schedule(-60 * 60 * 1000), {
+      inputFileHandle: input.handle,
+      lastRun: { at: succeededAt, outcome: "succeeded" },
+    });
+
+    // The instant arrives from an asynchronous platform read, so the note appears
+    // a beat after the section around it.
+    await expect
+      .element(page.getByText(UNCHANGED_INPUT_TITLE, { exact: false }))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("link the same data again", { exact: false }))
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText("Put this period's extract at that file's name", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+  });
+
+  test("an input file refreshed since that run raises nothing", async () => {
+    const input = inputHandleStub(Date.parse("2026-07-15T06:00:00.000Z"));
+    renderWithSchedule(schedule(-60 * 60 * 1000), {
+      inputFileHandle: input.handle,
+      lastRun: { at: succeededAt, outcome: "succeeded" },
+    });
+
+    // Absence is asserted only once the read has resolved and the render it would
+    // have caused has landed, so a note arriving late cannot pass as none.
+    await vi.waitFor(() => {
+      expect(input.reads).toContain("getFile");
+    });
+    await flushPendingUpdates();
+    expect(
+      page.getByText(UNCHANGED_INPUT_TITLE, { exact: false }).query(),
+    ).toBeNull();
+  });
+
+  test("a record with no agreed schedule never reads the input file", async () => {
+    // No schedule section means no note to feed, and the operator's file is left
+    // untouched rather than read for a reading nothing renders.
+    const input = inputHandleStub(Date.parse("2026-07-10T09:15:00.000Z"));
+    renderWithSchedule(undefined, {
+      inputFileHandle: input.handle,
+      lastRun: { at: succeededAt, outcome: "succeeded" },
+    });
+
+    await expect
+      .element(page.getByRole("heading", { name: "Run history" }))
+      .toBeInTheDocument();
+    await flushPendingUpdates();
+    expect(input.reads).toEqual([]);
   });
 });
 

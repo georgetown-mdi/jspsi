@@ -84,7 +84,11 @@ import {
   parkedResultsRows,
   projectedResultSizeWarning,
 } from "./parkedResultsModel";
-import { REPEATED_MISS_TITLE } from "./scheduleSurfacingModel";
+import {
+  REPEATED_MISS_TITLE,
+  UNCHANGED_INPUT_TITLE,
+} from "./scheduleSurfacingModel";
+import { useInputFileModifiedAt } from "./useInputFileModifiedAt";
 
 import type {
   ManagedExchangeLocalEdits,
@@ -836,23 +840,33 @@ function OutputFolderGrantField({
  * at this render, and the states this runtime owes the operator accurately
  * around it -- whether an unattended run happens here at all, that a browser
  * holding no pointer to the input file cannot meet a window with nobody
- * present, and, once misses have accumulated, the coordination prompt.
+ * present, that the file behind that pointer has not changed since the last
+ * successful run, and, once misses have accumulated, the coordination prompt.
  *
  * A record with no agreed schedule renders nothing here: it is attended-only,
- * and the local-fields editor above is where a schedule is entered.
+ * and the local-fields editor above is where a schedule is entered. Such a
+ * record's input file is not read either -- the one reading this section makes
+ * of the platform is made only where there is a section to hold it.
  *
  * The instant is read at render (`Date.now()`) rather than held in state: this
  * section reads where the recurrence stands when the operator opened it, and a
  * window that opens or closes while they sit on the page is the next visit's
  * reading, not a ticking one. The runtime reading beside it is read the same
  * way and cannot change while the page is open (see {@link isInstalledRuntime}).
+ * The input file's own instant is the one reading that cannot be taken at render
+ * -- the platform read is asynchronous -- so it arrives a beat later and the
+ * note it feeds appears with it.
  */
 function RunSchedule({ record }: { record: ManagedExchangeRecord }) {
+  const inputModifiedAtMs = useInputFileModifiedAt(
+    record.schedule !== undefined ? record.inputFileHandle : undefined,
+  );
   const view = scheduleView(
     record,
     storedInputHandleUsable(record.inputFileHandle),
     isInstalledRuntime(),
     Date.now(),
+    inputModifiedAtMs,
   );
   if (view === undefined) return null;
   return (
@@ -863,6 +877,11 @@ function RunSchedule({ record }: { record: ManagedExchangeRecord }) {
       {view.coordination !== undefined && (
         <Alert color="yellow" title={REPEATED_MISS_TITLE} mt="sm" mb="sm">
           {view.coordination.prompt}
+        </Alert>
+      )}
+      {view.unchangedInputNote !== undefined && (
+        <Alert color="yellow" title={UNCHANGED_INPUT_TITLE} mt="sm" mb="sm">
+          {view.unchangedInputNote}
         </Alert>
       )}
       <p className={`${styles.small} ${styles.sub}`}>{view.attendanceNote}</p>

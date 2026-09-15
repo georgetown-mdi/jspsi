@@ -28,6 +28,7 @@
 import {
   MAX_SCHEDULE_INTERVAL_DAYS,
   MAX_SCHEDULE_WINDOW_SECONDS,
+  parseStoredInstant,
 } from "@psi/managed/managedExchangeRecord";
 import {
   MAX_TIME_VALUE,
@@ -38,7 +39,10 @@ import {
 
 import { dateTimeLabel, lifetimeNoun } from "@psi/formatting";
 
-import type { ManagedExchangeSchedule } from "@psi/managed/managedExchangeRecord";
+import type {
+  ManagedExchangeLastRun,
+  ManagedExchangeSchedule,
+} from "@psi/managed/managedExchangeRecord";
 
 /**
  * The consecutive-miss count at which a surface escalates from naming the last
@@ -219,3 +223,39 @@ export function scheduleAttendanceNote(installedRuntime: boolean): string {
  */
 export const SCHEDULE_INPUT_RESELECTION_NOTE =
   "This browser holds no pointer to your input file, so no run of this exchange can happen with nobody present: reading it needs you to choose the file. Choose it here when you run this exchange, while a window is open.";
+
+/** The title over the unchanged-input note. It states the file's condition, not a
+ * verdict on the data: whether last period's extract is the right one to link
+ * again is the operator's call, and this device cannot make it. */
+export const UNCHANGED_INPUT_TITLE =
+  "The input file has not changed since the last run";
+
+/**
+ * The note for an input file whose last-modified instant predates this exchange's
+ * last successful run: the file the next run would read is the one that run
+ * already read, so the window ahead would link the same period's data again.
+ * `undefined` for every other reading -- a refreshed file, an exchange with no
+ * successful run recorded, a file whose modification instant this browser could
+ * not read at all (no pointer, no standing grant, a missing or unreadable
+ * entry), and a run stamp {@link parseStoredInstant} does not read as an
+ * instant, each of which keeps whatever state it already has.
+ *
+ * It warns and guides: it names what is true and the one move that clears it,
+ * bars nothing, and pauses nothing. The run control and the agreed cadence stand
+ * either way (docs/MANAGED_EXCHANGE.md, "An input that has not changed since the
+ * last run").
+ */
+export function unchangedInputNote(
+  lastRun: ManagedExchangeLastRun | undefined,
+  inputModifiedAtMs: number | undefined,
+): string | undefined {
+  if (lastRun === undefined || lastRun.outcome !== "succeeded")
+    return undefined;
+  if (inputModifiedAtMs === undefined || !Number.isFinite(inputModifiedAtMs))
+    return undefined;
+  const ranAtMs = parseStoredInstant(lastRun.at);
+  if (Number.isNaN(ranAtMs) || inputModifiedAtMs >= ranAtMs) return undefined;
+  const changed = dateTimeLabel(new Date(inputModifiedAtMs));
+  const ran = dateTimeLabel(new Date(ranAtMs));
+  return `Your input file was last changed ${changed}, before this exchange's last successful run on ${ran}, so the next run would link the same data again. Put this period's extract at that file's name before the next window opens.`;
+}

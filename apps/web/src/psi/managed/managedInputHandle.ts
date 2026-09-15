@@ -298,6 +298,33 @@ export async function acquireManagedInput(
 }
 
 /**
+ * The last-modified instant of the file a persisted pointer names, in epoch
+ * milliseconds, or `undefined` where this browser cannot read one: no standing
+ * read grant (queried, never prompted -- a page being read is not a run), a
+ * missing or unreadable entry, or a platform reporting no usable value.
+ *
+ * It resolves rather than rejects on each of those, because what it feeds is a
+ * display note beside the schedule: a file a run cannot read is that run's own
+ * benign input failure to report, and a second account of it here would put an
+ * error beside a page running nothing.
+ *
+ * The `File` it reads is this read's only and is not returned, so the
+ * no-second-copy invariant is untouched: the caller receives one number.
+ */
+export async function readInputFileModifiedAt(
+  handle: FileSystemFileHandle,
+  permission: HandlePermissionQuery = browserHandlePermission,
+): Promise<number | undefined> {
+  try {
+    await ensureHandlePermission(handle, "unattended", "read", permission);
+    const { lastModified } = await handle.getFile();
+    return Number.isFinite(lastModified) ? lastModified : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Acquire and validate a run's input against the record's standing terms in one
  * step, the guard every run path applies before any connection. Reads the input
  * through {@link acquireManagedInput}, then rejects an input that cannot satisfy
