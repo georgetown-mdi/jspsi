@@ -276,11 +276,15 @@ its ACL with `icacls /inheritance:r /grant:r` to grant Modify (`M`) to the
 current user only, then writes the token into the already-protected file. The
 entries `/inheritance:r` removes are the inherited ones -- the default
 `BUILTIN\Users` read is the entry it exists for -- and explicit entries stay;
-on the `windows-latest` runner this is measured on, a newly created file has no
-inherited entry at all, its SYSTEM, `BUILTIN\Administrators` and owner entries
-all being explicit, so there the narrowing removes nothing. If the `icacls` call
-fails (for example in a restricted container environment), the placeholder is
-deleted and an error is raised; no key material is written.
+on the `windows-latest` runner this is measured on, a file created in the
+checkout directory has no inherited entry at all, its SYSTEM,
+`BUILTIN\Administrators` and owner entries all being explicit, so there the
+narrowing removes nothing, while a file created under a directory that holds
+an inheritable grant receives every entry as inherited (measured on the same
+runner; the `icacls` fixture in the load-check tests is that listing), which
+is the case the narrowing exists for. If the `icacls` call fails (for example
+in a restricted container environment), the placeholder is deleted and an
+error is raised; no key material is written.
 
 Owner-only on Windows means the owner plus two well-known principals, SYSTEM
 (`S-1-5-18`) and `BUILTIN\Administrators` (`S-1-5-32-544`), which the narrowing
