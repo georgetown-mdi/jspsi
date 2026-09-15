@@ -493,13 +493,42 @@ export function RunDownloads({
  * The sink a {@link RunFailure} message is shown through. The seat composes
  * the message as a cause chain relying on `pre-line` to turn the error
  * renderer's newline (`sanitizedFailureMessage` in `./useInviterExchange`)
- * into a line break. Both `FailureAlert` and `RecoveredExchangePanel` render
- * their message through here rather than styling their own span, keeping
- * the layout `test/browser/failureMessageLayout.test.ts` measures to one
- * component.
+ * into a line break. Every failure surface reaches it through
+ * {@link FailureBody} rather than styling its own span, keeping the layout
+ * `test/browser/failureMessageLayout.test.ts` measures to one component.
  */
 export function FailureMessage({ message }: { message: string }) {
   return <span style={{ whiteSpace: "pre-line" }}>{message}</span>;
+}
+
+/** The label over a failure's reported cause. It names where the text came from
+ * rather than what it says, which is the whole of what this application can
+ * state about words it did not write. */
+export const REPORTED_CAUSE_LABEL = "Reported by the exchange";
+
+/**
+ * A failure's body: this application's own message, and -- where the failure has
+ * one -- the cause the exchange reported, in a block of its own under
+ * {@link REPORTED_CAUSE_LABEL}. The block is what separates the two voices, so
+ * the label is DOM text ahead of the report rather than an accessible name, and
+ * the report is set in the mono face this design reserves for data and protocol
+ * state (docs/notes/reported-failure-cause.md). Both failure surfaces render
+ * through here, which keeps that separation to one component.
+ */
+export function FailureBody({ failure }: { failure: RunFailure }) {
+  return (
+    <>
+      <FailureMessage message={failure.message} />
+      {failure.reportedCause !== undefined && (
+        <div className={styles.reportedCause}>
+          <p className={styles.reportedCauseLabel}>{REPORTED_CAUSE_LABEL}</p>
+          <p className={`${styles.mono} ${styles.reportedCauseText}`}>
+            {failure.reportedCause}
+          </p>
+        </div>
+      )}
+    </>
+  );
 }
 
 /**
@@ -529,7 +558,7 @@ export function FailureAlert({
       tabIndex={-1}
       mb="md"
     >
-      <FailureMessage message={failure.message} />
+      <FailureBody failure={failure} />
       {children}
     </Alert>
   );

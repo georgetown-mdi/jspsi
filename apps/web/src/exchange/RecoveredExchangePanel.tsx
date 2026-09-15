@@ -31,7 +31,7 @@ import {
 import { failureFor } from "./useInviterExchange";
 
 import {
-  FailureMessage,
+  FailureBody,
   RunDownloads,
   RunWarningsAlert,
   recoveredExchangeHeading,
@@ -315,7 +315,7 @@ export function RecoveredExchangePanel() {
           title={failure.title}
           mb="md"
         >
-          <FailureMessage message={failure.message} />
+          <FailureBody failure={failure} />
         </Alert>
       )}
       <RunWarningsAlert warnings={warnings} />

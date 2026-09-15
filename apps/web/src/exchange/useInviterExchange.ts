@@ -82,6 +82,13 @@ export interface RunFailure {
   category: ExchangeErrorCategory;
   title: string;
   message: string;
+  /** What the exchange itself reported, escaped for display and shown in a
+   * labeled block of its own rather than inside {@link message}, which is this
+   * application's own words. Set where the category's copy is fixed and the
+   * report is the only account of the cause the operator gets
+   * (docs/notes/reported-failure-cause.md); absent where there is nothing to
+   * report, and absent on the categories whose copy IS the report. */
+  reportedCause?: string;
 }
 
 /**
@@ -303,17 +310,18 @@ export function failureFor(
         "invitation.",
     };
   }
-  // Generic, retryable transport/exchange failure. The raw error is written
-  // for a developer and can embed partner-/server-controlled bytes, so the
-  // alert uses a fixed, friendly message; the detailed error stays in the
-  // dev-gated console.error for diagnosis. A mid-run drop lands here too,
-  // after agreed payload columns may already have flowed to the
-  // authenticated partner, so the copy must not claim the data stayed local.
+  // Generic, retryable transport/exchange failure, a mid-run drop among them --
+  // agreed payload columns may already have flowed to the authenticated partner,
+  // so the copy must not claim the data stayed local. The error's own text can be
+  // partner- or server-authored, which the display escape bounds but does not
+  // attribute, so it goes to `reportedCause` for the alert's labeled block rather
+  // than into this copy (docs/notes/reported-failure-cause.md).
   //
   // A filedrop run never opens a connection: its two halves rendezvous through a
   // synced shared folder, so a temporary-connection message misdirects. Name the
-  // shared-state cause instead, built only from operator-known facts (never the
-  // partner's path or raw fs error text). Both messages keep the retry affordance.
+  // shared-state cause instead. Both messages are built from operator-known facts
+  // alone and keep the retry affordance.
+  const reportedCause = sanitizedFailureMessage(error);
   return {
     category,
     title: "Exchange failed",
@@ -324,6 +332,9 @@ export function failureFor(
           "try again."
         : "The exchange could not be completed - usually a temporary " +
           "connection problem rather than an issue with your data.",
+    // An error with nothing readable to report gets no block at all, rather than
+    // an empty one under a label promising an account of the failure.
+    ...(reportedCause.trim() === "" ? {} : { reportedCause }),
   };
 }
 

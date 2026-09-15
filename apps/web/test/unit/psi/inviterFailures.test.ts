@@ -4,6 +4,7 @@ import {
   LinkageTermsUnsatisfiableError,
   OperatorConfigError,
   prepareForExchange,
+  sanitizeForDisplay,
 } from "@psilink/core";
 
 import {
@@ -145,6 +146,10 @@ describe("failureFor", () => {
     expect(failure.title).toBe("Could not verify your partner");
     expect(failure.message).not.toContain("kex transcript diverged");
     expect(failure.message).toContain("start over with a fresh invitation");
+    // Withheld outright rather than moved to the reported-cause block: the kex
+    // failure's message is non-oracular by design, which a block attributing it
+    // to the exchange would publish just as well as the sentence would.
+    expect(failure.reportedCause).toBeUndefined();
   });
 
   test("the output message forbids the re-run and still holds the cause", () => {
@@ -164,6 +169,64 @@ describe("failureFor", () => {
       "The exchange could not be completed - usually a temporary " +
         "connection problem rather than an issue with your data.",
     );
+  });
+
+  test("the exchange failure reports its cause outside the fixed copy", () => {
+    // The operator of an unattended run gets the cause chain to act on, and it
+    // arrives as the exchange's report rather than as this application's
+    // guidance: the fixed copy holds none of it, and the chain keeps its links.
+    const failure = failureFor(
+      "exchange",
+      new RelayedTerminalError(
+        "the partner closed the connection\ncaused by: read ECONNRESET",
+      ),
+    );
+    expect(failure.title).toBe("Exchange failed");
+    expect(failure.message).not.toContain("ECONNRESET");
+    expect(failure.reportedCause).toBe(
+      "the partner closed the connection\ncaused by: read ECONNRESET",
+    );
+  });
+
+  test("a browser-raised exchange failure reports its own chain", () => {
+    // The public web seat has no console relaying a rendered chain, so its
+    // report is the escaped walk of the error raised in this browser.
+    const failure = failureFor(
+      "exchange",
+      new Error("the data channel closed", {
+        cause: new Error("ICE failed"),
+      }),
+    );
+    expect(failure.reportedCause).toBe(
+      "the data channel closed\ncaused by: ICE failed",
+    );
+  });
+
+  test("an exchange failure with nothing to report gets no block", () => {
+    // The label promises an account of the failure, so a block is offered only
+    // where there is text to put in it. An `Error` always renders as something
+    // ("Error" for an empty message); a terminal relayed with no message at all,
+    // and a bare value thrown in this browser, are what render as nothing.
+    expect(
+      failureFor("exchange", new RelayedTerminalError("")).reportedCause,
+    ).toBeUndefined();
+    expect(failureFor("exchange", "  ").reportedCause).toBeUndefined();
+  });
+
+  test("a reported cause reaches the block escaped", () => {
+    // The block is a display boundary like any other, so the escape the seat
+    // applies everywhere else applies here: a terminal holding the ESC that
+    // drives an ANSI sequence, and a bidi override, reaches the operator with
+    // neither. Read off the escaper rather than restated, so a change to the
+    // escape's own alphabet cannot leave a stale copy passing.
+    const hostile = "\u001b[2J\u202eread ECONNRESET";
+    const escaped = failureFor(
+      "exchange",
+      new RelayedTerminalError(hostile),
+    ).reportedCause;
+    expect(escaped).toBe(sanitizeForDisplay(hostile));
+    expect(escaped).not.toContain("\u001b");
+    expect(escaped).not.toContain("\u202e");
   });
 
   test("a filedrop exchange failure names the shared folder, not a connection", () => {
