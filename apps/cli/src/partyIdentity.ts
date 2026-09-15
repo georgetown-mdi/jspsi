@@ -33,6 +33,18 @@ function isPlaceholderIdentity(identity: string): boolean {
 }
 
 /**
+ * The form a label an operator typed takes on its way into linkage terms:
+ * NFC-normalized, then trimmed. NFC is the canonical form linkage-terms free
+ * text is compared in across parties, and trimming drops the whitespace a
+ * quoted shell argument leaves around the name, so one typed name is one
+ * string in the terms the agreed-terms hash covers and in the identity a
+ * signing certificate is authorized against, whichever seat typed it.
+ */
+function normalizeSuppliedIdentity(identity: string | undefined): string {
+  return identity?.normalize("NFC").trim() ?? "";
+}
+
+/**
  * The refusal every `--identity` path raises when the flag holds the template
  * placeholder rather than a name.
  */
@@ -115,7 +127,8 @@ export function configuredIdentityStillPlaceholder(configPath: string): string {
 
 /**
  * This party's identity label for a command that authors its own linkage
- * terms: the `--identity` value, trimmed, and nothing else.
+ * terms: the `--identity` value under {@link normalizeSuppliedIdentity}, and
+ * nothing else.
  *
  * There is no fallback: a run with no flag, or a blank value (e.g. an unset
  * `$ORG` in `--identity "$ORG"`), stops rather than defaulting to system
@@ -127,7 +140,7 @@ export function configuredIdentityStillPlaceholder(configPath: string): string {
  * words asking for a name.
  */
 export function resolveIdentity(identity: string | undefined): string {
-  const chosen = identity?.trim() ?? "";
+  const chosen = normalizeSuppliedIdentity(identity);
   if (chosen.length === 0) throw new UsageError(IDENTITY_REQUIRED);
   if (isPlaceholderIdentity(chosen))
     throw new UsageError(IDENTITY_STILL_PLACEHOLDER);
@@ -136,7 +149,8 @@ export function resolveIdentity(identity: string | undefined): string {
 
 /**
  * This party's identity label for a run that may go unnamed: the
- * `--identity` value, trimmed, or `undefined` where the flag names nothing.
+ * `--identity` value under {@link normalizeSuppliedIdentity}, or `undefined`
+ * where the flag names nothing.
  *
  * A blank value (e.g. an unset `$ORG` in `--identity "$ORG"`) is absence,
  * not a label -- the terms simply hold no identity.
@@ -147,7 +161,7 @@ export function resolveIdentity(identity: string | undefined): string {
 export function optionalIdentity(
   identity: string | undefined,
 ): string | undefined {
-  const chosen = identity?.trim() ?? "";
+  const chosen = normalizeSuppliedIdentity(identity);
   if (chosen.length === 0) return undefined;
   if (isPlaceholderIdentity(chosen))
     throw new UsageError(IDENTITY_STILL_PLACEHOLDER);
