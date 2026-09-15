@@ -153,7 +153,9 @@ const HANDED_OFF_FAILURE: ManagedRunHandedOffFailure = {
  * input file and before connecting rather than rotating on custody it could not
  * establish. Not the storage state beside it: nothing rotated here, so there is
  * no desync to recover from. Recovery is `"none"` -- no affordance on this
- * surface makes the entry readable. */
+ * surface makes the entry readable, so the read's own error shows beneath this
+ * copy ({@link STATES_SHOWING_REPORTED_CAUSE}) as the only diagnostic the state
+ * has. */
 const CUSTODY_UNREADABLE_FAILURE: ManagedRunFailureAlert = {
   kind: "custody-unreadable",
   title: "Part of this exchange's stored copy could not be read",
@@ -290,10 +292,10 @@ const IMPORTED_FAILURE: ManagedRunFailureAlert = {
 };
 
 /** The recorded transport state: a connection or data-exchange drop, not a
- * failed-closed handshake. Fixed, friendly copy: the raw error can embed
- * partner- or server-controlled bytes and displays as an internal message, so
- * it stays in the dev-gated console. A temporary connection problem, retried
- * in place. */
+ * failed-closed handshake. Fixed, friendly copy, which accounts for nothing
+ * about why this run stopped; the error itself reaches the operator escaped, in
+ * the labelled block beneath that copy ({@link STATES_SHOWING_REPORTED_CAUSE}).
+ * A temporary connection problem, retried in place. */
 const TRANSPORT_FAILURE: ManagedRunFailureAlert = {
   kind: "transport",
   title: "The run could not be completed",
@@ -474,21 +476,25 @@ function attestsNonDisclosure(tier: ManagedFailureTier): boolean {
 /**
  * The states that show the launch error's reported cause beside their own copy,
  * in the labelled block the seats render it through (`FailureBody` in
- * `../exchange/RunSurface.tsx`). An allowlist, so a state added to the model
- * shows nothing until it is listed here.
+ * `../exchange/RunSurface.tsx`), which stands the report UNDER the label
+ * attributing it to the exchange -- the separation that keeps a partner's or a
+ * network stack's words from reading as this application's own account of the
+ * failure. An allowlist, so a state added to the model shows nothing until it
+ * is listed here.
  *
- * The transport state is the one whose copy accounts for nothing, and so the
- * one state the question is live for; it withholds on the maintainer's
- * standing ruling, its error kept to the dev-gated console
- * ({@link TRANSPORT_FAILURE}). Reversing that ruling is this list gaining
- * `"transport"`. Every other state's copy states the cause itself, fixed and
+ * The two states listed are the ones whose copy accounts for nothing: the
+ * transport state states a connection problem and no more
+ * ({@link TRANSPORT_FAILURE}), and the unreadable-custody state is this
+ * device's own storage read with no recovery on this surface
+ * ({@link CUSTODY_UNREADABLE_FAILURE}), so the error is the only diagnostic
+ * either has. Every other state's copy states the cause itself, fixed and
  * non-oracular by the decision each constant above records, and the unexplained
  * state withholds for the reason the seats withhold a failed-closed handshake's
  * message (docs/notes/reported-failure-cause.md).
  */
 const STATES_SHOWING_REPORTED_CAUSE: ReadonlyArray<
   ManagedRunFailureAlert["kind"]
-> = [];
+> = ["transport", "custody-unreadable"];
 
 /**
  * Whether a classified state shows the launch error as the cause the run
