@@ -240,7 +240,10 @@ string, which is what RFC 8785 requires:
   parse, which refuses it and reports the CLI's own invalid-linkage-terms
   usage error (`config file <path> has invalid linkage_terms: a linkage
   terms text value must not contain an unpaired UTF-16 surrogate`) rather
-  than a terms-hash mismatch.
+  than a terms-hash mismatch. The partner's terms a dual-signed record
+  retains in its envelope are read under that same parse, so a record
+  holding such a document is refused as an unreadable artifact rather than
+  verified against terms the encoder cannot reproduce.
 
 A linkage terms document MUST be well-formed UTF-16 throughout -- every string
 value, every array element, and every object key, the partner-named

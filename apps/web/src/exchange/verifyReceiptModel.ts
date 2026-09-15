@@ -483,18 +483,24 @@ const RESULT_SIZE_ROWS: Record<
 
 const TERMS_ROWS: Record<
   TermsHashStatus,
-  { status: string; tone: VerdictTone; explanation?: string }
+  { status: string; tone: VerdictTone }
 > = {
   verified: { status: "Re-derives and matches", tone: "verified" },
   mismatch: { status: "Does not match", tone: "failed" },
-  "not-checked": {
-    status: "Not checked",
-    tone: "incomplete",
-    explanation:
-      "Supply both parties' linkage terms to check the agreed-terms hash. The " +
-      "partner's terms are not retained by default, so this is the common case.",
-  },
+  "not-checked": { status: "Not checked", tone: "incomplete" },
 };
+
+// What a not-checked agreed-terms hash is still waiting on. The partner's half
+// comes from the dual-signed record, so a reader who loaded one whose holder
+// stripped that copy is told it is not there rather than pointed back at the
+// file they already supplied.
+const TERMS_NOT_CHECKED =
+  "Supply both parties' linkage terms to check the agreed-terms hash. Paste " +
+  "yours; your partner's are the copy a loaded dual-signed record holds, or a " +
+  "document you paste in its place.";
+const TERMS_NOT_CHECKED_RECEIPT_WITHOUT_TERMS =
+  "The dual-signed record you loaded holds no copy of your partner's linkage " +
+  "terms. Paste both parties' terms to check the agreed-terms hash.";
 
 // The readable name of each commitment, in the record's committed order. Fixed
 // strings owned by this page, never a value from a supplied file.
@@ -536,12 +542,16 @@ const SIGNATURE_NOTE_WITH_SIGNED_RECORD =
  *
  * Pass `signedRecordVerified` when the same run also verified a dual-signed
  * record, so the standing caveat points at that verdict rather than telling the
- * reader signatures went unchecked beside a verdict that checked them.
+ * reader signatures went unchecked beside a verdict that checked them. Pass
+ * `receiptHoldsNoPartnerTerms` when a dual-signed record is loaded whose
+ * unsigned envelope holds no terms, so a not-checked agreed-terms hash names
+ * that rather than the copy a receipt usually supplies.
  */
 export function verdictViewModel(
   report: RecordVerificationReport,
   warnings: ReadonlyArray<string>,
   signedRecordVerified = false,
+  receiptHoldsNoPartnerTerms = false,
 ): VerdictViewModel {
   const commitments: Array<VerdictRow> = [];
   for (const name of COMMITMENT_ORDER) {
@@ -556,6 +566,12 @@ export function verdictViewModel(
     });
   }
   const termsRow = TERMS_ROWS[report.termsHash];
+  const termsExplanation =
+    report.termsHash !== "not-checked"
+      ? undefined
+      : receiptHoldsNoPartnerTerms
+        ? TERMS_NOT_CHECKED_RECEIPT_WITHOUT_TERMS
+        : TERMS_NOT_CHECKED;
   const sizeRow =
     report.resultSize === undefined
       ? undefined
@@ -577,7 +593,7 @@ export function verdictViewModel(
       label: "The agreed-terms hash",
       status: termsRow.status,
       tone: termsRow.tone,
-      explanation: termsRow.explanation,
+      explanation: termsExplanation,
     },
     warnings: warnings.map((warning) => sanitizeForDisplay(warning)),
     signatureNote: signedRecordVerified
@@ -730,8 +746,10 @@ const RECEIPT_SIGNATURE_COPY: Record<ReceiptSignatureStatus, RowCopy> = {
   failed: { status: "Does not verify" },
 };
 
-// Where the two identities and the agreed-terms hash come from, named the same
-// way in both rows that can be waiting on them.
+// Where the two identities come from. The asserted-identity row is waiting on a
+// pair of names, which either document can be short of even when both are
+// loaded, so it offers both routes; the agreed-terms row below names the one
+// document it is actually short of instead.
 const EXPECTATIONS_REMEDIATION =
   "Load the exchange record for this exchange, or paste both parties' linkage " +
   "terms, to supply it.";
@@ -762,18 +780,54 @@ const ASSERTED_IDENTITY_COPY: Record<AssertedIdentityStatus, RowCopy> = {
 const SIGNED_TERMS_COPY: Record<TermsHashStatus, RowCopy> = {
   verified: { status: "Matches the terms this exchange agreed" },
   mismatch: { status: "Does not match the terms this exchange agreed" },
-  "not-checked": {
-    status: "Not checked",
-    explanation:
-      "Nothing outside the record states the terms this exchange agreed. " +
-      EXPECTATIONS_REMEDIATION,
-  },
+  // The not-checked explanation is composed per run rather than fixed here: it
+  // names the terms document the run is short of, which the status alone does
+  // not say. See signedTermsNotCheckedExplanation.
+  "not-checked": { status: "Not checked" },
 };
 
+/**
+ * Which of the two terms documents a verification run held. The partner's half
+ * counts as held when the loaded receipt's unsigned envelope supplied it, since
+ * that is the document the hash was re-derived from (core's
+ * `partnerTermsForVerification`).
+ */
+export interface SignedVerdictTermsSupplied {
+  /** Whether this party's own linkage terms were pasted. */
+  localTerms: boolean;
+  /** Whether the partner's terms were resolved, pasted or off the receipt. */
+  partnerTerms: boolean;
+}
+
+// What a not-checked agreed-terms hash is still waiting on, which is whichever
+// terms document the run is short of. A receipt holding the partner's copy
+// supplies that half on its own, so telling such a reader to paste both parties'
+// terms would send them after a document the file in front of them already
+// holds.
+function signedTermsNotCheckedExplanation(
+  supplied: SignedVerdictTermsSupplied,
+): string {
+  if (supplied.partnerTerms && !supplied.localTerms)
+    return (
+      "Paste your own linkage terms to check the agreed-terms hash -- your " +
+      "partner's are supplied already, from the dual-signed record you loaded " +
+      "or from the document you pasted. Loading this exchange's record " +
+      "supplies the hash instead."
+    );
+  const missing = supplied.localTerms
+    ? "Paste your partner's terms"
+    : "Paste both parties' terms";
+  return (
+    "The dual-signed record you loaded holds no copy of your partner's " +
+    `linkage terms. ${missing} to check the agreed-terms hash, or load this ` +
+    "exchange's record."
+  );
+}
+
 // What pairing this receipt to one run says. Only the exchange record supplies the
-// pairing, so a remediation here names it alone -- unlike the rows above, whose
-// EXPECTATIONS_REMEDIATION offers linkage terms as the other route: terms belong to
-// a partnership and repeat across every run of it.
+// pairing, so a remediation here names it alone -- unlike the rows above, which
+// offer linkage terms as the other route: terms belong to a partnership and
+// repeat across every run of it.
 const RUN_BINDING_COPY: Record<RunBindingStatus, RowCopy> = {
   verified: {
     status: "This receipt and this record are the same run",
@@ -987,19 +1041,34 @@ function guidanceLine(guidance: SignedReceiptVerdictGuidance): string {
  * remediation the run has earned are decided there and rendered here, so this
  * page and the CLI cannot reach different verdicts on one receipt. What this
  * model owns is the words.
+ *
+ * `termsSupplied` states which of the two terms documents the run held, so a
+ * not-checked agreed-terms hash names the one it is short of rather than both.
+ * The default stands for a run that held neither.
  */
 export function signedVerdictViewModel(
   report: DualSignedRecordVerificationReport,
+  termsSupplied: SignedVerdictTermsSupplied = {
+    localTerms: false,
+    partnerTerms: false,
+  },
 ): SignedVerdictViewModel {
   const verdict = decideSignedReceiptVerdict(report);
+  const termsRow = verdictRow(
+    "The agreed-terms hash",
+    verdict.termsHash,
+    SIGNED_TERMS_COPY,
+  );
   return {
     headline: signedHeadline(verdict.headline),
     parties: verdict.parties.map(signedPartyViewModel),
-    termsHash: verdictRow(
-      "The agreed-terms hash",
-      verdict.termsHash,
-      SIGNED_TERMS_COPY,
-    ),
+    termsHash:
+      verdict.termsHash.status === "not-checked"
+        ? {
+            ...termsRow,
+            explanation: signedTermsNotCheckedExplanation(termsSupplied),
+          }
+        : termsRow,
     runBinding: runBindingRow(verdict.runBinding),
     guidance: verdict.guidance.map(guidanceLine),
     // Never RECOMPUTED: deriving the binder needs the exchange session key. What

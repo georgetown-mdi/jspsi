@@ -24,7 +24,12 @@ import {
   SIGNED_RECEIPT_VERSION,
   verifyReceiptSignature,
 } from "../../src/records/signedReceipt";
-import { verifyDualSignedRecord } from "../../src/records/signedReceiptVerification";
+import {
+  partnerTermsForVerification,
+  signedRecordExpectations,
+  verifyDualSignedRecord,
+} from "../../src/records/signedReceiptVerification";
+import { computeTermsHash } from "../../src/records/exchangeRecord";
 import {
   certificateAuthorizesIdentity,
   computeCertificateFingerprint,
@@ -35,7 +40,8 @@ import { canonicalString } from "../../src/utils/canonical";
 import { safeParseLinkageTerms } from "../../src/config/linkageTermsSchema";
 import { toCommittedPayload } from "../../src/payloadExchange";
 
-import type { Output } from "../../src/config/linkageTermsSchema";
+import type { LinkageTerms, Output } from "../../src/config/linkageTermsSchema";
+import type { DualSignedRecord } from "../../src/records/signedReceipt";
 import type { MessageConnection } from "../../src/connection/messageConnection";
 import type { ExchangeRecord } from "../../src/records/exchangeRecord";
 import type { ExchangeResult } from "../../src/exchange";
@@ -78,6 +84,17 @@ function prepared(identity: string, output: Output, rows: typeof serverRows) {
 }
 
 const both: Output = { expectsOutput: true, shareWithPartner: true };
+
+/**
+ * A receipt without the unsigned envelope, for comparing the two parties'
+ * copies: everything both parties signed is identical across them, and the
+ * envelope is where they differ -- each retains the OTHER party's terms.
+ */
+function signedHalf(receipt: DualSignedRecord | undefined) {
+  return receipt === undefined
+    ? undefined
+    : { ...receipt, partnerTerms: undefined };
+}
 
 // Fixed keys and a fixed session key so both parties derive the same binder.
 const identityA = await generateSigningIdentity("Initiator Co", {
@@ -144,10 +161,15 @@ test("both parties produce one dual-signed record with mutual verification", asy
     },
   );
 
-  // Both sides return the same dual-signed record (roles fixed by the handshake).
+  // Both sides return the same signed content and signatures (roles fixed by the
+  // handshake), each beside the partner's terms it retained.
   expect(resInit.signedReceipt).toBeDefined();
   expect(resResp.signedReceipt).toBeDefined();
-  expect(resInit.signedReceipt).toEqual(resResp.signedReceipt);
+  expect(signedHalf(resInit.signedReceipt)).toEqual(
+    signedHalf(resResp.signedReceipt),
+  );
+  expect(resInit.signedReceipt!.partnerTerms?.identity).toBe("Responder Co");
+  expect(resResp.signedReceipt!.partnerTerms?.identity).toBe("Initiator Co");
 
   const receipt = resInit.signedReceipt!;
   expect(receipt.version).toBe(SIGNED_RECEIPT_VERSION);
@@ -644,7 +666,9 @@ describe("a party whose certificate is bound away from its agreed terms", () => 
       ),
     ]);
     expect(resInitiator.signedReceipt).toBeDefined();
-    expect(resInitiator.signedReceipt).toEqual(resResponder.signedReceipt);
+    expect(signedHalf(resInitiator.signedReceipt)).toEqual(
+      signedHalf(resResponder.signedReceipt),
+    );
     expect(
       certificateAuthorizesIdentity(
         resInitiator.signedReceipt!.initiator.certificate,
@@ -979,6 +1003,80 @@ describe("the run binder pairs a receipt to one exchange run", () => {
     expect(report.runBinding).toBe("not-checked");
     expect(report.outcome).toBe("incomplete");
     expect(report.initiator.signature).toBe("verified");
+  });
+});
+
+// --- The partner terms the receipt retains -----------------------------------
+
+// This party's own terms, the other half of the agreed-terms hash: the receipt
+// retains the partner's, so a verifier holding this document needs no second
+// file.
+const initiatorOwnTerms: LinkageTerms = {
+  ...firstNameTerms,
+  identity: "Initiator Co",
+  output: both,
+};
+
+describe("the partner terms the receipt retains", () => {
+  test("re-derive the agreed-terms hash both signatures cover", async () => {
+    const carried = partnerTermsForVerification(undefined, firstReceipt);
+    expect(carried?.identity).toBe("Responder Co");
+    expect(await computeTermsHash(initiatorOwnTerms, carried!)).toBe(
+      firstReceipt.content.termsHash,
+    );
+  });
+
+  test("carry a run whose certificates are anchored to a verified verdict", async () => {
+    // No partner terms document in hand: the receipt's own copy is what makes
+    // the agreed-terms hash checkable, and with both certificates anchored and
+    // the run's record beside it the verdict reaches verified.
+    const report = await verifyDualSignedRecord(firstReceipt, {
+      pinnedFingerprints: [fingerprintB],
+      localIdentity: { fingerprint: fingerprintA, source: "named" },
+      recordReceiptBinder: firstRecord.receiptBinder,
+      ...(await signedRecordExpectations({
+        localTerms: initiatorOwnTerms,
+        partnerTerms: partnerTermsForVerification(undefined, firstReceipt),
+      })),
+    });
+    expect(report.termsHash).toBe("verified");
+    expect(report.outcome).toBe("verified");
+  });
+
+  test("terms that do not belong to the run are a mismatch, not a verdict", async () => {
+    // The carried copy is evidence only through the hash it reproduces, so
+    // terms substituted into the envelope contradict the signed content.
+    const substituted: DualSignedRecord = {
+      ...firstReceipt,
+      partnerTerms: { ...firstReceipt.partnerTerms!, date: "2026-02-02" },
+    };
+    const report = await verifyDualSignedRecord(substituted, {
+      pinnedFingerprints: [fingerprintB],
+      localIdentity: { fingerprint: fingerprintA, source: "named" },
+      recordReceiptBinder: firstRecord.receiptBinder,
+      ...(await signedRecordExpectations({
+        localTerms: initiatorOwnTerms,
+        partnerTerms: partnerTermsForVerification(undefined, substituted),
+      })),
+    });
+    expect(report.termsHash).toBe("mismatch");
+    expect(report.outcome).toBe("failed");
+    expect(report.initiator.signature).toBe("verified");
+    expect(report.responder.signature).toBe("verified");
+  });
+
+  test("a receipt verifies identically with the carried terms stripped", async () => {
+    // Neither signature covers the envelope, so dropping it changes no check:
+    // the whole report is the one the receipt holding them produces.
+    const stripped: DualSignedRecord = {
+      ...firstReceipt,
+      partnerTerms: undefined,
+    };
+    expect(
+      await verifyDualSignedRecord(stripped, heldByInitiator(firstRecord)),
+    ).toEqual(
+      await verifyDualSignedRecord(firstReceipt, heldByInitiator(firstRecord)),
+    );
   });
 });
 
@@ -2126,7 +2224,7 @@ describe("a partner payload holding a lone surrogate is refused at the wire sche
       '{"columns":["note"],"rows":[["c-c"],["c-e"]]}',
     );
     const receipt = resInit.signedReceipt!;
-    expect(resResp.signedReceipt).toEqual(receipt);
+    expect(signedHalf(resResp.signedReceipt)).toEqual(signedHalf(receipt));
     expect(receipt.content.initiatorToResponderPayload).toBe(
       "q5b2XIyMH1ps6ViDniNujF6o_hYFS5VArRScrdMwxeg",
     );

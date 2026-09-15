@@ -1850,7 +1850,9 @@ describe("console inviter receipt on a failed run", () => {
     await expect
       .element(
         page.getByRole("link", {
-          name: "Download signed receipt (safe to share): psilink-receipt-job-7.json",
+          name:
+            "Download signed receipt (holds your partner's linkage terms): " +
+            "psilink-receipt-job-7.json",
         }),
       )
       .toBeInTheDocument();

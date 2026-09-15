@@ -99,8 +99,12 @@ async function buildFixture(receiptBinder = RECEIPT_BINDER): Promise<{
 
 // A dual-signed record over the same exchange the fixture above describes: this
 // party holds the initiator's slot, the partner the responder's, and the receipt
-// content has that record's agreed-terms hash.
-async function buildSignedFixture(record: ExchangeRecord): Promise<{
+// content has that record's agreed-terms hash. `partnerTerms` fills the unsigned
+// envelope, which a holder may equally have stripped -- the default here.
+async function buildSignedFixture(
+  record: ExchangeRecord,
+  partnerTerms?: LinkageTerms,
+): Promise<{
   signed: DualSignedRecord;
   ourIdentity: SigningIdentity;
   ourCertificate: SigningCertificate;
@@ -126,6 +130,7 @@ async function buildSignedFixture(record: ExchangeRecord): Promise<{
         certificate: partner.certificate,
         signature: await signReceiptContent(partner, content, "responder"),
       },
+      ...(partnerTerms === undefined ? {} : { partnerTerms }),
     },
     ourIdentity: us,
     ourCertificate: us.certificate,
@@ -830,6 +835,94 @@ describe("verify receipt screen", () => {
         page.getByText("checked separately below", { exact: false }).first(),
       )
       .toBeInTheDocument();
+  });
+
+  // A run whose receipt holds the partner's terms and whose operator pastes only
+  // its own: the record, its keys, the retained CSVs, this party's terms, and
+  // the receipt with both certificates anchored.
+  async function verifyWithTermsFromTheReceipt(): Promise<void> {
+    const { record, keys } = await buildFixture();
+    const { signed, ourCertificate, partnerFingerprint } =
+      await buildSignedFixture(record, PARTNER_TERMS);
+    await mountVerifyScreen();
+
+    await uploadAt(0, jsonFile("rec.json", serializeExchangeRecord(record)));
+    await uploadAt(
+      1,
+      jsonFile("rec.keys.json", serializeVerificationKeys(keys)),
+    );
+    await userEvent.click(
+      page.getByRole("button", {
+        name: "Re-supply your files to open the commitments",
+      }),
+    );
+    await uploadAt(2, csvFile("input.csv", INPUT_CSV));
+    await uploadAt(3, csvFile("result.csv", RESULT_CSV));
+    await userEvent.fill(
+      page.getByLabelText("Your linkage terms"),
+      JSON.stringify(LOCAL_TERMS),
+    );
+    await userEvent.click(
+      page.getByRole("button", { name: "Load these terms" }).first(),
+    );
+    await userEvent.click(
+      page.getByRole("button", {
+        name: "Check the partner's signatures with the dual-signed record",
+      }),
+    );
+    await uploadTo(
+      "Dual-signed record",
+      jsonFile("psilink-receipt-x.json", serializeDualSignedRecord(signed)),
+    );
+    await userEvent.fill(
+      page.getByLabelText("Your partner's certificate fingerprint"),
+      partnerFingerprint,
+    );
+    await uploadTo(
+      "Your exported certificate",
+      jsonFile("certificate.json", serializeCertificate(ourCertificate)),
+    );
+    await userEvent.click(
+      page.getByRole("button", { name: "Verify with the signed record" }),
+    );
+  }
+
+  test("the terms a loaded receipt holds check the agreed-terms hash", async () => {
+    // Nothing is pasted into the partner's box: the half it would supply is the
+    // copy the receipt's unsigned envelope holds.
+    await verifyWithTermsFromTheReceipt();
+
+    await expect
+      .element(page.getByText("Re-derives and matches"))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("Signed receipt verified"))
+      .toBeInTheDocument();
+  });
+
+  test("pasted partner terms are used in place of the receipt's copy", async () => {
+    await verifyWithTermsFromTheReceipt();
+    await expect
+      .element(page.getByText("Re-derives and matches"))
+      .toBeInTheDocument();
+
+    // A document that is not this exchange's: it is what the re-run reads, so
+    // the line the carried copy had verified reports a mismatch.
+    await userEvent.fill(
+      page.getByLabelText("Your partner's linkage terms"),
+      JSON.stringify({ ...PARTNER_TERMS, date: "2025-02-02" }),
+    );
+    await userEvent.click(
+      page.getByRole("button", { name: "Load these terms" }).nth(1),
+    );
+    await userEvent.click(
+      page.getByRole("button", { name: "Verify with these files" }),
+    );
+
+    await expect.element(page.getByText("Does not match")).toBeInTheDocument();
+    await expect
+      .element(page.getByText("Re-derives and matches"))
+      .not.toBeInTheDocument();
   });
 
   test("an unanchored partner leaves the signed verdict incomplete, naming the slot", async () => {

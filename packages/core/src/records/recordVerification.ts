@@ -53,9 +53,9 @@ export type CommitmentStatus =
 
 /**
  * The outcome of the agreed-terms-hash check. `not-checked` when either party's
- * terms were not re-supplied (the partner's terms are not retained by default, so
- * this is the common case); `mismatch` when the re-supplied terms do not
- * reproduce the recorded hash.
+ * terms were not supplied -- this party's own from its config, the partner's
+ * from the run's receipt or a document the operator names; `mismatch` when the
+ * terms supplied do not reproduce the recorded hash.
  */
 export type TermsHashStatus = "verified" | "mismatch" | "not-checked";
 
@@ -129,8 +129,9 @@ interface RecordVerificationInputs {
   data?: Partial<Record<CommitmentName, CanonicalValue>>;
   /** This party's linkage terms, for the terms-hash check. */
   localTerms?: LinkageTerms;
-  /** The partner's linkage terms, for the terms-hash check (not retained by
-   * default, so the check is best-effort). */
+  /** The partner's linkage terms, for the terms-hash check: the copy the run's
+   * receipt holds in its unsigned envelope, or a document the caller supplies
+   * in its place (`partnerTermsForVerification`). */
   partnerTerms?: LinkageTerms;
 }
 

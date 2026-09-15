@@ -105,6 +105,7 @@ async function receiptInputs(
     identity,
     pinnedFingerprint,
     partnerIdentity,
+    partnerTerms: identity === identityA ? termsB : termsA,
     content: await buildReceiptContent(
       "initiator",
       "dGVybXM",

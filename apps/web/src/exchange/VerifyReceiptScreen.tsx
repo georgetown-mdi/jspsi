@@ -12,6 +12,7 @@ import { Dropzone } from "@mantine/dropzone";
 import {
   deriveOurIdColumn,
   getLogger,
+  partnerTermsForVerification,
   reconstructCommittedData,
   reproductionMismatchCauses,
   sanitizeErrorForDisplay,
@@ -470,6 +471,13 @@ export function VerifyReceiptScreen() {
     setVerifyError(undefined);
     try {
       const parsedRecord = record?.record;
+      // The dual-signed record holds the partner's terms, so a run with one
+      // loaded checks the agreed-terms hash without them being pasted; what is
+      // pasted wins over that copy.
+      const partnerTermsForRun = partnerTermsForVerification(
+        partnerTerms,
+        signedRecord?.record,
+      );
       let recordReport: RecordVerificationReport | undefined;
       let recordWarnings: Array<string> = [];
       if (parsedRecord !== undefined && keys?.keys !== undefined) {
@@ -495,7 +503,7 @@ export function VerifyReceiptScreen() {
         recordReport = await verifyExchangeRecord(parsedRecord, keys.keys, {
           data,
           localTerms,
-          partnerTerms,
+          partnerTerms: partnerTermsForRun,
         });
         // A reproduction limitation is named only once the verdict shows it
         // could be the cause, so it joins the notes after the report, not
@@ -513,9 +521,16 @@ export function VerifyReceiptScreen() {
             pinnedFingerprint,
             ownCertificateFingerprint: certificate?.fingerprint,
           },
-          { record: parsedRecord, localTerms, partnerTerms },
+          {
+            record: parsedRecord,
+            localTerms,
+            partnerTerms: partnerTermsForRun,
+          },
         );
-        signedView = signedVerdictViewModel(report);
+        signedView = signedVerdictViewModel(report, {
+          localTerms: localTerms !== undefined,
+          partnerTerms: partnerTermsForRun !== undefined,
+        });
       }
       // An input changed while this run was reading files and computing, so its
       // result describes inputs the page no longer holds: the edit already
@@ -530,6 +545,8 @@ export function VerifyReceiptScreen() {
             recordReport,
             recordWarnings,
             signedView !== undefined,
+            signedRecord?.record !== undefined &&
+              signedRecord.record.partnerTerms === undefined,
           ),
         );
       if (signedView !== undefined) setSignedVerdict(signedView);
@@ -736,7 +753,7 @@ export function VerifyReceiptScreen() {
             <TermsInput
               key={`partner-terms-${exchangeGeneration}`}
               label="Your partner's linkage terms"
-              description="Paste your partner's config or exported terms, read the same way. The partner's terms are not retained by default; both sides are needed to check the hash."
+              description="Paste your partner's config or exported terms, read the same way. A loaded receipt holds them already; what you paste here is used in its place."
               terms={partnerTerms}
               onTerms={onPartnerTerms}
             />

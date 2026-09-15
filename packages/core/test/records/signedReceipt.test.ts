@@ -22,6 +22,7 @@ import {
   ConnectionError,
   createMessagePipe,
 } from "../../src/connection/messageConnection";
+import { MAX_NODE_COUNT } from "../../src/utils/camelizeKeys";
 
 import type {
   DualSignedRecord,
@@ -29,6 +30,7 @@ import type {
   SignedReceiptExchangeInputs,
 } from "../../src/records/signedReceipt";
 import type { CommittedPayload } from "../../src/records/exchangeRecord";
+import type { LinkageTerms } from "../../src/config/linkageTermsSchema";
 import type {
   P256PrivateJwk,
   SigningIdentity,
@@ -73,6 +75,25 @@ const fingerprintB = await computeCertificateFingerprint(identityB.certificate);
 // stands in for a different exchange (the replay class).
 const sessionKey = new Uint8Array(32).fill(7);
 const otherSessionKey = new Uint8Array(32).fill(9);
+
+// The linkage terms each party holds, which the receipt step copies into the
+// record's unsigned envelope without reading: the two differ so a test can tell
+// which party's copy an envelope holds.
+function termsNaming(identity: string): LinkageTerms {
+  return {
+    version: "1.0.0",
+    date: "2026-01-01",
+    algorithm: "psi",
+    linkageStrategy: "cascade",
+    deduplicate: false,
+    identity,
+    output: { expectsOutput: true, shareWithPartner: true },
+    linkageFields: [{ name: "firstName", type: "first_name" }],
+    linkageKeys: [{ name: "firstName", elements: [{ field: "firstName" }] }],
+  };
+}
+const termsA = termsNaming("Party A");
+const termsB = termsNaming("Party B");
 
 function content(overrides: Partial<ReceiptContent> = {}): ReceiptContent {
   return {
@@ -415,12 +436,14 @@ function inputsFor(
   pinnedFingerprint: string | undefined,
   partnerIdentity: string,
   sharedContent: ReceiptContent,
+  partnerTerms: LinkageTerms = termsB,
 ): SignedReceiptExchangeInputs {
   return {
     identity,
     pinnedFingerprint,
     partnerIdentity,
     content: sharedContent,
+    partnerTerms,
   };
 }
 
@@ -464,14 +487,21 @@ describe("exchangeSignedReceipt (two-party over the pipe)", () => {
   test("a successful swap yields one dual-signed record on both sides", async () => {
     const shared = content();
     const [recInit, recResp] = await runReceiptExchange(
-      inputsFor(identityA, fingerprintB, partnerIdentityForA, shared),
-      inputsFor(identityB, fingerprintA, partnerIdentityForB, shared),
+      inputsFor(identityA, fingerprintB, partnerIdentityForA, shared, termsB),
+      inputsFor(identityB, fingerprintA, partnerIdentityForB, shared, termsA),
     );
-    // Both parties write the same artifact (roles fixed by the handshake,
-    // not by local/partner), holding both certificates and signatures: each
-    // copies the signature the other sent rather than re-deriving it, so the
-    // two files agree byte for byte even though ECDSA signing is randomized.
-    expect(recInit).toEqual(recResp);
+    // Both parties sign the same content and store the same two signature
+    // blocks (roles fixed by the handshake, not by local/partner): each copies
+    // the signature the other sent rather than re-deriving it, so those fields
+    // agree byte for byte even though ECDSA signing is randomized. The unsigned
+    // envelope is the one field they differ in -- each holds the OTHER party's
+    // terms.
+    expect({ ...recInit, partnerTerms: undefined }).toEqual({
+      ...recResp,
+      partnerTerms: undefined,
+    });
+    expect(recInit.partnerTerms).toEqual(termsB);
+    expect(recResp.partnerTerms).toEqual(termsA);
     expect(recInit.version).toBe(SIGNED_RECEIPT_VERSION);
     expect(recInit.content).toEqual(shared);
     expect(recInit.initiator.certificate).toEqual(identityA.certificate);
@@ -640,6 +670,40 @@ describe("exchangeSignedReceipt (two-party over the pipe)", () => {
 
 // --- Serialize / parse -------------------------------------------------------
 
+// Terms holding one transform param whose value is an object of `entries`
+// keys. The linkage-terms schema bounds a param's own string length and list
+// length but not the width nested under a param value, so this is the shape
+// the camelize pre-pass's node-count budget is the only bound on.
+function termsWithParamWidth(entries: number): LinkageTerms {
+  const nested: Record<string, number> = {};
+  for (let index = 0; index < entries; index += 1)
+    nested[`key${index}`] = index;
+  return {
+    ...termsB,
+    linkageKeys: [
+      {
+        name: "firstName",
+        elements: [
+          {
+            field: "firstName",
+            transform: [{ function: "trim", params: { nested } }],
+          },
+        ],
+      },
+    ],
+  };
+}
+
+function recordCarrying(partnerTerms: LinkageTerms): unknown {
+  return {
+    version: SIGNED_RECEIPT_VERSION,
+    content: content(),
+    initiator: { certificate: identityA.certificate, signature: "AAAA" },
+    responder: { certificate: identityB.certificate, signature: "AAAA" },
+    partnerTerms,
+  };
+}
+
 describe("serialize / parse dual-signed record", () => {
   test("round-trips through serialize and parse", async () => {
     const shared = content();
@@ -717,6 +781,62 @@ describe("serialize / parse dual-signed record", () => {
         responder: { certificate: identityB.certificate, signature: "AAAA" },
       }),
     ).toThrow();
+  });
+
+  test("keeps the carried partner terms through a round-trip", async () => {
+    const shared = content();
+    const [record] = await runReceiptExchange(
+      inputsFor(identityA, fingerprintB, partnerIdentityForA, shared, termsB),
+      inputsFor(identityB, fingerprintA, partnerIdentityForB, shared, termsA),
+    );
+    const parsed = parseDualSignedRecord(
+      JSON.parse(serializeDualSignedRecord(record)),
+    );
+    expect(parsed.partnerTerms).toEqual(termsB);
+  });
+
+  test("accepts a record whose carried terms were stripped", () => {
+    // The envelope is unsigned, so a holder may drop it; what is left is still
+    // a readable receipt whose signatures verify (signedReceiptEndToEnd.test.ts
+    // checks the verdict itself).
+    expect(
+      parseDualSignedRecord({
+        version: SIGNED_RECEIPT_VERSION,
+        content: content(),
+        initiator: { certificate: identityA.certificate, signature: "AAAA" },
+        responder: { certificate: identityB.certificate, signature: "AAAA" },
+      }).partnerTerms,
+    ).toBeUndefined();
+  });
+
+  test("refuses carried terms the linkage-terms schema rejects", () => {
+    // The carried document is partner-authored and read under the same bounded
+    // schema as terms off the wire, so a hostile or edited one is refused at
+    // parse rather than reaching the terms-hash re-derivation.
+    expect(() =>
+      parseDualSignedRecord({
+        version: SIGNED_RECEIPT_VERSION,
+        content: content(),
+        initiator: { certificate: identityA.certificate, signature: "AAAA" },
+        responder: { certificate: identityB.certificate, signature: "AAAA" },
+        partnerTerms: { ...termsB, linkageFields: [] },
+      }),
+    ).toThrow();
+  });
+
+  test("refuses carried terms wider than the camelize pre-pass budget", () => {
+    expect(() =>
+      parseDualSignedRecord(
+        recordCarrying(termsWithParamWidth(MAX_NODE_COUNT + 1)),
+      ),
+    ).toThrow();
+  });
+
+  test("keeps carried terms holding a param value of modest width", () => {
+    expect(
+      parseDualSignedRecord(recordCarrying(termsWithParamWidth(16)))
+        .partnerTerms,
+    ).toEqual(termsWithParamWidth(16));
   });
 
   test("rejects an oversized base64url signature field before any crypto work", () => {

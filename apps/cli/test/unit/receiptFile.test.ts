@@ -61,7 +61,7 @@ const certA = {
     "CzgwEmZnlYhLunf5m3CK7WWpHiUlMeRW_hhdJmbaPiwbsuT0LPP0EJGcHskJMB7icXOXfuZ1DPlQlnkpqtVL4g",
 };
 const record: DualSignedRecord = {
-  version: "psilink-signed-receipt/v2",
+  version: "psilink-signed-receipt/v3",
   content: {
     termsHash: "dGVybXNIYXNo",
     initiatorToResponderPayload: "aTJyUGF5bG9hZA",

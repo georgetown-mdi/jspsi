@@ -259,7 +259,27 @@ export interface DualSignedRecordVerificationInputs {
 export interface SignedRecordExpectationSources {
   record?: ExchangeRecord;
   localTerms?: LinkageTerms;
+  /** The partner's terms, resolved by {@link partnerTermsForVerification} from
+   * what the operator supplied and what the receipt holds. */
   partnerTerms?: LinkageTerms;
+}
+
+/**
+ * The partner's linkage terms a verification runs against: a document the
+ * operator supplied, else the copy the receipt retains in its unsigned
+ * envelope. A supplied document wins, since the operator named it for this
+ * run; the carried copy is what makes the check run at all for a verifier who
+ * holds only the two artifacts.
+ *
+ * Neither source is trusted on its own: whichever it is, the terms are only
+ * ever re-hashed and compared against the value the signatures cover, so terms
+ * that do not belong to the run report a mismatch rather than a verdict.
+ */
+export function partnerTermsForVerification(
+  supplied: LinkageTerms | undefined,
+  receipt: DualSignedRecord | undefined,
+): LinkageTerms | undefined {
+  return supplied ?? receipt?.partnerTerms;
 }
 
 /**

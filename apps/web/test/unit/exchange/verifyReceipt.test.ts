@@ -330,6 +330,26 @@ describe("verdictViewModel: no re-supply", () => {
       "Partner receipt signatures are not checked",
     );
   });
+
+  test("with no receipt loaded, the not-checked terms row points at one", async () => {
+    const { record, keys } = await fixtures();
+    const report = await verifyExchangeRecord(record, keys, {});
+    const view = verdictViewModel(report, [], false, false);
+    expect(view.termsHash.explanation).toContain(
+      "a loaded dual-signed record holds",
+    );
+  });
+
+  test("with a receipt whose terms were stripped, the row says so", async () => {
+    // The reader supplied the one file that carries the partner's half and it
+    // holds none, so pointing them back at it would send them nowhere.
+    const { record, keys } = await fixtures();
+    const report = await verifyExchangeRecord(record, keys, {});
+    const view = verdictViewModel(report, [], false, true);
+    expect(view.termsHash.explanation).toContain(
+      "holds no copy of your partner's linkage terms",
+    );
+  });
 });
 
 describe("verdictViewModel: warnings are sanitized", () => {
@@ -990,7 +1010,9 @@ describe("verifySignedRecord: what the record cannot attest to itself", () => {
 
     const view = signedVerdictViewModel(report);
     expect(view.termsHash.status).toBe("Not checked");
-    expect(view.termsHash.explanation).toContain("Load the exchange record");
+    expect(view.termsHash.explanation).toContain(
+      "holds no copy of your partner's linkage terms",
+    );
     for (const party of view.parties) {
       expect(party.rows[3]?.status).toBe("Not checked");
       expect(party.rows[3]?.explanation).toContain(
@@ -1143,6 +1165,51 @@ describe("signedVerdictViewModel: over a report built by hand", () => {
         }),
       ),
     ).toThrow(/unanchored/);
+  });
+
+  test("a not-checked agreed-terms hash names only the document the run lacks", () => {
+    const report = signedReport({
+      outcome: "incomplete",
+      termsHash: "not-checked",
+    });
+    // The receipt's unsigned envelope supplied the partner's half, so asking for
+    // both parties' terms would send the reader after a document the file they
+    // loaded already holds.
+    const ownTermsMissing = signedVerdictViewModel(report, {
+      localTerms: false,
+      partnerTerms: true,
+    });
+    expect(ownTermsMissing.termsHash.explanation).toContain(
+      "Paste your own linkage terms",
+    );
+    expect(ownTermsMissing.termsHash.explanation).not.toContain("both parties");
+
+    const partnerTermsMissing = signedVerdictViewModel(report, {
+      localTerms: true,
+      partnerTerms: false,
+    });
+    expect(partnerTermsMissing.termsHash.explanation).toContain(
+      "Paste your partner's terms",
+    );
+
+    const neitherSupplied = signedVerdictViewModel(report, {
+      localTerms: false,
+      partnerTerms: false,
+    });
+    expect(neitherSupplied.termsHash.explanation).toContain(
+      "Paste both parties' terms",
+    );
+  });
+
+  test("a checked agreed-terms hash states no remediation", () => {
+    const view = signedVerdictViewModel(signedReport(), {
+      localTerms: true,
+      partnerTerms: true,
+    });
+    expect(view.termsHash.status).toBe(
+      "Matches the terms this exchange agreed",
+    );
+    expect(view.termsHash.explanation).toBeUndefined();
   });
 
   test("the identity a certificate holds is escaped at this display sink", () => {

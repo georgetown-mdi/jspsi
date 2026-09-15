@@ -41,7 +41,7 @@ import {
   generateSigningIdentity,
 } from "../../dist/core.esm.js";
 
-const RECORD_VERSION = "psilink-signed-receipt/v2";
+const RECORD_VERSION = "psilink-signed-receipt/v3";
 const CONTENT_DOMAIN = "psilink-signed-receipt-content/v2";
 const CERTIFICATE_VERSION = "psilink-signing-cert/v2";
 const CERTIFICATE_SIGNATURE_DOMAIN = "psilink-signing-cert-signature/v1";

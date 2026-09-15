@@ -1,7 +1,7 @@
 {
-  "description": "Cross-implementation vectors for the psilink-signed-receipt/v2 step: ECDSA over P-256 with SHA-256 across the signer-bound receipt content. Each vector fixes a private key, an identity, a session key, a handshake role, and the shared content. The certificate fingerprint and the per-exchange binder are known answers. The signature is NOT -- ECDSA signing is randomized -- so it is verify-only and was produced by the openssl CLI (see externalAnchors) over signed bytes the generator assembles from the spec: a suite that accepts it is accepting a signature made outside this codebase, over a byte layout stated independently of the module under test. Regenerate with generate-signed-receipt-vectors.mjs.",
+  "description": "Cross-implementation vectors for the psilink-signed-receipt/v3 step: ECDSA over P-256 with SHA-256 across the signer-bound receipt content. Each vector fixes a private key, an identity, a session key, a handshake role, and the shared content. The certificate fingerprint and the per-exchange binder are known answers. The signature is NOT -- ECDSA signing is randomized -- so it is verify-only and was produced by the openssl CLI (see externalAnchors) over signed bytes the generator assembles from the spec: a suite that accepts it is accepting a signature made outside this codebase, over a byte layout stated independently of the module under test. Regenerate with generate-signed-receipt-vectors.mjs.",
   "construction": {
-    "recordVersion": "psilink-signed-receipt/v2",
+    "recordVersion": "psilink-signed-receipt/v3",
     "algorithm": "ecdsa-p256-sha256",
     "contentDomain": "psilink-signed-receipt-content/v2",
     "binderLabel": "psilink-signed-receipt-binder-v1:<role>",
@@ -69,7 +69,7 @@
       "responderIdentity": "Party B, Agency B"
     },
     "record": {
-      "version": "psilink-signed-receipt/v2",
+      "version": "psilink-signed-receipt/v3",
       "content": {
         "termsHash": "dGVybXNIYXNoVmVjdG9y",
         "initiatorToResponderPayload": "aTJyUGF5bG9hZERpZ2VzdA",

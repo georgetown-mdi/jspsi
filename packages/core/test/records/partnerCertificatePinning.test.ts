@@ -234,7 +234,12 @@ describe("a first authenticated contact adopts the partner's certificate", () =>
 
     expect(adopted.initiator).toEqual([fingerprintB]);
     expect(adopted.responder).toEqual([fingerprintA]);
-    expect(resInit.signedReceipt).toEqual(resResp.signedReceipt);
+    // Everything both parties signed is the same on both sides; the unsigned
+    // envelope is where they differ, each holding the other party's terms.
+    expect({ ...resInit.signedReceipt, partnerTerms: undefined }).toEqual({
+      ...resResp.signedReceipt,
+      partnerTerms: undefined,
+    });
     expect(resInit.signedReceipt!.initiator.certificate).toEqual(
       identityA.certificate,
     );

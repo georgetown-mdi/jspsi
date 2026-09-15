@@ -2513,6 +2513,10 @@ export async function runExchange(
         // agreed terms rather than a value it self-asserts in its certificate.
         partnerIdentity: namedParties.partner,
         content,
+        // Retained in the receipt's unsigned envelope, so re-deriving the
+        // agreed-terms hash later takes this party's own terms and nothing
+        // else (docs/spec/EXCHANGE_RECORD.md, "Dual-signed record file").
+        partnerTerms,
       });
     }
   } catch (error) {
