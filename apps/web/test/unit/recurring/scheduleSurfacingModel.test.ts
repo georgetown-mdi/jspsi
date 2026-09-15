@@ -437,4 +437,16 @@ describe("an input file that has not changed since the last run", () => {
       noteAtUtc(lastRun("succeeded", "not an instant"), at(ranAt) - 1),
     ).toBeUndefined();
   });
+
+  test("a run stamp with no UTC designator raises nothing", () => {
+    // Read through the record module's shared stored-instant reader, which takes
+    // `Z` and never a bare offset, so no surface reads a stored stamp against the
+    // host zone.
+    expect(
+      noteAtUtc(
+        lastRun("succeeded", "2026-07-14T12:00:00.000+00:00"),
+        at("2026-07-10T09:15:00.000Z"),
+      ),
+    ).toBeUndefined();
+  });
 });

@@ -716,7 +716,8 @@ state it already has: a browser holding no pointer re-selects the file at each
 run, a file that is missing or unreadable fails the run as the benign input
 state above, and a read permission no longer standing is neither prompted for
 nor reported twice. An exchange with no successful run recorded has no instant
-to compare against and shows nothing.
+to compare against and shows nothing, and an attended-only exchange, which has
+no schedule section at all, is never read for one.
 
 ## The durability and crash-consistency contract
 

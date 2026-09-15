@@ -28,6 +28,7 @@
 import {
   MAX_SCHEDULE_INTERVAL_DAYS,
   MAX_SCHEDULE_WINDOW_SECONDS,
+  parseStoredInstant,
 } from "@psi/managed/managedExchangeRecord";
 import {
   MAX_TIME_VALUE,
@@ -234,9 +235,10 @@ export const UNCHANGED_INPUT_TITLE =
  * last successful run: the file the next run would read is the one that run
  * already read, so the window ahead would link the same period's data again.
  * `undefined` for every other reading -- a refreshed file, an exchange with no
- * successful run recorded, and a file whose modification instant this browser
- * could not read at all (no pointer, no standing grant, a missing or unreadable
- * entry), each of which keeps whatever state it already has.
+ * successful run recorded, a file whose modification instant this browser could
+ * not read at all (no pointer, no standing grant, a missing or unreadable
+ * entry), and a run stamp {@link parseStoredInstant} does not read as an
+ * instant, each of which keeps whatever state it already has.
  *
  * It warns and guides: it names what is true and the one move that clears it,
  * bars nothing, and pauses nothing. The run control and the agreed cadence stand
@@ -251,7 +253,7 @@ export function unchangedInputNote(
     return undefined;
   if (inputModifiedAtMs === undefined || !Number.isFinite(inputModifiedAtMs))
     return undefined;
-  const ranAtMs = Date.parse(lastRun.at);
+  const ranAtMs = parseStoredInstant(lastRun.at);
   if (Number.isNaN(ranAtMs) || inputModifiedAtMs >= ranAtMs) return undefined;
   const changed = dateTimeLabel(new Date(inputModifiedAtMs));
   const ran = dateTimeLabel(new Date(ranAtMs));

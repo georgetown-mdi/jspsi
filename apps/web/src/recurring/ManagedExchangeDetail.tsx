@@ -844,7 +844,9 @@ function OutputFolderGrantField({
  * successful run, and, once misses have accumulated, the coordination prompt.
  *
  * A record with no agreed schedule renders nothing here: it is attended-only,
- * and the local-fields editor above is where a schedule is entered.
+ * and the local-fields editor above is where a schedule is entered. Such a
+ * record's input file is not read either -- the one reading this section makes
+ * of the platform is made only where there is a section to hold it.
  *
  * The instant is read at render (`Date.now()`) rather than held in state: this
  * section reads where the recurrence stands when the operator opened it, and a
@@ -856,7 +858,9 @@ function OutputFolderGrantField({
  * note it feeds appears with it.
  */
 function RunSchedule({ record }: { record: ManagedExchangeRecord }) {
-  const inputModifiedAtMs = useInputFileModifiedAt(record.inputFileHandle);
+  const inputModifiedAtMs = useInputFileModifiedAt(
+    record.schedule !== undefined ? record.inputFileHandle : undefined,
+  );
   const view = scheduleView(
     record,
     storedInputHandleUsable(record.inputFileHandle),
