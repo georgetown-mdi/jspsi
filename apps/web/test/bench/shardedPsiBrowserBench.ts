@@ -30,25 +30,39 @@ const PSI_WORKER_BUILD =
 
 const CLIENT_KEY_FILL = 0x22;
 
+// The shipped browser path runs exactly one PSI worker, so every speedup is
+// against the one-worker run and a measurement without it has no baseline.
+const BASELINE_SHARD_COUNT = 1;
+
 const WORKER_SOURCE = `
 importScripts("/psi_wasm_worker.js");
 let client;
+function describe(failure) {
+  return failure && failure.message ? failure.message : String(failure);
+}
 const ready = PSI().then((library) => {
   const key = new Uint8Array(32).fill(${CLIENT_KEY_FILL});
   key[0] = 0x00;
   client = library.client.createFromKey(key, true);
   postMessage({ ready: true });
 });
+ready.catch((failure) => {
+  postMessage({ error: "the PSI engine failed to load: " + describe(failure) });
+});
 onmessage = (event) => {
-  void ready.then(() => {
-    const elements = client
-      .createRequest(event.data.values)
-      .getEncryptedElementsList_asU8();
-    const heap = self.performance.memory
-      ? self.performance.memory.usedJSHeapSize
-      : null;
-    postMessage({ elements, heapBytes: heap }, elements.map((e) => e.buffer));
-  });
+  void ready
+    .then(() => {
+      const elements = client
+        .createRequest(event.data.values)
+        .getEncryptedElementsList_asU8();
+      const heap = self.performance.memory
+        ? self.performance.memory.usedJSHeapSize
+        : null;
+      postMessage({ elements, heapBytes: heap }, elements.map((e) => e.buffer));
+    })
+    .catch((failure) => {
+      postMessage({ error: "masking failed: " + describe(failure) });
+    });
 };
 `;
 
@@ -57,12 +71,29 @@ const PAGE_SOURCE = `
 <meta charset="utf-8" />
 <title>sharded PSI browser bench</title>
 <script>
+// Without these a worker that fails to load or throws mid-run simply stops
+// replying, and the page.evaluate call driving it never settles.
+function rejectOnWorkerFailure(worker, reject) {
+  worker.onerror = (event) => {
+    event.preventDefault();
+    reject(new Error(event.message || "a shard worker failed"));
+  };
+  worker.onmessageerror = () => {
+    reject(new Error("a shard worker sent a message the page could not read"));
+  };
+}
+
 function spawnShards(count) {
   return Promise.all(
     Array.from({ length: count }, () => {
       const worker = new Worker("/shard-worker.js");
-      return new Promise((resolve) => {
-        worker.onmessage = () => {
+      return new Promise((resolve, reject) => {
+        rejectOnWorkerFailure(worker, reject);
+        worker.onmessage = (event) => {
+          if (event.data && event.data.error) {
+            reject(new Error(event.data.error));
+            return;
+          }
           worker.onmessage = null;
           resolve(worker);
         };
@@ -72,8 +103,12 @@ function spawnShards(count) {
 }
 
 function maskOn(worker, values) {
-  return new Promise((resolve) => {
-    worker.onmessage = (event) => resolve(event.data);
+  return new Promise((resolve, reject) => {
+    rejectOnWorkerFailure(worker, reject);
+    worker.onmessage = (event) => {
+      if (event.data && event.data.error) reject(new Error(event.data.error));
+      else resolve(event.data);
+    };
     worker.postMessage({ values });
   });
 }
@@ -131,9 +166,12 @@ interface ShardedMasking {
 async function main(): Promise<void> {
   const rows = Number(flagValue("rows", "8000"));
   const repeats = Number(flagValue("repeats", "3"));
-  const shardCounts = flagValue("workers", "1,2,4,8")
+  const requestedShardCounts = flagValue("workers", "1,2,4,8")
     .split(",")
     .map((value) => Number(value));
+  const shardCounts = requestedShardCounts.includes(BASELINE_SHARD_COUNT)
+    ? requestedShardCounts
+    : [BASELINE_SHARD_COUNT, ...requestedShardCounts];
   const values = Array.from(
     { length: rows },
     (_, index) => `joiner-value-${index}`,
@@ -166,6 +204,10 @@ async function main(): Promise<void> {
     console.log(
       `rows=${rows} repeats=${repeats} workers=${shardCounts.join(",")} cpus=${String(availableParallelism())}`,
     );
+    if (!requestedShardCounts.includes(BASELINE_SHARD_COUNT))
+      console.log(
+        `added a ${String(BASELINE_SHARD_COUNT)}-worker run: every speedup below is measured against it`,
+      );
 
     const samples = new Map<number, Array<ShardedMasking>>();
     let digest: string | undefined;
@@ -199,7 +241,7 @@ async function main(): Promise<void> {
 
     const best = (runs: Array<ShardedMasking>): number =>
       Math.min(...runs.map((run) => run.ms));
-    const single = best(samples.get(shardCounts[0])!);
+    const single = best(samples.get(BASELINE_SHARD_COUNT)!);
     console.log("");
     console.log("| config | best ms | spread ms | rows/s | speedup |");
     console.log("| --- | --- | --- | --- | --- |");

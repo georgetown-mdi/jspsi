@@ -167,6 +167,7 @@ type ShardResult =
 
 type ShardReply =
   | { id: number; ready: true }
+  | { id: number; loadFailed: true; error: string }
   | { id: number; ok: true; result: ShardResult }
   | { id: number; ok: false; error: string };
 
@@ -293,23 +294,104 @@ function serveShardWorker(
     try {
       port.postMessage({ id: request.id, ok: true, result: run(request) });
     } catch (failure) {
-      const text = failure instanceof Error ? failure.message : String(failure);
-      port.postMessage({ id: request.id, ok: false, error: text });
+      port.postMessage({
+        id: request.id,
+        ok: false,
+        error: messageOf(failure),
+      });
     }
   });
 
-  void PSI().then((library) => {
-    psi = library;
-    server = library.server!.createFromKey(seed.serverKey, REVEAL_INTERSECTION);
-    client = library.client!.createFromKey(seed.clientKey, REVEAL_INTERSECTION);
-    port.postMessage({ id: 0, ready: true });
-  });
+  void PSI()
+    .then((library) => {
+      psi = library;
+      server = library.server!.createFromKey(
+        seed.serverKey,
+        REVEAL_INTERSECTION,
+      );
+      client = library.client!.createFromKey(
+        seed.clientKey,
+        REVEAL_INTERSECTION,
+      );
+      port.postMessage({ id: 0, ready: true });
+    })
+    .catch((failure: unknown) => {
+      port.postMessage({ id: 0, loadFailed: true, error: messageOf(failure) });
+    });
+}
+
+function messageOf(failure: unknown): string {
+  return failure instanceof Error ? failure.message : String(failure);
+}
+
+interface PendingShardRequest {
+  readonly resolve: (result: ShardResult) => void;
+  readonly reject: (failure: Error) => void;
 }
 
 interface ShardHandle {
   readonly worker: Worker;
-  readonly pending: Map<number, (reply: ShardReply) => void>;
+  readonly pending: Map<number, PendingShardRequest>;
   nextId: number;
+  failure?: Error;
+  fail(failure: Error): void;
+}
+
+interface WatchedShard {
+  readonly handle: ShardHandle;
+  readonly ready: Promise<void>;
+}
+
+/**
+ * Wires one shard worker's replies, its readiness and its failures. A worker
+ * that fails to load its engine, throws, or exits fails both its readiness and
+ * every request still waiting on it, so a broken shard ends the run with that
+ * error rather than leaving the driver waiting on a reply that never comes.
+ */
+function watchShardWorker(worker: Worker): WatchedShard {
+  let markReady!: () => void;
+  let failReady!: (failure: Error) => void;
+  const ready = new Promise<void>((resolve, reject) => {
+    markReady = resolve;
+    failReady = reject;
+  });
+  const handle: ShardHandle = {
+    worker,
+    pending: new Map(),
+    nextId: 1,
+    fail(failure: Error): void {
+      handle.failure ??= failure;
+      failReady(handle.failure);
+      for (const [id, pending] of [...handle.pending]) {
+        handle.pending.delete(id);
+        pending.reject(handle.failure);
+      }
+    },
+  };
+  worker.on("message", (reply: ShardReply) => {
+    if ("ready" in reply) {
+      markReady();
+      return;
+    }
+    if ("loadFailed" in reply) {
+      handle.fail(new Error(reply.error));
+      return;
+    }
+    const pending = handle.pending.get(reply.id);
+    handle.pending.delete(reply.id);
+    if (!pending) return;
+    if (reply.ok) pending.resolve(reply.result);
+    else pending.reject(new Error(reply.error));
+  });
+  worker.on("error", (failure: unknown) => {
+    handle.fail(
+      failure instanceof Error ? failure : new Error(messageOf(failure)),
+    );
+  });
+  worker.on("exit", (code: number) => {
+    handle.fail(new Error(`shard worker exited with code ${String(code)}`));
+  });
+  return { handle, ready };
 }
 
 /**
@@ -320,39 +402,37 @@ interface ShardHandle {
 export class ShardedPsiDriver {
   private readonly handles: ShardHandle[];
 
+  private inFlight = false;
+
   private constructor(handles: ShardHandle[]) {
     this.handles = handles;
   }
 
   /** Spawns `shardCount` workers and resolves once every engine has loaded. */
-  static async spawn(
-    keys: ShardKeys,
-    shardCount: number,
-  ): Promise<ShardedPsiDriver> {
+  static spawn(keys: ShardKeys, shardCount: number): Promise<ShardedPsiDriver> {
     const seed: ShardWorkerSeed = { shardWorker: true, ...keys };
-    const handles: ShardHandle[] = [];
-    const ready: Array<Promise<void>> = [];
-    for (let shard = 0; shard < shardCount; shard += 1) {
-      const worker = new Worker(new URL(import.meta.url), { workerData: seed });
-      const handle: ShardHandle = { worker, pending: new Map(), nextId: 1 };
-      handles.push(handle);
-      ready.push(
-        new Promise<void>((resolve, reject) => {
-          worker.on("message", (reply: ShardReply) => {
-            if ("ready" in reply) {
-              resolve();
-              return;
-            }
-            const settle = handle.pending.get(reply.id);
-            handle.pending.delete(reply.id);
-            settle?.(reply);
-          });
-          worker.on("error", reject);
-        }),
-      );
-    }
-    await Promise.all(ready);
-    return new ShardedPsiDriver(handles);
+    return ShardedPsiDriver.over(
+      Array.from(
+        { length: shardCount },
+        () => new Worker(new URL(import.meta.url), { workerData: seed }),
+      ),
+    );
+  }
+
+  /** @internal */
+  static over(workers: ReadonlyArray<Worker>): Promise<ShardedPsiDriver> {
+    const shards = workers.map(watchShardWorker);
+    return Promise.all(shards.map((shard) => shard.ready)).then(
+      () => new ShardedPsiDriver(shards.map((shard) => shard.handle)),
+      async (failure: unknown) => {
+        await Promise.all(
+          shards.map((shard) => shard.handle.worker.terminate()),
+        );
+        throw failure instanceof Error
+          ? failure
+          : new Error(messageOf(failure));
+      },
+    );
   }
 
   /** How many shards this driver splits a value set across. */
@@ -360,17 +440,28 @@ export class ShardedPsiDriver {
     return this.handles.length;
   }
 
+  // The driver keeps one split for the operation in flight, so a second
+  // operation started before the first settles would read the wrong ranges back.
+  private runExclusive<T>(operation: () => Promise<T>): Promise<T> {
+    if (this.inFlight)
+      return Promise.reject(
+        new Error("the sharded PSI driver runs one operation at a time"),
+      );
+    this.inFlight = true;
+    return operation().finally(() => {
+      this.inFlight = false;
+    });
+  }
+
   private ask(
     handle: ShardHandle,
     body: ShardRequestBody,
   ): Promise<ShardResult> {
+    if (handle.failure) return Promise.reject(handle.failure);
     const id = handle.nextId;
     handle.nextId += 1;
     return new Promise<ShardResult>((resolve, reject) => {
-      handle.pending.set(id, (reply) => {
-        if ("ok" in reply && reply.ok) resolve(reply.result);
-        else if ("ok" in reply) reject(new Error(reply.error));
-      });
+      handle.pending.set(id, { resolve, reject });
       handle.worker.postMessage({ id, ...body } as ShardRequest);
     });
   }
@@ -386,7 +477,7 @@ export class ShardedPsiDriver {
   }
 
   // The split the operation in flight is using, read back when its shard
-  // results are merged. The driver runs one operation at a time.
+  // results are merged.
   private ranges: ShardRange[] = [];
 
   private rangesFor(shard: number): ShardRange {
@@ -394,85 +485,100 @@ export class ShardedPsiDriver {
   }
 
   /** Masks the starter's values across the shards, merged into one setup. */
-  async maskServerValues(values: ReadonlyArray<string>): Promise<MergedSetup> {
-    this.ranges = shardRanges(values.length, this.shardCount);
-    const results = await this.broadcast((range) => ({
-      op: "maskServerValues",
-      values: values.slice(range.start, range.end),
-    }));
-    return mergeSetupShards(
-      results.map((result, shard) => ({
-        start: this.ranges[shard]!.start,
-        elements: (result as { elements: Uint8Array[] }).elements,
-        permutation: (result as { permutation: number[] }).permutation,
-      })),
-    );
+  maskServerValues(values: ReadonlyArray<string>): Promise<MergedSetup> {
+    return this.runExclusive(async () => {
+      this.ranges = shardRanges(values.length, this.shardCount);
+      const results = await this.broadcast((range) => ({
+        op: "maskServerValues",
+        values: values.slice(range.start, range.end),
+      }));
+      return mergeSetupShards(
+        results.map((result, shard) => ({
+          start: this.ranges[shard]!.start,
+          elements: (result as { elements: Uint8Array[] }).elements,
+          permutation: (result as { permutation: number[] }).permutation,
+        })),
+      );
+    });
   }
 
   /** Masks the joiner's values across the shards, merged in input order. */
-  async maskClientValues(values: ReadonlyArray<string>): Promise<Uint8Array[]> {
-    this.ranges = shardRanges(values.length, this.shardCount);
-    const results = await this.broadcast((range) => ({
-      op: "maskClientValues",
-      values: values.slice(range.start, range.end),
-    }));
-    return concatShardElements(
-      results.map((result) => (result as { elements: Uint8Array[] }).elements),
-    );
+  maskClientValues(values: ReadonlyArray<string>): Promise<Uint8Array[]> {
+    return this.runExclusive(async () => {
+      this.ranges = shardRanges(values.length, this.shardCount);
+      const results = await this.broadcast((range) => ({
+        op: "maskClientValues",
+        values: values.slice(range.start, range.end),
+      }));
+      return concatShardElements(
+        results.map(
+          (result) => (result as { elements: Uint8Array[] }).elements,
+        ),
+      );
+    });
   }
 
   /** Re-masks the partner's request elements across the shards. */
-  async reMaskElements(
-    elements: ReadonlyArray<Uint8Array>,
-  ): Promise<Uint8Array[]> {
-    this.ranges = shardRanges(elements.length, this.shardCount);
-    const results = await this.broadcast((range) => ({
-      op: "reMaskElements",
-      elements: elements.slice(range.start, range.end),
-    }));
-    return concatShardElements(
-      results.map((result) => (result as { elements: Uint8Array[] }).elements),
-    );
+  reMaskElements(elements: ReadonlyArray<Uint8Array>): Promise<Uint8Array[]> {
+    return this.runExclusive(async () => {
+      this.ranges = shardRanges(elements.length, this.shardCount);
+      const results = await this.broadcast((range) => ({
+        op: "reMaskElements",
+        elements: elements.slice(range.start, range.end),
+      }));
+      return concatShardElements(
+        results.map(
+          (result) => (result as { elements: Uint8Array[] }).elements,
+        ),
+      );
+    });
   }
 
   /** Hands every shard the partner's setup, which each one matches against. */
-  async loadServerSetup(setupBytes: Uint8Array): Promise<void> {
-    await Promise.all(
-      this.handles.map((handle) =>
-        this.ask(handle, { op: "loadServerSetup", setupBytes }),
-      ),
-    );
+  loadServerSetup(setupBytes: Uint8Array): Promise<void> {
+    return this.runExclusive(async () => {
+      await Promise.all(
+        this.handles.map((handle) =>
+          this.ask(handle, { op: "loadServerSetup", setupBytes }),
+        ),
+      );
+    });
   }
 
   /** Matches the partner's response across the shards, merged into one table. */
-  async matchResponseElements(
+  matchResponseElements(
     elements: ReadonlyArray<Uint8Array>,
   ): Promise<[number[], number[]]> {
-    this.ranges = shardRanges(elements.length, this.shardCount);
-    const results = await this.broadcast((range) => ({
-      op: "matchResponseElements",
-      elements: elements.slice(range.start, range.end),
-    }));
-    return mergeAssociationShards(
-      results.map((result, shard) => ({
-        start: this.ranges[shard]!.start,
-        localIndices: (result as { localIndices: number[] }).localIndices,
-        partnerIndices: (result as { partnerIndices: number[] }).partnerIndices,
-      })),
-    );
+    return this.runExclusive(async () => {
+      this.ranges = shardRanges(elements.length, this.shardCount);
+      const results = await this.broadcast((range) => ({
+        op: "matchResponseElements",
+        elements: elements.slice(range.start, range.end),
+      }));
+      return mergeAssociationShards(
+        results.map((result, shard) => ({
+          start: this.ranges[shard]!.start,
+          localIndices: (result as { localIndices: number[] }).localIndices,
+          partnerIndices: (result as { partnerIndices: number[] })
+            .partnerIndices,
+        })),
+      );
+    });
   }
 
   /** What the shards cost: the process resident set, and each isolate's own. */
-  async memory(): Promise<ShardMemory> {
-    const results = (await Promise.all(
-      this.handles.map((handle) => this.ask(handle, { op: "reportMemory" })),
-    )) as Array<{ processResidentBytes: number; isolateBytes: number }>;
-    return {
-      processResidentBytes: Math.max(
-        ...results.map((result) => result.processResidentBytes),
-      ),
-      isolateBytes: results.map((result) => result.isolateBytes),
-    };
+  memory(): Promise<ShardMemory> {
+    return this.runExclusive(async () => {
+      const results = (await Promise.all(
+        this.handles.map((handle) => this.ask(handle, { op: "reportMemory" })),
+      )) as Array<{ processResidentBytes: number; isolateBytes: number }>;
+      return {
+        processResidentBytes: Math.max(
+          ...results.map((result) => result.processResidentBytes),
+        ),
+        isolateBytes: results.map((result) => result.isolateBytes),
+      };
+    });
   }
 
   /** Terminates every shard worker, freeing its engine with the isolate. */

@@ -1,8 +1,11 @@
+import { Worker } from "node:worker_threads";
+
 import { beforeAll, describe, expect, test } from "vitest";
 
 import PSI from "@openmined/psi.js";
 
 import {
+  ShardedPsiDriver,
   concatShardElements,
   mergeAssociationShards,
   mergeSetupShards,
@@ -216,6 +219,59 @@ describe("sharded PSI masking reassembly", () => {
       expect(ranges.at(-1)!.end).toBe(23);
       for (let index = 1; index < ranges.length; index += 1)
         expect(ranges[index]!.start).toBe(ranges[index - 1]!.end);
+    }
+  });
+});
+
+// The driver's failure and concurrency rules, driven over stand-in workers so a
+// crash and an overlapping call can be provoked without a WASM engine.
+describe("sharded PSI driver", () => {
+  const workerOver = (body: string): Worker =>
+    new Worker(
+      `const { parentPort } = require("node:worker_threads");
+       parentPort.postMessage({ id: 0, ready: true });
+       ${body}`,
+      { eval: true },
+    );
+
+  test("a shard worker that throws rejects the operation waiting on it", async () => {
+    const driver = await ShardedPsiDriver.over([
+      workerOver(`parentPort.on("message", () => {
+         throw new Error("the shard worker crashed");
+       });`),
+    ]);
+    try {
+      await expect(driver.maskClientValues(["one", "two"])).rejects.toThrow(
+        "the shard worker crashed",
+      );
+    } finally {
+      await driver.dispose();
+    }
+  });
+
+  test("a second operation started before the first settles is refused", async () => {
+    const driver = await ShardedPsiDriver.over([
+      workerOver(`parentPort.on("message", (request) => {
+         setTimeout(
+           () =>
+             parentPort.postMessage({
+               id: request.id,
+               ok: true,
+               result: { elements: [] },
+             }),
+           20,
+         );
+       });`),
+    ]);
+    try {
+      const first = driver.maskClientValues(["one"]);
+      await expect(driver.maskClientValues(["two"])).rejects.toThrow(
+        "one operation at a time",
+      );
+      await expect(first).resolves.toEqual([]);
+      await expect(driver.maskClientValues(["three"])).resolves.toEqual([]);
+    } finally {
+      await driver.dispose();
     }
   });
 });

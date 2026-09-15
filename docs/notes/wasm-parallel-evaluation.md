@@ -129,7 +129,8 @@ baseline.
 | 4 workers | 1,406 | 1,406-1,517 | 5,690 | 2.74x |
 | 8 workers | 939 | 939-1,058 | 8,524 | 4.10x |
 
-Chromium 1234 headless, `--enable-precise-memory-info`. The concatenated masked
+Headless Chromium 151.0.7922.34, the `chromium-1234` build playwright 1.62.1
+installs, run with `--enable-precise-memory-info`. The concatenated masked
 elements were identical across all four configurations.
 
 ## Memory
