@@ -317,29 +317,51 @@ not used: it lives in a module an environment with strict application control
 can refuse to load, and that refusal is a non-terminating error, so the command
 still exits successfully with nothing listed.
 
-The listing is therefore taken whole or not at all. A PowerShell that cannot be
-run, a read that fails, an empty rule set, and output that is not the listing's
-`sid;rights;type` shape throughout each count as a failure to read, because
-neither an empty listing nor an unreadable one can be told apart from a file
-with nothing granted on it and either would otherwise pass the check with no
-entry examined. On any of those the CLI falls back to `icacls`, which checks
-only explicit (non-inherited) non-owner ACEs -- and on a host where a new
-file's SYSTEM and Administrators entries are explicit rather than inherited,
-that tier names them too. Its warning says what it did not inspect, and a
-warning about a file that is in fact narrowed is the direction that does not
-hide one that is not.
+The load check has three results:
 
-That tier is read whole or not at all as well: `icacls` failing to run, and
+- The access list was checked and grants no principal other than the owner and
+  the two exempt ones read access. Nothing is logged.
+- It was checked and does grant another principal read access. The
+  over-permissive warning names the file, the secret it holds, and the
+  remediation.
+- It could not be checked. A warning says so, naming the file and the `icacls`
+  invocation that reads its access list by hand.
+
+A tier that measures nothing produces the third result, never the first. That
+rule is what makes the silent result mean something: an unread listing, one
+holding no entry the tier inspects, and no identity to judge a listing against
+are each indistinguishable from a file that grants nothing, so any of them
+passing silently would report a file as owner-only without having examined it.
+
+The PowerShell listing is therefore taken whole or not at all. A PowerShell that
+cannot be run, a read that fails, an empty rule set, and output that is not the
+listing's `sid;rights;type` shape throughout -- each principal a SID in string
+form, each rights and type an integer -- count as a failure to read. On any of
+those the CLI falls back to `icacls`.
+
+`icacls` prints inherited entries as well as explicit ones, marking an inherited
+entry `(I)` and a deny entry `(DENY)` before the rights; both are structural
+tokens rather than localized words, measured against the tool on a
+`windows-latest` runner. That tier judges explicit allow entries alone, so those
+are the only ones that tell it anything, and a listing of inherited and deny
+entries only -- what a file that inherits its whole access list prints, a
+foreign grant among them -- is the unchecked result rather than the silent one.
+On a host where a new file's SYSTEM and Administrators entries are explicit
+rather than inherited, the tier names them too: its warning says what it did not
+inspect, and a warning about a file that is in fact narrowed is the direction
+that does not hide one that is not.
+
+The tier is read whole or not at all as well: `icacls` failing to run, and
 output holding no line of an entry's `principal:(flags)` shape, both count as a
-failure to read, for the same reason an empty PowerShell listing does. Two
-warnings report a list that could not be judged, and both name the `icacls`
-invocation to check it by hand: one that the access list could not be read
-(neither tier produced entries), and one that the current user could not be
-determined -- `whoami` failed, so `icacls` output that was read has no identity
-to be judged against. The operator is trusted and the check is advisory, so an
-unverifiable access list is reported rather than treated as a refusal to load.
-`fs.statSync` is not used for either check because it returns simulated POSIX
-mode bits that do not reflect the actual ACL.
+failure to read, for the same reason an empty PowerShell listing does. Three
+warnings report the unchecked result, each naming the `icacls` invocation to
+check the file by hand: the access list could not be read (neither tier produced
+entries), it holds no entry this check inspects, and the current user could not
+be determined -- `whoami` failed, so `icacls` output that was read has no
+identity to be judged against. The operator is trusted and the check is
+advisory, so an access list that could not be checked is reported rather than
+treated as a refusal to load. `fs.statSync` is not used for either check because
+it returns simulated POSIX mode bits that do not reflect the actual ACL.
 
 The `icacls` remediation the overview shows uses `%USERDOMAIN%\%USERNAME%`, the
 domain-qualified name (e.g. `CORP\alice` or `COMPUTER\alice`) that `icacls`

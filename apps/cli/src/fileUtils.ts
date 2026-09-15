@@ -73,18 +73,26 @@ interface WindowsAccessRule {
   type: number;
 }
 
+// The string form of a SID: `S`, a revision, an identifier authority, then the
+// subauthorities. Both the listing's own identity and every rule's principal
+// must be one, so a body that is not the listing at all -- a prompt, a
+// localized error, a truncated line -- cannot be judged as a set of rules.
+const SID_TEXT = /^S-\d+-\d+(-\d+)*$/;
+
 // The listing's own SID, then one `sid;rights;type` field per rule. Returns
 // undefined for anything that is not that shape -- a missing separator, no
-// rules, a field that does not hold three parts, a non-numeric rights or type
-// -- so a listing that cannot be read whole counts as a failure to read and
-// falls through to icacls, rather than being scanned entry by entry and found
-// to grant nothing. See
+// rules, a field that does not hold three parts, a principal that is not a SID,
+// a non-numeric rights or type -- so a listing that cannot be read whole counts
+// as a failure to read and falls through to icacls, rather than being scanned
+// entry by entry and found to grant nothing. See
 // docs/spec/CREDENTIAL_STORAGE.md#windows-write-discipline-and-load-check.
 function parseWindowsAclListing(
   listing: string,
 ): { currentSid: string; rules: WindowsAccessRule[] } | undefined {
   const sep = listing.indexOf("|");
   if (sep <= 0) return undefined;
+  const currentSid = listing.slice(0, sep);
+  if (!SID_TEXT.test(currentSid)) return undefined;
   const rules: WindowsAccessRule[] = [];
   for (const field of listing.slice(sep + 1).split("|")) {
     const parts = field.split(";");
@@ -92,19 +100,20 @@ function parseWindowsAclListing(
     const [sid, rights, type] = parts;
     // A rights mask is signed: GenericRead sets bit 31, which .NET's [int]
     // cast renders negative.
-    if (sid === "" || !/^-?\d+$/.test(rights) || !/^-?\d+$/.test(type))
+    if (!SID_TEXT.test(sid) || !/^-?\d+$/.test(rights) || !/^-?\d+$/.test(type))
       return undefined;
     rules.push({ sid, rights: Number(rights), type: Number(type) });
   }
-  return { currentSid: listing.slice(0, sep), rules };
+  return { currentSid, rules };
 }
 
 // Warn if the key file's ACL grants read access to principals other than the
 // current user and well-known system accounts. Tries the PowerShell listing
 // above (inherited and explicit entries, by SID) and falls back to icacls
-// (explicit entries only). Each tier is read whole or not at all, and when a
-// tier's listing cannot be read -- or the current user it would be judged
-// against cannot be determined -- the check says so instead of passing. See
+// (explicit allow entries only). A tier that measures nothing -- an unreadable
+// listing, no entry it inspects, no identity to judge one against -- falls
+// through to the tier below or reports the access list unchecked, never
+// silently as owner-only. The three outcomes an operator can get are in
 // docs/spec/CREDENTIAL_STORAGE.md#windows-write-discipline-and-load-check.
 function warnIfWindowsAclOverPermissive(
   keyFilePath: string,
@@ -153,10 +162,17 @@ function warnIfWindowsAclOverPermissive(
     return;
   }
 
-  // icacls fallback: explicit ACEs only.
+  // icacls fallback. It lists inherited and deny entries as well as explicit
+  // grants -- `(I)` and `(DENY)` before the rights, both structural tokens and
+  // locale-independent, measured against the real tool on windows-latest -- and
+  // this tier judges neither, so only an explicit allow entry tells it anything.
   const couldNotRead = (reason: string): string =>
     `Could not read the access list on ${keyFilePath}: ${reason}; check it ` +
     `by hand with \`icacls "${keyFilePath}"\` and restrict the file to ` +
+    `owner-only so other users cannot read the ${secretLabel}`;
+  const couldNotJudge = (reason: string): string =>
+    `The access list on ${keyFilePath} could not be checked: ${reason}; check ` +
+    `it by hand with \`icacls "${keyFilePath}"\` and restrict the file to ` +
     `owner-only so other users cannot read the ${secretLabel}`;
   let output: string;
   try {
@@ -179,6 +195,22 @@ function warnIfWindowsAclOverPermissive(
     log.warn(couldNotRead("icacls listed no recognizable entry"));
     return;
   }
+  const judgeable = aces.filter((ace) => {
+    const flags = ace.slice(ace.indexOf(":(") + 1);
+    return !flags.includes("(I)") && !flags.includes("(DENY)");
+  });
+  // A listing of inherited and deny entries alone examines nothing: the grants
+  // it holds are the ones this tier does not inspect, so passing it would be
+  // the same silent pass an empty listing would be.
+  if (judgeable.length === 0) {
+    log.warn(
+      couldNotJudge(
+        "every entry icacls listed is inherited or a deny entry, neither of " +
+          "which this check inspects",
+      ),
+    );
+    return;
+  }
   let id: string;
   try {
     id = whoami();
@@ -194,20 +226,10 @@ function warnIfWindowsAclOverPermissive(
     );
     return;
   }
-  const overPermissive = aces.some((ace) => {
-    const sep = ace.indexOf(":(");
-    const flags = ace.slice(sep + 1);
-    const isInherited = flags.includes("(I)");
-    // icacls marks deny ACEs with "(DENY)" before the rights; these are
-    // restrictive, not permissive. "(DENY)" is a structural token in icacls
-    // output, locale-independent in the same way as "(I)".
-    const isDeny = flags.includes("(DENY)");
-    return (
-      !isInherited &&
-      !isDeny &&
-      ace.slice(0, sep).trim().toLowerCase() !== id.toLowerCase()
-    );
-  });
+  const overPermissive = judgeable.some(
+    (ace) =>
+      ace.slice(0, ace.indexOf(":(")).trim().toLowerCase() !== id.toLowerCase(),
+  );
   if (overPermissive) {
     // The fallback does not inspect the rights an ACE grants (icacls' rights
     // notation is complex and locale-adjacent), so it warns about any explicit

@@ -1240,7 +1240,7 @@ function aclListing(rules: [string, number, number][]): string {
 interface AclReplies {
   powershell: string | Error;
   icacls?: string | Error;
-  whoami?: Error;
+  whoami?: string | Error;
 }
 
 // Arm the recorder so the win32 route's commands answer per `replies` instead
@@ -1254,7 +1254,8 @@ function answerAclCommands(replies: AclReplies): void {
   execFile.respond = (file) => {
     if (file === "powershell") return answer(replies.powershell);
     if (file === "icacls") return answer(replies.icacls ?? "");
-    if (file === "whoami" && replies.whoami !== undefined) throw replies.whoami;
+    if (file === "whoami" && replies.whoami !== undefined)
+      return answer(replies.whoami);
     return undefined;
   };
 }
@@ -1303,19 +1304,40 @@ async function runWindowsAclCheckFresh(
 
 const UNSPAWNABLE = new Error("spawn ENOENT");
 
-// What `icacls <path>` prints for a file carrying an explicit Guests grant: the
-// path on its own line, one entry per line under it, then the summary line
-// whose wording is locale-dependent. The entries sit below the echoed path
-// rather than beside it so the listing reads the same whatever separator the
-// host's paths use.
-function guestGrantListing(): string {
+// The layout `icacls <path>` prints, taken from a windows-latest run: the first
+// entry sits beside the echoed path, the rest are aligned under it, and a blank
+// line then a summary line whose wording is locale-dependent close the listing.
+// icacls prints backslash separators whatever the caller passed, which is what
+// the parser normalizes the path it compares against.
+function icaclsListing(entries: string[]): string {
+  const echoed = path.join(dir, "secret").replace(/\//g, "\\");
+  const [first, ...rest] = entries;
+  const indent = " ".repeat(echoed.length + 1);
   return (
-    `${path.join(dir, "secret")}\n` +
-    ` BUILTIN\\Guests:(R)\n` +
-    ` NT AUTHORITY\\SYSTEM:(I)(F)\n` +
-    `\nSuccessfully processed 1 files; Failed processing 0 files\n`
+    [`${echoed} ${first}`, ...rest.map((entry) => indent + entry)].join(
+      "\r\n",
+    ) + "\r\n\r\nSuccessfully processed 1 files; Failed processing 0 files\r\n"
   );
 }
+
+// Entries from that same run, verbatim. A file created inside a directory
+// holding an inheritable grant listed these four and nothing else: every
+// principal on it, the foreign one included, reaches it by inheritance.
+const INHERITED_ENTRIES = [
+  "BUILTIN\\Guests:(I)(R)",
+  "BUILTIN\\Administrators:(I)(F)",
+  "NT AUTHORITY\\SYSTEM:(I)(F)",
+  "BUILTIN\\Users:(I)(RX)",
+];
+// The entry `icacls <path> /grant 'Users:(R)'` added, and the one
+// `/deny 'Guests:(R)'` added, as that run printed them.
+const EXPLICIT_FOREIGN_ENTRY = "BUILTIN\\Users:(R)";
+const EXPLICIT_DENY_ENTRY = "BUILTIN\\Guests:(DENY)(R)";
+// The rights that run printed for the current user after the owner-only
+// narrowing (`/inheritance:r /grant:r`), beside a stand-in for the
+// domain-qualified name it printed them against.
+const OWNER_RIGHTS = "(M)";
+const STUB_OWNER = "RUNNERVM\\runneradmin";
 
 describe("Windows access-list check tiers", () => {
   test("a listing that exits non-zero falls through to icacls", () => {
@@ -1337,6 +1359,34 @@ describe("Windows access-list check tiers", () => {
 
   test("a malformed listing falls through to icacls", () => {
     const { commands } = runWindowsAclCheck({ powershell: "garbage|morejunk" });
+
+    expect(commands).toContain("icacls");
+  });
+
+  test("a listing holding no rule falls through to icacls", () => {
+    const { commands, warnings } = runWindowsAclCheck({
+      powershell: `${OWNER_SID}|`,
+    });
+
+    expect(commands).toContain("icacls");
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("Could not read the access list");
+  });
+
+  test("a listing whose own identity is not a SID falls through to icacls", () => {
+    // Every rule is well formed, so entry-by-entry the file reads as owner-only
+    // -- against an identity the listing did not in fact state.
+    const { commands } = runWindowsAclCheck({
+      powershell: `PS C:\\>|${OWNER_SID};${FULL_CONTROL_RIGHTS};${ALLOW}`,
+    });
+
+    expect(commands).toContain("icacls");
+  });
+
+  test("a listing whose principal is not a SID falls through to icacls", () => {
+    const { commands } = runWindowsAclCheck({
+      powershell: `${OWNER_SID}|BUILTIN\\Guests;${READ_RIGHTS};${ALLOW}`,
+    });
 
     expect(commands).toContain("icacls");
   });
@@ -1371,17 +1421,52 @@ describe("Windows access-list check tiers", () => {
   test("an explicit entry for another principal warns", () => {
     const { warnings } = runWindowsAclCheck({
       powershell: UNSPAWNABLE,
-      icacls: guestGrantListing(),
+      icacls: icaclsListing([EXPLICIT_FOREIGN_ENTRY, ...INHERITED_ENTRIES]),
     });
 
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain("granting access to other users");
   });
 
+  test("the owner's own explicit entry alone draws no warning", async () => {
+    const { warnings } = await runWindowsAclCheckFresh({
+      powershell: UNSPAWNABLE,
+      icacls: icaclsListing([`${STUB_OWNER}:${OWNER_RIGHTS}`]),
+      whoami: STUB_OWNER,
+    });
+
+    expect(warnings).toEqual([]);
+  });
+
+  test("a listing of inherited entries alone is reported unchecked", () => {
+    // The tier inspects explicit entries, so this listing -- which is what a
+    // file inheriting every one of its entries prints, a foreign grant among
+    // them -- examines nothing and must not pass as owner-only.
+    const { warnings } = runWindowsAclCheck({
+      powershell: UNSPAWNABLE,
+      icacls: icaclsListing(INHERITED_ENTRIES),
+    });
+
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("could not be checked");
+    expect(warnings[0]).toContain("inherited or a deny entry");
+    expect(warnings[0]).toContain("icacls");
+  });
+
+  test("a listing whose only explicit entry denies is reported unchecked", () => {
+    const { warnings } = runWindowsAclCheck({
+      powershell: UNSPAWNABLE,
+      icacls: icaclsListing([EXPLICIT_DENY_ENTRY, ...INHERITED_ENTRIES]),
+    });
+
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("could not be checked");
+  });
+
   test("a whoami failure says the current user could not be determined", async () => {
     const { commands, warnings } = await runWindowsAclCheckFresh({
       powershell: UNSPAWNABLE,
-      icacls: guestGrantListing(),
+      icacls: icaclsListing([EXPLICIT_FOREIGN_ENTRY, ...INHERITED_ENTRIES]),
       whoami: new Error("spawn ENOENT"),
     });
 
