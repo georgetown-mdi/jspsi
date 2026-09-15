@@ -83,6 +83,17 @@
 //   - Not matched, by construction of an AST walk: the name inside a comment or
 //     a string literal.
 //
+// STATED LIMITS beyond the ones named above:
+//
+//   - The binding walk keys on the two seat failure types listed in
+//     `FAILURE_TYPES` (`RunFailure`, `ManagedRunFailureAlert`); a component
+//     that types its prop as the shared `FailureText` shape from
+//     apps/web/src/exchange/RunSurface.tsx is outside the walk, so a read
+//     through such a prop is not reported.
+//   - `readAsCondition` admits a read only as the left operand of a logical
+//     `&&`; a `??` or `||` left operand, and every other operand position, is
+//     treated as a render and reported.
+//
 // The vacuity guards keep a green result meaningful, since every half of the
 // claim is named by identifier here and a rename would otherwise leave this
 // scanning for something that no longer exists: each tracked type's declaration
