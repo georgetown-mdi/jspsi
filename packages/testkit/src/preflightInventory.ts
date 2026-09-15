@@ -218,14 +218,13 @@ export const PREFLIGHT_INVENTORY: Record<PreflightId, PreflightRow> = {
       "one the agreed linkage terms carry",
     weight: "refuses",
     console: {
-      kind: "pending",
-      because:
-        "the appliance keeps ONE long-lived signing identity, whose party name " +
-        "is bound when it is created and left alone afterwards, so a later " +
-        "exchange under a different name diverges -- and the CLI child refuses " +
-        "such a run rather than warning through it, which reaches a console " +
-        "operator only as a launch that failed. An authoring-time surface for " +
-        "it is a known gap",
+      kind: "authored",
+      how:
+        "the console reads the party name the identity file's certificate is " +
+        "bound to when it reports the fingerprint, and refuses the launch at " +
+        "the control that starts the exchange, naming both names and the two " +
+        "ways to reconcile them; the card where the identity is authored " +
+        "points at that statement",
     },
   },
   outboundPayloadConsent: {

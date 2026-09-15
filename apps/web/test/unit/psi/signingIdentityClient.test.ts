@@ -1,5 +1,7 @@
 import { describe, expect, test } from "vitest";
 
+import { MAX_TEXT_LENGTH } from "@psilink/core";
+
 import { resolveSigningFingerprint } from "@psi/jobClient/signingIdentityClient";
 
 // The console is trusted and its fingerprint body is still re-validated field
@@ -204,6 +206,53 @@ describe("the ok body is re-validated field by field", () => {
         answering(okBody({ identityFileName })),
       ),
     ).toMatchObject({ kind: "ok", identityFileName });
+  });
+
+  test("the bound party name crosses whole, and stays absent when the server reports none", async () => {
+    // It is what the card compares with the run's agreed terms, so an absent one
+    // must stay absent: a bound name invented here would either hold a launch the
+    // run admits or clear one the run refuses.
+    expect(
+      await resolveSigningFingerprint(
+        "Agency A",
+        {},
+        answering(okBody({ boundIdentity: "County Registrar" })),
+      ),
+    ).toMatchObject({ kind: "ok", boundIdentity: "County Registrar" });
+    const unnamed = await resolveSigningFingerprint(
+      "Agency A",
+      {},
+      answering(okBody()),
+    );
+    expect("boundIdentity" in unnamed).toBe(false);
+  });
+
+  test.each([
+    ["a value that is not a string", 12345],
+    ["an empty string", ""],
+    ["a name past the terms cap", "a".repeat(MAX_TEXT_LENGTH + 1)],
+  ])(
+    "a bound party name that is %s is a malformed body, not a name to compare",
+    async (_label, boundIdentity) => {
+      expect(
+        await resolveSigningFingerprint(
+          "Agency A",
+          {},
+          answering(okBody({ boundIdentity })),
+        ),
+      ).toEqual({ kind: "error" });
+    },
+  );
+
+  test("a name at the terms cap is admitted, so the bound is the limit", async () => {
+    const boundIdentity = "a".repeat(MAX_TEXT_LENGTH);
+    expect(
+      await resolveSigningFingerprint(
+        "Agency A",
+        {},
+        answering(okBody({ boundIdentity })),
+      ),
+    ).toMatchObject({ kind: "ok", boundIdentity });
   });
 
   test("a malformed certificate name fails the whole body, not just its own field", async () => {

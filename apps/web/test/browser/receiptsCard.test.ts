@@ -12,6 +12,7 @@ import "@mantine/core/styles.css";
 import {
   IDENTITY_LABEL_REQUIRED_REASON,
   RECEIPTS_DEFAULT,
+  SIGNING_IDENTITY_DIVERGENCE_POINTER,
 } from "@psi/receiptsModel";
 import { ReceiptsCard } from "@console/ReceiptsCard";
 
@@ -276,6 +277,23 @@ describe("ReceiptsCard: asking the console for this party's fingerprint", () => 
       .toBeInTheDocument();
   });
 
+  test("binds the name the terms state, not a copy of its own", async () => {
+    // The label is `linkage_terms.identity` as the run will state it, sent
+    // verbatim: a trim or a re-normalization here would bind the key to a name
+    // those terms do not state, which the run then refuses at identity load.
+    const asTheTermsStateIt = `${IDENTITY} `;
+    const stub = stubSigningApi();
+    await renderCard(asTheTermsStateIt);
+    await chooseCertificateMode();
+
+    await createButton().click();
+
+    await expect
+      .element(page.getByLabelText("Your certificate fingerprint"))
+      .toHaveTextContent(FINGERPRINT);
+    expect(JSON.parse(stub.bodies[0])).toEqual({ identity: asTheTermsStateIt });
+  });
+
   test("distinguishes an identity that was already there", async () => {
     stubSigningApi({ responses: [{ body: okBody({ created: false }) }] });
     await renderCard();
@@ -288,6 +306,46 @@ describe("ReceiptsCard: asking the console for this party's fingerprint", () => 
       .toHaveTextContent(FINGERPRINT);
     expect(app.container.textContent).toContain(
       "Your signing identity was already set up",
+    );
+  });
+
+  test("points at the refusal when the identity is bound to another name", async () => {
+    // The identity holds the name it was bound to when it was created, and showing
+    // the fingerprint again does not rebind it, so this exchange's own name can
+    // differ -- a run the CLI refuses at identity load. The card holds the pointer;
+    // the whole statement is at the control that starts the exchange.
+    stubSigningApi({
+      responses: [
+        { body: okBody({ created: false, boundIdentity: "County Registrar" }) },
+      ],
+    });
+    await renderCard();
+    await chooseCertificateMode();
+
+    await createButton().click();
+
+    await expect
+      .element(page.getByText(SIGNING_IDENTITY_DIVERGENCE_POINTER))
+      .toBeInTheDocument();
+    // The bound name reaches the draft, which is what the run control reads.
+    expect(latestDraft.boundIdentity).toBe("County Registrar");
+  });
+
+  test("says nothing about a bound name that matches this exchange", async () => {
+    stubSigningApi({
+      responses: [{ body: okBody({ boundIdentity: IDENTITY }) }],
+    });
+    await renderCard();
+    await chooseCertificateMode();
+
+    await createButton().click();
+
+    await expect
+      .element(page.getByLabelText("Your certificate fingerprint"))
+      .toHaveTextContent(FINGERPRINT);
+    await drainSettledResponse();
+    expect(app.container.textContent).not.toContain(
+      SIGNING_IDENTITY_DIVERGENCE_POINTER,
     );
   });
 

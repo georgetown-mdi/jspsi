@@ -1,4 +1,4 @@
-import { FINGERPRINT_REGEX } from "@psilink/core";
+import { FINGERPRINT_REGEX, MAX_TEXT_LENGTH } from "@psilink/core";
 
 import {
   MAX_JOB_STATUS_RESPONSE_BYTES,
@@ -26,6 +26,11 @@ import type { JobSigningIdentityLocation } from "@jobs/intentSchemas";
  *   this call minted it, so the card can distinguish "here is your fingerprint"
  *   from "your signing identity was just created". The file names are the mount's,
  *   for copy that tells the operator what to look for and what to send.
+ *   `boundIdentity` is the party name the identity is bound to, which a reused
+ *   identity holds from when it was created rather than from this request's
+ *   label: it is what the console compares with the run's agreed terms. Absent
+ *   when the server could read no name there, which is nothing to compare
+ *   rather than agreement.
  * - `refused`: the console's own `fingerprint` run refused the request (the
  *   CLI's exit 64). Every cause reachable through this endpoint lives in the
  *   operator's mounted folder and none is distinguishable from the console
@@ -56,6 +61,7 @@ export type SigningFingerprintOutcome =
       created: boolean;
       identityFileName: string;
       certificateFileName?: string;
+      boundIdentity?: string;
     }
   | { kind: "refused" }
   | { kind: "syncing" }
@@ -67,9 +73,10 @@ export type SigningFingerprintOutcome =
   | { kind: "error" };
 
 /** Read the fingerprint body defensively: re-check the digest against the
- * canonical regex client-side, and require the file names to be non-empty single
+ * canonical regex client-side, require the file names to be non-empty single
  * segments -- they are rendered as names the operator goes looking for, so a
- * separator-bearing value is a malformed body rather than something to show. */
+ * separator-bearing value is a malformed body rather than something to show --
+ * and hold the bound party name to the length a terms document admits. */
 function fingerprintOutcomeOf(body: unknown): SigningFingerprintOutcome {
   if (!isRecord(body)) return { kind: "error" };
   const { status } = body;
@@ -78,7 +85,13 @@ function fingerprintOutcomeOf(body: unknown): SigningFingerprintOutcome {
   if (status === "absent") return { kind: "absent" };
   if (status === "timeout") return { kind: "timeout" };
   if (status !== "ok") return { kind: "error" };
-  const { fingerprint, created, identityFileName, certificateFileName } = body;
+  const {
+    fingerprint,
+    created,
+    identityFileName,
+    certificateFileName,
+    boundIdentity,
+  } = body;
   if (typeof fingerprint !== "string" || !FINGERPRINT_REGEX.test(fingerprint))
     return { kind: "error" };
   if (typeof created !== "boolean") return { kind: "error" };
@@ -88,13 +101,31 @@ function fingerprintOutcomeOf(body: unknown): SigningFingerprintOutcome {
     !isPlainFileName(certificateFileName)
   )
     return { kind: "error" };
+  if (boundIdentity !== undefined && !isBoundIdentity(boundIdentity))
+    return { kind: "error" };
   return {
     kind: "ok",
     fingerprint,
     created,
     identityFileName,
     ...(certificateFileName !== undefined ? { certificateFileName } : {}),
+    ...(boundIdentity !== undefined ? { boundIdentity } : {}),
   };
+}
+
+/**
+ * Whether a value is a party name a certificate can be bound to: a non-empty
+ * string within the length a terms document's `identity` admits. A longer one is
+ * a malformed body rather than a name to compare, since the divergence it would
+ * report cannot be reconciled by naming it in the terms. The card escapes what
+ * passes here; this is the bound, not the escape.
+ */
+function isBoundIdentity(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= MAX_TEXT_LENGTH
+  );
 }
 
 /** Whether a value is a bare file name: a non-empty single segment containing no

@@ -47,6 +47,7 @@ import {
   RECEIPTS_DEFAULT,
   receiptsIntentFields,
   receiptsProblems,
+  signingIdentityDivergence,
 } from "@psi/receiptsModel";
 import {
   RUN_DIAGNOSTICS_DEFAULT,
@@ -1691,6 +1692,11 @@ export function AcceptorScreen() {
               receiptsBlocked={
                 acceptServerJob &&
                 receiptsProblems(receipts, committedName).length > 0
+              }
+              signingIdentityDivergence={
+                acceptServerJob
+                  ? signingIdentityDivergence(receipts, committedName)
+                  : undefined
               }
               splitDirectoryProblem={splitDirectoryProblem}
               onMetadataChange={changeMetadata}

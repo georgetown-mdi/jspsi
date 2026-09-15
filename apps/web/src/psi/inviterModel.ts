@@ -290,6 +290,11 @@ export interface InviterCreateGates {
   runDiagnosticsBlocked: boolean;
   /** Whether the receipts card holds a combination the run would refuse. */
   receiptsBlocked: boolean;
+  /** Why the signing identity and the name these terms state diverge, in the
+   * console's own words, or undefined when they agree or nothing signs. Already
+   * a complete sentence naming both values and both remedies, used as-is: the
+   * receipts card holds neither remedy, so the operator meets it here. */
+  signingIdentityDivergence: string | undefined;
   /** How many spine problems the draft holds; they are named last because the
    * cards above are collapsed disclosures whose own notice is invisible until
    * opened, while a spine problem is already listed in the work column. */
@@ -324,8 +329,9 @@ function heldCreate(
  * announcement is read on its own.
  *
  * The chain follows the screen's reading order: an operator working down it
- * meets the first unresolved card first. Every gate but the offline one is
- * cleared on this step.
+ * meets the first unresolved card first. Two gates are not cleared on this step:
+ * the offline one, and the signing-identity divergence, whose two remedies are
+ * the name on the file step and a re-key at the command line.
  */
 export function inviterCreateStatus(
   gates: InviterCreateGates,
@@ -358,6 +364,11 @@ export function inviterCreateStatus(
     return heldCreate(
       "Resolve the receipts-and-record-keeping settings above to continue.",
       "Resolve the receipts-and-record-keeping settings above before you can create.",
+    );
+  if (gates.signingIdentityDivergence !== undefined)
+    return heldCreate(
+      gates.signingIdentityDivergence,
+      gates.signingIdentityDivergence,
     );
   if (gates.problemCount > 0)
     return heldCreate(

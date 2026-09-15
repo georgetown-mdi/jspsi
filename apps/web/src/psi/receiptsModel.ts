@@ -1,6 +1,8 @@
 import {
   FINGERPRINT_REGEX,
   MAX_TEXT_LENGTH,
+  reasonTermsCannotStateIdentity,
+  redactAndDisplayPartyIdentity,
   sanitizeForDisplay,
 } from "@psilink/core";
 
@@ -30,7 +32,10 @@ import type { JobRendezvousConfig } from "./jobClient/workInputClient";
  * the secrets mount instead ({@link IDENTITY_PICKED_LOCATION_NOTICE}). What the
  * pre-run refusal for the shared-mount layout does and does not see:
  * {@link IDENTITY_SHARED_MOUNT_REFUSAL_ADVISORY} and
- * {@link IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY}.
+ * {@link IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY}. A signing identity bound to a
+ * party name other than the one the agreed terms state is refused before the
+ * launch, at the control that starts the exchange
+ * ({@link signingIdentityDivergence}).
  */
 
 /**
@@ -59,6 +64,16 @@ export interface ReceiptsDraft {
    * tell an identity that exists from one that does not.
    */
   ownFingerprint?: string;
+  /**
+   * The party name the resolved signing identity is bound to, as the console
+   * read it from the identity file. Not an input either, and present only
+   * beside {@link ownFingerprint}: a reused identity holds the name bound when
+   * it was created, so this is the value the pre-launch divergence statement
+   * compares with the run's agreed terms
+   * ({@link signingIdentityDivergence}). Absent when the console could read no
+   * name there, which is nothing to compare rather than agreement.
+   */
+  boundIdentity?: string;
   /** The partner's fingerprint as raw field text; blank means no pin. */
   partnerFingerprint: string;
   /** The retention/disposition note as raw field text; blank means no note. */
@@ -85,12 +100,13 @@ export const RECEIPTS_DEFAULT: ReceiptsDraft = {
 
 /**
  * The draft with one field set. Clearing certificate mode also drops this
- * party's resolved fingerprint, so a later return to certificate mode
- * re-asks the console rather than showing a stale value -- the identity file
- * lives in a mount the operator can edit between visits. Changing the
- * identity's LOCATION drops it for the same reason and a sharper one: a
- * fingerprint read at one location says nothing about the key at another, and
- * showing it beside the new location would misreport which key signs.
+ * party's resolved fingerprint and the name it is bound to, so a later return
+ * to certificate mode re-asks the console rather than showing a stale value --
+ * the identity file lives in a mount the operator can edit between visits.
+ * Changing the identity's LOCATION drops both for the same reason and a
+ * sharper one: a fingerprint read at one location says nothing about the key at
+ * another, and showing either beside the new location would misreport which key
+ * signs and whose name it holds.
  */
 export function receiptsWithField<TField extends keyof ReceiptsDraft>(
   draft: ReceiptsDraft,
@@ -99,12 +115,38 @@ export function receiptsWithField<TField extends keyof ReceiptsDraft>(
 ): ReceiptsDraft {
   const changed: ReceiptsDraft = { ...draft, [field]: value };
   if (field === "identityLocation") {
-    const { ownFingerprint: _stale, ...moved } = changed;
+    const {
+      ownFingerprint: _stale,
+      boundIdentity: _staleName,
+      ...moved
+    } = changed;
     return moved;
   }
   if (changed.mode === "certificate") return changed;
-  const { ownFingerprint: _dropped, ...rest } = changed;
+  const {
+    ownFingerprint: _dropped,
+    boundIdentity: _droppedName,
+    ...rest
+  } = changed;
   return { ...rest, partnerFingerprint: "" };
+}
+
+/**
+ * The draft with this party's resolved fingerprint and the name its identity is
+ * bound to, set together. The two are read from one file in one request, so a
+ * draft holding the fingerprint beside a name read at some earlier moment would
+ * compare the run against a name that is no longer there: a bound name the
+ * console could not read this time drops the one it read before.
+ */
+export function receiptsWithResolvedIdentity(
+  draft: ReceiptsDraft,
+  fingerprint: string,
+  boundIdentity: string | undefined,
+): ReceiptsDraft {
+  const resolved = receiptsWithField(draft, "ownFingerprint", fingerprint);
+  if (boundIdentity !== undefined) return { ...resolved, boundIdentity };
+  const { boundIdentity: _unread, ...withoutName } = resolved;
+  return withoutName;
 }
 
 /**
@@ -212,6 +254,112 @@ export function partnerPinStatement(draft: ReceiptsDraft): string | undefined {
     ? "No partner fingerprint pinned yet. The first exchange pins the " +
         "certificate your partner presents."
     : `Pinned for your partner: ${sanitizeForDisplay(pin)}`;
+}
+
+/**
+ * What a divergence costs this run, stated the same way on both branches of
+ * {@link signingIdentityDivergence} so the remedy is the only thing that
+ * differs between them. The CLI's own refusal states the same fact
+ * (`assertIdentityMatchesAgreedTerms`, `apps/cli/src/signingIdentityDivergence.ts`).
+ */
+const DIVERGENCE_CONSEQUENCE =
+  "Your partner checks a receipt against the name in the agreed terms and " +
+  "rejects one signed under any other, so this run is refused before it " +
+  "connects.";
+
+/**
+ * The two ways out of an ordinary divergence, in the order the CLI offers them:
+ * the local edit first, because it is the cheaper of the two and a new key
+ * invalidates every fingerprint a partner has pinned. Re-keying stays a
+ * command-line action here as it does everywhere else on this card
+ * ({@link IDENTITY_REGENERATION_NOTICE}).
+ */
+const DIVERGENCE_RECONCILE_GUIDANCE =
+  "Make the two match: set 'Your name' for this exchange to the name the " +
+  "identity is bound to, or create a new signing identity under the name " +
+  "these terms state at the command line -- 'psilink fingerprint --force " +
+  "--identity' -- which gives you a new fingerprint every partner who pinned " +
+  "the old one must be sent before their verification works again.";
+
+/**
+ * The one exit left where the bound name is one no terms document may state
+ * (`reasonTermsCannotStateIdentity` in `@psilink/core`): naming it in the terms
+ * is closed to its holder, so a new identity is the only way out. Core's own
+ * answer decides which names those are, read rather than restated so this
+ * boundary and the run's cannot disagree.
+ */
+const DIVERGENCE_REKEY_GUIDANCE =
+  "Create a new signing identity under a name the terms admit at the command " +
+  "line -- 'psilink fingerprint --force --identity' -- then send every " +
+  "partner who pinned the old fingerprint the new one before their " +
+  "verification works again.";
+
+/**
+ * The one line the card shows about a divergence, where the identity itself is
+ * displayed. The whole statement -- both names and both remedies -- is at the
+ * control that starts the exchange, which is where the operator is when the
+ * refusal applies to them ({@link signingIdentityDivergence}).
+ */
+export const SIGNING_IDENTITY_DIVERGENCE_POINTER =
+  "This signing identity is bound to a different name than the one this " +
+  "exchange names you by, so the run is refused: both names and the two ways " +
+  "to fix it are stated with the control that starts this exchange.";
+
+/**
+ * The pre-launch statement for a signed run whose signing identity is bound to
+ * a party name other than the one the agreed terms state -- both names and how
+ * to reconcile them -- or undefined when there is nothing to state.
+ *
+ * A REFUSAL rather than an advisory, matching the CLI, which refuses such a run
+ * at identity load before any connection, credential, or data leaves the
+ * machine (`assertIdentityMatchesAgreedTerms`, whose wording this follows).
+ * Warn-and-guide governs a choice the operator may legitimately make (CLAUDE.md,
+ * Applications); this run cannot complete either way, so the console holds the
+ * launch rather than spending the operator's press on it.
+ *
+ * Undefined in each of the three states that leave nothing to compare: no
+ * certificate asked for, no identity resolved yet, and an identity whose bound
+ * name the console could not read ({@link ReceiptsDraft.boundIdentity}) -- a
+ * refusal is owed a positive finding.
+ *
+ * The comparison is exact, over the terms identity as the run will state it
+ * rather than a trimmed form of it, because that is the value the partner
+ * authorizes the certificate against and the value the run's own refusal
+ * compares (held to core's own predicate by
+ * `apps/web/test/unit/jobs/consoleReceipts.unit.test.ts`).
+ *
+ * Both names are escaped here, the single escape site since neither value
+ * becomes an `Error` on this path (CONTRIBUTING.md, Operator-facing escaping);
+ * the bound one comes out of a file the operator's own command line may have
+ * written, so it is display-escaped like any other value read from the mount. A
+ * bound name no terms document may state is never named at all, for the reason
+ * core's own answer gives.
+ */
+export function signingIdentityDivergence(
+  draft: ReceiptsDraft,
+  identity: string,
+): string | undefined {
+  if (draft.mode !== "certificate") return undefined;
+  const bound = draft.boundIdentity;
+  // An unnamed exchange has nothing to diverge from, the same line the CLI's
+  // divergesFromAgreedTerms draws.
+  if (bound === undefined || identity.length === 0 || bound === identity)
+    return undefined;
+  const termsName = redactAndDisplayPartyIdentity(identity);
+  const unstatable = reasonTermsCannotStateIdentity(bound);
+  if (unstatable !== undefined)
+    return (
+      "Your signing identity is bound to a name the agreed terms cannot " +
+      `state -- ${unstatable} -- so it differs from the "${termsName}" this ` +
+      "exchange names you by, and no change to 'Your name' can bring the two " +
+      `into agreement. ${DIVERGENCE_CONSEQUENCE} ${DIVERGENCE_REKEY_GUIDANCE}`
+    );
+  return (
+    `Your signing identity is bound to "${redactAndDisplayPartyIdentity(
+      bound,
+    )}", and this exchange names you "${termsName}". ` +
+    `${DIVERGENCE_CONSEQUENCE} ${DIVERGENCE_RECONCILE_GUIDANCE}`
+  );
 }
 
 /**

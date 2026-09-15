@@ -26,6 +26,7 @@ import {
 import { StandardizationPreview } from "@components/StandardizationPreview";
 import { linkageRefusalFor } from "@psi/linkageRefusal";
 import { probePeerAnswerCopy } from "@console/SftpAuthoringForm";
+import { signingIdentityDivergence } from "@psi/receiptsModel";
 
 import type { PreflightId } from "@psilink/testkit/preflightInventory";
 import type { SftpConnectionFormValues } from "@console/sftpConnectionForm";
@@ -76,7 +77,7 @@ const CONSOLE_SURFACES: Record<PreflightId, ConsoleSurface> = {
   ignoredOfflineOverrides: null,
   keyFilePath: null,
   hostKeyTrust: ["@console/SftpAuthoringForm", probePeerAnswerCopy],
-  identityDivergence: null,
+  identityDivergence: ["@psi/receiptsModel", signingIdentityDivergence],
   outboundPayloadConsent: [
     "@exchange/acceptorColumnsModel",
     acceptorDisclosedColumns,
@@ -150,7 +151,7 @@ describe("every row is dispositioned in the console", () => {
     // dropped so that building the boundary is a change to this list, not a
     // rediscovery, and each names no console surface -- a pending row that still
     // pointed at a symbol would read as covered.
-    for (const id of ["jobAdmission", "identityDivergence"] as const) {
+    for (const id of ["jobAdmission"] as const) {
       expect([id, PREFLIGHT_INVENTORY[id].console.kind]).toEqual([
         id,
         "pending",

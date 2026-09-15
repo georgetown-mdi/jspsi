@@ -327,6 +327,12 @@ interface AcceptorLaunchStepBlocks {
    * rather than a flag, because the remedy is the one control to turn on and the
    * blocked-launch line is where the operator meets it. */
   splitDirectoryProblem?: string;
+  /** Why the signing identity and the name these terms state diverge, in the
+   * console's own words, or undefined when they agree or nothing signs. Its own
+   * SENTENCE for the reason above, and a sharper one: neither remedy is a
+   * control on this screen -- one is the name committed at the consent gate, the
+   * other a re-key at the command line. */
+  signingIdentityDivergence?: string;
 }
 
 const NO_STEP_BLOCKS: AcceptorLaunchStepBlocks = {
@@ -365,7 +371,9 @@ const NO_STEP_BLOCKS: AcceptorLaunchStepBlocks = {
  * conflict, the over-long name notice, the identifier rule, the cleaning steps,
  * the connection, the split rendezvous's retain-mode requirement, and the
  * file-handling and connection-tuning cards -- so an operator working down the
- * screen is sent to the first unresolved card. Each reason is
+ * screen is sent to the first unresolved card. The signing-identity divergence
+ * comes last of all: it is the one reason whose remedies are both off this
+ * screen. Each reason is
  * worded from the notice it points at, and none names a partner-controlled key.
  */
 export function acceptorLaunchBlockedReason(
@@ -439,6 +447,8 @@ export function acceptorLaunchBlockedReason(
     return "Resolve the diagnostics-and-recovery settings above before you can start.";
   if (stepBlocks.receiptsBlocked)
     return "Resolve the receipts-and-record-keeping settings above before you can start.";
+  if (stepBlocks.signingIdentityDivergence !== undefined)
+    return stepBlocks.signingIdentityDivergence;
   return undefined;
 }
 

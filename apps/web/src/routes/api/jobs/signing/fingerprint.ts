@@ -67,11 +67,18 @@ const fingerprintBodySchema = z.strictObject({
 /**
  * The typed 200 envelope for a fingerprint attempt that RAN: a completed attempt
  * is always a 200 with a discriminated body. Success includes the re-validated
- * fingerprint, whether this call created the identity, and the two mount FILE
+ * fingerprint, whether this call created the identity, the two mount FILE
  * NAMES the console's copy points the operator at -- names, never paths, so no
- * container location crosses the boundary. Anything else is a category
- * (`refused` / `absent` / `timeout` / `error`), so the client reads the outcome
- * from the body rather than from the status.
+ * container location crosses the boundary -- and the party name the identity is
+ * bound to, absent when the file names none the console can read. Anything else
+ * is a category (`refused` / `absent` / `timeout` / `error`), so the client
+ * reads the outcome from the body rather than from the status.
+ *
+ * The bound name is the operator's own label out of their own mount, and it is
+ * what lets the console state a divergence from the run's agreed terms before
+ * the run is launched. It is free text from a file rather than a value this
+ * schema admitted, so the client bounds it and the card escapes it where it
+ * shows it.
  *
  * The identity's file name is the console's own constant at the default
  * location, and the last segment the request picked at a configured one -- a
@@ -90,6 +97,9 @@ function fingerprintEnvelope(
     identityFileName,
     ...(result.certificateExported
       ? { certificateFileName: SIGNING_CERTIFICATE_FILE_NAME }
+      : {}),
+    ...(result.boundIdentity !== undefined
+      ? { boundIdentity: result.boundIdentity }
       : {}),
   };
 }
@@ -120,8 +130,8 @@ function pickedFileName(
  * action stays on the command line (`psilink fingerprint --force`).
  *
  * The request contains an identity label, a boolean, and a mount locator ONLY;
- * the response contains a fingerprint, a created flag, and file names ONLY --
- * never a container path (every path stays with the manager,
+ * the response contains a fingerprint, a created flag, file names, and the bound
+ * party name ONLY -- never a container path (every path stays with the manager,
  * {@link JobManager.resolveSigningFingerprint}; child stderr is discarded before
  * it reaches this layer). `gateJobRoute` 404s a hosted build or an unset
  * `JOB_DATA_ROOT`; the body is capped at
