@@ -803,6 +803,10 @@ image, so a re-measurement builds with `--no-cache` or it measures the cache.
   the `nodejs.org` tarball `ARG NODE_VERSION` names, so neither package manager
   records either and no generated list names one. What holds each is the base
   digest and that tarball's committed hash above; a pin is not an attribution.
+  A row naming either -- planted in a committed list, or measured off an image
+  whose package set moved -- fails the generator and the scripts test beside it,
+  naming the Section 889 claim in [COMPLIANCE.md](../COMPLIANCE.md#section-889)
+  that rests on this limit.
 - The license field is the string the package manager declares, not an audit of
   the package's contents. Nothing here verifies that a package's files match
   what its own metadata states.

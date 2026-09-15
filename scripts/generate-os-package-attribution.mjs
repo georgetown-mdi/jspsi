@@ -31,6 +31,12 @@
 // nothing at all, so a run that parses no row fails here rather than reporting
 // an empty package set.
 //
+// A row naming a Node.js runtime package fails the run. docs/COMPLIANCE.md's
+// Section 889 paragraph and docs/spec/CONTAINER_IMAGES.md both state that
+// neither the release SBOM nor these lists cover the Node.js runtime, each image
+// installing it outside its package manager; a list holding such a row would
+// falsify both.
+//
 // A license string is recorded exactly as declared. A disjunction is a
 // licensing call rather than a measurement and nothing here resolves one, and
 // the two distributions mix notations -- legacy Fedora shorthand beside SPDX
@@ -250,6 +256,30 @@ function compareByCodeUnit(left, right) {
   return left > right ? 1 : 0;
 }
 
+// The package names either distribution ships a Node.js runtime, or the npm
+// bundled with it, under: the plain name, a major-versioned one (nodejs22), and
+// a split-out subpackage (nodejs-libs, nodejs-full-i18n).
+const NODE_RUNTIME_PACKAGE = /^(node|nodejs|npm)\d*(-.+)?$/;
+
+/**
+ * Fails when a row names a Node.js runtime package, naming the claim it breaks.
+ *
+ * docs/COMPLIANCE.md's Section 889 paragraph states that the Node.js runtime is
+ * covered by neither the release SBOM nor these lists, because each image
+ * installs it as an upstream binary distribution rather than as a package its
+ * manager records; docs/spec/CONTAINER_IMAGES.md states the same limit. Such a
+ * row fails here rather than landing in a list the claim no longer holds for.
+ * Only the package column is read, the header's base pin naming node:26-alpine.
+ */
+export function assertNoNodeRuntimePackage(rows, listFile) {
+  const named = rows.filter((row) => NODE_RUNTIME_PACKAGE.test(row.name));
+  if (named.length === 0) return;
+  const packages = named.map((row) => `${row.name} ${row.version}`).join(", ");
+  throw new Error(
+    `${listFile} names the Node.js runtime as an OS package: ${packages}. docs/COMPLIANCE.md's Section 889 paragraph states that neither the release SBOM nor these lists cover the Node.js runtime, because each image installs it outside its package manager, and docs/spec/CONTAINER_IMAGES.md states the same limit. Reconcile both before committing a list that names one.`,
+  );
+}
+
 /**
  * The base image digest a Dockerfile pins.
  *
@@ -436,12 +466,9 @@ export function generateList(
     readFileSync(resolve(root, image.dockerfile), "utf8"),
     image.dockerfile,
   );
-  return renderList(
-    variant,
-    normalizeRows(image.parse(queryOutput)),
-    pin,
-    comparedOn,
-  );
+  const rows = normalizeRows(image.parse(queryOutput));
+  assertNoNodeRuntimePackage(rows, image.listFile);
+  return renderList(variant, rows, pin, comparedOn);
 }
 
 function usage() {
