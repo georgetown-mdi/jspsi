@@ -510,12 +510,15 @@ const VALUE_LINE_BREAK_MARKER = replaceControlCharactersForDisplay("\n");
  *
  * A break is laid out in front of each {@link VALUE_LINE_BREAK_MARKER} as well,
  * so a diagnosis a CLI child wrote over several lines is read over several
- * lines instead of as one wrapped line of markers. It is layout only: the
- * message is already escaped when it arrives here, the marker stays in the text
- * at the head of the line it opens, and a line a value's own break started is
- * therefore distinguishable from a cause-link boundary, which opens on the
- * renderer's `caused by: ` text. Since no value can spell a raw break, nothing
- * a child writes reaches the operator as a boundary of the seat's chain.
+ * lines instead of as one wrapped line of markers. It is layout only: the marker
+ * stays in the text at the head of the line it opens, so a line a value's own
+ * break started is distinguishable from a cause-link boundary, which opens on
+ * the renderer's `caused by: ` text. That distinction holds on the CAUSE-CHAIN
+ * path, whose message is escaped upstream (`sanitizedFailureMessage` in
+ * `./useInviterExchange`) and so reaches this sink with a value's breaks as
+ * markers alone; the column-name refusal path (`JobIntentColumnNameError` ->
+ * `consoleJobColumnRefusalAlert`) states the operator's own header bytes, which
+ * are bounded and bidi-isolated but not control-escaped.
  */
 export function FailureMessage({ message }: { message: string }) {
   return (

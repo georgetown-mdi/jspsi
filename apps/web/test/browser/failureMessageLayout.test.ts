@@ -8,6 +8,8 @@ import { createElement } from "react";
 import "@mantine/core/styles.css";
 
 import {
+  DEFAULT_MAX_DISPLAY_LENGTH,
+  DISPLAY_TRUNCATION_MARKER,
   errorWithPartnerCauseLinks,
   joinErrorCauseChain,
   partnerOriginText,
@@ -58,6 +60,40 @@ const STDERR_LABEL = "the CLI last wrote on stderr: ";
 /** Two lines of a CLI diagnosis: its own refusal and its own cause chain, which
  * spells the renderer's framing where the child chose it. */
 const CHILD_TAIL = "The run stopped.\ncaused by: the server refused the key.";
+
+/**
+ * A diagnosis of several lines, for the over-budget delivery the fit truncates.
+ * Each line is short enough that the wide desktop viewport lays it out on one
+ * line box, and each opens on a word of its own, so a line the cut kept whole is
+ * told from one the cut landed inside. The last spells the renderer's framing
+ * where the child chose it, away from the head of its line.
+ */
+const TRUNCATED_CHILD_LINES = [
+  "alpha: the run stopped in step one",
+  "bravo: the key file was unreadable",
+  "charlie: the server closed the link",
+  "delta: no results were written out",
+  "echo: the retry window has expired",
+  "foxtrot: caused by: the key refused",
+];
+
+/** The line the cut drops, wide enough that the tail runs past the value's
+ * budget whatever the padding below adds. */
+const DROPPED_CHILD_LINE =
+  "the run wrote this line first, and the fit drops it";
+
+/**
+ * The room the value's budget leaves its text, once the fit has paid for the
+ * truncation notice out of that same budget. The budget is core's default
+ * display bound, which the one elimination fits each value to and exports under
+ * no name of its own.
+ *
+ * A cut that fell on either EDGE of a control-character marker fills this room;
+ * a cut that fell INSIDE one leaves it short by the marker fragment the fit
+ * trimmed off the head of what it kept.
+ */
+const TRUNCATED_VALUE_ROOM =
+  DEFAULT_MAX_DISPLAY_LENGTH - DISPLAY_TRUNCATION_MARKER.length;
 
 const app = createAppMount();
 
@@ -139,6 +175,45 @@ function seatMessageForStderrTail(tail: string): string {
   ).message;
 }
 
+/**
+ * A seat message for a tail too wide for its budget, whose cut fell INSIDE one
+ * of the tail's own line-break markers: the fit trims the fragment that leaves
+ * behind (`trimPartialControlCharacterMarkerAtStart`), so the child's next line
+ * opens what the cut kept with nothing marking its head.
+ *
+ * Reached by composing rather than by arithmetic over the budgets. The fit keeps
+ * the END of the value, so what a marker's distance from the cut depends on is
+ * the text AFTER it: one padding character on the tail's last line moves the cut
+ * one place, and a short search over that padding reaches every offset the cut
+ * can take inside a marker. The kept text being short of
+ * {@link TRUNCATED_VALUE_ROOM} is what tells such a cut from one that fell on
+ * the marker's edge, which keeps the same line whole and trims nothing.
+ */
+function messageCutInsideAValueLineBreak(): {
+  message: string;
+  firstKeptLine: string;
+  kept: string;
+} {
+  for (let padding = 0; padding <= 64; padding += 1) {
+    const message = seatMessageForStderrTail(
+      [
+        DROPPED_CHILD_LINE,
+        ...TRUNCATED_CHILD_LINES.slice(0, -1),
+        `${TRUNCATED_CHILD_LINES.at(-1)}${".".repeat(padding)}`,
+      ].join("\n"),
+    );
+    const truncatedAt = message.indexOf(DISPLAY_TRUNCATION_MARKER);
+    if (truncatedAt === -1) continue;
+    const kept = message.slice(truncatedAt + DISPLAY_TRUNCATION_MARKER.length);
+    const firstKeptLine = TRUNCATED_CHILD_LINES.find((line) =>
+      kept.startsWith(line),
+    );
+    if (firstKeptLine !== undefined && kept.length < TRUNCATED_VALUE_ROOM)
+      return { message, firstKeptLine, kept };
+  }
+  throw new Error("no padding length cut the tail inside a line-break marker");
+}
+
 test("a relayed two-link failure lays its links out on separate lines", async () => {
   // Composed the way a console seat composes one: a relayed terminal error,
   // through the seat's own display pass.
@@ -191,6 +266,37 @@ test("a line a stderr link's own break opened is not a cause-link boundary", asy
   expect(
     lines.filter((line) => line.startsWith(VALUE_LINE_BREAK_MARKER)),
   ).toHaveLength(1);
+});
+
+test("a truncated delivery opens no line on the child's own text", async () => {
+  const { message, firstKeptLine, kept } = messageCutInsideAValueLineBreak();
+  // The cut fell inside the marker in front of this line: the line arrives
+  // whole, the marker is gone, and what the trimmed fragment cost is what the
+  // kept text is short by.
+  expect(message).toContain(`${DISPLAY_TRUNCATION_MARKER}${firstKeptLine}`);
+  expect(kept.length).toBeLessThan(TRUNCATED_VALUE_ROOM);
+
+  const span = await mountedMessage(message);
+  const lines = renderedLines(span);
+  expect(lines[0]).toBe(REFUSAL);
+  // The kept text continues the line the label and the truncation notice
+  // opened rather than opening one of its own, which is the case no marker
+  // stands in front of.
+  expect(lines[1]).toBe(
+    `${CAUSE_LINK_OPENING}${STDERR_LABEL}${DISPLAY_TRUNCATION_MARKER}${firstKeptLine}`,
+  );
+  expect(lines.filter((line) => line.startsWith(firstKeptLine))).toEqual([]);
+  // Every other line is one of the tail's own breaks, with the marker at its
+  // head, so no line the child's text opened reads as a link boundary -- the
+  // last of them spells `caused by: ` behind that marker.
+  expect(
+    lines.slice(2).filter((line) => !line.startsWith(VALUE_LINE_BREAK_MARKER)),
+  ).toEqual([]);
+  // One line per break the tail holds, plus the two the renderer framed: a line
+  // that wrapped for width would leave a line more than the breaks account for.
+  expect(lines).toHaveLength(
+    message.split(VALUE_LINE_BREAK_MARKER).length - 1 + 2,
+  );
 });
 
 test("the seat breaks the line without changing the message it was handed", async () => {
