@@ -98,6 +98,28 @@ describe("what a stored set of parked results admits", () => {
     expect(parseParkedResults(value)).toEqual(value);
   });
 
+  test("round-trips the folder outcome a result above the bound met", () => {
+    for (const fallback of ["ungranted", "write-failed"] as const) {
+      const value = results({
+        kind: "too-large",
+        runAt: RUN_AT,
+        resultBytes: 210_000_000,
+        fallback,
+      });
+      expect(parseParkedResults(value)).toEqual(value);
+    }
+    expect(() =>
+      parseParkedResults(
+        results({
+          kind: "too-large",
+          runAt: RUN_AT,
+          resultBytes: 210_000_000,
+          fallback: "elsewhere",
+        } as never),
+      ),
+    ).toThrow();
+  });
+
   test("round-trips the counts a run declared, on any shape of entry", () => {
     const pairTableFactors = { local: 12_000, partner: 9_000 };
     const value = results(

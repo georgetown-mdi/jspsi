@@ -316,9 +316,10 @@ async function deliverUnattendedResults(
   if (fallback === undefined) return;
   // The folder took nothing, so what is left is this browser -- which holds a
   // result only up to its own bound. Above it nothing is kept and nothing is
-  // shortened: the state goes in the rows' place, and its remedy is the folder.
+  // shortened: the state goes in the rows' place, naming the folder outcome
+  // whose remedy the operator is owed.
   if (!resultFitsParkedBound(csv.size)) {
-    await recordResultsTooLargeToPark(id, runAt, csv.size, details);
+    await recordResultsTooLargeToPark(id, runAt, csv.size, details, fallback);
     return;
   }
   try {
@@ -360,6 +361,20 @@ type RunEntryDetails = Pick<
   "matchedRecordCount" | "pairTableFactors"
 >;
 
+/** What the diagnostic line for a result above the bound says to do about the
+ * folder that would have taken it, one phrase per outcome that reached the
+ * bound. */
+const TOO_LARGE_FOLDER_REMEDY: Record<ParkedResultsFallback | "none", string> =
+  {
+    none: "granting an output folder is what takes a result this size",
+    ungranted:
+      "the granted output folder could not be used with nobody present, and " +
+      "granting it again is what takes a result this size",
+    "write-failed":
+      "the write to the granted output folder failed; check that the folder " +
+      "still exists and has room",
+  };
+
 /**
  * Record that a run's results were above the size this browser keeps, so the next
  * visit meets the state and its remedy rather than a gap. Never rejects: the run
@@ -371,12 +386,13 @@ async function recordResultsTooLargeToPark(
   runAt: string,
   resultBytes: number,
   details: RunEntryDetails,
+  fallback: ParkedResultsFallback | "none",
 ): Promise<void> {
   log.warn(
     `scheduled managed exchange ${id}: the run's results are ` +
       `${String(resultBytes)} bytes, above the ` +
       `${String(MAX_PARKED_RESULT_BYTES)} this browser keeps, so none of them ` +
-      `were kept; granting an output folder is what takes a result this size`,
+      `were kept; ${TOO_LARGE_FOLDER_REMEDY[fallback]}`,
   );
   try {
     await recordResultsTooLarge(id, {
@@ -384,6 +400,7 @@ async function recordResultsTooLargeToPark(
       runAt,
       resultBytes,
       ...details,
+      ...(fallback === "none" ? {} : { fallback }),
     });
   } catch (error) {
     log.error(
@@ -425,15 +442,14 @@ async function writeUnattendedResultsToFolder(
     log.warn(
       `scheduled managed exchange ${id}: the granted output folder reports ` +
         `permission ${delivery.state} with nobody present, so the run's ` +
-        `results are kept in this browser instead`,
+        `results were not written to it`,
     );
     return "ungranted";
   }
   if (delivery.kind === "write-failed") {
     log.warn(
       `scheduled managed exchange ${id}: the run's results could not be ` +
-        `written to the granted output folder, so they are kept in this ` +
-        `browser instead:`,
+        `written to the granted output folder:`,
       delivery.error,
     );
     return "write-failed";

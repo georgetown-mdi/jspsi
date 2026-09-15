@@ -1281,7 +1281,7 @@ optional `pairTableFactors`, the two declared record counts described under
 | Results | `fileName` (the download name: the exchange's label and the run's stamp), `csv` (the results file as a `Blob`), optional `matchedRecordCount`, optional `fallback` (`"ungranted"` \| `"write-failed"`) | The run's results, waiting for the operator; `fallback` names why a granted folder did not take them, and is absent where no grant was held |
 | Written | `kind: "written"`, `fileName`, `directoryName` (the granted folder's own name, the leaf a handle reports -- no path is disclosed to the app), optional `matchedRecordCount` | The run's results are in the granted folder; this entry is the note saying where, and holds no rows |
 | Storage refused | `kind: "storage-refused"` | This browser would not store that run's results; the rows are gone and the run itself stands |
-| Too large | `kind: "too-large"`, `resultBytes` (what the results file weighed), optional `matchedRecordCount` | The run's results were above the size this browser keeps; none of them are here, none were shortened to fit, and the run itself stands |
+| Too large | `kind: "too-large"`, `resultBytes` (what the results file weighed), optional `matchedRecordCount`, optional `fallback` (`"ungranted"` \| `"write-failed"`) | The run's results were above the size this browser keeps; none of them are here, none were shortened to fit, and the run itself stands. `fallback` names which folder outcome preceded the bound, on the same values the results shape holds, and is absent where no grant was held |
 
 A written entry is the one shape that leaves no row value at rest in the browser:
 the rows are in the operator's own folder, under whatever protection that
@@ -1358,8 +1358,14 @@ there, and the accounting of disclosures is untouched.
 results are kept whole or not at all: nothing is parked, nothing is shortened,
 and the too-large shape above stands in their place under the same `runAt`,
 naming what the file weighed. Its remedy is the output-folder grant, which the
-bound does not apply to. The run's own bookkeeping is untouched, as it is for a
-refusal: the run rotated, disclosed, and succeeded before any of this.
+bound does not apply to -- and the entry's `fallback` decides which step that
+grant is, because a result this size reaches the bound from every folder outcome
+above but a landed write: choose a folder where no grant was held, grant the
+folder again where the run could not use the grant with nobody present, or check
+the folder still exists and has room where the write failed. The next visit's row
+and the run's own diagnostic line each name the case rather than the grant alone.
+The run's own bookkeeping is untouched, as it is for a refusal: the run rotated,
+disclosed, and succeeded before any of this.
 
 **A storage refusal is a recorded state, not a silent drop.** A run whose results
 the store will not take -- the quota refusing the rows is the expected case --
@@ -1382,6 +1388,19 @@ cannot record the refused state either; what the operator meets is the unreadabl
 state itself, and the run's own bookkeeping still states what the run did.
 Clearing what this exchange has parked, or deleting the exchange, removes the
 value.
+
+**What the format literal does and does not decide.** An optional field added to
+a shape -- `fallback` on the results and too-large shapes -- leaves
+`psilink-parked-results/v1` where it is. Moving it would refuse every entry an
+operator has not collected yet, which is the loss the reader-rejects-unknown rule
+exists to bound rather than to cause. A newer build reads an entry holding no
+`fallback` as the plain case, no grant held, which is what that absence means in
+the shape. The other direction the literal does not decide at all: the entry
+schema is strict down to unknown keys, so a build that does not know the field
+refuses a value holding it whatever the literal says. What bounds that direction
+is the continuous-deployment policy -- reject, re-invite, re-create (see
+[EXCHANGE_FILE.md](EXCHANGE_FILE.md#versioning-and-compatibility-policy)) -- not
+a version the two builds negotiate over.
 
 **What it discloses at rest** is not what the rest of this document describes.
 Every other store here holds presence, shape, and aggregate counts; this one
