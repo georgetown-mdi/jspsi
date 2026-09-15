@@ -63,7 +63,9 @@ jobs:
           # A scheduled workflow otherwise takes the default branch, but staging
           # is promoted to main slowly, so checking out main here would catch a
           # regression late. staging is the branch this nightly exists to watch.
-          ref: staging
+          # A manual dispatch instead takes the ref it was dispatched on, so a
+          # platform fix can be confirmed on its own branch before it lands.
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.ref_name || 'staging' }}
       # Pins Node, installs from the lockfile, and builds @psilink/core so the
       # unit tests run against the compiled fork in dist/.
       - uses: ./.github/actions/setup
@@ -82,7 +84,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           # See the macOS job's identical step above.
-          ref: staging
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.ref_name || 'staging' }}
       # Pins Node, installs from the lockfile, and builds @psilink/core so the
       # unit tests run against the compiled fork in dist/.
       - uses: ./.github/actions/setup

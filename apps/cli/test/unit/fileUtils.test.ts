@@ -1232,27 +1232,69 @@ function readAcl(filePath: string): Ace[] {
   return aces;
 }
 
-// True when the file's ACL grants only the current user, with no inherited (I)
-// ACE and no other explicit principal -- the owner-only state the writers must
-// produce. Deny ACEs are restrictive and ignored.
+// The principals the load-time check treats as owner-equivalent (EXEMPT_SIDS,
+// S-1-5-18 and S-1-5-32-544 in src/fileUtils.ts), under the names icacls prints
+// for them: SYSTEM and the local Administrators group hold standing access to
+// every file on the host, and the writers' narrowing leaves them in place.
+// icacls prints a display name rather than a SID and localizes the name of a
+// built-in principal, so on a Windows installed in another language these two
+// entries do not match and the assertions below go red.
+const OWNER_EQUIVALENT_PRINCIPALS = [
+  "nt authority\\system",
+  "builtin\\administrators",
+];
+
+// True when the file's ACL grants only the current user and those two
+// principals, with no inherited (I) ACE and no other explicit principal -- the
+// owner-only state the writers must produce. Deny ACEs are restrictive and
+// ignored.
 function isOwnerOnly(filePath: string, owner: string): boolean {
   const aces = readAcl(filePath);
   if (aces.length === 0) return false;
   return aces.every((ace) => {
     if (ace.rights.includes("(DENY)")) return true;
+    const principal = ace.principal.toLowerCase();
+    if (OWNER_EQUIVALENT_PRINCIPALS.includes(principal)) return true;
     if (ace.rights.includes("(I)")) return false;
-    return ace.principal.toLowerCase() === owner.toLowerCase();
+    return principal === owner.toLowerCase();
   });
 }
 
+// The rights icacls prints for each of the current user's own ACEs.
+function ownerRights(filePath: string, owner: string): string[] {
+  return readAcl(filePath)
+    .filter((ace) => ace.principal.toLowerCase() === owner.toLowerCase())
+    .map((ace) => ace.rights);
+}
+
 describe.skipIf(process.platform !== "win32")("Windows owner-only ACL", () => {
+  // O_TRUNC without O_CREAT asks for the TRUNCATE_EXISTING disposition, which
+  // this platform rejects, so an ACL-narrowed file cannot be reopened with a
+  // truncating open. Should a Node release start accepting it, this goes red
+  // and the branch's comment is the thing to revisit.
+  test("reopening an existing file with O_TRUNC and no O_CREAT fails", () => {
+    const p = path.join(dir, "reopened");
+    fs.writeFileSync(p, "");
+    let code: string | undefined;
+    try {
+      fs.closeSync(
+        fs.openSync(p, fs.constants.O_WRONLY | fs.constants.O_TRUNC),
+      );
+    } catch (e) {
+      code = (e as NodeJS.ErrnoException).code;
+    }
+    expect(code).toBe("EINVAL");
+  });
+
   test("each owner-only writer grants Modify to the current user only", async () => {
     const owner = currentWindowsUser();
 
     const secret = path.join(dir, "secret");
     writeFileOwnerOnly(secret, "x");
+    expect(fs.readFileSync(secret, "utf8")).toBe("x");
     expect(isOwnerOnly(secret, owner)).toBe(true);
-    expect(readAcl(secret).some((a) => a.rights.includes("(M)"))).toBe(true);
+    // Modify, the level the writers grant, and not Full control.
+    expect(ownerRights(secret, owner)).toEqual(["(M)"]);
 
     const atomic = path.join(dir, "atomic");
     writeFileAtomic(atomic, "x", 0o600);
@@ -1261,7 +1303,7 @@ describe.skipIf(process.platform !== "win32")("Windows owner-only ACL", () => {
     const streamed = path.join(dir, "streamed.csv");
     await writeAndClose(createOwnerOnlyWriteStream(streamed), "a,b\n1,2\n");
     expect(isOwnerOnly(streamed, owner)).toBe(true);
-    expect(readAcl(streamed).some((a) => a.rights.includes("(M)"))).toBe(true);
+    expect(ownerRights(streamed, owner)).toEqual(["(M)"]);
   });
 
   test("createOwnerOnlyWriteStream overwrite drops a foreign explicit ACE", async () => {
