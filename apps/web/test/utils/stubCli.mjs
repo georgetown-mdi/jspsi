@@ -11,10 +11,12 @@
 //
 // Environment variables (all optional):
 //   STUB_FD3_EVENTS   JSON array of event objects to write to fd 3, in order.
-//                     Every occurrence of the CONFIG_FILE_PLACEHOLDER token is
-//                     replaced with the value of --config-file, so a test can
-//                     stage a message naming the configuration file the real CLI
-//                     would name without knowing the workdir the driver created.
+//                     Every occurrence of the CONFIG_FILE_PLACEHOLDER token in a
+//                     string field is replaced with the --config-file value as
+//                     the real CLI spells it (see displayedConfigFile), so a test
+//                     can stage a message naming the configuration file the real
+//                     CLI would name without knowing the workdir the driver
+//                     created.
 //   STUB_FD3_RAW      A raw string written verbatim to fd 3 (for malformed-line
 //                     tests); written BEFORE STUB_FD3_EVENTS so a malformed
 //                     preamble is observed before any terminal event.
@@ -22,7 +24,8 @@
 //   STUB_STDERR       Text written to stderr before exit. The
 //                     CONFIG_FILE_PLACEHOLDER token is replaced as it is in
 //                     STUB_FD3_EVENTS, so a test can stage a refusal the real
-//                     CLI prints before its event stream is open.
+//                     CLI prints before its event stream is open. The real CLI
+//                     escapes this route too, so the same spelling is used.
 //   STUB_STDOUT       Text written to stdout before exit.
 //   STUB_OUTPUT_FILE  When set, the output positional (last argv) is written
 //                     with this content (so the result route has a file).
@@ -73,6 +76,8 @@
 import fs from "node:fs";
 
 import YAML from "yaml";
+
+import { sanitizeForDisplay } from "@psilink/core/untrusted-text";
 
 // The token STUB_FD3_EVENTS spells the --config-file value with, paired with
 // STUB_CONFIG_FILE_TOKEN in ./jobFixtures.ts (this file is spawned as a
@@ -218,8 +223,16 @@ function runExchangeStub() {
 
   if (process.env.STUB_FD3_RAW !== undefined)
     writeFd3(process.env.STUB_FD3_RAW);
-  const events = JSON.parse(
-    withConfigFile(process.env.STUB_FD3_EVENTS ?? "[]"),
+  // Substituted after the parse, per string field, rather than into the JSON
+  // text: the replacement holds a backslash for every character the display
+  // escape rewrites, which is no valid escape inside a JSON string.
+  const events = JSON.parse(process.env.STUB_FD3_EVENTS ?? "[]").map((event) =>
+    Object.fromEntries(
+      Object.entries(event).map(([key, value]) => [
+        key,
+        typeof value === "string" ? withConfigFile(value) : value,
+      ]),
+    ),
   );
   for (const event of events) writeFd3(JSON.stringify(event) + "\n");
 
@@ -258,11 +271,27 @@ function runExchangeStub() {
 }
 
 /** Text with the placeholder token spelled as the --config-file value, so a
- * staged message names the file the real CLI would name. */
+ * staged message names the file the real CLI would name. A function replacement
+ * rather than a string one, so a `$` in the path is a character and not a
+ * replacement pattern. */
 function withConfigFile(text) {
-  return text.replaceAll(
-    CONFIG_FILE_PLACEHOLDER,
+  return text.replaceAll(CONFIG_FILE_PLACEHOLDER, () => displayedConfigFile());
+}
+
+/**
+ * The --config-file value as the real CLI spells it in a message it emits:
+ * display-escaped, because the CLI escapes every message it puts on fd 3 or on
+ * stderr (`buildErrorEvent` and `buildWarningEvent` in
+ * `apps/cli/src/eventStream.ts`, and the top-level stderr render in
+ * `apps/cli/src/index.ts`). A path of printable ASCII with no backslash comes
+ * back unchanged; one holding anything else does not, and staging it raw leaves
+ * a relay searching a message for the escaped spelling untested against the
+ * spelling that actually arrives.
+ */
+function displayedConfigFile() {
+  return sanitizeForDisplay(
     separatedFlagValue(process.argv, "--config-file") ?? "",
+    { maxLength: Infinity },
   );
 }
 
