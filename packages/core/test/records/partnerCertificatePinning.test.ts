@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 import PSI from "@openmined/psi.js";
 
 import {
+  PARTNER_CERTIFICATE_REFUSAL_MESSAGES,
   prepareForExchange,
   resolvePartnerCertificateOrAbort,
   runExchange,
@@ -12,13 +13,17 @@ import { ReceiptVerificationError } from "../../src/records/signedReceipt";
 import {
   computeCertificateFingerprint,
   generateSigningIdentity,
+  partnerCertificateCondition,
 } from "../../src/records/signingIdentity";
 import { MAX_TEXT_LENGTH } from "../../src/config/linkageTermsSchema";
 
 import type { HandshakeRole } from "../../src/types";
 import type { MessageConnection } from "../../src/connection/messageConnection";
 import type { Output } from "../../src/config/linkageTermsSchema";
-import type { RunExchangeOptions } from "../../src/exchange";
+import type {
+  PartnerCertificateRefusalKind,
+  RunExchangeOptions,
+} from "../../src/exchange";
 
 // The partner-certificate pin resolved at the terms exchange: both parties
 // present their self-signed certificate on the terms envelope, each holds the
@@ -622,7 +627,7 @@ describe("a run that does not sign in band presents no certificate", () => {
   });
 });
 
-describe("every terms-time pin refusal states its own next step", () => {
+describe("every terms-time pin refusal states its own next step and condition", () => {
   // Each of the five is raised with core's `psilinkRecoveryHintEmitted` tag,
   // whose two-state convention is that an error holds it exactly when its
   // message holds the step to take. What the tag buys is a display layer
@@ -635,10 +640,12 @@ describe("every terms-time pin refusal states its own next step", () => {
   };
   const refusals: Array<{
     label: string;
+    kind: PartnerCertificateRefusalKind;
     resolution: Parameters<typeof resolvePartnerCertificateOrAbort>[1];
   }> = [
     {
       label: "a certificate the wire schema rejects",
+      kind: "unreadable",
       resolution: {
         partnerCertificate: undefined,
         partnerCertificateMalformed: true,
@@ -648,6 +655,7 @@ describe("every terms-time pin refusal states its own next step", () => {
     },
     {
       label: "a partner presenting none",
+      kind: "absent",
       resolution: {
         partnerCertificate: undefined,
         partnerCertificateMalformed: false,
@@ -657,6 +665,7 @@ describe("every terms-time pin refusal states its own next step", () => {
     },
     {
       label: "a certificate diverging from the pin",
+      kind: "divergent",
       resolution: {
         partnerCertificate: identityB.certificate,
         partnerCertificateMalformed: false,
@@ -666,6 +675,7 @@ describe("every terms-time pin refusal states its own next step", () => {
     },
     {
       label: "a certificate that does not verify under its own key",
+      kind: "unverified",
       resolution: {
         partnerCertificate: tampered,
         partnerCertificateMalformed: false,
@@ -675,6 +685,7 @@ describe("every terms-time pin refusal states its own next step", () => {
     },
     {
       label: "a certificate bound to another party",
+      kind: "unauthorizedIdentity",
       resolution: {
         partnerCertificate: identityB.certificate,
         partnerCertificateMalformed: false,
@@ -706,6 +717,33 @@ describe("every terms-time pin refusal states its own next step", () => {
       /Have the partner |Confirm the partner's fingerprint|agree terms under/,
     );
   });
+
+  test.each(refusals)(
+    "$label raises the message and condition registered for $kind",
+    async ({ kind, resolution }) => {
+      // Per branch, so a branch handed the wrong condition raises copy naming
+      // another certificate's failure -- a partner who presented none told to
+      // re-share a fingerprint -- and fails here rather than reaching an
+      // operator. The message is compared whole: a display layer identifies
+      // the refusal by the literal core raised, so a byte of it moving out of
+      // step with the published register is the same defect as the wrong
+      // branch raising it.
+      const [conn] = createMessagePipe();
+      const raised = await resolvePartnerCertificateOrAbort(
+        conn,
+        resolution,
+      ).then(
+        () => {
+          throw new Error("expected the resolution to refuse");
+        },
+        (reason: unknown) => reason,
+      );
+      expect((raised as Error).message).toBe(
+        PARTNER_CERTIFICATE_REFUSAL_MESSAGES[kind],
+      );
+      expect(partnerCertificateCondition(raised)).toBe(kind);
+    },
+  );
 
   test("an adopted first contact raises nothing to tag", async () => {
     const [conn] = createMessagePipe();
