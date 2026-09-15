@@ -40,6 +40,7 @@ import {
 } from "../../../src/onlineBootstrap";
 import type { CommonBootstrapOptions } from "../../../src/optionDefinitions";
 import { streamOf, withStdin } from "../../stdinStream";
+import { pathAsDisplayed } from "../../platformPaths";
 
 const silentLog = getLogger("online-mint-linkage-seat-test");
 silentLog.setLevel("silent");
@@ -105,7 +106,8 @@ test("the online mint states a draft shortfall without claiming an agreement", a
   // input side can act on, and it names the file the terms came from.
   expect(rendered).toContain(
     "Provide a CSV that covers the required field types, then generate the " +
-      `invitation again; these terms are derived from the CSV input ${input}.`,
+      "invitation again; these terms are derived from the CSV input " +
+      `${pathAsDisplayed(input)}.`,
   );
   // Nobody has agreed to these terms and nobody has seen them, so the refusal
   // may neither call them agreed nor send the operator to renegotiate.

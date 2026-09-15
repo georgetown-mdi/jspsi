@@ -41,6 +41,12 @@ import { PERSISTENCE_LOSS_EXIT_CODE } from "../../../src/eventStream";
 import { captureFd3 } from "../../eventStreamTestSupport";
 import { establishHostKeyTrust } from "../../../src/hostKeyTrust";
 import { captureProcessExit } from "../../exitCapture";
+import {
+  pathAsDisplayed,
+  platformAbsolutePath,
+  platformFileUrl,
+  platformLocalhostFileUrl,
+} from "../../platformPaths";
 
 // The handler hands the resolved connection to runProtocol; mock it so the
 // happy path can be driven to that hand-off without opening a transport.
@@ -240,12 +246,12 @@ const baseOptions: ConnectionOverrideOptions = {};
 
 test("createConnection filedrop: channel and path are set", () => {
   const result = createConnection(
-    new URL("file:///mnt/share/drop"),
+    platformFileUrl("/mnt/share/drop"),
     baseOptions,
   );
   expect(result.channel).toBe("filedrop");
   if (result.channel !== "filedrop") return;
-  expect(result.path).toBe("/mnt/share/drop");
+  expect(result.path).toBe(platformAbsolutePath("/mnt/share/drop"));
 });
 
 test("createConnection filedrop: non-localhost authority throws a UsageError", () => {
@@ -285,16 +291,16 @@ test("createConnection refuses a webrtc URL, naming what does run one", () => {
 
 test("createConnection filedrop: file://localhost/path is accepted", () => {
   const result = createConnection(
-    new URL("file://localhost/mnt/share/drop"),
+    platformLocalhostFileUrl("/mnt/share/drop"),
     baseOptions,
   );
   expect(result.channel).toBe("filedrop");
   if (result.channel !== "filedrop") return;
-  expect(result.path).toBe("/mnt/share/drop");
+  expect(result.path).toBe(platformAbsolutePath("/mnt/share/drop"));
 });
 
 test("createConnection filedrop: peerTimeout is converted to ms", () => {
-  const result = createConnection(new URL("file:///mnt/share/drop"), {
+  const result = createConnection(platformFileUrl("/mnt/share/drop"), {
     ...baseOptions,
     peerTimeout: 60,
   });
@@ -302,7 +308,7 @@ test("createConnection filedrop: peerTimeout is converted to ms", () => {
 });
 
 test("createConnection filedrop: connectionTimeout is converted to ms", () => {
-  const result = createConnection(new URL("file:///mnt/share/drop"), {
+  const result = createConnection(platformFileUrl("/mnt/share/drop"), {
     ...baseOptions,
     connectionTimeout: 10,
   });
@@ -316,7 +322,7 @@ test("createConnection filedrop: connectionTimeout is converted to ms", () => {
 
 test("createConnection filedrop never produces a config with authentication set", () => {
   const result = createConnection(
-    new URL("file:///mnt/share/drop"),
+    platformFileUrl("/mnt/share/drop"),
     baseOptions,
   );
   expect(
@@ -795,7 +801,7 @@ test("handler: a header the strip emptied names the removal, not the trailing co
 
     await expect(
       handler({
-        _: ["file://localhost/drop", input],
+        _: [platformLocalhostFileUrl("/drop").href, input],
         $0: "psilink",
         "config-file": path.join(dir, "psilink.yaml"),
         "key-file": path.join(dir, ".psilink.key"),
@@ -1459,8 +1465,10 @@ test("handler --save: a save that cannot reach disk warns on fd 3 and exits 73, 
     expect(lines.map((l) => l.source)).toEqual(["persistenceLoss"]);
     // Both artifacts this branch was asked to write are named, and the operator
     // is steered to invite rather than to a re-run.
-    expect(String(lines[0].message)).toContain(f.unwritableConfigFile);
-    expect(String(lines[0].message)).toContain(f.keyFile);
+    expect(String(lines[0].message)).toContain(
+      pathAsDisplayed(f.unwritableConfigFile),
+    );
+    expect(String(lines[0].message)).toContain(pathAsDisplayed(f.keyFile));
     expect(String(lines[0].message)).toContain("do not re-run");
     // The cause stays on the human log: the emitter escapes its message exactly
     // once, so pre-rendered error text would reach a supervisor double-escaped.
@@ -1526,11 +1534,12 @@ test("handler --save: a failed key save whose rollback also fails names the conf
     // The claim made about each file, against what is actually on disk.
     const notice = String(lines[0].message);
     expect(notice).toContain(
-      `the key file at ${f.unwritableKeyFile} did not reach disk`,
+      `the key file at ${pathAsDisplayed(f.unwritableKeyFile)} did not reach ` +
+        "disk",
     );
     expect(notice).toContain(
-      `the configuration at ${f.configFile} was written and could not be ` +
-        "removed",
+      `the configuration at ${pathAsDisplayed(f.configFile)} was written and ` +
+        "could not be removed",
     );
     expect(fs.existsSync(f.configFile)).toBe(true);
     expect(fs.existsSync(f.unwritableKeyFile)).toBe(false);
@@ -1578,8 +1587,8 @@ test("handler --save: a config that appeared after the pre-flight is the same lo
     expect(lines.map((l) => l.type)).toEqual(["warning"]);
     // The partner declined to save, so only the config was due; the notice must
     // not claim a key file that was never going to be written.
-    expect(String(lines[0].message)).toContain(f.configFile);
-    expect(String(lines[0].message)).not.toContain(f.keyFile);
+    expect(String(lines[0].message)).toContain(pathAsDisplayed(f.configFile));
+    expect(String(lines[0].message)).not.toContain(pathAsDisplayed(f.keyFile));
     // The conflicting file is named on the human log and left exactly as it was.
     expect(stderr).toContain("refusing to overwrite");
     expect(fs.readFileSync(f.configFile, "utf8")).toBe("preexisting: true\n");
@@ -1619,7 +1628,7 @@ test("handler --save: a completed exchange holding no bootstrap result reports t
     expect(f.exitSpy).not.toHaveBeenCalled();
     expect(lines.map((l) => l.type)).toEqual(["warning"]);
     const notice = String(lines[0].message);
-    expect(notice).toContain(f.configFile);
+    expect(notice).toContain(pathAsDisplayed(f.configFile));
     expect(notice).toContain("do not re-run");
     // Operator-facing and well-formed: the absent result reaches the notice as
     // neither an interpolated hole nor the internal wording, both of which stay
