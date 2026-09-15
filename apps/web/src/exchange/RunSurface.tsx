@@ -493,8 +493,9 @@ export function RunDownloads({
  * The sink a {@link RunFailure} message is shown through. The seat composes
  * the message as a cause chain relying on `pre-line` to turn the error
  * renderer's newline (`sanitizedFailureMessage` in `./useInviterExchange`)
- * into a line break. Every failure surface reaches it through
- * {@link FailureBody} rather than styling its own span, keeping the layout
+ * into a line break. {@link FailureAlert} and the strand-recovery panel
+ * ({@link ./RecoveredExchangePanel}) reach it through {@link FailureBody}
+ * rather than styling their own span, keeping the layout
  * `test/browser/failureMessageLayout.test.ts` measures to one component.
  */
 export function FailureMessage({ message }: { message: string }) {
