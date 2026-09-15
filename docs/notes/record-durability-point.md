@@ -62,6 +62,16 @@ Neither is bought by the question the field exists to answer. An accounting of d
 
 The residual is stated rather than closed: the value's name is narrower than its meaning, so a reader who takes the literal at face value would infer a step the run may not have reached. The specification states the coverage and the limit at the point the value is defined; renaming it would be the same format move the extra value costs, for a smaller gain.
 
+### The one arm narrowed out of it
+
+The rejection above holds for the cause taxonomy it was written against, and it is narrowed to leave out one arm. A run that terminated because the partner presented a certificate that is not the pinned identity records that finding, in a separate `certificateMismatchObserved` beside the outcome ([EXCHANGE_RECORD.md](../spec/EXCHANGE_RECORD.md#when-a-record-is-owed)) -- not as a third `outcome` value, which is the shape the section above refuses and still refuses.
+
+What separates this arm from the rest is not that its cause is more interesting. It is that every other termination in the region leaves the partner merely UNVERIFIED, which the record already documents: `partnerIdentity` is a self-asserted string, and a reader takes it as one. On this arm the run held the presented certificate and found it wrong, so the recipient's identity is positively in doubt -- a fact about the disclosure the record attests, not about which step the run ended in. An accounting entry naming a recipient the writer has grounds to doubt, with nothing saying so, is the one reading the field set was leaving wrong.
+
+Two of the section's own objections are met rather than overridden. The value set is untouched, so a reader of the `outcome` still rejects an unrecognized value and still faces two of them; the added field is a required boolean, read by a reader that has already accepted the version. And it is not free-form failure attribution: it is a two-way predicate over three findings the run makes about a document it holds, set from positive evidence and never inferred from a termination the run cannot attribute to the certificate.
+
+The rot objection the section raises against a cause or step enum is unaffected and still stands. An enum naming the step a run died in goes stale as the steps move; this predicate names no step, and what it is about -- a pinned certificate compared against a presented one -- is the trust anchor the protocol is built on rather than a stage of it. The format-version move it costs is the same one the section prices, and it was paid once for the whole field set rather than per value.
+
 ## What it does not change
 
 The receipt's all-or-nothing rule is untouched: a terminated swap still writes no partial or unverifiable dual-signed record, and the record is not one -- it is the separate unsigned artifact, and it attests only what this party itself disclosed. The run still fails, with its own exit code; keeping the record is not a rescue of the exchange. And the record's own build stays non-fatal, so a run whose record cannot be built reports that and loses nothing else.

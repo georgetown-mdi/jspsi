@@ -96,6 +96,7 @@ const baseInputs: ExchangeRecordInputs = {
   partnerTerms: termsB,
   contributedLinkageFields: everyDeclaredField(termsA),
   outcome: "completed",
+  certificateMismatchObserved: false,
   recordsExposed: 5,
   resultSize: 2,
   associationTable: [
@@ -1077,7 +1078,7 @@ describe("serialize / parse", () => {
 
   test("parseExchangeRecord rejects an unrecognized version", async () => {
     const { record } = await buildExchangeRecord(baseInputs, fixedRandomness);
-    const bumped = { ...record, version: "psilink-exchange-record/v8" };
+    const bumped = { ...record, version: "psilink-exchange-record/v9" };
     expect(() => parseExchangeRecord(bumped)).toThrow();
   });
 
@@ -1114,6 +1115,54 @@ describe("serialize / parse", () => {
     expect(reparsed).toEqual(record);
     const completed = await buildExchangeRecord(baseInputs, fixedRandomness);
     expect(completed.record.outcome).toBe("completed");
+  });
+
+  test("every record states whether a certificate mismatch was observed", async () => {
+    // Present on both outcomes, so the reader's rule is one sentence: take the
+    // value. A completed record states false, a mismatch having terminated the
+    // run it was observed in.
+    const completed = await buildExchangeRecord(baseInputs, fixedRandomness);
+    expect(completed.record.certificateMismatchObserved).toBe(false);
+
+    const terminated = await buildExchangeRecord(
+      { ...baseInputs, outcome: "receipt-swap-terminated" },
+      fixedRandomness,
+    );
+    expect(terminated.record.certificateMismatchObserved).toBe(false);
+
+    const refused = await buildExchangeRecord(
+      {
+        ...baseInputs,
+        outcome: "receipt-swap-terminated",
+        certificateMismatchObserved: true,
+      },
+      fixedRandomness,
+    );
+    expect(refused.record.certificateMismatchObserved).toBe(true);
+    expect(
+      parseExchangeRecord(JSON.parse(serializeExchangeRecord(refused.record))),
+    ).toEqual(refused.record);
+  });
+
+  test("parseExchangeRecord refuses a record with no mismatch marker", async () => {
+    // Absence is not read as "nothing was observed": a writer that dropped the
+    // field and one that observed nothing would otherwise be one document.
+    const { record } = await buildExchangeRecord(baseInputs, fixedRandomness);
+    const { certificateMismatchObserved: _dropped, ...withoutMarker } = record;
+    expect(() => parseExchangeRecord(withoutMarker)).toThrow();
+  });
+
+  test("buildExchangeRecord refuses a non-boolean mismatch marker", async () => {
+    await expect(
+      buildExchangeRecord(
+        {
+          ...baseInputs,
+          certificateMismatchObserved:
+            "yes" as unknown as ExchangeRecordInputs["certificateMismatchObserved"],
+        },
+        fixedRandomness,
+      ),
+    ).rejects.toThrow();
   });
 
   test("buildExchangeRecord refuses an outcome the format does not hold", async () => {

@@ -54,7 +54,7 @@ import type { Algorithm, AssociationTable } from "../types.js";
  * fields have moved it, are in docs/spec/EXCHANGE_RECORD.md ("Record
  * fields").
  */
-export const EXCHANGE_RECORD_VERSION = "psilink-exchange-record/v7";
+export const EXCHANGE_RECORD_VERSION = "psilink-exchange-record/v8";
 
 /** The one recognized format version for v1 {@link VerificationKeys}. */
 export const EXCHANGE_KEYS_VERSION = "psilink-exchange-keys/v1";
@@ -437,6 +437,25 @@ export interface ExchangeRecord {
    * infers a completed run from a field's silence; see
    * {@link ExchangeRecordOutcome}. */
   outcome: ExchangeRecordOutcome;
+  /** Whether the run observed that the certificate the partner presented is not
+   * the pinned identity: a fingerprint that is not the pinned one, a
+   * certificate that does not authorize the agreed identity, or a self-signature
+   * that does not verify.
+   *
+   * A mechanical two-way predicate over positive evidence, not a second reading
+   * of {@link outcome} and not a cause taxonomy. Every other termination past
+   * the disclosure point leaves the partner merely unverified, which the record
+   * already states by holding {@link partnerIdentity} as self-asserted text;
+   * this is the one arm where the recipient's identity is positively in doubt.
+   * A run that failed for a local reason -- no fingerprint pinned -- and one
+   * whose receipt signature failed over a certificate that DID match the pin
+   * both record `false`.
+   *
+   * Always present, on the rule {@link outcome} follows: a reader never infers
+   * a clean authentication from a field's silence. `false` on every completed
+   * record, a mismatch having terminated the run it was observed in. Fixed in
+   * docs/spec/EXCHANGE_RECORD.md (When a record is owed). */
+  certificateMismatchObserved: boolean;
   /** Base64url SHA-256 over the canonical encoding of both parties' terms. */
   termsHash: string;
   /** This party's self-asserted identity (from its linkage terms). Absent when
@@ -735,10 +754,17 @@ const ExchangeRecordGovernanceSchema: z.ZodType<ExchangeRecordGovernance> = z
 
 const outcomeSchema = z.enum(EXCHANGE_RECORD_OUTCOMES);
 
+// Required, not defaulted: a record that omitted the marker would read as one
+// whose writer observed nothing, which is a statement about the partner's
+// certificate the writer never made. The version literal beside it is what
+// refuses an earlier record rather than reading its silence that way.
+const certificateMismatchObservedSchema = z.boolean();
+
 const ExchangeRecordSchema: z.ZodType<ExchangeRecord> = z.object({
   version: z.literal(EXCHANGE_RECORD_VERSION),
   createdAt: createdAtSchema,
   outcome: outcomeSchema,
+  certificateMismatchObserved: certificateMismatchObservedSchema,
   termsHash: base64UrlSchema,
   localIdentity: identitySchema.optional(),
   partnerIdentity: identitySchema.optional(),
@@ -836,6 +862,14 @@ export interface ExchangeRecordInputs {
    * false completion claim in a disclosure record is the one error this field
    * exists to prevent. */
   outcome: ExchangeRecordOutcome;
+  /** Whether the run observed that the certificate the partner presented is not
+   * the pinned identity. Required for the reason `outcome` is: a default of
+   * `false` is a clean-authentication claim a caller could make by forgetting,
+   * and the silence this field exists to end is exactly that one. The run path
+   * derives it from the terminating error's own condition
+   * (`observedPartnerCertificateMismatch`, records/signingIdentity.ts), never
+   * from the failure's message text. */
+  certificateMismatchObserved: boolean;
   /** The signed receipt's per-exchange binder for this run, when the run
    * derived one. Supply it whenever the derivation succeeded -- the caller
    * derives it once and passes the same value here and into the receipt
@@ -1090,6 +1124,9 @@ export async function buildExchangeRecord(
     // caller reaching past the type with an unrecognized outcome throws here
     // rather than writing a record the parser would later reject.
     outcome: outcomeSchema.parse(inputs.outcome),
+    certificateMismatchObserved: certificateMismatchObservedSchema.parse(
+      inputs.certificateMismatchObserved,
+    ),
     termsHash,
     // Each identity is written only when its party supplied one: an absent field
     // says the party named itself none, and there is nothing else it could say.

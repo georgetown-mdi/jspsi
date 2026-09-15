@@ -104,10 +104,13 @@ import {
   certificateAuthorizesIdentity,
   computeCertificateFingerprint,
   matchesPinnedFingerprint,
+  observedPartnerCertificateMismatch,
   verifyCertificateSelfSignature,
+  withPartnerCertificateCondition,
 } from "./records/signingIdentity.js";
 import type {
   CertificateBody,
+  PartnerCertificateCondition,
   SigningCertificate,
   SigningIdentity,
 } from "./records/signingIdentity.js";
@@ -801,7 +804,12 @@ export const PARTNER_CERTIFICATE_REFUSAL_MESSAGES = {
   unverified: PARTNER_CERTIFICATE_UNVERIFIED_MESSAGE,
   unauthorizedIdentity: PARTNER_CERTIFICATE_UNAUTHORIZED_IDENTITY_MESSAGE,
   divergent: PARTNER_CERTIFICATE_DIVERGENT_MESSAGE,
-} as const;
+  // Held to the vocabulary the swap's own refusals use
+  // (PARTNER_CERTIFICATE_MISMATCH_OBSERVED, records/signingIdentity.ts), so one
+  // name means one condition wherever it is raised and a key here that no
+  // condition matches does not compile. Partial: nothing is pinned yet at the
+  // terms exchange, so `unpinned` has no refusal here.
+} as const satisfies Partial<Record<PartnerCertificateCondition, string>>;
 
 /** Which of the five refusals {@link PARTNER_CERTIFICATE_REFUSAL_MESSAGES}
  * holds: the condition the terms-time pin resolution refused on. */
@@ -820,11 +828,23 @@ export type PartnerCertificateRefusalKind =
  * The tag is per instance rather than on {@link ReceiptVerificationError}: the
  * receipt step raises that class for a signature that does not verify too, and
  * that message prescribes no step of its own.
+ *
+ * The refusal also holds the condition it refused on, on the vocabulary the
+ * swap's own refusals use, so one name means one condition at both points. All
+ * five fire before this party's payload crosses, so none of them reaches a
+ * record build; holding them to the one vocabulary is what keeps that true of
+ * the names rather than of where they happen to be raised.
  */
-function partnerCertificateRefusal(message: string): ReceiptVerificationError {
-  return Object.assign(new ReceiptVerificationError(message), {
-    psilinkRecoveryHintEmitted: true,
-  });
+function partnerCertificateRefusal(
+  condition: PartnerCertificateRefusalKind,
+  message: string,
+): ReceiptVerificationError {
+  return withPartnerCertificateCondition(
+    Object.assign(new ReceiptVerificationError(message), {
+      psilinkRecoveryHintEmitted: true,
+    }),
+    condition,
+  );
 }
 
 /**
@@ -891,11 +911,17 @@ export async function resolvePartnerCertificateOrAbort(
   const { partnerCertificate, pinnedFingerprint } = resolution;
   if (resolution.partnerCertificateMalformed) {
     await sendAbort(conn, [PARTNER_CERTIFICATE_UNREADABLE_ABORT_REASON]);
-    throw partnerCertificateRefusal(PARTNER_CERTIFICATE_UNREADABLE_MESSAGE);
+    throw partnerCertificateRefusal(
+      "unreadable",
+      PARTNER_CERTIFICATE_UNREADABLE_MESSAGE,
+    );
   }
   if (partnerCertificate === undefined) {
     await sendAbort(conn, [PARTNER_CERTIFICATE_ABSENT_ABORT_REASON]);
-    throw partnerCertificateRefusal(PARTNER_CERTIFICATE_ABSENT_MESSAGE);
+    throw partnerCertificateRefusal(
+      "absent",
+      PARTNER_CERTIFICATE_ABSENT_MESSAGE,
+    );
   }
   if (partnerPinIsPresent(pinnedFingerprint)) {
     // Constant time over the decoded digest bytes, and a malformed configured
@@ -906,7 +932,10 @@ export async function resolvePartnerCertificateOrAbort(
     if (await matchesPinnedFingerprint(partnerCertificate, pinnedFingerprint))
       return pinnedFingerprint;
     await sendAbort(conn, [PARTNER_CERTIFICATE_DIVERGENT_ABORT_REASON]);
-    throw partnerCertificateRefusal(PARTNER_CERTIFICATE_DIVERGENT_MESSAGE);
+    throw partnerCertificateRefusal(
+      "divergent",
+      PARTNER_CERTIFICATE_DIVERGENT_MESSAGE,
+    );
   }
   // First authenticated contact. The self-signature is checked before the
   // fingerprint is adopted: a certificate that does not verify under its own
@@ -915,7 +944,10 @@ export async function resolvePartnerCertificateOrAbort(
   // could satisfy.
   if (!(await verifyCertificateSelfSignature(partnerCertificate))) {
     await sendAbort(conn, [PARTNER_CERTIFICATE_UNVERIFIED_ABORT_REASON]);
-    throw partnerCertificateRefusal(PARTNER_CERTIFICATE_UNVERIFIED_MESSAGE);
+    throw partnerCertificateRefusal(
+      "unverified",
+      PARTNER_CERTIFICATE_UNVERIFIED_MESSAGE,
+    );
   }
   // The certificate also has to name the party that agreed these terms: the
   // swap authorizes it against that same name, so adopting the fingerprint of
@@ -931,6 +963,7 @@ export async function resolvePartnerCertificateOrAbort(
       PARTNER_CERTIFICATE_UNAUTHORIZED_IDENTITY_ABORT_REASON,
     ]);
     throw partnerCertificateRefusal(
+      "unauthorizedIdentity",
       PARTNER_CERTIFICATE_UNAUTHORIZED_IDENTITY_MESSAGE,
     );
   }
@@ -2494,6 +2527,14 @@ export async function runExchange(
         postDisclosureFailure === undefined
           ? "completed"
           : "receipt-swap-terminated",
+      // Read off the terminating error's own condition, never its message: a
+      // failure that says nothing about the certificate the partner presented
+      // -- a transport drop, a refused received payload, a receipt signature
+      // that did not verify over a certificate that matched the pin, a run
+      // with no pin on file -- records that none was observed.
+      certificateMismatchObserved:
+        postDisclosureFailure !== undefined &&
+        observedPartnerCertificateMismatch(postDisclosureFailure.error),
       recordsExposed: rowCount,
       contributedLinkageFields: [...dataset.fieldNames],
       resultSize: bothExpectOutput ? attestedResultSize : undefined,

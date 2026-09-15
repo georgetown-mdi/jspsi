@@ -95,6 +95,7 @@ async function roundTrip(opts: {
     partnerTerms: termsB,
     contributedLinkageFields: ["ssn"],
     outcome: "completed",
+    certificateMismatchObserved: false,
     recordsExposed: opts.rawRows.length,
     // matchedPairCount's own definition of the attested figure, read here
     // rather than restated, so a change to what a record attests is a failure
@@ -365,6 +366,7 @@ describe("reconstructCommittedData round-trips through the real build path", () 
       partnerTerms: termsB,
       contributedLinkageFields: ["ssn"],
       outcome: "completed",
+      certificateMismatchObserved: false,
       recordsExposed: idRows.length,
       resultSize: 2,
       associationTable: [

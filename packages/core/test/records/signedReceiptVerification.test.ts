@@ -683,6 +683,7 @@ describe("signedRecordExpectations", () => {
     partnerTerms: termsB,
     contributedLinkageFields: ["ssn"],
     outcome: "completed",
+    certificateMismatchObserved: false,
     recordsExposed: 5,
     resultSize: 1,
     associationTable: [[0], [0]],

@@ -118,6 +118,11 @@ export function writeExchangeRecord(
   // file and the prose about it can never disagree (docs/spec/EXCHANGE_RECORD.md,
   // When a record is owed).
   const terminated = record.outcome === "receipt-swap-terminated";
+  // The one arm on which the record narrows who received the disclosure: the
+  // partner presented a certificate that is not the pinned identity, so the
+  // self-asserted name beside it is in doubt. Read off the record for the
+  // reason the outcome is (docs/spec/EXCHANGE_RECORD.md, When a record is owed).
+  const certificateMismatch = record.certificateMismatchObserved;
   try {
     writeFileOwnerOnly(keysFilePath, serializeVerificationKeys(keys));
     keysWritten = true;
@@ -137,6 +142,11 @@ export function writeExchangeRecord(
         (terminated
           ? "; it records a disclosure this run made before the run " +
             "terminated, and states that no receipt accompanies it"
+          : "") +
+        (certificateMismatch
+          ? ". It states that the partner presented a certificate that " +
+            "is not the one pinned for them, so the partner name in the " +
+            "record is what they claimed and not what this run confirmed"
           : ""),
     );
     return undefined;

@@ -60,8 +60,9 @@ afterEach(() => {
 
 // A minimal but schema-valid record + verification-keys pair to write to disk.
 const record: ExchangeRecord = {
-  version: "psilink-exchange-record/v7",
+  version: "psilink-exchange-record/v8",
   outcome: "completed",
+  certificateMismatchObserved: false,
   createdAt: "2026-01-02T03:04:05.000Z",
   termsHash: "hQi6gjL9Z0RFtfz2TZVqXmUF1Cu8PaBFbClOJ9R8l_Q",
   localIdentity: "Party A",
@@ -241,6 +242,31 @@ test("a terminated run's record is written to the same destination", () => {
   expect(wrote).toContain("before the run terminated");
   expect(wrote).toContain("no receipt accompanies it");
   expect(wrote).not.toContain("swap");
+  // This record observed no certificate mismatch, so the line says nothing
+  // about the partner's certificate: the partner name in it is the
+  // self-asserted value every record holds, with nothing to qualify.
+  expect(wrote).not.toContain("certificate");
+});
+
+test("a record stating an observed certificate mismatch says so where the file is named", () => {
+  // The one arm on which the record narrows who received the disclosure. An
+  // operator reading the log line has to be told, since the partner name beside
+  // it is one the run has positive grounds to doubt.
+  const recordFilePath = path.join(dir, "mismatch.json");
+  expect(
+    writeExchangeRecord(
+      { recordFile: recordFilePath },
+      { ...terminatedRecord, certificateMismatchObserved: true },
+      keys,
+      "test",
+    ),
+  ).toBeUndefined();
+
+  const wrote = logCapture.infos.find((m) =>
+    m.includes("wrote self-attested exchange record"),
+  );
+  expect(wrote).toContain("not the one pinned for them");
+  expect(wrote).toContain("what they claimed");
 });
 
 test("a terminated run's lost record is not reported as a completed exchange", () => {

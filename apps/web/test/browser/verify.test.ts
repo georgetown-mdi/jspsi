@@ -87,6 +87,7 @@ async function buildFixture(receiptBinder = RECEIPT_BINDER): Promise<{
     partnerTerms: PARTNER_TERMS,
     contributedLinkageFields: ["ssn"],
     outcome: "completed",
+    certificateMismatchObserved: false,
     recordsExposed: 2,
     localPayloadSent,
     partnerPayloadReceived,
@@ -396,6 +397,7 @@ describe("verify receipt screen", () => {
       partnerTerms: PARTNER_TERMS,
       contributedLinkageFields: ["ssn"],
       outcome: "completed",
+      certificateMismatchObserved: false,
       recordsExposed: 2,
       localPayloadSent,
       partnerPayloadReceived: {

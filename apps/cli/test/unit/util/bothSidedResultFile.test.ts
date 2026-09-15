@@ -154,6 +154,7 @@ test("a both-sided result writes a cluster's whole product and attests the pair 
     partnerTerms,
     contributedLinkageFields: ["first_name"],
     outcome: "completed",
+    certificateMismatchObserved: false,
     recordsExposed: inputRows.length,
     resultSize: matchedPairCount(associationTable),
     associationTable,

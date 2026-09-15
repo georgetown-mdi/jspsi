@@ -1099,6 +1099,28 @@ function withForgedReceiptCertificate(
   };
 }
 
+/** Swap the signature on this party's outbound receipt frame for `forged`,
+ * leaving the certificate beside it -- and every other message of the exchange
+ * -- untouched. */
+function withForgedReceiptSignature(
+  conn: MessageConnection,
+  forged: string,
+): MessageConnection {
+  return {
+    send: (data) =>
+      conn.send(
+        typeof data === "object" &&
+          data !== null &&
+          "certificate" in data &&
+          "signature" in data
+          ? { ...data, signature: forged }
+          : data,
+      ),
+    receive: (timeoutMs?: number) => conn.receive(timeoutMs),
+    close: () => conn.close(),
+  };
+}
+
 /** Drop this party's outbound receipt frame, leaving every other message of the
  * exchange untouched: the partner waits on a terminal frame that never comes. */
 function withoutReceiptFrame(conn: MessageConnection): MessageConnection {
@@ -1170,6 +1192,11 @@ describe("a run terminated after its disclosure keeps the record of it", () => {
     expect((responderFailure as Error).message).toMatch(/not trusted/);
     const responderKept = exchangeRecordFromFailure(responderFailure);
     expect(responderKept?.record.outcome).toBe("receipt-swap-terminated");
+    // The responder held the presented certificate and found it was not the
+    // pinned identity, so its record states that the recipient of its
+    // disclosure is in doubt (docs/spec/EXCHANGE_RECORD.md, When a record is
+    // owed).
+    expect(responderKept?.record.certificateMismatchObserved).toBe(true);
     // The disclosure is attested as fully as a completed run's is: the record
     // commits to both payload directions and to the pairing this party received,
     // and states its own exposure.
@@ -1189,6 +1216,10 @@ describe("a run terminated after its disclosure keeps the record of it", () => {
     const initiatorKept = exchangeRecordFromFailure(initiatorFailure);
     expect(initiatorKept?.record.outcome).toBe("receipt-swap-terminated");
     expect(initiatorKept?.record.recordsExposed).toBe(clientRows.length);
+    // The initiator observed nothing about its partner's certificate: it was
+    // parked on a frame that never came. The two parties of one run record
+    // different answers, each its own.
+    expect(initiatorKept?.record.certificateMismatchObserved).toBe(false);
     // Both parties' records are of the one run: the agreed-terms hash and the
     // derived binder are values both sides compute identically.
     expect(initiatorKept?.record.termsHash).toBe(
@@ -1197,6 +1228,70 @@ describe("a run terminated after its disclosure keeps the record of it", () => {
     expect(initiatorKept?.record.receiptBinder).toBe(
       responderKept?.record.receiptBinder,
     );
+  });
+
+  test("a receipt signature that fails over a matching certificate records no mismatch", async () => {
+    // The contrast with the arm above: the certificate on the initiator's
+    // receipt frame IS the one the responder pinned, and the signature beside
+    // it is one the same party made over another run of this partnership. The
+    // pin check passes and the signature check refuses, so what the responder
+    // observed is a signature that did not verify rather than a certificate
+    // that is not the pinned identity (docs/spec/EXCHANGE_RECORD.md, When a
+    // record is owed).
+    const [rawInitiator, connResponder] = createMessagePipe();
+    const initiator = runExchange(
+      withForgedReceiptSignature(
+        rawInitiator,
+        secondRun[0].signedReceipt!.initiator.signature,
+      ),
+      "initiator",
+      prepared("Initiator Co", both, clientRows),
+      {
+        psiLibrary,
+        signingIdentity: identityA,
+        partnerFingerprint: fingerprintB,
+        sessionKey,
+      },
+    ).then(
+      () => {
+        throw new Error("expected the initiator's run to terminate");
+      },
+      (reason: unknown) => reason,
+    );
+    const responderFailure = await runExchange(
+      connResponder,
+      "responder",
+      prepared("Responder Co", both, serverRows),
+      {
+        psiLibrary,
+        signingIdentity: identityB,
+        partnerFingerprint: fingerprintA,
+        sessionKey,
+      },
+    ).then(
+      () => {
+        throw new Error(
+          "expected the responder to reject the forged signature",
+        );
+      },
+      (reason: unknown) => reason,
+    );
+
+    expect(responderFailure).toBeInstanceOf(ReceiptVerificationError);
+    expect((responderFailure as Error).message).toMatch(
+      /signature does not verify/,
+    );
+    const responderKept = exchangeRecordFromFailure(responderFailure);
+    expect(responderKept?.record.outcome).toBe("receipt-swap-terminated");
+    expect(responderKept?.record.certificateMismatchObserved).toBe(false);
+    expect(responderKept?.record.receiptBinder).toBeDefined();
+    expect(exchangeRecordOwedButUnbuilt(responderFailure)).toBe(false);
+
+    await rawInitiator.close();
+    await connResponder.close();
+    const initiatorKept = exchangeRecordFromFailure(await initiator);
+    expect(initiatorKept?.record.outcome).toBe("receipt-swap-terminated");
+    expect(initiatorKept?.record.certificateMismatchObserved).toBe(false);
   });
 
   test("a transport drop mid-swap leaves the signing party a terminated record", async () => {
@@ -1245,6 +1340,9 @@ describe("a run terminated after its disclosure keeps the record of it", () => {
     const kept = exchangeRecordFromFailure(failure);
     expect(kept?.record.outcome).toBe("receipt-swap-terminated");
     expect(kept?.record.receiptBinder).toBeDefined();
+    // A transport fault says nothing about the partner's certificate.
+    expect(kept?.record.certificateMismatchObserved).toBe(false);
+    expect(partner.audit!.record.certificateMismatchObserved).toBe(false);
   });
 
   test("a completed run's record says so, and a failure before the disclosure has none", async () => {
@@ -1254,6 +1352,7 @@ describe("a run terminated after its disclosure keeps the record of it", () => {
     // partner named nobody, which stops before any linkage key moves.
     const [completed] = await runSigned(sessionKey);
     expect(completed.audit!.record.outcome).toBe("completed");
+    expect(completed.audit!.record.certificateMismatchObserved).toBe(false);
     expect(completed.signedReceipt).toBeDefined();
 
     const [connInitiator, connResponder] = createMessagePipe();
@@ -1326,6 +1425,9 @@ describe("a run terminated after its disclosure keeps the record of it", () => {
     const kept = exchangeRecordFromFailure(failure);
     expect(kept?.record.outcome).toBe("receipt-swap-terminated");
     expect(kept?.record.recordsExposed).toBe(payloadClient.length);
+    // An unsigned run presents and pins no certificate, and the refusal is
+    // about the columns that arrived, so nothing was observed about either.
+    expect(kept?.record.certificateMismatchObserved).toBe(false);
     // The record attests both directions of the disclosure, the refused inbound
     // payload included: what arrived is part of what happened.
     expect(kept?.record.governance.payloadSent).toEqual([{ name: "note" }]);
