@@ -548,8 +548,12 @@ export type {
 export {
   describeResolvedMatching,
   describeResolvedRunShape,
+  projectPairTable,
 } from "./pairTableProjection";
-export type { ResolvedRunShape } from "./pairTableProjection";
+export type {
+  PairTableProjection,
+  ResolvedRunShape,
+} from "./pairTableProjection";
 export { describeEntityClusters } from "./entityClusterReport";
 export type {
   EntityClusterShape,

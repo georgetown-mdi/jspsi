@@ -32,6 +32,7 @@ import {
   exchangeRecordOwedButUnbuilt,
   getLogger,
   loadPsiBackend,
+  projectPairTable,
   runExchange,
 } from "@psilink/core";
 
@@ -64,6 +65,7 @@ import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 import type Peer from "peerjs";
 
 import type { ObjectUrls, RunOutputs } from "../runOutputs";
+import type { PairTableFactors } from "../resultSizeProjection";
 
 import type { ManagedExchangeRecord } from "./managedExchangeRecord";
 import type { ManagedExchangeRunResult } from "./managedExchangeRun";
@@ -144,6 +146,14 @@ export interface ManagedRunDriverConfig {
    * run status. Optional: an unattended run has nobody reading it as it goes
    * and omits it, and its own record holds the same three afterwards. */
   onResolvedMatching?: (matching: ResolvedMatching) => void;
+  /** The two record counts this run declared at the terms exchange, reported once
+   * the terms are agreed and before the first round, and only where the agreed
+   * cardinality makes the pair table their product (`projectPairTable` in
+   * `@psilink/core`). An unattended run keeps them beside what it leaves, so the
+   * next visit can project how large a result a further run on these terms would
+   * produce ({@link ../resultSizeProjection.ts}). Optional: an attended run has the
+   * operator present when its own result arrives and omits it. */
+  onPairTableFactors?: (factors: PairTableFactors) => void;
 }
 
 /**
@@ -171,6 +181,7 @@ export function runManagedExchangeInBrowser(
     urls,
     onWarning,
     onResolvedMatching,
+    onPairTableFactors,
     peerWaitTimeoutMs,
   } = config;
   const exchangeRole = HANDSHAKE_ROLE_FOR_SIDE[record.side];
@@ -351,6 +362,12 @@ export function runManagedExchangeInBrowser(
                     localDeduplicate,
                     partnerDeduplicate,
                     cardinality,
+                  });
+                const projection = projectPairTable(runShape);
+                if (projection !== undefined && !signal.aborted)
+                  onPairTableFactors?.({
+                    local: projection.localDeclaredRecordCount,
+                    partner: projection.partnerRecordCount,
                   });
                 const { cardinalityNotice, pairTableAdvisory } =
                   describeResolvedRunShape(runShape);

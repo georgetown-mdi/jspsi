@@ -38,9 +38,11 @@ import {
   resetDisclosureAccounting,
 } from "@psi/disclosureAccountingStore";
 import {
+  clearParkedResults,
   parkRunResults,
   readParkedResults,
   recordParkedResultsRefusal,
+  recordResultsWrittenToFolder,
 } from "@psi/parkedResultsStore";
 
 import {
@@ -1345,6 +1347,50 @@ describe("a scheduled run's results wait for the next visit", () => {
       recordParkedResultsRefusal(created.id, RUN_AT),
     ).rejects.toThrow();
     expect(await rawParkedStored(created.id)).toEqual(stored);
+  });
+});
+
+describe("clearing what scheduled runs left takes the bytes with it", () => {
+  test("removes the rows, the notes, and the states, and leaves no envelope", async () => {
+    const created = await createManagedExchange(newExchange());
+    await parkRunResults(created.id, parkedRun());
+    await recordResultsWrittenToFolder(created.id, {
+      kind: "written",
+      runAt: LATER_RUN_AT,
+      fileName: runResultsFileName(RESULTS_LABEL, LATER_RUN_AT),
+      directoryName: "Riverbend results",
+    });
+
+    await clearParkedResults(created.id);
+
+    expect(await readParkedResults(created.id)).toEqual({ kind: "none" });
+    // What is offered and what is at rest are the same question: a clear that
+    // stopped offering the results while leaving them on disk would be no clear.
+    expect(await rawParkedStored(created.id)).toBeUndefined();
+  });
+
+  test("removes a stored value this build cannot read, which nothing else does", async () => {
+    const created = await createManagedExchange(newExchange());
+    await putRawParkedStored(created.id, {
+      version: "psilink-parked-results/v2",
+      entries: [],
+    });
+
+    await clearParkedResults(created.id);
+
+    expect(await rawParkedStored(created.id)).toBeUndefined();
+    // The read the surface renders from no longer reports the unreadable state,
+    // so the statement naming the clear as its remedy is stating what happens.
+    expect(await readParkedResults(created.id)).toEqual({ kind: "none" });
+  });
+
+  test("leaves the exchange itself, and its accounting, standing", async () => {
+    const created = await createManagedExchange(newExchange());
+    await parkRunResults(created.id, parkedRun());
+
+    await clearParkedResults(created.id);
+
+    expect(await getManagedExchange(created.id)).toBeDefined();
   });
 });
 

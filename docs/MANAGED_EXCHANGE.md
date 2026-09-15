@@ -73,8 +73,9 @@ What managed **adds**:
   goal](#the-automation-goal-and-its-platform-envelope)).
 - **The results of those runs kept for the next visit**, since nobody is present
   to download them -- which puts linkage results at rest in the browser, bounded
-  by a stated retention and by deleting the exchange (see [Where a scheduled
-  run's results go](#where-a-scheduled-runs-results-go)).
+  by a stated retention, by a size above which nothing is kept, by a control that
+  clears them now, and by deleting the exchange (see [Where a scheduled run's
+  results go](#where-a-scheduled-runs-results-go)).
 
 What managed does **not** add:
 
@@ -453,11 +454,31 @@ put an exchange on a schedule and again where they collect the results:
   removes everything else (see [Deleting a managed
   exchange](#deleting-a-managed-exchange)).
 - **Downloading them does not remove them.** The download is a copy; the
-  retention and the delete are what remove the kept file.
+  retention, the clear, or the delete is what removes the kept file.
 - **A run this browser would not store the results of says so.** The operator
   meets that state at the next visit, beside the run's date, rather than finding
   nothing where results should be -- and the run itself stands: it rotated the
   secret and filed its disclosure.
+- **There is a size this browser will not keep**, and it is the size of file the
+  app will read: 100 MB, the same cap the intake dropzones apply. A result above
+  it is kept whole or not at all -- nothing is kept and nothing is trimmed to fit
+  -- and the next visit meets that state, the size the file weighed, and the one
+  thing that takes a result of any size, which is the granted folder. The run
+  itself stands here too.
+- **A clear control removes what is kept here, now.** One step removes the
+  results, the notes saying where results were written, and the states recorded
+  where results were not kept, without deleting the exchange. Results already in
+  a folder stay in it, and the accounting of disclosures is untouched.
+
+**A run heading for a result too large to keep is warned about first.** Once an
+exchange has run, the app projects how large a result a further run on the same
+terms would produce -- the two record counts the parties declared, multiplied,
+one result row per matched pair -- and where that is above what this browser
+keeps, it says so where the operator enters the schedule and again in the run
+history. It is a worst case, so it warns while a narrower result of the same
+shape would still fit; the remedy either way is the folder grant, which the size
+does not apply to. The arithmetic and the measurement behind it are in
+[MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md#the-parked-results-of-a-scheduled-run).
 
 Each unattended run leaves its own entry, so two runs between visits leave two
 files -- in the granted folder as in the browser, each named by the exchange's

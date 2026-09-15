@@ -31,7 +31,7 @@ import {
   resetDisclosureAccounting,
 } from "@psi/disclosureAccountingStore";
 
-import { readParkedResults } from "@psi/parkedResultsStore";
+import { clearParkedResults, readParkedResults } from "@psi/parkedResultsStore";
 
 import { MANAGED_EXCHANGE_ARTIFACT_MIME } from "@psi/managed/managedExchangeArtifact";
 import { canReinviteFromRecord } from "@psi/managed/managedReinvite";
@@ -698,6 +698,16 @@ export function ManagedRunSurface({ id }: { id: string }) {
     setParkedResultsReads((reads) => reads + 1);
   }
 
+  // Remove everything this exchange's scheduled runs left in this browser, then
+  // read the store again: what the section shows afterwards is what the store
+  // holds, not an assumption that the delete took. A rejection reaches the
+  // control, which keeps its confirm open and states the failure.
+  async function clearParked(): Promise<void> {
+    await clearParkedResults(id);
+    setParkedResultsRead(undefined);
+    setParkedResultsReads((reads) => reads + 1);
+  }
+
   return (
     <AppPage>
       <main className={styles.lobby}>
@@ -726,6 +736,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
             refusedRun={spentByRefusedRun}
             parkedResultsRead={parkedResultsRead}
             onRetryParkedResultsRead={retryParkedResultsRead}
+            onClearParkedResults={clearParked}
           />
         ) : record === undefined ? (
           <>
@@ -976,6 +987,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
               onResetAccounting={resetAccounting}
               onRetryAccountingRead={retryAccountingRead}
               onRetryParkedResultsRead={retryParkedResultsRead}
+              onClearParkedResults={clearParked}
               onSaveLocalFields={saveLocalFields}
               onGrantOutputFolder={grantOutputFolder}
               onStopUsingOutputFolder={stopUsingOutputFolder}
@@ -1344,6 +1356,7 @@ function SpentSurface({
   refusedRun = false,
   parkedResultsRead,
   onRetryParkedResultsRead,
+  onClearParkedResults,
 }: {
   spent: ManagedSpentState | undefined;
   refusedRun?: boolean;
@@ -1352,6 +1365,9 @@ function SpentSurface({
   parkedResultsRead: ParkedResultsRead | undefined;
   /** Read the parked results again, for a read that never reached the store. */
   onRetryParkedResultsRead: () => void;
+  /** Remove what earlier runs left here. A spent copy runs nothing more, so this
+   * is the only thing short of the retention that removes them. */
+  onClearParkedResults: () => Promise<void>;
 }) {
   const refused = refusedRun ? (
     <p className={styles.small}>{MANAGED_RUN_HANDED_OFF_ATTESTATION}</p>
@@ -1363,6 +1379,7 @@ function SpentSurface({
       read={parkedResultsRead}
       scheduled={false}
       onRetryRead={onRetryParkedResultsRead}
+      onClear={onClearParkedResults}
     />
   );
   if (spent === undefined)

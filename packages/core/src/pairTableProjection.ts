@@ -94,7 +94,7 @@ export const PAIR_TABLE_ADVISORY_MAX_PAIRS = 10_000_000;
  * A run's projected derived pair table: what the two counts multiply to, and
  * whether that product is above {@link PAIR_TABLE_ADVISORY_MAX_PAIRS}.
  */
-interface PairTableProjection {
+export interface PairTableProjection {
   /**
    * This party's own raw dataset record count. Not a factor of the product: it
    * is the rows the advisory names behind a declared count its cleaning fanned.

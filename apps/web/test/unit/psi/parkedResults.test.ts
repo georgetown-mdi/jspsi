@@ -88,6 +88,38 @@ describe("what a stored set of parked results admits", () => {
     ).toThrow();
   });
 
+  test("round-trips a run whose results were larger than this browser keeps", () => {
+    const value = results({
+      kind: "too-large",
+      runAt: RUN_AT,
+      resultBytes: 210_000_000,
+      matchedRecordCount: 4_000_000,
+    });
+    expect(parseParkedResults(value)).toEqual(value);
+  });
+
+  test("round-trips the counts a run declared, on any shape of entry", () => {
+    const pairTableFactors = { local: 12_000, partner: 9_000 };
+    const value = results(
+      { ...parked(), pairTableFactors },
+      {
+        kind: "too-large",
+        runAt: "2026-03-08T09:00:00.000Z",
+        resultBytes: 210_000_000,
+        pairTableFactors,
+      },
+    );
+    expect(parseParkedResults(value)).toEqual(value);
+    expect(() =>
+      parseParkedResults(
+        results({
+          ...parked(),
+          pairTableFactors: { local: 12_000.5, partner: 9_000 },
+        }),
+      ),
+    ).toThrow();
+  });
+
   test("rejects an unrecognized version rather than migrating it", () => {
     expect(() =>
       parseParkedResults({
@@ -149,6 +181,17 @@ describe("the retention the surface states", () => {
     const expiry = runAtMs + PARKED_RESULTS_RETENTION_DAYS * DAY_MS;
     expect(retainParkedResults(refusal, expiry - 1).entries).toHaveLength(1);
     expect(retainParkedResults(refusal, expiry).entries).toHaveLength(0);
+  });
+
+  test("holds the too-large state exactly as long, without re-deriving the rule", () => {
+    const tooLarge = results({
+      kind: "too-large",
+      runAt: RUN_AT,
+      resultBytes: 210_000_000,
+    });
+    const expiry = runAtMs + PARKED_RESULTS_RETENTION_DAYS * DAY_MS;
+    expect(retainParkedResults(tooLarge, expiry - 1).entries).toHaveLength(1);
+    expect(retainParkedResults(tooLarge, expiry).entries).toHaveLength(0);
   });
 
   test("drops an entry whose run instant can be held to no retention at all", () => {
