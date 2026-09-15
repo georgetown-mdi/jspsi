@@ -409,7 +409,7 @@ export function writeFileOwnerOnly(
       // One descriptor serves the file's whole life: narrowing runs against
       // the path while this descriptor stays open, and the content goes
       // through the same descriptor, so it can be fsync'd before the rename
-      // as on POSIX. Reopening the narrowed path instead is not available:
+      // as on POSIX. A truncating reopen of the narrowed path is refused:
       // Node maps O_TRUNC without O_CREAT to TRUNCATE_EXISTING, which fails
       // EINVAL here. Only the directory-entry flush (fsyncParentDir below)
       // stays POSIX-only.
