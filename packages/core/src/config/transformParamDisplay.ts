@@ -1,3 +1,4 @@
+import { snakeizeKey } from "../utils/camelizeKeys.js";
 import { holdsPrivateKeyMaterial } from "../utils/sanitizeErrorForDisplay.js";
 
 /**
@@ -64,9 +65,23 @@ export function describeTransformParamValue(value: unknown): string {
  * as, before the display sanitizer reads it. Shared with the summary so a
  * refusal below judges the same characters the sanitizer would.
  *
- * The concatenation is guarded like the encoding above: a rendered value
- * within a few code units of the engine's string limit overflows on the
- * concatenation itself, and that RangeError would escape safeParse, which
+ * The key is the snake_case spelling the document writes ({@link snakeizeKey}),
+ * the spelling every param refusal names a param in
+ * (`config/transformParamTypes.ts`), so one param has one spelling wherever a
+ * reader meets it. Validation runs on the camelized shape, and two on-disk
+ * spellings camelize alike, so the written form is the one a reader can find
+ * in the file. It takes that function's limit: a key outside the lowercase-word
+ * convention -- which a free-form params record admits, the schema's own names
+ * never being one -- renders a `_` before each of its capitals.
+ *
+ * A key holding private key material keeps the spelling it was authored in,
+ * since the display redaction downstream matches an upper-case marker and the
+ * rewrite lower-cases one: rewritten, such a key would be shown where the
+ * marker belongs.
+ *
+ * The rendering is guarded like the encoding above: a rendered value within a
+ * few code units of the engine's string limit overflows on the key rewrite or
+ * the concatenation itself, and that RangeError would escape safeParse, which
  * converts a ZodError to a result but not an internal throw. Such a line
  * renders empty, the fallback an unrenderable value takes.
  */
@@ -76,7 +91,8 @@ export function describedTransformParamEntry(
 ): string {
   const rendered = describeTransformParamValue(value);
   try {
-    return `${param}: ${rendered}`;
+    const key = holdsPrivateKeyMaterial(param) ? param : snakeizeKey(param);
+    return `${key}: ${rendered}`;
   } catch {
     return "";
   }

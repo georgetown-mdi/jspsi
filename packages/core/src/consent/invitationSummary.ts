@@ -850,11 +850,13 @@ function substringEffect(
 
 /**
  * Reduce one transform step to its display summary: the sanitized function
- * name and a bounded, sanitized `key: value` view of its parameters. Each
- * entry is sanitized and truncated as a whole (so a parameter key or value
- * cannot hold control, bidi, or homoglyph characters), and the entry count
- * is capped. `positionalSafe` lets a recognized `substring` lead with a
- * literal slice phrase (see {@link substringEffect}) on a name field.
+ * name and a bounded, sanitized `key: value` view of its parameters, each key
+ * in the spelling the document writes it ({@link describedTransformParamEntry},
+ * which a refusal of the same parameter reads too). Each entry is sanitized
+ * and truncated as a whole (so a parameter key or value cannot hold control,
+ * bidi, or homoglyph characters), and the entry count is capped.
+ * `positionalSafe` lets a recognized `substring` lead with a literal slice
+ * phrase (see {@link substringEffect}) on a name field.
  * `substitutesFallback` is core's verdict on whether a `coalesce`
  * substitutes where this step sits, which decides between its two
  * descriptions; false for every other function.

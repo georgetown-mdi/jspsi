@@ -4654,6 +4654,26 @@ describe("displayInvitation: linkage-key detail, heading order, and the repeated
     expect(lines.some((line) => /runs as/.test(line))).toBe(false);
   });
 
+  test("displayInvitation: a param is named as the document writes it", () => {
+    // The acceptor meets this name twice -- on this line and in a refusal of
+    // the same param, whose path stops at `params` -- so the two state one
+    // spelling, the one the file holds.
+    const log = getLogger("accept-display-param-spelling-test");
+    log.setLevel("silent");
+    const lines = renderDisplayInvitation(log, {
+      ...sampleToken(FUTURE()),
+      linkageTerms: probeTermsWithTransform([
+        {
+          function: "split_on",
+          params: { delimiter: ";", includeOriginal: true },
+        },
+      ]),
+    }).split("\n");
+
+    expect(lines).toContain("            - include_original: true");
+    expect(lines.some((line) => line.includes("includeOriginal"))).toBe(false);
+  });
+
   test("displayInvitation: names the fields matched on, once at the top and under each key", () => {
     // The key `name` is partner free text and would otherwise be the only line at a
     // key's own level, so an operator scanning key headings would read nothing but

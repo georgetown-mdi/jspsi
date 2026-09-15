@@ -22,8 +22,12 @@ import { deriveAcceptedLinkageTerms } from "../../src/linkageTermsNegotiation.js
 import { assertPayloadSendDisclosed } from "../../src/payloadExchange.js";
 import { withholdsSenderAssociationTable } from "../../src/psi/link.js";
 import { resolveRole } from "../../src/protocolSetup.js";
-import { parseLinkageTerms } from "../../src/config/linkageTermsSchema.js";
+import {
+  parseLinkageTerms,
+  safeParseLinkageTerms,
+} from "../../src/config/linkageTermsSchema.js";
 import { declaredTransformParamType } from "../../src/config/transformParamTypes.js";
+import { camelizeKeys } from "../../src/utils/camelizeKeys.js";
 import { runPipeline } from "../../src/standardization.js";
 
 import type { ConnectionEndpoint } from "../../src/config/invitation.js";
@@ -1225,8 +1229,8 @@ describe("the consent summary's date-collapse marker", () => {
       slice(1, 4),
     ]);
     expect(params.slice(0, 2)).toEqual([
-      "inputFormat: MM/DD/YYYY",
-      `outputFormat: ${LITERAL_REGION_FORMAT}`,
+      "input_format: MM/DD/YYYY",
+      `output_format: ${LITERAL_REGION_FORMAT}`,
     ]);
     expect(params[params.length - 1]).toBe("... 6 more");
   });
@@ -1245,7 +1249,7 @@ describe("the consent summary's date-collapse marker", () => {
       },
       slice(1, 4),
     ]);
-    expect(params[0]).toBe(`outputFormat: ${LITERAL_REGION_FORMAT}`);
+    expect(params[0]).toBe(`output_format: ${LITERAL_REGION_FORMAT}`);
     expect(params[1]).toMatch(/^flood: F+\.\.\.\[truncated\]$/);
   });
 });
@@ -1390,20 +1394,27 @@ describe("a transform param the consent summary displays", () => {
     }
   };
 
+  // A displayed line names its param in the spelling a document writes, so
+  // reading the lines back applies the camelize a decode applies before the
+  // schema -- the same read path, rather than a second reading of the name.
   const stepFromDisplay = (
     functionName: string,
     lines: readonly string[],
   ): TransformStep => {
-    const params: Record<string, unknown> = {};
-    for (const line of lines) {
-      const separator = line.indexOf(": ");
-      const param = line.slice(0, separator);
-      params[param] = valueFromDisplay(
-        functionName,
-        param,
-        line.slice(separator + 2),
-      );
-    }
+    const written = Object.fromEntries(
+      lines.map((line) => {
+        const separator = line.indexOf(": ");
+        return [line.slice(0, separator), line.slice(separator + 2)];
+      }),
+    );
+    const params = Object.fromEntries(
+      Object.entries(camelizeKeys(written) as Record<string, string>).map(
+        ([param, shown]) => [
+          param,
+          valueFromDisplay(functionName, param, shown),
+        ],
+      ),
+    );
     return { function: functionName, params };
   };
 
@@ -1456,6 +1467,39 @@ describe("a transform param the consent summary displays", () => {
       summarizeInvitation({ linkageTerms: terms }).linkageKeys[0].elements[0]
         .transforms[1].params[0],
     ).not.toContain(executed);
+  });
+
+  test("a multi-word param is spelled as its own refusal spells it", () => {
+    // The two places an acceptor meets a param name: the row this screen
+    // paints, and a refusal of that same param, whose path stops at `params`
+    // and so names the key in its message alone. A reader holding both reads
+    // one key rather than two spellings of it.
+    const declared = { delimiter: "\\|", includeOriginal: true };
+    const shown = summarizeInvitation({
+      linkageTerms: parseLinkageTerms(
+        documentWith([[{ function: "split_on", params: declared }]]),
+      ),
+    }).linkageKeys[0].elements[0].transforms[0].params.map(String);
+    expect(shown).toContain("include_original: true");
+
+    const refused = safeParseLinkageTerms(
+      documentWith([
+        [
+          {
+            function: "split_on",
+            params: { ...declared, includeOriginal: "yes" },
+          },
+        ],
+      ]),
+    );
+    expect(refused.success).toBe(false);
+    const refusal = refused.success
+      ? undefined
+      : refused.error.issues
+          .map((issue) => issue.message)
+          .find((message) => message.startsWith("split_on "));
+    expect(refusal).toContain("include_original");
+    expect(refusal).not.toContain("includeOriginal");
   });
 
   test("a regex step with no pattern never reaches the display", () => {

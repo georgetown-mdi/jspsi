@@ -546,6 +546,22 @@ describe("summarizeInvitation", () => {
   // The summary shown for a lone transform declaring `fn`.
   const transformFor = (fn: string) => transformsFor([{ function: fn }])[0];
 
+  test("names a param as the document writes it", () => {
+    // The terms screen paints these entries as core renders them, and the
+    // acceptor meets the same name in a refusal of the param, whose path stops
+    // at `params`. One spelling for both, the one the file holds.
+    const params = transformsFor([
+      {
+        function: "split_on",
+        params: { delimiter: ";", includeOriginal: true },
+      },
+    ])[0].params.map(String);
+    expect(params).toContain("include_original: true");
+    expect(params.some((entry) => entry.includes("includeOriginal"))).toBe(
+      false,
+    );
+  });
+
   test("the transform glossary stays in sync with core's function set", () => {
     // Two-directional: every function core recognizes has a description, and the
     // glossary has no entry for a function core does not (a stale key). A new
