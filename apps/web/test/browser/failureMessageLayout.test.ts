@@ -16,7 +16,11 @@ import {
   replaceControlCharactersForDisplay,
 } from "@psilink/core";
 
-import { FailureMessage } from "@exchange/RunSurface";
+import {
+  FailureAlert,
+  FailureMessage,
+  REPORTED_CAUSE_LABEL,
+} from "@exchange/RunSurface";
 import { RelayedTerminalError } from "@psi/jobClient/serverJobExchangeDriver";
 import { failureFor } from "@exchange/useInviterExchange";
 
@@ -42,6 +46,11 @@ vi.mock("@psi/transport/rendezvous", async () =>
 // seat lays a break in front of each marker, and the measurements below are
 // over that: how many line boxes those markers produce, and what opens each of
 // them.
+//
+// Which element holds that chain is the category's choice -- the message span
+// where the category has no copy of its own, the labeled report block where it
+// does -- and a retained stderr tail reaches the operator through either, so
+// both are measured.
 
 const REFUSAL = "The appliance refused the run.";
 const RECOVERY = "Fix the mounted config, then run it again.";
@@ -113,6 +122,26 @@ async function mountedMessage(message: string): Promise<HTMLSpanElement> {
 }
 
 /**
+ * The labeled report block of a mounted failure alert, found by the label ahead
+ * of it -- the alert's title is a span of Mantine's own, so the block is reached
+ * through the label rather than by position among the alert's elements.
+ */
+async function mountedReport(
+  failure: ReturnType<typeof failureFor>,
+): Promise<HTMLElement> {
+  app.render(createElement(FailureAlert, { failure }));
+  return await vi.waitFor(() => {
+    const label = [...app.container.querySelectorAll("p")].find(
+      (node) => node.textContent === REPORTED_CAUSE_LABEL,
+    );
+    const report = label?.nextElementSibling;
+    if (!(report instanceof HTMLElement))
+      throw new Error("the failure alert shows no reported cause");
+    return report;
+  });
+}
+
+/**
  * The line boxes a rendered message occupies, by their offset down the page. An
  * inline element yields a client rect per box fragment rather than per line --
  * a broken line leaves a zero-width fragment behind at its end -- so the
@@ -129,10 +158,10 @@ function lineOffsets(span: HTMLSpanElement): Array<number> {
  * rather than what the string is punctuated with. A character the layout gave no
  * width -- a break it collapsed -- sits in no line box and is skipped.
  */
-function renderedLines(span: HTMLSpanElement): Array<string> {
-  const text = span.firstChild;
+function renderedLines(element: HTMLElement): Array<string> {
+  const text = element.firstChild;
   if (!(text instanceof Text))
-    throw new Error("the failure message is not a single text node");
+    throw new Error("the rendered failure text is not a single text node");
   const range = document.createRange();
   const lines: Array<{ top: number; text: string }> = [];
   for (let index = 0; index < text.data.length; index += 1) {
@@ -149,14 +178,12 @@ function renderedLines(span: HTMLSpanElement): Array<string> {
 }
 
 /**
- * The message a seat renders for a terminal whose stderr link holds `tail`,
+ * The terminal error a seat is handed for a run whose stderr link holds `tail`,
  * built through the real composition: the one elimination for partner-origin
- * text labels, redacts and control-replaces the tail, the relay hands the links
- * on, and the seat's display pass escapes each and joins them. `config` is the
- * category that shows the relayed chain with no copy of its own in front of it,
- * so the lines measured are the chain's.
+ * text labels, redacts and control-replaces the tail, and the relay hands the
+ * rendered links on as one message.
  */
-function seatMessageForStderrTail(tail: string): string {
+function relayedTerminalForStderrTail(tail: string): RelayedTerminalError {
   const error = errorWithPartnerCauseLinks(
     REFUSAL,
     STDERR_LABEL,
@@ -169,10 +196,16 @@ function seatMessageForStderrTail(tail: string): string {
     links.push(link.message);
     link = (link as { cause?: unknown }).cause;
   }
-  return failureFor(
-    "config",
-    new RelayedTerminalError(joinErrorCauseChain(links)),
-  ).message;
+  return new RelayedTerminalError(joinErrorCauseChain(links));
+}
+
+/**
+ * The message a seat renders for that terminal, through the seat's own display
+ * pass. `config` is the category that shows the relayed chain with no copy of
+ * its own in front of it, so the lines measured are the chain's.
+ */
+function seatMessageForStderrTail(tail: string): string {
+  return failureFor("config", relayedTerminalForStderrTail(tail)).message;
 }
 
 /**
@@ -266,6 +299,60 @@ test("a line a stderr link's own break opened is not a cause-link boundary", asy
   expect(
     lines.filter((line) => line.startsWith(VALUE_LINE_BREAK_MARKER)),
   ).toHaveLength(1);
+});
+
+test("the reported cause block lays the same diagnosis out on those lines", async () => {
+  // The route a retained tail takes on a dropped exchange: the generic failure
+  // states fixed copy of its own, so the relayed chain renders in the labeled
+  // block instead of the message span (`failureFor` in
+  // `@exchange/useInviterExchange`).
+  const failure = failureFor(
+    "exchange",
+    relayedTerminalForStderrTail(CHILD_TAIL),
+  );
+  const reportedCause = failure.reportedCause;
+  if (reportedCause === undefined)
+    throw new Error("the exchange failure reports no cause");
+  expect(reportedCause).toContain(VALUE_LINE_BREAK_MARKER);
+  // The seat's sentence is fixed copy with no marker in it, so the lines below
+  // are the report's own and the sentence is left as the seat wrote it.
+  expect(failure.message).not.toContain(VALUE_LINE_BREAK_MARKER);
+
+  const report = await mountedReport(failure);
+  expect(renderedLines(report)).toEqual([
+    REFUSAL,
+    `${CAUSE_LINK_OPENING}${STDERR_LABEL}The run stopped.`,
+    `${VALUE_LINE_BREAK_MARKER}${CAUSE_LINK_OPENING}the server refused the key.`,
+  ]);
+  // Layout alone here as in the span: taking the inserted breaks back out
+  // returns the report the seat was handed byte for byte.
+  expect(
+    report.textContent.replaceAll(
+      `\n${VALUE_LINE_BREAK_MARKER}`,
+      VALUE_LINE_BREAK_MARKER,
+    ),
+  ).toBe(reportedCause);
+});
+
+test("a chain composed into a seat's own sentence breaks on those lines too", async () => {
+  // The lost-local-write copy composes the chain onto the end of its own
+  // sentence, so the message span holds both voices. The sentence wraps for
+  // width at this viewport, so what is measured is the line the marker opened
+  // rather than the whole layout.
+  const { message } = failureFor(
+    "output",
+    relayedTerminalForStderrTail(CHILD_TAIL),
+  );
+  expect(message).toContain(VALUE_LINE_BREAK_MARKER);
+
+  const span = await mountedMessage(message);
+  expect(
+    renderedLines(span).filter((line) =>
+      line.startsWith(VALUE_LINE_BREAK_MARKER),
+    ),
+  ).toEqual([
+    `${VALUE_LINE_BREAK_MARKER}${CAUSE_LINK_OPENING}the server refused the key.`,
+  ]);
 });
 
 test("a truncated delivery opens no line on the child's own text", async () => {
