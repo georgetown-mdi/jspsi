@@ -1175,6 +1175,8 @@ describe("the launch error a classified state shows", () => {
     );
     expect(failure.kind).toBe("custody-unreadable");
     expect(failure.message).toContain("not valid JSON");
+    expect(failure.message).not.toContain("has an unreadable hand-off state");
+    expect(failure.message).not.toContain("abc");
     expect(failure.reportedCause).toBeUndefined();
   });
 
@@ -1282,5 +1284,24 @@ describe("the launch error a classified state shows", () => {
       expect(withShownCause(bare, new Error("   "), placement)).toEqual(bare);
       expect(withShownCause(bare, "not an error", placement)).toEqual(bare);
     }
+  });
+
+  test("a kind the table does not hold shows nothing", () => {
+    // A placement reaching this function outside the three literals -- an
+    // unmapped kind at runtime, past what the type checker can rule out --
+    // fails closed rather than falling into the attributed block.
+    const base = classifyAgainstOneRecord(
+      new Error("dropped"),
+      record({ lastRun: failed("transport") }),
+      undefined,
+      NOW,
+      false,
+    );
+    const bare = { ...base };
+    delete bare.reportedCause;
+    const unmapped = "nonsense" as ManagedRunCausePlacement;
+    expect(withShownCause(bare, new Error("partner text"), unmapped)).toEqual(
+      bare,
+    );
   });
 });

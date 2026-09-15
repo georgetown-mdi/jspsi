@@ -551,6 +551,9 @@ const OWN_ACCOUNT_CAUSE_LEAD = "What went wrong here:";
  * this stays the mechanism: the escape at the display boundary, and the empty
  * cause that gets neither a block promising an account the state has none of
  * nor a dangling lead. A rejection that is not an `Error` has no chain to show.
+ * An own-account placement shows the error the state's wrapper carries as its
+ * cause when it has one, since the wrapper's own sentence is what the state's
+ * copy already says.
  *
  * @internal exported for the unit test.
  */
@@ -559,9 +562,16 @@ export function withShownCause(
   error: unknown,
   placement: ManagedRunCausePlacement,
 ): ManagedRunFailureAlert {
+  const shown =
+    placement === "own-account" &&
+    error instanceof Error &&
+    error.cause instanceof Error
+      ? error.cause
+      : error;
   const cause: string =
-    placement !== "withheld" && error instanceof Error
-      ? sanitizeErrorForDisplay(error)
+    (placement === "attributed" || placement === "own-account") &&
+    shown instanceof Error
+      ? sanitizeErrorForDisplay(shown)
       : "";
   if (cause.trim() === "") return failure;
   return placement === "own-account"
