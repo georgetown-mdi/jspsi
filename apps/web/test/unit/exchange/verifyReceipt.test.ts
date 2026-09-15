@@ -91,6 +91,7 @@ const RECEIPT_BINDER = "YmluZGVy";
 
 const baseInputs: ExchangeRecordInputs = {
   outcome: "completed",
+  certificateMismatchObserved: false,
   localTerms: LOCAL_TERMS,
   partnerTerms: PARTNER_TERMS,
   contributedLinkageFields: ["ssn"],

@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { camelizeKeys } from "../utils/camelizeKeys.js";
+import { causeChainSome } from "../errors.js";
 import { partnerPinIsPresent } from "../config/signing.js";
 import { MAX_TEXT_LENGTH } from "../config/linkageTermsSchema.js";
 import { canonicalBytes } from "../utils/canonical.js";
@@ -468,13 +469,115 @@ export function assertCertificateAuthorizesIdentity(
   assertedIdentity: string,
 ): void {
   if (!certificateAuthorizesIdentity(certificate, assertedIdentity))
-    throw new SigningError(
-      "receipt identity is not authorized by the presenting certificate: the " +
-        `certificate is bound to a different identity`,
+    throw withPartnerCertificateCondition(
+      new SigningError(
+        "receipt identity is not authorized by the presenting certificate: " +
+          "the certificate is bound to a different identity",
+      ),
+      "unauthorizedIdentity",
     );
 }
 
 // --- Partner certificate trust (fingerprint pinning) -------------------------
+
+/**
+ * Every condition a partner-certificate check refuses on, against whether that
+ * refusal is positive evidence about the certificate the partner PRESENTED:
+ * that it is not the pinned identity.
+ *
+ * Keyed rather than listed, on the pattern `PARTNER_CERTIFICATE_REFUSAL_MESSAGES`
+ * (../exchange.ts) follows: a condition added here without a verdict beside it
+ * does not compile, rather than falling through to `false` and leaving a
+ * disclosure record silent about an authentication failure the run observed.
+ *
+ * The three `true` rows are the run holding the partner's certificate body and
+ * finding it wrong. `unpinned` is about this party's own configuration and says
+ * nothing about the certificate beside it; `unreadable` and `absent` refuse
+ * before any certificate body is in hand. What the record built from this
+ * states is fixed in docs/spec/EXCHANGE_RECORD.md ("When a record is owed").
+ */
+export const PARTNER_CERTIFICATE_MISMATCH_OBSERVED = {
+  /** The wire value is not a certificate this format admits. */
+  unreadable: false,
+  /** The partner presented no certificate at all. */
+  absent: false,
+  /** No fingerprint is pinned locally, so nothing was compared. */
+  unpinned: false,
+  /** The presented certificate's self-signature does not verify. */
+  unverified: true,
+  /** The presented certificate does not authorize the identity its holder
+   * agreed terms under. */
+  unauthorizedIdentity: true,
+  /** The presented certificate's fingerprint is not the pinned one. */
+  divergent: true,
+} as const;
+
+/** Which condition a partner-certificate check refused on. */
+export type PartnerCertificateCondition =
+  keyof typeof PARTNER_CERTIFICATE_MISMATCH_OBSERVED;
+
+// The property a refusal holds its condition in, tagged per instance on the
+// convention `TransportPublishIndeterminateError` (../errors.ts) states. A tag
+// rather than a field on one error class: the same condition is raised as a
+// SigningError here and re-raised as a ReceiptVerificationError by the receipt
+// step, and one reader answers for both.
+const PARTNER_CERTIFICATE_CONDITION_TAG = "psilinkPartnerCertificateCondition";
+
+/**
+ * `error` tagged with the partner-certificate condition it refused on, so a
+ * consumer deciding on the condition reads that value rather than matching the
+ * message text.
+ */
+export function withPartnerCertificateCondition<E extends Error>(
+  error: E,
+  condition: PartnerCertificateCondition,
+): E {
+  return Object.assign(error, {
+    [PARTNER_CERTIFICATE_CONDITION_TAG]: condition,
+  });
+}
+
+/**
+ * The partner-certificate condition `error`, or any link in its `cause` chain,
+ * refused on; `undefined` where none of them holds one. The chain is walked so
+ * a re-raise keeping the original as its `cause` still answers -- the receipt
+ * step wraps a {@link SigningError} that way.
+ */
+export function partnerCertificateCondition(
+  error: unknown,
+): PartnerCertificateCondition | undefined {
+  let found: PartnerCertificateCondition | undefined;
+  causeChainSome(error, (link) => {
+    const tagged = (link as Record<string, unknown>)[
+      PARTNER_CERTIFICATE_CONDITION_TAG
+    ];
+    if (
+      typeof tagged === "string" &&
+      tagged in PARTNER_CERTIFICATE_MISMATCH_OBSERVED
+    )
+      found = tagged as PartnerCertificateCondition;
+    return found !== undefined;
+  });
+  return found;
+}
+
+/**
+ * Whether the run that failed with `error` positively observed that the
+ * certificate the partner presented is not the pinned identity: a fingerprint
+ * that is not the pinned one, a certificate that does not authorize the agreed
+ * identity, or a self-signature that does not verify.
+ *
+ * False for every failure that says nothing about a presented certificate -- a
+ * transport drop, a refused received payload, a receipt signature that did not
+ * verify over a certificate that DID match the pin, and a run with no pin on
+ * file, which is a gap in this party's own configuration.
+ */
+export function observedPartnerCertificateMismatch(error: unknown): boolean {
+  const condition = partnerCertificateCondition(error);
+  return (
+    condition !== undefined && PARTNER_CERTIFICATE_MISMATCH_OBSERVED[condition]
+  );
+}
 
 /** Whether `certificate`'s fingerprint matches `pinnedFingerprint`, compared in
  * constant time over the decoded digest bytes. */
@@ -515,26 +618,35 @@ export async function assertPartnerCertificateTrusted(
   pinnedFingerprint: string | undefined,
 ): Promise<void> {
   if (!partnerPinIsPresent(pinnedFingerprint))
-    throw new SigningError(
-      "no pinned partner fingerprint is configured, so the partner's " +
-        "certificate cannot be trusted; obtain the partner's fingerprint " +
-        "out-of-band and set signing.partner_fingerprint",
+    throw withPartnerCertificateCondition(
+      new SigningError(
+        "no pinned partner fingerprint is configured, so the partner's " +
+          "certificate cannot be trusted; obtain the partner's fingerprint " +
+          "out-of-band and set signing.partner_fingerprint",
+      ),
+      "unpinned",
     );
   // Report the precise reason (invalid key vs. failed signature) with
   // partner-facing context rather than a single generic message.
   try {
     await assertCertificateSelfSignature(certificate);
   } catch (err) {
-    throw new SigningError(
-      "partner certificate is not valid: " +
-        (err instanceof Error ? err.message : String(err)),
+    throw withPartnerCertificateCondition(
+      new SigningError(
+        "partner certificate is not valid: " +
+          (err instanceof Error ? err.message : String(err)),
+      ),
+      "unverified",
     );
   }
   if (!(await matchesPinnedFingerprint(certificate, pinnedFingerprint)))
-    throw new SigningError(
-      "partner certificate fingerprint does not match the pinned value; the " +
-        "certificate is not the partner's pinned identity (or the partner has " +
-        "regenerated its identity and must re-share its fingerprint)",
+    throw withPartnerCertificateCondition(
+      new SigningError(
+        "partner certificate fingerprint does not match the pinned value; the " +
+          "certificate is not the partner's pinned identity (or the partner " +
+          "has regenerated its identity and must re-share its fingerprint)",
+      ),
+      "divergent",
     );
 }
 

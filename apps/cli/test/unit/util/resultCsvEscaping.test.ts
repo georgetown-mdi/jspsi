@@ -207,6 +207,7 @@ test("writeOutput: a written result re-supplies its record's commitments", async
     partnerTerms,
     contributedLinkageFields: ["ssn"],
     outcome: "completed",
+    certificateMismatchObserved: false,
     recordsExposed: inputRows.length,
     resultSize: associationTable[0].length,
     associationTable,

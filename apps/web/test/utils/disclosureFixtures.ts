@@ -112,6 +112,9 @@ export interface DisclosureRecordOverrides {
   /** How far the run got. Defaults to the completed run every other fixture
    * field describes; a suite asks for the record a terminated swap leaves. */
   outcome?: ExchangeRecord["outcome"];
+  /** Whether the run observed that the partner's certificate is not the pinned
+   * identity. Defaults to the false every run but the refused one records. */
+  certificateMismatchObserved?: boolean;
 }
 
 /** The rule set the citing fixture terms name: a field set and a key set, each
@@ -163,6 +166,7 @@ export async function disclosureRecord(
       (field) => field.name,
     ),
     outcome: overrides.outcome ?? "completed",
+    certificateMismatchObserved: overrides.certificateMismatchObserved ?? false,
     partnerTerms: partnerTermsFor(localTerms, overrides.partnerIdentity),
     recordsExposed: overrides.recordsExposed ?? 2,
     ...(overrides.resultSize === null

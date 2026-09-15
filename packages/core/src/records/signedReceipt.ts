@@ -9,7 +9,9 @@ import {
 import {
   boundedWireCertificateSchema,
   computeCertificateFingerprint,
+  partnerCertificateCondition,
   verifyPresentedCertificate,
+  withPartnerCertificateCondition,
 } from "./signingIdentity.js";
 import {
   decodeEcdsaSignature,
@@ -494,6 +496,11 @@ async function verifyPartnerReceipt(
   // identity the partner used in the agreed terms -- not merely match its
   // own identity. Re-tag as a ReceiptVerificationError so the receipt
   // step's failures share one security-kind error the CLI reports clearly.
+  //
+  // The gate's own condition is carried onto the re-raise, so a consumer
+  // deciding on WHICH check refused -- the self-attested record's statement
+  // about the certificate the partner presented -- reads a value rather than
+  // this composed message (see PARTNER_CERTIFICATE_MISMATCH_OBSERVED).
   try {
     await verifyPresentedCertificate({
       certificate: wire.certificate,
@@ -501,17 +508,25 @@ async function verifyPartnerReceipt(
       assertedIdentity: partnerAssertedIdentity,
     });
   } catch (err) {
-    throw new ReceiptVerificationError(
+    const refusal = new ReceiptVerificationError(
       "partner certificate is not trusted: " +
         (err instanceof Error ? err.message : String(err)),
       { cause: err },
     );
+    const condition = partnerCertificateCondition(err);
+    throw condition === undefined
+      ? refusal
+      : withPartnerCertificateCondition(refusal, condition);
   }
   // Only after the certificate is trusted by pin do we check the signature over
   // the shared receipt content bound to the partner's role. A partner that signed a
   // different content (or a different exchange, via a different binder), or whose
   // signature block was swapped with the local party's (a different bound role),
   // fails here.
+  //
+  // This refusal takes no partner-certificate condition, and must not: the
+  // certificate reached here by matching the pin, so what failed is the
+  // signature over it, not the identity behind it.
   if (
     !(await verifyReceiptSignature(
       wire.certificate,

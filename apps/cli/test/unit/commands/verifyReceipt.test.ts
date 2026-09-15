@@ -69,6 +69,7 @@ const localPayloadSent: CommittedPayload = {
 const RECEIPT_BINDER = "YmluZGVy";
 const baseInputs: ExchangeRecordInputs = {
   outcome: "completed",
+  certificateMismatchObserved: false,
   contributedLinkageFields: ["ssn"],
   localTerms: {
     version: "1.0.0",
@@ -799,7 +800,7 @@ describe("reading a dual-signed record", () => {
     writeFileSync(path, JSON.stringify({ version: "something-else/v1" }));
     expect(() => readVerifiableArtifact(path)).toThrow(UsageError);
     expect(() => readVerifiableArtifact(path)).toThrow(
-      /recognizes psilink-exchange-record\/v7 .* and psilink-signed-receipt\/v2/,
+      /recognizes psilink-exchange-record\/v8 .* and psilink-signed-receipt\/v2/,
     );
   });
 });
@@ -919,7 +920,7 @@ describe("readExchangeRecordFile / readVerificationKeysFile", () => {
     writeFileSync(recPath, JSON.stringify(bumped, null, 2));
     expect(() => readExchangeRecordFile(recPath)).toThrow(UsageError);
     expect(() => readExchangeRecordFile(recPath)).toThrow(
-      /unrecognized version \(psilink-exchange-record\/v1\); this build recognizes psilink-exchange-record\/v7/,
+      /unrecognized version \(psilink-exchange-record\/v1\); this build recognizes psilink-exchange-record\/v8/,
     );
   });
 

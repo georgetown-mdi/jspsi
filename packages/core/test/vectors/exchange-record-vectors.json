@@ -114,6 +114,7 @@
         },
         "createdAt": "2026-01-02T03:04:05.000Z",
         "outcome": "completed",
+        "certificateMismatchObserved": false,
         "recordsExposed": 5,
         "receiptBinder": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk"
       },
@@ -126,9 +127,10 @@
         }
       },
       "record": {
-        "version": "psilink-exchange-record/v7",
+        "version": "psilink-exchange-record/v8",
         "createdAt": "2026-01-02T03:04:05.000Z",
         "outcome": "completed",
+        "certificateMismatchObserved": false,
         "termsHash": "NndSxh_H2dH9QDOK3GNhZz574iSYpmWXZBAcqzbbJ7o",
         "localIdentity": "Party A",
         "partnerIdentity": "Party B",
@@ -255,6 +257,7 @@
         },
         "createdAt": "2026-01-02T03:04:05.000Z",
         "outcome": "completed",
+        "certificateMismatchObserved": false,
         "recordsExposed": 3
       },
       "randomness": {
@@ -266,9 +269,10 @@
         }
       },
       "record": {
-        "version": "psilink-exchange-record/v7",
+        "version": "psilink-exchange-record/v8",
         "createdAt": "2026-01-02T03:04:05.000Z",
         "outcome": "completed",
+        "certificateMismatchObserved": false,
         "termsHash": "1pgvorgQseW486XCURs3KAcOP_YN3bnIhVndGsrHHwc",
         "localIdentity": "Party A",
         "partnerIdentity": "Party B",
@@ -393,6 +397,7 @@
         },
         "createdAt": "2026-01-02T03:04:05.000Z",
         "outcome": "completed",
+        "certificateMismatchObserved": false,
         "recordsExposed": 4
       },
       "randomness": {
@@ -403,9 +408,10 @@
         }
       },
       "record": {
-        "version": "psilink-exchange-record/v7",
+        "version": "psilink-exchange-record/v8",
         "createdAt": "2026-01-02T03:04:05.000Z",
         "outcome": "completed",
+        "certificateMismatchObserved": false,
         "termsHash": "0mw2vkRK9EL4_K_3ZPpnmToLl2eyDBS3zGfoxqOlOTc",
         "localIdentity": "Party A",
         "partnerIdentity": "Party B",
@@ -536,6 +542,7 @@
         },
         "createdAt": "2026-01-02T03:04:05.000Z",
         "outcome": "completed",
+        "certificateMismatchObserved": false,
         "recordsExposed": 6
       },
       "randomness": {
@@ -547,9 +554,10 @@
         }
       },
       "record": {
-        "version": "psilink-exchange-record/v7",
+        "version": "psilink-exchange-record/v8",
         "createdAt": "2026-01-02T03:04:05.000Z",
         "outcome": "completed",
+        "certificateMismatchObserved": false,
         "termsHash": "0mw2vkRK9EL4_K_3ZPpnmToLl2eyDBS3zGfoxqOlOTc",
         "localIdentity": "Party B",
         "partnerIdentity": "Party A",
@@ -709,6 +717,7 @@
         },
         "createdAt": "2026-01-02T03:04:05.000Z",
         "outcome": "completed",
+        "certificateMismatchObserved": false,
         "recordsExposed": 8
       },
       "randomness": {
@@ -719,9 +728,10 @@
         }
       },
       "record": {
-        "version": "psilink-exchange-record/v7",
+        "version": "psilink-exchange-record/v8",
         "createdAt": "2026-01-02T03:04:05.000Z",
         "outcome": "completed",
+        "certificateMismatchObserved": false,
         "termsHash": "eZBA72rLn0xaADBj7BGC0mWHe_7s0pwED7tzDaUVjWk",
         "localIdentity": "Party A",
         "partnerIdentity": "Party B",
@@ -888,6 +898,7 @@
         },
         "createdAt": "2026-01-02T03:04:05.000Z",
         "outcome": "completed",
+        "certificateMismatchObserved": false,
         "recordsExposed": 8
       },
       "randomness": {
@@ -898,9 +909,10 @@
         }
       },
       "record": {
-        "version": "psilink-exchange-record/v7",
+        "version": "psilink-exchange-record/v8",
         "createdAt": "2026-01-02T03:04:05.000Z",
         "outcome": "completed",
+        "certificateMismatchObserved": false,
         "termsHash": "AzJi5GLcAEIuLecddIrltTqEXxzN35jvu9OPcLpZ910",
         "localIdentity": "Party A",
         "partnerIdentity": "Party B",
@@ -1063,6 +1075,7 @@
         },
         "createdAt": "2026-01-02T03:04:05.000Z",
         "outcome": "completed",
+        "certificateMismatchObserved": false,
         "recordsExposed": 5,
         "retentionDisposition": "Result filed in Agency A association table links.prod; held 6 years per records schedule RM-7, then disposed."
       },
@@ -1075,9 +1088,10 @@
         }
       },
       "record": {
-        "version": "psilink-exchange-record/v7",
+        "version": "psilink-exchange-record/v8",
         "createdAt": "2026-01-02T03:04:05.000Z",
         "outcome": "completed",
+        "certificateMismatchObserved": false,
         "termsHash": "NndSxh_H2dH9QDOK3GNhZz574iSYpmWXZBAcqzbbJ7o",
         "localIdentity": "Party A",
         "partnerIdentity": "Party B",
@@ -1224,6 +1238,7 @@
         },
         "createdAt": "2026-01-02T03:04:05.000Z",
         "outcome": "completed",
+        "certificateMismatchObserved": false,
         "recordsExposed": 3
       },
       "randomness": {
@@ -1235,9 +1250,10 @@
         }
       },
       "record": {
-        "version": "psilink-exchange-record/v7",
+        "version": "psilink-exchange-record/v8",
         "createdAt": "2026-01-02T03:04:05.000Z",
         "outcome": "completed",
+        "certificateMismatchObserved": false,
         "termsHash": "-mC6tZrCMQSzff2U5-6INjSqA4k8GbYkVTWjmJq92tk",
         "localIdentity": "Party A",
         "partnerIdentity": "Party B",
@@ -1424,7 +1440,8 @@
           "rows": []
         },
         "createdAt": "2026-01-02T03:04:05.000Z",
-        "outcome": "completed"
+        "outcome": "completed",
+        "certificateMismatchObserved": false
       },
       "randomness": {
         "bindingNonce": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
@@ -1434,9 +1451,10 @@
         }
       },
       "record": {
-        "version": "psilink-exchange-record/v7",
+        "version": "psilink-exchange-record/v8",
         "createdAt": "2026-01-02T03:04:05.000Z",
         "outcome": "completed",
+        "certificateMismatchObserved": false,
         "termsHash": "ldxVOhHDYzxE130SIN5Yx4Xr_aJTye5YjaG7kO2oAJQ",
         "localIdentity": "Party A",
         "partnerIdentity": "Party B",
@@ -1628,7 +1646,8 @@
           "rows": []
         },
         "createdAt": "2026-01-02T03:04:05.000Z",
-        "outcome": "completed"
+        "outcome": "completed",
+        "certificateMismatchObserved": false
       },
       "randomness": {
         "bindingNonce": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA",
@@ -1638,9 +1657,10 @@
         }
       },
       "record": {
-        "version": "psilink-exchange-record/v7",
+        "version": "psilink-exchange-record/v8",
         "createdAt": "2026-01-02T03:04:05.000Z",
         "outcome": "completed",
+        "certificateMismatchObserved": false,
         "termsHash": "rpEsquyNSax88z8WM723OMdf7SoVFtV45Pgy3FkeeOc",
         "localIdentity": "Party A",
         "partnerIdentity": "Party B",
@@ -1769,6 +1789,7 @@
         },
         "createdAt": "2026-01-02T03:04:05.000Z",
         "outcome": "completed",
+        "certificateMismatchObserved": false,
         "recordsExposed": 3
       },
       "randomness": {
@@ -1780,9 +1801,10 @@
         }
       },
       "record": {
-        "version": "psilink-exchange-record/v7",
+        "version": "psilink-exchange-record/v8",
         "createdAt": "2026-01-02T03:04:05.000Z",
         "outcome": "completed",
+        "certificateMismatchObserved": false,
         "termsHash": "6SJZlUOZSCBkd1l8YQFlACMchYvQPCLpa4QefopNc_c",
         "partnerIdentity": "Party B",
         "governance": {
@@ -1933,6 +1955,7 @@
         },
         "createdAt": "2026-01-02T03:04:06.000Z",
         "outcome": "receipt-swap-terminated",
+        "certificateMismatchObserved": false,
         "recordsExposed": 5,
         "receiptBinder": "VFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFQ"
       },
@@ -1945,9 +1968,10 @@
         }
       },
       "record": {
-        "version": "psilink-exchange-record/v7",
+        "version": "psilink-exchange-record/v8",
         "createdAt": "2026-01-02T03:04:06.000Z",
         "outcome": "receipt-swap-terminated",
+        "certificateMismatchObserved": false,
         "termsHash": "NndSxh_H2dH9QDOK3GNhZz574iSYpmWXZBAcqzbbJ7o",
         "localIdentity": "Party A",
         "partnerIdentity": "Party B",
@@ -1998,6 +2022,190 @@
           "localPayloadSent": "UVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVE",
           "partnerPayloadReceived": "UlJSUlJSUlJSUlJSUlJSUlJSUlJSUlJSUlJSUlJSUlI",
           "associationTable": "U1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1M"
+        }
+      }
+    },
+    {
+      "name": "certificate-mismatch-terminated",
+      "description": "The same terminated exchange as the vector above, recorded after the run observed that the certificate the partner presented is not the pinned identity. Pins the mismatch marker's placement and literal spelling across implementations, and pins that it is a field of its own beside the outcome rather than a second outcome value: everything else is unchanged from that vector, which is the format's statement that the marker narrows who received the disclosure and nothing else about it.",
+      "inputs": {
+        "localTerms": {
+          "version": "1.0.0",
+          "identity": "Party A",
+          "date": "2025-01-01",
+          "algorithm": "psi",
+          "linkageStrategy": "cascade",
+          "output": {
+            "expectsOutput": true,
+            "shareWithPartner": true
+          },
+          "deduplicate": false,
+          "linkageFields": [
+            {
+              "name": "ssn",
+              "type": "ssn"
+            }
+          ],
+          "linkageKeys": [
+            {
+              "name": "SSN",
+              "elements": [
+                {
+                  "field": "ssn"
+                }
+              ]
+            }
+          ],
+          "payload": {
+            "send": [
+              {
+                "name": "dose",
+                "description": "Administered dose in milligrams."
+              }
+            ],
+            "receive": [
+              {
+                "name": "status",
+                "description": "Enrollment status at the most recent visit."
+              }
+            ]
+          },
+          "legalAgreement": {
+            "reference": "MOU-2025-0042",
+            "purpose": "Care coordination for co-enrolled patients",
+            "expirationDate": "2030-06-30"
+          }
+        },
+        "partnerTerms": {
+          "version": "1.0.0",
+          "identity": "Party B",
+          "date": "2025-01-01",
+          "algorithm": "psi",
+          "linkageStrategy": "cascade",
+          "output": {
+            "expectsOutput": true,
+            "shareWithPartner": true
+          },
+          "deduplicate": false,
+          "linkageFields": [
+            {
+              "name": "ssn",
+              "type": "ssn"
+            }
+          ],
+          "linkageKeys": [
+            {
+              "name": "SSN",
+              "elements": [
+                {
+                  "field": "ssn"
+                }
+              ]
+            }
+          ],
+          "payload": {
+            "send": [
+              {
+                "name": "status",
+                "description": "Enrollment status at the most recent visit."
+              }
+            ],
+            "receive": [
+              {
+                "name": "dose",
+                "description": "Administered dose in milligrams."
+              }
+            ]
+          },
+          "legalAgreement": {
+            "reference": "MOU-2025-0042",
+            "purpose": "Care coordination for co-enrolled patients",
+            "expirationDate": "2030-06-30"
+          }
+        },
+        "contributedLinkageFields": ["ssn"],
+        "resultSize": 2,
+        "associationTable": [
+          [0, 2],
+          [1, 0]
+        ],
+        "localPayloadSent": {
+          "columns": ["dose"],
+          "rows": [["10mg"], ["20mg"]]
+        },
+        "partnerPayloadReceived": {
+          "columns": ["status"],
+          "rows": [["active"], [null]]
+        },
+        "createdAt": "2026-01-02T03:04:07.000Z",
+        "outcome": "receipt-swap-terminated",
+        "certificateMismatchObserved": true,
+        "recordsExposed": 5,
+        "receiptBinder": "hISEhISEhISEhISEhISEhISEhISEhISEhISEhISEhIQ"
+      },
+      "randomness": {
+        "bindingNonce": "gICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIA",
+        "salts": {
+          "localPayloadSent": "gYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYE",
+          "partnerPayloadReceived": "goKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoI",
+          "associationTable": "g4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4M"
+        }
+      },
+      "record": {
+        "version": "psilink-exchange-record/v8",
+        "createdAt": "2026-01-02T03:04:07.000Z",
+        "outcome": "receipt-swap-terminated",
+        "certificateMismatchObserved": true,
+        "termsHash": "NndSxh_H2dH9QDOK3GNhZz574iSYpmWXZBAcqzbbJ7o",
+        "localIdentity": "Party A",
+        "partnerIdentity": "Party B",
+        "governance": {
+          "algorithm": "psi",
+          "legalAgreement": {
+            "reference": "MOU-2025-0042",
+            "purpose": "Care coordination for co-enrolled patients",
+            "expirationDate": "2030-06-30"
+          },
+          "matchingBasis": [
+            {
+              "name": "ssn",
+              "type": "ssn"
+            }
+          ],
+          "payloadSent": [
+            {
+              "name": "dose",
+              "description": "Administered dose in milligrams."
+            }
+          ],
+          "payloadReceived": [
+            {
+              "name": "status",
+              "description": "Enrollment status at the most recent visit."
+            }
+          ],
+          "matching": {
+            "localDeduplicate": false,
+            "partnerDeduplicate": false,
+            "cardinality": "one-to-one"
+          }
+        },
+        "recordsExposed": 5,
+        "resultSize": 2,
+        "bindingNonce": "gICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIA",
+        "receiptBinder": "hISEhISEhISEhISEhISEhISEhISEhISEhISEhISEhIQ",
+        "commitments": {
+          "localPayloadSent": "GCuSFLQaGvDsRYyu1efTYP2JckbfMfON231y45np6uY",
+          "partnerPayloadReceived": "_yE_NTodn4MnCdEB5U5OxqjL26H5npFsmqiCuvk10pc",
+          "associationTable": "kfb69yToSA7XN_mPA7Z48cSj7Fet3bVcxGC9d92d0Z0"
+        }
+      },
+      "keys": {
+        "version": "psilink-exchange-keys/v1",
+        "salts": {
+          "localPayloadSent": "gYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYE",
+          "partnerPayloadReceived": "goKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoI",
+          "associationTable": "g4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4M"
         }
       }
     },
@@ -2129,6 +2337,7 @@
         },
         "createdAt": "2026-02-03T14:20:00.000Z",
         "outcome": "completed",
+        "certificateMismatchObserved": false,
         "recordsExposed": 9
       },
       "randomness": {
@@ -2140,9 +2349,10 @@
         }
       },
       "record": {
-        "version": "psilink-exchange-record/v7",
+        "version": "psilink-exchange-record/v8",
         "createdAt": "2026-02-03T14:20:00.000Z",
         "outcome": "completed",
+        "certificateMismatchObserved": false,
         "termsHash": "kG8ABOtXJz73F3wx9cNC37tsVGxwNEXcx5sukYbWWNg",
         "localIdentity": "County Clinic",
         "partnerIdentity": "State Registry",
@@ -2327,6 +2537,7 @@
         },
         "createdAt": "2026-02-03T14:20:01.000Z",
         "outcome": "completed",
+        "certificateMismatchObserved": false,
         "recordsExposed": 6
       },
       "randomness": {
@@ -2338,9 +2549,10 @@
         }
       },
       "record": {
-        "version": "psilink-exchange-record/v7",
+        "version": "psilink-exchange-record/v8",
         "createdAt": "2026-02-03T14:20:01.000Z",
         "outcome": "completed",
+        "certificateMismatchObserved": false,
         "termsHash": "kG8ABOtXJz73F3wx9cNC37tsVGxwNEXcx5sukYbWWNg",
         "localIdentity": "State Registry",
         "partnerIdentity": "County Clinic",
@@ -2525,6 +2737,7 @@
         },
         "createdAt": "2026-02-04T08:45:00.000Z",
         "outcome": "completed",
+        "certificateMismatchObserved": false,
         "recordsExposed": 7
       },
       "randomness": {
@@ -2536,9 +2749,10 @@
         }
       },
       "record": {
-        "version": "psilink-exchange-record/v7",
+        "version": "psilink-exchange-record/v8",
         "createdAt": "2026-02-04T08:45:00.000Z",
         "outcome": "completed",
+        "certificateMismatchObserved": false,
         "termsHash": "VHFv8sXLr678X1S3EQjwyCNAqrG2MKiPD32KG6fy0Rg",
         "localIdentity": "Shelter Network",
         "partnerIdentity": "Benefits Office",

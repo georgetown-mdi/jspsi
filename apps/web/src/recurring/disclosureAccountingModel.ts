@@ -169,6 +169,28 @@ const OUTCOME_DISCLOSURE: Record<ExchangeRecordOutcome, Displayable> = {
 };
 
 /**
+ * What a record stating an observed certificate mismatch adds beside its
+ * outcome. It sits with the outcome rather than in a column of its own, so a
+ * fixed set of columns states it for the runs that have it and the export's
+ * header row is unmoved.
+ *
+ * Shown only where the record states one. A record stating none has nothing to
+ * qualify: what every other entry says about its partner is the self-asserted
+ * name the Partner fact already shows, and a "no mismatch" line beside it would
+ * read as a confirmation the exchange never made (see
+ * docs/spec/EXCHANGE_RECORD.md, "When a record is owed").
+ */
+const CERTIFICATE_MISMATCH_DISCLOSURE = displayText`Your partner presented a certificate that is not the one pinned for them, so the partner named above is who they claimed to be and not who this run confirmed`;
+
+/** The values the outcome fact holds: how the run ended, and -- on the one arm
+ * that has it -- what the run observed about the partner's certificate. */
+function outcomeValues(record: ExchangeRecord): ReadonlyArray<Displayable> {
+  return record.certificateMismatchObserved
+    ? [OUTCOME_DISCLOSURE[record.outcome], CERTIFICATE_MISMATCH_DISCLOSURE]
+    : [OUTCOME_DISCLOSURE[record.outcome]];
+}
+
+/**
  * What a terminated run's entry attests, and what it does not. A record commits to
  * this party's own act of disclosure -- the payload frame handed to the transport
  * -- never to the partner's receipt of it, and a run cut there kept only what had
@@ -311,7 +333,9 @@ function ruleSetFact(
  * The same facts in the same order for every record. A terminated run's entry
  * differs in two of them only: the outcome fact takes
  * {@link TERMINATED_DISCLOSURE_NOTE}, and the received-columns fact takes
- * {@link ARRIVED_COLUMNS_LABEL} for the label it shows.
+ * {@link ARRIVED_COLUMNS_LABEL} for the label it shows. A record stating an
+ * observed certificate mismatch adds one value to the outcome fact
+ * ({@link CERTIFICATE_MISMATCH_DISCLOSURE}) and changes no label.
  */
 export function disclosureFacts(
   record: ExchangeRecord,
@@ -336,7 +360,7 @@ export function disclosureFacts(
     fact("What was disclosed", ALGORITHM_DISCLOSURE[governance.algorithm]),
     {
       label: "How the exchange ended",
-      values: [OUTCOME_DISCLOSURE[record.outcome]],
+      values: outcomeValues(record),
       muted: NOT_RECORDED,
       ...(terminatedRun(record) ? { note: TERMINATED_DISCLOSURE_NOTE } : {}),
     },

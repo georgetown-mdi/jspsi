@@ -321,6 +321,40 @@ describe("a disclosure's facts", () => {
     ]);
   });
 
+  test("state an observed certificate mismatch beside the outcome, and only where the record has one", async () => {
+    // The one arm where the record narrows who received the disclosure. It is a
+    // value on the outcome fact rather than a column of its own, so the export's
+    // header row is the same for every entry (docs/spec/EXCHANGE_RECORD.md, When
+    // a record is owed).
+    const refused = disclosureFacts(
+      await disclosureRecord({
+        outcome: "receipt-swap-terminated",
+        certificateMismatchObserved: true,
+      }),
+    );
+    const values = factValues(refused, "How the exchange ended");
+
+    expect(values).toHaveLength(2);
+    expect(values[0]).toBe("Disclosed, then stopped before the run finished");
+    expect(values[1]).toContain("not the one pinned for them");
+
+    // A record observing none states nothing about the partner's certificate:
+    // what every other entry shows for its partner is the self-asserted name the
+    // Partner fact already holds, and a "no mismatch" line would read as a
+    // confirmation the exchange never made.
+    for (const record of [
+      await disclosureRecord(),
+      await disclosureRecord({ outcome: "receipt-swap-terminated" }),
+    ]) {
+      const stated = factValues(
+        disclosureFacts(record),
+        "How the exchange ended",
+      );
+      expect(stated).toHaveLength(1);
+      expect(stated[0]).not.toContain("certificate");
+    }
+  });
+
   test("name no step of the run a terminated record does not prove it reached", async () => {
     // `receipt-swap-terminated` is written for every termination past this party's
     // payload send, so wording naming the receipt swap would tell a reader the run
@@ -561,6 +595,31 @@ describe("the exported accounting", () => {
       splitCsvRow(row)[splitCsvRow(header).indexOf("Columns you received")],
     ).toBe("clinic");
     expect(cell).toContain("recorded as received");
+  });
+
+  test("carries an observed certificate mismatch into the same cell, under the standing header", async () => {
+    const accounting = accountingOf(
+      await disclosureRecord({
+        outcome: "receipt-swap-terminated",
+        certificateMismatchObserved: true,
+      }),
+    );
+
+    const [header, row] = csvRows(disclosureAccountingCsv(accounting));
+    const columns = splitCsvRow(header);
+    const cell = splitCsvRow(row)[columns.indexOf("How the exchange ended")];
+
+    expect(cell).toContain("Disclosed, then stopped before the run finished");
+    expect(cell).toContain("not the one pinned for them");
+    // The marker widens no entry's column set: the header a compliance reader
+    // reads is the same one every other accounting exports.
+    expect(columns).toEqual(
+      splitCsvRow(
+        csvRows(
+          disclosureAccountingCsv(accountingOf(await disclosureRecord())),
+        )[0],
+      ),
+    );
   });
 
   test("has the rule-set citation and its caveat in the same row as the run's other governance fields", async () => {

@@ -1267,8 +1267,9 @@ test("tells a non-receiving party what the run's completion tells it too", async
 // --- Self-attested record persistence via runProtocol ------------------------
 
 const sampleRecord: ExchangeRecord = {
-  version: "psilink-exchange-record/v7",
+  version: "psilink-exchange-record/v8",
   outcome: "completed",
+  certificateMismatchObserved: false,
   createdAt: "2026-01-02T03:04:05.000Z",
   termsHash: "hQi6gjL9Z0RFtfz2TZVqXmUF1Cu8PaBFbClOJ9R8l_Q",
   localIdentity: "Party A",

@@ -65,6 +65,7 @@ const baseInputs: ExchangeRecordInputs = {
   partnerTerms: termsB,
   contributedLinkageFields: ["ssn"],
   outcome: "completed",
+  certificateMismatchObserved: false,
   recordsExposed: 5,
   resultSize: 2,
   associationTable,
