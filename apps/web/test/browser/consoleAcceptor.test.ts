@@ -1107,6 +1107,44 @@ describe("console acceptor recoveries against the run's exchange record", () => 
     expect(api.captured.some((r) => r.method === "DELETE")).toBe(false);
   });
 
+  test("states the certificate mismatch the record holds beside the outcome", async () => {
+    const api = stubServerJobAccept({
+      jobStatus: "failed",
+      record: {
+        createdAt: CREATED_AT,
+        outcome: "receipt-swap-terminated",
+        certificateMismatchObserved: true,
+      },
+    });
+    await acceptToExchangeFailure(api);
+
+    // The marker qualifies the outcome rather than replacing it, so both lines
+    // stand: what the run did, and what it found about the partner's certificate.
+    await expect
+      .element(page.getByText(TERMINATED_RECORD_LEAD))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("not the one pinned for them", { exact: false }))
+      .toBeInTheDocument();
+  });
+
+  test("says nothing about a certificate the record states no mismatch for", async () => {
+    const api = stubServerJobAccept({
+      jobStatus: "failed",
+      record: { createdAt: CREATED_AT, outcome: "receipt-swap-terminated" },
+    });
+    await acceptToExchangeFailure(api);
+
+    // Wait for the panel itself before reading the absence: a line missing
+    // because the ask has not landed yet would pass this on any record.
+    await expect
+      .element(page.getByText(TERMINATED_RECORD_LEAD))
+      .toBeInTheDocument();
+    expect(
+      page.getByText("not the one pinned for them", { exact: false }).query(),
+    ).toBeNull();
+  });
+
   test("a record the console cannot read confirms, and links no download", async () => {
     const api = stubServerJobAccept({
       jobStatus: "failed",
