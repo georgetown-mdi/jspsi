@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   architecturesStatement,
+  assertNoNodeRuntimePackage,
   basePin,
   classifyDifferences,
   compareRows,
@@ -204,6 +205,58 @@ describe("a package that records no license", () => {
   });
 });
 
+describe("a row naming a Node.js runtime package", () => {
+  const rowsNaming = (name) => [
+    { name, version: "22.22.0-r1", license: "MIT" },
+  ];
+
+  it("fails generation naming the package and the claim it breaks", () => {
+    expect(() =>
+      generateList(
+        "default",
+        `${APK_EXCERPT}\nnodejs-22.22.0-r1 x86_64 {nodejs} (MIT) [installed]`,
+        root,
+      ),
+    ).toThrow(
+      /NOTICE-os-packages-default\.tsv names the Node\.js runtime as an OS package: nodejs 22\.22\.0-r1\./,
+    );
+    expect(() =>
+      assertNoNodeRuntimePackage(rowsNaming("nodejs"), "a.tsv"),
+    ).toThrow(/docs\/COMPLIANCE\.md's Section 889 paragraph/);
+  });
+
+  it("fails on every name a distribution ships the runtime under", () => {
+    for (const name of [
+      "node",
+      "nodejs",
+      "nodejs22",
+      "nodejs-libs",
+      "nodejs-full-i18n",
+      "npm",
+    ]) {
+      expect(() =>
+        assertNoNodeRuntimePackage(rowsNaming(name), IMAGES.fips.listFile),
+      ).toThrow(new RegExp(`OS package: ${name} `));
+    }
+  });
+
+  it("passes on a package whose name only begins like one", () => {
+    for (const name of ["json-c", "nodm", "npmlog", "libnode"]) {
+      expect(() =>
+        assertNoNodeRuntimePackage(rowsNaming(name), IMAGES.fips.listFile),
+      ).not.toThrow();
+    }
+  });
+
+  it("reads the package column, not the base pin the header states", () => {
+    const text = readFileSync(resolve(root, IMAGES.default.listFile), "utf8");
+    expect(text).toContain("# base pin: node:26-alpine@sha256:");
+    expect(() =>
+      assertNoNodeRuntimePackage(readListRows(text), IMAGES.default.listFile),
+    ).not.toThrow();
+  });
+});
+
 describe("the architectures block of a list header", () => {
   it("states the date the run supplied, not one of its own", () => {
     const stated = architecturesStatement("2024-03-04").join(" ");
@@ -379,6 +432,20 @@ describe("--check against the committed default list", () => {
     );
   });
 
+  it("fails when the image holds a Node.js runtime package", () => {
+    const result = check([
+      ...listRows,
+      { name: "nodejs", version: "22.22.0-r1", license: "MIT" },
+    ]);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      "names the Node.js runtime as an OS package: nodejs 22.22.0-r1",
+    );
+    expect(result.stderr).toContain(
+      "docs/COMPLIANCE.md's Section 889 paragraph",
+    );
+  });
+
   it("fails on a license that moved and on a package that went missing", () => {
     const [first, ...rest] = listRows;
     const licensed = check([{ ...first, license: "WTFPL" }, ...rest]);
@@ -447,6 +514,19 @@ describe("the committed lists", () => {
           readListComparisonDate(text),
         ),
       ).toBe(text);
+    });
+
+    it(`${image.listFile} names no Node.js runtime package`, () => {
+      expect(() =>
+        assertNoNodeRuntimePackage(readListRows(text), image.listFile),
+      ).not.toThrow();
+    });
+
+    it(`a Node.js runtime row planted in ${image.listFile} fails`, () => {
+      const planted = `${text}nodejs\t22.22.0-r1\tMIT\n`;
+      expect(() =>
+        assertNoNodeRuntimePackage(readListRows(planted), image.listFile),
+      ).toThrow(/names the Node\.js runtime as an OS package/);
     });
 
     it(`${image.listFile} states which architectures were compared`, () => {
