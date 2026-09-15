@@ -27,7 +27,7 @@ The asymmetry runs the other way on the responder leg. Its payload send is the e
 | Value | What it states |
 | --- | --- |
 | `completed` | The run finished. A run that signed exchanged its receipt; a run with no signing identity had none to exchange, and says so by holding no [`receiptBinder`](#pairing-a-receipt-to-one-run). |
-| `receipt-swap-terminated` | The disclosure occurred and the run then terminated without this party holding a receipt for it. The value covers every termination after this party's payload crossed, the swap's own among them: its name is narrower than its meaning, and a reader who takes the literal at face value infers a step the run may not have reached. |
+| `receipt-swap-terminated` | This party handed its payload to the transport and the run then terminated without this party holding a receipt for it. The value covers every termination after that hand-off, the swap's own among them -- including a hand-off the transport could neither confirm nor retract, which is not a proven disclosure (the indeterminate-publish rule above). Its name is narrower than its meaning, and a reader who takes the literal at face value infers a step the run may not have reached. |
 
 Five properties fix how the row is read.
 
