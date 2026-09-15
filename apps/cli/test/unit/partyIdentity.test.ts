@@ -40,6 +40,12 @@ const REAL_LABELS = [
   `${PLACEHOLDER_IDENTITY}_2`,
 ];
 
+/** One accented name in the two Unicode forms a keyboard layout, an input
+ * method, or a paste can produce: precomposed, and with each accent as a
+ * separate combining mark. */
+const COMPOSED_LABEL = "José Muñoz, Agencia Ñ, jose@example.org";
+const DECOMPOSED_LABEL = COMPOSED_LABEL.normalize("NFD");
+
 /** Every TypeScript source the CLI ships, by name and content, for the
  * structural check below; a failure then names the file rather than printing
  * it. */
@@ -71,6 +77,16 @@ test("a supplied identity is returned, trimmed", () => {
   expect(resolveIdentity("  Jane Smith, Agency A  ")).toBe(
     "Jane Smith, Agency A",
   );
+});
+
+test("a decomposed identity commits in its composed form", () => {
+  // The agreed-terms hash covers the label as sent and a signing certificate
+  // authorizes the exact string, so the two spellings of one typed name must
+  // not reach the terms as two different labels.
+  expect(DECOMPOSED_LABEL).not.toBe(COMPOSED_LABEL);
+  expect(resolveIdentity(DECOMPOSED_LABEL)).toBe(COMPOSED_LABEL);
+  expect(resolveIdentity(`  ${DECOMPOSED_LABEL}\t`)).toBe(COMPOSED_LABEL);
+  expect(optionalIdentity(DECOMPOSED_LABEL)).toBe(COMPOSED_LABEL);
 });
 
 test("no identity is refused rather than invented", () => {
