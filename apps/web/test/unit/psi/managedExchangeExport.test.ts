@@ -109,7 +109,9 @@ describe("exportManagedBackup", () => {
     await exportManagedBackup(rec.id, deps);
     // The bytes downloaded re-import to the secret readAndMark returned -- the same
     // secret the marker was stamped against, not a stale React snapshot.
-    const restored = importManagedExchangeArtifact(deps.downloaded[0].content);
+    const { record: restored } = importManagedExchangeArtifact(
+      deps.downloaded[0].content,
+    );
     expect(restored.sharedSecret).toBe(rec.sharedSecret);
   });
 

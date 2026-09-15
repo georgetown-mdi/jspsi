@@ -104,7 +104,7 @@ describe("export/import round-trip against the real store", () => {
     await deleteManagedExchange(source.id);
     expect(await listManagedExchanges()).toEqual([]);
 
-    const installed = await importManagedExchange(bytes);
+    const { record: installed } = await importManagedExchange(bytes);
     // A fresh id, the same secret and terms, no handle.
     expect(installed.id).not.toBe(source.id);
     expect(installed.sharedSecret).toBe(source.sharedSecret);
@@ -157,7 +157,7 @@ describe("the import marker is the restore evidence the desync tiering reads", (
     expect(bytes).not.toMatch(/importedAt/);
 
     await deleteManagedExchange(source.id);
-    const installed = await importManagedExchange(bytes);
+    const { record: installed } = await importManagedExchange(bytes);
     const local = await getManagedLocalState(installed.id);
     // Both markers are stamped: the restore evidence and the current-backup marker.
     expect(local?.imported).toBeDefined();
@@ -186,7 +186,7 @@ describe("the import marker is the restore evidence the desync tiering reads", (
       encodeManagedExchangeArtifact(source),
     );
     await deleteManagedExchange(source.id);
-    const installed = await importManagedExchange(bytes);
+    const { record: installed } = await importManagedExchange(bytes);
 
     // The first run after the import fails closed. Its bookkeeping lands as auth.
     await recordManagedExchangeLastRun(
@@ -259,7 +259,7 @@ describe("a migration spends the source", () => {
 
     // The spent record revives by importing the artifact back -- in place (same id),
     // not as a duplicate (see the revive suite below).
-    const revived = await importManagedExchange(bytes);
+    const { record: revived } = await importManagedExchange(bytes);
     expect(revived.id).toBe(source.id);
     expect(revived.sharedSecret).toBe(source.sharedSecret);
   });
@@ -446,7 +446,9 @@ describe("the export binds the marker to the bytes it serialized", () => {
     // pre-rotation record), so it serializes the rotated secret the store now holds.
     const deps = exportDeps();
     await exportManagedBackup(record.id, deps);
-    const restored = importManagedExchangeArtifact(deps.downloaded[0]);
+    const { record: restored } = importManagedExchangeArtifact(
+      deps.downloaded[0],
+    );
     expect(restored.sharedSecret).toBe(rotated);
     expect(restored.sharedSecret).not.toBe(original);
 
@@ -511,7 +513,9 @@ describe("the export binds the marker to the bytes it serialized", () => {
     // it structurally cannot stamp a marker over a secret it did not serialize.
     const deps = exportDeps();
     await exportManagedBackup(record.id, deps);
-    const restored = importManagedExchangeArtifact(deps.downloaded[0]);
+    const { record: restored } = importManagedExchangeArtifact(
+      deps.downloaded[0],
+    );
     expect(restored.sharedSecret).toBe(rotated);
     expect(await getManagedExchange(record.id)).toMatchObject({
       sharedSecret: rotated,
@@ -553,7 +557,9 @@ describe("importing a spent secret-match revives in place", () => {
     expect((await getManagedLocalState(source.id))?.backup).toBeDefined();
 
     await deleteManagedExchange(source.id);
-    const restored = await importManagedExchange(deps.downloaded[0]);
+    const { record: restored } = await importManagedExchange(
+      deps.downloaded[0],
+    );
     expect(restored.sharedSecret).toBe(source.sharedSecret);
     expect(restored.exchangeFile).toEqual(source.exchangeFile);
   });
@@ -657,14 +663,14 @@ describe("importing a spent secret-match revives in place", () => {
 
     // Importing the artifact back revives the SAME record (same id), clears spent,
     // and marks it backed-up -- no duplicate row.
-    const revived = await importManagedExchange(bytes);
+    const { record: revived } = await importManagedExchange(bytes);
     expect(revived.id).toBe(source.id);
     expect(revived.sharedSecret).toBe(source.sharedSecret);
     // The revive restores the whole artifact, not just the secret: the unattended
     // path picks the recurrence back up at the window and miss count the artifact
     // holds, rather than reviving an attended-only husk.
     expect(revived.schedule).toEqual(
-      importManagedExchangeArtifact(bytes).schedule,
+      importManagedExchangeArtifact(bytes).record.schedule,
     );
     expect(revived.schedule).toEqual(schedule);
     const all = await listManagedExchanges();
@@ -684,7 +690,7 @@ describe("importing a spent secret-match revives in place", () => {
       encodeManagedExchangeArtifact(source),
     );
     // The source is live (not spent): an import is a second owner, installed fresh.
-    const installed = await importManagedExchange(bytes);
+    const { record: installed } = await importManagedExchange(bytes);
     expect(installed.id).not.toBe(source.id);
     const all = await listManagedExchanges();
     expect(all).toHaveLength(2);

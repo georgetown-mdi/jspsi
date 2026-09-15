@@ -31,6 +31,14 @@
  * across a spent husk and a live row beside it. The refusal names the record the store
  * still holds so the surface can say which exchange it is and what recovery it has.
  *
+ * Every import reports which of the source's device-local grants this browser does
+ * not hold. The artifact has no field for a File System Access handle, only a marker
+ * saying the source had one, so a fresh install holds neither the input file nor the
+ * output folder and a scheduled run would otherwise be the first to say so -- a whole
+ * window later. A revive keeps the grants the record it revives already had, so
+ * what it reports is whatever that record does not hold: nothing when the record
+ * still holds both, and the one grant it lost when it lost one.
+ *
  * Either way the installed or revived record is marked imported and backed-up as of
  * the import instant: the file just imported from is itself a current backup of the
  * installed secret (so the exchange reads green rather than immediately prompting a
@@ -48,6 +56,7 @@ import { importManagedExchangeArtifact } from "./managedExchangeArtifact";
 import { markManagedExchangeImported } from "./managedLocalState";
 
 import type { ManagedExchangeRecord } from "./managedExchangeRecord";
+import type { ManagedPlatformGrant } from "./managedExchangeArtifact";
 import type { ManagedReviveOutcome } from "./managedExchangeStore";
 import type { ManagedSpentHandoff } from "./managedLocalStateShape";
 
@@ -114,6 +123,30 @@ const defaultDeps: ManagedImportDeps = {
   now: () => new Date(),
 };
 
+/** What an import leaves the operator with: the record, and the grants they have to
+ * take again on this browser before an unattended run can use them. */
+export interface ManagedImportResult {
+  /** The revived or installed record. */
+  record: ManagedExchangeRecord;
+  /** The grants the source record held that {@link record} does not, in the order
+   * they are presented. Empty when there is nothing to take again. */
+  missingGrants: Array<ManagedPlatformGrant>;
+}
+
+/** The grants the artifact's source held that the imported record does not, which is
+ * what the operator has to take again here. Subtracting what the record holds is what
+ * keeps a revive in place quiet: it keeps the handles it already had. */
+function grantsMissingHere(
+  heldGrants: Array<ManagedPlatformGrant>,
+  record: ManagedExchangeRecord,
+): Array<ManagedPlatformGrant> {
+  const held: Record<ManagedPlatformGrant, boolean> = {
+    "input-file": record.inputFileHandle !== undefined,
+    "output-folder": record.outputDirectoryHandle !== undefined,
+  };
+  return heldGrants.filter((grant) => !held[grant]);
+}
+
 /**
  * Import an artifact's bytes as a managed exchange. Parses and reconstructs through
  * the artifact module's trust boundary (throwing on a malformed or tampered file
@@ -121,7 +154,8 @@ const defaultDeps: ManagedImportDeps = {
  * record in place (already marked imported and backed-up in the same transaction);
  * if it matches a record handed off by a route of its own, refuses; otherwise
  * installs a fresh record and marks it imported and backed-up as of the import
- * instant. Returns the revived or installed record.
+ * instant. Returns the revived or installed record, with the grants it does not
+ * hold that its source did.
  *
  * The import mark on a fresh install is best-effort after the install succeeds: a
  * valid record is already durable, so a failed marker write must not report the
@@ -139,11 +173,16 @@ const defaultDeps: ManagedImportDeps = {
 export async function importManagedExchange(
   source: string,
   deps: ManagedImportDeps = defaultDeps,
-): Promise<ManagedExchangeRecord> {
-  const reconstructed = importManagedExchangeArtifact(source);
+): Promise<ManagedImportResult> {
+  const { record: reconstructed, heldGrants } =
+    importManagedExchangeArtifact(source);
   const at = deps.now().toISOString();
   const reconciled = await deps.reviveSpent(reconstructed, at);
-  if (reconciled.kind === "revived") return reconciled.record;
+  if (reconciled.kind === "revived")
+    return {
+      record: reconciled.record,
+      missingGrants: grantsMissingHere(heldGrants, reconciled.record),
+    };
   if (reconciled.kind === "handed-off")
     throw new ManagedImportHandedOffError(reconciled.handoff, reconciled.label);
   const installed = await deps.install(reconstructed);
@@ -154,5 +193,8 @@ export async function importManagedExchange(
     // needed" and holds no restore evidence, and reporting failure here would
     // duplicate on retry.
   }
-  return installed;
+  return {
+    record: installed,
+    missingGrants: grantsMissingHere(heldGrants, installed),
+  };
 }

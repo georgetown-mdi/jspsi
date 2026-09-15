@@ -296,7 +296,7 @@ function importedRecordWithDocument(
       key: { sharedSecret: generateSharedSecret() },
       local: { label: "Imported quarterly", side: "inviter" },
     }),
-  );
+  ).record;
 }
 
 function importedRecordWithConnection(

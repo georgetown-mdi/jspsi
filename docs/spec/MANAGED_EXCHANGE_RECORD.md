@@ -766,9 +766,18 @@ The artifact's shape and custody model:
 - **Contents.** The persisted record fields above -- the exchange-file document
 plus `sharedSecret`, `expires`, the schedule, and the local bookkeeping, the
 browser analog of handing over `psilink.yaml` and `.psilink.key` together --
-**minus the input-file handle**. A `FileSystemFileHandle` is a device- and
-profile-local platform object with no file serialization, so the export omits it
-and the first run after an import re-acquires one (a one-time selection). The
+**minus both platform handles**. A `FileSystemFileHandle` and a
+`FileSystemDirectoryHandle` are device- and profile-local platform objects with no
+file serialization, so the export omits them and the first run after an import
+re-acquires the input file by selection while the output folder is granted again.
+In each handle's place the export writes a **marker in `local` recording that the
+source record held it** -- `heldInputFile` and `heldOutputFolder`, written only
+when the handle was there, omitted rather than written `false`. They are what lets
+an import name the grants to take again on the importing browser (see [Eviction
+recovery is the import
+flow](../MANAGED_EXCHANGE.md#eviction-recovery-is-the-import-flow)), and an
+artifact holding neither marker -- a source that held no handle, or a file
+written before the markers existed -- names nothing rather than guessing. The
 record's `id` is likewise not included: it is a device-local record
   identifier, not partnership data, and an import is a **take-over that mints a
   fresh local record**, not a copy of the source's identity. The artifact does
@@ -785,12 +794,22 @@ valid `psilink.yaml` (the snake_case YAML the CLI loads, serialized through the
 same discipline the mint layer applies to a validated spec). `key` is the
 `.psilink.key` pair (`sharedSecret` and, when a bound is in force, `expires`).
 And `local` holds the browser-only fields the two CLI artifacts do not (`label`,
-`side`, `schedule`, `lastRun`, `tokenMaxAgeDays`). The artifact's own
+`side`, `schedule`, `lastRun`, `tokenMaxAgeDays`, and the two held-grant markers
+above). The artifact's own
   JSON keys are `camelCase`, by design: the `.psilink.key` file the CLI reads is
   itself `camelCase` JSON (`sharedSecret`, `expires`), parsed without a
   `snake_case` conversion, so a `camelCase` `key` block is what maps onto a valid
   key file with no renaming. Only the embedded `exchangeDocument` is `snake_case`,
   because the CLI loads it as YAML through `camelizeKeys`.
+- **What an older reader does with the held-grant markers.** The
+  `artifactVersion` literal does not move for `heldInputFile` and
+  `heldOutputFolder`: both keys are optional, so the format does not version for
+  them. That does not make an artifact holding one readable everywhere. A build
+  whose `local` schema does not know the two keys refuses it whole, because the
+  strict reader-rejects-unknown schema rejects an unknown nested key and the
+  top-level parse fails with it. What the operator meets is the generic
+  unreadable-file alert on the import surface, which does not name a version
+  difference.
 - **What a reconstructed `lastRun` can and cannot assert.** The `local.lastRun`
   block is validated against the record's own `lastRun` schema rather than a
   narrower one, so an artifact is accepted with every outcome and
