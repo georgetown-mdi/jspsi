@@ -77,6 +77,8 @@ The remedies are stated and not offered. Both are the CLI's own: name this party
 
 The console compares a value it reads rather than deciding the question: the fingerprint endpoint reports the name the certificate is bound to, and a file it cannot read a name from reports none, which the console treats as nothing to compare rather than as agreement. The run's own refusal, which reads the file itself, stays the authority.
 
+Both remedies are stated only where both are open. A name field is not a way to reach every string: what is typed there reaches the agreed terms trimmed and NFC-normalized, so an identity bound to a name with space around it, or to another Unicode form of one, is a name no entry restates. Sending that operator to the field would hand them back the same refusal over two names that look alike on the screen, with nothing to see for the attempt -- so that class states the re-key alone, and names which of the two differences it is instead of quoting a value whose difference is invisible. It is the same shape as a bound name no terms document may state, one step earlier: there the terms close the edit, here the field does.
+
 ## See also
 
 - [SERVER_JOB_API.md](../spec/SERVER_JOB_API.md#refusing-a-run-that-would-publish-the-signing-identity) - the refusal's conditions, its comparison, and the `400` body that names it

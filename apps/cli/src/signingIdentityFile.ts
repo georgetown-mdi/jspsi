@@ -100,6 +100,12 @@ export async function loadSigningIdentity(
  * fingerprint to compare, an identity to name -- rather than to sign with it.
  * A caller that will sign takes {@link loadSigningIdentity}, whose consistency
  * check is what refuses a private key that no longer matches its certificate.
+ *
+ * The console asks the same question of the same file before a run it launches,
+ * through a reader of its own, so the two are driven over one set of documents
+ * (`@psilink/testkit/signingIdentityDocuments`, this leg
+ * `apps/cli/test/unit/boundIdentityParity.test.ts`): tightening what this
+ * accepts fails that set until the console's reader follows.
  */
 export async function loadSigningCertificate(
   identityPath: string,

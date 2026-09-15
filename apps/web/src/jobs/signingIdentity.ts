@@ -144,6 +144,11 @@ export function signingIdentityTargetExists(identityPath: string): boolean {
  * format is not mined for one, and the private key beside it is never imported.
  * The document holds that key, so it is parsed through the sensitive-file
  * chokepoint, which reports path-only.
+ *
+ * Both loaders are driven over one set of documents
+ * (`@psilink/testkit/signingIdentityDocuments`, this leg
+ * `apps/web/test/unit/jobs/boundIdentityParity.test.ts`), so a document the CLI
+ * comes to refuse is not left reported here as a name.
  */
 export async function readBoundIdentity(
   identityPath: string,

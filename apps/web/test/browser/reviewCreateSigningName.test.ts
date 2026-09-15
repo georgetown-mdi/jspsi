@@ -138,12 +138,17 @@ describe("ReviewCreateSection: the name this console signs under", () => {
   test("a bound name the terms cannot restate holds the create", async () => {
     // An identity minted outside the console can hold the untrimmed name. The
     // terms state "Agency A", which that identity is not, so the launch is held
-    // and the statement names the value the run states.
+    // and the statement names the value the run states. The remedy is the
+    // re-key alone: the terms trim what is typed, so no entry in the name field
+    // reaches the bound one.
     render("Agency A ", signedWith("Agency A "));
 
     await expect.element(createButton()).toBeDisabled();
     expect(app.container.textContent).toContain(
-      'this exchange names you "Agency A"',
+      'the "Agency A" this exchange names you by',
+    );
+    expect(app.container.textContent).not.toContain(
+      "set 'Your name' for this exchange to",
     );
   });
 

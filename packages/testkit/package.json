@@ -10,6 +10,7 @@
     "./loopbackTlsCert": "./src/loopbackTlsCert.ts",
     "./preflightInventory": "./src/preflightInventory.ts",
     "./prerequisiteGate": "./src/prerequisiteGate.ts",
+    "./signingIdentityDocuments": "./src/signingIdentityDocuments.ts",
     "./webrtcInboundFrames": "./src/webrtcInboundFrames.ts"
   },
   "dependencies": {
