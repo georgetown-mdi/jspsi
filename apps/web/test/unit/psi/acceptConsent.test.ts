@@ -7,6 +7,11 @@ import {
   summarizeInvitation,
 } from "@psilink/core";
 
+import {
+  RECEIPTS_DEFAULT,
+  receiptsWithResolvedIdentity,
+  signingIdentityDivergence,
+} from "@psi/receiptsModel";
 import { commitAcceptance } from "@psi/acceptConsent";
 
 import type {
@@ -92,6 +97,36 @@ describe("commitAcceptance (the consent gate)", () => {
     expect(commitAcceptance({ consented: true, name: "  Dana  " })).toBe(
       "Dana",
     );
+  });
+
+  test("commits a name typed in another Unicode form as its NFC form", () => {
+    // The committed name becomes this party's linkage_terms.identity, which the
+    // agreed-terms hash covers and a signing certificate is authorized against,
+    // so an accented name typed decomposed states the same string an inviting
+    // seat's draft would state for it.
+    expect(
+      commitAcceptance({ consented: true, name: "  Age\u0301ncia A  " }),
+    ).toBe("Ag\u00e9ncia A");
+  });
+
+  test("a name differing from the bound identity only by form agrees", () => {
+    // The accept screen holds the launch when the signing identity is bound to a
+    // name other than the one the exchange states (signingIdentityDivergence over
+    // the committed name). Two Unicode forms of one name are one name: the terms
+    // state the form the certificate is bound to, so there is nothing to hold it
+    // over.
+    const bound = receiptsWithResolvedIdentity(
+      { ...RECEIPTS_DEFAULT, mode: "certificate" },
+      "B".repeat(42) + "A",
+      "Ag\u00e9ncia A",
+    );
+    const committed = commitAcceptance({
+      consented: true,
+      name: "Age\u0301ncia A",
+    });
+    expect(committed).toBeDefined();
+    expect(signingIdentityDivergence(bound, committed ?? "")).toBeUndefined();
+    expect(signingIdentityDivergence(bound, "Another Agency")).toBeDefined();
   });
 });
 

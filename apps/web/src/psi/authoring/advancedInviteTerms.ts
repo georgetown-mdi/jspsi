@@ -10,6 +10,7 @@ import {
   isDraftDrawnFromLinkageRuleSet,
   linkageRuleSetReferenceForDraft,
 } from "../linkageComparison";
+import { normalizeLinkageTermsText } from "../linkageTermsText";
 import { payloadSendForMetadata } from "../metadataEditing";
 
 import { outputForDirection } from "./advancedInviteTypes";
@@ -39,14 +40,6 @@ import type { AdvancedInviteDraft, DraftKey } from "./advancedInviteTypes";
  * by {@link citationDropCause}; {@link importedCitationDropCause} exposes the loss
  * and its reason so the editor can say so before the document is emitted.
  */
-
-/** NFC-normalize and trim a free-text value. NFC is the cross-party canonical
- * form linkage-terms free text is compared in; trimming drops incidental
- * surrounding whitespace so a space-only value is treated as empty by the
- * schema's `.min(1)`. */
-function normalizeText(value: string): string {
-  return value.normalize("NFC").trim();
-}
 
 /** Whether `constraints` is an empty object (`{}`) -- a present key declaring nothing.
  * Its canonical form differs from an absent key, so the faithful import round-trip
@@ -292,7 +285,7 @@ export function buildAdvancedTerms(draft: AdvancedInviteDraft): LinkageTerms {
 
   const terms: LinkageTerms = {
     ...baseTerms,
-    identity: normalizeText(draft.identity),
+    identity: normalizeLinkageTermsText(draft.identity),
     algorithm: draft.algorithm,
     deduplicate: draft.deduplicate,
     linkageStrategy: draft.linkageStrategy,
@@ -336,8 +329,8 @@ export function buildAdvancedTerms(draft: AdvancedInviteDraft): LinkageTerms {
 
   if (draft.legalAgreement !== undefined) {
     terms.legalAgreement = {
-      reference: normalizeText(draft.legalAgreement.reference),
-      purpose: normalizeText(draft.legalAgreement.purpose),
+      reference: normalizeLinkageTermsText(draft.legalAgreement.reference),
+      purpose: normalizeLinkageTermsText(draft.legalAgreement.purpose),
       // The date comes from a date input (YYYY-MM-DD), not free prose, so it is
       // not NFC-normalized; its format is validated by the schema and that it has
       // not already passed by validateAdvancedInvite.

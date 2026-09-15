@@ -316,10 +316,10 @@ const DIVERGENCE_REKEY_UNDER_TERMS_NAME = rekeyGuidance(
 /**
  * Why 'Your name' cannot be set to `bound`, phrased as a clause the statement
  * reads inside, or undefined when it can. What is typed there reaches the terms
- * trimmed and NFC-normalized (`normalizeText`,
- * `@psi/authoring/advancedInviteTerms`), so the terms state another form of a
- * bound name holding either difference however carefully it is copied, and the
- * local edit the ordinary divergence offers first closes.
+ * trimmed and NFC-normalized (`normalizeLinkageTermsText`,
+ * `@psi/linkageTermsText`), so the terms state another form of a bound name
+ * holding either difference however carefully it is copied, and the local edit
+ * the ordinary divergence offers first closes.
  *
  * The clause names the class rather than the name: both differences are
  * invisible where a name is shown, so quoting the two values would read as one
