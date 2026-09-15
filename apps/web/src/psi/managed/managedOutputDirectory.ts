@@ -126,17 +126,40 @@ async function entryHeldAlready(
   );
 }
 
+/**
+ * How long the removal keeps asking while the platform still holds the write lock
+ * the aborted stream took; Chromium releases it a task turn after `abort()`
+ * resolves. Measured worst case for the lock to clear: 13.4 ms after the first
+ * refusal, over 2400 failed writes under load; 200 ms is about fifteen times that.
+ * Measurement and method: docs/notes/output-directory-removal-lock.md.
+ */
+const REMOVAL_LOCK_BUDGET_MS = 200;
+
+/** Whether a removal was refused because the write lock is still held, rather
+ * than for a reason waiting cannot clear. */
+function removalBlockedByLock(error: unknown): boolean {
+  return error instanceof Error && error.name === "NoModificationAllowedError";
+}
+
 /** Drop the entry a failed write created, best-effort: a folder that refuses the
- * removal leaves the empty file behind, which a completed run may not fail
- * over. */
+ * removal leaves the empty file behind, which a completed run may not fail over.
+ * A refusal naming the lock is asked again until {@link REMOVAL_LOCK_BUDGET_MS}
+ * is spent, since that lock outlives the abort that released the stream. */
 async function dropCreatedEntry(
   directory: FileSystemDirectoryHandle,
   fileName: string,
 ): Promise<void> {
-  try {
-    await directory.removeEntry(fileName);
-  } catch {
-    return;
+  let deadline: number | undefined;
+  for (;;) {
+    try {
+      await directory.removeEntry(fileName);
+      return;
+    } catch (error) {
+      if (!removalBlockedByLock(error)) return;
+      deadline ??= Date.now() + REMOVAL_LOCK_BUDGET_MS;
+      if (Date.now() >= deadline) return;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
   }
 }
 

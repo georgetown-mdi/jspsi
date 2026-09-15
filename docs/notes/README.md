@@ -35,6 +35,7 @@ stands, from a direction still open to a decision taken and built.
 | [one-sided-disclosure.md](one-sided-disclosure.md) | Resolved - shipped as the opt-in `single-pass` linkage strategy (the cascade stays the default). |
 | [one-sided-fuzzy-expansion.md](one-sided-fuzzy-expansion.md) | Decided, built, and applied. |
 | [operator-message-control-characters.md](operator-message-control-characters.md) | Decided and built. |
+| [output-directory-removal-lock.md](output-directory-removal-lock.md) | Measurement backing the retry's wall-clock budget. |
 | [prebuild-provenance.md](prebuild-provenance.md) | Decided, built, and armed against a fork that attests. |
 | [psi-c-count-only.md](psi-c-count-only.md) | Decided and built. |
 | [rebase-reattestation.md](rebase-reattestation.md) | Decided on the maintainer's ruling and built; the fourth mechanical re-attestation path and the limits it accepts. |
