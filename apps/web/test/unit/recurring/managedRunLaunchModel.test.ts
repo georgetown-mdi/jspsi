@@ -7,12 +7,12 @@ import { describe, expect, test } from "vitest";
 
 import {
   classifyManagedRunFailure,
-  managedFailureShowsReportedCause,
   managedReinviteRecoveryCopy,
+  managedRunCausePlacement,
   managedRunFailureFromRecord,
   managedRunReinvites,
   managedRunRetryable,
-  withReportedCause,
+  withShownCause,
 } from "@recurring/managedRunLaunchModel";
 
 import {
@@ -39,6 +39,7 @@ import type {
   ManagedExchangeRecord,
 } from "@psi/managed/managedExchangeRecord";
 import type {
+  ManagedRunCausePlacement,
   ManagedRunFailure,
   ManagedRunFailureAlert,
 } from "@recurring/managedRunLaunchModel";
@@ -1097,39 +1098,47 @@ describe("managedReinviteRecoveryCopy", () => {
   });
 });
 
-describe("the reported cause a classified state shows", () => {
-  // What the operator is shown follows from one predicate, and what it holds is
-  // a decision per state: the two states whose copy accounts for nothing show
-  // the error the run reported, and every state whose copy states the cause
-  // itself shows none of it.
+describe("the launch error a classified state shows", () => {
+  // What the operator is shown follows from one table, and what it holds is a
+  // decision per state: the two states whose copy accounts for nothing show the
+  // error, one under the label attributing it to the exchange and one finishing
+  // its own copy, and every state whose copy states the cause itself shows none
+  // of it.
 
-  /** Every state the surface classifies into, and whether it shows the launch
-   * error beside its own copy. Exhaustive by its type, so a kind added to the
-   * model does not typecheck until it is decided here, and a kind added to the
-   * allowlist without a decision reddens the assertion below. */
-  const SHOWS_REPORTED_CAUSE: Record<ManagedRunFailureAlert["kind"], boolean> =
-    {
-      transport: true,
-      "custody-unreadable": true,
-      expired: false,
-      input: false,
-      "terms-shortfall": false,
-      consent: false,
-      "already-running": false,
-      missed: false,
-      storage: false,
-      imported: false,
-      unexplained: false,
-    };
+  /** Every state the surface classifies into, and where its launch error
+   * reaches the operator. Exhaustive by its type, so a kind added to the model
+   * does not typecheck until it is decided here, and a kind whose placement
+   * moves without a decision reddens the assertion below. */
+  const CAUSE_PLACEMENT: Record<
+    ManagedRunFailureAlert["kind"],
+    ManagedRunCausePlacement
+  > = {
+    transport: "attributed",
+    "custody-unreadable": "own-account",
+    expired: "withheld",
+    input: "withheld",
+    "terms-shortfall": "withheld",
+    consent: "withheld",
+    "already-running": "withheld",
+    missed: "withheld",
+    storage: "withheld",
+    imported: "withheld",
+    unexplained: "withheld",
+  };
 
-  test("the predicate applies each state's own decision", () => {
-    const kinds = Object.keys(SHOWS_REPORTED_CAUSE) as Array<
+  /** The text a withholding state's error is written with: a phrase no copy
+   * holds, so finding it anywhere in the failure is the error having reached a
+   * sink. */
+  const WITHHELD_TEXT = "the entry lists 4 offending rows";
+
+  test("the model applies each state's own decision", () => {
+    const kinds = Object.keys(CAUSE_PLACEMENT) as Array<
       ManagedRunFailureAlert["kind"]
     >;
     for (const kind of kinds)
-      expect([kind, managedFailureShowsReportedCause(kind)]).toEqual([
+      expect([kind, managedRunCausePlacement(kind)]).toEqual([
         kind,
-        SHOWS_REPORTED_CAUSE[kind],
+        CAUSE_PLACEMENT[kind],
       ]);
   });
 
@@ -1148,9 +1157,12 @@ describe("the reported cause a classified state shows", () => {
     expect(failure.message).not.toContain("the data channel closed");
   });
 
-  test("an unreadable custody entry shows the read's own error", () => {
-    // This device's own storage read, with no affordance that makes the entry
-    // readable, so the underlying error is the only diagnostic the state has.
+  test("an unreadable custody entry finishes its copy with the read's error", () => {
+    // This browser's own storage read, with no affordance that makes the entry
+    // readable, so the underlying error is the only diagnostic the state has --
+    // and it is this application's account of its own read, so it finishes the
+    // copy instead of standing under a label naming the exchange as its source
+    // (docs/notes/reported-failure-cause.md).
     const failure = classifyAgainstOneRecord(
       new ManagedExchangeCustodyUnreadableError(
         "abc",
@@ -1162,14 +1174,14 @@ describe("the reported cause a classified state shows", () => {
       false,
     );
     expect(failure.kind).toBe("custody-unreadable");
-    expect(failure.reportedCause).toContain("not valid JSON");
-    expect(failure.message).not.toContain("not valid JSON");
+    expect(failure.message).toContain("not valid JSON");
+    expect(failure.reportedCause).toBeUndefined();
   });
 
   test("a failed-closed handshake withholds its own message", () => {
     // Non-oracular by design, exactly as the seats withhold the untagged
     // security arm's (docs/notes/reported-failure-cause.md).
-    expect(managedFailureShowsReportedCause("unexplained")).toBe(false);
+    expect(managedRunCausePlacement("unexplained")).toBe("withheld");
     const failure = classifyAgainstOneRecord(
       new Error("key confirmation mismatch at step 3"),
       record({ lastRun: failed("auth") }),
@@ -1183,18 +1195,22 @@ describe("the reported cause a classified state shows", () => {
 
   test("the states whose own copy states the cause show no error", () => {
     // The states are reached over the classification's own routes rather than
-    // asserted one by one off the predicate: a route attaching a cause of its
-    // own, past the single site, fails here.
+    // asserted one by one off the table: a route attaching a cause of its own,
+    // past the single site, fails here. Both sinks are checked, since the
+    // placement decides between them and withholding is neither.
     const errors: Array<[unknown, ManagedExchangeRecord]> = [
       [
-        new ManagedInputError({ reason: "acquire", cause: new Error("gone") }),
+        new ManagedInputError({
+          reason: "acquire",
+          cause: new Error(WITHHELD_TEXT),
+        }),
         record(),
       ],
-      [new PartnerNoShowError("nobody came"), record()],
-      [new ManagedExchangeLockUnavailableError("held"), record()],
-      [new Error("could not save"), record({ lastRun: failed("storage") })],
-      [new Error("mismatch"), record({ lastRun: failed("auth") })],
-      [new Error("refused"), record({ lastRun: failed("consent") })],
+      [new PartnerNoShowError(WITHHELD_TEXT), record()],
+      [new ManagedExchangeLockUnavailableError(WITHHELD_TEXT), record()],
+      [new Error(WITHHELD_TEXT), record({ lastRun: failed("storage") })],
+      [new Error(WITHHELD_TEXT), record({ lastRun: failed("auth") })],
+      [new Error(WITHHELD_TEXT), record({ lastRun: failed("consent") })],
     ];
     for (const [error, stored] of errors) {
       const failure = classifyAgainstOneRecord(
@@ -1204,10 +1220,11 @@ describe("the reported cause a classified state shows", () => {
         NOW,
         false,
       );
-      expect([failure.kind, failure.reportedCause]).toEqual([
+      expect([
         failure.kind,
-        undefined,
-      ]);
+        failure.reportedCause,
+        failure.message.includes(WITHHELD_TEXT),
+      ]).toEqual([failure.kind, undefined, false]);
     }
   });
 
@@ -1222,22 +1239,34 @@ describe("the reported cause a classified state shows", () => {
     expect(failure.reportedCause).toBeUndefined();
   });
 
-  test("the error a state shows is escaped for display", () => {
-    const hostile = new Error("channel closed \u001b[2J");
-    const failure = classifyAgainstOneRecord(
-      hostile,
+  test("the error a state shows is escaped for display, either placement", () => {
+    const attributed = classifyAgainstOneRecord(
+      new Error("channel closed \u001b[2J"),
       record({ lastRun: failed("transport") }),
       undefined,
       NOW,
       false,
     );
-    expect(failure.reportedCause).toContain("channel closed");
+    expect(attributed.reportedCause).toContain("channel closed");
     // Escaped once at this boundary, so the sequence that would drive a
     // terminal reaches the operator as text.
-    expect(failure.reportedCause).not.toContain("\u001b");
+    expect(attributed.reportedCause).not.toContain("\u001b");
+
+    const ownAccount = classifyAgainstOneRecord(
+      new ManagedExchangeCustodyUnreadableError(
+        "abc",
+        new Error("unreadable \u001b[2J"),
+      ),
+      record(),
+      undefined,
+      NOW,
+      false,
+    );
+    expect(ownAccount.message).toContain("unreadable");
+    expect(ownAccount.message).not.toContain("\u001b");
   });
 
-  test("an error with nothing to report gets no block", () => {
+  test("an error with nothing to show leaves the copy alone", () => {
     const base = classifyAgainstOneRecord(
       new Error("dropped"),
       record({ lastRun: failed("transport") }),
@@ -1247,7 +1276,11 @@ describe("the reported cause a classified state shows", () => {
     );
     const bare = { ...base };
     delete bare.reportedCause;
-    expect(withReportedCause(bare, new Error("   "), true)).toEqual(bare);
-    expect(withReportedCause(bare, "not an error", true)).toEqual(bare);
+    // Neither a label promising an account the state has none of, nor a lead
+    // with nothing after it.
+    for (const placement of ["attributed", "own-account"] as const) {
+      expect(withShownCause(bare, new Error("   "), placement)).toEqual(bare);
+      expect(withShownCause(bare, "not an error", placement)).toEqual(bare);
+    }
   });
 });

@@ -13,6 +13,7 @@ import {
   clearManagedExchanges,
   createManagedExchange,
 } from "@psi/managed/managedExchangeStore";
+import { ManagedExchangeCustodyUnreadableError } from "@psi/managed/managedExchangeRun";
 import { ManagedRunSurface } from "@recurring/ManagedRunSurface";
 import { REPORTED_CAUSE_LABEL } from "@exchange/RunSurface";
 import { composeManagedExchangeFile } from "@psi/managed/managedExchangeRecord";
@@ -21,17 +22,22 @@ import { createAppMount, flushPendingUpdates } from "./renderApp";
 
 import type { NewManagedExchange } from "@psi/managed/managedExchangeRecord";
 
-// The recurring seat shows the transport state's reported cause, and what keeps
-// a partner's or a network stack's sentence from reading as this application's
-// account of the failure is where the sentence lands: under the label
-// attributing it to the exchange, and outside the seat's own copy. A structural
-// property, so the run below fails with a chain written in this application's
-// voice -- the words that would mislead if they arrived unattributed.
+// The recurring seat shows a failed run's error on two states, and which voice
+// the operator reads it in is where it lands. The transport state's error is
+// the exchange's, so it stands under the label attributing it and outside the
+// seat's own copy; the unreadable-custody state's error is this browser's own
+// account of its own storage read, so it finishes that copy and no label
+// attributes it elsewhere. Structural properties, so each run below fails with
+// text that would mislead if it arrived in the other place.
 
-/** The relayed chain the stubbed run fails with: its second link tells the
- * operator the run is safe to repeat, which is advice only this application is
- * in a position to give. */
+/** The relayed chain the stubbed transport run fails with: its second link
+ * tells the operator the run is safe to repeat, which is advice only this
+ * application is in a position to give. */
 const PLANTED_ADVICE = "it is safe to run this again";
+
+/** What the stubbed custody read fails with: a fault of this browser's own
+ * storage, which no exchange said anything about. */
+const PLANTED_READ_FAULT = "the stored entry is not valid JSON";
 
 vi.mock("@tanstack/react-router", async () =>
   (await import("./moduleMocks")).reactRouterMock(),
@@ -41,16 +47,14 @@ vi.mock("@psi/transport/rendezvous", async () =>
   (await import("./moduleMocks")).rendezvousMock(),
 );
 
+/** The rejection the stubbed run fails with, set before each test. */
+let runRejection: unknown;
+
 vi.mock("@psi/managed/managedRunDriver", async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
   return {
     ...actual,
-    runManagedExchangeInBrowser: () =>
-      Promise.reject(
-        new Error("the data channel closed", {
-          cause: new Error(PLANTED_ADVICE),
-        }),
-      ),
+    runManagedExchangeInBrowser: () => Promise.reject(runRejection),
   };
 });
 
@@ -79,6 +83,9 @@ async function inputHandle(): Promise<FileSystemFileHandle> {
 const app = createAppMount();
 
 beforeEach(async () => {
+  runRejection = new Error("the data channel closed", {
+    cause: new Error(PLANTED_ADVICE),
+  });
   await clearManagedExchanges();
 });
 
@@ -88,13 +95,9 @@ afterEach(async () => {
   await clearManagedExchanges();
 });
 
-/** The mounted transport failure: the seat's own sentence, the label over the
- * report, and the report itself. */
-async function failedRun(): Promise<{
-  message: HTMLElement;
-  label: HTMLElement;
-  report: HTMLElement;
-}> {
+/** Mount an exchange's run surface and run it until the alert the stubbed
+ * rejection classifies into is up, named by its title. */
+async function runToFailure(title: string): Promise<void> {
   const created = await createManagedExchange(
     newExchange({ inputFileHandle: await inputHandle() }),
   );
@@ -102,9 +105,17 @@ async function failedRun(): Promise<{
   const runButton = page.getByRole("button", { name: "Run exchange" });
   await expect.element(runButton).toBeEnabled();
   await runButton.click();
-  await expect
-    .element(page.getByText("The run could not be completed"))
-    .toBeInTheDocument();
+  await expect.element(page.getByText(title)).toBeInTheDocument();
+}
+
+/** The mounted transport failure: the seat's own sentence, the label over the
+ * report, and the report itself. */
+async function failedRun(): Promise<{
+  message: HTMLElement;
+  label: HTMLElement;
+  report: HTMLElement;
+}> {
+  await runToFailure("The run could not be completed");
   return await vi.waitFor(() => {
     const label = [...app.container.querySelectorAll("p")].find(
       (node) => node.textContent === REPORTED_CAUSE_LABEL,
@@ -142,4 +153,31 @@ test("the transport state's cause stands under the label, not in the seat's own 
     expect(
       above.compareDocumentPosition(below) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+});
+
+test("the unreadable-custody state's cause finishes the seat's own copy, under no label", async () => {
+  runRejection = new ManagedExchangeCustodyUnreadableError(
+    "abc",
+    new Error(PLANTED_READ_FAULT),
+  );
+  await runToFailure("Part of this exchange's stored copy could not be read");
+
+  const message = await vi.waitFor(() => {
+    const found = [...app.container.querySelectorAll("span")].find((node) =>
+      node.textContent.startsWith("This browser could not read the note"),
+    );
+    if (found === undefined)
+      throw new Error("the failure alert is not mounted with its copy");
+    return found;
+  });
+  // The read that failed is this browser's own, so its error is part of what
+  // this application says about what it did, inside that sentence.
+  expect(message.textContent).toContain(PLANTED_READ_FAULT);
+  // And nothing on the surface attributes it to the exchange, which said
+  // nothing here -- the run stopped before connecting.
+  expect(
+    [...app.container.querySelectorAll("*")].some(
+      (node) => node.textContent === REPORTED_CAUSE_LABEL,
+    ),
+  ).toBe(false);
 });

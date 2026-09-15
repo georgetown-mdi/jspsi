@@ -424,8 +424,8 @@ export function ManagedRunSurface({ id }: { id: string }) {
         if (controller.signal.aborted) return;
         // The raw error can embed partner-/server-controlled bytes and displays as an
         // internal message, so it stays in the dev-gated console; the surface shows
-        // the classified copy, and the escaped report beneath it on the states that
-        // show one (`managedRunLaunchModel`).
+        // the classified copy, and the escaped error where the state's placement
+        // shows one (`managedRunLaunchModel`).
         whenDiagnostic(() => console.error(error));
         // The tier is derived from the record's OWN bookkeeping, which the run path
         // just stamped (the auth/transport/storage/input/consent/cancelled
