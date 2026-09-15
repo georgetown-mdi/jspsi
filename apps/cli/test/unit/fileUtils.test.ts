@@ -18,6 +18,12 @@ import {
   writeFileAtomic,
   writeFileOwnerOnly,
 } from "../../src/fileUtils";
+import {
+  currentWindowsUser,
+  isOwnerOnly,
+  ownerRights,
+  readAcl,
+} from "../windowsAcl";
 
 // Captures every execFileSync argument vector the extended-ACL strip
 // (`/bin/chmod`) makes. `stubbed` answers without running it, for a host
@@ -1200,73 +1206,6 @@ describe("extended-ACL strip symlink posture", () => {
 
 // --- Windows owner-only ACL --------------------------------------------------
 
-// The current user's domain-qualified name (DOMAIN\user), the principal the
-// writers grant Modify and the only non-inherited ACE a narrowed file may have.
-function currentWindowsUser(): string {
-  return childProcess.execFileSync("whoami", [], { encoding: "utf8" }).trim();
-}
-
-// One parsed line of `icacls <file>` output: the principal and the raw flag/
-// rights token after the `:(` separator (e.g. "(I)(M)" or "(R)"). The first
-// line of icacls output echoes the path before the first ACE; the trailing
-// "Successfully processed" summary line has no `:(` and is skipped.
-type Ace = { principal: string; rights: string };
-
-function readAcl(filePath: string): Ace[] {
-  const output = childProcess.execFileSync("icacls", [filePath], {
-    encoding: "utf8",
-  });
-  const echoed = filePath.replace(/\//g, "\\");
-  const aces: Ace[] = [];
-  for (const rawLine of output.split(/\r?\n/)) {
-    let line = rawLine;
-    if (line.startsWith(echoed)) line = line.slice(echoed.length).trimStart();
-    const trimmed = line.trim();
-    const sep = trimmed.indexOf(":(");
-    if (sep === -1) continue;
-    aces.push({
-      principal: trimmed.slice(0, sep).trim(),
-      rights: trimmed.slice(sep + 1),
-    });
-  }
-  return aces;
-}
-
-// The principals the load-time check treats as owner-equivalent (EXEMPT_SIDS,
-// S-1-5-18 and S-1-5-32-544 in src/fileUtils.ts), under the names icacls prints
-// for them: SYSTEM and the local Administrators group hold standing access to
-// every file on the host, and the writers' narrowing leaves them in place.
-// icacls prints a display name rather than a SID and localizes the name of a
-// built-in principal, so on a Windows installed in another language these two
-// entries do not match and the assertions below go red.
-const OWNER_EQUIVALENT_PRINCIPALS = [
-  "nt authority\\system",
-  "builtin\\administrators",
-];
-
-// True when the file's ACL grants only the current user and those two
-// principals, with no inherited (I) ACE and no other explicit principal -- the
-// owner-only state the writers must produce. Deny ACEs are restrictive and
-// ignored.
-function isOwnerOnly(filePath: string, owner: string): boolean {
-  const aces = readAcl(filePath);
-  if (aces.length === 0) return false;
-  return aces.every((ace) => {
-    if (ace.rights.includes("(DENY)")) return true;
-    const principal = ace.principal.toLowerCase();
-    if (OWNER_EQUIVALENT_PRINCIPALS.includes(principal)) return true;
-    if (ace.rights.includes("(I)")) return false;
-    return principal === owner.toLowerCase();
-  });
-}
-
-// The rights icacls prints for each of the current user's own ACEs.
-function ownerRights(filePath: string, owner: string): string[] {
-  return readAcl(filePath)
-    .filter((ace) => ace.principal.toLowerCase() === owner.toLowerCase())
-    .map((ace) => ace.rights);
-}
-
 describe.skipIf(process.platform !== "win32")("Windows owner-only ACL", () => {
   // O_TRUNC without O_CREAT asks for the TRUNCATE_EXISTING disposition, which
   // this platform rejects, so an ACL-narrowed file cannot be reopened with a
@@ -1344,8 +1283,19 @@ describe.skipIf(process.platform !== "win32")("Windows owner-only ACL", () => {
     childProcess.execFileSync("icacls", [p, "/grant", "Guests:(R)"], {
       stdio: "ignore",
     });
+    // The grant is the test's own setup, asserted so a platform that refuses
+    // it on an already-narrowed file reports that rather than an absent
+    // warning about a file still correctly narrowed.
+    const loosened = readAcl(p);
+    expect(
+      loosened.some((ace) => ace.principal.toLowerCase().includes("guests")),
+      `access list after the grant: ${JSON.stringify(loosened)}`,
+    ).toBe(true);
     warnIfFileOverPermissive(p, "shared secret");
-    expect(warn).toHaveBeenCalled();
+    expect(
+      warn,
+      `access list the check read: ${JSON.stringify(loosened)}`,
+    ).toHaveBeenCalled();
   });
 });
 
