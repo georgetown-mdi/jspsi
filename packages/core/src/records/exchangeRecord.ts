@@ -374,15 +374,18 @@ interface ExchangeRecordGovernance {
  * - `completed`: the run finished. A run that signed exchanged its receipt; a
  *   run with no signing identity had none to exchange and has no
  *   {@link ExchangeRecord.receiptBinder}.
- * - `receipt-swap-terminated`: the disclosure occurred and the run then
- *   terminated without this party holding a receipt for it. The signed-receipt
- *   swap is the step it most often terminates in, but the value covers the
- *   whole post-disclosure region -- a partner reply that never arrives, and a
- *   received payload refused against what this party consented to receive, both
- *   terminate the run before the swap and record the same value. The
+ * - `receipt-swap-terminated`: this party handed its payload to the transport
+ *   and the run then terminated without this party holding a receipt for it.
+ *   The signed-receipt swap is the step it most often terminates in, but the
+ *   value covers the whole region after the hand-off -- a partner reply that
+ *   never arrives, and a received payload refused against what this party
+ *   consented to receive, both terminate the run before the swap and record
+ *   the same value, and a hand-off the transport could neither confirm nor
+ *   retract records it too, without being a proven disclosure
+ *   (docs/spec/EXCHANGE_RECORD.md, the indeterminate-publish rule). The
  *   received-payload commitment beside it is empty where no reply arrived, so
- *   the record commits to what this party received. The record still attests
- *   the disclosure it made; it does not state WHY the run terminated
+ *   the record commits to what this party received. The record attests the
+ *   hand-off it made; it does not state WHY the run terminated
  *   (docs/spec/EXCHANGE_RECORD.md, When a record is owed).
  *
  * Stated on every record rather than left to an absent-marks-terminated

@@ -15,7 +15,10 @@ import {
   ConnectionError,
   createMessagePipe,
 } from "../../src/connection/messageConnection";
-import { OperatorConfigError } from "../../src/errors";
+import {
+  OperatorConfigError,
+  TransportPublishIndeterminateError,
+} from "../../src/errors";
 import {
   ReceiptVerificationError,
   SIGNED_RECEIPT_VERSION,
@@ -1037,11 +1040,17 @@ function cutAfterPayloadSend(
 
 /** Reject this party's own payload send at the transport, leaving every earlier
  * message of the exchange to go out normally. */
-function rejectPayloadSend(conn: MessageConnection): MessageConnection {
+function rejectPayloadSend(
+  conn: MessageConnection,
+  rejection: unknown = new ConnectionError(
+    "the connection dropped",
+    "transport",
+  ),
+): MessageConnection {
   return {
     send: async (data) => {
       if (typeof data === "object" && data !== null && "hasData" in data)
-        throw new ConnectionError("the connection dropped", "transport");
+        throw rejection;
       await conn.send(data);
     },
     receive: (timeoutMs?: number) => conn.receive(timeoutMs),
@@ -1506,6 +1515,139 @@ describe("a run terminated after its disclosure keeps the record of it", () => {
     await connInitiatorRaw.close();
     await connResponder.close();
     await responder;
+  });
+
+  test("a payload send rejected as indeterminate is owed a record on the leg that sends first", async () => {
+    // The transport could neither confirm nor retract the publish, so this
+    // party's payload may be in the partner's directory: the region opens on
+    // the rejection, and the run fails holding the record of a disclosure it
+    // cannot rule out. The rejection reaches the step wrapped as the message
+    // connection wraps it, which is the shape a real run raises.
+    const [connInitiatorRaw, connResponder] = createMessagePipe();
+    const responder = runExchange(
+      connResponder,
+      "responder",
+      preparedWithPayload("Responder Co", payloadServer),
+      { psiLibrary },
+    ).catch((reason: unknown) => reason);
+    const failure = await runExchange(
+      rejectPayloadSend(
+        connInitiatorRaw,
+        new ConnectionError("the publish could not be confirmed", "transport", {
+          cause: new TransportPublishIndeterminateError(
+            "the message may or may not have reached the partner",
+            { cause: new Error("the publish was cut off mid-operation") },
+          ),
+        }),
+      ),
+      "initiator",
+      preparedWithPayload("Initiator Co", payloadClient),
+      { psiLibrary },
+    ).then(
+      () => {
+        throw new Error(
+          "expected the indeterminate publish to end the initiator's run",
+        );
+      },
+      (reason: unknown) => reason,
+    );
+
+    // The run still fails, and on the transport's own error.
+    expect(failure).toBeInstanceOf(ConnectionError);
+    expect((failure as ConnectionError).cause).toBeInstanceOf(
+      TransportPublishIndeterminateError,
+    );
+    const kept = exchangeRecordFromFailure(failure);
+    expect(kept?.record.outcome).toBe("receipt-swap-terminated");
+    expect(kept?.record.recordsExposed).toBe(payloadClient.length);
+    expect(kept?.record.governance.payloadSent).toEqual([{ name: "note" }]);
+    expect(kept?.record.governance.payloadReceived).toEqual([]);
+    expect(exchangeRecordOwedButUnbuilt(failure)).toBe(false);
+    expect(exchangeDisclosedWithoutPartnerPayload(failure)).toBe(true);
+
+    await connInitiatorRaw.close();
+    await connResponder.close();
+    await responder;
+  });
+
+  test("the responder's terminal send rejected as indeterminate keeps the payload it received", async () => {
+    // The same rejection on the leg that receives first. Its record commits the
+    // partner's payload, which had arrived before the send: the commitment is
+    // what this party received, however the send then ended.
+    const [connInitiator, connResponderRaw] = createMessagePipe();
+    const initiator = runExchange(
+      connInitiator,
+      "initiator",
+      preparedWithPayload("Initiator Co", payloadClient),
+      { psiLibrary },
+    ).catch((reason: unknown) => reason);
+    const failure = await runExchange(
+      rejectPayloadSend(
+        connResponderRaw,
+        new ConnectionError("the publish could not be confirmed", "transport", {
+          cause: new TransportPublishIndeterminateError(
+            "the message may or may not have reached the partner",
+            { cause: new Error("the publish was cut off mid-operation") },
+          ),
+        }),
+      ),
+      "responder",
+      preparedWithPayload("Responder Co", payloadServer),
+      { psiLibrary },
+    ).then(
+      () => {
+        throw new Error(
+          "expected the indeterminate publish to end the responder's run",
+        );
+      },
+      (reason: unknown) => reason,
+    );
+
+    const kept = exchangeRecordFromFailure(failure);
+    expect(kept?.record.outcome).toBe("receipt-swap-terminated");
+    expect(kept?.record.recordsExposed).toBe(payloadServer.length);
+    expect(kept?.record.governance.payloadSent).toEqual([{ name: "note" }]);
+    expect(kept?.record.governance.payloadReceived).toEqual([{ name: "note" }]);
+    expect(exchangeDisclosedWithoutPartnerPayload(failure)).toBe(false);
+
+    await connInitiator.close();
+    await connResponderRaw.close();
+    await initiator;
+  });
+
+  test("the responder's terminal send refused outright owes no record", async () => {
+    // The other rejection on the same leg: the transport settled the publish as
+    // not having happened, so nothing of this party's crossed and there is
+    // nothing to attest -- the received payload alone owes no record.
+    const [connInitiator, connResponderRaw] = createMessagePipe();
+    const initiator = runExchange(
+      connInitiator,
+      "initiator",
+      preparedWithPayload("Initiator Co", payloadClient),
+      { psiLibrary },
+    ).catch((reason: unknown) => reason);
+    const failure = await runExchange(
+      rejectPayloadSend(connResponderRaw),
+      "responder",
+      preparedWithPayload("Responder Co", payloadServer),
+      { psiLibrary },
+    ).then(
+      () => {
+        throw new Error(
+          "expected the rejected send to end the responder's run",
+        );
+      },
+      (reason: unknown) => reason,
+    );
+
+    expect((failure as ConnectionError).kind).toBe("transport");
+    expect(exchangeRecordFromFailure(failure)).toBeUndefined();
+    expect(exchangeRecordOwedButUnbuilt(failure)).toBe(false);
+    expect(exchangeDisclosedWithoutPartnerPayload(failure)).toBe(false);
+
+    await connInitiator.close();
+    await connResponderRaw.close();
+    await initiator;
   });
 
   test.each([1, 2, 3])(

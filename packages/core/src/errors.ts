@@ -629,6 +629,24 @@ export class TransportPublishIndeterminateError extends Error {
 }
 
 /**
+ * Whether `error`, or anything in its `cause` chain, is a
+ * {@link TransportPublishIndeterminateError}.
+ *
+ * Asked of the chain rather than of the value handed over because a send's
+ * rejection reaches an application caller wrapped: `MessageConnection.send`
+ * re-raises whatever the transport threw as a `transport`
+ * {@link ConnectionError} holding it as the `cause`, and
+ * {@link FileSyncMessageLoop}'s send path has already re-raised the class once
+ * over the transport's own instance.
+ */
+export function isTransportPublishIndeterminate(error: unknown): boolean {
+  return causeChainSome(
+    error,
+    (link) => link instanceof TransportPublishIndeterminateError,
+  );
+}
+
+/**
  * Thrown into an in-flight {@link FileSyncConnection} wait when the
  * connection is closed mid-rendezvous or mid-send. `close()` aborts a
  * shared `AbortController` whose `reason` is an instance of this class,
