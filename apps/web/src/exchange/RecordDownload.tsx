@@ -60,6 +60,22 @@ export const COMPLETED_RECORD_NOTICE =
   "record from this console along with the results.";
 
 /**
+ * What the seat says over a record that states an observed certificate mismatch.
+ * It states what the run found about the certificate the partner presented, which
+ * is what narrows who received the disclosure; it does not name that finding as
+ * the reason the run ended, which the record does not say (docs/spec/EXCHANGE_RECORD.md,
+ * An observed certificate mismatch is stated on its own).
+ *
+ * Shown only where the record states one. A record stating none has nothing to
+ * qualify, and a "no mismatch" line would read as a confirmation of the partner's
+ * identity that the run never made.
+ */
+export const CERTIFICATE_MISMATCH_RECORD_NOTICE =
+  "The record also states that your partner presented a certificate that is not " +
+  "the one pinned for them, so the partner it names is who they claimed to be " +
+  "and not who this run confirmed.";
+
+/**
  * The lead the seat shows over a record file the console holds and cannot read
  * as a record. It states the file's presence, which is the part that is
  * established, and not what it says, which is the part that is not.
@@ -115,10 +131,17 @@ type RenderedRecordOffer = Extract<
 >;
 
 /** The lead and notice each rendered state shows, kept together so the two lines
- * of one state cannot be paired with another's. */
-function recordPanelCopy(offer: RenderedRecordOffer): {
+ * of one state cannot be paired with another's. An offered record whose marker is
+ * set takes a third line stating that finding; the panel's other states have no
+ * record reading to state it from.
+ *
+ * @internal exported for the unit test, which pins where the mismatch line
+ * stands.
+ */
+export function recordPanelCopy(offer: RenderedRecordOffer): {
   lead: string;
   notice: string;
+  certificateMismatch?: string;
 } {
   if (offer.kind === "unanswered")
     return { lead: RECORD_UNANSWERED_LEAD, notice: RECORD_UNANSWERED_NOTICE };
@@ -127,9 +150,14 @@ function recordPanelCopy(offer: RenderedRecordOffer): {
       lead: UNDESCRIBABLE_RECORD_LEAD,
       notice: UNDESCRIBABLE_RECORD_NOTICE,
     };
-  return offer.outcome === "completed"
-    ? { lead: COMPLETED_RECORD_LEAD, notice: COMPLETED_RECORD_NOTICE }
-    : { lead: TERMINATED_RECORD_LEAD, notice: TERMINATED_RECORD_NOTICE };
+  return {
+    ...(offer.outcome === "completed"
+      ? { lead: COMPLETED_RECORD_LEAD, notice: COMPLETED_RECORD_NOTICE }
+      : { lead: TERMINATED_RECORD_LEAD, notice: TERMINATED_RECORD_NOTICE }),
+    ...(offer.certificateMismatchObserved
+      ? { certificateMismatch: CERTIFICATE_MISMATCH_RECORD_NOTICE }
+      : {}),
+  };
 }
 
 /**
@@ -156,6 +184,10 @@ function recordPanelCopy(offer: RenderedRecordOffer): {
  * that run never wrote, so the keys beside it have nothing to open; the copy says
  * so where the download is rather than leaving the pair to display as a completed
  * run's.
+ *
+ * A record stating an observed certificate mismatch says so beside its outcome
+ * rather than in place of it: the record states the two separately, and what the
+ * marker narrows is who received the disclosure, not how the run ended.
  *
  * A record the console holds and cannot describe renders too, with no download:
  * the console withholds a pair it cannot read whole, and a panel that stayed
@@ -184,6 +216,9 @@ export function RecordDownload({
       <h2 id="exchange-record-title">Exchange record</h2>
       <p className={styles.calloutLead}>{copy.lead}</p>
       <p className={styles.small}>{copy.notice}</p>
+      {copy.certificateMismatch !== undefined && (
+        <p className={styles.small}>{copy.certificateMismatch}</p>
+      )}
       {offer.kind === "available" && (
         <>
           <DownloadRow

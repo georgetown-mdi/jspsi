@@ -92,6 +92,12 @@ export type JobExchangeRecordOffer =
   | {
       kind: "available";
       outcome: ExchangeRecordOutcome;
+      /** Whether the record states that the certificate the partner presented is
+       * not the pinned identity. A body that does not state the marker at all --
+       * a console that predates it -- reads as false: the seat then says nothing
+       * about the partner's certificate, which is what a record stating no
+       * mismatch leaves it saying too. */
+      certificateMismatchObserved: boolean;
       downloads: RecordDownloads;
     }
   | { kind: "undescribable" }
@@ -104,6 +110,7 @@ interface JobStatusFields {
   recordAvailable?: unknown;
   recordCreatedAt?: unknown;
   recordOutcome?: unknown;
+  certificateMismatchObserved?: unknown;
   recordUnavailableReason?: unknown;
 }
 
@@ -166,7 +173,10 @@ function recordOutcomeOf(value: unknown): ExchangeRecordOutcome | undefined {
  * `recordOutcome` (version skew against a differently-versioned console)
  * answers `unanswered` rather than `none`, since folding an availability
  * assertion into the discard state would let an unparseable detail license
- * destroying a record the console just said it holds.
+ * destroying a record the console just said it holds. The certificate-mismatch
+ * marker does not join that rule: only the literal `true` states a mismatch, and
+ * every other value leaves the offer where a record stating none leaves it, with
+ * nothing said about the partner's certificate.
  *
  * An ask with no readable body at all -- a fetch that threw, a non-2xx, or
  * unparseable JSON -- is likewise `unanswered`; {@link askJobExchangeRecordOffer}
@@ -193,6 +203,7 @@ export async function fetchJobExchangeRecordOffer(
     return {
       kind: "available",
       outcome,
+      certificateMismatchObserved: status.certificateMismatchObserved === true,
       downloads: jobRecordDownloads(jobId, status.recordCreatedAt),
     };
   } catch {

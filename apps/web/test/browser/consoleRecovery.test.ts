@@ -58,7 +58,11 @@ interface RecoveryStubOptions {
   /** The exchange record the job's status route reports. Absent leaves the body
    * reporting `recordAvailable: false`, which is what a run that owes no record
    * answers. */
-  record?: { createdAt: string; outcome: string };
+  record?: {
+    createdAt: string;
+    outcome: string;
+    certificateMismatchObserved?: boolean;
+  };
 }
 
 /** A valid recurring-run hand-off body: enough for the finished render's collapsed
@@ -135,6 +139,8 @@ function stubRecoveryApi(options: RecoveryStubOptions = {}): {
                   recordAvailable: true,
                   recordCreatedAt: options.record.createdAt,
                   recordOutcome: options.record.outcome,
+                  certificateMismatchObserved:
+                    options.record.certificateMismatchObserved ?? false,
                 }
               : { recordAvailable: false }),
           }),

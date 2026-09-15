@@ -135,14 +135,21 @@ function createRequest(body: unknown, headers: Record<string, string> = {}) {
   });
 }
 
-/** A record body with the given createdAt and outcome, matching the shape the
- * status route reads. Every record has an outcome, so the default is the
- * completed run's and a terminated run's is stated at the call site. */
+/** A record body with the given createdAt, outcome, and certificate-mismatch
+ * marker, matching the shape the status route reads. Every record has all three,
+ * so the defaults are the completed run that observed no mismatch and each other
+ * case is stated at the call site. */
 function recordJson(
   createdAt: string,
   outcome: ExchangeRecordOutcome = "completed",
+  certificateMismatchObserved = false,
 ): string {
-  return JSON.stringify({ createdAt, outcome, summary: "test" });
+  return JSON.stringify({
+    createdAt,
+    outcome,
+    certificateMismatchObserved,
+    summary: "test",
+  });
 }
 
 /**
@@ -814,6 +821,7 @@ describe("status route reports record availability", () => {
     recordAvailable: boolean;
     recordCreatedAt?: string;
     recordOutcome?: string;
+    certificateMismatchObserved?: boolean;
     recordUnavailableReason?: string;
   }> {
     const response = (await handlersOf(JobRoute).GET({
@@ -915,6 +923,81 @@ describe("status route reports record availability", () => {
       params: { jobId: id },
     })) as Response;
     expect(keys.status).toBe(200);
+  });
+
+  test("a record observing a certificate mismatch states it beside the outcome", async () => {
+    // The one arm where the record narrows who received the disclosure. The
+    // status body states it on its own field beside the outcome, so a client
+    // reads the finding about the partner's certificate without inferring one
+    // from how the run ended (docs/spec/EXCHANGE_RECORD.md, When a record is
+    // owed).
+    const id = await createFinishedJob("failed", {
+      STUB_EXIT_CODE: "1",
+      STUB_RECORD_JSON: recordJson(CREATED_AT, "receipt-swap-terminated", true),
+    });
+    const body = await recordStatusOf(id);
+    expect(body.recordAvailable).toBe(true);
+    expect(body.recordCreatedAt).toBe(CREATED_AT);
+    expect(body.recordOutcome).toBe("receipt-swap-terminated");
+    expect(body.certificateMismatchObserved).toBe(true);
+    // The marker states a finding and nothing further: it is a boolean, and no
+    // field beside it names the certificate, its fingerprint, or a party.
+    expect(typeof body.certificateMismatchObserved).toBe("boolean");
+    expect(
+      Object.keys(body)
+        .filter(
+          (key) =>
+            key.startsWith("record") || key === "certificateMismatchObserved",
+        )
+        .sort(),
+    ).toEqual([
+      "certificateMismatchObserved",
+      "recordAvailable",
+      "recordCreatedAt",
+      "recordOutcome",
+    ]);
+  });
+
+  test("a record observing none states the marker false rather than omitting it", async () => {
+    // Present exactly when the pair is offered, as the outcome beside it is: a
+    // client reading the field's absence reads a console that predates it, so
+    // omitting it here would leave "no mismatch was observed" unsayable.
+    const id = await createSucceededJob({
+      STUB_OUTPUT_FILE: "id\n1\n",
+      STUB_RECORD_JSON: recordJson(CREATED_AT),
+    });
+    const body = await recordStatusOf(id);
+    expect(body.recordAvailable).toBe(true);
+    expect(body.recordOutcome).toBe("completed");
+    expect(body.certificateMismatchObserved).toBe(false);
+  });
+
+  test("the marker is absent from every body that withholds the pair", async () => {
+    // It travels with the availability, so a body denying it states no marker
+    // rather than a stale or manufactured false.
+    const absent = await recordStatusOf(
+      await createSucceededJob({ STUB_OUTPUT_FILE: "id\n1\n" }),
+    );
+    expect(absent.recordAvailable).toBe(false);
+    expect(absent.certificateMismatchObserved).toBeUndefined();
+  });
+
+  test("a record with no mismatch marker is held back as undescribable", async () => {
+    // Every record of this format states the marker, so a file without one is a
+    // record this console cannot describe -- it is not read as a run that
+    // observed no mismatch, which would be a clean check this console never saw.
+    const id = await createSucceededJob({
+      STUB_OUTPUT_FILE: "id\n1\n",
+      STUB_RECORD_JSON: JSON.stringify({
+        createdAt: CREATED_AT,
+        outcome: "completed",
+      }),
+    });
+    const body = await recordStatusOf(id);
+    expect(body.recordAvailable).toBe(false);
+    expect(body.certificateMismatchObserved).toBeUndefined();
+    expect(body.recordUnavailableReason).toBe("undescribable-record");
+    expect(await recordPairStatuses(id)).toEqual({ record: 404, keys: 404 });
   });
 
   test("a run that failed before disclosing offers no record", async () => {

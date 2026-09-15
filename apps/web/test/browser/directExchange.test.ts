@@ -125,7 +125,11 @@ interface StubOptions {
   handoff?: unknown;
   /** The exchange record the job's status route reports. Unset, the body denies
    * availability under `recordUnavailable` below. */
-  record?: { createdAt: string; outcome: string };
+  record?: {
+    createdAt: string;
+    outcome: string;
+    certificateMismatchObserved?: boolean;
+  };
   /** Why the status route says it is withholding the record pair, for a body that
    * denies availability. The default is the console's definitive denial, which
    * is what a run that owes no record answers. */
@@ -261,6 +265,8 @@ function stubJobApi(options: StubOptions = {}): {
                   recordAvailable: true,
                   recordCreatedAt: options.record.createdAt,
                   recordOutcome: options.record.outcome,
+                  certificateMismatchObserved:
+                    options.record.certificateMismatchObserved ?? false,
                 }
               : {
                   recordAvailable: false,

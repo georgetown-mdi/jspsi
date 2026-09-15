@@ -178,38 +178,43 @@ export function resultFileExists(outputPath: string): boolean {
   return jobFileExists(outputPath);
 }
 
-/** The two fields the status path reads off a record file: the timestamp the
- * download filenames are stamped from, and what the record says became of the run
- * that wrote it. */
+/** The three fields the status path reads off a record file: the timestamp the
+ * download filenames are stamped from, what the record says became of the run
+ * that wrote it, and whether that run found the certificate the partner
+ * presented was not the pinned identity. */
 interface JobRecordSummary {
   createdAt: string;
   outcome: ExchangeRecordOutcome;
+  certificateMismatchObserved: boolean;
 }
 
 /** The shape the status path holds a record file to: core's own `createdAt` rule
- * (ISO-8601, so the stamp is a timestamp rather than any non-empty string) and
- * core's accepted outcome set. Both are required, matching the record format,
- * which has an outcome on every record and states it rather than leaving a
- * reader to infer one from silence (docs/spec/EXCHANGE_RECORD.md, When a record is
- * owed). */
+ * (ISO-8601, so the stamp is a timestamp rather than any non-empty string),
+ * core's accepted outcome set, and the certificate-mismatch marker beside it. All
+ * three are required, matching the record format, which has each of them on every
+ * record and states them rather than leaving a reader to infer one from silence
+ * (docs/spec/EXCHANGE_RECORD.md, When a record is owed). */
 const recordSummarySchema = z.object({
   createdAt: z.iso.datetime(),
   outcome: z.enum(EXCHANGE_RECORD_OUTCOMES),
+  certificateMismatchObserved: z.boolean(),
 });
 
 /**
  * Read the summary the status path needs from a server-produced record file, or
- * null if the file cannot be read, is not JSON, or does not have both a valid
- * `createdAt` and a recognized `outcome`. The file is small and server-produced
- * (the CLI wrote it), so it is read whole; the defensive null keeps a missing or
- * malformed record from throwing on the status path -- the caller treats null as
- * "record unavailable".
+ * null if the file cannot be read, is not JSON, or does not have a valid
+ * `createdAt`, a recognized `outcome`, and the certificate-mismatch marker. The
+ * file is small and server-produced (the CLI wrote it), so it is read whole; the
+ * defensive null keeps a missing or malformed record from throwing on the status
+ * path -- the caller treats null as "record unavailable".
  *
  * Requiring the outcome is what lets every surface downstream state how the run
  * ended rather than guess: a file this console's own CLI wrote always has
  * one, so a record without a recognized outcome is not a record this console can
  * describe, and it is refused here instead of being offered under a completed
- * run's framing.
+ * run's framing. The mismatch marker is required on the same ground: it is
+ * mandatory on every record of this format, so a file that omits it cannot be
+ * read as one stating no mismatch.
  */
 export function readRecordSummary(recordPath: string): JobRecordSummary | null {
   let parsed: unknown;

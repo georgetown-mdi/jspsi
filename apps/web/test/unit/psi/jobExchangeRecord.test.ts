@@ -52,10 +52,12 @@ describe("fetchJobExchangeRecordOffer", () => {
         recordAvailable: true,
         recordCreatedAt: CREATED_AT,
         recordOutcome: "receipt-swap-terminated",
+        certificateMismatchObserved: false,
       }),
     ).resolves.toEqual({
       kind: "available",
       outcome: "receipt-swap-terminated",
+      certificateMismatchObserved: false,
       downloads: jobRecordDownloads("job-1", CREATED_AT),
     });
   });
@@ -72,6 +74,49 @@ describe("fetchJobExchangeRecordOffer", () => {
         recordOutcome: "completed",
       }),
     ).resolves.toMatchObject({ kind: "available", outcome: "completed" });
+  });
+
+  test("a record observing a certificate mismatch is offered with that finding", async () => {
+    // What the seat says about the partner's certificate is read off the record's
+    // own marker, beside the outcome rather than out of it: the record states the
+    // two separately (docs/spec/EXCHANGE_RECORD.md, When a record is owed).
+    await expect(
+      offerFor({
+        status: "failed",
+        recordAvailable: true,
+        recordCreatedAt: CREATED_AT,
+        recordOutcome: "receipt-swap-terminated",
+        certificateMismatchObserved: true,
+      }),
+    ).resolves.toMatchObject({
+      kind: "available",
+      outcome: "receipt-swap-terminated",
+      certificateMismatchObserved: true,
+    });
+  });
+
+  test("a body stating no marker offers the record with nothing said about the certificate", async () => {
+    // A console that predates the field, and a value this reader cannot read as
+    // the marker, are the same answer: not a mismatch. Neither withholds the
+    // record the console just said it holds, because neither is a detail the
+    // downloads depend on.
+    for (const body of [
+      {
+        recordAvailable: true,
+        recordCreatedAt: CREATED_AT,
+        recordOutcome: "completed",
+      },
+      {
+        recordAvailable: true,
+        recordCreatedAt: CREATED_AT,
+        recordOutcome: "completed",
+        certificateMismatchObserved: "yes",
+      },
+    ])
+      await expect(offerFor(body)).resolves.toMatchObject({
+        kind: "available",
+        certificateMismatchObserved: false,
+      });
   });
 
   test("a run the console holds no record for leaves the seat nothing to say", async () => {

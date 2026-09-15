@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  CERTIFICATE_MISMATCH_RECORD_NOTICE,
   COMPLETED_RECORD_NOTICE,
   RECORD_UNANSWERED_LEAD,
   RECORD_UNANSWERED_NOTICE,
@@ -9,6 +10,7 @@ import {
   TERMINATED_RECORD_NOTICE,
   UNDESCRIBABLE_RECORD_LEAD,
   UNDESCRIBABLE_RECORD_NOTICE,
+  recordPanelCopy,
 } from "@exchange/RecordDownload";
 import {
   PENDING_RECORD_CONFIRM_BODY,
@@ -29,8 +31,12 @@ import {
   RECEIPT_UNANSWERED_NOTICE,
 } from "@exchange/ReceiptDownload";
 
-import { describeEntityClusters } from "@psilink/core";
+import {
+  EXCHANGE_RECORD_OUTCOMES,
+  describeEntityClusters,
+} from "@psilink/core";
 
+import type { ExchangeRecordOutcome } from "@psilink/core";
 import type { RunOutputs } from "@psi/runOutputs";
 
 const matched = (matchedRecordCount?: number): RunOutputs => ({
@@ -187,6 +193,62 @@ describe("the exchange-record copy", () => {
     expect(COMPLETED_RECORD_NOTICE).not.toContain("nothing to open");
   });
 
+  test("the mismatch notice states the finding, not a cause of the stop", () => {
+    // The record states the finding about the certificate and the outcome
+    // separately, so the copy states what the run observed and leaves how the run
+    // ended to the lead above it.
+    expect(CERTIFICATE_MISMATCH_RECORD_NOTICE).toContain(
+      "not the one pinned for them",
+    );
+    expect(CERTIFICATE_MISMATCH_RECORD_NOTICE).toContain("who they claimed");
+    expect(CERTIFICATE_MISMATCH_RECORD_NOTICE).not.toMatch(
+      /stopped|failed|ended|because/i,
+    );
+    // It names no certificate, no fingerprint, and no party the panel does not
+    // already name, so the seat states nothing the record's marker does not.
+    expect(CERTIFICATE_MISMATCH_RECORD_NOTICE).not.toMatch(
+      /SHA256|fingerprint/i,
+    );
+  });
+
+  test("the mismatch notice stands only where the record states one", () => {
+    // It is read off the marker, on either outcome: a completed record that
+    // states one says so too, and a record that states none leaves the panel
+    // saying nothing about the partner's certificate -- a "no mismatch" line
+    // would read as a confirmation the run never made.
+    const offered = (
+      outcome: ExchangeRecordOutcome,
+      certificateMismatchObserved: boolean,
+    ) =>
+      ({
+        kind: "available",
+        outcome,
+        certificateMismatchObserved,
+        downloads: {
+          recordUrl: "/api/jobs/job-1/record",
+          recordFileName: "psilink-record.json",
+          keysUrl: "/api/jobs/job-1/keys",
+          keysFileName: "psilink-record.keys.json",
+        },
+      }) as const;
+
+    for (const outcome of EXCHANGE_RECORD_OUTCOMES) {
+      expect(recordPanelCopy(offered(outcome, true)).certificateMismatch).toBe(
+        CERTIFICATE_MISMATCH_RECORD_NOTICE,
+      );
+      expect(
+        recordPanelCopy(offered(outcome, false)).certificateMismatch,
+      ).toBeUndefined();
+    }
+    // The states with no record reading behind them have no marker to state.
+    expect(
+      recordPanelCopy({ kind: "undescribable" }).certificateMismatch,
+    ).toBeUndefined();
+    expect(
+      recordPanelCopy({ kind: "unanswered" }).certificateMismatch,
+    ).toBeUndefined();
+  });
+
   test("the unanswered copy states the silence conditionally", () => {
     // There is no "a record was requested" field to state an absence against --
     // whether one is owed depends on how far the run got -- so the copy states the
@@ -284,6 +346,7 @@ describe("untakenRecordConfirm", () => {
       untakenRecordConfirm({
         kind: "available",
         outcome: "receipt-swap-terminated",
+        certificateMismatchObserved: false,
         downloads,
       }),
     ).toEqual({
