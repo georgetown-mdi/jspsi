@@ -23,9 +23,9 @@ verifier pins the workflow identity instead of fetching a public key.
 The corollary is that no signing key is used anywhere: no workflow step reads a
 private key, no public key sits in the repository root, and there is no
 rotation, expiry, or revocation procedure to write, staff, and remember. The
-now-unused `COSIGN_PRIVATE_KEY` and `COSIGN_PASSWORD` repository secrets remain
-configured until the maintainer deletes them -- a settings change no commit can
-make -- deferred until a keyless-signed image has verified end to end.
+now-unused `COSIGN_PRIVATE_KEY` and `COSIGN_PASSWORD` repository secrets
+remained configured -- a settings change no commit can make -- until the
+maintainer deleted them on 2026-09-14.
 
 ## Why this, and why before the first release
 
