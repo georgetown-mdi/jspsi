@@ -5,8 +5,7 @@ import {
   sourceModules,
 } from "./lib/typeScriptSources.mjs";
 import {
-  FAILURE_TYPE_FILE,
-  FAILURE_TYPE_NAME,
+  FAILURE_TYPES,
   SINK_COMPONENT_FILE,
   TEXT_SINKS,
   WEB_SOURCE_DIR,
@@ -42,6 +41,23 @@ export function Alerted({ failure }: { failure: RunFailure }) {
 }
 `;
 
+/** The file of the recurring seat, the surface holding the second tracked
+ * type's real call sites. */
+const MANAGED_RUN_SURFACE_FILE = "apps/web/src/recurring/ManagedRunSurface.tsx";
+
+/** The same regression on the recurring seat's own failure type: an alert
+ * inlining both pieces in spans of its own. */
+const INLINE_MANAGED_FAILURE = `
+export function Alerted({ failure }: { failure: ManagedRunFailureAlert }) {
+  return (
+    <Alert title={failure.title}>
+      <span style={{ whiteSpace: "pre-line" }}>{failure.message}</span>
+      <span className="mono">{failure.reportedCause}</span>
+    </Alert>
+  );
+}
+`;
+
 /** The reported cause handed to the sink that lays it out and labels it. */
 const THROUGH_THE_REPORTED_CAUSE_SINK = `
 export function Alerted({ failure }: { failure: RunFailure }) {
@@ -69,9 +85,9 @@ export function Alerted({ failure }: { failure: RunFailure }) {
 // still fails here -- rather than a claim about how fast the scan runs.
 const TREE_SCAN_TIMEOUT_MS = 60_000;
 
-describe("RunFailure display-sink check", () => {
+describe("failure display-sink check", () => {
   it(
-    "the tree as it stands renders every RunFailure piece through its sink",
+    "the tree as it stands renders every failure piece through its sink",
     () => {
       const offSink = [];
       const throughSink = new Map(
@@ -99,10 +115,9 @@ describe("RunFailure display-sink check", () => {
     TREE_SCAN_TIMEOUT_MS,
   );
 
-  it("the type this check scans for still stands where it says", () => {
-    expect(declaresType(parseFile(FAILURE_TYPE_FILE), FAILURE_TYPE_NAME)).toBe(
-      true,
-    );
+  it("every type this check scans for still stands where it says", () => {
+    for (const { name, file } of FAILURE_TYPES)
+      expect([name, declaresType(parseFile(file), name)]).toEqual([name, true]);
   });
 
   it("every sink this check names still stands where it says", () => {
@@ -122,6 +137,25 @@ describe("RunFailure display-sink check", () => {
         parseFile("apps/web/src/exchange/RecoveredExchangePanel.tsx"),
       ),
     ).toContain("failure");
+  });
+
+  it("holds the recurring seat's surface, whose type is its own", () => {
+    // The seat that runs unattended classifies into ManagedRunFailureAlert and
+    // renders it through the shared body, so its bindings are found and none of
+    // its renders sits outside a sink. The binding assertion is the vacuity
+    // guard on the render one: an unfound binding reports no render either.
+    const surface = parseFile(MANAGED_RUN_SURFACE_FILE);
+    expect(failureBindingNames(surface)).toContain("failure");
+    expect(
+      failureTextRenders(surface).filter((render) => !render.throughSink),
+    ).toEqual([]);
+  });
+
+  it("flags the recurring seat's failure inlined outside the sinks", () => {
+    expect(rendersIn(INLINE_MANAGED_FAILURE)).toMatchObject([
+      { line: 5, text: "failure.message", throughSink: false },
+      { line: 6, text: "failure.reportedCause", throughSink: false },
+    ]);
   });
 
   it("allows the message attribute of a FailureMessage element", () => {
@@ -258,10 +292,10 @@ describe("RunFailure display-sink check", () => {
     ).toEqual(["failure"]);
   });
 
-  it("passes over a file annotating no name as the failure type", () => {
+  it("passes over a file annotating no name as a tracked type", () => {
     expect(
       rendersIn(`
-        function Alerted({ failure }: { failure: ManagedRunFailureAlert }) {
+        function Alerted({ failure }: { failure: ManagedRunRecovery }) {
           return <span style={{ whiteSpace: "pre-line" }}>{failure.message}</span>;
         }
       `),

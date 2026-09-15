@@ -166,14 +166,30 @@ describe("failureFor", () => {
     expect(failure.reportedCause).toContain("blob quota exceeded");
   });
 
+  test("the output block reports a rejection of either shape", () => {
+    // The copy states only that a local write failed, so whatever the run
+    // rejected with is the operator's whole account of which write and why. A
+    // value thrown bare reaches the block in its own text, an Error as its
+    // chain, and both are escaped at this boundary like any other report.
+    expect(
+      failureFor("output", new Error("blob quota exceeded")).reportedCause,
+    ).toBe("blob quota exceeded");
+    expect(
+      failureFor("output", "the directory handle went away").reportedCause,
+    ).toBe("the directory handle went away");
+    const hostile = "\u001b[2Jthe directory handle went away";
+    expect(failureFor("output", hostile).reportedCause).toBe(
+      sanitizeForDisplay(hostile),
+    );
+  });
+
   test("an output failure with nothing to report gets no block", () => {
-    // A rejection that is not an Error has no chain to attribute, and an empty
-    // block under a label promising an account of the failure is worse than no
-    // block: the copy beside it already states what happened.
-    expect(failureFor("output", "just a string").reportedCause).toBeUndefined();
+    // An empty block under a label promising an account of the failure is worse
+    // than no block: the copy beside it already states what happened.
     expect(
       failureFor("output", new Error("   ")).reportedCause,
     ).toBeUndefined();
+    expect(failureFor("output", "  ").reportedCause).toBeUndefined();
   });
 
   test("the exchange message makes no on-device data claim", () => {

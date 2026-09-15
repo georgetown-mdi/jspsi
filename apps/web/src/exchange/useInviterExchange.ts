@@ -112,20 +112,14 @@ function sanitizedFailureMessage(error: unknown): string {
 
 /**
  * The `reportedCause` field of a failure whose copy is this application's own,
- * as the fields to spread: the exchange's account of the cause, or nothing at
- * all. An error with nothing readable to report gets no block, rather than an
- * empty one under a label promising an account of the failure, and a rejection
- * that is not an `Error` has no chain to attribute -- it renders as the value's
- * own text, which the copy beside it already covers. One helper so both
- * categories that state their own copy in front of the report decide it the
- * same way.
+ * as the fields to spread: `cause` where it holds an account of the failure,
+ * and nothing at all where it does not -- a failure with nothing readable to
+ * report gets no block, rather than an empty one under a label promising an
+ * account. One helper so both categories that state their own copy in front of
+ * the report decide the empty report the same way.
  */
-function reportedCauseFields(
-  error: unknown,
-): Pick<RunFailure, "reportedCause"> {
-  const reportedCause =
-    error instanceof Error ? sanitizedFailureMessage(error) : "";
-  return reportedCause.trim() === "" ? {} : { reportedCause };
+function reportedCauseFields(cause: string): Pick<RunFailure, "reportedCause"> {
+  return cause.trim() === "" ? {} : { reportedCause: cause };
 }
 
 /** @internal */
@@ -252,7 +246,11 @@ export function failureFor(
         "The linkage completed, so do not run this exchange again - a second " +
         "run would send your data for an exchange that already happened. On " +
         "this machine, a local write failed.",
-      ...reportedCauseFields(error),
+      // A rejection that is not an `Error` is reported here in the text it has,
+      // where the retryable category below withholds it: this copy accounts for
+      // nothing beyond a local write and the alert offers no retry, so the block
+      // is the whole of what the operator has to act on.
+      ...reportedCauseFields(sanitizedFailureMessage(error)),
     };
   }
   if (error instanceof LinkageTermsUnsatisfiableError) {
@@ -359,7 +357,13 @@ export function failureFor(
           "try again."
         : "The exchange could not be completed - usually a temporary " +
           "connection problem rather than an issue with your data.",
-    ...reportedCauseFields(error),
+    // A rejection that is not an `Error` has no chain to attribute, and its
+    // `String()` form displays as `undefined` or `[object Object]` under a label
+    // promising the exchange's own account of the failure. The fixed copy above
+    // stands in its place.
+    ...reportedCauseFields(
+      error instanceof Error ? sanitizedFailureMessage(error) : "",
+    ),
   };
 }
 

@@ -196,7 +196,7 @@ export const CHECKS = [
   {
     script: "check:run-failure-sink",
     description:
-      "Every render of a RunFailure message in apps/web/src goes through the FailureMessage sink, so no alert collapses a relayed cause chain onto one line.",
+      "Every render of a failed run's message or reported cause in apps/web/src goes through that piece's own sink, so no alert collapses a relayed cause chain onto one line.",
   },
   {
     script: "check:zero-setup-keys",
