@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { DEFAULT_THEME, mergeMantineTheme } from "@mantine/core";
+import { DEFAULT_THEME, darken, mergeMantineTheme } from "@mantine/core";
 
 import { cssVariablesResolver, mantineTheme } from "@theme";
 
@@ -91,6 +91,19 @@ const dimmedLight = vars.light["--mantine-color-dimmed"];
 const placeholderLight = vars.light["--mantine-color-placeholder"];
 const dimmedDark = vars.dark["--mantine-color-dimmed"];
 const placeholderDark = vars.dark["--mantine-color-placeholder"];
+const errorTokenDark = vars.dark["--mantine-color-error"];
+
+// The dark scheme's `light`-variant status surfaces, which the resolver leaves at
+// Mantine's values: getCSSColorVariables gives --mantine-color-{c}-light-color the
+// shade-0 near-white and --mantine-color-{c}-light the darken(shade 9, 0.5) tint,
+// the inverse of the light scheme's dark-on-tint arrangement. Each reads the
+// resolver's own value when one is present, so adding a dark override re-runs the
+// arithmetic against it rather than against the value it replaced.
+const darkStatusText = (hue: "yellow" | "red" | "green") =>
+  vars.dark[`--mantine-color-${hue}-light-color`] ?? theme.colors[hue][0];
+const darkStatusTint = (hue: "yellow" | "red" | "green") =>
+  vars.dark[`--mantine-color-${hue}-light`] ??
+  darken(theme.colors[hue][9], 0.5);
 
 // Resolves Mantine's `--mantine-primary-color-contrast` for a given primary fill,
 // mirroring getPrimaryContrastColor -> getContrastColor: with autoContrast on, the
@@ -198,6 +211,43 @@ describe("theme colour contrast (WCAG 2.1 AA)", () => {
         name: "error token (validation text + asterisk): on white input",
         fg: errorToken,
         bg: white,
+        floor: 4.5,
+      },
+      // Dark counterparts of the two blocks above. Mantine's dark error default is
+      // red-8, a dark-on-dark 3.44:1 / 3.01:1 that fails the text floor on both
+      // surfaces, so the resolver tunes it; the dark status tokens invert to
+      // near-white-on-tint and clear the floor at Mantine's own values, measured
+      // here rather than asserted in a comment. The dark-6 input is the binding
+      // surface -- it is lighter than the dark-7 body and than the app's own
+      // --app-surface / --app-column grounds, so a value clearing it clears those.
+      {
+        name: "error token (dark): on dark-6 input",
+        fg: errorTokenDark,
+        bg: dark6,
+        floor: 4.5,
+      },
+      {
+        name: "error token (dark): on dark-7 body",
+        fg: errorTokenDark,
+        bg: dark7,
+        floor: 4.5,
+      },
+      {
+        name: "warning Alert title + Badge (dark): on the yellow tint",
+        fg: darkStatusText("yellow"),
+        bg: darkStatusTint("yellow"),
+        floor: 4.5,
+      },
+      {
+        name: "error Alert title (dark): on the red tint",
+        fg: darkStatusText("red"),
+        bg: darkStatusTint("red"),
+        floor: 4.5,
+      },
+      {
+        name: "success Alert title + Badge (dark): on the green tint",
+        fg: darkStatusText("green"),
+        bg: darkStatusTint("green"),
         floor: 4.5,
       },
       // Locks the prior dimmed/placeholder fix in both schemes.
