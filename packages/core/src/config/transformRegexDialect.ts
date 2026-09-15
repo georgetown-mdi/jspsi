@@ -88,10 +88,11 @@ interface RegexDialectBudget {
  * text a step declares, which is what a factory's text accessor admits --
  * so the verdict matches what executes; a pattern longer than
  * `budget.maxPatternLength` is rejected on length alone, before compiling.
- * An omitted pattern is skipped (compiles to an in-dialect literal), as is
- * one declared as any other type, which the declared-type check on the step
- * schema refuses ({@link transformParamTypeRefusals}); `parse_date` is not
- * screened (its generated regex is always in-dialect).
+ * A pattern that is omitted, or declared as any other type, is skipped here
+ * and refused by the step schema's own checks
+ * ({@link transformParamAbsenceRefusals} and
+ * {@link transformParamTypeRefusals}); `parse_date` is not screened (its
+ * generated regex is always in-dialect).
  *
  * The caller's message names no partner-controlled value: the offending
  * pattern is located by inspection, not echoed.
@@ -114,12 +115,12 @@ export function linkageTermsHaveNonConformantTransformRegex(
         const paramKey = regexStepPatternParam(step.function);
         if (paramKey === undefined) continue;
         const source = step.params?.[paramKey];
-        // An omitted pattern compiles to a degenerate, in-dialect literal at
-        // runtime, so there is nothing to reject (matches the factory), and a
-        // pattern of another type is refused by the declared-type check on the
-        // step schema, which raises its own issue whatever this walk returns.
-        // Rendering one to a string here would run a `toString` the partner
-        // declared, which throws out of a safe parse when it is not callable.
+        // A pattern this walk cannot read is left to the step schema's own
+        // checks, which raise their own issue whatever this walk returns: an
+        // omitted one to the required-param check and one of another type to
+        // the declared-type check (both in transformParamTypes.ts). Rendering
+        // one to a string here would run a `toString` the partner declared,
+        // which throws out of a safe parse when it is not callable.
         if (typeof source !== "string") continue;
 
         if (performance.now() - startedAt >= totalBudgetMs) return true;

@@ -4100,7 +4100,7 @@ test("readConfigLinkageSource refuses a snake_case param the config mistyped", (
   expect(() => readConfigLinkageSource(configPath)).toThrow(UsageError);
   expect(() => readConfigLinkageSource(configPath)).toThrow(
     `config file ${configPath} has invalid standardization: ` +
-      "0.steps.0.params: parse_date inputFormat must be text, not a number; " +
+      "0.steps.0.params: parse_date input_format must be text, not a number; " +
       "quote the value, or omit the key to leave the param unset",
   );
 });

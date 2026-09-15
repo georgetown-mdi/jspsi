@@ -203,7 +203,7 @@ describe("safeParseStandardization", () => {
       result.error.issues.map((issue) => [issue.path.join("."), issue.message]),
     ).toContainEqual([
       "0.steps.0.params.inputFormat",
-      "parse_date inputFormat must be text, not a number; quote the value, or " +
+      "parse_date input_format must be text, not a number; quote the value, or " +
         "omit the key to leave the param unset",
     ]);
   });

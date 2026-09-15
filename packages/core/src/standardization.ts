@@ -12,12 +12,12 @@ import {
 } from "./utils/frozenLookupTable.js";
 import {
   compileLinearRegex,
-  coerceToPatternString,
   patternConformsToDialect,
 } from "./utils/linearRegex.js";
 import {
   declaredTransformParamType,
   transformParamEntryTypeMessage,
+  transformParamRequiredMessage,
   transformParamTypeMessage,
 } from "./config/transformParamTypes.js";
 import type { TransformParamType } from "./config/transformParamTypes.js";
@@ -180,6 +180,27 @@ function textParam(
     throw new UsageError(
       transformParamTypeMessage(functionName, param, "text", declared),
     );
+  return declared;
+}
+
+/**
+ * The text a step declares for a `param` the function reads no default for,
+ * refusing a step that declares none.
+ *
+ * The raw pattern of a regex-tier step is the case: without it the engine has
+ * nothing to compile, so a step omitting it would match, split, or filter on
+ * whatever an absent value renders as. Both decode paths refuse it first
+ * ({@link transformParamAbsenceRefusals}); this is the boundary for a caller
+ * that builds steps without a parse.
+ */
+function requiredTextParam(
+  functionName: string,
+  params: Params,
+  param: string,
+): string {
+  const declared = textParam(functionName, params, param);
+  if (declared === undefined)
+    throw new UsageError(transformParamRequiredMessage(functionName, param));
   return declared;
 }
 
@@ -718,9 +739,7 @@ function nullIfFactory(params: Params): StandardizingFn {
 }
 
 function replaceRegexFactory(params: Params): StandardizingFn {
-  const pattern = coerceToPatternString(
-    textParam("replace_regex", params, "pattern"),
-  );
+  const pattern = requiredTextParam("replace_regex", params, "pattern");
   // NFC-normalize the replacement literal so it cannot inject a non-NFC byte
   // sequence into the key (the pattern itself is matched as authored; author
   // it in NFC to match NFC runtime values).
@@ -736,9 +755,7 @@ function replaceRegexFactory(params: Params): StandardizingFn {
 }
 
 function extractRegexFactory(params: Params): StandardizingFn {
-  const pattern = coerceToPatternString(
-    textParam("extract_regex", params, "pattern"),
-  );
+  const pattern = requiredTextParam("extract_regex", params, "pattern");
   const re = compileLinearRegex(pattern);
   // Match AND slice on the NFC-normalized value (see the STANDARDIZING_FUNCTIONS
   // contract): an authored-NFC pattern must match a value left non-NFC by an
@@ -750,9 +767,7 @@ function extractRegexFactory(params: Params): StandardizingFn {
 }
 
 function filterRegexFactory(params: Params): StandardizingFn {
-  const pattern = coerceToPatternString(
-    textParam("filter_regex", params, "pattern"),
-  );
+  const pattern = requiredTextParam("filter_regex", params, "pattern");
   const re = compileLinearRegex(pattern);
   // NFC-normalize before testing (see the STANDARDIZING_FUNCTIONS contract) so
   // an authored-NFC pattern matches a value left non-NFC by an upstream
@@ -762,9 +777,7 @@ function filterRegexFactory(params: Params): StandardizingFn {
 }
 
 function splitOnFactory(params: Params): StandardizingFn {
-  const delimiter = coerceToPatternString(
-    textParam("split_on", params, "delimiter"),
-  );
+  const delimiter = requiredTextParam("split_on", params, "delimiter");
   const includeOriginal =
     booleanParam("split_on", params, "includeOriginal") ?? false;
   const re = compileLinearRegex(delimiter);

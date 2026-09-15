@@ -24,6 +24,7 @@ import {
 import { UnknownStandardizationFunctionError, UsageError } from "../src/errors";
 import * as linearRegex from "../src/utils/linearRegex";
 import { getLogger } from "../src/utils/logger";
+import { snakeizeKey } from "../src/utils/camelizeKeys";
 import { inferMetadata } from "../src/config/metadata";
 import type { ColumnMetadata } from "../src/config/metadata";
 import {
@@ -475,7 +476,7 @@ describe("runPipeline — parse_date", () => {
             },
           ]),
         JSON.stringify(bad),
-      ).toThrow(/parse_date outputFormat must be text/);
+      ).toThrow(/parse_date output_format must be text/);
     }
   });
 
@@ -487,7 +488,7 @@ describe("runPipeline — parse_date", () => {
             { function: "parse_date", params: { inputFormat: bad } },
           ]),
         JSON.stringify(bad),
-      ).toThrow(/parse_date inputFormat must be text/);
+      ).toThrow(/parse_date input_format must be text/);
     }
   });
 
@@ -4308,14 +4309,15 @@ describe("declared transform param types", () => {
         runPipeline(input, [
           { function: fn, params: { ...otherParams, [param]: wrongType } },
         ]),
-      ).toThrow(new RegExp(`${fn} ${param} must be`));
+      ).toThrow(new RegExp(`${fn} ${snakeizeKey(param)} must be`));
     },
   );
 
   // The pattern params have no default to fall back to: unread through the
   // accessor, an unquoted `007` renders into the compile source as the pattern
-  // `7` rather than being refused. Each is read through the same accessor as
-  // every other declared text param, one function at a time.
+  // `7` rather than being refused, and an absent one is refused rather than
+  // matching on the literal `undefined`. Each is read through the same
+  // accessor as every other declared text param, one function at a time.
   const patternParams: Array<{
     fn: string;
     param: string;
@@ -4337,7 +4339,21 @@ describe("declared transform param types", () => {
               { function: fn, params: { ...otherParams, [param]: wrongType } },
             ]),
           JSON.stringify(wrongType),
-        ).toThrow(new RegExp(`${fn} ${param} must be text`));
+        ).toThrow(new RegExp(`${fn} ${snakeizeKey(param)} must be text`));
+    },
+  );
+
+  test.each(patternParams)(
+    "$fn refuses an absent $param rather than matching on 'undefined'",
+    ({ fn, param, otherParams }) => {
+      // The compile boundary for a caller that builds steps without a decode;
+      // both decode paths refuse the same step first
+      // (transformParamAbsenceRefusals).
+      expect(() =>
+        runPipeline("aundefinedb", [
+          { function: fn, params: { ...otherParams } },
+        ]),
+      ).toThrow(new RegExp(`${fn} ${snakeizeKey(param)} must be declared`));
     },
   );
 

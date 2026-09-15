@@ -3,7 +3,10 @@ import { z } from "zod";
 import { MAX_NAME_LENGTH } from "./linkageTermsSchema.js";
 import { safeParseCamelized } from "./safeParseCamelized.js";
 import { transformParamDisplayRefusals } from "./transformParamDisplay.js";
-import { transformParamTypeRefusals } from "./transformParamTypes.js";
+import {
+  transformParamAbsenceRefusals,
+  transformParamTypeRefusals,
+} from "./transformParamTypes.js";
 
 // --- Standardizing step ------------------------------------------------------
 
@@ -28,7 +31,8 @@ const StandardizationStepSchema: z.ZodType<StandardizationStep> = z
   // reading here is the one that catches the unquoted number or bare `null` a
   // YAML document is easy to write: it refuses at decode, naming the param and
   // the type it got, rather than running with something the operator did not
-  // write. A param left out is how a step takes the function's default.
+  // write. A param left out is how a step takes the function's default, except
+  // for a raw pattern, which has none (transformParamAbsenceRefusals).
   .superRefine((step, ctx) => {
     // The document this refuses is the operator's own, and the operator is who
     // reads the refusal, so a text param's refusal names the remedy: quote the
@@ -36,6 +40,14 @@ const StandardizationStepSchema: z.ZodType<StandardizationStep> = z
     // type alone, because an acceptor reading a refusal of a partner's
     // invitation has no document to edit.
     for (const refusal of transformParamTypeRefusals(step, {
+      readerCanEditTheDocument: true,
+    }))
+      ctx.addIssue({
+        code: "custom",
+        message: refusal.message,
+        path: refusal.path,
+      });
+    for (const refusal of transformParamAbsenceRefusals(step, {
       readerCanEditTheDocument: true,
     }))
       ctx.addIssue({

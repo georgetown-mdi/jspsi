@@ -2,6 +2,8 @@ import {
   frozenLookupTable,
   frozenLookupTableEntry,
 } from "../utils/frozenLookupTable.js";
+import { snakeizeKey } from "../utils/camelizeKeys.js";
+import { regexStepPatternParam } from "./transformRegexDialect.js";
 
 /**
  * The declared type of one transform parameter: what a document must write for
@@ -170,6 +172,18 @@ const REFUSAL_TO_A_READER: TransformParamRefusalOptions = {
 };
 
 /**
+ * How a param is named to a reader: the snake_case spelling the document
+ * writes, not the camelCase one validation runs on ({@link snakeizeKey}).
+ * Every refusal below states the param this way, because the paths that locate
+ * a refusal stop at `params` -- the free-form record whose keys are the
+ * author's own -- so the message is the only part that names the key, and it
+ * has to name the key the reader can find in the file.
+ */
+function paramAsWritten(param: string): string {
+  return snakeizeKey(param);
+}
+
+/**
  * The refusal message for a param declared as the wrong type. Its type
  * statement is one wording for both decode paths and the factories, so the
  * same sentence names the fault wherever the document is read; only the remedy
@@ -188,9 +202,26 @@ export function transformParamTypeMessage(
   declared: unknown,
   options: TransformParamRefusalOptions = REFUSAL_TO_A_READER,
 ): string {
-  const head = `${functionName} ${param} must be ${EXPECTED_TYPE_LABELS[expected]}, not ${declaredTypeLabel(declared, expected)}`;
+  const head = `${functionName} ${paramAsWritten(param)} must be ${EXPECTED_TYPE_LABELS[expected]}, not ${declaredTypeLabel(declared, expected)}`;
   return expected === "text" && options.readerCanEditTheDocument
     ? `${head}; quote the value, or omit the key to leave the param unset`
+    : head;
+}
+
+/**
+ * The refusal message for a param a function reads no default for, absent from
+ * the step that names the function. The remedy turns on who reads it, as the
+ * type refusal's does: the party that wrote the document declares the param,
+ * while an acceptor reading a partner's invitation has nothing to edit.
+ */
+export function transformParamRequiredMessage(
+  functionName: string,
+  param: string,
+  options: TransformParamRefusalOptions = REFUSAL_TO_A_READER,
+): string {
+  const head = `${functionName} ${paramAsWritten(param)} must be declared, and this step declares none`;
+  return options.readerCanEditTheDocument
+    ? `${head}; add the param, or remove the step`
     : head;
 }
 
@@ -205,7 +236,7 @@ export function transformParamEntryTypeMessage(
   param: string,
   declared: unknown,
 ): string {
-  return `${functionName} ${param} must hold only text, not ${declaredTypeLabel(declared, "text")}`;
+  return `${functionName} ${paramAsWritten(param)} must hold only text, not ${declaredTypeLabel(declared, "text")}`;
 }
 
 /** One param a step declares as a type its function does not read. */
@@ -308,4 +339,49 @@ export function transformParamTypeRefusals(
     });
   }
   return refusals;
+}
+
+/**
+ * The refusal for a step that omits a param its function reads no default for,
+ * or an empty array for a step that declares every such param.
+ *
+ * Omitting a param is how a step leaves one unset, and every param a function
+ * documents a default for stays that way. The exception is the raw pattern a
+ * regex-tier step matches against ({@link regexStepPatternParam}): the
+ * function has no pattern to fall back on, so a step omitting it is refused at
+ * decode rather than compiled -- `String(undefined)` is a pattern like any
+ * other, and the step would match, split, or filter on the nine characters
+ * `undefined` instead of failing.
+ *
+ * `options` reaches the message builder unchanged, so the party who wrote the
+ * document is told to declare the param and an acceptor reading a partner's
+ * invitation reads the statement alone
+ * ({@link TransformParamRefusalOptions}).
+ *
+ * Own-property lookups throughout: a step's function name and its param names
+ * are partner-authored free text on the invitation path.
+ */
+export function transformParamAbsenceRefusals(
+  step: {
+    function: string;
+    params?: Record<string, unknown>;
+  },
+  options: TransformParamRefusalOptions = REFUSAL_TO_A_READER,
+): TransformParamTypeRefusal[] {
+  const required = regexStepPatternParam(step.function);
+  if (required === undefined) return [];
+  const params = step.params;
+  const declared =
+    params !== null &&
+    typeof params === "object" &&
+    Object.hasOwn(params, required)
+      ? params[required]
+      : undefined;
+  if (declared !== undefined) return [];
+  return [
+    {
+      path: ["params", required],
+      message: transformParamRequiredMessage(step.function, required, options),
+    },
+  ];
 }

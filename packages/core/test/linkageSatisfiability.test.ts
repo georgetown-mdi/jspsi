@@ -471,7 +471,7 @@ describe("substringCollapsesParsedDateToConstant", () => {
     // again at compile -- so it collapses nothing either.
     const nonText = [parseDate("ACME-YYYYMMDD", 7), firstFour];
     expect(() => runPipeline(DATES[0], nonText)).toThrow(
-      /parse_date inputFormat must be text/,
+      /parse_date input_format must be text/,
     );
     expect(verdictAt(nonText, 1)).toBe(false);
     // An ABSENT input format is not a dead one: the factory falls back to the
@@ -500,7 +500,7 @@ describe("substringCollapsesParsedDateToConstant", () => {
       expect(
         () => runPipeline(DATES[0], [parseDate(outputFormat), slice(1, 4)]),
         JSON.stringify(outputFormat),
-      ).toThrow(/parse_date outputFormat must be text/);
+      ).toThrow(/parse_date output_format must be text/);
   });
 
   test("a run of substrings is read as the one window it ends on (differential)", () => {
@@ -2879,7 +2879,7 @@ describe("assessLinkageSatisfiability dead keys", () => {
       expect(
         () => buildKeyStrings(terms.linkageKeys[0], dataset, 0),
         JSON.stringify(inputFormat),
-      ).toThrow(/parse_date inputFormat must be text/);
+      ).toThrow(/parse_date input_format must be text/);
     }
   });
 

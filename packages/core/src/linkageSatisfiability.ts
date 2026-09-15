@@ -397,8 +397,8 @@ function stepCountRefusal(
 }
 
 /**
- * Refuse a declared pipeline whose compile throws, where the terms are authored
- * or minted rather than where the run reaches it.
+ * Refuse a declared pipeline whose compile throws, where the terms are
+ * authored, minted, or accepted rather than where the run reaches it.
  *
  * A step's factory reads its parameters once, before the first row
  * ({@link compileSteps}), and a `pad_left` with no `length`, a multi-character
@@ -409,8 +409,15 @@ function stepCountRefusal(
  * by then is out-of-band renegotiation rather than an edit. The message here is
  * the author's: correct the parameters, or remove the step.
  *
- * The fan-out sibling {@link assertFanOutImplemented} runs at the same points and
- * checks the same two pipeline surfaces, for the same reason both realize what a
+ * The accept boundary runs it over the invitation's element transforms alone
+ * (`deriveAcceptedLinkageTerms`, and the web accept gate ahead of its consent
+ * screen), which is the last point the accepting party still holds the
+ * decision. The run reaches the same compile at key realization, and keeps it:
+ * a `LinkageTerms` built or mutated without a parse, or an accept, arrives
+ * there unchecked.
+ *
+ * The fan-out sibling {@link assertFanOutImplemented} checks the same two
+ * pipeline surfaces, for the same reason both realize what a
  * key is built from: a standardization transformation feeds
  * {@link StandardizedField}, and a linkage-key element transform feeds
  * {@link buildKeyStrings}. `standardization` is omitted where the caller holds
@@ -426,12 +433,17 @@ function stepCountRefusal(
  * build recognizes, so no partner free text is interpolated, and the CLI
  * classifies both as a usage error (exit 64) through the base class.
  *
- * This is the safety check at the mint boundary, not the authoring surface: the
- * web element editor marks a malformed param on the input that has to change
- * (`StepListEditor`). What reaches here is what that does not cover -- an
- * imported document, or a caller that mints without the editor. It runs once
- * per mint and on no editor pass, because compiling a whole document's
- * transforms costs enough to need bounding.
+ * This is the safety check at the mint and accept boundaries, not the authoring
+ * surface: the web element editor marks a malformed param on the input that has
+ * to change (`StepListEditor`). What reaches here is what that does not cover --
+ * an imported document, an invitation the partner authored, or a caller that
+ * mints without the editor. It runs per mint, per accept, and via the summary's
+ * deduplicate probe on display paths (`acceptTakesPartnerDeduplicate`,
+ * `consent/invitationSummary.ts`, which compose per render) -- roughly 1.4ms
+ * per 100-step document each time. That probe's catch swallows a refusal, so a
+ * document that both fans out and deduplicates withholds the grouping
+ * sentence for an uncompilable step; acceptable, since the accept gate
+ * refuses such a document before consent is acted on.
  *
  * Two bounds hold that cost, and they hold this walk alone. The declared step
  * count ({@link TRANSFORM_COMPILE_MAX_STEPS}) is checked before anything

@@ -8,10 +8,7 @@ import {
   INFER_DATE_SCAN_CAP,
 } from "../src/utils/date";
 import { runPipeline } from "../src/standardization";
-import {
-  coerceToPatternString,
-  patternConformsToDialect,
-} from "../src/utils/linearRegex";
+import { patternConformsToDialect } from "../src/utils/linearRegex";
 import { regexStepPatternParam } from "../src/config/transformRegexDialect";
 import type { ColumnMetadata } from "../src/config/metadata";
 import type { LinkageTerms } from "../src/config/linkageTermsSchema";
@@ -169,8 +166,10 @@ describe("getDefaultStandardization — structure", () => {
         const paramKey = regexStepPatternParam(step.function);
         if (paramKey === undefined) continue;
         const raw = step.params?.[paramKey];
-        if (raw === undefined) continue;
-        patterns.push(coerceToPatternString(raw));
+        // A default declares every raw pattern as text; the schema refuses an
+        // absent or non-text one, so nothing else can reach the engine.
+        expect(typeof raw, `${t.output}: ${step.function}`).toBe("string");
+        patterns.push(raw as string);
       }
     }
     // Guard: the defaults DO exercise regex steps, so this is not a vacuous pass.

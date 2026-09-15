@@ -11,7 +11,10 @@ import {
   linkageTermsHaveNonConformantTransformRegex,
   regexStepPatternParam,
 } from "./transformRegexDialect.js";
-import { transformParamTypeRefusals } from "./transformParamTypes.js";
+import {
+  transformParamAbsenceRefusals,
+  transformParamTypeRefusals,
+} from "./transformParamTypes.js";
 import type { TransformParamRefusalOptions } from "./transformParamTypes.js";
 import { transformParamDisplayRefusals } from "./transformParamDisplay.js";
 import { exceedsOwnKeyCount } from "../utils/objectKeyCount.js";
@@ -908,7 +911,10 @@ const TransformStepBoundsSchema = TransformStepBaseSchema
   // absent, by the type refusal below. The catastrophic-backtracking risk in the
   // expanded regex is closed by the linear-time engine (standardization.ts),
   // not by this cap. Full reasoning: docs/spec/CHANNEL_SECURITY.md,
-  // "Unbounded transform-parameter rejection".
+  // "Unbounded transform-parameter rejection". This refine and the empty-format
+  // one under it write out `input_format`/`output_format` as literals rather
+  // than deriving them through snakeizeKey (transformParamTypes.ts); the
+  // literals are pinned by tests.
   .refine(
     (step) => {
       if (step.function !== "parse_date") return true;
@@ -921,7 +927,7 @@ const TransformStepBoundsSchema = TransformStepBaseSchema
       );
     },
     {
-      message: `parse_date inputFormat and outputFormat must not exceed ${MAX_DATE_FORMAT_LENGTH} characters`,
+      message: `parse_date input_format and output_format must not exceed ${MAX_DATE_FORMAT_LENGTH} characters`,
       path: ["params"],
     },
   )
@@ -941,7 +947,7 @@ const TransformStepBoundsSchema = TransformStepBaseSchema
     },
     {
       message:
-        "parse_date outputFormat must not be empty: it would render every " +
+        "parse_date output_format must not be empty: it would render every " +
         "date to the empty string",
       path: ["params", "outputFormat"],
     },
@@ -980,8 +986,10 @@ const TransformStepBoundsSchema = TransformStepBaseSchema
 // unquoted number and the partner who crafted one both meet the refusal at
 // decode, naming the param and the type it got, rather than a run that quietly
 // applies something else. An ABSENT param is how a step leaves one unset, so it
-// is admitted; a `substring` bound left out drops every row and is refused one
-// layer up, by the dead-pipeline grading (`pipelineAlwaysDrops` via
+// is admitted, except for the raw pattern a regex-tier step matches against,
+// which the function reads no default for (transformParamAbsenceRefusals); a
+// `substring` bound left out drops every row and is refused one layer up, by
+// the dead-pipeline grading (`pipelineAlwaysDrops` via
 // `substringWindowDropsEveryValue`), which locates the offender by key rather
 // than costing the whole document its parse.
 //
@@ -993,6 +1001,12 @@ const transformStepSchema = (
 ): z.ZodType<TransformStep> =>
   TransformStepBoundsSchema.superRefine((step, ctx) => {
     for (const refusal of transformParamTypeRefusals(step, options))
+      ctx.addIssue({
+        code: "custom",
+        message: refusal.message,
+        path: refusal.path,
+      });
+    for (const refusal of transformParamAbsenceRefusals(step, options))
       ctx.addIssue({
         code: "custom",
         message: refusal.message,
