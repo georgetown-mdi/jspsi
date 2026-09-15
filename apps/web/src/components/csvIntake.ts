@@ -1,14 +1,18 @@
 /**
- * Maximum size, in bytes, of a file the console intake dropzones accept -- 100 MB.
+ * Maximum size, in bytes, of a file the console intake dropzones accept -- 100 MiB.
  *
  * This is a browser-memory bound, not a parser bound: core's `loadCSVFile`
  * accumulates across PapaParse chunks, so the cap is set against what a browser
  * tab can read, parse, and hold for the exchange. The dominant cost is the parsed
- * row array, retained for the whole exchange, so 100 MB (roughly one to two
- * million identifier rows) resolves to a few hundred MB resident -- a profile
- * sized for the modern-workstation execution target, and tunable upward as that
- * profile is measured. The rationale, and why this intake budget is distinct from
- * the comparison-step memory, lives in `docs/spec/PROTOCOL.md`.
+ * row array, retained for the whole exchange: measured through this path in
+ * headless Chromium, a 100 MiB file (1.4 million six-column rows) retains 271 MB
+ * in that array and peaks at 1.1 to 1.2 GB resident in the renderer, close to
+ * linearly in file size, so the workstation target would absorb 250 MiB. The cap
+ * stays at 100 MiB because every bound derived from it moves with it -- the
+ * WebRTC per-string cap, the parked-result bound, the job-intent input length and
+ * the job body cap -- and two of those are security-reviewed controls. The
+ * measurements, the row shapes they bracket, that chain, and why this intake
+ * budget is distinct from the comparison-step memory: `docs/spec/PROTOCOL.md`.
  *
  * No-silent-truncation is the invariant that matters here, and it is
  * pinned directly by a multi-chunk correctness test
