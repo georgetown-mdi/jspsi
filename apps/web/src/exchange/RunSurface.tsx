@@ -15,6 +15,7 @@ import {
   DEFAULT_PEER_TIMEOUT_MS,
   describeEntityClusters,
   describeResolvedMatching,
+  replaceControlCharactersForDisplay,
 } from "@psilink/core";
 
 import { dateTimeLabel } from "@psi/formatting";
@@ -490,16 +491,57 @@ export function RunDownloads({
 }
 
 /**
+ * The marker a line break inside a message's own value arrives as, read off the
+ * treatment that writes it rather than restated: a value composed onto a cause
+ * link has its control characters replaced where it is composed, so its breaks
+ * reach this sink as printable text (docs/spec/CHANNEL_SECURITY.md, "Display
+ * sanitization escape format").
+ */
+const VALUE_LINE_BREAK_MARKER = replaceControlCharactersForDisplay("\n");
+
+/**
+ * Lay a failure's text out on the lines its values were written on: a break in
+ * front of each {@link VALUE_LINE_BREAK_MARKER}, so a diagnosis a CLI child
+ * wrote over several lines is read over several lines instead of as one wrapped
+ * line of markers. Both places a failure's text renders go through it --
+ * {@link FailureMessage} and the reported-cause block of {@link FailureBody} --
+ * because which of the two holds the relayed chain depends on whether the
+ * category states copy of its own in front of it (`failureFor` in
+ * `./useInviterExchange`), and the tail reaches the operator either way.
+ *
+ * Layout and nothing else: the marker stays in the text at the head of the line
+ * it opens, so a line a value's own break started is told from a cause-link
+ * boundary, which opens on the renderer's `caused by: ` text. That distinction
+ * holds on the CAUSE-CHAIN path, whose text is escaped upstream
+ * (`sanitizedFailureMessage` in `./useInviterExchange`) and so arrives with a
+ * value's breaks as markers alone; the column-name refusal path
+ * (`JobIntentColumnNameError` -> `consoleJobColumnRefusalAlert`) states the
+ * operator's own header bytes, which are bounded and bidi-isolated but not
+ * control-escaped.
+ */
+export function layOutValueLineBreaks(text: string): string {
+  return text.replaceAll(
+    VALUE_LINE_BREAK_MARKER,
+    `\n${VALUE_LINE_BREAK_MARKER}`,
+  );
+}
+
+/**
  * The sink a {@link RunFailure} message is shown through. The seat composes
  * the message as a cause chain relying on `pre-line` to turn the error
  * renderer's newline (`sanitizedFailureMessage` in `./useInviterExchange`)
- * into a line break. {@link FailureAlert} and the strand-recovery panel
+ * into a line break, and the breaks {@link layOutValueLineBreaks} inserts with
+ * it. {@link FailureAlert} and the strand-recovery panel
  * ({@link ./RecoveredExchangePanel}) reach it through {@link FailureBody}
  * rather than styling their own span, keeping the layout
  * `test/browser/failureMessageLayout.test.ts` measures to one component.
  */
 export function FailureMessage({ message }: { message: string }) {
-  return <span style={{ whiteSpace: "pre-line" }}>{message}</span>;
+  return (
+    <span style={{ whiteSpace: "pre-line" }}>
+      {layOutValueLineBreaks(message)}
+    </span>
+  );
 }
 
 /** The label over a failure's reported cause. It names where the text came from
@@ -515,6 +557,10 @@ export const REPORTED_CAUSE_LABEL = "Reported by the exchange";
  * the report is set in the mono face this design reserves for data and protocol
  * state (docs/notes/reported-failure-cause.md). Both failure surfaces render
  * through here, which keeps that separation to one component.
+ *
+ * The report is a rendered cause chain as the message can be, so it goes through
+ * {@link layOutValueLineBreaks} too; its own rule sets the `pre-line` those
+ * breaks need (`.reportedCauseText` in `../styles/app.module.css`).
  */
 export function FailureBody({ failure }: { failure: RunFailure }) {
   return (
@@ -524,7 +570,7 @@ export function FailureBody({ failure }: { failure: RunFailure }) {
         <div className={styles.reportedCause}>
           <p className={styles.reportedCauseLabel}>{REPORTED_CAUSE_LABEL}</p>
           <p className={`${styles.mono} ${styles.reportedCauseText}`}>
-            {failure.reportedCause}
+            {layOutValueLineBreaks(failure.reportedCause)}
           </p>
         </div>
       )}
