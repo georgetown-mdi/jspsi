@@ -807,9 +807,11 @@ above). The artifact's own
   them. That does not make an artifact holding one readable everywhere. A build
   whose `local` schema does not know the two keys refuses it whole, because the
   strict reader-rejects-unknown schema rejects an unknown nested key and the
-  top-level parse fails with it. What the operator meets is the generic
-  unreadable-file alert on the import surface, which does not name a version
-  difference.
+  top-level parse fails with it. The import surface holds that rejection apart
+  from a file whose bytes do not parse at all: a document that parses and then
+  fails the schema names a newer build's export as a likely cause and states the
+  two ways past it -- bring the page up to date, or write the file from a build
+  that matches -- alongside the wrong-file and modified-file checks.
 - **What a reconstructed `lastRun` can and cannot assert.** The `local.lastRun`
   block is validated against the record's own `lastRun` schema rather than a
   narrower one, so an artifact is accepted with every outcome and

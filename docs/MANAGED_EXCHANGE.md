@@ -1498,6 +1498,17 @@ post-eviction one -- which is exactly why the managed-exchange list's empty
 state has the import affordance standing, rather than exposing it only
 behind a detected loss.
 
+**A refused file says why it was refused.** The artifact's schema
+rejects an unknown key and an unknown version outright (see
+[MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md), "Export
+artifact"), so a backup exported by a newer build than the page is running is
+refused as surely as a wrong or altered file is -- and the operator cannot tell
+which from the file in front of them. The import therefore separates the two: a
+file whose bytes do not parse leaves only the file itself to check, while a
+document the schema rejects names the version difference first and states both
+ways past it, reloading the page for the current version or exporting the backup
+again from the device that wrote the file.
+
 **The import says which grants this browser does not hold.** An artifact holds the
 exchange, not the two pointers into this device that the record also keeps: the
 input file each run reads, and the folder a scheduled run writes its results to
