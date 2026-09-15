@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  BUILT_IN_LINKAGE_RULE_SETS,
   DEFAULT_LINKAGE_FIELD_SET_NAME,
   DEFAULT_LINKAGE_FIELD_SET_VERSION,
   DEFAULT_LINKAGE_KEY_SET_NAME,
@@ -11,7 +12,10 @@ import {
   isDrawnFromLinkageRuleSet,
   linkageRuleSetReferenceFor,
   linkageTermsFromRuleSet,
+  resolveLinkageRuleSetCitation,
 } from "../../src/defaults/builtInLinkageTerms";
+
+import type { BuiltInLinkageRuleSet } from "../../src/defaults/builtInLinkageTerms";
 
 import type { ColumnMetadata, Metadata } from "../../src/config/metadata";
 import type {
@@ -49,6 +53,155 @@ describe("DEFAULT_LINKAGE_RULE_SET", () => {
     });
     expect(DEFAULT_LINKAGE_RULE_SET.linkageKeys.length).toBeGreaterThan(1);
     expect(DEFAULT_LINKAGE_RULE_SET.linkageFields.length).toBeGreaterThan(1);
+  });
+});
+
+/** A second rule set, declared here and shipped nowhere: what a registry
+ * holding more than one resolves against, and what a document citing a set
+ * this build does not ship names. Its rules share no key or field with the
+ * built-in set, so a half resolved to the wrong set answers differently. */
+const secondRuleSet: BuiltInLinkageRuleSet = {
+  reference: {
+    fieldSet: { name: "county-pii", version: "3.1.0" },
+    keySet: { name: "county-keys", version: "3.1.0" },
+  },
+  linkageFields: [{ name: "ssn", type: "ssn" }],
+  linkageKeys: [{ name: "SSN", elements: [{ field: "ssn" }] }],
+};
+
+/** The set's own rules, as a terms document drawn from it would hold them. */
+const drawnFrom = (
+  ruleSet: BuiltInLinkageRuleSet,
+): Pick<LinkageTerms, "linkageFields" | "linkageKeys"> => ({
+  linkageFields: structuredClone([...ruleSet.linkageFields]),
+  linkageKeys: structuredClone([...ruleSet.linkageKeys]),
+});
+
+/** Every object or array reachable within `value` that an edit could still
+ * change in place, each named from `path` so a failure states where it sits. */
+const unfrozenPathsWithin = (value: unknown, path: string): string[] => {
+  if (typeof value !== "object" || value === null) return [];
+  const paths = Object.isFrozen(value) ? [] : [path];
+  for (const [key, held] of Object.entries(value)) {
+    const heldPath = Array.isArray(value)
+      ? `${path}[${key}]`
+      : `${path}.${key}`;
+    paths.push(...unfrozenPathsWithin(held, heldPath));
+  }
+  return paths;
+};
+
+describe("BUILT_IN_LINKAGE_RULE_SETS", () => {
+  test("holds the set every path that authors nothing draws from", () => {
+    expect(BUILT_IN_LINKAGE_RULE_SETS).toContain(DEFAULT_LINKAGE_RULE_SET);
+    expect(getDefaultLinkageTerms("Party A").linkageRuleSet).toStrictEqual(
+      DEFAULT_LINKAGE_RULE_SET.reference,
+    );
+  });
+
+  test("is frozen against an added or replaced set", () => {
+    // The registry decides which citations resolve and which rules may be
+    // cited, so an entry added at runtime would decide later verdicts and
+    // later citations. Module code is strict, so each attempt throws.
+    const registry = BUILT_IN_LINKAGE_RULE_SETS as Array<BuiltInLinkageRuleSet>;
+    expect(() => registry.push(secondRuleSet)).toThrow();
+    expect(() => {
+      registry[0] = secondRuleSet;
+    }).toThrow();
+    expect(BUILT_IN_LINKAGE_RULE_SETS).toContain(DEFAULT_LINKAGE_RULE_SET);
+  });
+
+  test("holds every set frozen through its contents", () => {
+    // Each set is aliased into every terms document derived from it and into
+    // every verdict reached against it, so an entry frozen at its top level
+    // alone would let one in-place edit move what later derivations draw and
+    // later verdicts compare against.
+    expect(
+      BUILT_IN_LINKAGE_RULE_SETS.flatMap((ruleSet, index) =>
+        unfrozenPathsWithin(ruleSet, `BUILT_IN_LINKAGE_RULE_SETS[${index}]`),
+      ),
+    ).toStrictEqual([]);
+  });
+});
+
+describe("resolveLinkageRuleSetCitation", () => {
+  const registry = [DEFAULT_LINKAGE_RULE_SET, secondRuleSet];
+
+  test("resolves each half against the set declaring it", () => {
+    expect(
+      resolveLinkageRuleSetCitation(
+        DEFAULT_LINKAGE_RULE_SET.reference,
+        registry,
+      ),
+    ).toStrictEqual({
+      linkageFields: DEFAULT_LINKAGE_RULE_SET.linkageFields,
+      linkageKeys: DEFAULT_LINKAGE_RULE_SET.linkageKeys,
+    });
+    expect(
+      resolveLinkageRuleSetCitation(secondRuleSet.reference, registry),
+    ).toStrictEqual({
+      linkageFields: secondRuleSet.linkageFields,
+      linkageKeys: secondRuleSet.linkageKeys,
+    });
+  });
+
+  test("resolves the two halves to different sets where the citation names two", () => {
+    // The halves are named and versioned independently, so a document may
+    // cite one set's fields beside another's keys; each half is answered with
+    // the rules of the set declaring that half and no other.
+    expect(
+      resolveLinkageRuleSetCitation(
+        {
+          fieldSet: DEFAULT_LINKAGE_RULE_SET.reference.fieldSet,
+          keySet: secondRuleSet.reference.keySet,
+        },
+        registry,
+      ),
+    ).toStrictEqual({
+      linkageFields: DEFAULT_LINKAGE_RULE_SET.linkageFields,
+      linkageKeys: secondRuleSet.linkageKeys,
+    });
+    expect(
+      resolveLinkageRuleSetCitation(
+        {
+          fieldSet: secondRuleSet.reference.fieldSet,
+          keySet: DEFAULT_LINKAGE_RULE_SET.reference.keySet,
+        },
+        registry,
+      ),
+    ).toStrictEqual({
+      linkageFields: secondRuleSet.linkageFields,
+      linkageKeys: DEFAULT_LINKAGE_RULE_SET.linkageKeys,
+    });
+  });
+
+  test("resolves a half on its name AND version, or not at all", () => {
+    expect(
+      resolveLinkageRuleSetCitation(
+        {
+          fieldSet: {
+            name: secondRuleSet.reference.fieldSet.name,
+            version: "9.9.9",
+          },
+          keySet: { name: "nobody-keys", version: "1.0.0" },
+        },
+        registry,
+      ),
+    ).toStrictEqual({ linkageFields: undefined, linkageKeys: undefined });
+  });
+
+  test("resolves a citation against this build's own sets by default", () => {
+    expect(
+      resolveLinkageRuleSetCitation(DEFAULT_LINKAGE_RULE_SET.reference),
+    ).toStrictEqual({
+      linkageFields: DEFAULT_LINKAGE_RULE_SET.linkageFields,
+      linkageKeys: DEFAULT_LINKAGE_RULE_SET.linkageKeys,
+    });
+    // A set this build does not ship resolves to nothing on either half,
+    // whatever rules sit beside the citation.
+    expect(
+      resolveLinkageRuleSetCitation(secondRuleSet.reference),
+    ).toStrictEqual({ linkageFields: undefined, linkageKeys: undefined });
   });
 });
 
@@ -232,6 +385,35 @@ describe("linkageRuleSetReferenceFor", () => {
     ).toBeUndefined();
   });
 
+  test("cites the set the rules were drawn from, over a registry holding more than one", () => {
+    const registry = [DEFAULT_LINKAGE_RULE_SET, secondRuleSet];
+    expect(linkageRuleSetReferenceFor(wholeSet(), registry)).toStrictEqual(
+      DEFAULT_LINKAGE_RULE_SET.reference,
+    );
+    expect(
+      linkageRuleSetReferenceFor(drawnFrom(secondRuleSet), registry),
+    ).toStrictEqual(secondRuleSet.reference);
+    // Rules drawn from no set the registry holds cite none of them: a citation
+    // names where the rules came from, so a set declaring neither the fields
+    // nor the keys cannot be cited for them.
+    expect(
+      linkageRuleSetReferenceFor(
+        {
+          linkageFields: [{ name: "alias", type: "first_name" }],
+          linkageKeys: [{ name: "Alias", elements: [{ field: "alias" }] }],
+        },
+        registry,
+      ),
+    ).toBeUndefined();
+    // The keyless exclusion holds over every set, not only the first.
+    expect(
+      linkageRuleSetReferenceFor(
+        { linkageFields: [...secondRuleSet.linkageFields], linkageKeys: [] },
+        registry,
+      ),
+    ).toBeUndefined();
+  });
+
   test("cites nothing over rules that declare no key", () => {
     // Keyless rules are drawn from every set vacuously -- the predicate says so
     // -- so the citation is decided here instead: it asserts that the keys came
@@ -365,6 +547,57 @@ describe("checkLinkageRuleSetCitation", () => {
         keySet: shipped.keySet,
       }),
     ).toStrictEqual({ fieldSet: "unchecked", keySet: "consistent" });
+  });
+
+  test("reaches every verdict over a registry holding more than one set", () => {
+    // The verdict fills the exchange record and the consent review, so the
+    // registry it is reached against is the caller's to name: a set resolvable
+    // only in the registry passed here is checked, not left unchecked.
+    const registry = [DEFAULT_LINKAGE_RULE_SET, secondRuleSet];
+    expect(
+      checkLinkageRuleSetCitation(
+        secondRuleSet.reference,
+        drawnFrom(secondRuleSet),
+        registry,
+      ),
+    ).toStrictEqual({ fieldSet: "consistent", keySet: "consistent" });
+    expect(
+      checkLinkageRuleSetCitation(
+        secondRuleSet.reference,
+        wholeSet(),
+        registry,
+      ),
+    ).toStrictEqual({ fieldSet: "contradicted", keySet: "contradicted" });
+    // Each half is compared against the set declaring that half, so a citation
+    // naming two of the registry's sets is judged against both.
+    expect(
+      checkLinkageRuleSetCitation(
+        {
+          fieldSet: DEFAULT_LINKAGE_RULE_SET.reference.fieldSet,
+          keySet: secondRuleSet.reference.keySet,
+        },
+        wholeSet(),
+        registry,
+      ),
+    ).toStrictEqual({ fieldSet: "consistent", keySet: "contradicted" });
+    expect(
+      checkLinkageRuleSetCitation(
+        {
+          fieldSet: { name: "nobody-pii", version: "1.0.0" },
+          keySet: { name: "nobody-keys", version: "1.0.0" },
+        },
+        drawnFrom(secondRuleSet),
+        registry,
+      ),
+    ).toStrictEqual({ fieldSet: "unchecked", keySet: "unchecked" });
+    // Omitting the argument resolves against this build's own sets alone,
+    // which declare neither half of that citation.
+    expect(
+      checkLinkageRuleSetCitation(
+        secondRuleSet.reference,
+        drawnFrom(secondRuleSet),
+      ),
+    ).toStrictEqual({ fieldSet: "unchecked", keySet: "unchecked" });
   });
 
   test("agrees with the whole-set predicate wherever both halves resolve", () => {
