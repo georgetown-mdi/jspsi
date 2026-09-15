@@ -28,6 +28,7 @@ import {
 import { HANDSHAKE_ROLE_FOR_SIDE } from "@psi/handshakeRole";
 import { SIGNING_IDENTITY_IN_RENDEZVOUS_REFUSAL } from "@jobs/jobCreateRefusal";
 import { consoleJobColumnRefusalAlert } from "@psi/columnNames";
+import { consolePartnerCertificateRefusal } from "@console/partnerCertificateRefusal";
 import { createBrowserExchangeDriver } from "@psi/exchangeDriver";
 import { hasRecoveryHint } from "@psi/authenticateExchange";
 import { inviterExchangeDataSpec } from "@psi/authoring/advancedInvite";
@@ -275,11 +276,18 @@ export function failureFor(
     // nothing. Checked before the invitation branch, whose title is wrong
     // here. Still the security category, so the alert offers no retry -- the
     // same partner certificate is refused however many times it runs.
+    //
+    // One of core's five terms-time pin refusals takes the console's own
+    // remedy copy instead of the refusal's, whose next step is a
+    // configuration-file edit ({@link consolePartnerCertificateRefusal}); every
+    // other self-explaining refusal states a step that holds here and is shown
+    // as it arrived.
     if (error instanceof RelayedSelfExplainingError) {
+      const relayed = sanitizedFailureMessage(error);
       return {
         category,
         title: "The exchange stopped on a trust check",
-        message: sanitizedFailureMessage(error),
+        message: consolePartnerCertificateRefusal(relayed) ?? relayed,
       };
     }
     // A tagged credential/expiry error's message is composed only from local

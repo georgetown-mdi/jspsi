@@ -3,6 +3,7 @@ import path from "node:path";
 import {
   MAX_ERROR_CAUSE_DEPTH,
   errorWithPartnerCauseLinks,
+  sanitizeForDisplay,
 } from "@psilink/core";
 
 import { ERROR_MESSAGE_CHAIN_FIELD } from "@psi/relayErrorChain";
@@ -1685,6 +1686,11 @@ function relayedForConsole(record: JobRecord, event: RelayEvent): RelayEvent {
  * first contact to report, so its warning relays in the CLI's own words rather
  * than taking console copy stating a pin was adopted
  * ({@link JobRecord.partnerFingerprintPinnedAtCreation}).
+ *
+ * Gated on the run signing receipts as well, the gate the failure rebuild below
+ * holds: only a signing run pins anything, so console copy about a pin this run
+ * adopted is composed only where this server launched a run that could adopt one
+ * ({@link JobRecord.receiptPath}).
  */
 function rewrittenPartnerPinNotice(
   record: JobRecord,
@@ -1692,6 +1698,7 @@ function rewrittenPartnerPinNotice(
 ): RelayEvent {
   if (
     event.source !== PARTNER_CERTIFICATE_PINNED_SOURCE ||
+    record.receiptPath === null ||
     record.partnerFingerprintPinnedAtCreation
   )
     return event;
@@ -1718,6 +1725,15 @@ function rewrittenPartnerPinNotice(
  * flat field and the derived chain are read, since the path may sit in either,
  * and both are replaced together so the seat shows the console's sentence
  * whichever it reads ({@link ERROR_MESSAGE_CHAIN_FIELD}).
+ *
+ * Both sides of that search are display text: every string on a relayed event is
+ * escaped, so a data root holding a backslash or any character outside printable
+ * ASCII reaches the event as its escape, and a raw spelling would not be found
+ * there -- leaving the path to cross. The path is escaped to the same form
+ * rather than the event's text unescaped, since the escaped text is what would
+ * reach the operator. Matching one spelling of one path is a stopgap: the
+ * general close is a partner-origin type that makes a path-bearing message
+ * unrenderable at this boundary rather than searched for here.
  */
 function rewrittenPartnerPinFailure(
   record: JobRecord,
@@ -1725,8 +1741,13 @@ function rewrittenPartnerPinFailure(
 ): RelayEvent {
   if (event.category !== "config" || record.receiptPath === null) return event;
   const configPath = workdirArtifactPath(record.workdir, JOB_FILE_NAMES.config);
+  const escapedConfigPath = sanitizeForDisplay(configPath, {
+    maxLength: Infinity,
+  });
   if (
-    !errorDisplayStrings(event).some((text) => text.includes(configPath)) ||
+    !errorDisplayStrings(event).some((text) =>
+      text.includes(escapedConfigPath),
+    ) ||
     recordedPartnerFingerprint(configPath) !== undefined
   )
     return event;

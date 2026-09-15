@@ -3,6 +3,8 @@ import path from "node:path";
 
 import { afterEach, describe, expect, test } from "vitest";
 
+import { sanitizeForDisplay } from "@psilink/core";
+
 import {
   PARTNER_PIN_UNRECORDABLE_FAILURE,
   partnerCertificatePinnedNotice,
@@ -21,6 +23,7 @@ import {
   validLinkageTerms,
 } from "../../utils/jobFixtures";
 
+import type { JobExchangeIntent } from "@jobs/intentSchemas";
 import type { JobRecord } from "@jobs/jobManager";
 import type { RelayEvent } from "@jobs/cliDriver";
 
@@ -89,13 +92,12 @@ function composedConfigFile(pin: string | undefined): string {
   return configPath;
 }
 
-/** One certificate-mode job driven to its terminal event under the given stub
- * environment, created with `partnerFingerprint` pinned when one is given: the
- * data root it ran under and the buffered record. */
-async function runCertificateJob(
+/** One job driven to its terminal event under the given stub environment, with
+ * the signing block given: the data root it ran under and the buffered record. */
+async function runJob(
   label: string,
   childEnv: Record<string, string>,
-  partnerFingerprint?: string,
+  signing: JobExchangeIntent["signing"],
 ): Promise<{ dataRoot: string; record: JobRecord }> {
   const dataRoot = scratchDir(`${label}-root`);
   const manager = new JobManager({
@@ -108,13 +110,24 @@ async function runCertificateJob(
   const id = await manager.createJob(
     validIntent({
       linkageTerms: { ...validLinkageTerms(), identity: "Agency A" },
-      signing: {
-        mode: "certificate",
-        ...(partnerFingerprint !== undefined ? { partnerFingerprint } : {}),
-      },
+      ...(signing !== undefined ? { signing } : {}),
     }),
   );
   return { dataRoot, record: await awaitTerminal(manager, id) };
+}
+
+/** One certificate-mode job driven to its terminal event under the given stub
+ * environment, created with `partnerFingerprint` pinned when one is given: the
+ * data root it ran under and the buffered record. */
+async function runCertificateJob(
+  label: string,
+  childEnv: Record<string, string>,
+  partnerFingerprint?: string,
+): Promise<{ dataRoot: string; record: JobRecord }> {
+  return runJob(label, childEnv, {
+    mode: "certificate",
+    ...(partnerFingerprint !== undefined ? { partnerFingerprint } : {}),
+  });
 }
 
 /** The single terminal failure among the events a record buffered. */
@@ -236,6 +249,27 @@ describe("the relayed notice states no container path", () => {
     );
   });
 
+  test("a run that signs nothing relays the CLI's warning as written", async () => {
+    // Only a signing run pins a certificate, so console copy stating this run
+    // adopted a pin is composed only where this server launched one that could:
+    // the same gate the failure rebuild holds. A `partnerCertificatePinned`
+    // warning on an unsigned run is a claim about the child's run this server
+    // did not ask for, and it reaches the operator in the child's own words.
+    const { record } = await runJob(
+      "pin-unsigned",
+      pinAdoptingChildEnv(),
+      undefined,
+    );
+    const notice = soleWarning(record);
+    expect(notice.source).toBe("partnerCertificatePinned");
+    expect(notice.message).toBe(
+      PARTNER_PINNED_WARNING.replace(
+        STUB_CONFIG_FILE_TOKEN,
+        path.join(record.workdir, JOB_FILE_NAMES.config),
+      ),
+    );
+  });
+
   test("a run created with a pin on file relays the CLI's warning as written", async () => {
     // The console's copy states a first contact -- nothing was on file, so the
     // run adopted whatever the partner presented. A run whose composed
@@ -319,6 +353,24 @@ describe("the relayed first-contact failure states no container path", () => {
     expect(failure.category).toBe("config");
     expect(events).not.toContain(dataRoot);
     expect(events).not.toContain(JOB_FILE_NAMES.config);
+  });
+
+  test("a data root the display escape rewrites is still recognized", async () => {
+    // The relay escapes every string it passes, so a data root holding a
+    // character outside printable ASCII reaches the event as its escape: the
+    // path is searched for in that form, or the CLI's message -- and the path on
+    // it -- would cross unrecognized.
+    const { dataRoot, events, failure } = await runWithTerminalFailure(
+      "pin-escaped-ü",
+      ADOPTION_WRITE_FAILURE,
+    );
+    expect(sanitizeForDisplay(dataRoot, { maxLength: Infinity })).not.toBe(
+      dataRoot,
+    );
+    expect(failure.message).toBe(PARTNER_PIN_UNRECORDABLE_FAILURE);
+    expect(events).not.toContain(
+      sanitizeForDisplay(dataRoot, { maxLength: Infinity }),
+    );
   });
 
   test("the refusal raised before connecting is left as the CLI reports it", async () => {
