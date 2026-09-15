@@ -321,7 +321,8 @@ export function failureFor(
   // synced shared folder, so a temporary-connection message misdirects. Name the
   // shared-state cause instead. Both messages are built from operator-known facts
   // alone and keep the retry affordance.
-  const reportedCause = sanitizedFailureMessage(error);
+  const reportedCause =
+    error instanceof Error ? sanitizedFailureMessage(error) : "";
   return {
     category,
     title: "Exchange failed",

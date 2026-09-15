@@ -213,6 +213,22 @@ describe("failureFor", () => {
     expect(failureFor("exchange", "  ").reportedCause).toBeUndefined();
   });
 
+  test("a non-Error throw gets no report block, only the fixed message", () => {
+    // A thrown non-Error's `String()` reads as `undefined` or
+    // `[object Object]`, which would render under a label promising the
+    // exchange's own account of the failure. Withheld outright, and the fixed
+    // copy still reaches the operator.
+    const fixedMessage =
+      "The exchange could not be completed - usually a temporary " +
+      "connection problem rather than an issue with your data.";
+    const undefinedThrow = failureFor("exchange", undefined);
+    expect(undefinedThrow.reportedCause).toBeUndefined();
+    expect(undefinedThrow.message).toBe(fixedMessage);
+    const objectThrow = failureFor("exchange", { code: 7 });
+    expect(objectThrow.reportedCause).toBeUndefined();
+    expect(objectThrow.message).toBe(fixedMessage);
+  });
+
   test("a reported cause reaches the block escaped", () => {
     // The block is a display boundary like any other, so the escape the seat
     // applies everywhere else applies here: a terminal holding the ESC that
