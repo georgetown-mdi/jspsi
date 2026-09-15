@@ -20,6 +20,11 @@ IFS=$'\n\t'        # vars, and pipeline failures; stricter word splitting.
 #     via ANTHROPIC_API_KEY needs neither; these are best-effort).
 #   - the VS Code extension CDN -- only used when opened through the VS Code UI.
 #
+# The Playwright browser-download hosts are NOT here. They are Azure Front Door
+# names that answer a different edge address per lookup, so an entry resolved
+# once at start misses on most later requests; they are admitted by hostname on
+# the proxy lane instead (init-egress-proxy.sh, which both profiles run).
+#
 # Telemetry and error-reporting hosts are deliberately absent: the container sets
 # CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC and DISABLE_AUTOUPDATER, so Claude makes
 # no telemetry/Sentry/updater calls. Applied on container start via passwordless
@@ -141,9 +146,7 @@ for domain in \
   "console.anthropic.com" \
   "marketplace.visualstudio.com" \
   "vscode.blob.core.windows.net" \
-  "update.code.visualstudio.com" \
-  "cdn.playwright.dev" \
-  "playwright.download.prss.microsoft.com"; do
+  "update.code.visualstudio.com"; do
   add_domain "$domain" optional || true
 done
 

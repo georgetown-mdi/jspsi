@@ -2,22 +2,27 @@
 set -Eeuo pipefail # Exit on error (inherited by functions/subshells), undefined
 IFS=$'\n\t'        # vars, and pipeline failures; stricter word splitting.
 
-# Hostname-gated egress lane for the infra dev-container profile, applied on
-# start AFTER init-firewall.sh and only in an image built with PSILINK_INFRA=1.
+# Hostname-gated egress lane for the psilink dev container, applied on start
+# AFTER init-firewall.sh. Both profiles run it; the allowlist baked into the
+# image is what differs.
 #
-# init-firewall.sh matches destination IPs, which cannot express AWS: EC2 in
-# us-west-2 alone publishes 169 shared-tenant prefixes, and admitting them
-# admits every other tenant's instance. So this script adds a second lane
-# without touching the first: a tinyproxy CONNECT proxy bound to loopback,
-# default-deny, admitting a destination by HOSTNAME from
+# init-firewall.sh matches destination IPs, which two kinds of destination
+# cannot be expressed as. AWS is one: EC2 in us-west-2 alone publishes 169
+# shared-tenant prefixes, and admitting them admits every other tenant's
+# instance. A name whose address rotates per lookup is the other: an Azure Front
+# Door host resolved once at container start misses on most later requests. So
+# this script adds a second lane without touching the first: a tinyproxy CONNECT
+# proxy bound to loopback, default-deny, admitting a destination by HOSTNAME from
 # /usr/local/share/psilink-egress-allowlist plus PSILINK_EGRESS_EXTRA_HOSTS,
 # and an iptables OUTPUT rule that lets the tinyproxy uid -- and nothing else in
 # the container -- reach ports 443 and 22 on an address outside the IP
 # allowlist.
 #
-# Everything init-firewall.sh admitted stays admitted, directly: the infra
-# profile's NO_PROXY names those hosts, so the workflow that runs in the default
-# profile runs here byte-identically and only a NEW destination takes the proxy.
+# Everything init-firewall.sh admitted stays admitted, directly. The default
+# profile sets no proxy variables at all, so only a command pointed at the proxy
+# by hand takes the lane; the infra profile sets them globally and exempts the
+# IP-admitted hosts through NO_PROXY, so the workflow runs there byte-identically
+# and only a NEW destination takes the proxy.
 #
 # Fail closed. If the allowlist does not parse, the proxy does not start, or any
 # verification below fails, the trap tears the proxy and the uid rule back out
@@ -267,12 +272,67 @@ expect() { # $1 = label, $2 = observed, $3 = required prefix
   fi
 }
 
-expect "an allowlisted AWS endpoint is reachable through the proxy" \
-  "$(via_proxy https://sts.us-west-2.amazonaws.com/)" reached
+# Whether the assembled filter admits a host, under the same fnmatch semantics
+# tinyproxy applies: `==` inside [[ ]] is glob matching against an unquoted
+# right-hand side, and every pattern reaching here has already been checked into
+# the hostname shape valid_pattern accepts.
+filter_admits() {
+  local host=$1 pattern
+  while read -r pattern; do
+    if [[ "$host" == $pattern ]]; then
+      return 0
+    fi
+  done <<<"$patterns"
+  return 1
+}
+
+# The probes below run against the hosts the assembled filter actually admits,
+# so one script verifies the default profile's two-host lane and the infra
+# profile's wide one. At least one must run, checked after the block: a lane
+# that asserted nothing positive would start just as happily with a filter that
+# admits nothing at all.
+positive_probes=0
+
+# For a host whose ORIGIN need not answer at `/` -- Playwright's CDN serves only
+# under its release paths -- the assertion is "the proxy did not refuse it",
+# which is the half this configuration owns. A proxy 5xx from an origin that
+# does not answer is a pass; only a 403 from tinyproxy is a failure.
+probe_admitted() {
+  local host=$1 result
+  result=$(via_proxy "https://$host/")
+  if [ "$result" = filtered ]; then
+    fail "Proxy verification failed - the filter refuses allowlisted host $host"
+  fi
+  positive_probes=$((positive_probes + 1))
+  echo "Proxy verification passed - $host is admitted by the filter: $result"
+}
+
+if filter_admits sts.us-west-2.amazonaws.com; then
+  expect "an allowlisted AWS endpoint is reachable through the proxy" \
+    "$(via_proxy https://sts.us-west-2.amazonaws.com/)" reached
+  expect "the same AWS endpoint is refused when the proxy is bypassed" \
+    "$(direct https://sts.us-west-2.amazonaws.com/)" refused
+  positive_probes=$((positive_probes + 1))
+fi
+
+# No matching "refused when bypassed" assertion for these two. They are Azure
+# Front Door names, and an edge address one answers with can be an address
+# update.code.visualstudio.com or marketplace.visualstudio.com resolved to at
+# start, which puts it in the IP allowlist. Reaching one directly is therefore
+# possible and is not a failure of this lane; it is the shared-CDN residual
+# README.md states for every allowlisted host.
+for host in cdn.playwright.dev playwright.download.prss.microsoft.com; do
+  if filter_admits "$host"; then
+    probe_admitted "$host"
+  fi
+done
+
+if [ "$positive_probes" -eq 0 ]; then
+  fail "no allowlisted host this script knows how to probe is in the assembled filter"
+fi
+
 expect "an unlisted host is refused by the proxy" \
   "$(via_proxy https://example.com/)" filtered
-expect "the same AWS endpoint is refused when the proxy is bypassed" \
-  "$(direct https://sts.us-west-2.amazonaws.com/)" refused
 expect "the AWS customer-instance namespace is refused by the proxy" \
   "$(via_proxy https://ec2-1-2-3-4.us-west-2.compute.amazonaws.com/)" filtered
 

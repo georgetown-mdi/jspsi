@@ -1,0 +1,19 @@
+# Hostname egress allowlist for the DEFAULT dev-container profile.
+#
+# The format, the fnmatch matching, and the pattern shapes accepted are
+# documented at the top of .devcontainer/infra/egress-allowlist, which the
+# infra profile appends to this file at build time.
+#
+# Why these two hosts are here rather than in init-firewall.sh's ipset: both
+# are Azure Front Door names that answer a different edge address per lookup,
+# so an ipset entry resolved once at container start misses on most later
+# requests and the download fails with EHOSTUNREACH. The proxy admits a
+# destination by hostname, which does not depend on the address the name
+# resolved to at start.
+
+# --- Playwright browser download -------------------------------------------
+#
+# The Chrome-for-Testing binaries `npx playwright install chromium` fetches for
+# the web app's browser test suite (.devcontainer/post-create.sh).
+cdn.playwright.dev
+playwright.download.prss.microsoft.com

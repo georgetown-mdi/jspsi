@@ -8,7 +8,7 @@ with its writes confined to the container.
 
 There are two configurations. This document describes the default one
 throughout; the [infrastructure profile](#infrastructure-profile) at the end is
-the same container plus the tooling and the second egress lane that AWS,
+the same container plus the tooling and the wider hostname allowlist that AWS,
 Cloudflare, Let's Encrypt, and remote-host work need. Everything below applies
 to both unless it says otherwise.
 
@@ -22,11 +22,12 @@ to both unless it says otherwise.
   needs a root `sshd` the unprivileged container does not provide -- its runner
   skips cleanly (exit 0) here rather than failing.
 - **git**, the **GitHub CLI**, and the build toolchain for native npm modules.
-- An **egress firewall** (`init-firewall.sh`) applied on start.
+- An **egress firewall** (`init-firewall.sh`) and a loopback CONNECT proxy
+  (`init-egress-proxy.sh`), both applied on start.
 
 ## Security model
 
-Three layers, so prompt-free operation inside is safe:
+Four layers, so prompt-free operation inside is safe:
 
 1. **The container is the wall.** The only host filesystem a session can reach is
    the bind-mounted workspace (read-write), plus the named `node_modules` and
@@ -41,13 +42,31 @@ Three layers, so prompt-free operation inside is safe:
    `productionresultssa*.blob.core.windows.net` storage shards -- resolved by
    enumeration at start, since GitHub publishes no ranges for them -- that the
    API redirects Actions log bodies and run artifacts to), the Anthropic API and
-   login, the VS Code extension CDN, and the Playwright browser-download CDN
-   (`cdn.playwright.dev`, `playwright.download.prss.microsoft.com`) --
-   Chrome-for-Testing binaries a Playwright-driven test fetches. Telemetry and
-   updater hosts are absent: the container sets
-   `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` and `DISABLE_AUTOUPDATER`, so
-   Claude makes no such calls.
-3. **Command deny-list and a protected-branch push hook** (`.claude/settings.json`,
+   login, and the VS Code extension CDN. Telemetry and updater hosts are absent:
+   the container sets `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` and
+   `DISABLE_AUTOUPDATER`, so Claude makes no such calls.
+3. **A hostname-gated second lane** (`init-egress-proxy.sh`, run via the same
+   sudo grant immediately after the firewall): a `tinyproxy` HTTP CONNECT proxy
+   on `127.0.0.1:8888`, default-deny, admitting a destination by HOSTNAME and
+   reaching it only on port 443 or 22. One `iptables` rule connects it to the
+   firewall -- TCP egress to those two ports is accepted for packets owned by
+   the `tinyproxy` uid, ahead of the IP-allowlist match and the catch-all
+   REJECT -- so nothing else in the container gains an inch. It fails closed:
+   an unparseable pattern, a proxy that will not start, or a probe that does not
+   answer as expected removes both the proxy and the rule and exits non-zero,
+   leaving egress exactly what `init-firewall.sh` left it.
+
+   The default profile's allowlist is `.devcontainer/egress-allowlist`, two
+   hosts: `cdn.playwright.dev` and `playwright.download.prss.microsoft.com`,
+   the Chrome-for-Testing binaries `npx playwright install chromium` fetches
+   for the web app's browser suite. They are admitted by name rather than by
+   address because both are Azure Front Door names that answer a different edge
+   per lookup, so an address resolved once at container start misses on most
+   later requests. This profile sets no proxy variable, so nothing takes the
+   lane unless it is pointed at it, as the browser download is. The
+   [infrastructure profile](#infrastructure-profile) runs the same lane with a
+   much wider allowlist.
+4. **Command deny-list and a protected-branch push hook** (`.claude/settings.json`,
    checked in): guardrails that hold even with prompts disabled. Through Claude's
    Read/Edit/Write tools the deny-list blocks reads and writes of SSH private keys
    and `.env` files and writes to `/etc`; a checked-in `PreToolUse` hook
@@ -99,6 +118,15 @@ the host filesystem, not an airtight seal:
   including ones an attacker creates -- sit on the same IPs and become reachable
   by the same different-Host trick. Same class as the GitHub channel above, and
   accepted for the same reason: reading a failed job's log is worth it.
+- **The Playwright hosts are reachable off the proxy lane as well.**
+  `cdn.playwright.dev` and `playwright.download.prss.microsoft.com` have no
+  ipset entry of their own, but they are Azure Front Door names, and an edge
+  address either of them answers with can also be one that
+  `update.code.visualstudio.com` or `marketplace.visualstudio.com` resolved to
+  at start -- and those addresses are in the ipset. A direct connection to a
+  Playwright host therefore succeeds some of the time. That is the shared-CDN
+  bullet above rather than anything the lane does; what the lane buys is a
+  download that works on every lookup instead of the lucky ones.
 - **A provided token grants real GitHub write access.** When `GH_TOKEN` is set in
   `.env` (see Prerequisites), the container can push feature branches and open
   PRs. The push hook refuses `staging`/`main` and branch protection rejects them
@@ -119,13 +147,14 @@ the host filesystem, not an airtight seal:
   read-write, so a planted `.git/hooks/*` or edited file persists on the host and
   can run there later. Treat what runs inside as you would any code in the repo.
 
-Closing the first three would need a name-aware egress proxy. The
-[infrastructure profile](#infrastructure-profile) below runs one, but only over
-the destinations it adds: those are admitted by hostname, so a host sharing a
-CDN edge with an admitted name is not reachable there by sending a different
-SNI. It narrows none of the bullets above -- the IP allowlist is unchanged, and
-every host it admits is still reached directly and by address -- and it carries
-residuals of its own, listed with it.
+Closing the bullets above that turn on a shared address -- the CDN edges, the
+Actions storage clusters, the Playwright hosts -- would need every destination
+admitted by name. The proxy lane does admit by hostname, so a host sharing a CDN
+edge with a name on ITS allowlist is not reachable through it by sending a
+different SNI. It narrows none of those bullets: the IP allowlist is unchanged,
+and every host that allowlist admits is still reached directly and by address.
+The [infrastructure profile](#infrastructure-profile) below widens the lane's
+allowlist considerably and carries residuals of its own, listed with it.
 
 ## Prerequisites
 
@@ -176,9 +205,22 @@ Open the repository in an editor with dev-container support and reopen in the
 container, or use the `devcontainer` CLI. On first creation `post-create.sh` runs
 `npm ci` into an isolated `node_modules` volume (kept separate from the
 bind-mounted host tree so Linux-built native modules do not collide with the
-host's macOS build) and builds `@psilink/core` so the apps resolve it. This runs
-*before* the egress firewall (a start step), so the initial install has full
-network access; the firewall constrains subsequent sessions.
+host's macOS build), builds `@psilink/core` so the apps resolve it, and fetches
+the Chromium build the web app's browser suite drives. This runs *before* the
+egress firewall and the proxy lane (both start steps), so the initial install
+has full network access; they constrain subsequent sessions.
+
+Re-fetching that browser later -- after a `playwright` bump, say -- happens with
+the firewall up, which holds no allowlist entry for Playwright's download hosts.
+The proxy lane is what admits them, so point the download at it:
+
+```sh
+HTTPS_PROXY=http://127.0.0.1:8888 npx playwright install chromium
+cat /etc/psilink-egress-proxy/filter    # the lane's assembled allowlist
+```
+
+`post-create.sh` does the same on any re-run, testing whether the proxy is
+listening first.
 
 Inside the container:
 
@@ -206,8 +248,8 @@ Docker daemon over SSH, and the standards and literature sites. Today that work
 is handed to the host, where there is no container wall at all -- this profile
 is the alternative to that.
 
-It is the same image and the same egress firewall, with the same mounts plus
-one, and it adds:
+It is the same image, the same egress firewall, and the same proxy lane, with
+the same mounts plus one, and it adds:
 
 - **The AWS CLI v2**, at a pinned version, from the official installer archive.
   The two architecture digests in the Dockerfile were taken from archives whose
@@ -217,9 +259,9 @@ one, and it adds:
   way rather than pasting a digest from the download.
 - **The Docker CLIENT only** (`docker-ce-cli`, from Docker's signed apt
   repository), for `docker -H ssh://user@host` against a remote daemon.
-- **A second egress lane**: a `tinyproxy` HTTP CONNECT proxy on
-  `127.0.0.1:8888`, default-deny, admitting a destination by HOSTNAME and
-  reaching it only on port 443 or 22.
+- **A much wider allowlist on the proxy lane** the default profile already
+  runs, plus the proxy variables that route every new destination through it,
+  and an `ssh_config` that sends every SSH destination through it as well.
 
 ### Choosing it
 
@@ -243,12 +285,11 @@ admitting them admits every other AWS customer's instance. A hostname allowlist
 can: `ec2.us-west-2.amazonaws.com` is one name, and
 `ec2-1-2-3-4.us-west-2.compute.amazonaws.com` is a different one.
 
-So the firewall is left exactly as the default profile has it, and the proxy is
-added beside it. One `iptables` rule connects the two: TCP egress to port 443 or
-22 is accepted for packets owned by the `tinyproxy` uid, ahead of the
-IP-allowlist match and the catch-all REJECT. Nothing else in the container gains
-an inch -- a process that is not the proxy still reaches only the IP allowlist,
-and the proxy itself reaches no other port.
+So the firewall is left exactly as it is, and the proxy is added beside it -- in
+both profiles, for the same reason the default profile's Playwright hosts take
+it: a name is the thing being admitted, and the address behind it need not hold
+still. The `iptables` rule joining the two is described in layer 3 of the
+[security model](#security-model) above.
 
 ### The two lanes, and which one a request takes
 
@@ -276,9 +317,11 @@ the IP one.
 ### The allowlist
 
 `.devcontainer/infra/egress-allowlist`, one pattern per line with the reason for
-each group. It is baked into the image at build time, the way `init-firewall.sh`
-is, rather than read from the bind-mounted workspace -- so adding a host to it
-is a repository change and a rebuild, not an edit a running session can make.
+each group, appended at build time to `.devcontainer/egress-allowlist` -- the
+list every profile's lane starts from. Both are baked into the image, the way
+`init-firewall.sh` is, rather than read from the bind-mounted workspace -- so
+adding a host is a repository change and a rebuild, not an edit a running
+session can make.
 
 Matching is `fnmatch`, so a pattern without `*` matches that host and nothing
 else (`example.com` does not admit `notexample.com`). A `*` is accepted only
