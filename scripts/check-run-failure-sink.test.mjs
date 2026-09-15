@@ -58,6 +58,30 @@ export function Alerted({ failure }: { failure: ManagedRunFailureAlert }) {
 }
 `;
 
+/** A body typed as the shared shape rather than either seat's own failure
+ * type: the annotation a component takes when it renders operator-facing text
+ * for both seats, inlining the message in a span of its own. */
+const INLINE_SHARED_FAILURE_TEXT = `
+export function Body({ failure }: { failure: FailureText }) {
+  return <span style={{ whiteSpace: "pre-line" }}>{failure.message}</span>;
+}
+`;
+
+/** The same shared shape rendering both pieces through their sinks, as the
+ * shared body itself does. */
+const SHARED_FAILURE_TEXT_THROUGH_SINKS = `
+export function Body({ failure }: { failure: FailureText }) {
+  return (
+    <>
+      <FailureMessage message={failure.message} />
+      {failure.reportedCause !== undefined && (
+        <FailureReportedCause reportedCause={failure.reportedCause} />
+      )}
+    </>
+  );
+}
+`;
+
 /** The reported cause handed to the sink that lays it out and labels it. */
 const THROUGH_THE_REPORTED_CAUSE_SINK = `
 export function Alerted({ failure }: { failure: RunFailure }) {
@@ -158,6 +182,22 @@ describe("failure display-sink check", () => {
     ]);
   });
 
+  it("flags a body typed as the shared shape inlining its own span", () => {
+    // The shape a component renders either seat's failure text through, so a
+    // read off it reaches the operator exactly as a read off the seat's own
+    // type does, and is held to the same sinks.
+    expect(rendersIn(INLINE_SHARED_FAILURE_TEXT)).toMatchObject([
+      { line: 3, text: "failure.message", throughSink: false },
+    ]);
+  });
+
+  it("allows the shared shape's pieces handed to their sinks", () => {
+    expect(rendersIn(SHARED_FAILURE_TEXT_THROUGH_SINKS)).toMatchObject([
+      { property: "message", throughSink: true },
+      { property: "reportedCause", throughSink: true },
+    ]);
+  });
+
   it("allows the message attribute of a FailureMessage element", () => {
     expect(rendersIn(THROUGH_THE_SINK)).toMatchObject([
       { text: "failure.message", throughSink: true },
@@ -230,6 +270,37 @@ describe("failure display-sink check", () => {
         }
       `),
     ).toMatchObject([{ text: "failure.reportedCause", throughSink: true }]);
+  });
+
+  it("flags a ?? default, the boundary of the guard exemption", () => {
+    // The exemption is the logical guard alone, which yields its left side only
+    // where that side is falsy and so renders none of the piece's own text. A
+    // `??` yields the piece itself wherever it has one, which is a render.
+    expect(
+      rendersIn(`
+        function Alerted({ failure }: { failure: RunFailure }) {
+          return <span>{failure.reportedCause ?? "no report"}</span>;
+        }
+      `),
+    ).toMatchObject([
+      {
+        text: "failure.reportedCause",
+        property: "reportedCause",
+        throughSink: false,
+      },
+    ]);
+  });
+
+  it("flags a || fallback, the other side of that boundary", () => {
+    expect(
+      rendersIn(`
+        function Alerted({ failure }: { failure: RunFailure }) {
+          return <span>{failure.message || "the run failed"}</span>;
+        }
+      `),
+    ).toMatchObject([
+      { text: "failure.message", property: "message", throughSink: false },
+    ]);
   });
 
   it("flags a guarded branch that inlines the piece it guards", () => {

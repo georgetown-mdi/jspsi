@@ -90,11 +90,11 @@ export interface ManagedRunFailureAlert {
   title: string;
   /** The operator-facing message. */
   message: string;
-  /** What the run itself reported, escaped for display and shown in a labelled
-   * block of its own rather than inside {@link message}, which is this
+  /** What the exchange itself reported, escaped for display and shown in a
+   * labelled block of its own rather than inside {@link message}, which is this
    * application's own words (docs/notes/reported-failure-cause.md). Set only on
-   * the states {@link managedFailureShowsReportedCause} names, and never on a
-   * state read back from a record, which holds no error to report. */
+   * the states {@link managedRunCausePlacement} places `"attributed"`, and never
+   * on a state read back from a record, which holds no error to report. */
   reportedCause?: string;
   /** The recovery affordance the host renders. */
   recovery: ManagedRunRecovery;
@@ -153,7 +153,9 @@ const HANDED_OFF_FAILURE: ManagedRunHandedOffFailure = {
  * input file and before connecting rather than rotating on custody it could not
  * establish. Not the storage state beside it: nothing rotated here, so there is
  * no desync to recover from. Recovery is `"none"` -- no affordance on this
- * surface makes the entry readable. */
+ * surface makes the entry readable, so the read's own error finishes this copy
+ * ({@link MANAGED_RUN_CAUSE_PLACEMENT}) as the only diagnostic the state has:
+ * this browser's account of its own read, not something the exchange said. */
 const CUSTODY_UNREADABLE_FAILURE: ManagedRunFailureAlert = {
   kind: "custody-unreadable",
   title: "Part of this exchange's stored copy could not be read",
@@ -290,10 +292,10 @@ const IMPORTED_FAILURE: ManagedRunFailureAlert = {
 };
 
 /** The recorded transport state: a connection or data-exchange drop, not a
- * failed-closed handshake. Fixed, friendly copy: the raw error can embed
- * partner- or server-controlled bytes and displays as an internal message, so
- * it stays in the dev-gated console. A temporary connection problem, retried
- * in place. */
+ * failed-closed handshake. Fixed, friendly copy, which accounts for nothing
+ * about why this run stopped; the error itself reaches the operator escaped, in
+ * the labelled block beneath that copy ({@link MANAGED_RUN_CAUSE_PLACEMENT}).
+ * A temporary connection problem, retried in place. */
 const TRANSPORT_FAILURE: ManagedRunFailureAlert = {
   kind: "transport",
   title: "The run could not be completed",
@@ -472,56 +474,112 @@ function attestsNonDisclosure(tier: ManagedFailureTier): boolean {
 }
 
 /**
- * The states that show the launch error's reported cause beside their own copy,
- * in the labelled block the seats render it through (`FailureBody` in
- * `../exchange/RunSurface.tsx`). An allowlist, so a state added to the model
- * shows nothing until it is listed here.
+ * Where a classified state's launch error reaches the operator.
  *
- * The transport state is the one whose copy accounts for nothing, and so the
- * one state the question is live for; it withholds on the maintainer's
- * standing ruling, its error kept to the dev-gated console
- * ({@link TRANSPORT_FAILURE}). Reversing that ruling is this list gaining
- * `"transport"`. Every other state's copy states the cause itself, fixed and
+ * - `"attributed"` -- in the labelled block the seats render it through
+ *   (`FailureBody` in `../exchange/RunSurface.tsx`), which stands it UNDER the
+ *   label naming the exchange as its source. Where words a partner or a network
+ *   stack wrote belong, so they cannot read as this application's own account
+ *   of the failure.
+ * - `"own-account"` -- finishing the state's own copy, where this application's
+ *   account of something it did itself belongs: a label attributing it to the
+ *   exchange would be wrong about who wrote it, the treatment the `output`
+ *   category's own-write cause already takes
+ *   (docs/notes/reported-failure-cause.md).
+ * - `"withheld"` -- nowhere.
+ */
+export type ManagedRunCausePlacement =
+  "attributed" | "own-account" | "withheld";
+
+/**
+ * Where each classified state's launch error reaches the operator. Exhaustive
+ * by the kind union, so a state added to the model does not typecheck until its
+ * placement is decided here.
+ *
+ * The two states showing the error at all are the ones whose copy accounts for
+ * nothing about why the run stopped. The transport state states a connection
+ * problem and no more ({@link TRANSPORT_FAILURE}), and its error is the
+ * partner- or network-written text the label exists to attribute. The
+ * unreadable-custody state is this browser reading its own storage
+ * ({@link CUSTODY_UNREADABLE_FAILURE}), with no affordance on this surface that
+ * makes the entry readable, so the read's error is the only diagnostic it has
+ * -- and it is this application's account of its own read, so it finishes the
+ * copy instead. Every other state's copy states the cause itself, fixed and
  * non-oracular by the decision each constant above records, and the unexplained
  * state withholds for the reason the seats withhold a failed-closed handshake's
  * message (docs/notes/reported-failure-cause.md).
  */
-const STATES_SHOWING_REPORTED_CAUSE: ReadonlyArray<
-  ManagedRunFailureAlert["kind"]
-> = [];
+const MANAGED_RUN_CAUSE_PLACEMENT: Record<
+  ManagedRunFailureAlert["kind"],
+  ManagedRunCausePlacement
+> = {
+  transport: "attributed",
+  "custody-unreadable": "own-account",
+  expired: "withheld",
+  input: "withheld",
+  "terms-shortfall": "withheld",
+  consent: "withheld",
+  "already-running": "withheld",
+  missed: "withheld",
+  storage: "withheld",
+  imported: "withheld",
+  unexplained: "withheld",
+};
 
 /**
- * Whether a classified state shows the launch error as the cause the run
- * reported. The one site the withholding is decided at: what the operator is
- * shown follows from {@link STATES_SHOWING_REPORTED_CAUSE} alone, on the live
- * launch path and on any other a state reaches a seat by.
+ * Where a classified state shows the launch error, if it shows it at all. The
+ * one site that is decided at: what the operator reads follows from
+ * {@link MANAGED_RUN_CAUSE_PLACEMENT} alone, on the live launch path and on any
+ * other a state reaches a seat by.
  *
  * @internal exported for the unit test.
  */
-export function managedFailureShowsReportedCause(
+export function managedRunCausePlacement(
   kind: ManagedRunFailureAlert["kind"],
-): boolean {
-  return STATES_SHOWING_REPORTED_CAUSE.includes(kind);
+): ManagedRunCausePlacement {
+  return MANAGED_RUN_CAUSE_PLACEMENT[kind];
 }
 
+/** The lead an own-account placement finishes with the error: this application
+ * still speaking, about an operation of its own, so the text lands inside its
+ * own sentence rather than under a label naming the exchange as its source. */
+const OWN_ACCOUNT_CAUSE_LEAD = "What went wrong here:";
+
 /**
- * A classified state with `error` attached as the cause the run reported, where
- * `shown` says the state shows one. The decision is passed in rather than read
- * here so it stays at the single site above and this stays the mechanism: the
- * escape at the display boundary, and the empty report that gets no block
- * rather than a label promising an account the state has none of. A rejection
- * that is not an `Error` has no chain to attribute.
+ * A classified state with `error` shown where `placement` puts it. The decision
+ * is passed in rather than read here so it stays at the single site above and
+ * this stays the mechanism: the escape at the display boundary, and the empty
+ * cause that gets neither a block promising an account the state has none of
+ * nor a dangling lead. A rejection that is not an `Error` has no chain to show.
+ * An own-account placement shows the error the state's wrapper carries as its
+ * cause when it has one, since the wrapper's own sentence is what the state's
+ * copy already says.
  *
  * @internal exported for the unit test.
  */
-export function withReportedCause(
+export function withShownCause(
   failure: ManagedRunFailureAlert,
   error: unknown,
-  shown: boolean,
+  placement: ManagedRunCausePlacement,
 ): ManagedRunFailureAlert {
-  const reportedCause: string =
-    shown && error instanceof Error ? sanitizeErrorForDisplay(error) : "";
-  return reportedCause.trim() === "" ? failure : { ...failure, reportedCause };
+  const shown =
+    placement === "own-account" &&
+    error instanceof Error &&
+    error.cause instanceof Error
+      ? error.cause
+      : error;
+  const cause: string =
+    (placement === "attributed" || placement === "own-account") &&
+    shown instanceof Error
+      ? sanitizeErrorForDisplay(shown)
+      : "";
+  if (cause.trim() === "") return failure;
+  return placement === "own-account"
+    ? {
+        ...failure,
+        message: `${failure.message} ${OWN_ACCOUNT_CAUSE_LEAD} ${cause}`,
+      }
+    : { ...failure, reportedCause: cause };
 }
 
 /**
@@ -547,7 +605,7 @@ export function withReportedCause(
  * ({@link MANAGED_RUN_NON_DISCLOSURE_ATTESTATION}).
  *
  * Whatever state it lands on, the launch error reaches the operator only
- * through {@link managedFailureShowsReportedCause}.
+ * through {@link managedRunCausePlacement}.
  */
 export function classifyManagedRunFailure(
   error: unknown,
@@ -565,11 +623,7 @@ export function classifyManagedRunFailure(
   );
   return state.kind === "handed-off"
     ? state
-    : withReportedCause(
-        state,
-        error,
-        managedFailureShowsReportedCause(state.kind),
-      );
+    : withShownCause(state, error, managedRunCausePlacement(state.kind));
 }
 
 /** The state a launch failure lands on, before the launch error is offered to
