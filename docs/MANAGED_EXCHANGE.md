@@ -427,8 +427,10 @@ entry, and re-pointed the same way. At run time the app only checks whether the
 grant still stands -- it never asks, because there is nobody to answer. A grant
 the browser will not honour with nobody present, one the operator revoked, and a
 write that fails all land the results in the browser instead, and the next visit
-says which happened rather than reporting a plain success. The folder's own name
-and the file written into it are what the visit names.
+says which happened rather than reporting a plain success. A result too large for
+this browser to keep lands nowhere at all, and the state recorded in its place
+names which of them preceded it too. The folder's own name and the file written
+into it are what the visit names.
 
 **A folder used for nothing else** is the practice to follow: while the grant
 stands the site can read and write everything in that folder, not only the
@@ -462,9 +464,11 @@ put an exchange on a schedule and again where they collect the results:
 - **There is a size this browser will not keep**, and it is the size of file the
   app will read: 100 MB, the same cap the intake dropzones apply. A result above
   it is kept whole or not at all -- nothing is kept and nothing is trimmed to fit
-  -- and the next visit meets that state, the size the file weighed, and the one
-  thing that takes a result of any size, which is the granted folder. The run
-  itself stands here too.
+  -- and the next visit meets that state, the size the file weighed, and what to
+  do about the granted folder, which takes a result of any size: choose one where
+  none is granted, grant it again where the run could not use the grant with
+  nobody present, or check the folder still exists and has room where the write
+  failed. The run itself stands here too.
 - **A clear control removes what is kept here, now.** One step removes the
   results, the notes saying where results were written, and the states recorded
   where results were not kept, without deleting the exchange. Results already in

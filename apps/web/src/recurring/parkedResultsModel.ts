@@ -30,6 +30,7 @@ import { byteSizeLabel, dateTimeLabel } from "@psi/formatting";
 import type {
   ParkedResults,
   ParkedResultsEntry,
+  ParkedResultsFallback,
   ParkedRunResults,
   TooLargeRunResults,
   WrittenRunResults,
@@ -175,9 +176,28 @@ function parkedSummary(entry: ParkedRunResults): string {
 /** How large a result this browser keeps, as the surfaces state it. */
 const PARKED_SIZE_PHRASE = byteSizeLabel(MAX_PARKED_RESULT_BYTES);
 
+/** What a row says to do about the folder that would have taken a result this
+ * browser would not keep: which of the three folder outcomes reached the bound,
+ * and the step that answers it. */
+const TOO_LARGE_FOLDER_REMEDY: Record<ParkedResultsFallback | "none", string> =
+  {
+    none:
+      "No folder is granted for this exchange's results. Choose a folder, and " +
+      "a run of any size writes them there instead.",
+    ungranted:
+      "The folder you granted could not be written to without asking you, and " +
+      "a run with nobody present cannot ask. Grant the folder again, and a run " +
+      "of any size writes there instead.",
+    "write-failed":
+      "Writing to the folder you granted failed. Check that the folder still " +
+      "exists and has room, or grant a different one; a run of any size writes " +
+      "there instead.",
+  };
+
 /** What a row says about a run whose results were larger than this browser keeps:
  * what they weighed against the bound, that none of them are here and none were
- * shortened to fit, and the one thing that takes a result this size. */
+ * shortened to fit, and what to do about the folder that takes a result this
+ * size. */
 function tooLargeSummary(entry: TooLargeRunResults): string {
   const matched = matchedRecordPhrase(entry.matchedRecordCount);
   const size = byteSizeLabel(entry.resultBytes);
@@ -188,8 +208,8 @@ function tooLargeSummary(entry: TooLargeRunResults): string {
   return (
     `${opening} -- more than the ${PARKED_SIZE_PHRASE} this browser keeps, so ` +
     `none of them were kept here and none were cut down to fit. The run itself ` +
-    `completed and filed its disclosure. Choose a folder for this exchange's ` +
-    `results, and a run of any size writes them there instead.`
+    `completed and filed its disclosure. ` +
+    TOO_LARGE_FOLDER_REMEDY[entry.fallback ?? "none"]
   );
 }
 

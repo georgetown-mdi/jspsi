@@ -19,7 +19,10 @@ import {
 } from "../../../src/psi/parkedResults.js";
 import { dateTimeLabel } from "../../../src/psi/formatting.js";
 
-import type { ParkedResults } from "../../../src/psi/parkedResults.js";
+import type {
+  ParkedResults,
+  ParkedResultsFallback,
+} from "../../../src/psi/parkedResults.js";
 
 const DAY_MS = 86_400_000;
 
@@ -170,7 +173,10 @@ describe("the row a run written to the granted folder reads as", () => {
 });
 
 describe("the row a run too large to keep reads as", () => {
-  function tooLarge(matchedRecordCount?: number): ParkedResults {
+  function tooLarge(
+    matchedRecordCount?: number,
+    fallback?: ParkedResultsFallback,
+  ): ParkedResults {
     return {
       version: PARKED_RESULTS_VERSION,
       entries: [
@@ -179,6 +185,7 @@ describe("the row a run too large to keep reads as", () => {
           runAt: EARLIER,
           resultBytes: 210 * 1024 ** 2,
           ...(matchedRecordCount !== undefined ? { matchedRecordCount } : {}),
+          ...(fallback !== undefined ? { fallback } : {}),
         },
       ],
     };
@@ -192,6 +199,28 @@ describe("the row a run too large to keep reads as", () => {
     expect(summary).toContain("none of them were kept here");
     expect(summary).toContain("none were cut down to fit");
     expect(summary).toContain("Choose a folder");
+  });
+
+  test("states no folder chosen yet where the run held no grant", () => {
+    const summary = parkedResultsRows(tooLarge())[0].summary;
+    expect(summary).toContain("No folder is granted");
+    expect(summary).toContain("Choose a folder");
+  });
+
+  test("states a grant the run could not use unattended, and asks for it again", () => {
+    const summary = parkedResultsRows(tooLarge(undefined, "ungranted"))[0]
+      .summary;
+    expect(summary).toContain("could not be written to without asking you");
+    expect(summary).toContain("Grant the folder again");
+    expect(summary).not.toContain("No folder is granted");
+  });
+
+  test("states a write that failed, and what to check about the folder", () => {
+    const summary = parkedResultsRows(tooLarge(undefined, "write-failed"))[0]
+      .summary;
+    expect(summary).toContain("Writing to the folder you granted failed");
+    expect(summary).toContain("still exists and has room");
+    expect(summary).not.toContain("Choose a folder");
   });
 
   test("states the run itself as standing, so it is not read as a failed run", () => {

@@ -485,7 +485,44 @@ describe("a result larger than this browser keeps", () => {
       resultBytes: MAX_PARKED_RESULT_BYTES + 1,
       matchedRecordCount: 4_000_000,
     });
-    expect(warn).toHaveBeenCalled();
+    expect(tooLarge.fallback).toBeUndefined();
+    expect(warn.mock.calls.at(-1)?.[0]).toContain(
+      "granting an output folder is what takes a result this size",
+    );
+    warn.mockRestore();
+  });
+
+  test("names the grant it could not use with nobody present, on the state and in the log", async () => {
+    const warn = vi.spyOn(log, "warn").mockImplementation(() => undefined);
+    const folder = grantedFolder({ permission: "prompt" });
+    mockedRun.mockImplementation((config) =>
+      Promise.resolve(sizedRun(config, MAX_PARKED_RESULT_BYTES + 1)),
+    );
+
+    await browserScheduleTickSeams(new AbortController().signal).runAttempt(
+      attemptFor(folder.record),
+    );
+
+    expect(mockedTooLarge.mock.calls[0][1].fallback).toBe("ungranted");
+    expect(warn.mock.calls.at(-1)?.[0]).toContain("granting it again");
+    warn.mockRestore();
+  });
+
+  test("names the write that failed, on the state and in the log", async () => {
+    const warn = vi.spyOn(log, "warn").mockImplementation(() => undefined);
+    const folder = grantedFolder({
+      write: () => Promise.reject(new Error("the disk is full")),
+    });
+    mockedRun.mockImplementation((config) =>
+      Promise.resolve(sizedRun(config, MAX_PARKED_RESULT_BYTES + 1)),
+    );
+
+    await browserScheduleTickSeams(new AbortController().signal).runAttempt(
+      attemptFor(folder.record),
+    );
+
+    expect(mockedTooLarge.mock.calls[0][1].fallback).toBe("write-failed");
+    expect(warn.mock.calls.at(-1)?.[0]).toContain("still exists and has room");
     warn.mockRestore();
   });
 

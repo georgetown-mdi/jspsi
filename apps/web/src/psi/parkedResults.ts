@@ -48,11 +48,10 @@ export const PARKED_RESULTS_RETENTION_DAYS = 30;
 
 const MS_PER_DAY = 86_400_000;
 
-/** Why a run that held an output-folder grant kept its results in the browser
- * instead of writing them there: the grant was not one the run could use with
- * nobody present (never taken, not honoured unattended, or revoked), or the write
- * itself did not land. Absent where no grant was held at all, which is the plain
- * parking case. */
+/** Why a run that held an output-folder grant did not write its results there:
+ * the grant was not one the run could use with nobody present (never taken, not
+ * honoured unattended, or revoked), or the write itself did not land. Absent
+ * where no grant was held at all, which is the plain case. */
 export type ParkedResultsFallback = "ungranted" | "write-failed";
 
 /** What every entry a run leaves here holds, whatever became of the results.
@@ -112,7 +111,8 @@ export interface RefusedRunResults extends ParkedRunEntry {
  * ({@link MAX_PARKED_RESULT_BYTES}). Nothing of the results is here: they are
  * kept whole or not at all, never shortened to fit. The run itself completed,
  * rotated, and filed its disclosure; what the operator's next visit meets is this
- * state and the remedy for it, which is the output-folder grant. */
+ * state, what the file weighed, and the remedy for the folder outcome that
+ * preceded it. */
 export interface TooLargeRunResults extends ParkedRunEntry {
   kind: "too-large";
   /** The size of the results file that was not kept, in bytes, so the state names
@@ -120,6 +120,10 @@ export interface TooLargeRunResults extends ParkedRunEntry {
   resultBytes: number;
   /** How many rows the results table had, where the run reported it. */
   matchedRecordCount?: number;
+  /** Why the granted output folder did not take these results, where one was
+   * held ({@link ParkedResultsFallback}); the remedy this state names is the
+   * one for it. */
+  fallback?: ParkedResultsFallback;
 }
 
 /** One entry of a managed exchange's parked results. */
@@ -135,6 +139,11 @@ export interface ParkedResults {
 const pairTableFactorsSchema: ZodType<PairTableFactors> = z
   .object({ local: z.int().min(0), partner: z.int().min(0) })
   .strict();
+
+const fallbackSchema: ZodType<ParkedResultsFallback> = z.enum([
+  "ungranted",
+  "write-failed",
+]);
 
 /** The fields every entry holds, spread into each shape below: the union is
  * `.strict()` shape by shape, so a shared base has to be spread rather than
@@ -155,7 +164,7 @@ const entrySchema: ZodType<ParkedResultsEntry> = z.discriminatedUnion("kind", [
       // clone rebuilt, and anything else is a stored value this reader refuses.
       csv: z.custom<Blob>((value) => value instanceof Blob),
       matchedRecordCount: z.int().min(0).optional(),
-      fallback: z.enum(["ungranted", "write-failed"]).optional(),
+      fallback: fallbackSchema.optional(),
     })
     .strict(),
   z
@@ -179,6 +188,7 @@ const entrySchema: ZodType<ParkedResultsEntry> = z.discriminatedUnion("kind", [
       kind: z.literal("too-large"),
       resultBytes: z.int().min(0),
       matchedRecordCount: z.int().min(0).optional(),
+      fallback: fallbackSchema.optional(),
     })
     .strict(),
 ]);
