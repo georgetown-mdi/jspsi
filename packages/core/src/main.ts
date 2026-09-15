@@ -523,6 +523,7 @@ export {
 export {
   CONFIRMING_PROTOCOL_STAGE_ID,
   InvitationTermDivergenceError,
+  PARTNER_CERTIFICATE_REFUSAL_MESSAGES,
   assertAlgorithmImplemented,
   assertLocalCertificateAuthorizesAgreedIdentity,
   assertSigningModeImplemented,
@@ -542,6 +543,7 @@ export type {
   ExchangeDataSpec,
   ExchangeResult,
   ExchangeStageDefinition,
+  PartnerCertificateRefusalKind,
   PreparedExchange,
   RunExchangeOptions,
 } from "./exchange";

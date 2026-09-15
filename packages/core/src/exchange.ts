@@ -785,6 +785,30 @@ const PARTNER_CERTIFICATE_DIVERGENT_MESSAGE =
   "identity, replace signing.partner_fingerprint with the new value.";
 
 /**
+ * The five terms-time pin refusals by what the partner's certificate did, so a
+ * display layer composing its own remedy copy for one of them identifies it
+ * from the literal core raised rather than from a fragment of it. The remedies
+ * these messages name are configuration-file edits, which is the right
+ * instruction for the command line and not one every seat's operator can take.
+ *
+ * Keyed rather than listed: a consumer's own copy is declared over this union,
+ * so a refusal added here is a compile error there rather than a case that
+ * falls through to the message it cannot act on.
+ */
+export const PARTNER_CERTIFICATE_REFUSAL_MESSAGES = {
+  unreadable: PARTNER_CERTIFICATE_UNREADABLE_MESSAGE,
+  absent: PARTNER_CERTIFICATE_ABSENT_MESSAGE,
+  unverified: PARTNER_CERTIFICATE_UNVERIFIED_MESSAGE,
+  unauthorizedIdentity: PARTNER_CERTIFICATE_UNAUTHORIZED_IDENTITY_MESSAGE,
+  divergent: PARTNER_CERTIFICATE_DIVERGENT_MESSAGE,
+} as const;
+
+/** Which of the five refusals {@link PARTNER_CERTIFICATE_REFUSAL_MESSAGES}
+ * holds: the condition the terms-time pin resolution refused on. */
+export type PartnerCertificateRefusalKind =
+  keyof typeof PARTNER_CERTIFICATE_REFUSAL_MESSAGES;
+
+/**
  * One of the five terms-time pin refusals, tagged `psilinkRecoveryHintEmitted`
  * per instance on the convention `TransportPublishIndeterminateError`
  * (`./errors.ts`) states: an error is tagged exactly when it holds its own next

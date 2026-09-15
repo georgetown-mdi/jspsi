@@ -175,6 +175,8 @@ The failure **terminal event**. Emitted exactly once, for an organic (non-signal
 
 `recoveryHint: true` states that `message` names the cause and the next step, so a consumer showing fixed copy for the category beside it MUST show the message instead and MUST NOT add an advisory of its own. The field is absent where the CLI makes no such claim; a consumer reads its absence as no claim, never as a denial.
 
+A consumer MAY show copy of its own in place of a message it recognizes, where the step that message names is not one its own operator can take -- the next step these messages name is an edit of the configuration file the run was given, which a consumer composing that file per run does not put in front of anybody. Copy substituted that way states the same cause and a step its own operator holds; a message the consumer does not recognize is shown as it arrived.
+
 The value is read off core's `psilinkRecoveryHintEmitted` tag, whose two-state convention is that an error holds it exactly when it holds its own next step (`packages/core/src/errors.ts`). The tag is walked over the `cause` chain, so a wrap of a tagged failure keeps the claim its message still states. It is the same tag the CLI's own stderr path reads to suppress its generic advisory, so the two sinks never disagree about which failures explain themselves.
 
 This is what lets a consumer tell the refusals of the terms-time certificate pin apart from an ordinary `security` failure (a wrong secret, a tampered handshake) without matching on message text: the five pin refusals carry the marker and each names what to do, while the handshake failures, whose messages are non-oracular by design, do not.

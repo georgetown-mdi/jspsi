@@ -3,6 +3,8 @@ import path from "node:path";
 
 import { afterEach, describe, expect, test } from "vitest";
 
+import { sanitizeForDisplay } from "@psilink/core";
+
 import {
   PARTNER_PIN_UNRECORDABLE_FAILURE,
   partnerCertificatePinnedNotice,
@@ -21,6 +23,7 @@ import {
   validLinkageTerms,
 } from "../../utils/jobFixtures";
 
+import type { JobExchangeIntent } from "@jobs/intentSchemas";
 import type { JobRecord } from "@jobs/jobManager";
 import type { RelayEvent } from "@jobs/cliDriver";
 
@@ -89,13 +92,12 @@ function composedConfigFile(pin: string | undefined): string {
   return configPath;
 }
 
-/** One certificate-mode job driven to its terminal event under the given stub
- * environment, created with `partnerFingerprint` pinned when one is given: the
- * data root it ran under and the buffered record. */
-async function runCertificateJob(
+/** One job driven to its terminal event under the given stub environment, with
+ * the signing block given: the data root it ran under and the buffered record. */
+async function runJob(
   label: string,
   childEnv: Record<string, string>,
-  partnerFingerprint?: string,
+  signing: JobExchangeIntent["signing"],
 ): Promise<{ dataRoot: string; record: JobRecord }> {
   const dataRoot = scratchDir(`${label}-root`);
   const manager = new JobManager({
@@ -108,13 +110,24 @@ async function runCertificateJob(
   const id = await manager.createJob(
     validIntent({
       linkageTerms: { ...validLinkageTerms(), identity: "Agency A" },
-      signing: {
-        mode: "certificate",
-        ...(partnerFingerprint !== undefined ? { partnerFingerprint } : {}),
-      },
+      ...(signing !== undefined ? { signing } : {}),
     }),
   );
   return { dataRoot, record: await awaitTerminal(manager, id) };
+}
+
+/** One certificate-mode job driven to its terminal event under the given stub
+ * environment, created with `partnerFingerprint` pinned when one is given: the
+ * data root it ran under and the buffered record. */
+async function runCertificateJob(
+  label: string,
+  childEnv: Record<string, string>,
+  partnerFingerprint?: string,
+): Promise<{ dataRoot: string; record: JobRecord }> {
+  return runJob(label, childEnv, {
+    mode: "certificate",
+    ...(partnerFingerprint !== undefined ? { partnerFingerprint } : {}),
+  });
 }
 
 /** The single terminal failure among the events a record buffered. */
@@ -124,6 +137,35 @@ function soleFailure(record: JobRecord): RelayEvent {
     .filter((event) => event.type === "error");
   expect(failures).toHaveLength(1);
   return failures[0];
+}
+
+/** Every string value on every event the browser would be served, read out of
+ * the fields themselves rather than a JSON rendering of them: that rendering
+ * escapes a backslash of its own, so a path spelling that did cross would not be
+ * found in it. */
+function relayedStrings(record: JobRecord): Array<string> {
+  const strings: Array<string> = [];
+  const collect = (value: unknown): void => {
+    if (typeof value === "string") strings.push(value);
+    else if (Array.isArray(value)) for (const item of value) collect(item);
+    else if (value !== null && typeof value === "object")
+      for (const item of Object.values(value)) collect(item);
+  };
+  collect(record.events.map((entry) => entry.event));
+  return strings;
+}
+
+/** Assert that no spelling of `value` reached the browser: neither the raw one
+ * nor the one or two display escapes the CLI and the relay each apply. */
+function expectNothingCrossed(record: JobRecord, value: string): void {
+  const escapedOnce = sanitizeForDisplay(value, { maxLength: Infinity });
+  const spellings = [
+    value,
+    escapedOnce,
+    sanitizeForDisplay(escapedOnce, { maxLength: Infinity }),
+  ];
+  for (const text of relayedStrings(record))
+    for (const spelling of spellings) expect(text).not.toContain(spelling);
 }
 
 /** The single warning among the events a record buffered. */
@@ -236,6 +278,27 @@ describe("the relayed notice states no container path", () => {
     );
   });
 
+  test("a run that signs nothing relays the CLI's warning as written", async () => {
+    // Only a signing run pins a certificate, so console copy stating this run
+    // adopted a pin is composed only where this server launched one that could:
+    // the same gate the failure rebuild holds. A `partnerCertificatePinned`
+    // warning on an unsigned run is a claim about the child's run this server
+    // did not ask for, and it reaches the operator in the child's own words.
+    const { record } = await runJob(
+      "pin-unsigned",
+      pinAdoptingChildEnv(),
+      undefined,
+    );
+    const notice = soleWarning(record);
+    expect(notice.source).toBe("partnerCertificatePinned");
+    expect(notice.message).toBe(
+      PARTNER_PINNED_WARNING.replace(
+        STUB_CONFIG_FILE_TOKEN,
+        path.join(record.workdir, JOB_FILE_NAMES.config),
+      ),
+    );
+  });
+
   test("a run created with a pin on file relays the CLI's warning as written", async () => {
     // The console's copy states a first contact -- nothing was on file, so the
     // run adopted whatever the partner presented. A run whose composed
@@ -283,28 +346,24 @@ const ADOPTION_WRITE_FAILURE =
   "writable for the run that records the pin.";
 
 /** One certificate-mode job whose child emits `message` as its terminal
- * failure, run to that terminal: the data root it ran under, every event the
- * browser would be served, and the single failure among them. */
+ * failure, run to that terminal: the data root it ran under, the buffered
+ * record, and the single failure among its events. */
 async function runWithTerminalFailure(
   label: string,
   message: string,
-): Promise<{ dataRoot: string; events: string; failure: RelayEvent }> {
+): Promise<{ dataRoot: string; record: JobRecord; failure: RelayEvent }> {
   const { dataRoot, record } = await runCertificateJob(label, {
     STUB_EXIT_CODE: "64",
     STUB_FD3_EVENTS: JSON.stringify([
       { v: 1, type: "error", category: "config", message },
     ]),
   });
-  return {
-    dataRoot,
-    events: JSON.stringify(record.events),
-    failure: soleFailure(record),
-  };
+  return { dataRoot, record, failure: soleFailure(record) };
 }
 
 describe("the relayed first-contact failure states no container path", () => {
   test("the adoption write's own failure is rebuilt", async () => {
-    const { dataRoot, events, failure } = await runWithTerminalFailure(
+    const { dataRoot, record, failure } = await runWithTerminalFailure(
       "pin-adoption",
       ADOPTION_WRITE_FAILURE,
     );
@@ -317,8 +376,33 @@ describe("the relayed first-contact failure states no container path", () => {
     // The category is relayed unchanged, so the seat routes the failure as it
     // did before the message was rebuilt.
     expect(failure.category).toBe("config");
-    expect(events).not.toContain(dataRoot);
-    expect(events).not.toContain(JOB_FILE_NAMES.config);
+    expectNothingCrossed(record, dataRoot);
+    for (const text of relayedStrings(record))
+      expect(text).not.toContain(JOB_FILE_NAMES.config);
+  });
+
+  test.each([
+    ["a character outside printable ASCII", "pin-escaped-ü"],
+    ["a backslash", "pin-escaped-back\\slash"],
+  ])("a data root holding %s is still recognized", async (_shape, label) => {
+    // TWO display escapes stand between the path and the relay's search, not
+    // one: the CLI escapes its whole terminal message where it builds the
+    // event, and the relay escapes every string field it validates again. The
+    // second pass doubles the first pass's backslashes, so a needle escaped
+    // once does not occur in what arrives and the CLI's message -- with the
+    // container path on it -- would cross unrecognized.
+    const { dataRoot, record, failure } = await runWithTerminalFailure(
+      label,
+      ADOPTION_WRITE_FAILURE,
+    );
+    expect(sanitizeForDisplay(dataRoot, { maxLength: Infinity })).not.toBe(
+      dataRoot,
+    );
+    expect(failure.message).toBe(PARTNER_PIN_UNRECORDABLE_FAILURE);
+    expect(failure[ERROR_MESSAGE_CHAIN_FIELD]).toEqual([
+      PARTNER_PIN_UNRECORDABLE_FAILURE,
+    ]);
+    expectNothingCrossed(record, dataRoot);
   });
 
   test("the refusal raised before connecting is left as the CLI reports it", async () => {

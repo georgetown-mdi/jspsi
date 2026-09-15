@@ -3,6 +3,7 @@ import path from "node:path";
 import {
   MAX_ERROR_CAUSE_DEPTH,
   errorWithPartnerCauseLinks,
+  sanitizeForDisplay,
 } from "@psilink/core";
 
 import { ERROR_MESSAGE_CHAIN_FIELD } from "@psi/relayErrorChain";
@@ -1685,6 +1686,11 @@ function relayedForConsole(record: JobRecord, event: RelayEvent): RelayEvent {
  * first contact to report, so its warning relays in the CLI's own words rather
  * than taking console copy stating a pin was adopted
  * ({@link JobRecord.partnerFingerprintPinnedAtCreation}).
+ *
+ * Gated on the run signing receipts as well, the gate the failure rebuild below
+ * holds: only a signing run pins anything, so console copy about a pin this run
+ * adopted is composed only where this server launched a run that could adopt one
+ * ({@link JobRecord.receiptPath}).
  */
 function rewrittenPartnerPinNotice(
   record: JobRecord,
@@ -1692,6 +1698,7 @@ function rewrittenPartnerPinNotice(
 ): RelayEvent {
   if (
     event.source !== PARTNER_CERTIFICATE_PINNED_SOURCE ||
+    record.receiptPath === null ||
     record.partnerFingerprintPinnedAtCreation
   )
     return event;
@@ -1718,6 +1725,15 @@ function rewrittenPartnerPinNotice(
  * flat field and the derived chain are read, since the path may sit in either,
  * and both are replaced together so the seat shows the console's sentence
  * whichever it reads ({@link ERROR_MESSAGE_CHAIN_FIELD}).
+ *
+ * Both sides of that search are display text: a data root holding a backslash or
+ * any character outside printable ASCII reaches the event as its escape, and a
+ * raw spelling would not be found there -- leaving the path to cross. The path
+ * is escaped to the same form rather than the event's text unescaped, since the
+ * escaped text is what would reach the operator
+ * ({@link configPathAsRelayed}). Matching one spelling of one path is a stopgap:
+ * the general close is a partner-origin type that makes a path-bearing message
+ * unrenderable at this boundary rather than searched for here.
  */
 function rewrittenPartnerPinFailure(
   record: JobRecord,
@@ -1725,8 +1741,9 @@ function rewrittenPartnerPinFailure(
 ): RelayEvent {
   if (event.category !== "config" || record.receiptPath === null) return event;
   const configPath = workdirArtifactPath(record.workdir, JOB_FILE_NAMES.config);
+  const searchedPath = configPathAsRelayed(configPath);
   if (
-    !errorDisplayStrings(event).some((text) => text.includes(configPath)) ||
+    !errorDisplayStrings(event).some((text) => text.includes(searchedPath)) ||
     recordedPartnerFingerprint(configPath) !== undefined
   )
     return event;
@@ -1735,6 +1752,31 @@ function rewrittenPartnerPinFailure(
     message: PARTNER_PIN_UNRECORDABLE_FAILURE,
     [ERROR_MESSAGE_CHAIN_FIELD]: [PARTNER_PIN_UNRECORDABLE_FAILURE],
   };
+}
+
+/**
+ * A container path as it reads on a relayed `error` event, which is the form
+ * {@link rewrittenPartnerPinFailure} has to search for.
+ *
+ * TWO display escapes stand between the path and that search, not one. The CLI
+ * escapes its whole terminal message where it builds the event (`buildErrorEvent`
+ * in `apps/cli/src/eventStream.ts`), and the relay escapes every string field it
+ * validates again at the trust boundary (`validateAndSanitizeEvent` in
+ * `./cliDriver.ts`, whose derivation of the chain field escapes per link). The
+ * second pass doubles the first pass's backslashes, so a data root spelled
+ * `root-\xfc` after the CLI's escape reads `root-\\xfc` on the event and a
+ * once-escaped needle does not occur in it. A path of printable ASCII with no
+ * backslash is unchanged by either pass, so this is the one spelling that
+ * matches whatever the path holds.
+ *
+ * `Infinity` on both passes: what is wanted here is the escape and not the cap,
+ * whose truncation is the callers' own and would cut the needle short.
+ */
+function configPathAsRelayed(configPath: string): string {
+  return sanitizeForDisplay(
+    sanitizeForDisplay(configPath, { maxLength: Infinity }),
+    { maxLength: Infinity },
+  );
 }
 
 /** Every string a relayed `error` event puts in front of the operator: the flat
