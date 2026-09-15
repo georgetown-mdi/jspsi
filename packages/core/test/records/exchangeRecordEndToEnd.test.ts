@@ -9,6 +9,7 @@ import {
   ConnectionError,
   createMessagePipe,
 } from "../../src/connection/messageConnection";
+import { StandardizedDataset } from "../../src/standardization";
 import { LinkageTermsUnsatisfiableError, UsageError } from "../../src/errors";
 import { sanitizeErrorForDisplay } from "../../src/utils/sanitizeErrorForDisplay";
 
@@ -786,9 +787,9 @@ test("the unconditional count exchange composes into a deadlock-free full exchan
 // --- Terms the input cannot fully satisfy ------------------------------------
 // governance.matchingBasis is derived from the AGREED terms (pinned above), so
 // it names every linkage field those terms declare, regardless of what this
-// party's columns actually supplied. A party whose columns cannot produce one
-// of the agreed keys must be stopped before the run, or its record would name
-// a field it contributed nothing for.
+// party's columns actually supplied. Preparing the exchange stops a party whose
+// columns cannot produce one of the agreed keys; the record build refuses a
+// basis wider than what the run contributed, whichever path assembled it.
 
 // clientRows hold first_name and note, never a last_name column, so the second
 // agreed key here can produce no key string for any of this party's records.
@@ -817,7 +818,7 @@ const preparePartlySatisfied = () =>
     ["first_name", "note"],
   );
 
-test("terms the input only partly satisfies stop the run before any record is built", async () => {
+test("preparing an exchange the input only partly satisfies is refused", async () => {
   const records: Array<BuiltExchangeRecord> = [];
   const [conn] = createMessagePipe();
   const run = (async () => {
@@ -851,4 +852,37 @@ test("the refusal names the shortfall and the out-of-band remedy", () => {
   // the key it collapses are reachable in the rendered chain.
   expect(rendered).toContain("lastName (last_name)");
   expect(rendered).toContain("firstName + lastName");
+});
+
+test("a prepared exchange assembled past that stop writes no record", async () => {
+  // prepareForExchange is what refuses the shortfall above, so a PreparedExchange
+  // assembled without it reaches the run holding terms its own dataset cannot
+  // supply. The record build is where that is caught: this party contributed no
+  // linkage field the agreed keys reference, so it writes no record and reports
+  // the loss, while the run's result and the partner's record stand.
+  const both: Output = { expectsOutput: true, shareWithPartner: true };
+  const contributingNothing = prepared("Initiator Co", both, clientRows);
+  contributingNothing.dataset = new StandardizedDataset(
+    [],
+    contributingNothing.linkageTerms.linkageKeys,
+  );
+  const [connInitiator, connResponder] = createMessagePipe();
+  const [initiator, responder] = await Promise.all([
+    runExchange(connInitiator, "initiator", contributingNothing, {
+      psiLibrary,
+    }),
+    runExchange(
+      connResponder,
+      "responder",
+      prepared("Responder Co", both, serverRows),
+      { psiLibrary },
+    ),
+  ]);
+
+  expect(initiator.audit).toBeUndefined();
+  expect(initiator.recordOwedButUnbuilt).toBe(true);
+  expect(responder.recordOwedButUnbuilt).toBe(false);
+  expect(built(responder).record.governance.matchingBasis).toEqual([
+    { name: "firstName", type: "first_name" },
+  ]);
 });

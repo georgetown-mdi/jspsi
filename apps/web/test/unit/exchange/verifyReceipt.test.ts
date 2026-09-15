@@ -93,6 +93,7 @@ const baseInputs: ExchangeRecordInputs = {
   outcome: "completed",
   localTerms: LOCAL_TERMS,
   partnerTerms: PARTNER_TERMS,
+  contributedLinkageFields: ["ssn"],
   recordsExposed: 2,
   localPayloadSent,
   partnerPayloadReceived,

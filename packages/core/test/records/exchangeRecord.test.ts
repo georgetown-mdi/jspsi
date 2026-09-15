@@ -21,6 +21,10 @@ import {
   randomBytes,
   toBase64Url,
 } from "../../src/utils/crypto";
+import {
+  sanitizeErrorChainLinks,
+  sanitizeErrorForDisplay,
+} from "../../src/utils/sanitizeErrorForDisplay";
 
 import type {
   CommittedPayload,
@@ -82,9 +86,15 @@ const partnerPayloadReceived: CommittedPayload = {
   rows: [["active"], [null]],
 };
 
+// The linkage fields a party whose input supplies every declared field
+// contributes -- what the build checks the matching basis against.
+const everyDeclaredField = (terms: LinkageTerms): string[] =>
+  terms.linkageFields.map((field) => field.name);
+
 const baseInputs: ExchangeRecordInputs = {
   localTerms: termsA,
   partnerTerms: termsB,
+  contributedLinkageFields: everyDeclaredField(termsA),
   outcome: "completed",
   recordsExposed: 5,
   resultSize: 2,
@@ -125,12 +135,22 @@ const termsWithGovernance: LinkageTerms = {
   },
 };
 
+// The error a refused build raises, for the cases asserting how it reads.
+const refuseBuild = (
+  inputs: ExchangeRecordInputs,
+): Promise<Error | undefined> =>
+  buildExchangeRecord(inputs, fixedRandomness).then(
+    () => undefined,
+    (err: unknown) => err as Error,
+  );
+
 // Inputs that populate every governance channel: a legal agreement, a multi-field
 // matching basis, sent and received payload columns, and an association table.
 const governanceInputs: ExchangeRecordInputs = {
   ...baseInputs,
   localTerms: termsWithGovernance,
   partnerTerms: { ...termsWithGovernance, identity: "Party B" },
+  contributedLinkageFields: everyDeclaredField(termsWithGovernance),
 };
 
 // --- Agreed-terms hash -------------------------------------------------------
@@ -505,7 +525,11 @@ describe("association-table commitment", () => {
 describe("governance metadata", () => {
   test("is populated from terms that hold a legal agreement", async () => {
     const { record } = await buildExchangeRecord(
-      { ...baseInputs, localTerms: termsWithGovernance },
+      {
+        ...baseInputs,
+        localTerms: termsWithGovernance,
+        contributedLinkageFields: everyDeclaredField(termsWithGovernance),
+      },
       fixedRandomness,
     );
     expect(record.governance).toEqual({
@@ -572,6 +596,70 @@ describe("governance metadata", () => {
     );
     expect(record.governance.matchingBasis).toEqual([
       { name: "ssn", type: "ssn" },
+    ]);
+  });
+
+  test("a matching basis naming a field the run contributed nothing for is refused", async () => {
+    // termsWithGovernance keys on ln, dob, and ssn4 together. An input holding
+    // no ssn4 column leaves that field in the basis with nothing behind it, so
+    // no record is written at all rather than one overstating the basis.
+    const refusal = await refuseBuild({
+      ...governanceInputs,
+      contributedLinkageFields: ["ln", "dob"],
+    });
+    expect(refusal?.message).toContain("contributed no values for (1).");
+    expect(refusal?.message).toContain(
+      "Run the exchange with an input that supplies every linkage field the " +
+        "agreed linkage keys reference.",
+    );
+    // The names are terms content, so they ride a cause link of their own.
+    expect(refusal?.message).not.toContain("ssn4");
+    expect((refusal?.cause as Error).message).toContain("(1): ssn4");
+  });
+
+  test("a long list of uncontributed names leaves the remedy readable", async () => {
+    // A partner authors the field names, and the display boundary caps each
+    // rendered link: names in the message would let a long list push the
+    // remedy past that cap.
+    const longNames = Array.from({ length: 20 }, (_, i) =>
+      `field_${i}_`.padEnd(60, "x"),
+    );
+    const manyFields: LinkageTerms = {
+      ...termsA,
+      linkageFields: longNames.map((name) => ({ name, type: "ssn4" as const })),
+      linkageKeys: [
+        { name: "ALL", elements: longNames.map((field) => ({ field })) },
+      ],
+    };
+    const refusal = await refuseBuild({
+      ...baseInputs,
+      localTerms: manyFields,
+      partnerTerms: { ...manyFields, identity: "Party B" },
+      contributedLinkageFields: [],
+    });
+    const [message, names] = sanitizeErrorChainLinks(
+      sanitizeErrorForDisplay(refusal),
+    );
+    expect(message).toContain("contributed no values for (20).");
+    expect(message).toMatch(/agreed linkage keys reference\.$/);
+    expect(names).toContain(`(20): ${longNames[0]}`);
+  });
+
+  test("a matching basis the contributed fields cover is built, extras and all", async () => {
+    // The basis is the fields the keys reference, so a contributed field no key
+    // reads -- a column the input supplies for a field the terms declare but
+    // never key on -- widens nothing.
+    const { record } = await buildExchangeRecord(
+      {
+        ...governanceInputs,
+        contributedLinkageFields: ["ssn4", "dob", "ln", "email"],
+      },
+      fixedRandomness,
+    );
+    expect(record.governance.matchingBasis.map((field) => field.name)).toEqual([
+      "dob",
+      "ln",
+      "ssn4",
     ]);
   });
 
@@ -940,7 +1028,11 @@ describe("serialize / parse", () => {
     // mandatory purpose -- a regression dropping it from RecordLegalAgreementSchema
     // would appear here.
     const { record } = await buildExchangeRecord(
-      { ...baseInputs, localTerms: termsWithGovernance },
+      {
+        ...baseInputs,
+        localTerms: termsWithGovernance,
+        contributedLinkageFields: everyDeclaredField(termsWithGovernance),
+      },
       fixedRandomness,
     );
     const parsed = parseExchangeRecord(
@@ -1138,6 +1230,7 @@ describe("serialize / parse", () => {
         ...baseInputs,
         localTerms: drawnFromDefaults,
         partnerTerms: { ...drawnFromDefaults, identity: "Party B" },
+        contributedLinkageFields: everyDeclaredField(drawnFromDefaults),
       },
       fixedRandomness,
     );
@@ -1162,6 +1255,7 @@ describe("serialize / parse", () => {
             keySet: { name: "county-keys", version: "3.1.0" },
           },
         },
+        contributedLinkageFields: everyDeclaredField(drawnFromDefaults),
       },
       fixedRandomness,
     );
@@ -1206,10 +1300,12 @@ describe("serialize / parse", () => {
   });
 
   test("a citation and its verdict are refused apart", async () => {
+    const drawnFromDefaults = getDefaultLinkageTerms("Party A");
     const { record } = await buildExchangeRecord(
       {
         ...baseInputs,
-        localTerms: getDefaultLinkageTerms("Party A"),
+        localTerms: drawnFromDefaults,
+        contributedLinkageFields: everyDeclaredField(drawnFromDefaults),
       },
       fixedRandomness,
     );
@@ -1226,10 +1322,12 @@ describe("serialize / parse", () => {
   });
 
   test("a verdict outside the recognized three is refused", async () => {
+    const drawnFromDefaults = getDefaultLinkageTerms("Party A");
     const { record } = await buildExchangeRecord(
       {
         ...baseInputs,
-        localTerms: getDefaultLinkageTerms("Party A"),
+        localTerms: drawnFromDefaults,
+        contributedLinkageFields: everyDeclaredField(drawnFromDefaults),
       },
       fixedRandomness,
     );

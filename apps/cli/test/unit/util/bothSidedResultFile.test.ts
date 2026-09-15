@@ -152,6 +152,7 @@ test("a both-sided result writes a cluster's whole product and attests the pair 
   const { record, keys } = await buildExchangeRecord({
     localTerms: terms,
     partnerTerms,
+    contributedLinkageFields: ["first_name"],
     outcome: "completed",
     recordsExposed: inputRows.length,
     resultSize: matchedPairCount(associationTable),

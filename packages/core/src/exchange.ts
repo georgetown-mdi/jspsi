@@ -2495,6 +2495,7 @@ export async function runExchange(
           ? "completed"
           : "receipt-swap-terminated",
       recordsExposed: rowCount,
+      contributedLinkageFields: [...dataset.fieldNames],
       resultSize: bothExpectOutput ? attestedResultSize : undefined,
       // Self-facing audit pointer from this party's local config; undefined when
       // unconfigured, in which case the record omits it.

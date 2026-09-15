@@ -85,6 +85,7 @@ async function buildFixture(receiptBinder = RECEIPT_BINDER): Promise<{
   return buildExchangeRecord({
     localTerms: LOCAL_TERMS,
     partnerTerms: PARTNER_TERMS,
+    contributedLinkageFields: ["ssn"],
     outcome: "completed",
     recordsExposed: 2,
     localPayloadSent,
@@ -393,6 +394,7 @@ describe("verify receipt screen", () => {
     const { record, keys } = await buildExchangeRecord({
       localTerms: LOCAL_TERMS,
       partnerTerms: PARTNER_TERMS,
+      contributedLinkageFields: ["ssn"],
       outcome: "completed",
       recordsExposed: 2,
       localPayloadSent,
