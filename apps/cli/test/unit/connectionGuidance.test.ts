@@ -172,7 +172,7 @@ test("the notice and the config comment name a section of the reference that exi
     "utf8",
   );
   const headings = reference
-    .split("\n")
+    .split(/\r?\n/)
     .filter((line) => line.startsWith("#"))
     .map((line) =>
       line

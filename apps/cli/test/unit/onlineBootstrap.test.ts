@@ -40,6 +40,7 @@ import {
   inviterConnectionFromURL,
   type RunnableConnectionConfig,
 } from "../../src/connectionFromUrl";
+import { platformAbsolutePath, platformFileUrl } from "../platformPaths";
 import { diffConnectionAgainstTarget } from "../../src/reconcile";
 import {
   connectionOverridesFrom,
@@ -158,10 +159,22 @@ test("connectionFromURL: sftp URL maps to an sftp connection", () => {
 });
 
 test("connectionFromURL: file URL maps to a filedrop connection", () => {
-  const conn = connectionFromURL(new URL("file:///mnt/share/drop"), {});
+  const conn = connectionFromURL(platformFileUrl("/mnt/share/drop"), {});
   expect(conn.channel).toBe("filedrop");
   if (conn.channel !== "filedrop") return;
-  expect(conn.path).toBe("/mnt/share/drop");
+  expect(conn.path).toBe(platformAbsolutePath("/mnt/share/drop"));
+});
+
+test("connectionFromURL: a file URL naming no local directory is a usage error", () => {
+  // Node maps a file:// URL to a path per platform: a drive-less pathname
+  // names no Windows path, and a percent-encoded separator is refused
+  // everywhere. The operator typed the URL either way, so the refusal is a
+  // usage error naming it rather than an internal failure.
+  const url = new URL(
+    process.platform === "win32" ? "file:///mnt/share/drop" : "file:///a%2Fb",
+  );
+  expect(() => connectionFromURL(url, {})).toThrow(UsageError);
+  expect(() => connectionFromURL(url, {})).toThrow(/names no directory/);
 });
 
 test("connectionFromURL: a webrtc (ws) URL is a usage error", () => {
@@ -349,14 +362,14 @@ test("connectionFromURL: --outbound-path splits an sftp URL path into inbound/ou
 });
 
 test("connectionFromURL: --outbound-path splits a filedrop URL directory", () => {
-  const target = connectionFromURL(new URL("file:///mnt/share/in"), {
+  const target = connectionFromURL(platformFileUrl("/mnt/share/in"), {
     options: { retainFiles: true },
-    server: { outboundPath: "/mnt/share/out" },
+    server: { outboundPath: platformAbsolutePath("/mnt/share/out") },
   });
   expect(target.channel).toBe("filedrop");
   if (target.channel !== "filedrop") return;
-  expect(target.inboundPath).toBe("/mnt/share/in");
-  expect(target.outboundPath).toBe("/mnt/share/out");
+  expect(target.inboundPath).toBe(platformAbsolutePath("/mnt/share/in"));
+  expect(target.outboundPath).toBe(platformAbsolutePath("/mnt/share/out"));
   expect(target.path).toBeUndefined();
 });
 
@@ -1421,7 +1434,7 @@ test("applyEndpointSplitDirectories: grafts a split sftp endpoint onto the URL c
 });
 
 test("applyEndpointSplitDirectories: grafts a split filedrop endpoint onto a filedrop URL", () => {
-  const urlConnection = connectionFromURL(new URL("file:///mnt/ignored"), {});
+  const urlConnection = connectionFromURL(platformFileUrl("/mnt/ignored"), {});
   const endpoint: ConnectionEndpoint = {
     channel: "filedrop",
     inboundPath: "/mnt/share/from-inviter",
@@ -1522,7 +1535,7 @@ test("applyEndpointSplitDirectories: rejects a degenerate (relative-path) filedr
   // absolute-path rule to the acceptor's own config), so the grafted connection
   // can violate it. Validation fails it here, before any network activity, with
   // the schema's own message rather than an opaque connect-time error.
-  const urlConnection = connectionFromURL(new URL("file:///mnt/ignored"), {});
+  const urlConnection = connectionFromURL(platformFileUrl("/mnt/ignored"), {});
   const endpoint: ConnectionEndpoint = {
     channel: "filedrop",
     inboundPath: "relative/in",
@@ -1536,9 +1549,12 @@ test("applyEndpointSplitDirectories: rejects a degenerate (relative-path) filedr
 // --- inviterConnectionFromURL ------------------------------------------------
 
 test("inviterConnectionFromURL: a file-sync URL is built exactly as connectionFromURL builds it", () => {
-  for (const raw of ["sftp://alice@host:2222/drop", "file:///mnt/share/drop"])
-    expect(inviterConnectionFromURL(new URL(raw), {})).toEqual(
-      connectionFromURL(new URL(raw), {}),
+  for (const url of [
+    new URL("sftp://alice@host:2222/drop"),
+    platformFileUrl("/mnt/share/drop"),
+  ])
+    expect(inviterConnectionFromURL(url, {})).toEqual(
+      connectionFromURL(url, {}),
     );
 });
 
@@ -1761,9 +1777,12 @@ test("endpointFromConnection: no credential rides along on the emitted endpoint"
 
 test("endpointFromConnection: a filedrop connection emits the shared path locator", () => {
   const endpoint = endpointFromConnection(
-    connectionFromURL(new URL("file:///mnt/share/drop"), {}),
+    connectionFromURL(platformFileUrl("/mnt/share/drop"), {}),
   );
-  expect(endpoint).toEqual({ channel: "filedrop", path: "/mnt/share/drop" });
+  expect(endpoint).toEqual({
+    channel: "filedrop",
+    path: platformAbsolutePath("/mnt/share/drop"),
+  });
 });
 
 test("endpointFromConnection: a port the endpoint schema rejects (0) is dropped", () => {
@@ -1784,18 +1803,24 @@ test.each(["sftp", "filedrop"] as const)(
     // --outbound-path splits the URL/positional path (inbound) from a separate
     // outbound directory; the endpoint holds the inviter's own pair unswapped,
     // since the mirror swap is the acceptor's job (connectionFromEndpoint).
+    const inbound =
+      channel === "sftp" ? "/inviter-in" : platformAbsolutePath("/inviter-in");
+    const outbound =
+      channel === "sftp"
+        ? "/inviter-out"
+        : platformAbsolutePath("/inviter-out");
     const url =
       channel === "sftp"
         ? new URL("sftp://host/inviter-in")
-        : new URL("file:///inviter-in");
+        : platformFileUrl("/inviter-in");
     const connection = connectionFromURL(url, {
       options: { retainFiles: true },
-      server: { outboundPath: "/inviter-out" },
+      server: { outboundPath: outbound },
     });
     const endpoint = endpointFromConnection(connection);
     if (endpoint.channel !== channel) throw new Error(`expected ${channel}`);
-    expect(endpoint.inboundPath).toBe("/inviter-in");
-    expect(endpoint.outboundPath).toBe("/inviter-out");
+    expect(endpoint.inboundPath).toBe(inbound);
+    expect(endpoint.outboundPath).toBe(outbound);
     expect(endpoint.path).toBeUndefined();
   },
 );
@@ -1804,15 +1829,15 @@ test("endpointFromConnection -> connectionFromEndpoint round-trips a split pair 
   // End-to-end producer -> consumer: the inviter emits its pair verbatim, and the
   // acceptor's single swap site lands the inviter's outbound on the acceptor's
   // inbound.
-  const connection = connectionFromURL(new URL("file:///inviter-in"), {
+  const connection = connectionFromURL(platformFileUrl("/inviter-in"), {
     options: { retainFiles: true },
-    server: { outboundPath: "/inviter-out" },
+    server: { outboundPath: platformAbsolutePath("/inviter-out") },
   });
   const endpoint = endpointFromConnection(connection);
   const { connection: seeded } = connectionFromEndpoint(endpoint);
   if (seeded.channel !== "filedrop") throw new Error("expected filedrop");
-  expect(seeded.inboundPath).toBe("/inviter-out");
-  expect(seeded.outboundPath).toBe("/inviter-in");
+  expect(seeded.inboundPath).toBe(platformAbsolutePath("/inviter-out"));
+  expect(seeded.outboundPath).toBe(platformAbsolutePath("/inviter-in"));
 });
 
 test("endpointFromConnection: a webrtc connection emits the signaling locator", () => {
@@ -1941,9 +1966,9 @@ test("endpointFromConnection: an over-long path is a clean usage error", () => {
 
 test("endpointFromConnection: an over-long split outbound_path is a clean usage error", () => {
   // The split pair is bounded too; --outbound-path supplies the outbound half.
-  const connection = connectionFromURL(new URL("file:///inviter-in"), {
+  const connection = connectionFromURL(platformFileUrl("/inviter-in"), {
     options: { retainFiles: true },
-    server: { outboundPath: `/${"o".repeat(4097)}` },
+    server: { outboundPath: platformAbsolutePath(`/${"o".repeat(4097)}`) },
   });
   expect(() => endpointFromConnection(connection)).toThrow(/outbound_path/);
 });

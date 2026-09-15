@@ -6,6 +6,12 @@ import { vi, test, expect, beforeEach, afterEach } from "vitest";
 import YAML from "yaml";
 import type { PreparedExchange } from "@psilink/core";
 
+import {
+  denyDirectoryWrites,
+  restoreDirectoryWrites,
+} from "../directoryWriteAccess";
+import { pathAsDisplayed } from "../platformPaths";
+
 // Shared state readable inside the vi.mock factory despite ESM hoisting.
 const mockState = vi.hoisted(() => ({
   dropDir: "",
@@ -517,12 +523,12 @@ test("rejects before opening a connection when onAuthenticated is passed on an u
 test.skipIf(process.getuid?.() === 0)(
   "rejects before opening a connection when keyFilePath parent is not writable",
   async () => {
-    // 0o555 = r-x for all; the current user cannot write into the directory, so
-    // saveKeyFile would fail after the key exchange. The pre-flight should catch
-    // this. Root bypasses mode bits, so the probe would succeed there instead.
+    // The current user cannot create a file in the directory, so saveKeyFile
+    // would fail after the key exchange. The pre-flight should catch this.
+    // Root bypasses mode bits, so the probe would succeed there instead.
     const readOnlyDir = path.join(tmpDir, "readonly");
     fs.mkdirSync(readOnlyDir);
-    fs.chmodSync(readOnlyDir, 0o555);
+    denyDirectoryWrites(readOnlyDir);
     try {
       await expect(
         runProtocol({
@@ -541,8 +547,8 @@ test.skipIf(process.getuid?.() === 0)(
         }),
       ).rejects.toThrow("not writable");
     } finally {
-      // Restore mode so afterEach can rm -rf the tmp dir.
-      fs.chmodSync(readOnlyDir, 0o755);
+      // Restore write access so afterEach can remove the tmp dir.
+      restoreDirectoryWrites(readOnlyDir);
     }
   },
 );
@@ -2088,12 +2094,22 @@ test("the residue guidance renders in full for a configured peer_id longer than 
 // sanitizeForDisplay doubles a literal backslash on every pass, so one
 // backslash in the name would reach the operator as four. Both halves are
 // asserted, because the presence check alone passes on the doubled output too.
-test.each([
-  ["a literal backslash", "back\\slash"],
+//
+// A backslash and a control byte are characters Windows refuses in a filename,
+// so a residue name holding one exists only off it. The remaining two cover
+// the same single-escape rule on every platform.
+const RESIDUE_NAMES: [string, string][] = [
   ["a non-ASCII code point", "你好"],
-  ["a control byte", "\x1b[31mred"],
   ["an astral code point", "\u{1f600}"],
-])(
+  ...(process.platform === "win32"
+    ? ([] as [string, string][])
+    : ([
+        ["a literal backslash", "back\\slash"],
+        ["a control byte", "\x1b[31mred"],
+      ] as [string, string][])),
+];
+
+test.each(RESIDUE_NAMES)(
   "a residue filename containing %s is escaped once at the rendered boundary",
   async (_, leftoverId) => {
     const err = await runIntoLeftoverPeerHello(leftoverId);
@@ -2647,8 +2663,15 @@ test("a first-contact pin is recorded and stated on both sinks, unattended", asy
   // The stderr line names the value, the file it went into, and the
   // out-of-band check. The two parties run concurrently, so it is found by the
   // file it names rather than by its position in the log.
-  const stated = mockState.warnings.find((m) => m.includes(configA));
+  const displayedConfigA = pathAsDisplayed(configA);
+  const stated = mockState.warnings.find((m) => m.includes(displayedConfigA));
   expect(stated).toBeDefined();
+  // The path is the operator's own argument and reaches them through one
+  // escape pass, so a separator the escape doubles must not arrive quadrupled.
+  // Where the separator is not a backslash the two forms are one string and
+  // there is nothing for a second pass to change.
+  if (displayedConfigA !== configA)
+    expect(stated).not.toContain(pathAsDisplayed(displayedConfigA));
   expect(stated).toContain(ADOPTED_FINGERPRINT);
   expect(stated).toContain("compare the fingerprint");
 }, 20_000);
@@ -3820,8 +3843,12 @@ test("SIGINT logs recovery message when tokenRotated=true", async () => {
   try {
     await vi.waitFor(
       () => {
-        expect(loadKeyFile(keyFileA)?.sharedSecret).not.toBe(TOKEN_A);
-        expect(loadKeyFile(keyFileB)?.sharedSecret).not.toBe(TOKEN_A);
+        // warnOnPermissive off: the load-time check runs a subprocess per call
+        // on Windows, and this poll runs beside the two parties it is waiting
+        // on, whose rendezvous is the thing that must make progress.
+        const opts = { warnOnPermissive: false };
+        expect(loadKeyFile(keyFileA, opts)?.sharedSecret).not.toBe(TOKEN_A);
+        expect(loadKeyFile(keyFileB, opts)?.sharedSecret).not.toBe(TOKEN_A);
       },
       { timeout: 10_000 },
     );
@@ -4027,8 +4054,12 @@ test("SIGTERM logs recovery message when tokenRotated=true", async () => {
   try {
     await vi.waitFor(
       () => {
-        expect(loadKeyFile(keyFileA)?.sharedSecret).not.toBe(TOKEN_A);
-        expect(loadKeyFile(keyFileB)?.sharedSecret).not.toBe(TOKEN_A);
+        // warnOnPermissive off: the load-time check runs a subprocess per call
+        // on Windows, and this poll runs beside the two parties it is waiting
+        // on, whose rendezvous is the thing that must make progress.
+        const opts = { warnOnPermissive: false };
+        expect(loadKeyFile(keyFileA, opts)?.sharedSecret).not.toBe(TOKEN_A);
+        expect(loadKeyFile(keyFileB, opts)?.sharedSecret).not.toBe(TOKEN_A);
       },
       { timeout: 10_000 },
     );

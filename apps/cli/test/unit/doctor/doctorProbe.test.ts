@@ -17,6 +17,7 @@ import type { ProbeDeps } from "../../../src/doctor/probe";
 import type { SmbProbeInput } from "../../../src/doctor/smbEnvironment";
 import { overallOf, verdictOf } from "../../../src/doctor/verdict";
 import type { DoctorReport } from "../../../src/doctor/verdict";
+import { currentWindowsUser, isOwnerOnly } from "../../windowsAcl";
 
 const PASSWORD = "correct horse battery";
 
@@ -68,8 +69,18 @@ function oversizedListing(): string {
 interface Invocation {
   args: string[];
   cwd?: string;
-  /** The credentials file as it stood while this invocation ran. */
-  authFile?: { path: string; contents: string; mode: number };
+  /**
+   * The credentials file as it stood while this invocation ran. Windows holds
+   * no POSIX mode -- `fs.statSync` reports a synthetic 0o666 there whatever
+   * the access list says -- so the owner-only state is read off the access
+   * list itself on that platform and left undefined elsewhere.
+   */
+  authFile?: {
+    path: string;
+    contents: string;
+    mode: number;
+    ownerOnly?: boolean;
+  };
 }
 
 /** The `-c` command an invocation contains, if any. */
@@ -104,6 +115,9 @@ function fakeRunner(reply: (args: string[]) => Partial<CommandResult>): {
             path: authPath,
             contents: fs.readFileSync(authPath, "utf8"),
             mode: fs.statSync(authPath).mode & 0o777,
+            ...(process.platform === "win32"
+              ? { ownerOnly: isOwnerOnly(authPath, currentWindowsUser()) }
+              : {}),
           };
         calls.push(call);
         return Promise.resolve({
@@ -201,7 +215,9 @@ describe("the credential never becomes an argv value", () => {
     );
     expect(withAuth.length).toBeGreaterThan(0);
     for (const call of withAuth) {
-      expect(call.authFile?.mode).toBe(0o600);
+      if (process.platform === "win32")
+        expect(call.authFile?.ownerOnly).toBe(true);
+      else expect(call.authFile?.mode).toBe(0o600);
       expect(call.authFile?.contents).toBe(
         `username=svc-psilink\npassword=${PASSWORD}\ndomain=AGENCY\n`,
       );

@@ -18,6 +18,12 @@ import {
   writeFileAtomic,
   writeFileOwnerOnly,
 } from "../../src/fileUtils";
+import {
+  currentWindowsUser,
+  isOwnerOnly,
+  ownerRights,
+  readAcl,
+} from "../windowsAcl";
 
 // Captures every execFileSync argument vector the extended-ACL strip
 // (`/bin/chmod`) makes. `stubbed` answers without running it, for a host
@@ -25,10 +31,16 @@ import {
 // the strip's own command line, so other commands (`whoami`, `icacls`,
 // `ls -le`) still get real answers. Mocked rather than spied: a builtin
 // module's ESM namespace is not configurable.
+// `respond` answers a command instead of running it, for the Windows
+// access-list tiers: it returns the output that command is to print, throws to
+// stand for one that cannot be spawned, or returns undefined to let the real
+// command run (`whoami`, whose value the CLI memoizes for the process).
 const execFile = vi.hoisted(() => ({
   commands: [] as string[][],
   stubbed: false,
   failure: undefined as unknown,
+  respond: undefined as
+    undefined | ((file: string, args: readonly string[]) => string | undefined),
 }));
 
 vi.mock("node:child_process", async (importOriginal) => {
@@ -48,6 +60,10 @@ vi.mock("node:child_process", async (importOriginal) => {
       execFile.commands.push([file, ...args]);
       if (execFile.failure !== undefined && isAclStrip(file, args))
         throw execFile.failure;
+      if (execFile.respond !== undefined) {
+        const answer = execFile.respond(file, args);
+        if (answer !== undefined) return answer;
+      }
       return execFile.stubbed ? "" : actual.execFileSync(file, args, options);
     },
   };
@@ -64,6 +80,7 @@ afterEach(() => {
   execFile.commands.length = 0;
   execFile.stubbed = false;
   execFile.failure = undefined;
+  execFile.respond = undefined;
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -1198,74 +1215,236 @@ describe("extended-ACL strip symlink posture", () => {
   );
 });
 
-// --- Windows owner-only ACL --------------------------------------------------
+// --- Windows access-list check: tier selection -------------------------------
 
-// The current user's domain-qualified name (DOMAIN\user), the principal the
-// writers grant Modify and the only non-inherited ACE a narrowed file may have.
-function currentWindowsUser(): string {
-  return childProcess.execFileSync("whoami", [], { encoding: "utf8" }).trim();
+// The SIDs and rights the PowerShell tier reads. SYSTEM and Administrators are
+// the two the check exempts; Guests stands for any other principal.
+const OWNER_SID = "S-1-5-21-1111111111-2222222222-3333333333-1001";
+const GUESTS_SID = "S-1-5-32-546";
+const SYSTEM_SID = "S-1-5-18";
+const ADMINISTRATORS_SID = "S-1-5-32-544";
+const READ_RIGHTS = 1179785; // FileSystemRights.Read
+const FULL_CONTROL_RIGHTS = 2032127;
+const ALLOW = 0;
+const DENY = 1;
+
+// The line the PowerShell tier prints: the current user's SID, then one
+// `sid;rights;type` field per access rule.
+function aclListing(rules: [string, number, number][]): string {
+  return [OWNER_SID, ...rules.map((rule) => rule.join(";"))].join("|");
 }
 
-// One parsed line of `icacls <file>` output: the principal and the raw flag/
-// rights token after the `:(` separator (e.g. "(I)(M)" or "(R)"). The first
-// line of icacls output echoes the path before the first ACE; the trailing
-// "Successfully processed" summary line has no `:(` and is skipped.
-type Ace = { principal: string; rights: string };
+// What each command the win32 route runs answers with: output it prints, or an
+// error to stand for one that cannot be spawned. `whoami` is left to the real
+// command unless a failure is asked for.
+interface AclReplies {
+  powershell: string | Error;
+  icacls?: string | Error;
+  whoami?: Error;
+}
 
-function readAcl(filePath: string): Ace[] {
-  const output = childProcess.execFileSync("icacls", [filePath], {
-    encoding: "utf8",
+// Arm the recorder so the win32 route's commands answer per `replies` instead
+// of running.
+function answerAclCommands(replies: AclReplies): void {
+  const answer = (reply: string | Error): string => {
+    if (reply instanceof Error) throw reply;
+    return reply;
+  };
+  execFile.commands.length = 0;
+  execFile.respond = (file) => {
+    if (file === "powershell") return answer(replies.powershell);
+    if (file === "icacls") return answer(replies.icacls ?? "");
+    if (file === "whoami" && replies.whoami !== undefined) throw replies.whoami;
+    return undefined;
+  };
+}
+
+// Collect what `logger` warns, as one string per call.
+function captureWarnings(logger: ReturnType<typeof getLogger>): string[] {
+  const warnings: string[] = [];
+  vi.spyOn(logger, "warn").mockImplementation((...args: unknown[]) => {
+    warnings.push(args.map(String).join(" "));
   });
-  const echoed = filePath.replace(/\//g, "\\");
-  const aces: Ace[] = [];
-  for (const rawLine of output.split(/\r?\n/)) {
-    let line = rawLine;
-    if (line.startsWith(echoed)) line = line.slice(echoed.length).trimStart();
-    const trimmed = line.trim();
-    const sep = trimmed.indexOf(":(");
-    if (sep === -1) continue;
-    aces.push({
-      principal: trimmed.slice(0, sep).trim(),
-      rights: trimmed.slice(sep + 1),
+  return warnings;
+}
+
+// Drive the win32 route of `warnIfFileOverPermissive` on any host. Returns the
+// command lines the check ran and the warnings it emitted.
+function runWindowsAclCheck(replies: AclReplies): {
+  commands: string[];
+  warnings: string[];
+} {
+  answerAclCommands(replies);
+  const warnings = captureWarnings(getLogger("file-utils"));
+  withPlatform("win32", () =>
+    warnIfFileOverPermissive(path.join(dir, "secret"), "shared secret"),
+  );
+  return { commands: execFile.commands.map((c) => c[0]), warnings };
+}
+
+// The same, against a freshly imported copy of the module. The CLI memoizes
+// `whoami` for the process once it succeeds, so on a host that has already run
+// it -- a real Windows run of the writers above -- a stub that throws would
+// never be consulted. The fresh copy has yet to run it. Core is imported first
+// so the spy lands on the same copy of the logger the fresh module will load.
+async function runWindowsAclCheckFresh(
+  replies: AclReplies,
+): Promise<{ commands: string[]; warnings: string[] }> {
+  vi.resetModules();
+  const { getLogger: freshGetLogger } = await import("@psilink/core");
+  const warnings = captureWarnings(freshGetLogger("file-utils"));
+  const fresh = await import("../../src/fileUtils");
+  answerAclCommands(replies);
+  withPlatform("win32", () =>
+    fresh.warnIfFileOverPermissive(path.join(dir, "secret"), "shared secret"),
+  );
+  return { commands: execFile.commands.map((c) => c[0]), warnings };
+}
+
+const UNSPAWNABLE = new Error("spawn ENOENT");
+
+// What `icacls <path>` prints for a file carrying an explicit Guests grant: the
+// path on its own line, one entry per line under it, then the summary line
+// whose wording is locale-dependent. The entries sit below the echoed path
+// rather than beside it so the listing reads the same whatever separator the
+// host's paths use.
+function guestGrantListing(): string {
+  return (
+    `${path.join(dir, "secret")}\n` +
+    ` BUILTIN\\Guests:(R)\n` +
+    ` NT AUTHORITY\\SYSTEM:(I)(F)\n` +
+    `\nSuccessfully processed 1 files; Failed processing 0 files\n`
+  );
+}
+
+describe("Windows access-list check tiers", () => {
+  test("a listing that exits non-zero falls through to icacls", () => {
+    const { commands, warnings } = runWindowsAclCheck({
+      powershell: new Error("Command failed: powershell"),
     });
-  }
-  return aces;
-}
 
-// The principals the load-time check treats as owner-equivalent (EXEMPT_SIDS,
-// S-1-5-18 and S-1-5-32-544 in src/fileUtils.ts), under the names icacls prints
-// for them: SYSTEM and the local Administrators group hold standing access to
-// every file on the host, and the writers' narrowing leaves them in place.
-// icacls prints a display name rather than a SID and localizes the name of a
-// built-in principal, so on a Windows installed in another language these two
-// entries do not match and the assertions below go red.
-const OWNER_EQUIVALENT_PRINCIPALS = [
-  "nt authority\\system",
-  "builtin\\administrators",
-];
-
-// True when the file's ACL grants only the current user and those two
-// principals, with no inherited (I) ACE and no other explicit principal -- the
-// owner-only state the writers must produce. Deny ACEs are restrictive and
-// ignored.
-function isOwnerOnly(filePath: string, owner: string): boolean {
-  const aces = readAcl(filePath);
-  if (aces.length === 0) return false;
-  return aces.every((ace) => {
-    if (ace.rights.includes("(DENY)")) return true;
-    const principal = ace.principal.toLowerCase();
-    if (OWNER_EQUIVALENT_PRINCIPALS.includes(principal)) return true;
-    if (ace.rights.includes("(I)")) return false;
-    return principal === owner.toLowerCase();
+    expect(commands).toContain("icacls");
+    // The icacls reply defaults to no output, which is itself a failed read.
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("Could not read the access list");
   });
-}
 
-// The rights icacls prints for each of the current user's own ACEs.
-function ownerRights(filePath: string, owner: string): string[] {
-  return readAcl(filePath)
-    .filter((ace) => ace.principal.toLowerCase() === owner.toLowerCase())
-    .map((ace) => ace.rights);
-}
+  test("a listing that prints nothing falls through to icacls", () => {
+    const { commands } = runWindowsAclCheck({ powershell: "" });
+
+    expect(commands).toContain("icacls");
+  });
+
+  test("a malformed listing falls through to icacls", () => {
+    const { commands } = runWindowsAclCheck({ powershell: "garbage|morejunk" });
+
+    expect(commands).toContain("icacls");
+  });
+
+  test("a malformed field after a well-formed one fails the whole listing", () => {
+    // Read entry by entry, the Guests grant here would warn and the check would
+    // never reach icacls; taken whole, the trailing junk makes it a failed read.
+    const { commands, warnings } = runWindowsAclCheck({
+      powershell:
+        aclListing([
+          [OWNER_SID, FULL_CONTROL_RIGHTS, ALLOW],
+          [GUESTS_SID, READ_RIGHTS, ALLOW],
+        ]) + "|garbage",
+    });
+
+    expect(commands).toContain("icacls");
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("Could not read the access list");
+  });
+
+  test("icacls output holding no entry line is a failed read", () => {
+    const { warnings } = runWindowsAclCheck({
+      powershell: UNSPAWNABLE,
+      icacls: "Successfully processed 1 files; Failed processing 0 files\n",
+    });
+
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("Could not read the access list");
+    expect(warnings[0]).toContain("no recognizable entry");
+  });
+
+  test("an explicit entry for another principal warns", () => {
+    const { warnings } = runWindowsAclCheck({
+      powershell: UNSPAWNABLE,
+      icacls: guestGrantListing(),
+    });
+
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("granting access to other users");
+  });
+
+  test("a whoami failure says the current user could not be determined", async () => {
+    const { commands, warnings } = await runWindowsAclCheckFresh({
+      powershell: UNSPAWNABLE,
+      icacls: guestGrantListing(),
+      whoami: new Error("spawn ENOENT"),
+    });
+
+    // The stub is only reached while the memoized value is unset; a run that
+    // never spawned whoami would be asserting nothing.
+    expect(commands).toContain("whoami");
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("Could not determine the current user");
+    expect(warnings[0]).toContain("spawn ENOENT");
+    expect(warnings[0]).not.toContain("Could not read the access list");
+  });
+
+  test("neither tier able to run warns that the access list was not read", () => {
+    const { warnings } = runWindowsAclCheck({
+      powershell: UNSPAWNABLE,
+      icacls: UNSPAWNABLE,
+    });
+
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("Could not read the access list");
+    expect(warnings[0]).toContain("icacls");
+  });
+
+  test("a grant to another principal warns without consulting icacls", () => {
+    const { commands, warnings } = runWindowsAclCheck({
+      powershell: aclListing([
+        [OWNER_SID, FULL_CONTROL_RIGHTS, ALLOW],
+        [GUESTS_SID, READ_RIGHTS, ALLOW],
+      ]),
+    });
+
+    expect(commands).toEqual(["powershell"]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("granting read access to other users");
+  });
+
+  test("the owner plus the exempt system SIDs draws no warning", () => {
+    const { commands, warnings } = runWindowsAclCheck({
+      powershell: aclListing([
+        [OWNER_SID, FULL_CONTROL_RIGHTS, ALLOW],
+        [SYSTEM_SID, FULL_CONTROL_RIGHTS, ALLOW],
+        [ADMINISTRATORS_SID, FULL_CONTROL_RIGHTS, ALLOW],
+      ]),
+    });
+
+    expect(commands).toEqual(["powershell"]);
+    expect(warnings).toEqual([]);
+  });
+
+  test("a deny entry for another principal draws no warning", () => {
+    const { commands, warnings } = runWindowsAclCheck({
+      powershell: aclListing([
+        [OWNER_SID, FULL_CONTROL_RIGHTS, ALLOW],
+        [GUESTS_SID, READ_RIGHTS, DENY],
+      ]),
+    });
+
+    expect(commands).toEqual(["powershell"]);
+    expect(warnings).toEqual([]);
+  });
+});
+
+// --- Windows owner-only ACL --------------------------------------------------
 
 describe.skipIf(process.platform !== "win32")("Windows owner-only ACL", () => {
   // O_TRUNC without O_CREAT asks for the TRUNCATE_EXISTING disposition, which
@@ -1344,8 +1523,19 @@ describe.skipIf(process.platform !== "win32")("Windows owner-only ACL", () => {
     childProcess.execFileSync("icacls", [p, "/grant", "Guests:(R)"], {
       stdio: "ignore",
     });
+    // The grant is the test's own setup, asserted so a platform that refuses
+    // it on an already-narrowed file reports that rather than an absent
+    // warning about a file still correctly narrowed.
+    const loosened = readAcl(p);
+    expect(
+      loosened.some((ace) => ace.principal.toLowerCase().includes("guests")),
+      `access list after the grant: ${JSON.stringify(loosened)}`,
+    ).toBe(true);
     warnIfFileOverPermissive(p, "shared secret");
-    expect(warn).toHaveBeenCalled();
+    expect(
+      warn,
+      `access list the check read: ${JSON.stringify(loosened)}`,
+    ).toHaveBeenCalled();
   });
 });
 

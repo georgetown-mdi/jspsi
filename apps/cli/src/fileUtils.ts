@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { getLogger } from "@psilink/core";
+import { getLogger, sanitizeErrorForDisplay } from "@psilink/core";
 
 const log = getLogger("file-utils");
 
@@ -43,11 +43,68 @@ const EXEMPT_SIDS = new Set(["S-1-5-18", "S-1-5-32-544"]);
 const GENERIC_READ = 0x80000000;
 const GENERIC_ALL = 0x10000000;
 
+// The PowerShell listing: every access rule on the file, inherited and
+// explicit, with each identity already a SID so no name has to be resolved and
+// no locale enters. `[System.IO.FileInfo]::new(...).GetAccessControl()` reads
+// it off the .NET type rather than through `Get-Acl`, which lives in a module
+// an environment with strict application control -- the GitHub `windows-latest`
+// runner among them -- can refuse to load; that refusal is a non-terminating
+// error, so the command still exits 0 with an empty listing on its output.
+//
+// Every route that cannot produce the whole listing exits non-zero instead, so
+// the caller sees a failure rather than an empty list it could read as a file
+// with nothing granted on it.
+const windowsAclListingCommand = (escapedPath: string): string =>
+  `$sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value;` +
+  `$acl=$null;` +
+  `try{$acl=[System.IO.FileInfo]::new('${escapedPath}').GetAccessControl()}catch{};` +
+  `if($null -eq $acl){exit 1};` +
+  `$rules=$acl.GetAccessRules($true,$true,[System.Security.Principal.SecurityIdentifier]);` +
+  `if($null -eq $rules -or $rules.Count -eq 0){exit 1};` +
+  `$out=@();` +
+  `foreach($r in $rules){$out+=($r.IdentityReference.Value+';'+[int]$r.FileSystemRights+';'+[int]$r.AccessControlType)};` +
+  `Write-Output ($sid+'|'+($out -join '|'))`;
+
+// One access rule off the PowerShell listing: the principal's SID, the rights
+// mask, and the access-control type (0 is Allow).
+interface WindowsAccessRule {
+  sid: string;
+  rights: number;
+  type: number;
+}
+
+// The listing's own SID, then one `sid;rights;type` field per rule. Returns
+// undefined for anything that is not that shape -- a missing separator, no
+// rules, a field that does not hold three parts, a non-numeric rights or type
+// -- so a listing that cannot be read whole counts as a failure to read and
+// falls through to icacls, rather than being scanned entry by entry and found
+// to grant nothing. See
+// docs/spec/CREDENTIAL_STORAGE.md#windows-write-discipline-and-load-check.
+function parseWindowsAclListing(
+  listing: string,
+): { currentSid: string; rules: WindowsAccessRule[] } | undefined {
+  const sep = listing.indexOf("|");
+  if (sep <= 0) return undefined;
+  const rules: WindowsAccessRule[] = [];
+  for (const field of listing.slice(sep + 1).split("|")) {
+    const parts = field.split(";");
+    if (parts.length !== 3) return undefined;
+    const [sid, rights, type] = parts;
+    // A rights mask is signed: GenericRead sets bit 31, which .NET's [int]
+    // cast renders negative.
+    if (sid === "" || !/^-?\d+$/.test(rights) || !/^-?\d+$/.test(type))
+      return undefined;
+    rules.push({ sid, rights: Number(rights), type: Number(type) });
+  }
+  return { currentSid: listing.slice(0, sep), rules };
+}
+
 // Warn if the key file's ACL grants read access to principals other than the
-// current user and well-known system accounts. Tries PowerShell's Get-Acl
-// (locale-independent, checks inherited and explicit ACEs; may be unavailable
-// in Nano Server, WDAC, or Constrained Language Mode) and falls back to
-// icacls (explicit ACEs only). See
+// current user and well-known system accounts. Tries the PowerShell listing
+// above (inherited and explicit entries, by SID) and falls back to icacls
+// (explicit entries only). Each tier is read whole or not at all, and when a
+// tier's listing cannot be read -- or the current user it would be judged
+// against cannot be determined -- the check says so instead of passing. See
 // docs/spec/CREDENTIAL_STORAGE.md#windows-write-discipline-and-load-check.
 function warnIfWindowsAclOverPermissive(
   keyFilePath: string,
@@ -56,116 +113,147 @@ function warnIfWindowsAclOverPermissive(
   // path is caller-supplied; '' escaping suffices because the user controls the
   // key file path
   const escaped = keyFilePath.replace(/'/g, "''");
-  const cmd =
-    `$sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value;` +
-    `$acl=Get-Acl -LiteralPath '${escaped}';` +
-    `$aces=@($acl.Access|%{` +
-    `$s=try{$_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value}catch{$null};` +
-    `if($null -ne $s){'{"s":"'+$s+'","r":'+([int]$_.FileSystemRights)+',"t":'+([int]$_.AccessControlType)+'}'}` +
-    `});` +
-    `Write-Output($sid+'|['+($aces -join ',')+']')`;
+  let listing: ReturnType<typeof parseWindowsAclListing>;
   try {
+    // Whitespace removed rather than trimmed: PowerShell wraps a long line to
+    // the console width, and none of the listing's own fields hold a space.
     const out = execFileSync(
       "powershell",
-      ["-NoProfile", "-NonInteractive", "-Command", cmd],
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        windowsAclListingCommand(escaped),
+      ],
       { encoding: "utf8", timeout: 5000 },
-    ).trim();
-    const sep = out.indexOf("|");
-    if (sep !== -1) {
-      const currentSid = out.slice(0, sep);
-      // Non-sensitive: PowerShell ACL-listing output, not a credential file, so
-      // there is no secret for a parse error to leak.
-      // eslint-disable-next-line no-restricted-properties -- non-credential parse, see above
-      const aces = JSON.parse(out.slice(sep + 1)) as Array<{
-        s: string;
-        r: number;
-        t: number;
-      }>;
-      if (
-        aces.some(
-          (ace) =>
-            ace.t === 0 &&
-            ((ace.r & 1) !== 0 ||
-              (ace.r & GENERIC_READ) !== 0 ||
-              (ace.r & GENERIC_ALL) !== 0) &&
-            ace.s !== currentSid &&
-            !EXEMPT_SIDS.has(ace.s),
-        )
-      ) {
-        log.warn(
-          `${keyFilePath} has ACL entries granting read access to other ` +
-            "users; restrict to owner-read-only via icacls or File " +
-            `Properties to prevent other users from reading the ${secretLabel}`,
-        );
-      }
-      return;
-    }
+    ).replace(/\s+/g, "");
+    listing = parseWindowsAclListing(out);
   } catch {
-    // PowerShell unavailable; fall through to icacls.
+    // PowerShell unavailable or the listing unreadable; fall through to icacls.
+  }
+  if (listing !== undefined) {
+    const { currentSid, rules } = listing;
+    if (
+      rules.some(
+        ({ sid, rights, type }) =>
+          type === 0 &&
+          ((rights & 1) !== 0 ||
+            (rights & GENERIC_READ) !== 0 ||
+            (rights & GENERIC_ALL) !== 0) &&
+          sid !== currentSid &&
+          !EXEMPT_SIDS.has(sid),
+      )
+    ) {
+      log.warn(
+        `${keyFilePath} has ACL entries granting read access to other ` +
+          "users; restrict to owner-read-only via icacls or File " +
+          `Properties to prevent other users from reading the ${secretLabel}`,
+      );
+    }
+    return;
   }
 
   // icacls fallback: explicit ACEs only.
+  const couldNotRead = (reason: string): string =>
+    `Could not read the access list on ${keyFilePath}: ${reason}; check it ` +
+    `by hand with \`icacls "${keyFilePath}"\` and restrict the file to ` +
+    `owner-only so other users cannot read the ${secretLabel}`;
+  let output: string;
   try {
-    const output = execFileSync("icacls", [keyFilePath], {
+    output = execFileSync("icacls", [keyFilePath], {
       encoding: "utf8",
       timeout: 5000,
     });
-    const lines = output.split(/\r?\n/);
-    const aces: string[] = [];
-    // icacls echoes the path on the first line before the first ACE entry;
-    // normalize separators since icacls always outputs backslashes.
-    const echoed = keyFilePath.replace(/\//g, "\\");
-    const firstLine = lines[0] ?? "";
-    if (firstLine.toLowerCase().startsWith(echoed.toLowerCase())) {
-      const rest = firstLine.slice(echoed.length);
-      // rest[0] must be a space (path + " " + ACE) or absent (path only on
-      // first line). Checking the character avoids a false prefix match if
-      // echoed is a strict prefix of a longer path (e.g. "C:\foo" vs
-      // "C:\foobar").
-      if (rest === "" || rest[0] === " ") {
-        const ace = rest.trimStart();
-        if (ace) aces.push(ace);
-      }
-    }
-    for (const line of lines.slice(1)) {
-      const trimmed = line.trim();
-      // Collect only lines that structurally look like ACE entries (contain the
-      // principal:(flags) separator). This avoids matching the icacls summary
-      // line ("Successfully processed N files..."), which is locale-dependent.
-      if (trimmed.includes(":(")) aces.push(trimmed);
-    }
-    const id = whoami();
-    const overPermissive = aces.some((ace) => {
-      const sep = ace.indexOf(":(");
-      if (sep === -1) return false;
-      const flags = ace.slice(sep + 1);
-      const isInherited = flags.includes("(I)");
-      // icacls marks deny ACEs with "(DENY)" before the rights; these are
-      // restrictive, not permissive. "(DENY)" is a structural token in icacls
-      // output, locale-independent in the same way as "(I)".
-      const isDeny = flags.includes("(DENY)");
-      return (
-        !isInherited &&
-        !isDeny &&
-        ace.slice(0, sep).trim().toLowerCase() !== id.toLowerCase()
-      );
-    });
-    if (overPermissive) {
-      // The fallback does not inspect the rights an ACE grants (icacls' rights
-      // notation is complex and locale-adjacent), so it warns about any explicit
-      // non-owner ACE without claiming it specifically grants read -- a
-      // write-only grant on a secret file is a misconfiguration worth flagging
-      // too. The PowerShell tier above does mask for read and keeps that wording.
-      log.warn(
-        `${keyFilePath} has ACL entries granting access to other users ` +
-          "(inherited entries and specific rights not inspected); restrict to " +
-          "owner-only via icacls or File Properties to prevent other users " +
-          `from accessing the ${secretLabel}`,
-      );
-    }
   } catch {
-    // icacls unavailable; warning is advisory
+    log.warn(
+      couldNotRead("neither the PowerShell read nor icacls could be run"),
+    );
+    return;
   }
+  const aces = parseIcaclsAces(output, keyFilePath);
+  // The same rule the PowerShell tier follows: a listing holding no
+  // recognizable entry is a failed read, since it cannot be told apart from a
+  // file with nothing granted on it and would otherwise pass with no entry
+  // examined.
+  if (aces.length === 0) {
+    log.warn(couldNotRead("icacls listed no recognizable entry"));
+    return;
+  }
+  let id: string;
+  try {
+    id = whoami();
+  } catch (err) {
+    // icacls did run; what is missing is the identity every entry is compared
+    // against, so this says so rather than sending the operator to re-run a
+    // command that worked.
+    log.warn(
+      `Could not determine the current user, so the access list on ` +
+        `${keyFilePath} could not be judged: ${sanitizeErrorForDisplay(err)}; ` +
+        `check it by hand with \`icacls "${keyFilePath}"\` and restrict the ` +
+        `file to owner-only so other users cannot read the ${secretLabel}`,
+    );
+    return;
+  }
+  const overPermissive = aces.some((ace) => {
+    const sep = ace.indexOf(":(");
+    const flags = ace.slice(sep + 1);
+    const isInherited = flags.includes("(I)");
+    // icacls marks deny ACEs with "(DENY)" before the rights; these are
+    // restrictive, not permissive. "(DENY)" is a structural token in icacls
+    // output, locale-independent in the same way as "(I)".
+    const isDeny = flags.includes("(DENY)");
+    return (
+      !isInherited &&
+      !isDeny &&
+      ace.slice(0, sep).trim().toLowerCase() !== id.toLowerCase()
+    );
+  });
+  if (overPermissive) {
+    // The fallback does not inspect the rights an ACE grants (icacls' rights
+    // notation is complex and locale-adjacent), so it warns about any explicit
+    // non-owner ACE without claiming it specifically grants read -- a
+    // write-only grant on a secret file is a misconfiguration worth flagging
+    // too. The PowerShell tier above does mask for read and keeps that wording.
+    log.warn(
+      `${keyFilePath} has ACL entries granting access to other users ` +
+        "(inherited entries and specific rights not inspected); restrict to " +
+        "owner-only via icacls or File Properties to prevent other users " +
+        `from accessing the ${secretLabel}`,
+    );
+  }
+}
+
+// The ACE lines of an `icacls <path>` listing: the principal:(flags) entries it
+// prints for the path, with the echoed path and the locale-dependent summary
+// line ("Successfully processed N files...") left out. An empty result means
+// nothing in the output had an entry's shape, which the caller takes as a
+// failed read rather than as a file with no entries.
+function parseIcaclsAces(output: string, keyFilePath: string): string[] {
+  const lines = output.split(/\r?\n/);
+  const aces: string[] = [];
+  // icacls echoes the path on the first line before the first ACE entry;
+  // normalize separators since icacls always outputs backslashes.
+  const echoed = keyFilePath.replace(/\//g, "\\");
+  const firstLine = lines[0] ?? "";
+  if (firstLine.toLowerCase().startsWith(echoed.toLowerCase())) {
+    const rest = firstLine.slice(echoed.length);
+    // rest[0] must be a space (path + " " + ACE) or absent (path only on
+    // first line). Checking the character avoids a false prefix match if
+    // echoed is a strict prefix of a longer path (e.g. "C:\foo" vs
+    // "C:\foobar").
+    if (rest === "" || rest[0] === " ") {
+      const ace = rest.trimStart();
+      if (ace.includes(":(")) aces.push(ace);
+    }
+  }
+  for (const line of lines.slice(1)) {
+    const trimmed = line.trim();
+    // Collect only lines that structurally look like ACE entries (contain the
+    // principal:(flags) separator). This avoids matching the icacls summary
+    // line ("Successfully processed N files..."), which is locale-dependent.
+    if (trimmed.includes(":(")) aces.push(trimmed);
+  }
+  return aces;
 }
 
 /**

@@ -52,6 +52,7 @@ import {
   captureStdio,
   snapshotDiagnosticSinkAndLevel,
 } from "../../loggingTestSupport";
+import { pathAsDisplayed } from "../../platformPaths";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "verify-receipt-"));
 
@@ -1205,7 +1206,8 @@ describe("handler", () => {
     );
     expect(termsAt).toBeGreaterThan(-1);
     expect(lines[termsAt + 1]).toBe(
-      `  note: config file ${configPath} defines no linkage_terms, so it ` +
+      `  note: config file ${pathAsDisplayed(configPath)} defines no ` +
+        "linkage_terms, so it " +
         "supplied no terms for this check",
     );
     // The remediation names what is missing rather than the config already

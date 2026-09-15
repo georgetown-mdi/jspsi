@@ -82,6 +82,11 @@ import {
 } from "../../../src/onlineBootstrap";
 import { captureStdio } from "../../loggingTestSupport";
 import {
+  pathAsDisplayed,
+  platformAbsolutePath,
+  platformFileUrl,
+} from "../../platformPaths";
+import {
   configuredIdentityRequired,
   configuredIdentityStillPlaceholder,
   IDENTITY_REQUIRED,
@@ -1420,7 +1425,11 @@ test("validateInvite: the offline-infer path declares nothing, even under --reta
 test("validateInvite: online filedrop emits the shared-path endpoint", async () => {
   const { input, options } = onlineFixture();
   const ready = await validateInvite({
-    resolved: { mode: "online", url: new URL("file:///mnt/share/drop"), input },
+    resolved: {
+      mode: "online",
+      url: platformFileUrl("/mnt/share/drop"),
+      input,
+    },
     options,
     acceptTimeout: 900,
     log: silentLog,
@@ -1428,7 +1437,7 @@ test("validateInvite: online filedrop emits the shared-path endpoint", async () 
   const token = await decodeInvitation(ready.invitation);
   expect(token.connectionEndpoint).toEqual({
     channel: "filedrop",
-    path: "/mnt/share/drop",
+    path: platformAbsolutePath("/mnt/share/drop"),
   });
 });
 
@@ -1639,7 +1648,7 @@ test("validateInvite: --identity over a reused config is reported, not applied",
     );
     expect(ignored[0]).toContain('"Agency Flag"');
     expect(ignored[0]).toContain('"Agency Config"');
-    expect(ignored[0]).toContain(configPath);
+    expect(ignored[0]).toContain(pathAsDisplayed(configPath));
   } finally {
     warnSpy.mockRestore();
     fs.rmSync(dir, { recursive: true, force: true });
@@ -1746,7 +1755,7 @@ test("validateInvite: --identity over a reused config redacts a planted key mark
     expect(ignored).toHaveLength(1);
     expect(ignored[0]).toContain("[redacted private key]");
     expect(ignored[0]).not.toContain("BEGIN OPENSSH PRIVATE KEY");
-    expect(ignored[0]).toContain(configPath);
+    expect(ignored[0]).toContain(pathAsDisplayed(configPath));
     expect(ignored[0]).toMatch(/to change it\.$/);
   } finally {
     warnSpy.mockRestore();
@@ -1993,7 +2002,7 @@ test("validateInvite: a config plus a disagreeing input is refused before mintin
     );
     expect(rendered).toContain(
       "Provide a CSV that covers the required field types, then generate the " +
-        `invitation again; these terms come from ${configPath}.`,
+        `invitation again; these terms come from ${pathAsDisplayed(configPath)}.`,
     );
     expect(rendered).not.toContain("ask your partner");
     expect(rendered).not.toContain("re-establish the exchange");
@@ -2019,7 +2028,7 @@ test("validateInvite: a config whose key cleaning drops every record is refused 
     // different CSV.
     expect(rendered).toContain(
       "Correct the cleaning steps those keys declare, then generate the " +
-        `invitation again; these terms come from ${configPath}.`,
+        `invitation again; these terms come from ${pathAsDisplayed(configPath)}.`,
     );
     expect(rendered).not.toContain("Provide a CSV");
   } finally {

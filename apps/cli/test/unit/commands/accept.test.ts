@@ -121,6 +121,11 @@ import { exitCodeForError } from "../../../src/util/exit";
 import { promptConfirm, promptFreeText } from "../../../src/util/prompt";
 import { captureStdio } from "../../loggingTestSupport";
 import { ttyStream } from "../../stdinStream";
+import {
+  pathAsDisplayed,
+  platformAbsolutePath,
+  platformFileUrl,
+} from "../../platformPaths";
 
 const promptConfirmMock = vi.mocked(promptConfirm);
 const promptFreeTextMock = vi.mocked(promptFreeText);
@@ -5627,7 +5632,7 @@ describe("handler: '--consent-to-terms' gates the confirmation prompt", () => {
       expect(promptConfirmMock).toHaveBeenCalledTimes(1);
       expect(exit).toHaveBeenCalledWith(64);
       expect(stderrWrites.join("")).toContain("refusing to overwrite");
-      expect(stderrWrites.join("")).toContain(configFile);
+      expect(stderrWrites.join("")).toContain(pathAsDisplayed(configFile));
       expect(fs.readFileSync(configFile, "utf8")).toBe(planted);
       expect(fs.existsSync(keyFile)).toBe(false);
     } finally {
@@ -6522,7 +6527,10 @@ describe("handler: online accept threads the token commitment to the persistence
       // A config whose linkage terms and connection agree with the invitation and the
       // URL below, so reconciliation keeps it.
       writeExistingConfig(configFile, {
-        connection: { channel: "filedrop", path: "/mnt/share" },
+        connection: {
+          channel: "filedrop",
+          path: platformAbsolutePath("/mnt/share"),
+        },
       });
       for (const disclosed of [["diagnosis", "notes"], undefined]) {
         runOnlineBootstrapMock.mockClear();
@@ -6534,7 +6542,7 @@ describe("handler: online accept threads the token commitment to the persistence
           _: [],
           $0: "psilink",
           identity: "Agency B",
-          args: ["file:///mnt/share", encoded, input],
+          args: [platformFileUrl("/mnt/share").href, encoded, input],
           "consent-to-terms": true,
           "config-file": configFile,
           "key-file": keyFile,

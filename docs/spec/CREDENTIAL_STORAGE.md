@@ -309,14 +309,37 @@ The operation is recoverable in any case -- a lost rotated token or exchange
 record is re-produced by re-running -- so the residual Windows gap is a
 durability one, not a confidentiality one.
 
-On load, the CLI first attempts to use PowerShell's `Get-Acl` with SID
-translation, which checks both inherited and explicit ACEs in a
-locale-independent way; SYSTEM (`S-1-5-18`) and Administrators (`S-1-5-32-544`)
-are not flagged. If PowerShell is unavailable -- for example in Nano Server
-containers or environments with strict application control policies -- the CLI
-falls back to `icacls`, which checks only explicit (non-inherited) non-owner
-ACEs. `fs.statSync` is not used for either check because it returns simulated
-POSIX mode bits that do not reflect the actual ACL.
+On load, the CLI first reads the file's access rules through PowerShell, off
+`System.IO.FileInfo.GetAccessControl()` and by SID, so both inherited and
+explicit ACEs are checked and no display name has to be resolved; SYSTEM
+(`S-1-5-18`) and Administrators (`S-1-5-32-544`) are not flagged. `Get-Acl` is
+not used: it lives in a module an environment with strict application control
+can refuse to load, and that refusal is a non-terminating error, so the command
+still exits successfully with nothing listed.
+
+The listing is therefore taken whole or not at all. A PowerShell that cannot be
+run, a read that fails, an empty rule set, and output that is not the listing's
+`sid;rights;type` shape throughout each count as a failure to read, because
+neither an empty listing nor an unreadable one can be told apart from a file
+with nothing granted on it and either would otherwise pass the check with no
+entry examined. On any of those the CLI falls back to `icacls`, which checks
+only explicit (non-inherited) non-owner ACEs -- and on a host where a new
+file's SYSTEM and Administrators entries are explicit rather than inherited,
+that tier names them too. Its warning says what it did not inspect, and a
+warning about a file that is in fact narrowed is the direction that does not
+hide one that is not.
+
+That tier is read whole or not at all as well: `icacls` failing to run, and
+output holding no line of an entry's `principal:(flags)` shape, both count as a
+failure to read, for the same reason an empty PowerShell listing does. Two
+warnings report a list that could not be judged, and both name the `icacls`
+invocation to check it by hand: one that the access list could not be read
+(neither tier produced entries), and one that the current user could not be
+determined -- `whoami` failed, so `icacls` output that was read has no identity
+to be judged against. The operator is trusted and the check is advisory, so an
+unverifiable access list is reported rather than treated as a refusal to load.
+`fs.statSync` is not used for either check because it returns simulated POSIX
+mode bits that do not reflect the actual ACL.
 
 The `icacls` remediation the overview shows uses `%USERDOMAIN%\%USERNAME%`, the
 domain-qualified name (e.g. `CORP\alice` or `COMPUTER\alice`) that `icacls`
