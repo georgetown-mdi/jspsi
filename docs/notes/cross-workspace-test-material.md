@@ -181,6 +181,11 @@ priced -- not this note.
   and the web browser suite. Same handling, and the clearer shape of the
   cost: a fixture wanted on two surfaces reaches them by living in a published
   package.
+- `signingIdentityDocuments.ts` -- test-only. Signing-identity documents and the
+  party name a certificate-only load owes each, driving the CLI's
+  `loadSigningCertificate` and the console's `readBoundIdentity` bound-identity
+  parity tests. Same handling: a case wanted on both loaders reaches them by
+  living in a published package.
 - The helpers `testing.ts` defines -- `sortAssociationTable`,
   `withCapturedLogs`, `installCapturedLogsInterceptor`, and the `LogEntry`
   shape -- test-only. No product code calls them.
