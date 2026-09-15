@@ -1,34 +1,36 @@
 #!/usr/bin/env node
-// RunFailure display-sink check, run by static_checks.yaml.
+// Failure display-sink check, run by static_checks.yaml.
 //
-// A `RunFailure` message is composed as a cause chain whose links are separated
-// by the error renderer's own newline (`sanitizedFailureMessage` in
-// apps/web/src/exchange/useInviterExchange.ts). Only a `pre-line` white-space
-// style lays those newlines out as line breaks, so a render that omits it
-// collapses the whole relayed chain onto one line -- readable enough to pass a
-// green suite, and useless to the operator trying to tell which link failed.
-// The styling therefore lives in exactly one component, `FailureMessage` in
-// apps/web/src/exchange/RunSurface.tsx, and every render of a `RunFailure`
-// message goes through it rather than styling a span of its own.
+// WHAT IS HELD. A failed run holds two pieces of operator-facing text a relayed
+// cause chain can reach: the `message`, composed as a chain whose links are
+// separated by the error renderer's own newline (`sanitizedFailureMessage` in
+// apps/web/src/exchange/useInviterExchange.ts), and the `reportedCause`, which
+// is the chain itself where the category states copy of its own in front of it.
+// Two treatments lay either out: a `pre-line` white-space style for the
+// renderer's newlines, and a break in front of each escaped line-break marker
+// for the ones a value's own text holds (`layOutValueLineBreaks`). A render
+// that omits them collapses the whole chain onto one line -- readable enough to
+// pass a green suite, and useless to the operator trying to tell which link
+// failed. Each piece therefore renders through exactly one component in
+// apps/web/src/exchange/RunSurface.tsx, and an inline span rendering either
+// piece reddens here.
 //
-// That is a claim about every future alert, not about the two call sites
-// standing today, and no type or test objects to a third one inlining its own
-// span. This check is the executable form of it: a second inline span rendering
-// a `RunFailure` message reddens here instead of shipping a collapsed chain.
+// THE TYPES HELD TO IT are the seats' failure types, `FAILURE_TYPES` below:
+// the exchange seats' `RunFailure` and the recurring seat's
+// `ManagedRunFailureAlert`. Both hold the two pieces and render them through
+// the same sinks, so both are held to them; a type absent from that list binds
+// nothing here.
 //
 // THE SCANNED SET IS EVERY SOURCE UNDER apps/web/src, walked whole rather than
 // listed, so a new file is covered the moment it exists and there is no list to
 // drift out of coverage. What narrows the scan to this claim is not the file
-// set but the BINDINGS: a file that never annotates a name as `RunFailure`
-// contributes none and is passed over. `ManagedRunFailureAlert` in
-// apps/web/src/recurring/ is a different type whose message is first-party copy
-// with no cause chain in it, and it renders its own span correctly outside this
-// claim.
+// set but the BINDINGS: a file that never annotates a name as a tracked type
+// contributes none and is passed over.
 //
-// HOW A BINDING IS FOUND, without a type checker. Every `RunFailure` type
-// reference in the file is walked up to the declaration it annotates, and the
-// LOCAL name that declaration binds the annotated value under is taken as a
-// `RunFailure`-valued binding for the rest of the file:
+// HOW A BINDING IS FOUND, without a type checker. Every reference to a tracked
+// type in the file is walked up to the declaration it annotates, and the LOCAL
+// name that declaration binds the annotated value under is taken as a
+// failure-valued binding for the rest of the file:
 //
 //   - a parameter or variable annotated whole -- `(failure: RunFailure)`,
 //     `const failure: RunFailure = ...`, and the `useState<RunFailure>()`
@@ -47,32 +49,56 @@
 //     (`{ failure: renamed }: Props`) binds nothing here -- a stated limit.
 //
 // Matching by NAME within one file is what stands in for resolution. A file
-// that binds an unrelated value under a name it also annotates as `RunFailure`
-// would have that unrelated value's `.message` render read as this claim's --
-// a false report, and one whose fix is to read the two names apart.
+// that binds an unrelated value under a name it also annotates as a tracked
+// type would have that unrelated value's `.message` render read as this
+// claim's -- a false report, and one whose fix is to read the two names apart.
 //
 // WHAT A "RENDER" MATCHES, and what it cannot:
 //
-//   - Matched: a `.message` read off a `RunFailure` binding sitting anywhere
-//     inside a JSX expression container -- the `{failure.message}` child of a
-//     hand-styled span, and the `message={failure.message}` attribute alike --
-//     optional chaining included. The attribute of a `FailureMessage` element
-//     is the one allowed position; every other container is a failure.
+//   - Matched: a `.message` or `.reportedCause` read off a tracked binding
+//     sitting anywhere inside a JSX expression container -- the
+//     `{failure.message}` child of a hand-styled span, and the
+//     `message={failure.message}` attribute alike -- optional chaining included.
+//     The same-named attribute of that piece's own sink is the one allowed
+//     position; every other container, and the right prop on the wrong
+//     component, is a failure.
+//   - Not matched: a read taken as a condition rather than as a value -- an
+//     operand of an equality comparison, the operand of a `!`, a conditional
+//     expression's test, or the left side of a `&&`. Those are the guards in
+//     front of an optional piece, both the compared form
+//     (`{failure.reportedCause !== undefined && <Sink ... />}`) and the bare
+//     one (`{failure.reportedCause && <Sink ... />}`), and none of them puts
+//     the read's own text in front of the operator: a `&&` yields its left
+//     side only where that side is falsy, and the rest yield a boolean. The
+//     read that supplies the rendered text is matched where it stands, so a
+//     guard whose branch inlines the piece reddens on that branch. A `??` or a
+//     `||` is matched, each yielding the left side's own value to render.
 //   - Not matched, as a stated limit: a read that reaches JSX through a local
 //     (`const text = failure.message`, `const { message } = failure`), through
 //     a helper called with the failure, or through a container assembled
 //     outside JSX. Following those needs the taint analysis a syntactic scan
 //     cannot run. This catches the shape a contributor writes by habit -- an
-//     alert inlining its own span -- and is not a proof that no `RunFailure`
-//     message can render outside the sink.
+//     alert inlining its own span -- and is not a proof that no failure text
+//     can render outside its sink.
 //   - Not matched, by construction of an AST walk: the name inside a comment or
 //     a string literal.
 //
-// Two vacuity guards keep a green result meaningful, since both halves of the
-// claim are named by identifier here and a rename would otherwise leave this
-// scanning for something that no longer exists: the `RunFailure` declaration
-// and the `FailureMessage` declaration must each still stand where this check
-// says, and at least one render must have been found going through the sink.
+// STATED LIMITS beyond the ones named above:
+//
+//   - The binding walk keys on the two seat failure types listed in
+//     `FAILURE_TYPES` (`RunFailure`, `ManagedRunFailureAlert`); a component
+//     that types its prop as the shared `FailureText` shape from
+//     apps/web/src/exchange/RunSurface.tsx is outside the walk, so a read
+//     through such a prop is not reported.
+//   - `readAsCondition` admits a read only as the left operand of a logical
+//     `&&`; a `??` or `||` left operand, and every other operand position, is
+//     treated as a render and reported.
+//
+// The vacuity guards keep a green result meaningful, since every half of the
+// claim is named by identifier here and a rename would otherwise leave this
+// scanning for something that no longer exists: each tracked type's declaration
+// and each sink's declaration must still stand where this check says, and each
+// sink must have been found with at least one render going through it.
 
 import ts from "typescript";
 import { fileURLToPath } from "node:url";
@@ -86,20 +112,34 @@ import {
 /** The tree every scanned source is taken from. */
 export const WEB_SOURCE_DIR = "apps/web/src";
 
-/** The type whose message the sink below is the one render path for. */
-export const FAILURE_TYPE_NAME = "RunFailure";
+/**
+ * The failure types the sinks below are the one render path for, each with the
+ * file declaring it, held by the vacuity guard. A name absent from this list
+ * binds nothing in the walk and so is held to nothing.
+ */
+export const FAILURE_TYPES = /** @type {const} */ ([
+  { name: "RunFailure", file: "apps/web/src/exchange/useInviterExchange.ts" },
+  {
+    name: "ManagedRunFailureAlert",
+    file: "apps/web/src/recurring/managedRunLaunchModel.ts",
+  },
+]);
 
-/** Where {@link FAILURE_TYPE_NAME} is declared, held by the vacuity guard. */
-export const FAILURE_TYPE_FILE = "apps/web/src/exchange/useInviterExchange.ts";
+const FAILURE_TYPE_NAMES = new Set(FAILURE_TYPES.map(({ name }) => name));
 
-/** The component every `RunFailure` message renders through. */
-export const SINK_COMPONENT_NAME = "FailureMessage";
-
-/** Where {@link SINK_COMPONENT_NAME} is declared, held by the vacuity guard. */
+/** Where every sink below is declared, held by the vacuity guards. */
 export const SINK_COMPONENT_FILE = "apps/web/src/exchange/RunSurface.tsx";
 
-/** The sink's prop the message is passed as. */
-const SINK_MESSAGE_PROP = "message";
+/**
+ * The sink each piece of a failure's operator-facing text renders through,
+ * keyed by the property it is read off. A sink takes its piece as the prop of
+ * that same name, so the allowed position is `<Sink property={...} />` and
+ * nothing else.
+ */
+export const TEXT_SINKS = /** @type {const} */ ([
+  { property: "message", component: "FailureMessage" },
+  { property: "reportedCause", component: "FailureReportedCause" },
+]);
 
 /**
  * The declaration `node` annotates, with the property key path from that
@@ -169,9 +209,9 @@ function boundNames({ declaration, keys }) {
 }
 
 /**
- * Every name `sourceFile` annotates as {@link FAILURE_TYPE_NAME}, by the walk
- * the module header describes. Sorted, so a failure report reads the same on
- * every run.
+ * Every name `sourceFile` annotates as one of {@link FAILURE_TYPES}, by the
+ * walk the module header describes. Sorted, so a failure report reads the same
+ * on every run.
  */
 export function failureBindingNames(sourceFile) {
   const names = new Set();
@@ -179,7 +219,7 @@ export function failureBindingNames(sourceFile) {
     if (
       !ts.isTypeReferenceNode(node) ||
       !ts.isIdentifier(node.typeName) ||
-      node.typeName.text !== FAILURE_TYPE_NAME
+      !FAILURE_TYPE_NAMES.has(node.typeName.text)
     )
       continue;
     const annotation = annotatedDeclaration(node);
@@ -189,15 +229,15 @@ export function failureBindingNames(sourceFile) {
 }
 
 /**
- * The name of the element whose `message` attribute `container` is the value
- * of, or undefined when the container sits in any other JSX position -- a
+ * The name of the element whose `property`-named attribute `container` is the
+ * value of, or undefined when the container sits in any other JSX position -- a
  * child, or another attribute.
  */
-function messagePropElementName(container) {
+function propElementName(container, property) {
   const attribute = container.parent;
   if (!attribute || !ts.isJsxAttribute(attribute)) return undefined;
   if (!ts.isIdentifier(attribute.name)) return undefined;
-  if (attribute.name.text !== SINK_MESSAGE_PROP) return undefined;
+  if (attribute.name.text !== property) return undefined;
   const opening = attribute.parent?.parent;
   if (
     !opening ||
@@ -208,24 +248,63 @@ function messagePropElementName(container) {
   return opening.tagName.text;
 }
 
+/** The comparisons whose operands are read for a verdict rather than for their
+ * value, so a piece read into one reaches the operator through neither side. */
+const EQUALITY_OPERATORS = new Set([
+  ts.SyntaxKind.EqualsEqualsToken,
+  ts.SyntaxKind.ExclamationEqualsToken,
+  ts.SyntaxKind.EqualsEqualsEqualsToken,
+  ts.SyntaxKind.ExclamationEqualsEqualsToken,
+]);
+
 /**
- * Every JSX render of a `RunFailure` message in `sourceFile`, as
- * `{line, text, throughSink}` records in source order. `throughSink` is true for
- * the one allowed position -- the `message` attribute of a
- * {@link SINK_COMPONENT_NAME} element -- and false for every other container.
+ * Whether `node` is read as a condition and not as a value: an operand of an
+ * equality comparison, the operand of a `!`, a conditional expression's test,
+ * or the left side of a `&&`, which yields that side only where it is falsy and
+ * so renders nothing the operator reads. A `??` or a `||` is neither: each
+ * yields the left side's own value. Whatever the guarded branch renders is a
+ * read of its own.
  */
-export function failureMessageRenders(sourceFile) {
+function readAsCondition(node) {
+  const { parent } = node;
+  if (!parent) return false;
+  if (ts.isBinaryExpression(parent)) {
+    if (EQUALITY_OPERATORS.has(parent.operatorToken.kind)) return true;
+    if (parent.operatorToken.kind !== ts.SyntaxKind.AmpersandAmpersandToken)
+      return false;
+    // A `&&` hands its RIGHT side on as the whole expression's value, so that
+    // side is a condition only where the expression it yields to is one --
+    // which is the chained guard, `{a && failure.reportedCause && <Sink />}`.
+    return parent.left === node || readAsCondition(parent);
+  }
+  if (ts.isConditionalExpression(parent)) return parent.condition === node;
+  return (
+    ts.isPrefixUnaryExpression(parent) &&
+    parent.operator === ts.SyntaxKind.ExclamationToken
+  );
+}
+
+/**
+ * Every JSX render of a failure's operator-facing text in `sourceFile`, as
+ * `{line, text, property, throughSink}` records in source order. `throughSink`
+ * is true for the one allowed position -- the property's own attribute of its
+ * own sink in {@link TEXT_SINKS} -- and false for every other container.
+ */
+export function failureTextRenders(sourceFile) {
   const names = new Set(failureBindingNames(sourceFile));
   if (names.size === 0) return [];
   const found = [];
   for (const node of descendants(sourceFile)) {
     if (
       !ts.isPropertyAccessExpression(node) ||
-      node.name.text !== SINK_MESSAGE_PROP ||
       !ts.isIdentifier(node.expression) ||
       !names.has(node.expression.text)
     )
       continue;
+    const sink = TEXT_SINKS.find(
+      (candidate) => candidate.property === node.name.text,
+    );
+    if (!sink || readAsCondition(node)) continue;
     let container;
     for (let up = node.parent; up; up = up.parent) {
       if (ts.isJsxExpression(up)) {
@@ -238,7 +317,8 @@ export function failureMessageRenders(sourceFile) {
     found.push({
       line: line + 1,
       text: node.getText(),
-      throughSink: messagePropElementName(container) === SINK_COMPONENT_NAME,
+      property: sink.property,
+      throughSink: propElementName(container, sink.property) === sink.component,
     });
   }
   return found;
@@ -270,42 +350,56 @@ export function exportsFunction(sourceFile, name) {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const failures = [];
 
-  if (!declaresType(parseFile(FAILURE_TYPE_FILE), FAILURE_TYPE_NAME))
-    failures.push(
-      `${FAILURE_TYPE_FILE}: no longer declares ${FAILURE_TYPE_NAME} -- it moved or was renamed, and this check scans for that name; update scripts/check-run-failure-sink.mjs to follow it.`,
-    );
-  if (!exportsFunction(parseFile(SINK_COMPONENT_FILE), SINK_COMPONENT_NAME))
-    failures.push(
-      `${SINK_COMPONENT_FILE}: no longer exports ${SINK_COMPONENT_NAME} -- the sink moved or was renamed, and this check names it; update scripts/check-run-failure-sink.mjs to follow it.`,
-    );
+  for (const { name, file } of FAILURE_TYPES)
+    if (!declaresType(parseFile(file), name))
+      failures.push(
+        `${file}: no longer declares ${name} -- it moved or was renamed, and this check scans for that name; update scripts/check-run-failure-sink.mjs to follow it.`,
+      );
+  const sinkSource = parseFile(SINK_COMPONENT_FILE);
+  for (const { component } of TEXT_SINKS)
+    if (!exportsFunction(sinkSource, component))
+      failures.push(
+        `${SINK_COMPONENT_FILE}: no longer exports ${component} -- the sink moved or was renamed, and this check names it; update scripts/check-run-failure-sink.mjs to follow it.`,
+      );
 
   const files = sourceModules(WEB_SOURCE_DIR);
-  let throughSink = 0;
+  const throughSink = new Map(TEXT_SINKS.map(({ property }) => [property, 0]));
   for (const file of files) {
     const sourceFile = parseFile(file);
-    for (const { line, text, throughSink: allowed } of failureMessageRenders(
-      sourceFile,
-    )) {
+    for (const {
+      line,
+      text,
+      property,
+      throughSink: allowed,
+    } of failureTextRenders(sourceFile)) {
       if (allowed) {
-        throughSink += 1;
+        throughSink.set(property, throughSink.get(property) + 1);
         continue;
       }
+      const { component } = TEXT_SINKS.find(
+        (sink) => sink.property === property,
+      );
       failures.push(
-        `${file}:${line}: renders \`${text}\` outside the ${SINK_COMPONENT_NAME} sink (${SINK_COMPONENT_FILE}) -- a ${FAILURE_TYPE_NAME} message is a cause chain separated by newlines, which only that component's pre-line style lays out as line breaks; render it as <${SINK_COMPONENT_NAME} ${SINK_MESSAGE_PROP}={...} /> instead of styling a span here.`,
+        `${file}:${line}: renders \`${text}\` outside the ${component} sink (${SINK_COMPONENT_FILE}) -- a failure's ${property} is a cause chain laid out by that component alone, on the renderer's own newlines and on the escaped line-break markers a value's text holds; render it as <${component} ${property}={...} /> instead of styling a span here.`,
       );
     }
   }
 
-  if (throughSink === 0)
-    failures.push(
-      `No render through the ${SINK_COMPONENT_NAME} sink was found under ${WEB_SOURCE_DIR} -- with nothing going through it this check protects nothing, so either the sink's callers moved out of this scan's reach or the binding walk stopped recognizing them; update scripts/check-run-failure-sink.mjs to follow them.`,
-    );
+  for (const { property, component } of TEXT_SINKS)
+    if (throughSink.get(property) === 0)
+      failures.push(
+        `No render through the ${component} sink was found under ${WEB_SOURCE_DIR} -- with nothing going through it this check protects nothing for a failure's ${property}, so either the sink's callers moved out of this scan's reach or the binding walk stopped recognizing them; update scripts/check-run-failure-sink.mjs to follow them.`,
+      );
 
   if (failures.length > 0) {
     for (const failure of failures) console.error(failure);
     process.exit(1);
   }
+  const counts = TEXT_SINKS.map(
+    ({ property, component }) =>
+      `${throughSink.get(property)} of ${property} through ${component}`,
+  ).join(", ");
   console.log(
-    `RunFailure display-sink check passed: ${throughSink} render(s) of a ${FAILURE_TYPE_NAME} message across ${files.length} scanned file(s), all through ${SINK_COMPONENT_NAME}.`,
+    `Failure display-sink check passed: ${counts}, across ${files.length} scanned file(s), with no render outside a sink.`,
   );
 }

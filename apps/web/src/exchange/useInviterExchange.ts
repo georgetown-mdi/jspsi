@@ -88,7 +88,8 @@ export interface RunFailure {
    * application's own words. Set where the category's copy is fixed and the
    * report is the only account of the cause the operator gets
    * (docs/notes/reported-failure-cause.md); absent where there is nothing to
-   * report, and absent on the categories whose copy IS the report. */
+   * report, where this browser raised the failure itself and {@link message}
+   * holds that account, and on the categories whose copy IS the report. */
   reportedCause?: string;
 }
 
@@ -108,6 +109,18 @@ function sanitizedFailureMessage(error: unknown): string {
   return error instanceof RelayedTerminalError
     ? joinErrorCauseChain(sanitizeErrorChainLinks(error.message))
     : sanitizeErrorForDisplay(error);
+}
+
+/**
+ * The `reportedCause` field of a failure whose copy is this application's own,
+ * as the fields to spread: `cause` where it holds an account of the failure,
+ * and nothing at all where it does not -- a failure with nothing readable to
+ * report gets no block, rather than an empty one under a label promising an
+ * account. One helper so both categories that state their own copy in front of
+ * the report decide the empty report the same way.
+ */
+function reportedCauseFields(cause: string): Pick<RunFailure, "reportedCause"> {
+  return cause.trim() === "" ? {} : { reportedCause: cause };
 }
 
 /** @internal */
@@ -218,21 +231,34 @@ export function failureFor(
     };
   }
   if (category === "output") {
-    // The exchange succeeded; only a local write failed, so this alert must
-    // not invite a re-run of a privacy-sensitive exchange -- unlike the other
-    // categories it offers no retry control, and says so explicitly. The
-    // cause is either this browser's own results-file build or the console's
-    // report of a lost local write it cannot name, so the message claims only
-    // that a local write failed. Sanitized at the display boundary like any
-    // operator-facing alert.
+    // The exchange succeeded; only a local write failed, so this alert must not
+    // invite a re-run of a privacy-sensitive exchange -- unlike the other
+    // categories it offers no retry control, and says so explicitly. Those
+    // sentences are this application's own, so only an account of a write this
+    // browser did not make stands on the labelled block beside them
+    // (docs/notes/reported-failure-cause.md). The class tells the two apart:
+    // the job client alone builds a relayed terminal, rebuilding the chain the
+    // console reported, while a failure of this browser's own results-file
+    // build is this application's account of its own write and finishes the
+    // sentence rather than standing under a label attributing it elsewhere.
+    const doNotRepeat =
+      "The linkage completed, so do not run this exchange again - a second " +
+      "run would send your data for an exchange that already happened. On " +
+      "this machine, a local write failed";
+    // A rejection that is not an `Error` is shown here in the text it has,
+    // where the retryable category below withholds it: this copy accounts for
+    // nothing beyond a local write and the alert offers no retry, so the cause
+    // is the whole of what the operator has to act on.
+    const cause = sanitizedFailureMessage(error);
+    const consoleReported = error instanceof RelayedTerminalError;
     return {
       category,
       title: "Results unavailable",
       message:
-        "The linkage completed, so do not run this exchange again - a second " +
-        "run would send your data for an exchange that already happened. On " +
-        "this machine, a local write failed: " +
-        sanitizedFailureMessage(error),
+        consoleReported || cause.trim() === ""
+          ? `${doNotRepeat}.`
+          : `${doNotRepeat}: ${cause}`,
+      ...(consoleReported ? reportedCauseFields(cause) : {}),
     };
   }
   if (error instanceof LinkageTermsUnsatisfiableError) {
@@ -329,8 +355,6 @@ export function failureFor(
   // synced shared folder, so a temporary-connection message misdirects. Name the
   // shared-state cause instead. Both messages are built from operator-known facts
   // alone and keep the retry affordance.
-  const reportedCause =
-    error instanceof Error ? sanitizedFailureMessage(error) : "";
   return {
     category,
     title: "Exchange failed",
@@ -341,9 +365,13 @@ export function failureFor(
           "try again."
         : "The exchange could not be completed - usually a temporary " +
           "connection problem rather than an issue with your data.",
-    // An error with nothing readable to report gets no block at all, rather than
-    // an empty one under a label promising an account of the failure.
-    ...(reportedCause.trim() === "" ? {} : { reportedCause }),
+    // A rejection that is not an `Error` has no chain to attribute, and its
+    // `String()` form displays as `undefined` or `[object Object]` under a label
+    // promising the exchange's own account of the failure. The fixed copy above
+    // stands in its place.
+    ...reportedCauseFields(
+      error instanceof Error ? sanitizedFailureMessage(error) : "",
+    ),
   };
 }
 

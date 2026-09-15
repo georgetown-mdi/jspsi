@@ -10,6 +10,8 @@
  * value except the record's own local `expires`.
  */
 
+import { sanitizeErrorForDisplay } from "@psilink/core";
+
 import {
   ManagedExchangeExpiredError,
   benignRerunOutcome,
@@ -88,6 +90,12 @@ export interface ManagedRunFailureAlert {
   title: string;
   /** The operator-facing message. */
   message: string;
+  /** What the run itself reported, escaped for display and shown in a labelled
+   * block of its own rather than inside {@link message}, which is this
+   * application's own words (docs/notes/reported-failure-cause.md). Set only on
+   * the states {@link managedFailureShowsReportedCause} names, and never on a
+   * state read back from a record, which holds no error to report. */
+  reportedCause?: string;
   /** The recovery affordance the host renders. */
   recovery: ManagedRunRecovery;
 }
@@ -464,6 +472,59 @@ function attestsNonDisclosure(tier: ManagedFailureTier): boolean {
 }
 
 /**
+ * The states that show the launch error's reported cause beside their own copy,
+ * in the labelled block the seats render it through (`FailureBody` in
+ * `../exchange/RunSurface.tsx`). An allowlist, so a state added to the model
+ * shows nothing until it is listed here.
+ *
+ * The transport state is the one whose copy accounts for nothing, and so the
+ * one state the question is live for; it withholds on the maintainer's
+ * standing ruling, its error kept to the dev-gated console
+ * ({@link TRANSPORT_FAILURE}). Reversing that ruling is this list gaining
+ * `"transport"`. Every other state's copy states the cause itself, fixed and
+ * non-oracular by the decision each constant above records, and the unexplained
+ * state withholds for the reason the seats withhold a failed-closed handshake's
+ * message (docs/notes/reported-failure-cause.md).
+ */
+const STATES_SHOWING_REPORTED_CAUSE: ReadonlyArray<
+  ManagedRunFailureAlert["kind"]
+> = [];
+
+/**
+ * Whether a classified state shows the launch error as the cause the run
+ * reported. The one site the withholding is decided at: what the operator is
+ * shown follows from {@link STATES_SHOWING_REPORTED_CAUSE} alone, on the live
+ * launch path and on any other a state reaches a seat by.
+ *
+ * @internal exported for the unit test.
+ */
+export function managedFailureShowsReportedCause(
+  kind: ManagedRunFailureAlert["kind"],
+): boolean {
+  return STATES_SHOWING_REPORTED_CAUSE.includes(kind);
+}
+
+/**
+ * A classified state with `error` attached as the cause the run reported, where
+ * `shown` says the state shows one. The decision is passed in rather than read
+ * here so it stays at the single site above and this stays the mechanism: the
+ * escape at the display boundary, and the empty report that gets no block
+ * rather than a label promising an account the state has none of. A rejection
+ * that is not an `Error` has no chain to attribute.
+ *
+ * @internal exported for the unit test.
+ */
+export function withReportedCause(
+  failure: ManagedRunFailureAlert,
+  error: unknown,
+  shown: boolean,
+): ManagedRunFailureAlert {
+  const reportedCause: string =
+    shown && error instanceof Error ? sanitizeErrorForDisplay(error) : "";
+  return reportedCause.trim() === "" ? failure : { ...failure, reportedCause };
+}
+
+/**
  * Classify a launch failure into the surface's {@link ManagedRunFailure}. The
  * benign states are read through {@link benignRerunOutcome}, each with its own
  * plain copy -- the expiry state names the lapsed instant the error has, the
@@ -484,8 +545,37 @@ function attestsNonDisclosure(tier: ManagedFailureTier): boolean {
  * state whose copy claims nothing left this device is read off the error only
  * from before it, and a derived tier making the same claim is gated by it too
  * ({@link MANAGED_RUN_NON_DISCLOSURE_ATTESTATION}).
+ *
+ * Whatever state it lands on, the launch error reaches the operator only
+ * through {@link managedFailureShowsReportedCause}.
  */
 export function classifyManagedRunFailure(
+  error: unknown,
+  records: ManagedRunRecordReadings,
+  local: ManagedLocalState | undefined,
+  now: number,
+  dataExchangeStarted: boolean,
+): ManagedRunFailure {
+  const state = classifyLaunchState(
+    error,
+    records,
+    local,
+    now,
+    dataExchangeStarted,
+  );
+  return state.kind === "handed-off"
+    ? state
+    : withReportedCause(
+        state,
+        error,
+        managedFailureShowsReportedCause(state.kind),
+      );
+}
+
+/** The state a launch failure lands on, before the launch error is offered to
+ * it ({@link classifyManagedRunFailure}, which is the whole of this function's
+ * reach). */
+function classifyLaunchState(
   error: unknown,
   records: ManagedRunRecordReadings,
   local: ManagedLocalState | undefined,

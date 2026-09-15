@@ -51,6 +51,7 @@ import { appendSanitizedRunWarning } from "@psi/runWarnings";
 import {
   CopyRow,
   DonePanel,
+  FailureBody,
   RunDownloads,
   RunWarningsAlert,
 } from "@exchange/RunSurface";
@@ -895,9 +896,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
               failure !== undefined && (
                 <>
                   <Alert color="red" title={failure.title} mb="md">
-                    <span style={{ whiteSpace: "pre-line" }}>
-                      {failure.message}
-                    </span>
+                    <FailureBody failure={failure} />
                   </Alert>
                   {/* Below the failure, not in place of it: a run that stopped
                       after sending raises its own notice when it could not file

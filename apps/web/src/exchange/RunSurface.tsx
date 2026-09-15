@@ -550,29 +550,61 @@ export function FailureMessage({ message }: { message: string }) {
 export const REPORTED_CAUSE_LABEL = "Reported by the exchange";
 
 /**
- * A failure's body: this application's own message, and -- where the failure has
- * one -- the cause the exchange reported, in a block of its own under
- * {@link REPORTED_CAUSE_LABEL}. The block is what separates the two voices, so
- * the label is DOM text ahead of the report rather than an accessible name, and
- * the report is set in the mono face this design reserves for data and protocol
- * state (docs/notes/reported-failure-cause.md). Both failure surfaces render
- * through here, which keeps that separation to one component.
+ * The sink a failure's reported cause is shown through: the block of its own
+ * under {@link REPORTED_CAUSE_LABEL} that separates the exchange's words from
+ * this application's. The label is DOM text ahead of the report rather than an
+ * accessible name, and the report is set in the mono face this design reserves
+ * for data and protocol state (docs/notes/reported-failure-cause.md).
  *
- * The report is a rendered cause chain as the message can be, so it goes through
+ * The report is a rendered cause chain as a message can be, so it goes through
  * {@link layOutValueLineBreaks} too; its own rule sets the `pre-line` those
- * breaks need (`.reportedCauseText` in `../styles/app.module.css`).
+ * breaks need (`.reportedCauseText` in `../styles/app.module.css`). Every seat
+ * reaches it through {@link FailureBody} rather than inlining the report in a
+ * span of its own, which `scripts/check-run-failure-sink.mjs` holds.
  */
-export function FailureBody({ failure }: { failure: RunFailure }) {
+export function FailureReportedCause({
+  reportedCause,
+}: {
+  reportedCause: string;
+}) {
+  return (
+    <div className={styles.reportedCause}>
+      <p className={styles.reportedCauseLabel}>{REPORTED_CAUSE_LABEL}</p>
+      <p className={`${styles.mono} ${styles.reportedCauseText}`}>
+        {layOutValueLineBreaks(reportedCause)}
+      </p>
+    </div>
+  );
+}
+
+/**
+ * The operator-facing text of a failed run, whichever seat classified it. The
+ * two seats classify into types of their own -- `RunFailure` in
+ * `./useInviterExchange`, `ManagedRunFailureAlert` in
+ * `../recurring/managedRunLaunchModel`, each with the recovery its own surface
+ * offers -- and satisfy this shape, so the two voices are separated by one
+ * component on both rather than by a copy of it on each.
+ */
+export interface FailureText {
+  /** This application's own words about the failure. */
+  message: string;
+  /** What the exchange itself reported, escaped for display; absent where the
+   * seat has nothing to attribute to the exchange. */
+  reportedCause?: string;
+}
+
+/**
+ * A failure's body: this application's own message, and -- where the failure has
+ * one -- the cause the exchange reported, under its own label. Every failure
+ * surface renders through here, which keeps the separation of the two voices to
+ * one component.
+ */
+export function FailureBody({ failure }: { failure: FailureText }) {
   return (
     <>
       <FailureMessage message={failure.message} />
       {failure.reportedCause !== undefined && (
-        <div className={styles.reportedCause}>
-          <p className={styles.reportedCauseLabel}>{REPORTED_CAUSE_LABEL}</p>
-          <p className={`${styles.mono} ${styles.reportedCauseText}`}>
-            {layOutValueLineBreaks(failure.reportedCause)}
-          </p>
-        </div>
+        <FailureReportedCause reportedCause={failure.reportedCause} />
       )}
     </>
   );

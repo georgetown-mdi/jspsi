@@ -2269,6 +2269,9 @@ describe("inviter screen", () => {
     await expect
       .element(page.getByText("Results unavailable"))
       .toBeInTheDocument();
+    // The build that failed is this browser's own, so its account finishes the
+    // do-not-repeat sentences rather than standing under a label attributing it
+    // to the exchange.
     await expect
       .element(page.getByText(/a local write failed: blob quota exceeded/))
       .toBeInTheDocument();

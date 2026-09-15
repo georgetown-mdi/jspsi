@@ -152,16 +152,66 @@ describe("failureFor", () => {
     expect(failure.reportedCause).toBeUndefined();
   });
 
-  test("the output message forbids the re-run and still holds the cause", () => {
+  test("the output message forbids the re-run and states its own write", () => {
     // The exchange itself completed, so the alert withholds every run-again
     // control -- and says why, rather than leaving the operator to look for the
-    // control somewhere else. The local cause stays in the message.
+    // control somewhere else. The build that failed is this browser's own, so
+    // its account finishes those sentences: a block would attribute this
+    // application's own words to an exchange that reported nothing.
     const failure = failureFor("output", new Error("blob quota exceeded"));
     expect(failure.message).toContain("do not run this exchange again");
     expect(failure.message).toContain("already happened");
     expect(failure.message).toContain(
       "a local write failed: blob quota exceeded",
     );
+    expect(failure.reportedCause).toBeUndefined();
+  });
+
+  test("the console's report of a lost write stands on the block", () => {
+    // A relayed terminal holds the chain the job client rebuilt from the
+    // console's own report of a write this browser did not make, so it stands
+    // beside the do-not-repeat sentences under the exchange's label instead of
+    // running on from them in one voice, and keeps its links.
+    const failure = failureFor(
+      "output",
+      new RelayedTerminalError(
+        "the results file could not be written\ncaused by: EACCES",
+      ),
+    );
+    expect(failure.message).toContain("a local write failed.");
+    expect(failure.message).not.toContain("EACCES");
+    expect(failure.reportedCause).toBe(
+      "the results file could not be written\ncaused by: EACCES",
+    );
+  });
+
+  test("the output message states a rejection of either shape", () => {
+    // The copy accounts for nothing beyond a local write, so whatever the build
+    // rejected with is the operator's whole account of which write and why. A
+    // value thrown bare reads in its own text, an `Error` as its chain, and
+    // both are escaped at this boundary like any other operator-facing text.
+    expect(
+      failureFor("output", "the directory handle went away").message,
+    ).toContain("a local write failed: the directory handle went away");
+    const hostile = "\u001b[2Jthe directory handle went away";
+    expect(failureFor("output", hostile).message).toContain(
+      `a local write failed: ${sanitizeForDisplay(hostile)}`,
+    );
+  });
+
+  test("an output failure with nothing to report ends the sentence", () => {
+    // Neither source leaves the operator a promise with nothing behind it: an
+    // empty block under a label promising an account is worse than no block,
+    // and so is a sentence that opens on a cause and stops.
+    const built = failureFor("output", new Error("   "));
+    expect(built.message).toContain("a local write failed.");
+    expect(built.reportedCause).toBeUndefined();
+    expect(failureFor("output", "  ").message).toContain(
+      "a local write failed.",
+    );
+    const relayed = failureFor("output", new RelayedTerminalError("  "));
+    expect(relayed.message).toContain("a local write failed.");
+    expect(relayed.reportedCause).toBeUndefined();
   });
 
   test("the exchange message makes no on-device data claim", () => {
