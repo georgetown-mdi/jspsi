@@ -327,9 +327,16 @@ only explicit (non-inherited) non-owner ACEs -- and on a host where a new
 file's SYSTEM and Administrators entries are explicit rather than inherited,
 that tier names them too. Its warning says what it did not inspect, and a
 warning about a file that is in fact narrowed is the direction that does not
-hide one that is not. When that tier cannot run either, the CLI warns that the
-file's access list could not be read and names the `icacls` invocation to check
-it by hand: the operator is trusted and the check is advisory, so an
+hide one that is not.
+
+That tier is read whole or not at all as well: `icacls` failing to run, and
+output holding no line of an entry's `principal:(flags)` shape, both count as a
+failure to read, for the same reason an empty PowerShell listing does. Two
+warnings report a list that could not be judged, and both name the `icacls`
+invocation to check it by hand: one that the access list could not be read
+(neither tier produced entries), and one that the current user could not be
+determined -- `whoami` failed, so `icacls` output that was read has no identity
+to be judged against. The operator is trusted and the check is advisory, so an
 unverifiable access list is reported rather than treated as a refusal to load.
 `fs.statSync` is not used for either check because it returns simulated POSIX
 mode bits that do not reflect the actual ACL.

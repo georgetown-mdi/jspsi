@@ -1234,14 +1234,18 @@ function aclListing(rules: [string, number, number][]): string {
   return [OWNER_SID, ...rules.map((rule) => rule.join(";"))].join("|");
 }
 
-// Drive the win32 route of `warnIfFileOverPermissive` on any host: `powershell`
-// and `icacls` answer with the given output, or throw the given error to stand
-// for a command that cannot be spawned. Returns the command lines the check ran
-// and the warnings it emitted.
-function runWindowsAclCheck(replies: {
+// What each command the win32 route runs answers with: output it prints, or an
+// error to stand for one that cannot be spawned. `whoami` is left to the real
+// command unless a failure is asked for.
+interface AclReplies {
   powershell: string | Error;
   icacls?: string | Error;
-}): { commands: string[]; warnings: string[] } {
+  whoami?: Error;
+}
+
+// Arm the recorder so the win32 route's commands answer per `replies` instead
+// of running.
+function answerAclCommands(replies: AclReplies): void {
   const answer = (reply: string | Error): string => {
     if (reply instanceof Error) throw reply;
     return reply;
@@ -1250,21 +1254,68 @@ function runWindowsAclCheck(replies: {
   execFile.respond = (file) => {
     if (file === "powershell") return answer(replies.powershell);
     if (file === "icacls") return answer(replies.icacls ?? "");
+    if (file === "whoami" && replies.whoami !== undefined) throw replies.whoami;
     return undefined;
   };
+}
+
+// Collect what `logger` warns, as one string per call.
+function captureWarnings(logger: ReturnType<typeof getLogger>): string[] {
   const warnings: string[] = [];
-  vi.spyOn(getLogger("file-utils"), "warn").mockImplementation(
-    (...args: unknown[]) => {
-      warnings.push(args.map(String).join(" "));
-    },
-  );
+  vi.spyOn(logger, "warn").mockImplementation((...args: unknown[]) => {
+    warnings.push(args.map(String).join(" "));
+  });
+  return warnings;
+}
+
+// Drive the win32 route of `warnIfFileOverPermissive` on any host. Returns the
+// command lines the check ran and the warnings it emitted.
+function runWindowsAclCheck(replies: AclReplies): {
+  commands: string[];
+  warnings: string[];
+} {
+  answerAclCommands(replies);
+  const warnings = captureWarnings(getLogger("file-utils"));
   withPlatform("win32", () =>
     warnIfFileOverPermissive(path.join(dir, "secret"), "shared secret"),
   );
   return { commands: execFile.commands.map((c) => c[0]), warnings };
 }
 
+// The same, against a freshly imported copy of the module. The CLI memoizes
+// `whoami` for the process once it succeeds, so on a host that has already run
+// it -- a real Windows run of the writers above -- a stub that throws would
+// never be consulted. The fresh copy has yet to run it. Core is imported first
+// so the spy lands on the same copy of the logger the fresh module will load.
+async function runWindowsAclCheckFresh(
+  replies: AclReplies,
+): Promise<{ commands: string[]; warnings: string[] }> {
+  vi.resetModules();
+  const { getLogger: freshGetLogger } = await import("@psilink/core");
+  const warnings = captureWarnings(freshGetLogger("file-utils"));
+  const fresh = await import("../../src/fileUtils");
+  answerAclCommands(replies);
+  withPlatform("win32", () =>
+    fresh.warnIfFileOverPermissive(path.join(dir, "secret"), "shared secret"),
+  );
+  return { commands: execFile.commands.map((c) => c[0]), warnings };
+}
+
 const UNSPAWNABLE = new Error("spawn ENOENT");
+
+// What `icacls <path>` prints for a file carrying an explicit Guests grant: the
+// path on its own line, one entry per line under it, then the summary line
+// whose wording is locale-dependent. The entries sit below the echoed path
+// rather than beside it so the listing reads the same whatever separator the
+// host's paths use.
+function guestGrantListing(): string {
+  return (
+    `${path.join(dir, "secret")}\n` +
+    ` BUILTIN\\Guests:(R)\n` +
+    ` NT AUTHORITY\\SYSTEM:(I)(F)\n` +
+    `\nSuccessfully processed 1 files; Failed processing 0 files\n`
+  );
+}
 
 describe("Windows access-list check tiers", () => {
   test("a listing that exits non-zero falls through to icacls", () => {
@@ -1273,7 +1324,9 @@ describe("Windows access-list check tiers", () => {
     });
 
     expect(commands).toContain("icacls");
-    expect(warnings).toEqual([]);
+    // The icacls reply defaults to no output, which is itself a failed read.
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("Could not read the access list");
   });
 
   test("a listing that prints nothing falls through to icacls", () => {
@@ -1300,7 +1353,45 @@ describe("Windows access-list check tiers", () => {
     });
 
     expect(commands).toContain("icacls");
-    expect(warnings).toEqual([]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("Could not read the access list");
+  });
+
+  test("icacls output holding no entry line is a failed read", () => {
+    const { warnings } = runWindowsAclCheck({
+      powershell: UNSPAWNABLE,
+      icacls: "Successfully processed 1 files; Failed processing 0 files\n",
+    });
+
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("Could not read the access list");
+    expect(warnings[0]).toContain("no recognizable entry");
+  });
+
+  test("an explicit entry for another principal warns", () => {
+    const { warnings } = runWindowsAclCheck({
+      powershell: UNSPAWNABLE,
+      icacls: guestGrantListing(),
+    });
+
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("granting access to other users");
+  });
+
+  test("a whoami failure says the current user could not be determined", async () => {
+    const { commands, warnings } = await runWindowsAclCheckFresh({
+      powershell: UNSPAWNABLE,
+      icacls: guestGrantListing(),
+      whoami: new Error("spawn ENOENT"),
+    });
+
+    // The stub is only reached while the memoized value is unset; a run that
+    // never spawned whoami would be asserting nothing.
+    expect(commands).toContain("whoami");
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("Could not determine the current user");
+    expect(warnings[0]).toContain("spawn ENOENT");
+    expect(warnings[0]).not.toContain("Could not read the access list");
   });
 
   test("neither tier able to run warns that the access list was not read", () => {
