@@ -323,7 +323,8 @@ Ratified by the owner:
 - **Signed Exchange Receipts** (board 9) -- Done is: every exchange that moves a
   payload yields a record whose signing identity was pinned and verified before
   the send, and no identity divergence or certificate mismatch is discoverable
-  only after the fact.
+  only after the fact, and every input a verified verdict needs is an artifact
+  the product produces, not one the operator is told to have kept.
 - **Sync Tool** (board 9) -- Done is: no interruption of a file-drop or SFTP
   exchange -- crash, restart, dropped endpoint, or a peer that never arrives --
   leaves a run wedged or a working directory unresumable, and every wait is
