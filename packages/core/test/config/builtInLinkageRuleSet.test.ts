@@ -77,6 +77,20 @@ const drawnFrom = (
   linkageKeys: structuredClone([...ruleSet.linkageKeys]),
 });
 
+/** Every object or array reachable within `value` that an edit could still
+ * change in place, each named from `path` so a failure states where it sits. */
+const unfrozenPathsWithin = (value: unknown, path: string): string[] => {
+  if (typeof value !== "object" || value === null) return [];
+  const paths = Object.isFrozen(value) ? [] : [path];
+  for (const [key, held] of Object.entries(value)) {
+    const heldPath = Array.isArray(value)
+      ? `${path}[${key}]`
+      : `${path}.${key}`;
+    paths.push(...unfrozenPathsWithin(held, heldPath));
+  }
+  return paths;
+};
+
 describe("BUILT_IN_LINKAGE_RULE_SETS", () => {
   test("holds the set every path that authors nothing draws from", () => {
     expect(BUILT_IN_LINKAGE_RULE_SETS).toContain(DEFAULT_LINKAGE_RULE_SET);
@@ -95,6 +109,18 @@ describe("BUILT_IN_LINKAGE_RULE_SETS", () => {
       registry[0] = secondRuleSet;
     }).toThrow();
     expect(BUILT_IN_LINKAGE_RULE_SETS).toContain(DEFAULT_LINKAGE_RULE_SET);
+  });
+
+  test("holds every set frozen through its contents", () => {
+    // Each set is aliased into every terms document derived from it and into
+    // every verdict reached against it, so an entry frozen at its top level
+    // alone would let one in-place edit move what later derivations draw and
+    // later verdicts compare against.
+    expect(
+      BUILT_IN_LINKAGE_RULE_SETS.flatMap((ruleSet, index) =>
+        unfrozenPathsWithin(ruleSet, `BUILT_IN_LINKAGE_RULE_SETS[${index}]`),
+      ),
+    ).toStrictEqual([]);
   });
 });
 
@@ -521,6 +547,57 @@ describe("checkLinkageRuleSetCitation", () => {
         keySet: shipped.keySet,
       }),
     ).toStrictEqual({ fieldSet: "unchecked", keySet: "consistent" });
+  });
+
+  test("reaches every verdict over a registry holding more than one set", () => {
+    // The verdict fills the exchange record and the consent review, so the
+    // registry it is reached against is the caller's to name: a set resolvable
+    // only in the registry passed here is checked, not left unchecked.
+    const registry = [DEFAULT_LINKAGE_RULE_SET, secondRuleSet];
+    expect(
+      checkLinkageRuleSetCitation(
+        secondRuleSet.reference,
+        drawnFrom(secondRuleSet),
+        registry,
+      ),
+    ).toStrictEqual({ fieldSet: "consistent", keySet: "consistent" });
+    expect(
+      checkLinkageRuleSetCitation(
+        secondRuleSet.reference,
+        wholeSet(),
+        registry,
+      ),
+    ).toStrictEqual({ fieldSet: "contradicted", keySet: "contradicted" });
+    // Each half is compared against the set declaring that half, so a citation
+    // naming two of the registry's sets is judged against both.
+    expect(
+      checkLinkageRuleSetCitation(
+        {
+          fieldSet: DEFAULT_LINKAGE_RULE_SET.reference.fieldSet,
+          keySet: secondRuleSet.reference.keySet,
+        },
+        wholeSet(),
+        registry,
+      ),
+    ).toStrictEqual({ fieldSet: "consistent", keySet: "contradicted" });
+    expect(
+      checkLinkageRuleSetCitation(
+        {
+          fieldSet: { name: "nobody-pii", version: "1.0.0" },
+          keySet: { name: "nobody-keys", version: "1.0.0" },
+        },
+        drawnFrom(secondRuleSet),
+        registry,
+      ),
+    ).toStrictEqual({ fieldSet: "unchecked", keySet: "unchecked" });
+    // Omitting the argument resolves against this build's own sets alone,
+    // which declare neither half of that citation.
+    expect(
+      checkLinkageRuleSetCitation(
+        secondRuleSet.reference,
+        drawnFrom(secondRuleSet),
+      ),
+    ).toStrictEqual({ fieldSet: "unchecked", keySet: "unchecked" });
   });
 
   test("agrees with the whole-set predicate wherever both halves resolve", () => {

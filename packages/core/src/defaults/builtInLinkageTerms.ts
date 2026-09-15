@@ -601,7 +601,7 @@ export function resolveLinkageRuleSetCitation(
  * them ships is a set the other may not.
  *
  * Resolution is {@link resolveLinkageRuleSetCitation}'s, per half and
- * against every shipped set: a half naming one of them is compared
+ * against every set in `ruleSets`: a half naming one of them is compared
  * against that set's own rules, and a half naming none is `unchecked`.
  * Nothing here resolves a partner's set name to content -- an
  * unresolvable name stays unresolvable, held and caveated rather than
@@ -611,12 +611,16 @@ export function resolveLinkageRuleSetCitation(
  * answer for that half, so this widens and narrows nothing: a narrowed
  * emission is `consistent`, while an added, edited, or repeated rule, or
  * a reordered cascade, is `contradicted`.
+ *
+ * @param ruleSets the sets the citation is resolved and compared against,
+ * this build's own ({@link BUILT_IN_LINKAGE_RULE_SETS}) by default.
  */
 export function checkLinkageRuleSetCitation(
   citation: LinkageRuleSetReference,
   rules: Pick<LinkageTerms, "linkageFields" | "linkageKeys">,
+  ruleSets: ReadonlyArray<BuiltInLinkageRuleSet> = BUILT_IN_LINKAGE_RULE_SETS,
 ): LinkageRuleSetCitationVerdicts {
-  const shipped = resolveLinkageRuleSetCitation(citation);
+  const shipped = resolveLinkageRuleSetCitation(citation, ruleSets);
   return {
     fieldSet:
       shipped.linkageFields === undefined
