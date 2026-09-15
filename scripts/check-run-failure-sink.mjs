@@ -15,11 +15,12 @@
 // apps/web/src/exchange/RunSurface.tsx, and an inline span rendering either
 // piece reddens here.
 //
-// THE TYPES HELD TO IT are the seats' failure types, `FAILURE_TYPES` below:
-// the exchange seats' `RunFailure` and the recurring seat's
-// `ManagedRunFailureAlert`. Both hold the two pieces and render them through
-// the same sinks, so both are held to them; a type absent from that list binds
-// nothing here.
+// THE TYPES HELD TO IT are `FAILURE_TYPES` below: the exchange seats'
+// `RunFailure`, the recurring seat's `ManagedRunFailureAlert`, and the
+// `FailureText` shape both of those satisfy, which is what a component taking
+// a failure as operator-facing text alone annotates its prop with. Each holds
+// the two pieces and renders them through the same sinks, so each is held to
+// them; a type absent from that list binds nothing here.
 //
 // THE SCANNED SET IS EVERY SOURCE UNDER apps/web/src, walked whole rather than
 // listed, so a new file is covered the moment it exists and there is no list to
@@ -83,17 +84,6 @@
 //   - Not matched, by construction of an AST walk: the name inside a comment or
 //     a string literal.
 //
-// STATED LIMITS beyond the ones named above:
-//
-//   - The binding walk keys on the two seat failure types listed in
-//     `FAILURE_TYPES` (`RunFailure`, `ManagedRunFailureAlert`); a component
-//     that types its prop as the shared `FailureText` shape from
-//     apps/web/src/exchange/RunSurface.tsx is outside the walk, so a read
-//     through such a prop is not reported.
-//   - `readAsCondition` admits a read only as the left operand of a logical
-//     `&&`; a `??` or `||` left operand, and every other operand position, is
-//     treated as a render and reported.
-//
 // The vacuity guards keep a green result meaningful, since every half of the
 // claim is named by identifier here and a rename would otherwise leave this
 // scanning for something that no longer exists: each tracked type's declaration
@@ -123,6 +113,7 @@ export const FAILURE_TYPES = /** @type {const} */ ([
     name: "ManagedRunFailureAlert",
     file: "apps/web/src/recurring/managedRunLaunchModel.ts",
   },
+  { name: "FailureText", file: "apps/web/src/exchange/RunSurface.tsx" },
 ]);
 
 const FAILURE_TYPE_NAMES = new Set(FAILURE_TYPES.map(({ name }) => name));
