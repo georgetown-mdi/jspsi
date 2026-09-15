@@ -69,6 +69,7 @@ const localPayloadSent: CommittedPayload = {
 const RECEIPT_BINDER = "YmluZGVy";
 const baseInputs: ExchangeRecordInputs = {
   outcome: "completed",
+  contributedLinkageFields: ["ssn"],
   localTerms: {
     version: "1.0.0",
     identity: "Party A",

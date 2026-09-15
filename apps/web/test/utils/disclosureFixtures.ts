@@ -159,6 +159,9 @@ export async function disclosureRecord(
   };
   const built = await buildExchangeRecord({
     localTerms,
+    contributedLinkageFields: localTerms.linkageFields.map(
+      (field) => field.name,
+    ),
     outcome: overrides.outcome ?? "completed",
     partnerTerms: partnerTermsFor(localTerms, overrides.partnerIdentity),
     recordsExposed: overrides.recordsExposed ?? 2,

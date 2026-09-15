@@ -681,6 +681,7 @@ describe("signedRecordExpectations", () => {
   const recordInputs: ExchangeRecordInputs = {
     localTerms: termsA,
     partnerTerms: termsB,
+    contributedLinkageFields: ["ssn"],
     outcome: "completed",
     recordsExposed: 5,
     resultSize: 1,

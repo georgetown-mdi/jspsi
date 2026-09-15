@@ -93,6 +93,7 @@ async function roundTrip(opts: {
   const { record, keys } = await buildExchangeRecord({
     localTerms: termsA,
     partnerTerms: termsB,
+    contributedLinkageFields: ["ssn"],
     outcome: "completed",
     recordsExposed: opts.rawRows.length,
     // matchedPairCount's own definition of the attested figure, read here
@@ -362,6 +363,7 @@ describe("reconstructCommittedData round-trips through the real build path", () 
     const { record, keys } = await buildExchangeRecord({
       localTerms: termsA,
       partnerTerms: termsB,
+      contributedLinkageFields: ["ssn"],
       outcome: "completed",
       recordsExposed: idRows.length,
       resultSize: 2,

@@ -22,6 +22,7 @@ import {
 } from "../config/linkageTermsSchema.js";
 import { checkLinkageRuleSetCitation } from "../defaults/builtInLinkageTerms.js";
 import { boundedArray } from "../utils/boundedArray.js";
+import { redactPrivateKeyMaterial } from "../utils/sanitizeErrorForDisplay.js";
 import {
   LINKAGE_CARDINALITIES,
   resolvedMatchingFromTerms,
@@ -796,10 +797,19 @@ export type CommittedPayload = {
  * an optional self-facing pointer from this party's local config, independent
  * of `localTerms`/`partnerTerms` and never put on the wire. The two payload
  * data sets are always committed (a no-data payload is committed as such).
+ * `contributedLinkageFields` states what this run had to match with, which the
+ * terms alone do not say.
  */
 export interface ExchangeRecordInputs {
   localTerms: LinkageTerms;
   partnerTerms: LinkageTerms;
+  /** The linkage fields this party's own input supplied, by standardized name
+   * -- for the run path, the fields `prepareForExchange`'s standardized dataset
+   * bound to an input column. Required on every build path: the matching basis
+   * is read from the agreed terms, and a basis naming a field this list does
+   * not hold is refused rather than written. A name this list holds that the
+   * terms never reference is ignored. */
+  contributedLinkageFields: readonly string[];
   /** This party's own input row count (the number of records it contributed to
    * the exchange). Always supplied -- a party always knows its own input size. */
   recordsExposed: number;
@@ -865,6 +875,13 @@ export interface BuiltExchangeRecord {
  * here, against the rule sets this build ships, so it is this party's own
  * statement rather than an agreed one.
  *
+ * The matching basis is checked against `contributedLinkageFields` and the
+ * build is refused when it names a field the run contributed none of. It stays
+ * a terms fact both parties' records agree on rather than being narrowed to
+ * this party's contribution, which is per-party and asymmetric; the two
+ * records would then disagree. Why the refusal and not a narrowing:
+ * docs/notes/one-sided-disclosure.md.
+ *
  * The payload column SETS are instead read from the COMMITTED payloads
  * (`localPayloadSent` / `partnerPayloadReceived`), not the optional
  * `terms.payload.send`/`receive` data dictionary, which is operator-authored,
@@ -889,6 +906,7 @@ function governanceFromTerms(
   partnerTerms: LinkageTerms,
   localPayloadSent: CommittedPayload,
   partnerPayloadReceived: CommittedPayload,
+  contributedLinkageFields: readonly string[],
 ): ExchangeRecordGovernance {
   // Map the columns ACTUALLY committed for a direction into record columns,
   // attaching each column's data-dictionary description from the
@@ -938,6 +956,22 @@ function governanceFromTerms(
   matchingBasis.sort((a, b) =>
     a.name < b.name ? -1 : a.name > b.name ? 1 : 0,
   );
+
+  // Every field name below is terms content -- partner-authored on every accept
+  // path -- redacted where it is composed in, so a marker planted in one name
+  // cannot take the names listed after it (see redactPrivateKeyMaterial).
+  const contributed = new Set(contributedLinkageFields);
+  const uncontributed = matchingBasis
+    .filter((field) => !contributed.has(field.name))
+    .map((field) => redactPrivateKeyMaterial(field.name));
+  if (uncontributed.length > 0)
+    throw new Error(
+      "the self-attested record would name linkage fields this run " +
+        `contributed no values for (${uncontributed.length}): ` +
+        `${uncontributed.join(", ")}. It is refused rather than written. Run ` +
+        "the exchange with an input that supplies every linkage field the " +
+        "agreed linkage keys reference.",
+    );
 
   // The citation and this party's verdict on it, both in the record format's
   // own shape. The citation is copied verbatim and the verdict written BESIDE
@@ -1073,6 +1107,7 @@ export async function buildExchangeRecord(
         inputs.partnerTerms,
         inputs.localPayloadSent,
         inputs.partnerPayloadReceived,
+        inputs.contributedLinkageFields,
       ),
     ),
     // This party's own input row count, validated on build with the
