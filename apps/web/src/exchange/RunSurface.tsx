@@ -15,6 +15,7 @@ import {
   DEFAULT_PEER_TIMEOUT_MS,
   describeEntityClusters,
   describeResolvedMatching,
+  replaceControlCharactersForDisplay,
 } from "@psilink/core";
 
 import { dateTimeLabel } from "@psi/formatting";
@@ -490,6 +491,15 @@ export function RunDownloads({
 }
 
 /**
+ * The marker a line break inside a message's own value arrives as, read off the
+ * treatment that writes it rather than restated: a value composed onto a cause
+ * link has its control characters replaced where it is composed, so its breaks
+ * reach this sink as printable text (docs/spec/CHANNEL_SECURITY.md, "Display
+ * sanitization escape format").
+ */
+const VALUE_LINE_BREAK_MARKER = replaceControlCharactersForDisplay("\n");
+
+/**
  * The sink a {@link RunFailure} message is shown through. The seat composes
  * the message as a cause chain relying on `pre-line` to turn the error
  * renderer's newline (`sanitizedFailureMessage` in `./useInviterExchange`)
@@ -497,9 +507,25 @@ export function RunDownloads({
  * ({@link ./RecoveredExchangePanel}) reach it through {@link FailureBody}
  * rather than styling their own span, keeping the layout
  * `test/browser/failureMessageLayout.test.ts` measures to one component.
+ *
+ * A break is laid out in front of each {@link VALUE_LINE_BREAK_MARKER} as well,
+ * so a diagnosis a CLI child wrote over several lines is read over several
+ * lines instead of as one wrapped line of markers. It is layout only: the
+ * message is already escaped when it arrives here, the marker stays in the text
+ * at the head of the line it opens, and a line a value's own break started is
+ * therefore distinguishable from a cause-link boundary, which opens on the
+ * renderer's `caused by: ` text. Since no value can spell a raw break, nothing
+ * a child writes reaches the operator as a boundary of the seat's chain.
  */
 export function FailureMessage({ message }: { message: string }) {
-  return <span style={{ whiteSpace: "pre-line" }}>{message}</span>;
+  return (
+    <span style={{ whiteSpace: "pre-line" }}>
+      {message.replaceAll(
+        VALUE_LINE_BREAK_MARKER,
+        `\n${VALUE_LINE_BREAK_MARKER}`,
+      )}
+    </span>
+  );
 }
 
 /** The label over a failure's reported cause. It names where the text came from
