@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { canonicalBytes } from "../utils/canonical.js";
+import { LinkageTermsSchema } from "../config/linkageTermsSchema.js";
 import { hkdfDerive, hmacSha256, toBase64Url } from "../utils/crypto.js";
 import {
   ConnectionError,
@@ -25,6 +26,7 @@ import type { HandshakeRole } from "../types.js";
 import type { MessageConnection } from "../connection/messageConnection.js";
 import type { CanonicalValue } from "../utils/canonical.js";
 import type { CommittedPayload } from "./exchangeRecord.js";
+import type { LinkageTerms } from "../config/linkageTermsSchema.js";
 import type { SigningCertificate, SigningIdentity } from "./signingIdentity.js";
 
 // Certificate-backed signed exchange receipts (the sign/exchange step): both
@@ -44,9 +46,9 @@ import type { SigningCertificate, SigningIdentity } from "./signingIdentity.js";
 
 /** Single recognized format version for a dual-signed record; a reader rejects
  * any other value rather than migrating it. It moves with the certificate
- * format the record embeds (docs/spec/EXCHANGE_RECORD.md, "Dual-signed record
- * file"). */
-export const SIGNED_RECEIPT_VERSION = "psilink-signed-receipt/v2";
+ * format the record embeds and with the envelope beside the signed content
+ * (docs/spec/EXCHANGE_RECORD.md, "Dual-signed record file"). */
+export const SIGNED_RECEIPT_VERSION = "psilink-signed-receipt/v3";
 
 // The domain label folded into the signed receipt-content bytes. Its version
 // tracks the shape of those bytes, not the signature algorithm; the embedded
@@ -350,19 +352,36 @@ export interface SignedReceiptParty {
  * plus both parties' certificates and signatures, serialized via the
  * canonical encoding so the verification item can parse it back. Roles are
  * fixed by the handshake (initiator / responder), not by "local"/"partner",
- * so both parties write the same record. The two files are byte-identical
- * because each party copies the signature the other sent rather than
- * re-deriving it; a third party holding a record can re-encode either
- * signature (ECDSA is malleable in `s`) and produce a differing copy that
- * still verifies, so the artifacts are compared by verifying them, not by
- * hashing the file. Full detail: docs/spec/EXCHANGE_RECORD.md
- * ("Dual-signed record file").
+ * so both parties sign and store the same content and the same two
+ * signature blocks: each party copies the signature the other sent rather
+ * than re-deriving it, and those fields agree byte for byte across the two
+ * copies even though ECDSA signing is randomized. A third party
+ * holding a record can re-encode either signature (ECDSA is malleable in
+ * `s`) and produce a differing copy that still verifies, so the artifacts
+ * are compared by verifying them, not by hashing the file. Full detail:
+ * docs/spec/EXCHANGE_RECORD.md ("Dual-signed record file").
  */
 export interface DualSignedRecord {
   version: typeof SIGNED_RECEIPT_VERSION;
   content: ReceiptContent;
   initiator: SignedReceiptParty;
   responder: SignedReceiptParty;
+  /**
+   * The linkage terms of the party the holder of this copy exchanged with,
+   * retained beside the signed content so the agreed-terms hash can be
+   * re-derived from the receipt and the holder's own terms, with no second
+   * file. This is the one field the two parties' copies differ in: each
+   * holds the OTHER party's terms.
+   *
+   * UNSIGNED: neither signature covers it, so a verifier re-derives the
+   * hash from it and compares (recordVerification.ts,
+   * signedReceiptVerification.ts) rather than trusting the copy -- terms
+   * that do not reproduce `content.termsHash` are a mismatch. Absent from a
+   * receipt whose holder stripped them, which verifies exactly as it does
+   * with them and leaves the hash to be checked against a supplied
+   * document instead.
+   */
+  partnerTerms?: LinkageTerms;
 }
 
 // --- Schema (for the verification item to parse back) ------------------------
@@ -400,11 +419,19 @@ const SignedReceiptPartySchema: z.ZodType<SignedReceiptParty> = z.object({
   signature: base64UrlSchema,
 });
 
+// The carried terms are partner-authored, so they are read under the same
+// bounded schema every other path that parses a partner's terms uses
+// (docs/spec/CHANNEL_SECURITY.md, "Transform-parameter declared types"); the
+// document is written from an already-parsed value in camelCase, so no
+// camelize pre-pass stands in front of it. A file whose carried terms do not
+// parse is refused whole rather than read with the field dropped, matching how
+// every other field of this format is read.
 const DualSignedRecordSchema: z.ZodType<DualSignedRecord> = z.object({
   version: z.literal(SIGNED_RECEIPT_VERSION),
   content: ReceiptContentSchema,
   initiator: SignedReceiptPartySchema,
   responder: SignedReceiptPartySchema,
+  partnerTerms: LinkageTermsSchema.optional(),
 });
 
 /** Serialize a {@link DualSignedRecord} to its on-disk/download string form:
@@ -559,6 +586,9 @@ export interface SignedReceiptExchangeInputs {
    * own. */
   partnerIdentity: string;
   content: ReceiptContent;
+  /** The partner's linkage terms, as the terms exchange parsed them, retained
+   * in the record's unsigned envelope. */
+  partnerTerms: LinkageTerms;
 }
 
 /**
@@ -587,7 +617,13 @@ export async function exchangeSignedReceipt(
   handshakeRole: HandshakeRole,
   inputs: SignedReceiptExchangeInputs,
 ): Promise<DualSignedRecord> {
-  const { identity, pinnedFingerprint, partnerIdentity, content } = inputs;
+  const {
+    identity,
+    pinnedFingerprint,
+    partnerIdentity,
+    content,
+    partnerTerms,
+  } = inputs;
   // This party signs bytes bound to its OWN role; the partner's role is the
   // opposite, and its signature is verified against bytes bound to that role.
   const partnerRole: HandshakeRole =
@@ -643,5 +679,6 @@ export async function exchangeSignedReceipt(
     content,
     initiator: initiatorParty,
     responder: responderParty,
+    partnerTerms,
   };
 }

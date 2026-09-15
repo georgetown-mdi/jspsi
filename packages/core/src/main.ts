@@ -619,6 +619,7 @@ export type {
 export {
   anchorsPhrase,
   decideSignedReceiptVerdict,
+  partnerTermsForVerification,
   signedRecordExpectations,
   verifyDualSignedRecord,
 } from "./records/signedReceiptVerification";

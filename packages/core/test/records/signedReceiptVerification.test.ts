@@ -10,6 +10,7 @@ import {
 import {
   anchorsPhrase,
   decideSignedReceiptVerdict,
+  partnerTermsForVerification,
   signedRecordExpectations,
   verifyDualSignedRecord,
 } from "../../src/records/signedReceiptVerification";
@@ -775,6 +776,51 @@ describe("signedRecordExpectations", () => {
   test("supplies nothing when neither artifact is in hand", async () => {
     expect(await signedRecordExpectations({})).toEqual({});
     expect(await signedRecordExpectations({ localTerms: termsA })).toEqual({});
+  });
+});
+
+describe("partnerTermsForVerification", () => {
+  const termsB: LinkageTerms = {
+    version: "1.0.0",
+    identity: "Party B",
+    date: "2025-01-01",
+    algorithm: "psi",
+    linkageStrategy: "cascade",
+    output: { expectsOutput: true, shareWithPartner: true },
+    deduplicate: false,
+    linkageFields: [{ name: "ssn", type: "ssn" }],
+    linkageKeys: [{ name: "SSN", elements: [{ field: "ssn" }] }],
+  };
+  const carried: LinkageTerms = { ...termsB, date: "2025-02-02" };
+  const receiptCarrying = (
+    partnerTerms: LinkageTerms | undefined,
+  ): DualSignedRecord => ({
+    version: SIGNED_RECEIPT_VERSION,
+    content: content(),
+    initiator: { certificate: identityA.certificate, signature: "AAAA" },
+    responder: { certificate: identityB.certificate, signature: "AAAA" },
+    partnerTerms,
+  });
+
+  test("the supplied document wins over the copy the receipt holds", () => {
+    // The operator named that file for this run, so it is what the hash is
+    // re-derived from; the carried copy stands in only where none was named.
+    expect(partnerTermsForVerification(termsB, receiptCarrying(carried))).toBe(
+      termsB,
+    );
+  });
+
+  test("the carried copy stands in when no document was supplied", () => {
+    expect(
+      partnerTermsForVerification(undefined, receiptCarrying(carried)),
+    ).toBe(carried);
+  });
+
+  test("neither source leaves the check without terms", () => {
+    expect(
+      partnerTermsForVerification(undefined, receiptCarrying(undefined)),
+    ).toBeUndefined();
+    expect(partnerTermsForVerification(undefined, undefined)).toBeUndefined();
   });
 });
 
