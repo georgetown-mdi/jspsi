@@ -142,7 +142,8 @@ for domain in \
   "marketplace.visualstudio.com" \
   "vscode.blob.core.windows.net" \
   "update.code.visualstudio.com" \
-  "registry.npmjs.org"; do
+  "cdn.playwright.dev" \
+  "playwright.download.prss.microsoft.com"; do
   add_domain "$domain" optional || true
 done
 
