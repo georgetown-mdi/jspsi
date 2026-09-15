@@ -33,6 +33,11 @@ import {
   HANDED_OFF_IMPORT_TITLE,
   handedOffImportReason,
 } from "./managedHandoffGate";
+import {
+  IMPORT_FAILURE_TITLE,
+  UNREADABLE_IMPORT_REASON,
+  importFailureReason,
+} from "./managedImportFailure";
 import { loadSavedExchanges } from "./savedExchangesLoad";
 import { managedImportGrantNotice } from "./managedImportGrantNotice";
 import { recoveryRows } from "./savedExchangesRecovery";
@@ -560,6 +565,11 @@ function RecoveryListing({ reload }: { reload: () => void }) {
  * on the imported exchange's run surface, so it is a way forward even when the list read
  * itself cannot be mended.
  *
+ * A file the import will not take is refused with the reason its failure has
+ * ({@link importFailureReason}): a document the artifact schema rejects can be a
+ * newer build's export, which the operator cannot see from the file, while bytes
+ * that do not parse at all leave only the file itself to check.
+ *
  * An import the store refuses because its exchange was handed off from this browser is
  * not the unreadable-file failure and does not read as one: the file is fine and the
  * exchange is still here, running somewhere else, so that refusal names the exchange
@@ -573,7 +583,7 @@ function RecoveryListing({ reload }: { reload: () => void }) {
 function RestoreFromBackup() {
   const navigate = useNavigate();
   const [importFailure, setImportFailure] = useState<
-    { kind: "unreadable" } | { kind: "handed-off"; reason: string }
+    { kind: "refused"; reason: string } | { kind: "handed-off"; reason: string }
   >();
   const [grantNotice, setGrantNotice] = useState<{
     id: string;
@@ -585,10 +595,10 @@ function RestoreFromBackup() {
     setImportFailure(undefined);
     setGrantNotice(undefined);
     // Cap the file size before reading it: the artifact is a small JSON document, so
-    // an over-cap file is rejected with the same import-failure copy rather than read
-    // into memory ahead of the bounded parse.
+    // an over-cap file is refused with the unreadable-file copy rather than read into
+    // memory ahead of the bounded parse.
     if (file.size > MAX_ARTIFACT_IMPORT_BYTES) {
-      setImportFailure({ kind: "unreadable" });
+      setImportFailure({ kind: "refused", reason: UNREADABLE_IMPORT_REASON });
       return;
     }
     void (async () => {
@@ -611,7 +621,7 @@ function RestoreFromBackup() {
                 kind: "handed-off",
                 reason: handedOffImportReason(error.handoff, error.label),
               }
-            : { kind: "unreadable" },
+            : { kind: "refused", reason: importFailureReason(error) },
         );
       }
     })();
@@ -651,9 +661,8 @@ function RestoreFromBackup() {
         </Alert>
       ) : (
         importFailure !== undefined && (
-          <Alert color="red" title="That file could not be imported" mb="sm">
-            The backup file could not be read. Check that you chose the backup
-            file you exported and that it was not modified.
+          <Alert color="red" title={IMPORT_FAILURE_TITLE} mb="sm">
+            {importFailure.reason}
           </Alert>
         )
       )}
