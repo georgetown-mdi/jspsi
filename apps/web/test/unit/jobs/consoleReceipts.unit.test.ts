@@ -5,7 +5,13 @@ import { afterEach, describe, expect, test } from "vitest";
 
 import { parse as parseYaml } from "yaml";
 
-import { MAX_TEXT_LENGTH, safeParseExchangeSpec } from "@psilink/core";
+import {
+  MAX_TEXT_LENGTH,
+  certificateAuthorizesIdentity,
+  generateSigningIdentity,
+  safeParseExchangeSpec,
+  serializeSigningIdentity,
+} from "@psilink/core";
 
 import {
   FIRST_CONTACT_PIN_ADVISORY,
@@ -23,6 +29,7 @@ import {
   RETENTION_NOTE_CONTROL_CHAR_PROBLEM,
   RETENTION_NOTE_PROBLEM,
   SESSION_DERIVED_PROBLEM,
+  SIGNING_IDENTITY_DIVERGENCE_POINTER,
   UNNAMED_PARTY_PROBLEM,
   fingerprintRequestProblem,
   identityLocationLabel,
@@ -32,6 +39,8 @@ import {
   receiptsProblems,
   receiptsSummary,
   receiptsWithField,
+  receiptsWithResolvedIdentity,
+  signingIdentityDivergence,
 } from "@psi/receiptsModel";
 import {
   HANDOFF_SHARED_DIRECTORY_PLACEHOLDER,
@@ -54,6 +63,7 @@ import {
   assertExportPathDistinct,
   fingerprintArgv,
   parseFingerprintStdout,
+  readBoundIdentity,
   reconcileFingerprintExit,
   runSigningFingerprint,
   signingCertificatePath,
@@ -73,9 +83,9 @@ import {
   validZeroSetupIntent,
 } from "../../utils/jobFixtures";
 
+import type { CertificateBody, LinkageTerms } from "@psilink/core";
 import type { JobRendezvousConfig } from "@psi/jobClient/workInputClient";
 import type { JobSigningPaths } from "@jobs/intentSchemas";
-import type { LinkageTerms } from "@psilink/core";
 import type { ReceiptsDraft } from "@psi/receiptsModel";
 
 // The console's receipt-signing and retention authoring surface, end to end: what
@@ -859,6 +869,49 @@ describe("the fingerprint driver", () => {
     expect(result).toEqual({ kind: "timeout" });
   });
 
+  test("reads the party name the identity on disk is bound to", async () => {
+    // The name a reused identity holds, which the label a later request sends
+    // does not rebind. Read from a real identity document rather than a stand-in,
+    // so the certificate's own validation is part of what is asserted.
+    const dir = scratchDir();
+    const identityPath = path.join(dir, SIGNING_IDENTITY_FILE_NAME);
+    fs.writeFileSync(
+      identityPath,
+      serializeSigningIdentity(
+        await generateSigningIdentity("County Registrar"),
+      ),
+    );
+    await expect(readBoundIdentity(identityPath)).resolves.toBe(
+      "County Registrar",
+    );
+  });
+
+  test("a file that holds no readable identity names nobody", async () => {
+    // Each of these is "nothing to compare" rather than a name: a missing file, a
+    // document that is not an identity of a recognized format, and one whose
+    // certificate does not validate. None of them may report a name the console
+    // would then compare a run against.
+    const dir = scratchDir();
+    const absent = path.join(dir, "no-such-identity.json");
+    await expect(readBoundIdentity(absent)).resolves.toBeUndefined();
+    const unparseable = path.join(dir, "unparseable.json");
+    fs.writeFileSync(unparseable, "{ not json");
+    await expect(readBoundIdentity(unparseable)).resolves.toBeUndefined();
+    const unrecognized = path.join(dir, "unrecognized.json");
+    fs.writeFileSync(unrecognized, JSON.stringify({ stub: "identity" }));
+    await expect(readBoundIdentity(unrecognized)).resolves.toBeUndefined();
+    const tampered = path.join(dir, "tampered.json");
+    const identity = await generateSigningIdentity("County Registrar");
+    fs.writeFileSync(
+      tampered,
+      serializeSigningIdentity({
+        ...identity,
+        certificate: { ...identity.certificate, identity: "Agency A" },
+      }),
+    );
+    await expect(readBoundIdentity(tampered)).resolves.toBeUndefined();
+  });
+
   test("a mount that cannot be created resolves as an error, not an unhandled throw", async () => {
     // The driver creates the mount itself before it spawns, and a mount path an
     // operator left occupied by a regular file has to settle as a result kind:
@@ -1508,6 +1561,185 @@ describe("the receipts card's model", () => {
         /Move that file to the location you picked, or remove it if that key is not one you use/,
       );
     }
+  });
+});
+
+describe("the signing identity's bound name against the agreed terms", () => {
+  // The console's half of the CLI's own refusal
+  // (assertIdentityMatchesAgreedTerms, apps/cli/src/signingIdentityDivergence.ts):
+  // the identity is bound to a party name when it is created and reusing it does
+  // not rebind, so an exchange naming this party something else signs receipts
+  // the partner rejects, and the run is refused at identity load. The console
+  // states that before the launch instead of spending the press on it.
+
+  /** A draft with an identity resolved and bound to `boundIdentity`, the state
+   * every case here is about: the fingerprint and the bound name arrive from one
+   * read of one file, so neither stands without the other. */
+  const resolved = (boundIdentity: string): ReceiptsDraft =>
+    receiptsWithResolvedIdentity(
+      draft({ mode: "certificate" }),
+      OWN_FINGERPRINT,
+      boundIdentity,
+    );
+
+  test("a bound name the terms state agrees, and nothing is raised", () => {
+    const agreeing = resolved(THIS_PARTY);
+    expect(signingIdentityDivergence(agreeing, THIS_PARTY)).toBeUndefined();
+    // Nor does agreement reach the card's own refusals or advisories: a run
+    // whose names match is the ordinary signed run, unchanged.
+    expect(problemsFor(agreeing)).toEqual([]);
+    expect(
+      receiptsAdvisories(agreeing, SEPARATE_RENDEZVOUS).map(
+        (advisory) => advisory.message,
+      ),
+    ).not.toContain(SIGNING_IDENTITY_DIVERGENCE_POINTER);
+  });
+
+  test("a diverging name is refused before the launch, naming both values", () => {
+    const statement = signingIdentityDivergence(
+      resolved("County Registrar"),
+      THIS_PARTY,
+    );
+    expect(statement).toBeDefined();
+    expect(statement).toContain('"County Registrar"');
+    expect(statement).toContain(`"${THIS_PARTY}"`);
+    // What happens, and what to do about it: the refusal, then the two remedies
+    // the CLI offers in the same order -- the local name edit first, since a new
+    // key invalidates every fingerprint a partner has pinned.
+    expect(statement).toMatch(/this run is refused before it connects/);
+    expect(statement).toMatch(/set 'Your name' for this exchange/);
+    expect(statement).toMatch(/psilink fingerprint --force --identity/);
+    expect(statement).toMatch(/new fingerprint/);
+    // The console's own words, not the configuration keys the CLI states them in.
+    expect(statement).not.toContain("linkage_terms.identity");
+    expect(statement).not.toContain("signing.mode");
+  });
+
+  test("signing with no identity resolved yet states no divergence", () => {
+    // Nothing has been read, so there is no bound name to compare: the missing
+    // identity is its own refusal (IDENTITY_MISSING_PROBLEM) and this one is owed
+    // a positive finding.
+    const unresolved = draft({ mode: "certificate" });
+    expect(signingIdentityDivergence(unresolved, THIS_PARTY)).toBeUndefined();
+    expect(problemsFor(unresolved)).toContain(IDENTITY_MISSING_PROBLEM);
+  });
+
+  test("an identity whose bound name could not be read states no divergence", () => {
+    // The console reports no name for a file it cannot read one from, which is
+    // nothing to compare rather than disagreement. The run's own refusal, which
+    // reads the file itself, stays the authority.
+    const unread = receiptsWithResolvedIdentity(
+      draft({ mode: "certificate" }),
+      OWN_FINGERPRINT,
+      undefined,
+    );
+    expect(unread.boundIdentity).toBeUndefined();
+    expect(signingIdentityDivergence(unread, THIS_PARTY)).toBeUndefined();
+  });
+
+  test("a draft that signs nothing is never held over an identity", () => {
+    expect(
+      signingIdentityDivergence(RECEIPTS_DEFAULT, THIS_PARTY),
+    ).toBeUndefined();
+    expect(
+      signingIdentityDivergence(
+        draft({ mode: "none", boundIdentity: "County Registrar" }),
+        THIS_PARTY,
+      ),
+    ).toBeUndefined();
+    expect(
+      signingIdentityDivergence(
+        draft({ mode: "session-derived", boundIdentity: "County Registrar" }),
+        THIS_PARTY,
+      ),
+    ).toBeUndefined();
+  });
+
+  test("a bound name no terms document may state takes the re-key exit", () => {
+    // The local name edit is closed to its holder -- no terms document may state
+    // that label -- so the statement names the class core names and never any
+    // part of the label itself.
+    const statement = signingIdentityDivergence(
+      resolved("Registrar\u0007X"),
+      THIS_PARTY,
+    );
+    expect(statement).toBeDefined();
+    expect(statement).toContain("control or text-direction character");
+    expect(statement).toMatch(/Create a new signing identity/);
+    expect(statement).not.toMatch(/set 'Your name' for this exchange to/);
+    expect(statement).not.toContain("Registrar");
+    expect(statement).toContain(`"${THIS_PARTY}"`);
+  });
+
+  test("the bound name is escaped where it is shown", () => {
+    // It comes out of a file the operator's own command line may have written,
+    // so the card shows it through the display escape like every other value read
+    // from the mount.
+    const statement = signingIdentityDivergence(
+      resolved("Agency \u00c1"),
+      THIS_PARTY,
+    );
+    expect(statement).toBeDefined();
+    expect(statement).not.toContain("\u00c1");
+  });
+
+  test("the verdict is core's own comparison of the two identity values", () => {
+    // The console predicts a refusal the run makes over the canonical identity
+    // bytes (certificateAuthorizesIdentity). Held to that predicate rather than
+    // described as agreeing with it, over the pairs a whitespace or case
+    // difference would part the two on.
+    for (const [bound, terms] of [
+      ["Agency A", "Agency A"],
+      ["Agency A", "Agency B"],
+      ["Agency A", "agency a"],
+      ["Agency A", "Agency A "],
+      ["Agency A", " Agency A"],
+      ["Agency \u00c1", "Agency \u00c1"],
+    ] as const) {
+      const authorized = certificateAuthorizesIdentity(
+        { identity: bound } as CertificateBody,
+        terms,
+      );
+      expect([
+        bound,
+        terms,
+        signingIdentityDivergence(resolved(bound), terms) === undefined,
+      ]).toEqual([bound, terms, authorized]);
+    }
+  });
+
+  test("the card points at the statement rather than repeating it", () => {
+    // The whole statement is at the control that starts the exchange, where the
+    // operator is when the refusal applies; the card, which shows the identity,
+    // holds one line pointing there. Neither is one of the card's own refusals,
+    // whose remedies are all controls on the card itself.
+    const statement = signingIdentityDivergence(
+      resolved("County Registrar"),
+      THIS_PARTY,
+    );
+    expect(SIGNING_IDENTITY_DIVERGENCE_POINTER).not.toBe(statement);
+    expect(SIGNING_IDENTITY_DIVERGENCE_POINTER).toMatch(
+      /the control that starts this exchange/,
+    );
+    expect(problemsFor(resolved("County Registrar"))).toEqual([]);
+  });
+
+  test("the fingerprint and the bound name are dropped together", () => {
+    // Both are facts about one key at one location, so no edit may leave one
+    // behind: a stale bound name would hold a launch over a key the draft no
+    // longer names.
+    const bound = resolved("County Registrar");
+    expect(bound.ownFingerprint).toBe(OWN_FINGERPRINT);
+    expect(bound.boundIdentity).toBe("County Registrar");
+    const unsigned = receiptsWithField(bound, "mode", "none");
+    expect(unsigned.ownFingerprint).toBeUndefined();
+    expect(unsigned.boundIdentity).toBeUndefined();
+    const moved = receiptsWithField(bound, "identityLocation", {
+      mount: "secrets",
+      subPath: ["signing-identity.json"],
+    });
+    expect(moved.ownFingerprint).toBeUndefined();
+    expect(moved.boundIdentity).toBeUndefined();
   });
 });
 

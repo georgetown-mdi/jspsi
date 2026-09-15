@@ -4,6 +4,11 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import {
+  generateSigningIdentity,
+  serializeSigningIdentity,
+} from "@psilink/core";
+
+import {
   JOB_FILE_NAMES,
   MAX_IDENTITY_LENGTH,
   jobZeroSetupIntentSchema,
@@ -380,6 +385,7 @@ describe("POST /api/jobs/signing/fingerprint maps each condition", () => {
         "fingerprint",
         "created",
         "identityFileName",
+        "boundIdentity",
       ]).toContain(key);
     expect(body).toMatchObject({
       status: "ok",
@@ -389,6 +395,31 @@ describe("POST /api/jobs/signing/fingerprint maps each condition", () => {
     expect(typeof body.fingerprint).toBe("string");
     // No export was asked for, so the envelope names no certificate file.
     expect("certificateFileName" in body).toBe(false);
+    // The stub writes a document that is no identity of a recognized format, so
+    // no bound name can be read from it -- and the envelope then states none
+    // rather than echoing the label the request sent, which binds nothing.
+    expect("boundIdentity" in body).toBe(false);
+  });
+
+  test("the envelope reports the name the identity on disk is bound to", async () => {
+    // The gap this closes: the console sends a label with every request, and a
+    // reuse ignores it, so the bound name is the only value that says whose
+    // receipts this identity would sign. A real identity document is seeded, which
+    // the create-or-reuse child then reuses rather than replacing.
+    const { dataRoot } = seedManager();
+    fs.writeFileSync(
+      path.join(dataRoot, SIGNING_IDENTITY_FILE_NAME),
+      serializeSigningIdentity(
+        await generateSigningIdentity("County Registrar"),
+      ),
+    );
+    const response = await postFingerprint({ identity: "Agency A" });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      status: "ok",
+      created: false,
+      boundIdentity: "County Registrar",
+    });
   });
 
   test("a second attempt reports created:false, and an export adds one name", async () => {

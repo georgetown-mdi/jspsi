@@ -1,7 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { FINGERPRINT_REGEX } from "@psilink/core";
+import {
+  FINGERPRINT_REGEX,
+  SIGNING_IDENTITY_VERSION,
+  parseCertificate,
+  parseSensitiveJson,
+  recordedVersionMatches,
+} from "@psilink/core";
 
 import {
   WORKDIR_MODE,
@@ -120,6 +126,50 @@ export function signingIdentityTargetExists(identityPath: string): boolean {
 }
 
 /**
+ * The party name the signing identity at `identityPath` is bound to, or
+ * undefined when this console cannot read one there: no file, an unreadable
+ * one, a document of an unrecognized format, or a certificate that does not
+ * validate.
+ *
+ * Read for one question -- whether the identity this run would sign under is
+ * bound to the party the agreed terms name -- and it answers that question with
+ * a value, never with a verdict: undefined means "nothing to compare", never
+ * "the two agree". The run's own refusal at identity load
+ * (`assertIdentityMatchesAgreedTerms`, `apps/cli`) stays the authority on
+ * whether a diverging run may proceed.
+ *
+ * The CERTIFICATE half of the file, on the terms the CLI's own
+ * `loadSigningCertificate` reads it (`apps/cli/src/signingIdentityFile.ts`):
+ * the version literal around the certificate is checked so an unrecognized
+ * format is not mined for one, and the private key beside it is never imported.
+ * The document holds that key, so it is parsed through the sensitive-file
+ * chokepoint, which reports path-only.
+ */
+export async function readBoundIdentity(
+  identityPath: string,
+): Promise<string | undefined> {
+  let document: unknown;
+  try {
+    document = parseSensitiveJson(
+      fs.readFileSync(identityPath, "utf8"),
+      `signing identity at ${identityPath}`,
+    );
+  } catch {
+    return undefined;
+  }
+  if (!recordedVersionMatches(document, SIGNING_IDENTITY_VERSION))
+    return undefined;
+  try {
+    const certificate = await parseCertificate(
+      (document as Record<string, unknown>)["certificate"],
+    );
+    return certificate.identity;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Why a configured identity location does not name a file on this console. The
  * message names the field and a shape reason only, never a resolved path or a
  * mount name, on the discipline every authoring rejection keeps.
@@ -204,7 +254,12 @@ const FINGERPRINT_SIGKILL_GRACE_MS = 5_000;
  * The reconciled outcome of a fingerprint attempt:
  * - `ok`: identity created or loaded, fingerprint read. `created`
  *   distinguishes the two; `certificateExported` is true only when an
- *   export was requested and the child exited cleanly.
+ *   export was requested and the child exited cleanly. `boundIdentity` is the
+ *   party name the identity is bound to, absent when the file names none this
+ *   console can read ({@link readBoundIdentity}). It is the value a reused
+ *   identity was bound to when it was created, which the label this request
+ *   sent does not rebind, so it is the only way the console can tell the run's
+ *   agreed terms and the certificate apart.
  * - `refused`: the CLI exited 64 (usage error). The request is schema-valid
  *   and every path is server-composed, so the cause is a condition in the
  *   console's mounted working directory (an unreadable or unparsable
@@ -229,6 +284,7 @@ export type SigningFingerprintResult =
       fingerprint: string;
       created: boolean;
       certificateExported: boolean;
+      boundIdentity?: string;
     }
   | { kind: "refused" }
   | { kind: "syncing" }
@@ -311,7 +367,10 @@ export function fingerprintArgv(args: {
  * budgets, and the exit-to-result mapping.
  *
  * `created` is read from the identity file's presence before the child
- * runs, not from its stderr banner, which this boundary discards.
+ * runs, not from its stderr banner, which this boundary discards. The bound
+ * party name is read from the file after it ({@link readBoundIdentity}), and a
+ * file that names none this console can read leaves the field absent rather
+ * than failing an attempt the child completed.
  *
  * The child's cwd is `dataRoot` rather than inherited, and rather than the
  * identity's own directory: an inherited cwd would let an unmounted
@@ -354,12 +413,17 @@ export function runSigningFingerprint(args: {
     ...(args.childEnv !== undefined ? { childEnv: args.childEnv } : {}),
     sigtermMs: args.sigtermMs ?? FINGERPRINT_SIGTERM_MS,
     sigkillGraceMs: args.sigkillGraceMs ?? FINGERPRINT_SIGKILL_GRACE_MS,
-  }).then((outcome): SigningFingerprintResult => {
+  }).then(async (outcome): Promise<SigningFingerprintResult> => {
     if (outcome.kind === "spawnFailed") return { kind: "error" };
     if (outcome.kind === "timedOut") return { kind: "timeout" };
-    return reconcileFingerprintExit(outcome.code, outcome.stdout, {
+    const result = reconcileFingerprintExit(outcome.code, outcome.stdout, {
       created,
       exportRequested: args.exportPath !== undefined,
     });
+    if (result.kind !== "ok") return result;
+    // Read after the child, not before: on a first run the file the bound name
+    // is in does not exist until the child writes it.
+    const boundIdentity = await readBoundIdentity(args.identityPath);
+    return boundIdentity === undefined ? result : { ...result, boundIdentity };
   });
 }

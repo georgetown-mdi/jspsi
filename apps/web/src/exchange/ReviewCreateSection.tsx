@@ -30,7 +30,10 @@ import {
   transportChooserCopy,
   transportRunMode,
 } from "@psi/transportChooser";
-import { receiptsProblems } from "@psi/receiptsModel";
+import {
+  receiptsProblems,
+  signingIdentityDivergence,
+} from "@psi/receiptsModel";
 import { runDiagnosticsProblems } from "@psi/runDiagnosticsModel";
 
 import {
@@ -243,6 +246,12 @@ export function ReviewCreateSection({
   const receiptsBlocked =
     exchangeFilesOffered &&
     receiptsProblems(receipts, editor.draft.identity).length > 0;
+  // Read only where this console conducts the run: a save-a-file or browser
+  // transport signs nothing here, so there is no identity of this console's to
+  // diverge from the terms.
+  const identityDivergence = !exchangeFilesOffered
+    ? undefined
+    : signingIdentityDivergence(receipts, editor.draft.identity);
   // The SFTP session mode applies only where a session exists, so the card
   // withholds it on the shared-directory transport.
   const tuningCapabilities =
@@ -275,6 +284,7 @@ export function ReviewCreateSection({
     connectionTuningBlocked,
     runDiagnosticsBlocked,
     receiptsBlocked,
+    signingIdentityDivergence: identityDivergence,
     problemCount: problems.length,
   });
   // A mint already under way is the one hold with nothing to say: the button

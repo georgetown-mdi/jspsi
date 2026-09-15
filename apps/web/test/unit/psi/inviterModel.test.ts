@@ -57,6 +57,7 @@ import {
 
 import { OFFLINE_EXCHANGE_REASON } from "@psi/offlineExchangeGate";
 import { SPLIT_RENDEZVOUS_RETAIN_REQUIREMENT } from "@console/filedropRendezvousChoice";
+import { signingIdentityDivergence } from "@psi/receiptsModel";
 
 // The send-row expectation derives its form from this function, so it pins that
 // the row holds the same form the step's chips do, not what that form is; the
@@ -433,6 +434,21 @@ describe("review and create", () => {
 // named in one place and silent in the other is the failure this covers: it
 // leaves a disabled button under a line that says the step is ready.
 describe("the create gate and the two sentences that state it", () => {
+  // The divergence gate's own sentence, taken from the model that composes it
+  // rather than written twice: the step shows it verbatim, so what matters here
+  // is that both surfaces speak it and no shorter line replaces it.
+  const DIVERGENCE_STATEMENT = signingIdentityDivergence(
+    {
+      mode: "certificate",
+      partnerFingerprint: "",
+      retentionDisposition: "",
+      ownFingerprint: `${"B".repeat(42)}A`,
+      boundIdentity: "County Registrar",
+    },
+    "Agency A",
+  );
+  if (DIVERGENCE_STATEMENT === undefined)
+    throw new Error("the diverging draft above states no divergence");
   const clearGates: InviterCreateGates = {
     offlineBlocked: false,
     connectionIncomplete: false,
@@ -441,6 +457,7 @@ describe("the create gate and the two sentences that state it", () => {
     connectionTuningBlocked: false,
     runDiagnosticsBlocked: false,
     receiptsBlocked: false,
+    signingIdentityDivergence: undefined,
     problemCount: 0,
   };
 
@@ -503,6 +520,15 @@ describe("the create gate and the two sentences that state it", () => {
         "Resolve the receipts-and-record-keeping settings above to continue.",
       announcement:
         "Resolve the receipts-and-record-keeping settings above before you can create.",
+    },
+    {
+      gate: "signingIdentityDivergence",
+      gates: {
+        ...clearGates,
+        signingIdentityDivergence: DIVERGENCE_STATEMENT,
+      },
+      statusLine: DIVERGENCE_STATEMENT,
+      announcement: DIVERGENCE_STATEMENT,
     },
     {
       gate: "problemCount",

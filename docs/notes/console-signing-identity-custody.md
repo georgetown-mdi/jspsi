@@ -67,6 +67,16 @@ Two properties follow from the console creating the identity at its default loca
 
 The refusal reads both the identity this run loads and the default in the data root. Moving the option does not move the file, and a key left behind in a folder the partner syncs is a key the partner reads whether or not this run is the one that loads it. The card therefore raises that leftover key at the weight the layout gives it: where the rendezvous report says the folder is shared or cannot rule it out, the caveat is a warning of its own -- the weight the identical disclosure takes with no location picked -- rather than a line inside the picked-location notice. Where the rendezvous has a mount of its own it stays inside that notice, because nothing about the key is then in a folder the partner reads.
 
+## Why a name the terms do not state is refused too, and guided rather than re-bound
+
+The identity is bound to a party name when it is created, and the console's create-or-reuse never rebinds it: the label a later fingerprint request sends is ignored on a reuse. So one long-lived key meets an exchange that names this party something else, and that run cannot finish -- the partner authorizes the certificate against the agreed terms and rejects a receipt signed under any other name. The CLI refuses it at identity load, before any connection, credential, or row of data leaves the machine.
+
+This is a refusal for the reason above it is: warn-and-guide governs a choice the operator may legitimately make, and this is not one. The run does not complete either way, and a console that let the launch through would spend the press on a failure whose explanation it already had. The statement therefore stands where the operator is at launch -- the control that starts the exchange, with a line on the receipts card pointing there, since the card is where the identity is authored and neither remedy is a control on it.
+
+The remedies are stated and not offered. Both are the CLI's own: name this party in the terms as the identity is bound, or re-key under the name the terms state. A console button for the second would mint a key with a new fingerprint and silently invalidate every pin a partner holds, which is the same reason re-keying is not offered anywhere else on the card. A button for the first would edit the agreed terms from a signing control, at the point the operator is reviewing what they agreed. Guidance costs an operator one edit they can see; an affordance for either is deferred until that edit is shown to be the friction.
+
+The console compares a value it reads rather than deciding the question: the fingerprint endpoint reports the name the certificate is bound to, and a file it cannot read a name from reports none, which the console treats as nothing to compare rather than as agreement. The run's own refusal, which reads the file itself, stays the authority.
+
 ## See also
 
 - [SERVER_JOB_API.md](../spec/SERVER_JOB_API.md#refusing-a-run-that-would-publish-the-signing-identity) - the refusal's conditions, its comparison, and the `400` body that names it
@@ -74,3 +84,4 @@ The refusal reads both the identity this run loads and the default in the data r
 - [SERVER_JOB_API.md](../spec/SERVER_JOB_API.md#where-the-identity-is-the-consoles-option) - the location option: the locator, its resolution, and what a picked location is read rather than created
 - [DEPLOYMENT.md](../DEPLOYMENT.md#mounting-the-signing-identity) - the CLI's own mounts for the identity, read-only after creation
 - [signing-identity-custody.md](signing-identity-custody.md) - the CLI's posture: no invented location, and what each command does without one
+- [SERVER_JOB_API.md](../spec/SERVER_JOB_API.md#the-signing-identity) - the bound party name the fingerprint response holds, how it is read, and when it is absent

@@ -104,6 +104,7 @@ export function AcceptorColumnsStep({
   runDiagnosticsBlocked = false,
   receiptsBlocked = false,
   splitDirectoryProblem,
+  signingIdentityDivergence,
   onMetadataChange,
   onRemap,
   onReset,
@@ -170,6 +171,11 @@ export function AcceptorColumnsStep({
    * blocked reason, so the operator meets the control to turn on rather than a
    * job that fails at composition. */
   splitDirectoryProblem?: string;
+  /** Why the signing identity and the name these terms state diverge, in the
+   * console's own words, or undefined when they agree or nothing signs. Gates
+   * launch and IS the blocked reason, since both of its remedies are off this
+   * screen. */
+  signingIdentityDivergence?: string;
   onMetadataChange: (next: Metadata) => void;
   /** Bind a missing field type to a chosen column, forcing role linkage. */
   onRemap: (type: SemanticType, columnName: string) => void;
@@ -296,6 +302,9 @@ export function AcceptorColumnsStep({
       runDiagnosticsBlocked,
       receiptsBlocked,
       ...(splitDirectoryProblem !== undefined ? { splitDirectoryProblem } : {}),
+      ...(signingIdentityDivergence !== undefined
+        ? { signingIdentityDivergence }
+        : {}),
     },
   );
   const launchDisabled = launchBlockedReason !== undefined;

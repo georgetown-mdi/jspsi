@@ -22,12 +22,15 @@ import {
   CERTIFICATE_EXPORT_NOTICE,
   IDENTITY_REGENERATION_NOTICE,
   RETENTION_NOTE_NOTICE,
+  SIGNING_IDENTITY_DIVERGENCE_POINTER,
   fingerprintRequestProblem,
   partnerPinStatement,
   receiptsAdvisories,
   receiptsProblems,
   receiptsSummary,
   receiptsWithField,
+  receiptsWithResolvedIdentity,
+  signingIdentityDivergence,
 } from "@psi/receiptsModel";
 import styles from "@styles/app.module.css";
 
@@ -212,6 +215,7 @@ export function ReceiptsCard({
   const notices = advisories.filter((advisory) => advisory.severity === "info");
   const requestProblem = fingerprintRequestProblem(identity);
   const pinStatement = partnerPinStatement(draft);
+  const divergent = signingIdentityDivergence(draft, identity) !== undefined;
   const set = <TField extends keyof ReceiptsDraft>(
     field: TField,
     value: ReceiptsDraft[TField],
@@ -247,10 +251,10 @@ export function ReceiptsCard({
     setExportedName(outcome.certificateFileName);
     setJustCreated(outcome.created);
     onChange(
-      receiptsWithField(
+      receiptsWithResolvedIdentity(
         draftRef.current,
-        "ownFingerprint",
         outcome.fingerprint,
+        outcome.boundIdentity,
       ),
     );
   }
@@ -381,6 +385,11 @@ export function ReceiptsCard({
                       ? ` Your public certificate is in ${exportedName}.`
                       : ""}
                   </Text>
+                  {divergent && (
+                    <Text size="sm" c="red">
+                      {SIGNING_IDENTITY_DIVERGENCE_POINTER}
+                    </Text>
+                  )}
                 </>
               )}
               {failure !== undefined && (

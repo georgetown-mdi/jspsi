@@ -40,6 +40,11 @@ import {
   splitRendezvousRetainProblem,
 } from "@console/filedropRendezvousChoice";
 
+import {
+  RECEIPTS_DEFAULT,
+  receiptsWithResolvedIdentity,
+  signingIdentityDivergence,
+} from "@psi/receiptsModel";
 import { OFFLINE_EXCHANGE_REASON } from "@psi/offlineExchangeGate";
 
 import {
@@ -617,6 +622,43 @@ describe("acceptor launch gates", () => {
     ).toBe(
       "Resolve the connection-tuning settings above before you can start.",
     );
+  });
+
+  test("a diverging signing identity holds the launch in its own words", () => {
+    // The one gate whose sentence IS the statement rather than a pointer at a
+    // control: both of its remedies are off this screen -- the name committed at
+    // the consent gate, and a re-key at the command line -- so the blocked-launch
+    // line is where the operator reads the whole thing. Composed by the receipts
+    // model the card drives, not written by hand here.
+    const statement = signingIdentityDivergence(
+      receiptsWithResolvedIdentity(
+        { ...RECEIPTS_DEFAULT, mode: "certificate" },
+        "B".repeat(42) + "A",
+        "County Registrar",
+      ),
+      "Agency A",
+    );
+    expect(statement).toBeDefined();
+    expect(
+      acceptorLaunchBlockedReason(
+        satisfiableVerdict,
+        satisfiable.editorState,
+        nameTerms,
+        {
+          offline: false,
+          deduplicatePairRefused: false,
+          deduplicateChangedAfterConsent: false,
+          connectionBlocked: false,
+          exchangeFilesBlocked: false,
+          connectionTuningBlocked: false,
+          runDiagnosticsBlocked: false,
+          receiptsBlocked: false,
+          ...(statement !== undefined
+            ? { signingIdentityDivergence: statement }
+            : {}),
+        },
+      ),
+    ).toBe(statement);
   });
 
   test("omitting the step's own gates is the same as none of them being set", () => {
