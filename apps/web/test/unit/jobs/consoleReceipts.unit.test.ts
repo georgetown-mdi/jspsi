@@ -1741,6 +1741,14 @@ describe("the signing identity's bound name against the agreed terms", () => {
     expect(moved.ownFingerprint).toBeUndefined();
     expect(moved.boundIdentity).toBeUndefined();
   });
+
+  test("an unnamed exchange has nothing to diverge from", () => {
+    // Mirrors the CLI's divergesFromAgreedTerms, which treats an empty terms
+    // identity the same as an absent one rather than a name that disagrees.
+    const bound = resolved("County Registrar");
+    expect(signingIdentityDivergence(bound, "")).toBeUndefined();
+    expect(signingIdentityDivergence(bound, "Someone Else")).toBeDefined();
+  });
 });
 
 describe("the verify screen reads a config the way --config-file does", () => {

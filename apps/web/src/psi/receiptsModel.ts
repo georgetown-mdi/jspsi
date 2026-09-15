@@ -341,7 +341,10 @@ export function signingIdentityDivergence(
 ): string | undefined {
   if (draft.mode !== "certificate") return undefined;
   const bound = draft.boundIdentity;
-  if (bound === undefined || bound === identity) return undefined;
+  // An unnamed exchange has nothing to diverge from, the same line the CLI's
+  // divergesFromAgreedTerms draws.
+  if (bound === undefined || identity.length === 0 || bound === identity)
+    return undefined;
   const termsName = redactAndDisplayPartyIdentity(identity);
   const unstatable = reasonTermsCannotStateIdentity(bound);
   if (unstatable !== undefined)
