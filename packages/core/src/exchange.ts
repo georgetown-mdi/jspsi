@@ -2495,7 +2495,6 @@ export async function runExchange(
           ? "completed"
           : "receipt-swap-terminated",
       recordsExposed: rowCount,
-      // What this run had to match with, which the agreed terms do not state.
       contributedLinkageFields: [...dataset.fieldNames],
       resultSize: bothExpectOutput ? attestedResultSize : undefined,
       // Self-facing audit pointer from this party's local config; undefined when
