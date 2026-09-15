@@ -52,12 +52,12 @@ describe("fetchJobExchangeRecordOffer", () => {
         recordAvailable: true,
         recordCreatedAt: CREATED_AT,
         recordOutcome: "receipt-swap-terminated",
-        certificateMismatchObserved: false,
+        recordCertificateMismatchObserved: false,
       }),
     ).resolves.toEqual({
       kind: "available",
       outcome: "receipt-swap-terminated",
-      certificateMismatchObserved: false,
+      recordCertificateMismatchObserved: false,
       downloads: jobRecordDownloads("job-1", CREATED_AT),
     });
   });
@@ -86,12 +86,12 @@ describe("fetchJobExchangeRecordOffer", () => {
         recordAvailable: true,
         recordCreatedAt: CREATED_AT,
         recordOutcome: "receipt-swap-terminated",
-        certificateMismatchObserved: true,
+        recordCertificateMismatchObserved: true,
       }),
     ).resolves.toMatchObject({
       kind: "available",
       outcome: "receipt-swap-terminated",
-      certificateMismatchObserved: true,
+      recordCertificateMismatchObserved: true,
     });
   });
 
@@ -110,12 +110,12 @@ describe("fetchJobExchangeRecordOffer", () => {
         recordAvailable: true,
         recordCreatedAt: CREATED_AT,
         recordOutcome: "completed",
-        certificateMismatchObserved: "yes",
+        recordCertificateMismatchObserved: "yes",
       },
     ])
       await expect(offerFor(body)).resolves.toMatchObject({
         kind: "available",
-        certificateMismatchObserved: false,
+        recordCertificateMismatchObserved: false,
       });
   });
 

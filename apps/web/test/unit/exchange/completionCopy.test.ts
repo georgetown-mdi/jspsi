@@ -200,7 +200,18 @@ describe("the exchange-record copy", () => {
     expect(CERTIFICATE_MISMATCH_RECORD_NOTICE).toContain(
       "not the one pinned for them",
     );
-    expect(CERTIFICATE_MISMATCH_RECORD_NOTICE).toContain("who they claimed");
+    // The doubt is over who received the disclosure, which is stronger than the
+    // merely-unverified partner every other termination leaves, and the copy says
+    // what to do about it.
+    expect(CERTIFICATE_MISMATCH_RECORD_NOTICE).toContain(
+      "in doubt rather than simply unconfirmed",
+    );
+    expect(CERTIFICATE_MISMATCH_RECORD_NOTICE).toContain(
+      "possibly disclosed to someone other than the partner you pinned",
+    );
+    expect(CERTIFICATE_MISMATCH_RECORD_NOTICE).toContain(
+      "which certificate they hold",
+    );
     expect(CERTIFICATE_MISMATCH_RECORD_NOTICE).not.toMatch(
       /stopped|failed|ended|because/i,
     );
@@ -218,12 +229,12 @@ describe("the exchange-record copy", () => {
     // would read as a confirmation the run never made.
     const offered = (
       outcome: ExchangeRecordOutcome,
-      certificateMismatchObserved: boolean,
+      recordCertificateMismatchObserved: boolean,
     ) =>
       ({
         kind: "available",
         outcome,
-        certificateMismatchObserved,
+        recordCertificateMismatchObserved,
         downloads: {
           recordUrl: "/api/jobs/job-1/record",
           recordFileName: "psilink-record.json",
@@ -346,7 +357,7 @@ describe("untakenRecordConfirm", () => {
       untakenRecordConfirm({
         kind: "available",
         outcome: "receipt-swap-terminated",
-        certificateMismatchObserved: false,
+        recordCertificateMismatchObserved: false,
         downloads,
       }),
     ).toEqual({

@@ -62,9 +62,10 @@ export const COMPLETED_RECORD_NOTICE =
 /**
  * What the seat says over a record that states an observed certificate mismatch.
  * It states what the run found about the certificate the partner presented, which
- * is what narrows who received the disclosure; it does not name that finding as
- * the reason the run ended, which the record does not say (docs/spec/EXCHANGE_RECORD.md,
- * An observed certificate mismatch is stated on its own).
+ * puts who received the disclosure in doubt rather than leaving it unconfirmed;
+ * it does not name that finding as the reason the run ended, which the record
+ * does not say (docs/spec/EXCHANGE_RECORD.md, An observed certificate mismatch is
+ * stated on its own).
  *
  * Shown only where the record states one. A record stating none has nothing to
  * qualify, and a "no mismatch" line would read as a confirmation of the partner's
@@ -72,8 +73,11 @@ export const COMPLETED_RECORD_NOTICE =
  */
 export const CERTIFICATE_MISMATCH_RECORD_NOTICE =
   "The record also states that your partner presented a certificate that is not " +
-  "the one pinned for them, so the partner it names is who they claimed to be " +
-  "and not who this run confirmed.";
+  "the one pinned for them. Who received what this run disclosed is therefore in " +
+  "doubt rather than simply unconfirmed: treat this run's output as possibly " +
+  "disclosed to someone other than the partner you pinned. Confirm with your " +
+  "partner, over a channel you already trust, which certificate they hold before " +
+  "you rely on this run's result or run the exchange again.";
 
 /**
  * The lead the seat shows over a record file the console holds and cannot read
@@ -154,7 +158,7 @@ export function recordPanelCopy(offer: RenderedRecordOffer): {
     ...(offer.outcome === "completed"
       ? { lead: COMPLETED_RECORD_LEAD, notice: COMPLETED_RECORD_NOTICE }
       : { lead: TERMINATED_RECORD_LEAD, notice: TERMINATED_RECORD_NOTICE }),
-    ...(offer.certificateMismatchObserved
+    ...(offer.recordCertificateMismatchObserved
       ? { certificateMismatch: CERTIFICATE_MISMATCH_RECORD_NOTICE }
       : {}),
   };

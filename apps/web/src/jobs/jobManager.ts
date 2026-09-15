@@ -243,7 +243,7 @@ interface JobView {
    * {@link recordAvailable} is true. It states what the run observed about the
    * certificate, not why the run ended (docs/spec/EXCHANGE_RECORD.md, An observed
    * certificate mismatch is stated on its own). */
-  certificateMismatchObserved?: boolean;
+  recordCertificateMismatchObserved?: boolean;
   /** Why the pair is withheld, present exactly when {@link recordAvailable} is
    * false: distinguishes the console's definitive denial from a record on disk
    * this bundle cannot describe -- the same negative to a reader of the boolean
@@ -1552,9 +1552,9 @@ export class JobManager {
  *
  * `recordOutcome` travels with the availability so a client can tell a
  * terminated record (no result file behind it) from a completed one, and
- * `certificateMismatchObserved` beside it so a client can tell a run that found
- * the partner's certificate was not the pinned identity from one that found no
- * such thing. `RecordUnavailableReason` separates the console's definitive denial
+ * `recordCertificateMismatchObserved` beside it so a client can tell a run that
+ * found the partner's certificate was not the pinned identity from one that
+ * found no such thing. `RecordUnavailableReason` separates the console's definitive denial
  * from a record on disk this bundle cannot describe.
  */
 function liveRecordAvailability(record: JobRecord):
@@ -1563,7 +1563,7 @@ function liveRecordAvailability(record: JobRecord):
       recordAvailable: true;
       recordCreatedAt: string;
       recordOutcome: ExchangeRecordOutcome;
-      certificateMismatchObserved: boolean;
+      recordCertificateMismatchObserved: boolean;
     } {
   const withheld = (recordUnavailableReason: RecordUnavailableReason) => ({
     recordAvailable: false as const,
@@ -1578,7 +1578,7 @@ function liveRecordAvailability(record: JobRecord):
     recordAvailable: true,
     recordCreatedAt: summary.createdAt,
     recordOutcome: summary.outcome,
-    certificateMismatchObserved: summary.certificateMismatchObserved,
+    recordCertificateMismatchObserved: summary.certificateMismatchObserved,
   };
 }
 

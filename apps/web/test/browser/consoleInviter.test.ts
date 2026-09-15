@@ -274,7 +274,7 @@ function stubJobApi(options: StubOptions = {}): {
                   recordAvailable: true,
                   recordCreatedAt: options.record.createdAt,
                   recordOutcome: options.record.outcome,
-                  certificateMismatchObserved:
+                  recordCertificateMismatchObserved:
                     options.record.certificateMismatchObserved ?? false,
                 }
               : {

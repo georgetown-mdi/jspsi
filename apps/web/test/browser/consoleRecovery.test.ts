@@ -139,7 +139,7 @@ function stubRecoveryApi(options: RecoveryStubOptions = {}): {
                   recordAvailable: true,
                   recordCreatedAt: options.record.createdAt,
                   recordOutcome: options.record.outcome,
-                  certificateMismatchObserved:
+                  recordCertificateMismatchObserved:
                     options.record.certificateMismatchObserved ?? false,
                 }
               : { recordAvailable: false }),

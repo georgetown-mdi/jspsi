@@ -97,7 +97,7 @@ export type JobExchangeRecordOffer =
        * a console that predates it -- reads as false: the seat then says nothing
        * about the partner's certificate, which is what a record stating no
        * mismatch leaves it saying too. */
-      certificateMismatchObserved: boolean;
+      recordCertificateMismatchObserved: boolean;
       downloads: RecordDownloads;
     }
   | { kind: "undescribable" }
@@ -110,7 +110,7 @@ interface JobStatusFields {
   recordAvailable?: unknown;
   recordCreatedAt?: unknown;
   recordOutcome?: unknown;
-  certificateMismatchObserved?: unknown;
+  recordCertificateMismatchObserved?: unknown;
   recordUnavailableReason?: unknown;
 }
 
@@ -203,7 +203,8 @@ export async function fetchJobExchangeRecordOffer(
     return {
       kind: "available",
       outcome,
-      certificateMismatchObserved: status.certificateMismatchObserved === true,
+      recordCertificateMismatchObserved:
+        status.recordCertificateMismatchObserved === true,
       downloads: jobRecordDownloads(jobId, status.recordCreatedAt),
     };
   } catch {

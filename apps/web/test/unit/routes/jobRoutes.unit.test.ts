@@ -821,7 +821,7 @@ describe("status route reports record availability", () => {
     recordAvailable: boolean;
     recordCreatedAt?: string;
     recordOutcome?: string;
-    certificateMismatchObserved?: boolean;
+    recordCertificateMismatchObserved?: boolean;
     recordUnavailableReason?: string;
   }> {
     const response = (await handlersOf(JobRoute).GET({
@@ -939,20 +939,17 @@ describe("status route reports record availability", () => {
     expect(body.recordAvailable).toBe(true);
     expect(body.recordCreatedAt).toBe(CREATED_AT);
     expect(body.recordOutcome).toBe("receipt-swap-terminated");
-    expect(body.certificateMismatchObserved).toBe(true);
+    expect(body.recordCertificateMismatchObserved).toBe(true);
     // The marker states a finding and nothing further: it is a boolean, and no
     // field beside it names the certificate, its fingerprint, or a party.
-    expect(typeof body.certificateMismatchObserved).toBe("boolean");
+    expect(typeof body.recordCertificateMismatchObserved).toBe("boolean");
     expect(
       Object.keys(body)
-        .filter(
-          (key) =>
-            key.startsWith("record") || key === "certificateMismatchObserved",
-        )
+        .filter((key) => key.startsWith("record"))
         .sort(),
     ).toEqual([
-      "certificateMismatchObserved",
       "recordAvailable",
+      "recordCertificateMismatchObserved",
       "recordCreatedAt",
       "recordOutcome",
     ]);
@@ -969,7 +966,7 @@ describe("status route reports record availability", () => {
     const body = await recordStatusOf(id);
     expect(body.recordAvailable).toBe(true);
     expect(body.recordOutcome).toBe("completed");
-    expect(body.certificateMismatchObserved).toBe(false);
+    expect(body.recordCertificateMismatchObserved).toBe(false);
   });
 
   test("the marker is absent from every body that withholds the pair", async () => {
@@ -979,7 +976,7 @@ describe("status route reports record availability", () => {
       await createSucceededJob({ STUB_OUTPUT_FILE: "id\n1\n" }),
     );
     expect(absent.recordAvailable).toBe(false);
-    expect(absent.certificateMismatchObserved).toBeUndefined();
+    expect(absent.recordCertificateMismatchObserved).toBeUndefined();
   });
 
   test("a record with no mismatch marker is held back as undescribable", async () => {
@@ -995,7 +992,7 @@ describe("status route reports record availability", () => {
     });
     const body = await recordStatusOf(id);
     expect(body.recordAvailable).toBe(false);
-    expect(body.certificateMismatchObserved).toBeUndefined();
+    expect(body.recordCertificateMismatchObserved).toBeUndefined();
     expect(body.recordUnavailableReason).toBe("undescribable-record");
     expect(await recordPairStatuses(id)).toEqual({ record: 404, keys: 404 });
   });

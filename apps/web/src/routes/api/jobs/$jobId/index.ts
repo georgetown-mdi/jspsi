@@ -43,8 +43,11 @@ export const Route = createFileRoute("/api/jobs/$jobId/")({
           ...(view.recordOutcome !== undefined
             ? { recordOutcome: view.recordOutcome }
             : {}),
-          ...(view.certificateMismatchObserved !== undefined
-            ? { certificateMismatchObserved: view.certificateMismatchObserved }
+          ...(view.recordCertificateMismatchObserved !== undefined
+            ? {
+                recordCertificateMismatchObserved:
+                  view.recordCertificateMismatchObserved,
+              }
             : {}),
           ...(view.recordUnavailableReason !== undefined
             ? { recordUnavailableReason: view.recordUnavailableReason }
