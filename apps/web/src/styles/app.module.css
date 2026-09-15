@@ -526,8 +526,6 @@
   border-radius: 8px;
   padding: 10px 12px;
   margin: 0.7rem 0 0.2rem 0;
-  max-height: 14rem;
-  overflow-y: auto;
 }
 
 /* Both rules out-specify `.page p` above, whose margin and reading measure are
@@ -547,6 +545,8 @@
   overflow-wrap: anywhere;
   margin: 0;
   max-width: none;
+  max-height: 14rem;
+  overflow-y: auto;
 }
 
 .stateInset {

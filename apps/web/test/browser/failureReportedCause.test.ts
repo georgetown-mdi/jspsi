@@ -117,3 +117,36 @@ test("the reported cause is set apart from the alert's own type", async () => {
   // both links are short on a wide desktop viewport, so neither wraps for width.
   expect(lineCount(report)).toBe(2);
 });
+
+test("a long report scrolls under a label that stays put", async () => {
+  // Long enough, past the renderer's own eight-link cap, to land several
+  // kilobytes in the block once escaped -- past what 14rem can show flat.
+  const links = Array.from(
+    { length: 120 },
+    (_, i) => `chain link ${i} ` + "x".repeat(280),
+  );
+  const failure = failureFor(
+    "exchange",
+    new RelayedTerminalError(links.join("\ncaused by: ")),
+  );
+  app.render(createElement(FailureAlert, { failure }));
+  const mounted = await vi.waitFor(() => {
+    const paragraphs = [...app.container.querySelectorAll("p")];
+    const foundLabel = paragraphs.find(
+      (node) => node.textContent === REPORTED_CAUSE_LABEL,
+    );
+    if (foundLabel === undefined)
+      throw new Error("the failure alert is not mounted");
+    const foundReport = foundLabel.nextElementSibling;
+    if (!(foundReport instanceof HTMLElement))
+      throw new Error("the label stands with no report after it");
+    return { label: foundLabel, report: foundReport };
+  });
+  const { label, report } = mounted;
+
+  // The text element carries the height bound, not the block it sits in, so
+  // scrolling it cannot carry the label -- which stands outside it -- along.
+  expect(getComputedStyle(report).overflowY).toBe("auto");
+  expect(report.scrollHeight).toBeGreaterThan(report.clientHeight);
+  expect(report.contains(label)).toBe(false);
+});
