@@ -41,6 +41,7 @@ stands, from a direction still open to a decision taken and built.
 | [receipt-run-binding.md](receipt-run-binding.md) | Resolved - built. |
 | [receipt-signing-fips-boundary.md](receipt-signing-fips-boundary.md) | Decided. |
 | [record-durability-point.md](record-durability-point.md) | Resolved - built. |
+| [reported-failure-cause.md](reported-failure-cause.md) | Decided on the maintainer's ruling and built; the two shapes declined, and what the block holds apart that escaping does not. |
 | [rule-set-citation-verdict.md](rule-set-citation-verdict.md) | Resolved - built. |
 | [sftp-adapter-state-machine.md](sftp-adapter-state-machine.md) | Shipped. |
 | [shared-consent-summary.md](shared-consent-summary.md) | Shipped. |

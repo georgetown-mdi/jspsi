@@ -26,6 +26,7 @@ import {
 
 import type { JobRecord } from "@jobs/jobManager";
 import type { RelayEvent } from "@jobs/cliDriver";
+import type { RunFailure } from "@exchange/useInviterExchange";
 
 // The stderr tail a synthesized terminal names is the child's own bytes, so it
 // crosses RAW on a cause link of its own and the seat that renders the chain is
@@ -102,12 +103,12 @@ async function eventsFromRun(
 }
 
 /**
- * The alert a console seat composes for a relayed event sequence, routed
+ * The failure a console seat composes for a relayed event sequence, routed
  * through the real SSE frame encoder, the real browser-side job API client, and
  * the seat's own display pass. The status request answers 404, so the run
  * resolves without a record pair rather than hanging on a metadata fetch.
  */
-async function alertAtSeat(events: Array<RelayEvent>): Promise<string> {
+async function failureAtSeat(events: Array<RelayEvent>): Promise<RunFailure> {
   const body = events
     .map((event, index) => renderSseFrame(index + 1, event))
     .join("");
@@ -136,7 +137,13 @@ async function alertAtSeat(events: Array<RelayEvent>): Promise<string> {
   return failureFor(
     raised[0].category as Parameters<typeof failureFor>[0],
     raised[0].error,
-  ).message;
+  );
+}
+
+/** That failure's own message: this application's words, whatever the child
+ * wrote. */
+async function alertAtSeat(events: Array<RelayEvent>): Promise<string> {
+  return (await failureAtSeat(events)).message;
 }
 
 test("a hostile stderr tail reaches the operator's alert escaped exactly once", async () => {
@@ -185,19 +192,29 @@ test("a flooding stderr tail delivers its END within one value's budget", async 
   expect(link.length).toBeLessThanOrEqual(PARTNER_LABELLED_VALUE_BUDGET);
 });
 
-test("a stream-broke terminal keeps the child's bytes out of its retryable alert", async () => {
-  // The `exchange` category shows fixed copy and holds the relayed text in the
-  // dev-gated console alone, so this alert names none of the tail however the
-  // event carries it -- what the operator sees there is a retry affordance.
+test("a stream-broke terminal reports the child's bytes outside its own copy", async () => {
+  // The `exchange` category's copy is fixed and this application's own, and the
+  // tail reaches the operator beside it as the exchange's report. So a tail
+  // mimicking console guidance -- "it is safe to run this again", against a
+  // category whose alert offers a retry -- is in the block labelled as the
+  // exchange's words and in none of the sentences the seat wrote.
   const events = await eventsFromRun(HOSTILE_TAIL, STREAM_BROKE_EXIT);
   const terminal = events[events.length - 1];
   expect((terminal[ERROR_MESSAGE_CHAIN_FIELD] as Array<string>)[1]).toContain(
     "it is safe to run this again",
   );
 
-  const alert = await alertAtSeat(events);
-  expect(alert).not.toContain("it is safe to run this again");
-  expect(alert).toContain("temporary");
+  const failure = await failureAtSeat(events);
+  expect(failure.message).not.toContain("it is safe to run this again");
+  expect(failure.message).toContain("temporary");
+  expect(failure.reportedCause).toContain("it is safe to run this again");
+  // Escaped exactly once here as it is on the alert that renders the chain in
+  // its message: the block is the same display boundary.
+  const treated = replaceControlCharactersForDisplay(HOSTILE_TAIL);
+  expect(failure.reportedCause).toContain(sanitizeForDisplay(treated));
+  expect(failure.reportedCause).not.toContain(
+    sanitizeForDisplay(sanitizeForDisplay(treated)),
+  );
 });
 
 test("the child cannot open a cause link of the console's own chain", async () => {

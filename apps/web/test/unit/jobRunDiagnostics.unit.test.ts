@@ -550,9 +550,11 @@ describe("the escalation is stated before the run, not composed from its failure
 // A rendezvous directory is partner-writable and core's foreign-file terminal
 // names the offending files verbatim, so text an operator would read as
 // first-party can reach a seat inside a message this console composed no part
-// of. What keeps that inert is that a failure's alert is composed from the
-// lifecycle's category alone: no relayed byte selects a title, and no per-run
-// choice changes what a failure says.
+// of. What keeps that inert is that a failure's title and copy are composed from
+// the lifecycle's category alone: no relayed byte selects either, and no per-run
+// choice changes them. Relayed text the operator does get shown reaches them
+// under the reported-cause label instead, attributed to the exchange rather than
+// to this application (docs/notes/reported-failure-cause.md).
 //
 // These pins exercise failureFor, the one composition point all three seats
 // share, and say nothing about what a seat does with the result afterward --
@@ -590,6 +592,9 @@ describe("relayed terminal text never retitles a failure", () => {
     expect(surfaced.title).toBe("Exchange failed");
     expect(surfaced.message).not.toContain("--force-retain-sweep");
     expect(surfaced.message).not.toContain("refuses to delete");
+    // Where the planted fragment does reach the operator: the block attributed
+    // to the exchange, which is not a run-dependent choice either.
+    expect(surfaced.reportedCause).toContain("refuses to delete");
   });
 
   test("every category keeps the title it gives an ordinary terminal", () => {

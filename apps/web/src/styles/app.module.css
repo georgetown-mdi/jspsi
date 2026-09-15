@@ -514,6 +514,41 @@
   overflow-wrap: anywhere;
 }
 
+/* The block a failure's reported cause is shown in: inside the failure alert
+   and outside its voice, on the code background in the mono face this sheet
+   reserves for data and protocol state, so words this application did not write
+   display as somebody else's. The text keeps the newline the error renderer
+   frames cause links with as a line break, and breaks mid-token rather than
+   widening the alert (docs/notes/reported-failure-cause.md). */
+.reportedCause {
+  background: var(--app-code-bg);
+  border: 1px solid var(--app-rule);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 0.7rem 0 0.2rem 0;
+}
+
+/* Both rules out-specify `.page p` above, whose margin and reading measure are
+   for standing prose. */
+.reportedCause .reportedCauseLabel {
+  font-size: 11.5px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--app-secondary);
+  margin: 0 0 6px 0;
+}
+
+.reportedCause .reportedCauseText {
+  color: var(--app-ink);
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  margin: 0;
+  max-width: none;
+  max-height: 14rem;
+  overflow-y: auto;
+}
+
 .stateInset {
   border: 1px dashed var(--app-faint);
   border-radius: 8px;
