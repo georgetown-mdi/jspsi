@@ -85,6 +85,28 @@ export function channelFromURL(url: URL): ConnectionConfig["channel"] {
   }
 }
 
+// The directory a file:// URL names on THIS platform. `fileURLToPath` rejects
+// a URL whose pathname is not an absolute path here -- on Windows that is any
+// URL naming no drive, so file:///mnt/share (the form a POSIX host takes) has
+// no Windows path at all, and a percent-encoded separator is rejected
+// everywhere. Each is the operator's own argument, so it is a usage error
+// rather than the raw TypeError, which would leave the run reporting an
+// internal failure.
+function localDirectoryFromFileURL(url: URL): string {
+  try {
+    return fileURLToPath(url);
+  } catch (cause) {
+    throw new UsageError(
+      `file:// URL names no directory on this system: ` +
+        `${redactUrlCredentials(url)}` +
+        (process.platform === "win32"
+          ? "; on Windows name a drive, e.g. file:///C:/share/drop"
+          : ""),
+      { cause },
+    );
+  }
+}
+
 /**
  * Build a connection config from a server URL, for CLI paths with no end of a
  * rendezvous of their own (the online accept path and the zero-setup
@@ -111,7 +133,7 @@ export function connectionFromURL(
       );
     const base: FileDropConnectionConfig = {
       channel: "filedrop",
-      path: fileURLToPath(url),
+      path: localDirectoryFromFileURL(url),
     };
     // applyConnectionOverrides ignores the server-* fields on a filedrop
     // connection, so the full override set is safe here -- only the shared and
