@@ -21,7 +21,6 @@ import {
   clipToRenderedCost,
   compatibilityMessage,
   COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
-  DEFAULT_LINKAGE_RULE_SET,
   DISPLAY_TRUNCATION_MARKER,
   isDrawnFromLinkageRuleSet,
   keepFirstPartyLineBreaks,
@@ -36,6 +35,7 @@ import {
   renderedDisplayCost,
   renderedDisplayCostKeepingLineBreaks,
   replaceControlCharactersForDisplay,
+  resolveLinkageRuleSetCitation,
   ruleSetCitation,
   safeParseConnectionConfig,
   safeParseFileSyncOptions,
@@ -2192,13 +2192,7 @@ export function warnOnLinkageRuleSetCitationDrift(
   const cited = terms.linkageRuleSet;
   if (cited === undefined) return;
 
-  const shipped = DEFAULT_LINKAGE_RULE_SET;
-  const namesShippedSet = (
-    citedHalf: LinkageSetIdentity,
-    shippedHalf: LinkageSetIdentity,
-  ): boolean =>
-    citedHalf.name === shippedHalf.name &&
-    citedHalf.version === shippedHalf.version;
+  const shipped = resolveLinkageRuleSetCitation(cited);
 
   // Each half is judged by handing the predicate that half's shipped
   // declarations over rules with nothing on the other side: an empty list
@@ -2212,7 +2206,7 @@ export function warnOnLinkageRuleSetCitationDrift(
     );
   };
   if (
-    namesShippedSet(cited.fieldSet, shipped.reference.fieldSet) &&
+    shipped.linkageFields !== undefined &&
     !isDrawnFromLinkageRuleSet(
       {
         reference: cited,
@@ -2224,7 +2218,7 @@ export function warnOnLinkageRuleSetCitationDrift(
   )
     reportDrift("linkage_fields", cited.fieldSet);
   if (
-    namesShippedSet(cited.keySet, shipped.reference.keySet) &&
+    shipped.linkageKeys !== undefined &&
     !isDrawnFromLinkageRuleSet(
       { reference: cited, linkageFields: [], linkageKeys: shipped.linkageKeys },
       { linkageFields: [], linkageKeys: terms.linkageKeys },

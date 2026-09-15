@@ -375,6 +375,24 @@ export const DEFAULT_LINKAGE_RULE_SET: BuiltInLinkageRuleSet = Object.freeze({
 });
 
 /**
+ * Every rule set this build ships, in the order a citation is resolved
+ * against them: the sets a document may cite and this build can check a
+ * citation against, and the sets a derivation may draw its rules from. A
+ * set outside this list is one nothing here resolves -- held and
+ * caveated rather than guessed at.
+ *
+ * The order decides which set a document drawn from more than one is
+ * cited to ({@link linkageRuleSetReferenceFor}), so it is the list's own
+ * declaration order rather than a property of the sets.
+ *
+ * Frozen, as each set it holds is: the sets are aliased into every terms
+ * document derived from one and into every verdict reached against one,
+ * so a replaced entry would decide later derivations and verdicts alike.
+ */
+export const BUILT_IN_LINKAGE_RULE_SETS: ReadonlyArray<BuiltInLinkageRuleSet> =
+  Object.freeze([DEFAULT_LINKAGE_RULE_SET]);
+
+/**
  * Whether `rules` were drawn from `ruleSet`: every key byte-identical to a
  * key the set declares, in the set's own cascade order, and every field
  * byte-identical to a distinct field it declares. A narrowed emission
@@ -521,6 +539,54 @@ function namesSameSet(
 }
 
 /**
+ * The built-in rules a citation's two halves name, each half either
+ * resolved to the rules a shipped set declares for it or left
+ * unresolved.
+ */
+export interface ResolvedLinkageRuleSetCitation {
+  /** The linkage fields of the set the cited field set names, or
+   * `undefined` where no shipped set declares that field set. */
+  linkageFields: ReadonlyArray<LinkageField> | undefined;
+  /** The linkage keys of the set the cited key set names, or `undefined`
+   * where no shipped set declares that key set. */
+  linkageKeys: ReadonlyArray<LinkageKey> | undefined;
+}
+
+/**
+ * What `citation` names among `ruleSets`, one half at a time: the linkage
+ * fields of the set declaring the cited field set, and the linkage keys of
+ * the set declaring the cited key set. The single place a cited name is
+ * turned into rules, so every reader of a citation resolves it alike.
+ *
+ * Each half is matched on its name AND version, since a name without its
+ * content version identifies no fixed content, and each half is resolved
+ * on its own: a document can cite a shipped field set while its key set is
+ * one this build does not ship, and the halves may resolve to different
+ * sets. An unresolved half is `undefined` rather than a fallback set --
+ * nothing here guesses at a name it does not ship, and a caller decides
+ * what an unresolvable half means for it.
+ *
+ * Returns rules rather than the sets holding them, so a caller cannot read
+ * one half's rules off the set the other half resolved to.
+ *
+ * @param ruleSets the sets to resolve against, this build's own
+ * ({@link BUILT_IN_LINKAGE_RULE_SETS}) by default.
+ */
+export function resolveLinkageRuleSetCitation(
+  citation: LinkageRuleSetReference,
+  ruleSets: ReadonlyArray<BuiltInLinkageRuleSet> = BUILT_IN_LINKAGE_RULE_SETS,
+): ResolvedLinkageRuleSetCitation {
+  return {
+    linkageFields: ruleSets.find((ruleSet) =>
+      namesSameSet(citation.fieldSet, ruleSet.reference.fieldSet),
+    )?.linkageFields,
+    linkageKeys: ruleSets.find((ruleSet) =>
+      namesSameSet(citation.keySet, ruleSet.reference.keySet),
+    )?.linkageKeys,
+  };
+}
+
+/**
  * This build's verdict on `citation`, the rule set `rules` are cited to,
  * one half at a time.
  *
@@ -534,12 +600,12 @@ function namesSameSet(
  * builds may reach different verdicts on one document, since a set one of
  * them ships is a set the other may not.
  *
- * Resolution is per half and by name and version together, the pattern
- * the web import path already resolves a citation by: a half naming the
- * shipped set is compared against that set's own rules, and any other
- * name is `unchecked`. Nothing here resolves a partner's set name to
- * content -- an unresolvable name stays unresolvable, held and caveated
- * rather than guessed at.
+ * Resolution is {@link resolveLinkageRuleSetCitation}'s, per half and
+ * against every shipped set: a half naming one of them is compared
+ * against that set's own rules, and a half naming none is `unchecked`.
+ * Nothing here resolves a partner's set name to content -- an
+ * unresolvable name stays unresolvable, held and caveated rather than
+ * guessed at.
  *
  * What "drawn from" means is exactly {@link isDrawnFromLinkageRuleSet}'s
  * answer for that half, so this widens and narrows nothing: a narrowed
@@ -550,50 +616,56 @@ export function checkLinkageRuleSetCitation(
   citation: LinkageRuleSetReference,
   rules: Pick<LinkageTerms, "linkageFields" | "linkageKeys">,
 ): LinkageRuleSetCitationVerdicts {
-  const shipped = DEFAULT_LINKAGE_RULE_SET.reference;
+  const shipped = resolveLinkageRuleSetCitation(citation);
   return {
-    fieldSet: !namesSameSet(citation.fieldSet, shipped.fieldSet)
-      ? "unchecked"
-      : fieldsDrawnFromSet(
-            DEFAULT_LINKAGE_RULE_SET.linkageFields,
-            rules.linkageFields,
-          )
-        ? "consistent"
-        : "contradicted",
-    keySet: !namesSameSet(citation.keySet, shipped.keySet)
-      ? "unchecked"
-      : keysDrawnFromSet(
-            DEFAULT_LINKAGE_RULE_SET.linkageKeys,
-            rules.linkageKeys,
-          )
-        ? "consistent"
-        : "contradicted",
+    fieldSet:
+      shipped.linkageFields === undefined
+        ? "unchecked"
+        : fieldsDrawnFromSet(shipped.linkageFields, rules.linkageFields)
+          ? "consistent"
+          : "contradicted",
+    keySet:
+      shipped.linkageKeys === undefined
+        ? "unchecked"
+        : keysDrawnFromSet(shipped.linkageKeys, rules.linkageKeys)
+          ? "consistent"
+          : "contradicted",
   };
 }
 
 /**
- * The citation `rules` are entitled to: {@link DEFAULT_LINKAGE_RULE_SET}'s
- * reference where the rules were drawn from that set, and `undefined`
- * where they were not -- edited, reordered, authored from scratch, or
+ * The citation `rules` are entitled to: the reference of the first set in
+ * `ruleSets` the rules were drawn from, and `undefined` where they were
+ * drawn from none of them -- edited, reordered, authored from scratch, or
  * declaring no key. The single place a builder that lets an operator edit
  * seeded rules decides whether the result may still cite the set it
  * started from.
  *
+ * One set's whole reference, never a pair of halves from two sets: a
+ * citation names where the rules came from, and rules drawn from no one
+ * set came from no set the list holds. Where several sets would each
+ * answer -- a narrowed emission both declare -- the list's order decides,
+ * so the citation is stable across runs rather than a property of the
+ * rules alone.
+ *
  * A citation asserts that the keys came from the named set, so rules
  * declaring none hold no provenance to claim: they are drawn from every
- * set vacuously, and the predicate alone would hand them the built-in
+ * set vacuously, and the predicate alone would hand them the first set's
  * citation over whatever field declarations outlived their keys. A
  * builder reaches that state as an intermediate (disabling every key in
  * the web editor), so the keyless case is excluded here rather than left
  * to the downstream rejection.
+ *
+ * @param ruleSets the sets the rules may be cited to, this build's own
+ * ({@link BUILT_IN_LINKAGE_RULE_SETS}) by default.
  */
 export function linkageRuleSetReferenceFor(
   rules: Pick<LinkageTerms, "linkageFields" | "linkageKeys">,
+  ruleSets: ReadonlyArray<BuiltInLinkageRuleSet> = BUILT_IN_LINKAGE_RULE_SETS,
 ): LinkageRuleSetReference | undefined {
   if (rules.linkageKeys.length === 0) return undefined;
-  return isDrawnFromLinkageRuleSet(DEFAULT_LINKAGE_RULE_SET, rules)
-    ? DEFAULT_LINKAGE_RULE_SET.reference
-    : undefined;
+  return ruleSets.find((ruleSet) => isDrawnFromLinkageRuleSet(ruleSet, rules))
+    ?.reference;
 }
 
 /**

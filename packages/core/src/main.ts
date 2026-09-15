@@ -250,6 +250,7 @@ export type {
   WebRTCConnectionConfig,
 } from "./config/connection";
 export {
+  BUILT_IN_LINKAGE_RULE_SETS,
   DEFAULT_LINKAGE_KEY_SET_NAME,
   DEFAULT_LINKAGE_RULE_SET,
   OPT_IN_LINKAGE_FIELD_TYPES,
@@ -260,10 +261,12 @@ export {
   isOptInLinkageKey,
   linkageRuleSetReferenceFor,
   optInLinkageKeys,
+  resolveLinkageRuleSetCitation,
 } from "./defaults/builtInLinkageTerms";
 export type {
   BuiltInLinkageRuleSet,
   LinkageRuleSetCitationVerdict,
+  ResolvedLinkageRuleSetCitation,
 } from "./defaults/builtInLinkageTerms";
 export { getDefaultStandardization } from "./defaults/builtInStandardization";
 export {

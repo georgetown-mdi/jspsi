@@ -1,9 +1,9 @@
 import {
-  DEFAULT_LINKAGE_RULE_SET,
   authoredLinkageFields,
   decideLinkageTermsVerdict,
   getDefaultLinkageTerms,
   referencedLinkageFieldNames,
+  resolveLinkageRuleSetCitation,
 } from "@psilink/core";
 
 import {
@@ -120,40 +120,32 @@ function reconcileImportedFields(
 
 /**
  * The rule set an imported citation is checked against, resolved one half at a time:
- * {@link DEFAULT_LINKAGE_RULE_SET}'s own keys or fields where that half's name and
- * version match the built-in set, otherwise the document's own claimed rules for that
- * half. The two halves are composed under the document's reference, and
- * `isDraftDrawnFromLinkageRuleSet` judges fields and keys independently.
+ * the rules a shipped set declares for that half where the citation names one of
+ * them, otherwise the document's own claimed rules for that half. The two halves are
+ * composed under the document's reference, and `isDraftDrawnFromLinkageRuleSet`
+ * judges fields and keys independently.
  */
 function ruleSetForImportedCitation(
   cited: BuiltInLinkageRuleSet,
 ): BuiltInLinkageRuleSet {
-  const shipped = shippedHalves(cited.reference);
+  const shipped = resolveLinkageRuleSetCitation(cited.reference);
   return {
     reference: cited.reference,
-    linkageFields: shipped.fieldSet
-      ? DEFAULT_LINKAGE_RULE_SET.linkageFields
-      : cited.linkageFields,
-    linkageKeys: shipped.keySet
-      ? DEFAULT_LINKAGE_RULE_SET.linkageKeys
-      : cited.linkageKeys,
+    linkageFields: shipped.linkageFields ?? cited.linkageFields,
+    linkageKeys: shipped.linkageKeys ?? cited.linkageKeys,
   };
 }
 
-/** Which halves of `reference` name the set this build ships, each matched on that
+/** Which halves of `reference` name a set this build ships, each matched on that
  * half's name AND version -- the only halves it can resolve to rules of its own. */
 function shippedHalves(reference: LinkageRuleSetReference): {
   fieldSet: boolean;
   keySet: boolean;
 } {
-  const builtIn = DEFAULT_LINKAGE_RULE_SET.reference;
+  const shipped = resolveLinkageRuleSetCitation(reference);
   return {
-    fieldSet:
-      reference.fieldSet.name === builtIn.fieldSet.name &&
-      reference.fieldSet.version === builtIn.fieldSet.version,
-    keySet:
-      reference.keySet.name === builtIn.keySet.name &&
-      reference.keySet.version === builtIn.keySet.version,
+    fieldSet: shipped.linkageFields !== undefined,
+    keySet: shipped.linkageKeys !== undefined,
   };
 }
 
