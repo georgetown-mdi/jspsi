@@ -611,6 +611,11 @@ describe("the exported accounting", () => {
 
     expect(cell).toContain("Disclosed, then stopped before the run finished");
     expect(cell).toContain("not the one pinned for them");
+    // The note names the fact it qualifies rather than a position on screen:
+    // in the export that fact is a column of this same row, and the screen's
+    // vertical list carries the same label.
+    expect(cell).toContain("the partner named in the Partner fact");
+    expect(columns).toContain("Partner");
     // The marker widens no entry's column set: the header a compliance reader
     // reads is the same one every other accounting exports.
     expect(columns).toEqual(

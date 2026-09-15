@@ -9,6 +9,7 @@ import {
   computeCertificateFingerprint,
   generateSigningIdentity,
   observedPartnerCertificateMismatch,
+  withPartnerCertificateCondition,
 } from "../../src/records/signingIdentity";
 import { buildExchangeRecord } from "../../src/records/exchangeRecord";
 import { reconcileReceivedPayload } from "../../src/payloadExchange";
@@ -18,7 +19,10 @@ import {
 } from "../../src/connection/messageConnection";
 
 import type { SignedReceiptExchangeInputs } from "../../src/records/signedReceipt";
-import type { SigningIdentity } from "../../src/records/signingIdentity";
+import type {
+  PartnerCertificateCondition,
+  SigningIdentity,
+} from "../../src/records/signingIdentity";
 import type {
   CommittedPayload,
   ExchangeRecordInputs,
@@ -298,5 +302,32 @@ describe("the marker is read from a condition, never from message text", () => {
 
     expect(observedPartnerCertificateMismatch(rewrapped)).toBe(true);
     expect(await terminatedRecordFor(rewrapped)).toBe(true);
+  });
+
+  test.each(["toString", "constructor", "hasOwnProperty", "__proto__"])(
+    "a tag naming the inherited member %s observes none",
+    async (inherited) => {
+      // Every one of these is a member of the condition table's PROTOTYPE, so a
+      // membership test that walked the chain would take the tag for a
+      // condition and answer with that member rather than a boolean -- which
+      // the record schema refuses, losing a record the run owes.
+      const refusal = withPartnerCertificateCondition(
+        new Error("the swap refused"),
+        inherited as PartnerCertificateCondition,
+      );
+
+      expect(observedPartnerCertificateMismatch(refusal)).toBe(false);
+      expect(await terminatedRecordFor(refusal)).toBe(false);
+    },
+  );
+
+  test("a tag that is not a string observes none", async () => {
+    const refusal = withPartnerCertificateCondition(
+      new Error("the swap refused"),
+      7 as unknown as PartnerCertificateCondition,
+    );
+
+    expect(observedPartnerCertificateMismatch(refusal)).toBe(false);
+    expect(await terminatedRecordFor(refusal)).toBe(false);
   });
 });

@@ -180,7 +180,7 @@ const OUTCOME_DISCLOSURE: Record<ExchangeRecordOutcome, Displayable> = {
  * read as a confirmation the exchange never made (see
  * docs/spec/EXCHANGE_RECORD.md, "When a record is owed").
  */
-const CERTIFICATE_MISMATCH_DISCLOSURE = displayText`Your partner presented a certificate that is not the one pinned for them, so the partner named above is who they claimed to be and not who this run confirmed`;
+const CERTIFICATE_MISMATCH_DISCLOSURE = displayText`Your partner presented a certificate that is not the one pinned for them, so the partner named in the Partner fact is who they claimed to be and not who this run confirmed`;
 
 /** The values the outcome fact holds: how the run ended, and -- on the one arm
  * that has it -- what the run observed about the partner's certificate. */

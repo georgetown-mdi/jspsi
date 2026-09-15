@@ -551,9 +551,13 @@ export function partnerCertificateCondition(
     const tagged = (link as Record<string, unknown>)[
       PARTNER_CERTIFICATE_CONDITION_TAG
     ];
+    // Own-key rather than `in`: a tag naming an inherited member -- `toString`,
+    // `constructor`, `__proto__` -- passes a prototype-chain membership test,
+    // and the lookup over it then yields that member in place of the boolean
+    // observedPartnerCertificateMismatch is declared to return.
     if (
       typeof tagged === "string" &&
-      tagged in PARTNER_CERTIFICATE_MISMATCH_OBSERVED
+      Object.hasOwn(PARTNER_CERTIFICATE_MISMATCH_OBSERVED, tagged)
     )
       found = tagged as PartnerCertificateCondition;
     return found !== undefined;
