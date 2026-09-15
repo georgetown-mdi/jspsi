@@ -52,6 +52,16 @@ export const RECEIPT_UNANSWERED_NOTICE =
   "removes the receipt along with the results.";
 
 /**
+ * What the download link names the receipt. The parenthetical states what the
+ * file holds rather than how freely it may be passed on: the unsigned envelope
+ * holds the partner's linkage terms in full -- their linkage fields and keys,
+ * cleaning steps, payload descriptions, and any legal-agreement purpose text
+ * (docs/spec/EXCHANGE_RECORD.md, "Receipt privacy properties").
+ */
+export const RECEIPT_DOWNLOAD_LABEL =
+  "Download signed receipt (holds your partner's linkage terms)";
+
+/**
  * The dual-signed receipt a console server-job run produced, offered on every
  * console server-job seat (invite, accept, Direct, and strand recovery) whenever
  * the console holds one. Renders nothing for a run that signed nothing, so a seat
@@ -110,7 +120,7 @@ export function ReceiptDownload({
   if (offer.kind === "available")
     return (
       <DownloadRow
-        label="Download signed receipt (safe to share)"
+        label={RECEIPT_DOWNLOAD_LABEL}
         href={offer.receiptUrl}
         fileName={offer.receiptFileName}
       />

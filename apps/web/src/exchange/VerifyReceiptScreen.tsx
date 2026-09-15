@@ -527,7 +527,10 @@ export function VerifyReceiptScreen() {
             partnerTerms: partnerTermsForRun,
           },
         );
-        signedView = signedVerdictViewModel(report);
+        signedView = signedVerdictViewModel(report, {
+          localTerms: localTerms !== undefined,
+          partnerTerms: partnerTermsForRun !== undefined,
+        });
       }
       // An input changed while this run was reading files and computing, so its
       // result describes inputs the page no longer holds: the edit already
