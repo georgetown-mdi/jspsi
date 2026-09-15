@@ -7,14 +7,14 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 import {
   boundIdentityOf,
   certificateOnlyLoadCases,
-} from "@psilink/testkit/signingIdentityDocuments";
+} from "@psilink/core/testing";
 
 import { readBoundIdentity } from "@jobs/signingIdentity";
 
 // This is the console half of the certificate-only load parity set
-// (`@psilink/testkit/signingIdentityDocuments`, whose header holds the whole
-// argument). `packages/` cannot import `apps/` and `apps/web` may not import
-// `apps/cli`, so each app drives the set from its own test tree; the CLI half is
+// (`@psilink/core/testing`, whose module header states what it holds).
+// `packages/` cannot import `apps/` and `apps/web` may not import `apps/cli`,
+// so each app drives the set from its own test tree; the CLI half is
 // apps/cli/test/unit/boundIdentityParity.test.ts, compared against the same
 // documents and so against each other.
 

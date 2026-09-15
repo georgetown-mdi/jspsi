@@ -103,7 +103,7 @@ export async function loadSigningIdentity(
  *
  * The console asks the same question of the same file before a run it launches,
  * through a reader of its own, so the two are driven over one set of documents
- * (`@psilink/testkit/signingIdentityDocuments`, this leg
+ * (`@psilink/core/testing`, this leg
  * `apps/cli/test/unit/boundIdentityParity.test.ts`): tightening what this
  * accepts fails that set until the console's reader follows.
  */

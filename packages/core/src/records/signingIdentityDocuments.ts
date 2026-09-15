@@ -1,38 +1,24 @@
-// The signing-identity documents a CERTIFICATE-ONLY load is held to, each with
-// the party name that load must report for it.
-//
-// Two implementations answer one question -- whose certificate is in this file?
-// The CLI's `loadSigningCertificate` (apps/cli/src/signingIdentityFile.ts) is
-// the one the run itself reads through, and the console's `readBoundIdentity`
-// (apps/web/src/jobs/signingIdentity.ts) is the one that tells an operator, at
-// the control, whether the run would refuse the identity they are about to sign
-// with. A name the console reports that the run then refuses is the failure this
-// set exists to catch, so both apps' unit projects drive these documents: the
-// CLI leg is apps/cli/test/unit/boundIdentityParity.test.ts and the console leg
-// is apps/web/test/unit/jobs/boundIdentityParity.test.ts.
-//
-// The set lives here rather than in either test tree because both apps need it
-// and neither may import the other, and rather than behind
-// `@psilink/core/testing` because everything there is built into `dist/testing.*`
-// and published with `@psilink/core` (docs/TESTING.md, Shared test material):
-// these documents are malformed and tampered identity files around a generated
-// private key, which is not material to ship to a consumer of the library. It
-// holds the documents and the expected answer only; each leg writes the file and
-// drives its own loader.
-//
-// The two loaders differ in how they report "no name": the CLI rejects with a
-// UsageError where the console resolves undefined. That difference is not the
-// parity -- {@link boundIdentityOf} folds a refusal into "no name" so the legs
-// compare the one thing they must agree on, and each app's own suite pins the
-// exit shape it owes its own callers.
+// The signing-identity documents a certificate-only load is held to, each with
+// the party name that load must report for it. One set behind the `./testing`
+// subpath, so the two loaders that answer whose certificate is in a file --
+// the CLI's `loadSigningCertificate`, which the run itself reads through, and
+// the console's `readBoundIdentity`, which tells an operator whether the run
+// would refuse the identity they are about to sign with -- cannot drift: a
+// name the console reports that the run then refuses is what this set catches.
+// The set holds the documents and the expected answer only; each leg writes
+// the file and drives its own loader.
 
 import {
   SIGNING_IDENTITY_VERSION,
   generateSigningIdentity,
   serializeSigningIdentity,
-} from "@psilink/core";
+} from "./signingIdentity.js";
 
-/** One document, keyed so a case added here fails both legs to compile. */
+/**
+ * @internal
+ *
+ * One document, keyed so a case added here fails both legs to compile.
+ */
 export type CertificateOnlyLoadCaseId =
   | "wellFormed"
   | "privateKeyNotAKey"
@@ -42,7 +28,11 @@ export type CertificateOnlyLoadCaseId =
   | "certificateMissing"
   | "certificateTampered";
 
-/** What one document holds, and the name a certificate-only load owes it. */
+/**
+ * @internal
+ *
+ * What one document holds, and the name a certificate-only load owes it.
+ */
 export interface CertificateOnlyLoadCase {
   /** The file's content, or null to leave no file at the path. */
   readonly document: string | null;
@@ -52,13 +42,25 @@ export interface CertificateOnlyLoadCase {
   readonly because: string;
 }
 
-/** The party name every document below that names one is bound to. */
+/**
+ * @internal
+ *
+ * The party name every document below that names one is bound to.
+ */
 export const CERTIFICATE_ONLY_LOAD_IDENTITY = "Agency A, County Registrar";
 
 /**
+ * @internal
+ *
  * The name a certificate-only load reports for a document, with a refusal read
  * as no name: the question the console asks of the identity file, put to either
  * app's loader by its own leg.
+ *
+ * The two loaders report "no name" differently -- the CLI rejects with a
+ * UsageError where the console resolves undefined -- and that difference is not
+ * the parity, so folding a refusal into no name leaves the legs comparing the
+ * one thing they must agree on. Each app's own suite pins the exit shape it
+ * owes its own callers.
  */
 export async function boundIdentityOf(
   load: () => Promise<string | undefined>,
@@ -71,6 +73,8 @@ export async function boundIdentityOf(
 }
 
 /**
+ * @internal
+ *
  * The documents, built around a freshly generated identity so each leg drives
  * real certificates rather than stand-ins. Asynchronous because generating and
  * self-signing one reaches `crypto.subtle`.
