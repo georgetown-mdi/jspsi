@@ -112,6 +112,8 @@ const noRawErrorAtDisplaySink = SINK_VALUE_POSITIONS.map((position) => ({
 export const DISPLAYABLE_PRODUCERS = [
   "sanitizeForDisplay",
   "redactAndSanitizeForDisplay",
+  "renderOperatorSuppliedText",
+  "redactAndRenderOperatorSuppliedText",
   "displayText",
   "describeDecodeError",
   "displayPartyIdentity",

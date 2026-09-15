@@ -2,6 +2,10 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import logLibrary from "loglevel";
 
 import {
+  redactAndRenderOperatorSuppliedText,
+  redactAndSanitizeForDisplay,
+} from "../../src/utils/sanitizeErrorForDisplay";
+import {
   getLogger,
   getLoggerForVerbosity,
   setDiagnosticSink,
@@ -212,4 +216,38 @@ test("the sweep reaches a symbol-named logger", () => {
   logger.setLevel("warn");
   setLogLevel(logLibrary.levels.SILENT);
   expect(logger.getLevel()).toBe(logLibrary.levels.SILENT);
+});
+
+// The log route's half of the fragment boundary. A line bound for a log sink is
+// escaped where it is composed rather than at the prefixer, so a path the
+// operator typed and a value the partner chose take different calls and reach
+// one line under different treatments. The prefixer's own pass is the
+// private-key strip, per argument, and it leaves both renderings as composed.
+test("a log line holds the operator's path as typed and the partner's value escaped", () => {
+  const log = getLogger(uniqueName("fragment-boundary"));
+
+  log.warn(
+    `could not read ${redactAndRenderOperatorSuppliedText(
+      "C:\\Users\\operator\\input.csv",
+    )}: the partner named ${redactAndSanitizeForDisplay("share\\inbox\u001b[2K")}`,
+  );
+
+  const line = emitted.join("\n");
+  expect(line).toContain("C:\\Users\\operator\\input.csv");
+  expect(line).toContain("share\\\\inbox\\x1b[2K");
+  expect(line).not.toContain("\u001b");
+});
+
+test("the strip on an operator path leaves the guidance behind it", () => {
+  const log = getLogger(uniqueName("fragment-redaction"));
+
+  log.warn(
+    `could not read ${redactAndRenderOperatorSuppliedText(
+      "C:\\keys\\-----BEGIN OPENSSH PRIVATE KEY-----",
+    )}: set input_file and run again`,
+  );
+
+  const line = emitted.join("\n");
+  expect(line).toContain("C:\\keys\\[redacted private key]");
+  expect(line).toContain("set input_file and run again");
 });

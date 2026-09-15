@@ -7,6 +7,7 @@ import {
   computeCertificateFingerprint,
   generateSigningIdentity,
   getLogger,
+  sanitizeErrorForDisplay,
 } from "@psilink/core";
 import * as signingIdentityFile from "../../src/signingIdentityFile";
 import {
@@ -186,6 +187,24 @@ test.skipIf(process.platform === "win32").each([
     }
   },
 );
+
+test("the refusal names a Windows path as the operator typed it", async () => {
+  // The path is the operator's own, so the display sink renders it as given
+  // while the fragment beside it keeps the escape. A Windows separator is a
+  // legal filename character here, which is what lets one run be driven on any
+  // platform.
+  const identityPath = path.join(dir, "C:\\psilink\\signing-identity.json");
+  fs.writeFileSync(identityPath, '{"version":"nonsense\\u001b[2K"}');
+
+  const err = await loadSigningIdentity(identityPath).then(
+    () => undefined,
+    (thrown: unknown) => thrown,
+  );
+
+  const rendered = sanitizeErrorForDisplay(err);
+  expect(rendered).toContain("C:\\psilink\\signing-identity.json");
+  expect(rendered).not.toContain("\u001b");
+});
 
 test("the module resolves no identity path of its own", () => {
   // The identity is a credential: every path it is read from or written to is

@@ -2,7 +2,8 @@ declare const displayableBrand: unique symbol;
 
 /**
  * A string that has passed through the display boundary: what
- * {@link sanitizeForDisplay} returns and what {@link displayText} composes.
+ * {@link sanitizeForDisplay} and {@link renderOperatorSuppliedText} return
+ * and what {@link displayText} composes.
  * Declaring an operator-facing display field as `Displayable` rather than
  * `string` makes omitting the sanitize call a compile error instead of a review
  * catch -- a plain `string` (any partner-controlled value) is not assignable to
@@ -11,8 +12,8 @@ declare const displayableBrand: unique symbol;
  * cast or unwrapping.
  *
  * The brand is a phantom property keyed by a module-private `unique symbol`, so
- * nothing outside this module satisfies it structurally: the two functions here
- * are the only way to obtain one, short of a deliberate `as Displayable`
+ * nothing outside this module satisfies it structurally: the three functions
+ * here are the only way to obtain one, short of a deliberate `as Displayable`
  * assertion. It exists only in the type system -- no value has the property
  * at runtime, and the branded string is byte-identical to the unbranded one.
  *
@@ -22,7 +23,9 @@ declare const displayableBrand: unique symbol;
  * "As text" is the whole of the claim -- the sanitizer leaves every
  * printable ASCII byte intact, `<`, `>`, `&`, `"` and `'` among them, so a
  * `Displayable` is safe in a React text child because JSX escapes it there,
- * and has no HTML-, attribute-, or URL-safety of its own.
+ * and has no HTML-, attribute-, or URL-safety of its own. The claim is the
+ * same width for an operator-supplied render, which leaves non-ASCII as the
+ * operator typed it: what both producers take out is the control class.
  */
 export type Displayable = string & { readonly [displayableBrand]: true };
 
@@ -180,6 +183,56 @@ export function sanitizeForDisplay(
     out += piece;
   }
 
+  return (
+    truncated
+      ? trimPartialControlCharacterMarker(out) + DISPLAY_TRUNCATION_MARKER
+      : out
+  ) as Displayable;
+}
+
+/**
+ * Render a fragment the OPERATOR supplied for operator-facing output: every
+ * control character replaced by {@link controlCharacterMarker}, every other
+ * code point left as the operator typed it, and the result truncated to
+ * `maxLength` with {@link DISPLAY_TRUNCATION_MARKER} in place of the rest.
+ *
+ * The counterpart of {@link sanitizeForDisplay} on the other side of the
+ * fragment boundary. That escape doubles a literal backslash to keep its
+ * `\xHH` tokens unambiguous, which is right for bytes somebody else chose and
+ * wrong for a path the operator typed: `C:\data\in.csv` reaches them as
+ * `C:\\data\\in.csv`, a path they cannot copy back. Here the separators, the
+ * accented directory name and every other printable byte read as given.
+ *
+ * What it does NOT leave as given is the control class, the one class an
+ * operator-supplied value shares its hazard with whoever else can reach it:
+ * an ESC drives an ANSI sequence and a line break spoofs a log line, and a
+ * path can be copied into a config from an invitation the partner wrote. The
+ * marker is printable ASCII with no backslash, so the sink has nothing left
+ * to escape.
+ *
+ * The bidi overrides and confusable characters {@link sanitizeForDisplay}
+ * neutralizes are shown here as themselves: a value this renders is one the
+ * operator chose, where fidelity is what the value is shown for. Marking a
+ * fragment as operator-supplied is therefore a statement about who chose the
+ * bytes, made where the value enters a message
+ * ({@link ./operatorSuppliedText.operatorSuppliedText}).
+ */
+export function renderOperatorSuppliedText(
+  value: string,
+  options?: SanitizeForDisplayOptions,
+): Displayable {
+  const maxLength = options?.maxLength ?? DEFAULT_MAX_DISPLAY_LENGTH;
+  let out = "";
+  let truncated = false;
+  // By code point, like the escape above: an astral character is kept or
+  // dropped whole rather than cut between its surrogates.
+  for (const ch of replaceControlCharactersForDisplay(value)) {
+    if (out.length + ch.length > maxLength) {
+      truncated = true;
+      break;
+    }
+    out += ch;
+  }
   return (
     truncated
       ? trimPartialControlCharacterMarker(out) + DISPLAY_TRUNCATION_MARKER

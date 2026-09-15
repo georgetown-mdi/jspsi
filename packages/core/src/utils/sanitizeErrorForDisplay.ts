@@ -1,8 +1,11 @@
 import { errorMessage } from "../connection/messageConnection";
+import { operatorSuppliedSpans } from "./operatorSuppliedText";
+import type { DisplaySpan } from "./operatorSuppliedText";
 import {
   COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
   DISPLAY_TRUNCATION_MARKER,
   renderedDisplayCost,
+  renderOperatorSuppliedText,
   replaceControlCharactersForDisplay,
   sanitizeForDisplay,
 } from "./sanitizeForDisplay";
@@ -307,6 +310,32 @@ export function redactAndSanitizeForDisplay(
 }
 
 /**
+ * {@link redactAndSanitizeForDisplay} for a fragment the OPERATOR supplied:
+ * {@link redactPrivateKeyMaterial} first, then
+ * {@link renderOperatorSuppliedText}, which leaves the operator's own bytes as
+ * they typed them instead of escaping them.
+ *
+ * This is the log-, console- and prompt-sink half of the fragment boundary,
+ * pairing with the error route's per-span render: a path composed into a
+ * message that never becomes an `Error` takes this at the call site that shows
+ * it, and the same path composed into an `Error` stays raw and is rendered
+ * where the chain is (`./operatorSuppliedText`). Either way the operator reads
+ * one separator per separator they typed.
+ *
+ * Redacting BEFORE rendering bounds the fail-closed dangling rule to the
+ * fragment that held the marker, for the reason
+ * {@link redactAndSanitizeForDisplay} states: a path an operator names with a
+ * `BEGIN` marker costs its own fragment, not the instruction composed behind
+ * it.
+ */
+export function redactAndRenderOperatorSuppliedText(
+  value: string,
+  options?: SanitizeForDisplayOptions,
+): Displayable {
+  return renderOperatorSuppliedText(redactPrivateKeyMaterial(value), options);
+}
+
+/**
  * Where the display form of a message whose line breaks are its own is kept
  * for {@link sanitizeErrorForDisplay} to read.
  *
@@ -491,6 +520,40 @@ function renderFirstPartyLineBreaks(text: string): string {
 }
 
 /**
+ * Escape one link span by span, so the spans an operator supplied reach them
+ * as they typed them while every other span takes the escape.
+ *
+ * The budget is the LINK's, spent in span order: each span is charged what it
+ * renders to, and the first span that does not fit whole is cut and marked,
+ * with the spans behind it dropped. So a link partitioned by origin is bounded
+ * exactly where an unpartitioned link is
+ * ({@link COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH}) rather than at that cap per
+ * span.
+ *
+ * Redaction runs per SPAN rather than over the joined link, which narrows the
+ * fail-closed dangling rule the same way a composition site does: a `BEGIN`
+ * marker inside one span consumes the rest of that span alone, so an operator
+ * who names a path with one loses the path and not the sentence telling them
+ * what to do about it.
+ */
+function renderSpans(spans: ReadonlyArray<DisplaySpan>): string {
+  let rendered = "";
+  for (const span of spans) {
+    const room = COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH - rendered.length;
+    if (room <= 0) break;
+    const text = redactPrivateKeyMaterial(span.text);
+    const shown = span.operatorSupplied
+      ? renderOperatorSuppliedText(text, { maxLength: room })
+      : sanitizeForDisplay(text, { maxLength: room });
+    rendered += shown;
+    // Past its room the render truncated and marked the span, and what the
+    // budget has left cannot show the spans behind it either.
+    if (shown.length > room) break;
+  }
+  return rendered;
+}
+
+/**
  * Render an arbitrary thrown value as operator-safe display text: its own
  * message followed by each chained `cause` message, every link passed
  * through {@link sanitizeForDisplay} so partner- or server-controlled
@@ -511,6 +574,13 @@ function renderFirstPartyLineBreaks(text: string): string {
  * that changes: each line is escaped whole, and a line break inside one is
  * the mark's own printable marker, so no byte of a message begins a line on
  * either route.
+ *
+ * A link marked by {@link ./operatorSuppliedText.keepOperatorSuppliedText} is
+ * rendered SPAN BY SPAN: the spans the operator supplied reach them as they
+ * typed them, with the escape's doubled backslash off the path they have to
+ * copy back, and every other span is escaped as it is on an unmarked link.
+ * The mark is read only where its spans join back to the link's own message,
+ * so a link whose mark describes some other text is escaped whole.
  *
  * This is the display-boundary call site for rendering a raw error
  * INSTANCE to a human. The transport and message layers preserve the
@@ -554,7 +624,11 @@ function renderFirstPartyLineBreaks(text: string): string {
  * {@link errorMessage}.
  */
 export function sanitizeErrorForDisplay(err: unknown): string {
-  const rawLinks: Array<{ message: string; kept: string | undefined }> = [];
+  const rawLinks: Array<{
+    message: string;
+    kept: string | undefined;
+    spans: ReadonlyArray<DisplaySpan> | undefined;
+  }> = [];
   const seen = new Set<unknown>();
   let current: unknown = err;
   let elided = false;
@@ -565,6 +639,7 @@ export function sanitizeErrorForDisplay(err: unknown): string {
     // code-point walk throw -- must yield a marker, never crash the renderer.
     let message: string;
     let kept: string | undefined;
+    let spans: ReadonlyArray<DisplaySpan> | undefined;
     try {
       const raw = errorMessage(current);
       message = typeof raw === "string" ? raw : String(raw);
@@ -580,14 +655,25 @@ export function sanitizeErrorForDisplay(err: unknown): string {
     } catch {
       kept = undefined;
     }
+    // The origin partition is read the same way, and after the message: it is
+    // kept only where its spans join back to the text this link renders, so a
+    // link whose message could not be read has none.
+    try {
+      spans = operatorSuppliedSpans(current, message);
+    } catch {
+      spans = undefined;
+    }
     // Suppress a link that repeats the previous link's raw message: a wrapper
     // built by asConnectionError has its cause's message verbatim, so the
     // outer and first inner links are usually byte-identical. The kept link is
     // the marked one of the two, so an unmarked wrapper over a marked cause of
     // the same text still reaches the operator as the block it was written as.
     const previous = rawLinks[rawLinks.length - 1];
-    if (previous?.message !== message) rawLinks.push({ message, kept });
-    else if (previous.kept === undefined) previous.kept = kept;
+    if (previous?.message !== message) rawLinks.push({ message, kept, spans });
+    else {
+      if (previous.kept === undefined) previous.kept = kept;
+      if (previous.spans === undefined) previous.spans = spans;
+    }
     seen.add(current);
     // Follow `.cause` on any object link, like {@link causeChainSome}; a
     // non-object link has no chain to follow. typeof null is "object", so the
@@ -614,12 +700,17 @@ export function sanitizeErrorForDisplay(err: unknown): string {
     }
     current = next;
   }
-  const links: string[] = rawLinks.map(({ message, kept }) =>
-    kept === undefined
-      ? sanitizeForDisplay(redactPrivateKeyMaterial(message), {
-          maxLength: COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
-        })
-      : renderFirstPartyLineBreaks(kept),
+  // A link marked both ways renders through the line-break form, which escapes
+  // every span: two marks over one link describe it two ways, and the escape is
+  // the treatment a link gets by asking for nothing.
+  const links: string[] = rawLinks.map(({ message, kept, spans }) =>
+    kept !== undefined
+      ? renderFirstPartyLineBreaks(kept)
+      : spans !== undefined
+        ? renderSpans(spans)
+        : sanitizeForDisplay(redactPrivateKeyMaterial(message), {
+            maxLength: COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
+          }),
   );
   // Appended after the escape and the cap, like the truncation marker inside
   // sanitizeForDisplay: the marker is this module's own fixed ASCII, and a link
