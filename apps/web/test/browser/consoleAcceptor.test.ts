@@ -425,7 +425,11 @@ interface AcceptStubOptions {
   jobStatus?: string;
   /** The exchange record the job's status route reports. Unset, the body denies
    * availability under `recordUnavailable` below. */
-  record?: { createdAt: string; outcome: string };
+  record?: {
+    createdAt: string;
+    outcome: string;
+    certificateMismatchObserved?: boolean;
+  };
   /** Why the status route says it is withholding the record pair, for a body that
    * denies availability. The default is the console's definitive denial, which
    * is what a run that owes no record answers. */
@@ -540,6 +544,8 @@ function stubServerJobAccept(options: AcceptStubOptions = {}): {
                   recordAvailable: true,
                   recordCreatedAt: options.record.createdAt,
                   recordOutcome: options.record.outcome,
+                  recordCertificateMismatchObserved:
+                    options.record.certificateMismatchObserved ?? false,
                 }
               : {
                   recordAvailable: false,
@@ -1099,6 +1105,44 @@ describe("console acceptor recoveries against the run's exchange record", () => 
     await page.getByRole("button", { name: "Cancel" }).click();
     await flushPendingUpdates();
     expect(api.captured.some((r) => r.method === "DELETE")).toBe(false);
+  });
+
+  test("states the certificate mismatch the record holds beside the outcome", async () => {
+    const api = stubServerJobAccept({
+      jobStatus: "failed",
+      record: {
+        createdAt: CREATED_AT,
+        outcome: "receipt-swap-terminated",
+        certificateMismatchObserved: true,
+      },
+    });
+    await acceptToExchangeFailure(api);
+
+    // The marker qualifies the outcome rather than replacing it, so both lines
+    // stand: what the run did, and what it found about the partner's certificate.
+    await expect
+      .element(page.getByText(TERMINATED_RECORD_LEAD))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("not the one pinned for them", { exact: false }))
+      .toBeInTheDocument();
+  });
+
+  test("says nothing about a certificate the record states no mismatch for", async () => {
+    const api = stubServerJobAccept({
+      jobStatus: "failed",
+      record: { createdAt: CREATED_AT, outcome: "receipt-swap-terminated" },
+    });
+    await acceptToExchangeFailure(api);
+
+    // Wait for the panel itself before reading the absence: a line missing
+    // because the ask has not landed yet would pass this on any record.
+    await expect
+      .element(page.getByText(TERMINATED_RECORD_LEAD))
+      .toBeInTheDocument();
+    expect(
+      page.getByText("not the one pinned for them", { exact: false }).query(),
+    ).toBeNull();
   });
 
   test("a record the console cannot read confirms, and links no download", async () => {
