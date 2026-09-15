@@ -492,7 +492,8 @@ const TERMS_ROWS: Record<
     tone: "incomplete",
     explanation:
       "Supply both parties' linkage terms to check the agreed-terms hash. The " +
-      "partner's terms are not retained by default, so this is the common case.",
+      "receipt holds your partner's, so loading it supplies that half; yours " +
+      "is the one to paste.",
   },
 };
 
