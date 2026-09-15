@@ -90,3 +90,735 @@ vulnerabilities:
       amazonlinux:2023 tag onto a 2023.12.20260831 or later rootfs, and this
       entry comes out in that same diff.
     expired_at: 2026-10-15
+
+  # Accepted 2026-09-15. The samba client closure.
+  - id: CVE-2026-6949
+    purls:
+      - pkg:rpm/amazon/libsmbclient
+      - pkg:rpm/amazon/libwbclient
+      - pkg:rpm/amazon/samba-client
+      - pkg:rpm/amazon/samba-client-libs
+      - pkg:rpm/amazon/samba-common
+      - pkg:rpm/amazon/samba-common-libs
+    statement: >-
+      Samba's DNS server crashes on a TSIG packet with crafted name
+      compression. This entry covers the FIPS variant image's Amazon Linux
+      libsmbclient, libwbclient, samba-client, samba-client-libs,
+      samba-common and samba-common-libs at 2:4.17.12-1.amzn2023.0.5,
+      fixed at 2:4.17.12-1.amzn2023.0.7, and no other package. Accepted
+      because the vulnerable path is Samba's DNS server and no psilink
+      role runs one. The image does install samba-client, and psilink's
+      doctor command runs smbclient inside it to probe a Windows file-drop
+      share, so this closure is reached; no samba server or authentication
+      component is. The built image's own package list
+      (NOTICE-os-packages-fips.tsv) holds no smbd, nmbd, winbindd or
+      samba-winbind, and neither role authenticates a Unix account or
+      serves DNS. Cleared by moving Dockerfile.fips to the
+      amazonlinux:2023 rootfs carrying 2023.12.20260914 or later, the
+      first snapshot serving 2:4.17.12-1.amzn2023.0.7. No published rootfs
+      carries that release -- the newest, measured 2026-09-15, is
+      2023.12.20260831 -- and the build asserts that the rootfs release
+      equals the dnf releasever, so a snapshot-only bump fails by design
+      and there is no base to bump to. This entry comes out in the same
+      diff as that bump, which "Bumping the FIPS base image" in
+      docs/spec/DEPENDENCY_PINS.md describes.
+    expired_at: 2026-10-15
+  - id: CVE-2026-58218
+    purls:
+      - pkg:rpm/amazon/libsmbclient
+      - pkg:rpm/amazon/libwbclient
+      - pkg:rpm/amazon/samba-client
+      - pkg:rpm/amazon/samba-client-libs
+      - pkg:rpm/amazon/samba-common
+      - pkg:rpm/amazon/samba-common-libs
+    statement: >-
+      Denial of service in Samba's DNS signing, through TKEY name cache
+      exhaustion. This entry covers the FIPS variant image's Amazon Linux
+      libsmbclient, libwbclient, samba-client, samba-client-libs,
+      samba-common and samba-common-libs at 2:4.17.12-1.amzn2023.0.5,
+      fixed at 2:4.17.12-1.amzn2023.0.7, and no other package. Accepted
+      because the vulnerable path is Samba's DNS server and no psilink
+      role runs one. The image does install samba-client, and psilink's
+      doctor command runs smbclient inside it to probe a Windows file-drop
+      share, so this closure is reached; no samba server or authentication
+      component is. The built image's own package list
+      (NOTICE-os-packages-fips.tsv) holds no smbd, nmbd, winbindd or
+      samba-winbind, and neither role authenticates a Unix account or
+      serves DNS. Cleared by moving Dockerfile.fips to the
+      amazonlinux:2023 rootfs carrying 2023.12.20260914 or later, the
+      first snapshot serving 2:4.17.12-1.amzn2023.0.7. No published rootfs
+      carries that release -- the newest, measured 2026-09-15, is
+      2023.12.20260831 -- and the build asserts that the rootfs release
+      equals the dnf releasever, so a snapshot-only bump fails by design
+      and there is no base to bump to. This entry comes out in the same
+      diff as that bump, which "Bumping the FIPS base image" in
+      docs/spec/DEPENDENCY_PINS.md describes.
+    expired_at: 2026-10-15
+  - id: CVE-2026-15779
+    purls:
+      - pkg:rpm/amazon/libsmbclient
+      - pkg:rpm/amazon/libwbclient
+      - pkg:rpm/amazon/samba-client
+      - pkg:rpm/amazon/samba-client-libs
+      - pkg:rpm/amazon/samba-common
+      - pkg:rpm/amazon/samba-common-libs
+    statement: >-
+      pam_winbind's mkhomedir chowns critical system paths without
+      validating them. This entry covers the FIPS variant image's Amazon
+      Linux libsmbclient, libwbclient, samba-client, samba-client-libs,
+      samba-common and samba-common-libs at 2:4.17.12-1.amzn2023.0.5,
+      fixed at 2:4.17.12-1.amzn2023.0.7, and no other package. Accepted
+      because the vulnerable path is a PAM module that ships in
+      samba-winbind, a package this image does not install, and reaching
+      it needs a Unix account authentication neither role performs -- the
+      runtime stage strips every setuid and setgid bit in the closure and
+      drops to an unprivileged account. The image does install
+      samba-client, and psilink's doctor command runs smbclient inside it
+      to probe a Windows file-drop share, so this closure is reached; no
+      samba server or authentication component is. The built image's own
+      package list (NOTICE-os-packages-fips.tsv) holds no smbd, nmbd,
+      winbindd or samba-winbind, and neither role authenticates a Unix
+      account or serves DNS. Cleared by moving Dockerfile.fips to the
+      amazonlinux:2023 rootfs carrying 2023.12.20260914 or later, the
+      first snapshot serving 2:4.17.12-1.amzn2023.0.7. No published rootfs
+      carries that release -- the newest, measured 2026-09-15, is
+      2023.12.20260831 -- and the build asserts that the rootfs release
+      equals the dnf releasever, so a snapshot-only bump fails by design
+      and there is no base to bump to. This entry comes out in the same
+      diff as that bump, which "Bumping the FIPS base image" in
+      docs/spec/DEPENDENCY_PINS.md describes.
+    expired_at: 2026-10-15
+
+  # Accepted 2026-09-15. The Amazon Linux openssl packages.
+  - id: CVE-2026-75803
+    purls:
+      - pkg:rpm/amazon/openssl
+      - pkg:rpm/amazon/openssl-libs
+    statement: >-
+      ChaCha20-Poly1305 and AES-OCB decryption of an empty ciphertext
+      finalized through EVP_Cipher() reports success without verifying the
+      authentication tag. This entry covers the FIPS variant image's
+      Amazon Linux openssl and openssl-libs at 1:3.5.7-2.amzn2023.0.1,
+      fixed at 1:3.5.8-1.amzn2023.0.1, and no other package. Accepted
+      because neither cipher nor that call shape is on a psilink path: the
+      application-layer AEAD is AES-GCM through WebCrypto
+      (packages/core/src/connection/encryptedMessageConnection.ts), which
+      the advisory does not name and which does not finalize through
+      EVP_Cipher(), and the advisory records no FIPS impact for the 3.5
+      module. SMB3 encrypts with AES-CCM and AES-GCM, so smbclient does
+      not meet the cipher condition either. psilink's own cryptography
+      does not run on these two: node comes from the official tarball
+      rather than from a package and links its own libcrypto, and the
+      certified module this image is built around
+      (openssl-fips-provider-certified 3.2.2-1.amzn2023, a separate
+      package with no finding here) is what serves that cryptography,
+      cross-loaded into the libcrypto node links. What reads these two
+      packages in the image is the openssl CLI, which the build uses once
+      to read the loaded provider back and which the entrypoint does not
+      consult because it answers for a different libcrypto and a different
+      consumer, and the samba client libraries. Cleared by moving
+      Dockerfile.fips to the amazonlinux:2023 rootfs carrying
+      2023.12.20260914 or later, the first snapshot serving
+      1:3.5.8-1.amzn2023.0.1. No published rootfs carries that release --
+      the newest, measured 2026-09-15, is 2023.12.20260831 -- and the
+      build asserts that the rootfs release equals the dnf releasever, so
+      a snapshot-only bump fails by design and there is no base to bump
+      to. This entry comes out in the same diff as that bump, which
+      "Bumping the FIPS base image" in docs/spec/DEPENDENCY_PINS.md
+      describes.
+    expired_at: 2026-10-15
+  - id: CVE-2026-63076
+    purls:
+      - pkg:rpm/amazon/openssl
+      - pkg:rpm/amazon/openssl-libs
+    statement: >-
+      A crafted protectionAlg makes a CMP server dereference an invalid
+      pointer. This entry covers the FIPS variant image's Amazon Linux
+      openssl and openssl-libs at 1:3.5.7-2.amzn2023.0.1, fixed at
+      1:3.5.8-1.amzn2023.0.1, and no other package. Accepted because the
+      vulnerable path is the CMP certificate-management protocol, which
+      nothing in this image speaks: psilink enrolls no certificates and
+      manages none. psilink's own cryptography does not run on these two:
+      node comes from the official tarball rather than from a package and
+      links its own libcrypto, and the certified module this image is
+      built around (openssl-fips-provider-certified 3.2.2-1.amzn2023, a
+      separate package with no finding here) is what serves that
+      cryptography, cross-loaded into the libcrypto node links. What reads
+      these two packages in the image is the openssl CLI, which the build
+      uses once to read the loaded provider back and which the entrypoint
+      does not consult because it answers for a different libcrypto and a
+      different consumer, and the samba client libraries. Cleared by
+      moving Dockerfile.fips to the amazonlinux:2023 rootfs carrying
+      2023.12.20260914 or later, the first snapshot serving
+      1:3.5.8-1.amzn2023.0.1. No published rootfs carries that release --
+      the newest, measured 2026-09-15, is 2023.12.20260831 -- and the
+      build asserts that the rootfs release equals the dnf releasever, so
+      a snapshot-only bump fails by design and there is no base to bump
+      to. This entry comes out in the same diff as that bump, which
+      "Bumping the FIPS base image" in docs/spec/DEPENDENCY_PINS.md
+      describes.
+    expired_at: 2026-10-15
+  - id: CVE-2026-63075
+    purls:
+      - pkg:rpm/amazon/openssl
+      - pkg:rpm/amazon/openssl-libs
+    statement: >-
+      Retained QUIC ACK-only packets can exhaust memory. This entry covers
+      the FIPS variant image's Amazon Linux openssl and openssl-libs at
+      1:3.5.7-2.amzn2023.0.1, fixed at 1:3.5.8-1.amzn2023.0.1, and no
+      other package. Accepted because the vulnerable path is a QUIC server
+      and no psilink role opens one: psilink's transports are SFTP over
+      ssh2, WebRTC data channels, file drop, and the console's localhost
+      HTTP server. psilink's own cryptography does not run on these two:
+      node comes from the official tarball rather than from a package and
+      links its own libcrypto, and the certified module this image is
+      built around (openssl-fips-provider-certified 3.2.2-1.amzn2023, a
+      separate package with no finding here) is what serves that
+      cryptography, cross-loaded into the libcrypto node links. What reads
+      these two packages in the image is the openssl CLI, which the build
+      uses once to read the loaded provider back and which the entrypoint
+      does not consult because it answers for a different libcrypto and a
+      different consumer, and the samba client libraries. Cleared by
+      moving Dockerfile.fips to the amazonlinux:2023 rootfs carrying
+      2023.12.20260914 or later, the first snapshot serving
+      1:3.5.8-1.amzn2023.0.1. No published rootfs carries that release --
+      the newest, measured 2026-09-15, is 2023.12.20260831 -- and the
+      build asserts that the rootfs release equals the dnf releasever, so
+      a snapshot-only bump fails by design and there is no base to bump
+      to. This entry comes out in the same diff as that bump, which
+      "Bumping the FIPS base image" in docs/spec/DEPENDENCY_PINS.md
+      describes.
+    expired_at: 2026-10-15
+  - id: CVE-2026-63074
+    purls:
+      - pkg:rpm/amazon/openssl
+      - pkg:rpm/amazon/openssl-libs
+    statement: >-
+      Indefinite cache growth of ExtraCerts in CMP. This entry covers the
+      FIPS variant image's Amazon Linux openssl and openssl-libs at
+      1:3.5.7-2.amzn2023.0.1, fixed at 1:3.5.8-1.amzn2023.0.1, and no
+      other package. Accepted because the vulnerable path is the CMP
+      certificate-management protocol, which nothing in this image speaks:
+      psilink enrolls no certificates and manages none. psilink's own
+      cryptography does not run on these two: node comes from the official
+      tarball rather than from a package and links its own libcrypto, and
+      the certified module this image is built around
+      (openssl-fips-provider-certified 3.2.2-1.amzn2023, a separate
+      package with no finding here) is what serves that cryptography,
+      cross-loaded into the libcrypto node links. What reads these two
+      packages in the image is the openssl CLI, which the build uses once
+      to read the loaded provider back and which the entrypoint does not
+      consult because it answers for a different libcrypto and a different
+      consumer, and the samba client libraries. Cleared by moving
+      Dockerfile.fips to the amazonlinux:2023 rootfs carrying
+      2023.12.20260914 or later, the first snapshot serving
+      1:3.5.8-1.amzn2023.0.1. No published rootfs carries that release --
+      the newest, measured 2026-09-15, is 2023.12.20260831 -- and the
+      build asserts that the rootfs release equals the dnf releasever, so
+      a snapshot-only bump fails by design and there is no base to bump
+      to. This entry comes out in the same diff as that bump, which
+      "Bumping the FIPS base image" in docs/spec/DEPENDENCY_PINS.md
+      describes.
+    expired_at: 2026-10-15
+  - id: CVE-2026-63073
+    purls:
+      - pkg:rpm/amazon/openssl
+      - pkg:rpm/amazon/openssl-libs
+    statement: >-
+      An untrusted sender DN is used as a format string when validating a
+      CMP response. This entry covers the FIPS variant image's Amazon
+      Linux openssl and openssl-libs at 1:3.5.7-2.amzn2023.0.1, fixed at
+      1:3.5.8-1.amzn2023.0.1, and no other package. Accepted because the
+      vulnerable path is the CMP certificate-management protocol, which
+      nothing in this image speaks: psilink enrolls no certificates and
+      manages none. psilink's own cryptography does not run on these two:
+      node comes from the official tarball rather than from a package and
+      links its own libcrypto, and the certified module this image is
+      built around (openssl-fips-provider-certified 3.2.2-1.amzn2023, a
+      separate package with no finding here) is what serves that
+      cryptography, cross-loaded into the libcrypto node links. What reads
+      these two packages in the image is the openssl CLI, which the build
+      uses once to read the loaded provider back and which the entrypoint
+      does not consult because it answers for a different libcrypto and a
+      different consumer, and the samba client libraries. Cleared by
+      moving Dockerfile.fips to the amazonlinux:2023 rootfs carrying
+      2023.12.20260914 or later, the first snapshot serving
+      1:3.5.8-1.amzn2023.0.1. No published rootfs carries that release --
+      the newest, measured 2026-09-15, is 2023.12.20260831 -- and the
+      build asserts that the rootfs release equals the dnf releasever, so
+      a snapshot-only bump fails by design and there is no base to bump
+      to. This entry comes out in the same diff as that bump, which
+      "Bumping the FIPS base image" in docs/spec/DEPENDENCY_PINS.md
+      describes.
+    expired_at: 2026-10-15
+  - id: CVE-2026-63072
+    purls:
+      - pkg:rpm/amazon/openssl
+      - pkg:rpm/amazon/openssl-libs
+    statement: >-
+      Heap buffer overflow in CMS key unwrapping. This entry covers the
+      FIPS variant image's Amazon Linux openssl and openssl-libs at
+      1:3.5.7-2.amzn2023.0.1, fixed at 1:3.5.8-1.amzn2023.0.1, and no
+      other package. Accepted because the vulnerable path is CMS message
+      processing, which nothing in this image performs: psilink's wire
+      frames are JSON under its own AES-GCM application layer, and its key
+      material is the signing identity file it writes itself. psilink's
+      own cryptography does not run on these two: node comes from the
+      official tarball rather than from a package and links its own
+      libcrypto, and the certified module this image is built around
+      (openssl-fips-provider-certified 3.2.2-1.amzn2023, a separate
+      package with no finding here) is what serves that cryptography,
+      cross-loaded into the libcrypto node links. What reads these two
+      packages in the image is the openssl CLI, which the build uses once
+      to read the loaded provider back and which the entrypoint does not
+      consult because it answers for a different libcrypto and a different
+      consumer, and the samba client libraries. Cleared by moving
+      Dockerfile.fips to the amazonlinux:2023 rootfs carrying
+      2023.12.20260914 or later, the first snapshot serving
+      1:3.5.8-1.amzn2023.0.1. No published rootfs carries that release --
+      the newest, measured 2026-09-15, is 2023.12.20260831 -- and the
+      build asserts that the rootfs release equals the dnf releasever, so
+      a snapshot-only bump fails by design and there is no base to bump
+      to. This entry comes out in the same diff as that bump, which
+      "Bumping the FIPS base image" in docs/spec/DEPENDENCY_PINS.md
+      describes.
+    expired_at: 2026-10-15
+  - id: CVE-2026-54874
+    purls:
+      - pkg:rpm/amazon/openssl
+      - pkg:rpm/amazon/openssl-libs
+    statement: >-
+      A DTLS peer buffers records for a future epoch without bound. This
+      entry covers the FIPS variant image's Amazon Linux openssl and
+      openssl-libs at 1:3.5.7-2.amzn2023.0.1, fixed at
+      1:3.5.8-1.amzn2023.0.1, and no other package. Accepted because no
+      psilink role terminates DTLS on these packages: the CLI's WebRTC
+      transport is werift, a JavaScript implementation running on node's
+      own crypto, and a browser party's DTLS is the browser's. psilink's
+      own cryptography does not run on these two: node comes from the
+      official tarball rather than from a package and links its own
+      libcrypto, and the certified module this image is built around
+      (openssl-fips-provider-certified 3.2.2-1.amzn2023, a separate
+      package with no finding here) is what serves that cryptography,
+      cross-loaded into the libcrypto node links. What reads these two
+      packages in the image is the openssl CLI, which the build uses once
+      to read the loaded provider back and which the entrypoint does not
+      consult because it answers for a different libcrypto and a different
+      consumer, and the samba client libraries. Cleared by moving
+      Dockerfile.fips to the amazonlinux:2023 rootfs carrying
+      2023.12.20260914 or later, the first snapshot serving
+      1:3.5.8-1.amzn2023.0.1. No published rootfs carries that release --
+      the newest, measured 2026-09-15, is 2023.12.20260831 -- and the
+      build asserts that the rootfs release equals the dnf releasever, so
+      a snapshot-only bump fails by design and there is no base to bump
+      to. This entry comes out in the same diff as that bump, which
+      "Bumping the FIPS base image" in docs/spec/DEPENDENCY_PINS.md
+      describes.
+    expired_at: 2026-10-15
+  - id: CVE-2026-18798
+    purls:
+      - pkg:rpm/amazon/openssl
+      - pkg:rpm/amazon/openssl-libs
+    statement: >-
+      An OpenSSL QUIC server can double free while processing an INITIAL
+      packet. This entry covers the FIPS variant image's Amazon Linux
+      openssl and openssl-libs at 1:3.5.7-2.amzn2023.0.1, fixed at
+      1:3.5.8-1.amzn2023.0.1, and no other package. Accepted because the
+      vulnerable path is a QUIC server and no psilink role opens one:
+      psilink's transports are SFTP over ssh2, WebRTC data channels, file
+      drop, and the console's localhost HTTP server. psilink's own
+      cryptography does not run on these two: node comes from the official
+      tarball rather than from a package and links its own libcrypto, and
+      the certified module this image is built around
+      (openssl-fips-provider-certified 3.2.2-1.amzn2023, a separate
+      package with no finding here) is what serves that cryptography,
+      cross-loaded into the libcrypto node links. What reads these two
+      packages in the image is the openssl CLI, which the build uses once
+      to read the loaded provider back and which the entrypoint does not
+      consult because it answers for a different libcrypto and a different
+      consumer, and the samba client libraries. Cleared by moving
+      Dockerfile.fips to the amazonlinux:2023 rootfs carrying
+      2023.12.20260914 or later, the first snapshot serving
+      1:3.5.8-1.amzn2023.0.1. No published rootfs carries that release --
+      the newest, measured 2026-09-15, is 2023.12.20260831 -- and the
+      build asserts that the rootfs release equals the dnf releasever, so
+      a snapshot-only bump fails by design and there is no base to bump
+      to. This entry comes out in the same diff as that bump, which
+      "Bumping the FIPS base image" in docs/spec/DEPENDENCY_PINS.md
+      describes.
+    expired_at: 2026-10-15
+  - id: CVE-2026-14457
+    purls:
+      - pkg:rpm/amazon/openssl
+      - pkg:rpm/amazon/openssl-libs
+    statement: >-
+      A TLS server selecting a signature algorithm for a raw public key
+      can dereference a certificate that is absent. This entry covers the
+      FIPS variant image's Amazon Linux openssl and openssl-libs at
+      1:3.5.7-2.amzn2023.0.1, fixed at 1:3.5.8-1.amzn2023.0.1, and no
+      other package. Accepted because no psilink role runs a TLS server on
+      these packages and none negotiates raw public keys: psilink's
+      transports are SFTP over ssh2, WebRTC data channels, file drop, and
+      the console's localhost HTTP server, all of them node code on the
+      libcrypto node links. psilink's own cryptography does not run on
+      these two: node comes from the official tarball rather than from a
+      package and links its own libcrypto, and the certified module this
+      image is built around (openssl-fips-provider-certified
+      3.2.2-1.amzn2023, a separate package with no finding here) is what
+      serves that cryptography, cross-loaded into the libcrypto node
+      links. What reads these two packages in the image is the openssl
+      CLI, which the build uses once to read the loaded provider back and
+      which the entrypoint does not consult because it answers for a
+      different libcrypto and a different consumer, and the samba client
+      libraries. Cleared by moving Dockerfile.fips to the amazonlinux:2023
+      rootfs carrying 2023.12.20260914 or later, the first snapshot
+      serving 1:3.5.8-1.amzn2023.0.1. No published rootfs carries that
+      release -- the newest, measured 2026-09-15, is 2023.12.20260831 --
+      and the build asserts that the rootfs release equals the dnf
+      releasever, so a snapshot-only bump fails by design and there is no
+      base to bump to. This entry comes out in the same diff as that bump,
+      which "Bumping the FIPS base image" in docs/spec/DEPENDENCY_PINS.md
+      describes.
+    expired_at: 2026-10-15
+
+  # Accepted 2026-09-15. libevent.
+  - id: CVE-2026-63383
+    purls:
+      - pkg:rpm/amazon/libevent
+    statement: >-
+      Denial of service in libevent's RPC handling of malformed data. This
+      entry covers the FIPS variant image's Amazon Linux libevent at
+      2.1.12-3.amzn2023.0.3, fixed at 2.1.12-3.amzn2023.0.4, and no other
+      package. Accepted because the vulnerable path is libevent's own RPC
+      machinery, which an application reaches only by calling it. libevent
+      is in this image as a transitive dependency of the base package
+      closure: Dockerfile.fips installs it by no name, and it reaches the
+      built image's package list through another package's requirement.
+      Nothing the image runs calls it -- both roles are node processes,
+      and the only other executables a run reaches are the two shell
+      entrypoints and smbclient. Cleared by moving Dockerfile.fips to the
+      amazonlinux:2023 rootfs carrying 2023.12.20260914 or later, the
+      first snapshot serving 2.1.12-3.amzn2023.0.4. No published rootfs
+      carries that release -- the newest, measured 2026-09-15, is
+      2023.12.20260831 -- and the build asserts that the rootfs release
+      equals the dnf releasever, so a snapshot-only bump fails by design
+      and there is no base to bump to. This entry comes out in the same
+      diff as that bump, which "Bumping the FIPS base image" in
+      docs/spec/DEPENDENCY_PINS.md describes.
+    expired_at: 2026-10-15
+  - id: CVE-2026-63384
+    purls:
+      - pkg:rpm/amazon/libevent
+    statement: >-
+      Denial of service through an integer conversion error in
+      evtag_unmarshal_header. This entry covers the FIPS variant image's
+      Amazon Linux libevent at 2.1.12-3.amzn2023.0.3, fixed at
+      2.1.12-3.amzn2023.0.4, and no other package. Accepted because the
+      vulnerable path is libevent's evtag decoder, which an application
+      reaches only by calling it. libevent is in this image as a
+      transitive dependency of the base package closure: Dockerfile.fips
+      installs it by no name, and it reaches the built image's package
+      list through another package's requirement. Nothing the image runs
+      calls it -- both roles are node processes, and the only other
+      executables a run reaches are the two shell entrypoints and
+      smbclient. Cleared by moving Dockerfile.fips to the amazonlinux:2023
+      rootfs carrying 2023.12.20260914 or later, the first snapshot
+      serving 2.1.12-3.amzn2023.0.4. No published rootfs carries that
+      release -- the newest, measured 2026-09-15, is 2023.12.20260831 --
+      and the build asserts that the rootfs release equals the dnf
+      releasever, so a snapshot-only bump fails by design and there is no
+      base to bump to. This entry comes out in the same diff as that bump,
+      which "Bumping the FIPS base image" in docs/spec/DEPENDENCY_PINS.md
+      describes.
+    expired_at: 2026-10-15
+
+  # Accepted 2026-09-15. expat.
+  - id: CVE-2026-76957
+    purls:
+      - pkg:rpm/amazon/expat
+    statement: >-
+      Memory corruption in libexpat allowing arbitrary code execution or
+      denial of service. This entry covers the FIPS variant image's Amazon
+      Linux expat at 2.6.3-1.amzn2023.0.6, fixed at 2.8.3-1.amzn2023.0.1,
+      and no other package. Accepted because reaching the vulnerable path
+      needs an XML document parsed through this copy of libexpat, which
+      nothing in the image does. expat is in this image as a transitive
+      dependency of the base package closure, installed by no name in
+      Dockerfile.fips, and its callers here are the dnf and python stack
+      the base carries, which runs during the build and not in a container
+      the entrypoint starts. Neither role parses XML: psilink reads CSV
+      inputs, YAML and JSON configuration and JSON wire frames, and no XML
+      parser is called anywhere in apps/cli/src or packages/core/src.
+      Cleared by moving Dockerfile.fips to the amazonlinux:2023 rootfs
+      carrying 2023.12.20260914 or later, the first snapshot serving
+      2.8.3-1.amzn2023.0.1. No published rootfs carries that release --
+      the newest, measured 2026-09-15, is 2023.12.20260831 -- and the
+      build asserts that the rootfs release equals the dnf releasever, so
+      a snapshot-only bump fails by design and there is no base to bump
+      to. This entry comes out in the same diff as that bump, which
+      "Bumping the FIPS base image" in docs/spec/DEPENDENCY_PINS.md
+      describes.
+    expired_at: 2026-10-15
+  - id: CVE-2026-66046
+    purls:
+      - pkg:rpm/amazon/expat
+    statement: >-
+      Quadratic complexity in storeAtts(), a denial of service on a
+      document with many non-normalized attributes. This entry covers the
+      FIPS variant image's Amazon Linux expat at 2.6.3-1.amzn2023.0.6,
+      fixed at 2.8.3-1.amzn2023.0.1, and no other package. Accepted
+      because reaching the vulnerable path needs an XML document parsed
+      through this copy of libexpat, which nothing in the image does.
+      expat is in this image as a transitive dependency of the base
+      package closure, installed by no name in Dockerfile.fips, and its
+      callers here are the dnf and python stack the base carries, which
+      runs during the build and not in a container the entrypoint starts.
+      Neither role parses XML: psilink reads CSV inputs, YAML and JSON
+      configuration and JSON wire frames, and no XML parser is called
+      anywhere in apps/cli/src or packages/core/src. Cleared by moving
+      Dockerfile.fips to the amazonlinux:2023 rootfs carrying
+      2023.12.20260914 or later, the first snapshot serving
+      2.8.3-1.amzn2023.0.1. No published rootfs carries that release --
+      the newest, measured 2026-09-15, is 2023.12.20260831 -- and the
+      build asserts that the rootfs release equals the dnf releasever, so
+      a snapshot-only bump fails by design and there is no base to bump
+      to. This entry comes out in the same diff as that bump, which
+      "Bumping the FIPS base image" in docs/spec/DEPENDENCY_PINS.md
+      describes.
+    expired_at: 2026-10-15
+  - id: CVE-2026-56412
+    purls:
+      - pkg:rpm/amazon/expat
+    statement: >-
+      Use after free in libexpat's handling of XML CDATA sections. This
+      entry covers the FIPS variant image's Amazon Linux expat at
+      2.6.3-1.amzn2023.0.6, fixed at 2.8.3-1.amzn2023.0.1, and no other
+      package. Accepted because reaching the vulnerable path needs an XML
+      document parsed through this copy of libexpat, which nothing in the
+      image does. expat is in this image as a transitive dependency of the
+      base package closure, installed by no name in Dockerfile.fips, and
+      its callers here are the dnf and python stack the base carries,
+      which runs during the build and not in a container the entrypoint
+      starts. Neither role parses XML: psilink reads CSV inputs, YAML and
+      JSON configuration and JSON wire frames, and no XML parser is called
+      anywhere in apps/cli/src or packages/core/src. Cleared by moving
+      Dockerfile.fips to the amazonlinux:2023 rootfs carrying
+      2023.12.20260914 or later, the first snapshot serving
+      2.8.3-1.amzn2023.0.1. No published rootfs carries that release --
+      the newest, measured 2026-09-15, is 2023.12.20260831 -- and the
+      build asserts that the rootfs release equals the dnf releasever, so
+      a snapshot-only bump fails by design and there is no base to bump
+      to. This entry comes out in the same diff as that bump, which
+      "Bumping the FIPS base image" in docs/spec/DEPENDENCY_PINS.md
+      describes.
+    expired_at: 2026-10-15
+  - id: CVE-2026-56411
+    purls:
+      - pkg:rpm/amazon/expat
+    statement: >-
+      Integer overflow in libexpat leading to information disclosure or
+      code execution. This entry covers the FIPS variant image's Amazon
+      Linux expat at 2.6.3-1.amzn2023.0.6, fixed at 2.8.3-1.amzn2023.0.1,
+      and no other package. Accepted because reaching the vulnerable path
+      needs an XML document parsed through this copy of libexpat, which
+      nothing in the image does. expat is in this image as a transitive
+      dependency of the base package closure, installed by no name in
+      Dockerfile.fips, and its callers here are the dnf and python stack
+      the base carries, which runs during the build and not in a container
+      the entrypoint starts. Neither role parses XML: psilink reads CSV
+      inputs, YAML and JSON configuration and JSON wire frames, and no XML
+      parser is called anywhere in apps/cli/src or packages/core/src.
+      Cleared by moving Dockerfile.fips to the amazonlinux:2023 rootfs
+      carrying 2023.12.20260914 or later, the first snapshot serving
+      2.8.3-1.amzn2023.0.1. No published rootfs carries that release --
+      the newest, measured 2026-09-15, is 2023.12.20260831 -- and the
+      build asserts that the rootfs release equals the dnf releasever, so
+      a snapshot-only bump fails by design and there is no base to bump
+      to. This entry comes out in the same diff as that bump, which
+      "Bumping the FIPS base image" in docs/spec/DEPENDENCY_PINS.md
+      describes.
+    expired_at: 2026-10-15
+  - id: CVE-2026-56410
+    purls:
+      - pkg:rpm/amazon/expat
+    statement: >-
+      Integer overflow in xmlwf leading to information disclosure or
+      arbitrary code execution. This entry covers the FIPS variant image's
+      Amazon Linux expat at 2.6.3-1.amzn2023.0.6, fixed at
+      2.8.3-1.amzn2023.0.1, and no other package. Accepted because the
+      vulnerable path is expat's xmlwf command line tool, which nothing in
+      this image runs, and reaching libexpat at all needs an XML document
+      parsed, which nothing in the image does. expat is in this image as a
+      transitive dependency of the base package closure, installed by no
+      name in Dockerfile.fips, and its callers here are the dnf and python
+      stack the base carries, which runs during the build and not in a
+      container the entrypoint starts. Neither role parses XML: psilink
+      reads CSV inputs, YAML and JSON configuration and JSON wire frames,
+      and no XML parser is called anywhere in apps/cli/src or
+      packages/core/src. Cleared by moving Dockerfile.fips to the
+      amazonlinux:2023 rootfs carrying 2023.12.20260914 or later, the
+      first snapshot serving 2.8.3-1.amzn2023.0.1. No published rootfs
+      carries that release -- the newest, measured 2026-09-15, is
+      2023.12.20260831 -- and the build asserts that the rootfs release
+      equals the dnf releasever, so a snapshot-only bump fails by design
+      and there is no base to bump to. This entry comes out in the same
+      diff as that bump, which "Bumping the FIPS base image" in
+      docs/spec/DEPENDENCY_PINS.md describes.
+    expired_at: 2026-10-15
+  - id: CVE-2026-56409
+    purls:
+      - pkg:rpm/amazon/expat
+    statement: >-
+      Integer overflow in xmlwf's output filename handling when -d
+      outputDir is used. This entry covers the FIPS variant image's Amazon
+      Linux expat at 2.6.3-1.amzn2023.0.6, fixed at 2.8.3-1.amzn2023.0.1,
+      and no other package. Accepted because the vulnerable path is
+      expat's xmlwf command line tool, which nothing in this image runs,
+      and reaching libexpat at all needs an XML document parsed, which
+      nothing in the image does. expat is in this image as a transitive
+      dependency of the base package closure, installed by no name in
+      Dockerfile.fips, and its callers here are the dnf and python stack
+      the base carries, which runs during the build and not in a container
+      the entrypoint starts. Neither role parses XML: psilink reads CSV
+      inputs, YAML and JSON configuration and JSON wire frames, and no XML
+      parser is called anywhere in apps/cli/src or packages/core/src.
+      Cleared by moving Dockerfile.fips to the amazonlinux:2023 rootfs
+      carrying 2023.12.20260914 or later, the first snapshot serving
+      2.8.3-1.amzn2023.0.1. No published rootfs carries that release --
+      the newest, measured 2026-09-15, is 2023.12.20260831 -- and the
+      build asserts that the rootfs release equals the dnf releasever, so
+      a snapshot-only bump fails by design and there is no base to bump
+      to. This entry comes out in the same diff as that bump, which
+      "Bumping the FIPS base image" in docs/spec/DEPENDENCY_PINS.md
+      describes.
+    expired_at: 2026-10-15
+  - id: CVE-2026-56408
+    purls:
+      - pkg:rpm/amazon/expat
+    statement: >-
+      Integer overflow in libexpat's copyString. This entry covers the
+      FIPS variant image's Amazon Linux expat at 2.6.3-1.amzn2023.0.6,
+      fixed at 2.8.3-1.amzn2023.0.1, and no other package. Accepted
+      because reaching the vulnerable path needs an XML document parsed
+      through this copy of libexpat, which nothing in the image does.
+      expat is in this image as a transitive dependency of the base
+      package closure, installed by no name in Dockerfile.fips, and its
+      callers here are the dnf and python stack the base carries, which
+      runs during the build and not in a container the entrypoint starts.
+      Neither role parses XML: psilink reads CSV inputs, YAML and JSON
+      configuration and JSON wire frames, and no XML parser is called
+      anywhere in apps/cli/src or packages/core/src. Cleared by moving
+      Dockerfile.fips to the amazonlinux:2023 rootfs carrying
+      2023.12.20260914 or later, the first snapshot serving
+      2.8.3-1.amzn2023.0.1. No published rootfs carries that release --
+      the newest, measured 2026-09-15, is 2023.12.20260831 -- and the
+      build asserts that the rootfs release equals the dnf releasever, so
+      a snapshot-only bump fails by design and there is no base to bump
+      to. This entry comes out in the same diff as that bump, which
+      "Bumping the FIPS base image" in docs/spec/DEPENDENCY_PINS.md
+      describes.
+    expired_at: 2026-10-15
+  - id: CVE-2026-56405
+    purls:
+      - pkg:rpm/amazon/expat
+    statement: >-
+      Integer overflow in libexpat allowing information disclosure and
+      arbitrary code execution. This entry covers the FIPS variant image's
+      Amazon Linux expat at 2.6.3-1.amzn2023.0.6, fixed at
+      2.8.3-1.amzn2023.0.1, and no other package. Accepted because
+      reaching the vulnerable path needs an XML document parsed through
+      this copy of libexpat, which nothing in the image does. expat is in
+      this image as a transitive dependency of the base package closure,
+      installed by no name in Dockerfile.fips, and its callers here are
+      the dnf and python stack the base carries, which runs during the
+      build and not in a container the entrypoint starts. Neither role
+      parses XML: psilink reads CSV inputs, YAML and JSON configuration
+      and JSON wire frames, and no XML parser is called anywhere in
+      apps/cli/src or packages/core/src. Cleared by moving Dockerfile.fips
+      to the amazonlinux:2023 rootfs carrying 2023.12.20260914 or later,
+      the first snapshot serving 2.8.3-1.amzn2023.0.1. No published rootfs
+      carries that release -- the newest, measured 2026-09-15, is
+      2023.12.20260831 -- and the build asserts that the rootfs release
+      equals the dnf releasever, so a snapshot-only bump fails by design
+      and there is no base to bump to. This entry comes out in the same
+      diff as that bump, which "Bumping the FIPS base image" in
+      docs/spec/DEPENDENCY_PINS.md describes.
+    expired_at: 2026-10-15
+  - id: CVE-2026-56404
+    purls:
+      - pkg:rpm/amazon/expat
+    statement: >-
+      Integer overflow in libexpat's addBinding allowing arbitrary code
+      execution. This entry covers the FIPS variant image's Amazon Linux
+      expat at 2.6.3-1.amzn2023.0.6, fixed at 2.8.3-1.amzn2023.0.1, and no
+      other package. Accepted because reaching the vulnerable path needs
+      an XML document parsed through this copy of libexpat, which nothing
+      in the image does. expat is in this image as a transitive dependency
+      of the base package closure, installed by no name in
+      Dockerfile.fips, and its callers here are the dnf and python stack
+      the base carries, which runs during the build and not in a container
+      the entrypoint starts. Neither role parses XML: psilink reads CSV
+      inputs, YAML and JSON configuration and JSON wire frames, and no XML
+      parser is called anywhere in apps/cli/src or packages/core/src.
+      Cleared by moving Dockerfile.fips to the amazonlinux:2023 rootfs
+      carrying 2023.12.20260914 or later, the first snapshot serving
+      2.8.3-1.amzn2023.0.1. No published rootfs carries that release --
+      the newest, measured 2026-09-15, is 2023.12.20260831 -- and the
+      build asserts that the rootfs release equals the dnf releasever, so
+      a snapshot-only bump fails by design and there is no base to bump
+      to. This entry comes out in the same diff as that bump, which
+      "Bumping the FIPS base image" in docs/spec/DEPENDENCY_PINS.md
+      describes.
+    expired_at: 2026-10-15
+  - id: CVE-2026-56131
+    purls:
+      - pkg:rpm/amazon/expat
+    statement: >-
+      Use after free in libexpat from insufficient handler call depth
+      tracking. This entry covers the FIPS variant image's Amazon Linux
+      expat at 2.6.3-1.amzn2023.0.6, fixed at 2.8.3-1.amzn2023.0.1, and no
+      other package. Accepted because reaching the vulnerable path needs
+      an XML document parsed through this copy of libexpat, which nothing
+      in the image does. expat is in this image as a transitive dependency
+      of the base package closure, installed by no name in
+      Dockerfile.fips, and its callers here are the dnf and python stack
+      the base carries, which runs during the build and not in a container
+      the entrypoint starts. Neither role parses XML: psilink reads CSV
+      inputs, YAML and JSON configuration and JSON wire frames, and no XML
+      parser is called anywhere in apps/cli/src or packages/core/src.
+      Cleared by moving Dockerfile.fips to the amazonlinux:2023 rootfs
+      carrying 2023.12.20260914 or later, the first snapshot serving
+      2.8.3-1.amzn2023.0.1. No published rootfs carries that release --
+      the newest, measured 2026-09-15, is 2023.12.20260831 -- and the
+      build asserts that the rootfs release equals the dnf releasever, so
+      a snapshot-only bump fails by design and there is no base to bump
+      to. This entry comes out in the same diff as that bump, which
+      "Bumping the FIPS base image" in docs/spec/DEPENDENCY_PINS.md
+      describes.
+    expired_at: 2026-10-15
+  - id: CVE-2026-50219
+    purls:
+      - pkg:rpm/amazon/expat
+    statement: >-
+      Use after free in libexpat from improper handler call depth
+      tracking. This entry covers the FIPS variant image's Amazon Linux
+      expat at 2.6.3-1.amzn2023.0.6, fixed at 2.8.3-1.amzn2023.0.1, and no
+      other package. Accepted because reaching the vulnerable path needs
+      an XML document parsed through this copy of libexpat, which nothing
+      in the image does. expat is in this image as a transitive dependency
+      of the base package closure, installed by no name in
+      Dockerfile.fips, and its callers here are the dnf and python stack
+      the base carries, which runs during the build and not in a container
+      the entrypoint starts. Neither role parses XML: psilink reads CSV
+      inputs, YAML and JSON configuration and JSON wire frames, and no XML
+      parser is called anywhere in apps/cli/src or packages/core/src.
+      Cleared by moving Dockerfile.fips to the amazonlinux:2023 rootfs
+      carrying 2023.12.20260914 or later, the first snapshot serving
+      2.8.3-1.amzn2023.0.1. No published rootfs carries that release --
+      the newest, measured 2026-09-15, is 2023.12.20260831 -- and the
+      build asserts that the rootfs release equals the dnf releasever, so
+      a snapshot-only bump fails by design and there is no base to bump
+      to. This entry comes out in the same diff as that bump, which
+      "Bumping the FIPS base image" in docs/spec/DEPENDENCY_PINS.md
+      describes.
+    expired_at: 2026-10-15
