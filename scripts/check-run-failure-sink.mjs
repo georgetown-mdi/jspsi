@@ -62,11 +62,17 @@
 //     The same-named attribute of that piece's own sink is the one allowed
 //     position; every other container, and the right prop on the wrong
 //     component, is a failure.
-//   - Not matched: a read an equality comparison or a `!` takes as its operand,
-//     which is the guard in front of an optional piece
-//     (`{failure.reportedCause !== undefined && <Sink ... />}`). Such an
-//     expression yields a boolean, so the value the operator sees comes from
-//     somewhere else; the read that supplies it is matched on its own.
+//   - Not matched: a read taken as a condition rather than as a value -- an
+//     operand of an equality comparison, the operand of a `!`, a conditional
+//     expression's test, or the left side of a `&&`. Those are the guards in
+//     front of an optional piece, both the compared form
+//     (`{failure.reportedCause !== undefined && <Sink ... />}`) and the bare
+//     one (`{failure.reportedCause && <Sink ... />}`), and none of them puts
+//     the read's own text in front of the operator: a `&&` yields its left
+//     side only where that side is falsy, and the rest yield a boolean. The
+//     read that supplies the rendered text is matched where it stands, so a
+//     guard whose branch inlines the piece reddens on that branch. A `??` or a
+//     `||` is matched, each yielding the left side's own value to render.
 //   - Not matched, as a stated limit: a read that reaches JSX through a local
 //     (`const text = failure.message`, `const { message } = failure`), through
 //     a helper called with the failure, or through a container assembled
@@ -242,14 +248,25 @@ const EQUALITY_OPERATORS = new Set([
 
 /**
  * Whether `node` is read as a condition and not as a value: an operand of an
- * equality comparison, or the operand of a `!`. Both yield a boolean, so what
- * the guarded branch renders is a read of its own.
+ * equality comparison, the operand of a `!`, a conditional expression's test,
+ * or the left side of a `&&`, which yields that side only where it is falsy and
+ * so renders nothing the operator reads. A `??` or a `||` is neither: each
+ * yields the left side's own value. Whatever the guarded branch renders is a
+ * read of its own.
  */
 function readAsCondition(node) {
   const { parent } = node;
   if (!parent) return false;
-  if (ts.isBinaryExpression(parent))
-    return EQUALITY_OPERATORS.has(parent.operatorToken.kind);
+  if (ts.isBinaryExpression(parent)) {
+    if (EQUALITY_OPERATORS.has(parent.operatorToken.kind)) return true;
+    if (parent.operatorToken.kind !== ts.SyntaxKind.AmpersandAmpersandToken)
+      return false;
+    // A `&&` hands its RIGHT side on as the whole expression's value, so that
+    // side is a condition only where the expression it yields to is one --
+    // which is the chained guard, `{a && failure.reportedCause && <Sink />}`.
+    return parent.left === node || readAsCondition(parent);
+  }
+  if (ts.isConditionalExpression(parent)) return parent.condition === node;
   return (
     ts.isPrefixUnaryExpression(parent) &&
     parent.operator === ts.SyntaxKind.ExclamationToken

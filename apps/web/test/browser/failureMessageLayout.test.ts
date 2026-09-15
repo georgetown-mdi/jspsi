@@ -21,7 +21,10 @@ import {
   FailureMessage,
   REPORTED_CAUSE_LABEL,
 } from "@exchange/RunSurface";
-import { RelayedTerminalError } from "@psi/jobClient/serverJobExchangeDriver";
+import {
+  RelayedSelfExplainingError,
+  RelayedTerminalError,
+} from "@psi/jobClient/serverJobExchangeDriver";
 import { failureFor } from "@exchange/useInviterExchange";
 
 import { createAppMount, flushPendingUpdates } from "./renderApp";
@@ -178,12 +181,12 @@ function renderedLines(element: HTMLElement): Array<string> {
 }
 
 /**
- * The terminal error a seat is handed for a run whose stderr link holds `tail`,
- * built through the real composition: the one elimination for partner-origin
- * text labels, redacts and control-replaces the tail, and the relay hands the
+ * The chain a seat is handed for a run whose stderr link holds `tail`, built
+ * through the real composition: the one elimination for partner-origin text
+ * labels, redacts and control-replaces the tail, and the relay hands the
  * rendered links on as one message.
  */
-function relayedTerminalForStderrTail(tail: string): RelayedTerminalError {
+function relayedChainForStderrTail(tail: string): string {
   const error = errorWithPartnerCauseLinks(
     REFUSAL,
     STDERR_LABEL,
@@ -196,7 +199,12 @@ function relayedTerminalForStderrTail(tail: string): RelayedTerminalError {
     links.push(link.message);
     link = (link as { cause?: unknown }).cause;
   }
-  return new RelayedTerminalError(joinErrorCauseChain(links));
+  return joinErrorCauseChain(links);
+}
+
+/** That chain as the terminal error a seat whose copy is its own is handed. */
+function relayedTerminalForStderrTail(tail: string): RelayedTerminalError {
+  return new RelayedTerminalError(relayedChainForStderrTail(tail));
 }
 
 /**
@@ -334,20 +342,40 @@ test("the reported cause block lays the same diagnosis out on those lines", asyn
   ).toBe(reportedCause);
 });
 
-test("a chain composed into a seat's own sentence breaks on those lines too", async () => {
-  // The lost-local-write copy composes the chain onto the end of its own
-  // sentence, so the message span holds both voices. The sentence wraps for
-  // width at this viewport, so what is measured is the line the marker opened
-  // rather than the whole layout.
-  const { message } = failureFor(
+test("a self-explaining refusal breaks on those lines in the span", async () => {
+  // The other category whose body IS the chain: a refusal that states its own
+  // cause and next step displaces the seat's copy, so its diagnosis is laid out
+  // in the message span and no block stands beside it (`failureFor` in
+  // `@exchange/useInviterExchange`).
+  const failure = failureFor(
+    "security",
+    new RelayedSelfExplainingError(relayedChainForStderrTail(CHILD_TAIL)),
+  );
+  expect(failure.reportedCause).toBeUndefined();
+  expect(failure.message).toContain(VALUE_LINE_BREAK_MARKER);
+
+  const span = await mountedMessage(failure.message);
+  expect(renderedLines(span)).toEqual([
+    REFUSAL,
+    `${CAUSE_LINK_OPENING}${STDERR_LABEL}The run stopped.`,
+    `${VALUE_LINE_BREAK_MARKER}${CAUSE_LINK_OPENING}the server refused the key.`,
+  ]);
+});
+
+test("the lost-write report breaks on those lines in the block", async () => {
+  // The do-not-repeat copy is this application's own, so the console's report
+  // of a write this browser did not make is laid out in the labeled block and
+  // the seat's sentence holds none of it.
+  const failure = failureFor(
     "output",
     relayedTerminalForStderrTail(CHILD_TAIL),
   );
-  expect(message).toContain(VALUE_LINE_BREAK_MARKER);
+  expect(failure.message).not.toContain(VALUE_LINE_BREAK_MARKER);
+  expect(failure.reportedCause).toContain(VALUE_LINE_BREAK_MARKER);
 
-  const span = await mountedMessage(message);
+  const report = await mountedReport(failure);
   expect(
-    renderedLines(span).filter((line) =>
+    renderedLines(report).filter((line) =>
       line.startsWith(VALUE_LINE_BREAK_MARKER),
     ),
   ).toEqual([

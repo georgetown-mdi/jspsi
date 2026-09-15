@@ -213,6 +213,56 @@ describe("failure display-sink check", () => {
     ).toMatchObject([{ text: "failure.reportedCause", throughSink: true }]);
   });
 
+  it("reads a bare && guard in front of an optional piece as no render", () => {
+    // The idiomatic form of the same guard: the read yields the branch rather
+    // than any text of its own, so the only render is the one handing the piece
+    // to its sink.
+    expect(
+      rendersIn(`
+        function Alerted({ failure }: { failure: RunFailure }) {
+          return (
+            <Alert>
+              {failure.reportedCause && (
+                <FailureReportedCause reportedCause={failure.reportedCause} />
+              )}
+            </Alert>
+          );
+        }
+      `),
+    ).toMatchObject([{ text: "failure.reportedCause", throughSink: true }]);
+  });
+
+  it("flags a guarded branch that inlines the piece it guards", () => {
+    // Exempting the guard exempts nothing behind it: the branch is where the
+    // operator's text comes from, and a span there is the regression this check
+    // exists for.
+    expect(
+      rendersIn(`
+        function Alerted({ failure }: { failure: RunFailure }) {
+          return (
+            <Alert>
+              {failure.reportedCause && (
+                <span className="mono">{failure.reportedCause}</span>
+              )}
+            </Alert>
+          );
+        }
+      `),
+    ).toMatchObject([{ text: "failure.reportedCause", throughSink: false }]);
+  });
+
+  it("reads a ternary's test as no render and flags its branch", () => {
+    expect(
+      rendersIn(`
+        function Alerted({ failure }: { failure: RunFailure }) {
+          return failure.reportedCause ? (
+            <span className="mono">{failure.reportedCause}</span>
+          ) : null;
+        }
+      `),
+    ).toMatchObject([{ text: "failure.reportedCause", throughSink: false }]);
+  });
+
   it("flags the same read reached by optional chaining", () => {
     expect(
       rendersIn(`
