@@ -622,14 +622,31 @@ as everything else the exchange persists (shape and caveats:
 without the API (Safari, Firefox) re-select the file each attended run.
 
 The handle is a **live pointer to the path, not a snapshot**: each run reads
-the file through the handle at run start and receives whatever file currently
-exists at that path. Replacing the file at the agreed path with the current
-period's extract **is** the data-refresh workflow -- an export job or the
-operator drops the new file over the same name, and the next scheduled run
-picks it up with no interaction. Because a `File` object obtained from a
-handle is a point-in-time reference, the design reads through the handle at
-each run rather than retaining `File` objects across runs: contents are always
-current at run time.
+the file through the handle at run start and receives whatever file exists at
+that path. Replacing the file at the agreed path with the current period's
+extract **is** the data-refresh workflow -- an export job or the operator puts
+the new file at the same name, and the next scheduled run picks it up with no
+interaction. The pointer follows the name rather than the file that stood
+there when it was picked, so every way a tool or a person writes the refresh
+reaches the run:
+
+- The file **overwritten in place**.
+- A **temporary file written beside it and renamed over the name** -- what an
+  export job, an editor, or a sync client typically does.
+- The file **deleted and created again** at the same name.
+- The file **moved aside to an archive name**, with the new extract written in
+  its place: the run reads the new extract, not the archived copy.
+
+A refresh costs a run only when the run lands inside it rather than after it:
+between a delete and the new file's arrival there is nothing at the path, so
+that run fails its read as a missing file instead of running on last period's
+data. Overwriting the file or renaming over the name leaves no such moment.
+
+A `File` the platform hands back is the file as it stood at that instant:
+once the file underneath it changes, reading that `File` fails rather than
+returning either period's contents. The design therefore reads through the
+handle at each run start and retains no `File` across runs -- a run reads the
+current file or fails, never last period's data.
 
 A missing entry -- the file deleted, moved, or renamed away -- fails the run's
 file read with a clean not-found before any connection is attempted: a third
