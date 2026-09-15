@@ -672,7 +672,10 @@ the agreed terms, and the guard holds the file to the same rule the run boundary
 does -- every declared linkage key satisfiable, none declaring cleaning that
 drops every record -- so a malformed or drifted refresh is rejected as a benign
 pre-run problem, never silently linked. It catches the wrong-dataset case, though
-not a same-shaped wrong file.
+not a same-shaped wrong file -- one state of which, last period's extract still
+standing at the path, the schedule section names on its own (see [An input that
+has not changed since the last
+run](#an-input-that-has-not-changed-since-the-last-run)).
 
 That shortfall is a state of its own on the run surface, held apart from the file
 that could not be read: the same file falls the same way short of the same keys
@@ -690,6 +693,30 @@ distinct from the unreadable file's (see
 unattended run that met it shows the same two ways forward at the operator's
 next visit, rather than the re-pick that would refuse identically. That is the
 case the split exists for: nobody was watching when it failed.
+
+#### An input that has not changed since the last run
+
+An extract left standing at the agreed path is the one refresh failure nothing
+else reports: the file reads, satisfies every agreed key, and links last
+period's rows again. The exchange's schedule section names it. Where the
+pointed-at file's last-changed instant predates this exchange's last successful
+run, the section states both instants and the move that clears them -- put this
+period's extract at that file's name before the next window opens.
+
+Each way of replacing the file above moves that instant, so what the note reads
+is a refresh that did not happen rather than one this browser could not see.
+
+It warns and guides; it bars nothing. The run control stays enabled, the agreed
+cadence stands, and an unattended window still runs -- an operator re-sending
+last period's data on purpose is a decision this device cannot make for them.
+The note says only what is true of the file and what to do about it.
+
+Every reading that is not a readable instant raises nothing here, keeping the
+state it already has: a browser holding no pointer re-selects the file at each
+run, a file that is missing or unreadable fails the run as the benign input
+state above, and a read permission no longer standing is neither prompted for
+nor reported twice. An exchange with no successful run recorded has no instant
+to compare against and shows nothing.
 
 ## The durability and crash-consistency contract
 

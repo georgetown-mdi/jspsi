@@ -31,6 +31,7 @@ import {
   scheduleCadenceLine,
   scheduleDueLine,
   scheduleDueness,
+  unchangedInputNote,
 } from "./scheduleSurfacingModel";
 
 import type { Displayable, ExchangeSpec } from "@psilink/core";
@@ -165,6 +166,10 @@ interface ScheduleView {
   /** Present when this browser holds no usable pointer to the input file, which
    * is a standing bar to any run happening with nobody present. */
   inputReselectionNote?: string;
+  /** Present when the input file has not been changed since the last successful
+   * run, so the next run would link that run's data again. Advisory: it bars no
+   * run and pauses no schedule. */
+  unchangedInputNote?: string;
 }
 
 /**
@@ -172,23 +177,27 @@ interface ScheduleView {
  * schedule (an attended-only exchange), so the section renders nothing rather
  * than an empty state.
  *
- * Both platform readings are the caller's, kept out of this model so the
+ * Every platform reading is the caller's, kept out of this model so the
  * derivation stays pure: `hasInputHandle` is a stored handle AND the File System
  * Access API to use it with; `installedRuntime` is whether this page is the
- * installed app the unattended runner starts in.
+ * installed app the unattended runner starts in; `inputModifiedAtMs` is the
+ * pointed-at file's last-modified instant, absent wherever this browser could not
+ * read one (see {@link ../psi/managed/managedInputHandle.ts}).
  *
  * @throws {RangeError} if the schedule's lattice is unusable (see
  *   {@link scheduleDueness}).
  */
 export function scheduleView(
-  record: Pick<ManagedExchangeRecord, "schedule">,
+  record: Pick<ManagedExchangeRecord, "schedule" | "lastRun">,
   hasInputHandle: boolean,
   installedRuntime: boolean,
   now: number,
+  inputModifiedAtMs?: number,
 ): ScheduleView | undefined {
   const { schedule } = record;
   if (schedule === undefined) return undefined;
   const coordination = repeatedMissCoordination(schedule);
+  const unchangedInput = unchangedInputNote(record.lastRun, inputModifiedAtMs);
   return {
     cadence: scheduleCadenceLine(schedule),
     dueLine: scheduleDueLine(scheduleDueness(schedule, now)),
@@ -197,6 +206,9 @@ export function scheduleView(
     ...(hasInputHandle
       ? {}
       : { inputReselectionNote: SCHEDULE_INPUT_RESELECTION_NOTE }),
+    ...(unchangedInput !== undefined
+      ? { unchangedInputNote: unchangedInput }
+      : {}),
   };
 }
 
