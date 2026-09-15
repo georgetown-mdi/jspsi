@@ -21,6 +21,10 @@ import {
   randomBytes,
   toBase64Url,
 } from "../../src/utils/crypto";
+import {
+  sanitizeErrorChainLinks,
+  sanitizeErrorForDisplay,
+} from "../../src/utils/sanitizeErrorForDisplay";
 
 import type {
   CommittedPayload,
@@ -130,6 +134,15 @@ const termsWithGovernance: LinkageTerms = {
     receive: [{ name: "status" }],
   },
 };
+
+// The error a refused build raises, for the cases asserting how it reads.
+const refuseBuild = (
+  inputs: ExchangeRecordInputs,
+): Promise<Error | undefined> =>
+  buildExchangeRecord(inputs, fixedRandomness).then(
+    () => undefined,
+    (err: unknown) => err as Error,
+  );
 
 // Inputs that populate every governance channel: a legal agreement, a multi-field
 // matching basis, sent and received payload columns, and an association table.
@@ -590,12 +603,46 @@ describe("governance metadata", () => {
     // termsWithGovernance keys on ln, dob, and ssn4 together. An input holding
     // no ssn4 column leaves that field in the basis with nothing behind it, so
     // no record is written at all rather than one overstating the basis.
-    await expect(
-      buildExchangeRecord(
-        { ...governanceInputs, contributedLinkageFields: ["ln", "dob"] },
-        fixedRandomness,
-      ),
-    ).rejects.toThrow("contributed no values for (1): ssn4");
+    const refusal = await refuseBuild({
+      ...governanceInputs,
+      contributedLinkageFields: ["ln", "dob"],
+    });
+    expect(refusal?.message).toContain("contributed no values for (1).");
+    expect(refusal?.message).toContain(
+      "Run the exchange with an input that supplies every linkage field the " +
+        "agreed linkage keys reference.",
+    );
+    // The names are terms content, so they ride a cause link of their own.
+    expect(refusal?.message).not.toContain("ssn4");
+    expect((refusal?.cause as Error).message).toContain("(1): ssn4");
+  });
+
+  test("a long list of uncontributed names leaves the remedy readable", async () => {
+    // A partner authors the field names, and the display boundary caps each
+    // rendered link: names in the message would let a long list push the
+    // remedy past that cap.
+    const longNames = Array.from({ length: 20 }, (_, i) =>
+      `field_${i}_`.padEnd(60, "x"),
+    );
+    const manyFields: LinkageTerms = {
+      ...termsA,
+      linkageFields: longNames.map((name) => ({ name, type: "ssn4" as const })),
+      linkageKeys: [
+        { name: "ALL", elements: longNames.map((field) => ({ field })) },
+      ],
+    };
+    const refusal = await refuseBuild({
+      ...baseInputs,
+      localTerms: manyFields,
+      partnerTerms: { ...manyFields, identity: "Party B" },
+      contributedLinkageFields: [],
+    });
+    const [message, names] = sanitizeErrorChainLinks(
+      sanitizeErrorForDisplay(refusal),
+    );
+    expect(message).toContain("contributed no values for (20).");
+    expect(message).toMatch(/agreed linkage keys reference\.$/);
+    expect(names).toContain(`(20): ${longNames[0]}`);
   });
 
   test("a matching basis the contributed fields cover is built, extras and all", async () => {

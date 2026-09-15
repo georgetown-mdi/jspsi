@@ -21,6 +21,7 @@ import {
   MAX_TEXT_LENGTH,
 } from "../config/linkageTermsSchema.js";
 import { checkLinkageRuleSetCitation } from "../defaults/builtInLinkageTerms.js";
+import { chainDetailCauses } from "../errors.js";
 import { boundedArray } from "../utils/boundedArray.js";
 import { redactPrivateKeyMaterial } from "../utils/sanitizeErrorForDisplay.js";
 import {
@@ -957,8 +958,11 @@ function governanceFromTerms(
     a.name < b.name ? -1 : a.name > b.name ? 1 : 0,
   );
 
-  // Every field name below is terms content -- partner-authored on every accept
-  // path -- redacted where it is composed in, so a marker planted in one name
+  // The message holds fixed copy and the count only; the names are terms
+  // content -- partner-authored on every accept path -- so they ride a labelled
+  // cause link of their own, which the display boundary caps independently, and
+  // the count leads it so a truncated link still reports how much is unread.
+  // Each name is redacted where it is composed in, so a marker planted in one
   // cannot take the names listed after it (see redactPrivateKeyMaterial).
   const contributed = new Set(contributedLinkageFields);
   const uncontributed = matchingBasis
@@ -967,10 +971,15 @@ function governanceFromTerms(
   if (uncontributed.length > 0)
     throw new Error(
       "the self-attested record would name linkage fields this run " +
-        `contributed no values for (${uncontributed.length}): ` +
-        `${uncontributed.join(", ")}. It is refused rather than written. Run ` +
-        "the exchange with an input that supplies every linkage field the " +
-        "agreed linkage keys reference.",
+        `contributed no values for (${uncontributed.length}). It is refused ` +
+        "rather than written. Run the exchange with an input that supplies " +
+        "every linkage field the agreed linkage keys reference.",
+      {
+        cause: chainDetailCauses([
+          "linkage fields the run contributed no values for " +
+            `(${uncontributed.length}): ${uncontributed.join(", ")}`,
+        ]),
+      },
     );
 
   // The citation and this party's verdict on it, both in the record format's
