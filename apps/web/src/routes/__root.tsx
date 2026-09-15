@@ -40,16 +40,6 @@ export const Route = createRootRoute({
         // browser white.
         name: "theme-color",
         content: "#f6f5f1",
-        media: "(prefers-color-scheme: light)",
-      },
-      {
-        // The dark counterpart: --app-surface from styles/tokens.css under
-        // [data-mantine-color-scheme="dark"]. A Web App Manifest theme_color is a
-        // single value with no media form, so site.webmanifest keeps the light one
-        // and only these metas distinguish the two schemes.
-        name: "theme-color",
-        content: "#131512",
-        media: "(prefers-color-scheme: dark)",
       },
       ...seo({
         title: "psilink - private record linkage",
