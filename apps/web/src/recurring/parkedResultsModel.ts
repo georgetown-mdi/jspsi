@@ -6,11 +6,14 @@
  * projecting a result larger than this browser keeps raises before it happens.
  * No React, no IndexedDB.
  *
- * Nothing here holds a partner-authored value: a row states an instant, a count
+ * The one partner-authored value here is the partner's declared record count,
+ * admitted only as a schema-bounded integer from the terms-exchange envelope and
+ * rendered through Intl.NumberFormat: the safety argument is that bound, not an
+ * absence of partner input. Everything else a row states -- an instant, a count
  * this browser produced, the name of a folder the operator themselves chose, and
- * fixed first-party copy, so there is no display sanitization boundary in this
- * module. The results themselves are never rendered -- they are handed to the
- * operator as the file the run built, or written to the folder they granted.
+ * fixed first-party copy -- needs no such boundary. The results themselves are
+ * never rendered -- they are handed to the operator as the file the run built, or
+ * written to the folder they granted.
  */
 
 import {

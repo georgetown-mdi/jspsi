@@ -1380,7 +1380,8 @@ not something a read may do on their behalf. The parking write re-reads through
 the same parse, so while such a value sits there a later run parks nothing and
 cannot record the refused state either; what the operator meets is the unreadable
 state itself, and the run's own bookkeeping still states what the run did.
-Deleting the exchange removes the value.
+Clearing what this exchange has parked, or deleting the exchange, removes the
+value.
 
 **What it discloses at rest** is not what the rest of this document describes.
 Every other store here holds presence, shape, and aggregate counts; this one

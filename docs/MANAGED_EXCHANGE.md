@@ -454,7 +454,7 @@ put an exchange on a schedule and again where they collect the results:
   removes everything else (see [Deleting a managed
   exchange](#deleting-a-managed-exchange)).
 - **Downloading them does not remove them.** The download is a copy; the
-  retention and the delete are what remove the kept file.
+  retention, the clear, or the delete is what removes the kept file.
 - **A run this browser would not store the results of says so.** The operator
   meets that state at the next visit, beside the run's date, rather than finding
   nothing where results should be -- and the run itself stands: it rotated the
