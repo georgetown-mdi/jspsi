@@ -22,6 +22,7 @@ import {
   ConnectionError,
   createMessagePipe,
 } from "../../src/connection/messageConnection";
+import { MAX_NODE_COUNT } from "../../src/utils/camelizeKeys";
 
 import type {
   DualSignedRecord,
@@ -669,6 +670,40 @@ describe("exchangeSignedReceipt (two-party over the pipe)", () => {
 
 // --- Serialize / parse -------------------------------------------------------
 
+// Terms holding one transform param whose value is an object of `entries`
+// keys. The linkage-terms schema bounds a param's own string length and list
+// length but not the width nested under a param value, so this is the shape
+// the camelize pre-pass's node-count budget is the only bound on.
+function termsWithParamWidth(entries: number): LinkageTerms {
+  const nested: Record<string, number> = {};
+  for (let index = 0; index < entries; index += 1)
+    nested[`key${index}`] = index;
+  return {
+    ...termsB,
+    linkageKeys: [
+      {
+        name: "firstName",
+        elements: [
+          {
+            field: "firstName",
+            transform: [{ function: "trim", params: { nested } }],
+          },
+        ],
+      },
+    ],
+  };
+}
+
+function recordCarrying(partnerTerms: LinkageTerms): unknown {
+  return {
+    version: SIGNED_RECEIPT_VERSION,
+    content: content(),
+    initiator: { certificate: identityA.certificate, signature: "AAAA" },
+    responder: { certificate: identityB.certificate, signature: "AAAA" },
+    partnerTerms,
+  };
+}
+
 describe("serialize / parse dual-signed record", () => {
   test("round-trips through serialize and parse", async () => {
     const shared = content();
@@ -787,6 +822,21 @@ describe("serialize / parse dual-signed record", () => {
         partnerTerms: { ...termsB, linkageFields: [] },
       }),
     ).toThrow();
+  });
+
+  test("refuses carried terms wider than the camelize pre-pass budget", () => {
+    expect(() =>
+      parseDualSignedRecord(
+        recordCarrying(termsWithParamWidth(MAX_NODE_COUNT + 1)),
+      ),
+    ).toThrow();
+  });
+
+  test("keeps carried terms holding a param value of modest width", () => {
+    expect(
+      parseDualSignedRecord(recordCarrying(termsWithParamWidth(16)))
+        .partnerTerms,
+    ).toEqual(termsWithParamWidth(16));
   });
 
   test("rejects an oversized base64url signature field before any crypto work", () => {

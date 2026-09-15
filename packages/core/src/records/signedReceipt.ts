@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { canonicalBytes } from "../utils/canonical.js";
-import { LinkageTermsSchema } from "../config/linkageTermsSchema.js";
+import { safeParseLinkageTerms } from "../config/linkageTermsSchema.js";
 import { hkdfDerive, hmacSha256, toBase64Url } from "../utils/crypto.js";
 import {
   ConnectionError,
@@ -419,19 +419,36 @@ const SignedReceiptPartySchema: z.ZodType<SignedReceiptParty> = z.object({
   signature: base64UrlSchema,
 });
 
-// The carried terms are partner-authored, so they are read under the same
-// bounded schema every other path that parses a partner's terms uses
-// (docs/spec/CHANNEL_SECURITY.md, "Transform-parameter declared types"); the
-// document is written from an already-parsed value in camelCase, so no
-// camelize pre-pass stands in front of it. A file whose carried terms do not
-// parse is refused whole rather than read with the field dropped, matching how
-// every other field of this format is read.
+// The carried terms are partner-authored, so they are read through
+// safeParseLinkageTerms -- the same capped camelize pre-pass and bounded
+// schema every other path that parses a partner's terms takes
+// (docs/spec/CHANNEL_SECURITY.md, "Application-layer parsed-input bounds" and
+// "Transform-parameter declared types"). The pre-pass is what holds the width
+// budget: the schema's own well-formedness walk is unbounded over a single
+// `transform.params` value, so a document past MAX_NODE_COUNT is refused
+// before that walk runs. The non-throwing helper keeps this schema's
+// `.safeParse()` contract, its bound refusals arriving as issues rather than
+// as a throw out of the enclosing parse.
+const carriedLinkageTermsSchema: z.ZodType<LinkageTerms> = z
+  .unknown()
+  .transform((raw, ctx) => {
+    const parsed = safeParseLinkageTerms(raw);
+    if (!parsed.success) {
+      for (const issue of parsed.error.issues) ctx.addIssue({ ...issue });
+      return z.NEVER;
+    }
+    return parsed.data;
+  });
+
+// A file whose carried terms do not parse is refused whole rather than read
+// with the field dropped, matching how every other field of this format is
+// read.
 const DualSignedRecordSchema: z.ZodType<DualSignedRecord> = z.object({
   version: z.literal(SIGNED_RECEIPT_VERSION),
   content: ReceiptContentSchema,
   initiator: SignedReceiptPartySchema,
   responder: SignedReceiptPartySchema,
-  partnerTerms: LinkageTermsSchema.optional(),
+  partnerTerms: carriedLinkageTermsSchema.optional(),
 });
 
 /** Serialize a {@link DualSignedRecord} to its on-disk/download string form:

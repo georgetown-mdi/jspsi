@@ -483,19 +483,24 @@ const RESULT_SIZE_ROWS: Record<
 
 const TERMS_ROWS: Record<
   TermsHashStatus,
-  { status: string; tone: VerdictTone; explanation?: string }
+  { status: string; tone: VerdictTone }
 > = {
   verified: { status: "Re-derives and matches", tone: "verified" },
   mismatch: { status: "Does not match", tone: "failed" },
-  "not-checked": {
-    status: "Not checked",
-    tone: "incomplete",
-    explanation:
-      "Supply both parties' linkage terms to check the agreed-terms hash. The " +
-      "receipt holds your partner's, so loading it supplies that half; yours " +
-      "is the one to paste.",
-  },
+  "not-checked": { status: "Not checked", tone: "incomplete" },
 };
+
+// What a not-checked agreed-terms hash is still waiting on. The partner's half
+// comes from the dual-signed record, so a reader who loaded one whose holder
+// stripped that copy is told it is not there rather than pointed back at the
+// file they already supplied.
+const TERMS_NOT_CHECKED =
+  "Supply both parties' linkage terms to check the agreed-terms hash. Paste " +
+  "yours; your partner's are the copy a loaded dual-signed record holds, or a " +
+  "document you paste in its place.";
+const TERMS_NOT_CHECKED_RECEIPT_WITHOUT_TERMS =
+  "The dual-signed record you loaded holds no copy of your partner's linkage " +
+  "terms. Paste both parties' terms to check the agreed-terms hash.";
 
 // The readable name of each commitment, in the record's committed order. Fixed
 // strings owned by this page, never a value from a supplied file.
@@ -537,12 +542,16 @@ const SIGNATURE_NOTE_WITH_SIGNED_RECORD =
  *
  * Pass `signedRecordVerified` when the same run also verified a dual-signed
  * record, so the standing caveat points at that verdict rather than telling the
- * reader signatures went unchecked beside a verdict that checked them.
+ * reader signatures went unchecked beside a verdict that checked them. Pass
+ * `receiptHoldsNoPartnerTerms` when a dual-signed record is loaded whose
+ * unsigned envelope holds no terms, so a not-checked agreed-terms hash names
+ * that rather than the copy a receipt usually supplies.
  */
 export function verdictViewModel(
   report: RecordVerificationReport,
   warnings: ReadonlyArray<string>,
   signedRecordVerified = false,
+  receiptHoldsNoPartnerTerms = false,
 ): VerdictViewModel {
   const commitments: Array<VerdictRow> = [];
   for (const name of COMMITMENT_ORDER) {
@@ -557,6 +566,12 @@ export function verdictViewModel(
     });
   }
   const termsRow = TERMS_ROWS[report.termsHash];
+  const termsExplanation =
+    report.termsHash !== "not-checked"
+      ? undefined
+      : receiptHoldsNoPartnerTerms
+        ? TERMS_NOT_CHECKED_RECEIPT_WITHOUT_TERMS
+        : TERMS_NOT_CHECKED;
   const sizeRow =
     report.resultSize === undefined
       ? undefined
@@ -578,7 +593,7 @@ export function verdictViewModel(
       label: "The agreed-terms hash",
       status: termsRow.status,
       tone: termsRow.tone,
-      explanation: termsRow.explanation,
+      explanation: termsExplanation,
     },
     warnings: warnings.map((warning) => sanitizeForDisplay(warning)),
     signatureNote: signedRecordVerified

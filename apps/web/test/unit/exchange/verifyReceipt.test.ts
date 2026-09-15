@@ -330,6 +330,26 @@ describe("verdictViewModel: no re-supply", () => {
       "Partner receipt signatures are not checked",
     );
   });
+
+  test("with no receipt loaded, the not-checked terms row points at one", async () => {
+    const { record, keys } = await fixtures();
+    const report = await verifyExchangeRecord(record, keys, {});
+    const view = verdictViewModel(report, [], false, false);
+    expect(view.termsHash.explanation).toContain(
+      "a loaded dual-signed record holds",
+    );
+  });
+
+  test("with a receipt whose terms were stripped, the row says so", async () => {
+    // The reader supplied the one file that carries the partner's half and it
+    // holds none, so pointing them back at it would send them nowhere.
+    const { record, keys } = await fixtures();
+    const report = await verifyExchangeRecord(record, keys, {});
+    const view = verdictViewModel(report, [], false, true);
+    expect(view.termsHash.explanation).toContain(
+      "holds no copy of your partner's linkage terms",
+    );
+  });
 });
 
 describe("verdictViewModel: warnings are sanitized", () => {

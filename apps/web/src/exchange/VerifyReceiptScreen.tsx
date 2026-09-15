@@ -542,6 +542,8 @@ export function VerifyReceiptScreen() {
             recordReport,
             recordWarnings,
             signedView !== undefined,
+            signedRecord?.record !== undefined &&
+              signedRecord.record.partnerTerms === undefined,
           ),
         );
       if (signedView !== undefined) setSignedVerdict(signedView);
