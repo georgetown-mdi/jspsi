@@ -41,9 +41,12 @@ Three layers, so prompt-free operation inside is safe:
    `productionresultssa*.blob.core.windows.net` storage shards -- resolved by
    enumeration at start, since GitHub publishes no ranges for them -- that the
    API redirects Actions log bodies and run artifacts to), the Anthropic API and
-   login, and the VS Code extension CDN. Telemetry and updater hosts are
-   absent: the container sets `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` and
-   `DISABLE_AUTOUPDATER`, so Claude makes no such calls.
+   login, the VS Code extension CDN, and the Playwright browser-download CDN
+   (`cdn.playwright.dev`, `playwright.download.prss.microsoft.com`) --
+   Chrome-for-Testing binaries a Playwright-driven test fetches. Telemetry and
+   updater hosts are absent: the container sets
+   `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` and `DISABLE_AUTOUPDATER`, so
+   Claude makes no such calls.
 3. **Command deny-list and a protected-branch push hook** (`.claude/settings.json`,
    checked in): guardrails that hold even with prompts disabled. Through Claude's
    Read/Edit/Write tools the deny-list blocks reads and writes of SSH private keys
