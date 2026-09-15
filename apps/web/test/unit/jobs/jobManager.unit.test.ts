@@ -547,13 +547,17 @@ describe("a synthesized persistence-loss terminal reaches the operator's alert",
     const alert = failureFor(failures[0].category, failures[0].error);
     expect(alert.category).toBe("output");
     expect(alert.title).toBe("Results unavailable");
-    // The alert leads with the do-not-repeat instruction, then hands over the
-    // console's own cause. The lead must not name an artifact that cause
-    // immediately says cannot be confirmed -- the two sentences are read together.
+    // The alert leads with the do-not-repeat instruction, and the console's own
+    // cause stands under its own label beside it. The lead must not name an
+    // artifact that cause immediately says cannot be confirmed -- the two are
+    // read together however they are separated.
     expect(alert.message).toContain("do not run this exchange again");
-    expect(alert.message).toContain("a local write failed:");
-    expect(alert.message).toContain("cannot confirm which files reached disk");
+    expect(alert.message).toContain("a local write failed.");
+    expect(alert.reportedCause).toContain(
+      "cannot confirm which files reached disk",
+    );
     expect(alert.message).not.toContain("generating the results file");
+    expect(alert.reportedCause).not.toContain("generating the results file");
   });
 });
 

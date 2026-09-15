@@ -7,10 +7,12 @@ import { describe, expect, test } from "vitest";
 
 import {
   classifyManagedRunFailure,
+  managedFailureShowsReportedCause,
   managedReinviteRecoveryCopy,
   managedRunFailureFromRecord,
   managedRunReinvites,
   managedRunRetryable,
+  withReportedCause,
 } from "@recurring/managedRunLaunchModel";
 
 import {
@@ -1092,5 +1094,118 @@ describe("managedReinviteRecoveryCopy", () => {
       expect(prose(side)).not.toMatch(
         /automatic|merge[sd]? (them|the two)|for you\b|cannot save/i,
       );
+  });
+});
+
+describe("the reported cause a classified state shows", () => {
+  // What the operator is shown follows from one predicate. The transport state
+  // is the one whose copy accounts for nothing and so the one the question is
+  // live for, and it withholds; reversing that is the allowlist behind the
+  // predicate gaining the kind, and these fail when it does.
+
+  test("the transport state withholds the launch error", () => {
+    expect(managedFailureShowsReportedCause("transport")).toBe(false);
+    const failure = classifyAgainstOneRecord(
+      new Error("partner said: rerunning this is safe"),
+      record({ lastRun: failed("transport") }),
+      undefined,
+      NOW,
+      false,
+    );
+    expect(failure.kind).toBe("transport");
+    expect(failure.reportedCause).toBeUndefined();
+    expect(failure.message).not.toMatch(/rerunning this is safe/);
+  });
+
+  test("a failed-closed handshake withholds its own message too", () => {
+    // Non-oracular by design, exactly as the seats withhold the untagged
+    // security arm's (docs/notes/reported-failure-cause.md).
+    expect(managedFailureShowsReportedCause("unexplained")).toBe(false);
+    const failure = classifyAgainstOneRecord(
+      new Error("key confirmation mismatch at step 3"),
+      record({ lastRun: failed("auth") }),
+      undefined,
+      NOW,
+      false,
+    );
+    expect(failure.kind).toBe("unexplained");
+    expect(failure.reportedCause).toBeUndefined();
+  });
+
+  test("no state shows the launch error while the predicate withholds it", () => {
+    // The states are reached over the classification's own routes rather than
+    // asserted one by one off the predicate: a route attaching a cause of its
+    // own, past the single site, fails here.
+    const errors: Array<[unknown, ManagedExchangeRecord]> = [
+      [
+        new ManagedInputError({ reason: "acquire", cause: new Error("gone") }),
+        record(),
+      ],
+      [new PartnerNoShowError("nobody came"), record()],
+      [new ManagedExchangeLockUnavailableError("held"), record()],
+      [
+        new ManagedExchangeCustodyUnreadableError("abc", new Error("invalid")),
+        record(),
+      ],
+      [new Error("dropped"), record({ lastRun: failed("transport") })],
+      [new Error("could not save"), record({ lastRun: failed("storage") })],
+      [new Error("mismatch"), record({ lastRun: failed("auth") })],
+      [new Error("refused"), record({ lastRun: failed("consent") })],
+    ];
+    for (const [error, stored] of errors) {
+      const failure = classifyAgainstOneRecord(
+        error,
+        stored,
+        undefined,
+        NOW,
+        false,
+      );
+      expect([failure.kind, failure.reportedCause]).toEqual([
+        failure.kind,
+        undefined,
+      ]);
+    }
+  });
+
+  test("a next-visit read has no launch error to report", () => {
+    const failure = withCopy(
+      managedRunFailureFromRecord(
+        record({ lastRun: failed("transport") }),
+        undefined,
+        NOW,
+      ),
+    );
+    expect(failure.reportedCause).toBeUndefined();
+  });
+
+  test("a state the predicate admits shows the error escaped for display", () => {
+    // The mechanism the predicate gates, driven directly: reversing the ruling
+    // is the allowlist gaining a kind, and this is what the operator then sees.
+    const hostile = new Error("channel closed \u001b[2J");
+    const base = classifyAgainstOneRecord(
+      hostile,
+      record({ lastRun: failed("transport") }),
+      undefined,
+      NOW,
+      false,
+    );
+    const shown = withReportedCause(base, hostile, true);
+    expect(shown.reportedCause).toContain("channel closed");
+    // Escaped once at this boundary, so the sequence that would drive a
+    // terminal reaches the operator as text.
+    expect(shown.reportedCause).not.toContain("\u001b");
+    expect(shown.message).toBe(base.message);
+  });
+
+  test("an error with nothing to report gets no block", () => {
+    const base = classifyAgainstOneRecord(
+      new Error("dropped"),
+      record({ lastRun: failed("transport") }),
+      undefined,
+      NOW,
+      false,
+    );
+    expect(withReportedCause(base, new Error("   "), true)).toEqual(base);
+    expect(withReportedCause(base, "not an error", true)).toEqual(base);
   });
 });

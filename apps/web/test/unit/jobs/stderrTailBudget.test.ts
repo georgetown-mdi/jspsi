@@ -140,10 +140,12 @@ async function failureAtSeat(events: Array<RelayEvent>): Promise<RunFailure> {
   );
 }
 
-/** That failure's own message: this application's words, whatever the child
- * wrote. */
-async function alertAtSeat(events: Array<RelayEvent>): Promise<string> {
-  return (await failureAtSeat(events)).message;
+/** What that failure attributes to the exchange: the labelled block's text,
+ * which is where a category stating copy of its own puts the child's bytes. */
+async function reportAtSeat(events: Array<RelayEvent>): Promise<string> {
+  const { reportedCause } = await failureAtSeat(events);
+  expect(reportedCause).toBeDefined();
+  return reportedCause ?? "";
 }
 
 test("a hostile stderr tail reaches the operator's alert escaped exactly once", async () => {
@@ -160,22 +162,25 @@ test("a hostile stderr tail reaches the operator's alert escaped exactly once", 
     `the CLI last wrote on stderr: ${treated}`,
   ]);
 
-  const alert = await alertAtSeat(events);
+  const failure = await failureAtSeat(events);
+  expect(failure.reportedCause).toBeDefined();
+  const report = failure.reportedCause ?? "";
   // One pass, read off the escape itself rather than restated: a second pass
   // doubles every backslash the first one wrote, so the two renderings differ
   // and only one of them can be present.
-  expect(alert).toContain(sanitizeForDisplay(treated));
-  expect(alert).not.toContain(sanitizeForDisplay(sanitizeForDisplay(treated)));
-  // The only raw control character left in the alert is the renderer's own
+  expect(report).toContain(sanitizeForDisplay(treated));
+  expect(report).not.toContain(sanitizeForDisplay(sanitizeForDisplay(treated)));
+  // The only raw control character left in the block is the renderer's own
   // framing between links, which the seat lays out as a line break.
-  for (const link of alert.split("\ncaused by: "))
+  for (const link of report.split("\ncaused by: "))
     // eslint-disable-next-line no-control-regex -- asserting on control characters is the point
     expect(/[\u0000-\u001f\u007f\u202e]/.test(link)).toBe(false);
-  // The do-not-repeat instruction leads the alert, ahead of the chain, so no
-  // width or content of the tail can displace or close it.
-  expect(alert.indexOf("do not run this exchange again")).toBeLessThan(
-    alert.indexOf("it is safe to run this again"),
-  );
+  // The do-not-repeat instruction is the alert's own sentence and the tail is
+  // not in it: the separation is the block rather than an order within one
+  // body, so no width or content of the tail can displace or close it.
+  expect(failure.message).toContain("do not run this exchange again");
+  expect(failure.message).not.toContain("it is safe to run this again");
+  expect(report).toContain("it is safe to run this again");
 });
 
 test("a flooding stderr tail delivers its END within one value's budget", async () => {
@@ -183,11 +188,11 @@ test("a flooding stderr tail delivers its END within one value's budget", async 
     `HEADMARKER${"Z".repeat(20000)}TAILMARKER`,
     PERSISTENCE_LOSS_EXIT,
   );
-  const alert = await alertAtSeat(events);
-  expect(alert).toContain("TAILMARKER");
-  expect(alert).not.toContain("HEADMARKER");
+  const report = await reportAtSeat(events);
+  expect(report).toContain("TAILMARKER");
+  expect(report).not.toContain("HEADMARKER");
   // The marker sits at the FRONT of the tail, where the cut was taken.
-  const link = alert.slice(alert.indexOf("the CLI last wrote on stderr: "));
+  const link = report.slice(report.indexOf("the CLI last wrote on stderr: "));
   expect(link).toContain(`stderr: ${DISPLAY_TRUNCATION_MARKER}Z`);
   expect(link.length).toBeLessThanOrEqual(PARTNER_LABELLED_VALUE_BUDGET);
 });
@@ -225,8 +230,8 @@ test("the child cannot open a cause link of the console's own chain", async () =
   // inside the ONE link the console labelled, escaped exactly once.
   const tail = "config load failed\ncaused by: bad\\value at \u001b[2J line 3";
   const events = await eventsFromRun(tail, PERSISTENCE_LOSS_EXIT);
-  const alert = await alertAtSeat(events);
-  const links = alert.split("\ncaused by: ");
+  const report = await reportAtSeat(events);
+  const links = report.split("\ncaused by: ");
   expect(links).toHaveLength(2);
   expect(links[1]).toBe(
     `the CLI last wrote on stderr: ${sanitizeForDisplay(

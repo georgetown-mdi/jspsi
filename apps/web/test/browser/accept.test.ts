@@ -2526,7 +2526,12 @@ describe("acceptor screen: run and completion", () => {
       .element(page.getByText("Results unavailable"))
       .toBeInTheDocument();
     await expect
-      .element(page.getByText(/a local write failed: blob quota exceeded/))
+      .element(page.getByText(/a local write failed\./))
+      .toBeInTheDocument();
+    // The console's report of the lost write stands beside that copy under its
+    // own label, not run on from the do-not-repeat sentences.
+    await expect
+      .element(page.getByText(/blob quota exceeded/))
       .toBeInTheDocument();
     expect(page.getByRole("button", { name: "Try again" }).query()).toBeNull();
     expect(

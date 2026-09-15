@@ -152,16 +152,28 @@ describe("failureFor", () => {
     expect(failure.reportedCause).toBeUndefined();
   });
 
-  test("the output message forbids the re-run and still holds the cause", () => {
+  test("the output message forbids the re-run and attributes the cause", () => {
     // The exchange itself completed, so the alert withholds every run-again
     // control -- and says why, rather than leaving the operator to look for the
-    // control somewhere else. The local cause stays in the message.
+    // control somewhere else. Those sentences are this application's own, so
+    // the cause stands beside them under its own label instead of running on
+    // from them in one voice.
     const failure = failureFor("output", new Error("blob quota exceeded"));
     expect(failure.message).toContain("do not run this exchange again");
     expect(failure.message).toContain("already happened");
-    expect(failure.message).toContain(
-      "a local write failed: blob quota exceeded",
-    );
+    expect(failure.message).toContain("a local write failed.");
+    expect(failure.message).not.toContain("blob quota exceeded");
+    expect(failure.reportedCause).toContain("blob quota exceeded");
+  });
+
+  test("an output failure with nothing to report gets no block", () => {
+    // A rejection that is not an Error has no chain to attribute, and an empty
+    // block under a label promising an account of the failure is worse than no
+    // block: the copy beside it already states what happened.
+    expect(failureFor("output", "just a string").reportedCause).toBeUndefined();
+    expect(
+      failureFor("output", new Error("   ")).reportedCause,
+    ).toBeUndefined();
   });
 
   test("the exchange message makes no on-device data claim", () => {

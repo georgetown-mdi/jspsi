@@ -8,16 +8,16 @@ import {
   FAILURE_TYPE_FILE,
   FAILURE_TYPE_NAME,
   SINK_COMPONENT_FILE,
-  SINK_COMPONENT_NAME,
+  TEXT_SINKS,
   WEB_SOURCE_DIR,
   declaresType,
   exportsFunction,
   failureBindingNames,
-  failureMessageRenders,
+  failureTextRenders,
 } from "./check-run-failure-sink.mjs";
 
 const rendersIn = (source, file = "fixture.tsx") =>
-  failureMessageRenders(parseSource(file, source));
+  failureTextRenders(parseSource(file, source));
 
 const bindingsIn = (source, file = "fixture.tsx") =>
   failureBindingNames(parseSource(file, source));
@@ -42,6 +42,25 @@ export function Alerted({ failure }: { failure: RunFailure }) {
 }
 `;
 
+/** The reported cause handed to the sink that lays it out and labels it. */
+const THROUGH_THE_REPORTED_CAUSE_SINK = `
+export function Alerted({ failure }: { failure: RunFailure }) {
+  return <FailureReportedCause reportedCause={failure.reportedCause} />;
+}
+`;
+
+/** The same regression on the other piece: an alert inlining the exchange's
+ * report in a span of its own, unlaid-out and unlabelled. */
+const INLINE_REPORTED_CAUSE = `
+export function Alerted({ failure }: { failure: RunFailure }) {
+  return (
+    <Alert title={failure.title}>
+      <span className="mono">{failure.reportedCause}</span>
+    </Alert>
+  );
+}
+`;
+
 // Bound for the case that walks the whole web source tree: it parses every
 // module in it, with no wait in it. It runs 0.7s alone against vitest's 5s
 // default, and 9.0s with the rest of the script suites competing for the same
@@ -52,17 +71,30 @@ const TREE_SCAN_TIMEOUT_MS = 60_000;
 
 describe("RunFailure display-sink check", () => {
   it(
-    "the tree as it stands renders every RunFailure message through the sink",
+    "the tree as it stands renders every RunFailure piece through its sink",
     () => {
       const offSink = [];
-      let throughSink = 0;
+      const throughSink = new Map(
+        TEXT_SINKS.map(({ property }) => [property, 0]),
+      );
       for (const file of sourceModules(WEB_SOURCE_DIR))
-        for (const render of failureMessageRenders(parseFile(file))) {
-          if (render.throughSink) throughSink += 1;
+        for (const render of failureTextRenders(parseFile(file))) {
+          if (render.throughSink)
+            throughSink.set(
+              render.property,
+              throughSink.get(render.property) + 1,
+            );
           else offSink.push(`${file}:${render.line}: ${render.text}`);
         }
       expect(offSink).toEqual([]);
-      expect(throughSink).toBeGreaterThan(0);
+      // Each sink separately, and named in the assertion so a failure says
+      // which: a green result on one of the two pieces says nothing about the
+      // other's callers still being in this scan's reach.
+      for (const { property } of TEXT_SINKS)
+        expect([property, throughSink.get(property) > 0]).toEqual([
+          property,
+          true,
+        ]);
     },
     TREE_SCAN_TIMEOUT_MS,
   );
@@ -73,10 +105,12 @@ describe("RunFailure display-sink check", () => {
     );
   });
 
-  it("the sink this check names still stands where it says", () => {
-    expect(
-      exportsFunction(parseFile(SINK_COMPONENT_FILE), SINK_COMPONENT_NAME),
-    ).toBe(true);
+  it("every sink this check names still stands where it says", () => {
+    for (const { component } of TEXT_SINKS)
+      expect([
+        component,
+        exportsFunction(parseFile(SINK_COMPONENT_FILE), component),
+      ]).toEqual([component, true]);
   });
 
   it("finds the binding shapes the real call sites use", () => {
@@ -100,6 +134,49 @@ describe("RunFailure display-sink check", () => {
     expect(rendersIn(INLINE_SPAN)).toMatchObject([
       { line: 5, text: "failure.message", throughSink: false },
     ]);
+  });
+
+  it("allows the reportedCause attribute of its own sink", () => {
+    expect(rendersIn(THROUGH_THE_REPORTED_CAUSE_SINK)).toMatchObject([
+      {
+        text: "failure.reportedCause",
+        property: "reportedCause",
+        throughSink: true,
+      },
+    ]);
+  });
+
+  it("flags an alert inlining the reported cause in a span of its own", () => {
+    expect(rendersIn(INLINE_REPORTED_CAUSE)).toMatchObject([
+      {
+        line: 5,
+        text: "failure.reportedCause",
+        property: "reportedCause",
+        throughSink: false,
+      },
+    ]);
+  });
+
+  it("flags a piece handed to the other piece's sink", () => {
+    expect(
+      rendersIn(`
+        function Alerted({ failure }: { failure: RunFailure }) {
+          return <FailureMessage reportedCause={failure.reportedCause} />;
+        }
+      `),
+    ).toMatchObject([{ text: "failure.reportedCause", throughSink: false }]);
+  });
+
+  it("reads the guard in front of an optional piece as no render", () => {
+    expect(
+      rendersIn(`
+        function Alerted({ failure }: { failure: RunFailure }) {
+          return failure.reportedCause !== undefined && !failure.message ? (
+            <FailureReportedCause reportedCause={failure.reportedCause} />
+          ) : null;
+        }
+      `),
+    ).toMatchObject([{ text: "failure.reportedCause", throughSink: true }]);
   });
 
   it("flags the same read reached by optional chaining", () => {
