@@ -43,6 +43,16 @@ iptables -t mangle -F
 iptables -t mangle -X
 ipset destroy allowed-domains 2>/dev/null || true
 
+# A flush leaves each chain's policy as it was, so on a re-run in a container
+# whose first run finished, OUTPUT is already DROP here and the GitHub fetch
+# below times out, tripping the fail-closed trap and leaving the container with
+# no egress at all. Reset the policies to what a fresh container starts with so
+# a re-run builds the ruleset the same way the first run did; the explicit DROP
+# below closes them again once the allowlist is in place.
+iptables -P INPUT ACCEPT
+iptables -P FORWARD ACCEPT
+iptables -P OUTPUT ACCEPT
+
 # 2. Selectively restore ONLY internal Docker DNS resolution.
 if [ -n "$DOCKER_DNS_RULES" ]; then
   echo "Restoring Docker DNS rules..."
