@@ -309,14 +309,25 @@ The operation is recoverable in any case -- a lost rotated token or exchange
 record is re-produced by re-running -- so the residual Windows gap is a
 durability one, not a confidentiality one.
 
-On load, the CLI first attempts to use PowerShell's `Get-Acl` with SID
-translation, which checks both inherited and explicit ACEs in a
-locale-independent way; SYSTEM (`S-1-5-18`) and Administrators (`S-1-5-32-544`)
-are not flagged. If PowerShell is unavailable -- for example in Nano Server
-containers or environments with strict application control policies -- the CLI
-falls back to `icacls`, which checks only explicit (non-inherited) non-owner
-ACEs. `fs.statSync` is not used for either check because it returns simulated
-POSIX mode bits that do not reflect the actual ACL.
+On load, the CLI first reads the file's access rules through PowerShell, off
+`System.IO.FileInfo.GetAccessControl()` and by SID, so both inherited and
+explicit ACEs are checked and no display name has to be resolved; SYSTEM
+(`S-1-5-18`) and Administrators (`S-1-5-32-544`) are not flagged. `Get-Acl` is
+not used: it lives in a module an environment with strict application control
+can refuse to load, and that refusal is a non-terminating error, so the command
+still exits successfully with nothing listed.
+
+The listing is therefore taken whole or not at all. A PowerShell that cannot be
+run, a read that fails, and an empty rule set each count as a failure to read,
+because an empty listing cannot be told apart from a file with nothing granted
+on it and would otherwise pass the check with no entry examined. On any of
+those the CLI falls back to `icacls`, which checks only explicit
+(non-inherited) non-owner ACEs -- and on a host where a new file's SYSTEM and
+Administrators entries are explicit rather than inherited, that tier names them
+too. Its warning says what it did not inspect, and a warning about a file that
+is in fact narrowed is the direction that does not hide one that is not.
+`fs.statSync` is not used for either check because it returns simulated POSIX
+mode bits that do not reflect the actual ACL.
 
 The `icacls` remediation the overview shows uses `%USERDOMAIN%\%USERNAME%`, the
 domain-qualified name (e.g. `CORP\alice` or `COMPUTER\alice`) that `icacls`

@@ -43,11 +43,32 @@ const EXEMPT_SIDS = new Set(["S-1-5-18", "S-1-5-32-544"]);
 const GENERIC_READ = 0x80000000;
 const GENERIC_ALL = 0x10000000;
 
+// The PowerShell listing: every access rule on the file, inherited and
+// explicit, with each identity already a SID so no name has to be resolved and
+// no locale enters. `[System.IO.FileInfo]::new(...).GetAccessControl()` reads
+// it off the .NET type rather than through `Get-Acl`, which lives in a module
+// an environment with strict application control -- the GitHub `windows-latest`
+// runner among them -- can refuse to load; that refusal is a non-terminating
+// error, so the command still exits 0 with an empty listing on its output.
+//
+// Every route that cannot produce the whole listing exits non-zero instead, so
+// the caller sees a failure rather than an empty list it could read as a file
+// with nothing granted on it.
+const windowsAclListingCommand = (escapedPath: string): string =>
+  `$sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value;` +
+  `$acl=$null;` +
+  `try{$acl=[System.IO.FileInfo]::new('${escapedPath}').GetAccessControl()}catch{};` +
+  `if($null -eq $acl){exit 1};` +
+  `$rules=$acl.GetAccessRules($true,$true,[System.Security.Principal.SecurityIdentifier]);` +
+  `if($null -eq $rules -or $rules.Count -eq 0){exit 1};` +
+  `$out=@();` +
+  `foreach($r in $rules){$out+=($r.IdentityReference.Value+';'+[int]$r.FileSystemRights+';'+[int]$r.AccessControlType)};` +
+  `Write-Output ($sid+'|'+($out -join '|'))`;
+
 // Warn if the key file's ACL grants read access to principals other than the
-// current user and well-known system accounts. Tries PowerShell's Get-Acl
-// (locale-independent, checks inherited and explicit ACEs; may be unavailable
-// in Nano Server, WDAC, or Constrained Language Mode) and falls back to
-// icacls (explicit ACEs only). See
+// current user and well-known system accounts. Tries the PowerShell listing
+// above (inherited and explicit entries, by SID) and falls back to icacls
+// (explicit entries only). See
 // docs/spec/CREDENTIAL_STORAGE.md#windows-write-discipline-and-load-check.
 function warnIfWindowsAclOverPermissive(
   keyFilePath: string,
@@ -56,41 +77,42 @@ function warnIfWindowsAclOverPermissive(
   // path is caller-supplied; '' escaping suffices because the user controls the
   // key file path
   const escaped = keyFilePath.replace(/'/g, "''");
-  const cmd =
-    `$sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value;` +
-    `$acl=Get-Acl -LiteralPath '${escaped}';` +
-    `$aces=@($acl.Access|%{` +
-    `$s=try{$_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value}catch{$null};` +
-    `if($null -ne $s){'{"s":"'+$s+'","r":'+([int]$_.FileSystemRights)+',"t":'+([int]$_.AccessControlType)+'}'}` +
-    `});` +
-    `Write-Output($sid+'|['+($aces -join ',')+']')`;
   try {
+    // Whitespace removed rather than trimmed: PowerShell wraps a long line to
+    // the console width, and none of the listing's own fields hold a space.
     const out = execFileSync(
       "powershell",
-      ["-NoProfile", "-NonInteractive", "-Command", cmd],
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        windowsAclListingCommand(escaped),
+      ],
       { encoding: "utf8", timeout: 5000 },
-    ).trim();
+    ).replace(/\s+/g, "");
     const sep = out.indexOf("|");
-    if (sep !== -1) {
-      const currentSid = out.slice(0, sep);
-      // Non-sensitive: PowerShell ACL-listing output, not a credential file, so
-      // there is no secret for a parse error to leak.
-      // eslint-disable-next-line no-restricted-properties -- non-credential parse, see above
-      const aces = JSON.parse(out.slice(sep + 1)) as Array<{
-        s: string;
-        r: number;
-        t: number;
-      }>;
+    const currentSid = sep > 0 ? out.slice(0, sep) : "";
+    const entries =
+      sep > 0
+        ? out
+            .slice(sep + 1)
+            .split("|")
+            .filter((e) => e !== "")
+        : [];
+    if (entries.length > 0) {
       if (
-        aces.some(
-          (ace) =>
-            ace.t === 0 &&
-            ((ace.r & 1) !== 0 ||
-              (ace.r & GENERIC_READ) !== 0 ||
-              (ace.r & GENERIC_ALL) !== 0) &&
-            ace.s !== currentSid &&
-            !EXEMPT_SIDS.has(ace.s),
-        )
+        entries.some((entry) => {
+          const [sid, rights, type] = entry.split(";");
+          const granted = Number(rights);
+          return (
+            Number(type) === 0 &&
+            ((granted & 1) !== 0 ||
+              (granted & GENERIC_READ) !== 0 ||
+              (granted & GENERIC_ALL) !== 0) &&
+            sid !== currentSid &&
+            !EXEMPT_SIDS.has(sid)
+          );
+        })
       ) {
         log.warn(
           `${keyFilePath} has ACL entries granting read access to other ` +
@@ -101,7 +123,7 @@ function warnIfWindowsAclOverPermissive(
       return;
     }
   } catch {
-    // PowerShell unavailable; fall through to icacls.
+    // PowerShell unavailable or the listing unreadable; fall through to icacls.
   }
 
   // icacls fallback: explicit ACEs only.
