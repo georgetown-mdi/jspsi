@@ -1588,7 +1588,10 @@ test("handler --save: a config that appeared after the pre-flight is the same lo
     // The partner declined to save, so only the config was due; the notice must
     // not claim a key file that was never going to be written.
     expect(String(lines[0].message)).toContain(pathAsDisplayed(f.configFile));
+    // Both forms: on Windows a notice naming the raw path would slip past an
+    // assertion made only against the escaped one.
     expect(String(lines[0].message)).not.toContain(pathAsDisplayed(f.keyFile));
+    expect(String(lines[0].message)).not.toContain(f.keyFile);
     // The conflicting file is named on the human log and left exactly as it was.
     expect(stderr).toContain("refusing to overwrite");
     expect(fs.readFileSync(f.configFile, "utf8")).toBe("preexisting: true\n");

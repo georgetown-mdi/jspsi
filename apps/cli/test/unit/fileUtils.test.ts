@@ -31,10 +31,16 @@ import {
 // the strip's own command line, so other commands (`whoami`, `icacls`,
 // `ls -le`) still get real answers. Mocked rather than spied: a builtin
 // module's ESM namespace is not configurable.
+// `respond` answers a command instead of running it, for the Windows
+// access-list tiers: it returns the output that command is to print, throws to
+// stand for one that cannot be spawned, or returns undefined to let the real
+// command run (`whoami`, whose value the CLI memoizes for the process).
 const execFile = vi.hoisted(() => ({
   commands: [] as string[][],
   stubbed: false,
   failure: undefined as unknown,
+  respond: undefined as
+    undefined | ((file: string, args: readonly string[]) => string | undefined),
 }));
 
 vi.mock("node:child_process", async (importOriginal) => {
@@ -54,6 +60,10 @@ vi.mock("node:child_process", async (importOriginal) => {
       execFile.commands.push([file, ...args]);
       if (execFile.failure !== undefined && isAclStrip(file, args))
         throw execFile.failure;
+      if (execFile.respond !== undefined) {
+        const answer = execFile.respond(file, args);
+        if (answer !== undefined) return answer;
+      }
       return execFile.stubbed ? "" : actual.execFileSync(file, args, options);
     },
   };
@@ -70,6 +80,7 @@ afterEach(() => {
   execFile.commands.length = 0;
   execFile.stubbed = false;
   execFile.failure = undefined;
+  execFile.respond = undefined;
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -1202,6 +1213,144 @@ describe("extended-ACL strip symlink posture", () => {
       );
     },
   );
+});
+
+// --- Windows access-list check: tier selection -------------------------------
+
+// The SIDs and rights the PowerShell tier reads. SYSTEM and Administrators are
+// the two the check exempts; Guests stands for any other principal.
+const OWNER_SID = "S-1-5-21-1111111111-2222222222-3333333333-1001";
+const GUESTS_SID = "S-1-5-32-546";
+const SYSTEM_SID = "S-1-5-18";
+const ADMINISTRATORS_SID = "S-1-5-32-544";
+const READ_RIGHTS = 1179785; // FileSystemRights.Read
+const FULL_CONTROL_RIGHTS = 2032127;
+const ALLOW = 0;
+const DENY = 1;
+
+// The line the PowerShell tier prints: the current user's SID, then one
+// `sid;rights;type` field per access rule.
+function aclListing(rules: [string, number, number][]): string {
+  return [OWNER_SID, ...rules.map((rule) => rule.join(";"))].join("|");
+}
+
+// Drive the win32 route of `warnIfFileOverPermissive` on any host: `powershell`
+// and `icacls` answer with the given output, or throw the given error to stand
+// for a command that cannot be spawned. Returns the command lines the check ran
+// and the warnings it emitted.
+function runWindowsAclCheck(replies: {
+  powershell: string | Error;
+  icacls?: string | Error;
+}): { commands: string[]; warnings: string[] } {
+  const answer = (reply: string | Error): string => {
+    if (reply instanceof Error) throw reply;
+    return reply;
+  };
+  execFile.commands.length = 0;
+  execFile.respond = (file) => {
+    if (file === "powershell") return answer(replies.powershell);
+    if (file === "icacls") return answer(replies.icacls ?? "");
+    return undefined;
+  };
+  const warnings: string[] = [];
+  vi.spyOn(getLogger("file-utils"), "warn").mockImplementation(
+    (...args: unknown[]) => {
+      warnings.push(args.map(String).join(" "));
+    },
+  );
+  withPlatform("win32", () =>
+    warnIfFileOverPermissive(path.join(dir, "secret"), "shared secret"),
+  );
+  return { commands: execFile.commands.map((c) => c[0]), warnings };
+}
+
+const UNSPAWNABLE = new Error("spawn ENOENT");
+
+describe("Windows access-list check tiers", () => {
+  test("a listing that exits non-zero falls through to icacls", () => {
+    const { commands, warnings } = runWindowsAclCheck({
+      powershell: new Error("Command failed: powershell"),
+    });
+
+    expect(commands).toContain("icacls");
+    expect(warnings).toEqual([]);
+  });
+
+  test("a listing that prints nothing falls through to icacls", () => {
+    const { commands } = runWindowsAclCheck({ powershell: "" });
+
+    expect(commands).toContain("icacls");
+  });
+
+  test("a malformed listing falls through to icacls", () => {
+    const { commands } = runWindowsAclCheck({ powershell: "garbage|morejunk" });
+
+    expect(commands).toContain("icacls");
+  });
+
+  test("a malformed field after a well-formed one fails the whole listing", () => {
+    // Read entry by entry, the Guests grant here would warn and the check would
+    // never reach icacls; taken whole, the trailing junk makes it a failed read.
+    const { commands, warnings } = runWindowsAclCheck({
+      powershell:
+        aclListing([
+          [OWNER_SID, FULL_CONTROL_RIGHTS, ALLOW],
+          [GUESTS_SID, READ_RIGHTS, ALLOW],
+        ]) + "|garbage",
+    });
+
+    expect(commands).toContain("icacls");
+    expect(warnings).toEqual([]);
+  });
+
+  test("neither tier able to run warns that the access list was not read", () => {
+    const { warnings } = runWindowsAclCheck({
+      powershell: UNSPAWNABLE,
+      icacls: UNSPAWNABLE,
+    });
+
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("Could not read the access list");
+    expect(warnings[0]).toContain("icacls");
+  });
+
+  test("a grant to another principal warns without consulting icacls", () => {
+    const { commands, warnings } = runWindowsAclCheck({
+      powershell: aclListing([
+        [OWNER_SID, FULL_CONTROL_RIGHTS, ALLOW],
+        [GUESTS_SID, READ_RIGHTS, ALLOW],
+      ]),
+    });
+
+    expect(commands).toEqual(["powershell"]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("granting read access to other users");
+  });
+
+  test("the owner plus the exempt system SIDs draws no warning", () => {
+    const { commands, warnings } = runWindowsAclCheck({
+      powershell: aclListing([
+        [OWNER_SID, FULL_CONTROL_RIGHTS, ALLOW],
+        [SYSTEM_SID, FULL_CONTROL_RIGHTS, ALLOW],
+        [ADMINISTRATORS_SID, FULL_CONTROL_RIGHTS, ALLOW],
+      ]),
+    });
+
+    expect(commands).toEqual(["powershell"]);
+    expect(warnings).toEqual([]);
+  });
+
+  test("a deny entry for another principal draws no warning", () => {
+    const { commands, warnings } = runWindowsAclCheck({
+      powershell: aclListing([
+        [OWNER_SID, FULL_CONTROL_RIGHTS, ALLOW],
+        [GUESTS_SID, READ_RIGHTS, DENY],
+      ]),
+    });
+
+    expect(commands).toEqual(["powershell"]);
+    expect(warnings).toEqual([]);
+  });
 });
 
 // --- Windows owner-only ACL --------------------------------------------------

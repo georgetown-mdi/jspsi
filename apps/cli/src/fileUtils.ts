@@ -65,10 +65,44 @@ const windowsAclListingCommand = (escapedPath: string): string =>
   `foreach($r in $rules){$out+=($r.IdentityReference.Value+';'+[int]$r.FileSystemRights+';'+[int]$r.AccessControlType)};` +
   `Write-Output ($sid+'|'+($out -join '|'))`;
 
+// One access rule off the PowerShell listing: the principal's SID, the rights
+// mask, and the access-control type (0 is Allow).
+interface WindowsAccessRule {
+  sid: string;
+  rights: number;
+  type: number;
+}
+
+// The listing's own SID, then one `sid;rights;type` field per rule. Returns
+// undefined for anything that is not that shape -- a missing separator, no
+// rules, a field that does not hold three parts, a non-numeric rights or type
+// -- so a listing that cannot be read whole counts as a failure to read and
+// falls through to icacls, rather than being scanned entry by entry and found
+// to grant nothing. See
+// docs/spec/CREDENTIAL_STORAGE.md#windows-write-discipline-and-load-check.
+function parseWindowsAclListing(
+  listing: string,
+): { currentSid: string; rules: WindowsAccessRule[] } | undefined {
+  const sep = listing.indexOf("|");
+  if (sep <= 0) return undefined;
+  const rules: WindowsAccessRule[] = [];
+  for (const field of listing.slice(sep + 1).split("|")) {
+    const parts = field.split(";");
+    if (parts.length !== 3) return undefined;
+    const [sid, rights, type] = parts;
+    // A rights mask is signed: GenericRead sets bit 31, which .NET's [int]
+    // cast renders negative.
+    if (sid === "" || !/^-?\d+$/.test(rights) || !/^-?\d+$/.test(type))
+      return undefined;
+    rules.push({ sid, rights: Number(rights), type: Number(type) });
+  }
+  return { currentSid: listing.slice(0, sep), rules };
+}
+
 // Warn if the key file's ACL grants read access to principals other than the
 // current user and well-known system accounts. Tries the PowerShell listing
 // above (inherited and explicit entries, by SID) and falls back to icacls
-// (explicit entries only). See
+// (explicit entries only); when neither can be read, says so. See
 // docs/spec/CREDENTIAL_STORAGE.md#windows-write-discipline-and-load-check.
 function warnIfWindowsAclOverPermissive(
   keyFilePath: string,
@@ -77,6 +111,7 @@ function warnIfWindowsAclOverPermissive(
   // path is caller-supplied; '' escaping suffices because the user controls the
   // key file path
   const escaped = keyFilePath.replace(/'/g, "''");
+  let listing: ReturnType<typeof parseWindowsAclListing>;
   try {
     // Whitespace removed rather than trimmed: PowerShell wraps a long line to
     // the console width, and none of the listing's own fields hold a space.
@@ -90,40 +125,30 @@ function warnIfWindowsAclOverPermissive(
       ],
       { encoding: "utf8", timeout: 5000 },
     ).replace(/\s+/g, "");
-    const sep = out.indexOf("|");
-    const currentSid = sep > 0 ? out.slice(0, sep) : "";
-    const entries =
-      sep > 0
-        ? out
-            .slice(sep + 1)
-            .split("|")
-            .filter((e) => e !== "")
-        : [];
-    if (entries.length > 0) {
-      if (
-        entries.some((entry) => {
-          const [sid, rights, type] = entry.split(";");
-          const granted = Number(rights);
-          return (
-            Number(type) === 0 &&
-            ((granted & 1) !== 0 ||
-              (granted & GENERIC_READ) !== 0 ||
-              (granted & GENERIC_ALL) !== 0) &&
-            sid !== currentSid &&
-            !EXEMPT_SIDS.has(sid)
-          );
-        })
-      ) {
-        log.warn(
-          `${keyFilePath} has ACL entries granting read access to other ` +
-            "users; restrict to owner-read-only via icacls or File " +
-            `Properties to prevent other users from reading the ${secretLabel}`,
-        );
-      }
-      return;
-    }
+    listing = parseWindowsAclListing(out);
   } catch {
     // PowerShell unavailable or the listing unreadable; fall through to icacls.
+  }
+  if (listing !== undefined) {
+    const { currentSid, rules } = listing;
+    if (
+      rules.some(
+        ({ sid, rights, type }) =>
+          type === 0 &&
+          ((rights & 1) !== 0 ||
+            (rights & GENERIC_READ) !== 0 ||
+            (rights & GENERIC_ALL) !== 0) &&
+          sid !== currentSid &&
+          !EXEMPT_SIDS.has(sid),
+      )
+    ) {
+      log.warn(
+        `${keyFilePath} has ACL entries granting read access to other ` +
+          "users; restrict to owner-read-only via icacls or File " +
+          `Properties to prevent other users from reading the ${secretLabel}`,
+      );
+    }
+    return;
   }
 
   // icacls fallback: explicit ACEs only.
@@ -186,7 +211,12 @@ function warnIfWindowsAclOverPermissive(
       );
     }
   } catch {
-    // icacls unavailable; warning is advisory
+    log.warn(
+      `Could not read the access list on ${keyFilePath}: neither the ` +
+        "PowerShell read nor icacls could be run; check it by hand with " +
+        `\`icacls "${keyFilePath}"\` and restrict the file to owner-only so ` +
+        `other users cannot read the ${secretLabel}`,
+    );
   }
 }
 

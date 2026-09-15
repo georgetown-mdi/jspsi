@@ -318,14 +318,19 @@ can refuse to load, and that refusal is a non-terminating error, so the command
 still exits successfully with nothing listed.
 
 The listing is therefore taken whole or not at all. A PowerShell that cannot be
-run, a read that fails, and an empty rule set each count as a failure to read,
-because an empty listing cannot be told apart from a file with nothing granted
-on it and would otherwise pass the check with no entry examined. On any of
-those the CLI falls back to `icacls`, which checks only explicit
-(non-inherited) non-owner ACEs -- and on a host where a new file's SYSTEM and
-Administrators entries are explicit rather than inherited, that tier names them
-too. Its warning says what it did not inspect, and a warning about a file that
-is in fact narrowed is the direction that does not hide one that is not.
+run, a read that fails, an empty rule set, and output that is not the listing's
+`sid;rights;type` shape throughout each count as a failure to read, because
+neither an empty listing nor an unreadable one can be told apart from a file
+with nothing granted on it and either would otherwise pass the check with no
+entry examined. On any of those the CLI falls back to `icacls`, which checks
+only explicit (non-inherited) non-owner ACEs -- and on a host where a new
+file's SYSTEM and Administrators entries are explicit rather than inherited,
+that tier names them too. Its warning says what it did not inspect, and a
+warning about a file that is in fact narrowed is the direction that does not
+hide one that is not. When that tier cannot run either, the CLI warns that the
+file's access list could not be read and names the `icacls` invocation to check
+it by hand: the operator is trusted and the check is advisory, so an
+unverifiable access list is reported rather than treated as a refusal to load.
 `fs.statSync` is not used for either check because it returns simulated POSIX
 mode bits that do not reflect the actual ACL.
 
