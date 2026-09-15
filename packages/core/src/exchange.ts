@@ -1525,9 +1525,10 @@ const oneDirectionalDisclosuresByTerminatedRun = new WeakSet<object>();
  * {@link ExchangeResult.audit}: the run still failed, and the record's own
  * `outcome` field states that rather than passing for a completed run's.
  *
- * A failure raised before this party's send resolved holds nothing: the
- * region had not opened, so no record is owed (docs/spec/EXCHANGE_RECORD.md,
- * When a record is owed).
+ * A failure raised before this party's payload send holds nothing: the region
+ * had not opened, so no record is owed. The send holds one both when it resolves
+ * and when the transport rejects it as indeterminate -- a publish it can neither
+ * confirm nor retract (docs/spec/EXCHANGE_RECORD.md, When a record is owed).
  *
  * The lookup walks the `cause` chain, so a caller that re-raises the failure with
  * the original as its `cause` still recovers the record.
@@ -2365,8 +2366,17 @@ export async function runExchange(
       conn,
       handshakeRole,
       localPayload,
-      () => {
+      (reportedPartnerPayload) => {
         localPayloadSent = true;
+        // The responder's own send is the last frame of its exchange, so an
+        // indeterminate rejection there terminates a run that already holds the
+        // partner's payload; the step reports it because the throw discards its
+        // return value. The record commits what had arrived
+        // (docs/spec/EXCHANGE_RECORD.md, When a record is owed).
+        if (reportedPartnerPayload !== undefined) {
+          partnerPayload = reportedPartnerPayload;
+          partnerPayloadReceived = true;
+        }
       },
     );
     partnerPayloadReceived = true;
@@ -2435,9 +2445,10 @@ export async function runExchange(
       });
     }
   } catch (error) {
-    // Before this party's send resolved the region has not opened, so the
-    // failure owes no record and leaves with none; what a rejected send may
-    // nonetheless have published is the limit the spec states.
+    // Before this party's send reported the region has not opened, so the
+    // failure owes no record and leaves with none. A send the transport
+    // rejects as indeterminate does report, since the payload may have reached
+    // the partner all the same.
     if (!localPayloadSent) throw error;
     postDisclosureFailure = { error };
   }

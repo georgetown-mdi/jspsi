@@ -13,7 +13,11 @@ import { prepareForExchange } from "../src/exchange";
 import { deriveAcceptedLinkageTerms } from "../src/linkageTermsNegotiation";
 import { MAX_NAME_LENGTH } from "../src/config/linkageTermsSchema";
 import { disclosedColumnNames } from "../src/config/metadata";
-import { OutboundDisclosureRefusalError, UsageError } from "../src/errors";
+import {
+  OutboundDisclosureRefusalError,
+  TransportPublishIndeterminateError,
+  UsageError,
+} from "../src/errors";
 import { sanitizeErrorForDisplay } from "../src/utils/sanitizeErrorForDisplay";
 import { readMessage } from "./utils/compatibilityMessageReader";
 
@@ -1232,7 +1236,9 @@ test("exchangePayloads: the responder reports its send, the exchange's terminal 
   expect(order).toEqual(["receive", "send", "reported"]);
 });
 
-test("exchangePayloads: a send the transport refuses is not reported", async () => {
+test("exchangePayloads: a send the transport refuses outright is not reported", async () => {
+  // Every rejection but the indeterminate one below: the transport settled the
+  // publish as not having happened, so nothing was disclosed to report.
   const refusing: MessageConnection = {
     send: () => Promise.reject(new Error("the transport refused the frame")),
     receive: () => Promise.resolve({ hasData: false }),
@@ -1245,6 +1251,85 @@ test("exchangePayloads: a send the transport refuses is not reported", async () 
     ),
   ).rejects.toThrow(/the transport refused the frame/);
   expect(reported).toEqual([]);
+});
+
+/** A connection whose send rejects with `error`, answering every receive with
+ * `inbound`. */
+function sendRejecting(
+  error: unknown,
+  inbound: unknown = { hasData: false },
+): MessageConnection {
+  return {
+    send: () => Promise.reject(error),
+    receive: () => Promise.resolve(inbound),
+    close: () => Promise.resolve(),
+  };
+}
+
+/** The file-sync transport's rejection of a publish it can neither confirm nor
+ * retract. */
+function indeterminatePublish(): TransportPublishIndeterminateError {
+  return new TransportPublishIndeterminateError(
+    "the message may or may not have reached the partner",
+    { cause: new Error("the publish was cut off mid-operation") },
+  );
+}
+
+const inboundPayload = {
+  hasData: true,
+  columns: ["diagnosis"],
+  rowIndices: [0],
+  rows: [["A"]],
+};
+
+test.each([
+  ["initiator", undefined],
+  ["responder", { columns: ["diagnosis"], rowIndices: [0], rows: [["A"]] }],
+] as const)(
+  "exchangePayloads: a send rejected as indeterminate is reported on the %s leg",
+  async (handshakeRole, expectedReport) => {
+    // The publish may already sit in the partner's directory, so the caller's
+    // record-owed obligation opens on this rejection as it does on a
+    // resolution. The responder holds the partner's payload by then and the
+    // report hands it over, since the throw discards the step's return value.
+    const reported: Array<PartnerPayload | undefined> = [];
+    const raised = await exchangePayloads(
+      sendRejecting(indeterminatePublish(), inboundPayload),
+      handshakeRole,
+      { hasData: false },
+      (partnerPayload) => reported.push(partnerPayload),
+    ).then(
+      () => {
+        throw new Error(
+          "expected the indeterminate publish to reject the send",
+        );
+      },
+      (reason: unknown) => reason,
+    );
+
+    expect(raised).toBeInstanceOf(TransportPublishIndeterminateError);
+    expect(reported).toEqual([expectedReport]);
+  },
+);
+
+test("exchangePayloads: an indeterminate publish the connection wrapped is reported all the same", async () => {
+  // The shape an application caller actually sees: MessageConnection.send
+  // re-raises the transport's rejection as a transport ConnectionError holding
+  // it as the cause, so the classification is read off the whole chain.
+  const reported: string[] = [];
+  const raised = await exchangePayloads(
+    sendRejecting(
+      new ConnectionError("the publish could not be confirmed", "transport", {
+        cause: indeterminatePublish(),
+      }),
+    ),
+    "initiator",
+    { hasData: false },
+    () => reported.push("reported"),
+  ).catch((reason: unknown) => reason);
+
+  expect(raised).toBeInstanceOf(ConnectionError);
+  expect(reported).toEqual(["reported"]);
 });
 
 test("exchangePayloads: a frame failing length parity is refused on parity alone, not the repeat scan", async () => {

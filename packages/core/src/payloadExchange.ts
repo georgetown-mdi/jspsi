@@ -27,7 +27,11 @@ import {
 import { redactPrivateKeyMaterial } from "./utils/sanitizeErrorForDisplay.js";
 import { singleIssueArray } from "./utils/singleIssueArray.js";
 import { loneSurrogateIndex } from "./utils/wellFormedString.js";
-import { OutboundDisclosureRefusalError, UsageError } from "./errors.js";
+import {
+  OutboundDisclosureRefusalError,
+  UsageError,
+  isTransportPublishIndeterminate,
+} from "./errors.js";
 
 /** The payload received from the exchange partner after PSI linkage. */
 export interface PartnerPayload {
@@ -917,24 +921,30 @@ export function toCommittedPayload(
  * surfaces as a rejection of the awaited call, so no listener registration,
  * error buffering, or per-path cleanup is needed.
  *
- * `onLocalPayloadSent` is the step's partial progress, and the one part of it a
+ * `onLocalPayloadSent` is the step's partial progress, and the part of it a
  * caller cannot recover from a rejection: this party's payload crosses before
  * the initiator's receive, and the throw that follows carries no state saying
  * so. It runs once the send has RESOLVED -- the transport has taken the frame
- * (docs/COMMUNICATION.md) -- and never for a send that rejected, whatever the
- * transport did with the frame before rejecting. A caller that owes a record
- * of what it disclosed opens that obligation there (docs/spec/EXCHANGE_RECORD.md,
- * When a record is owed).
+ * (docs/COMMUNICATION.md) -- and also for a send the transport rejects as
+ * indeterminate, which it can neither confirm nor retract, so the payload file
+ * may already be in the partner's directory. It does not run for a send
+ * rejected any other way. A caller that owes a record of what it disclosed
+ * opens that obligation there (docs/spec/EXCHANGE_RECORD.md, When a record is
+ * owed).
+ *
+ * The responder holds the partner's payload before its own send, and an
+ * indeterminate rejection discards this function's return value, so its report
+ * hands over what it received; the initiator, which sends first, has received
+ * nothing to hand over.
  */
 export async function exchangePayloads(
   conn: MessageConnection,
   handshakeRole: HandshakeRole,
   localPayload: PayloadWireMessage,
-  onLocalPayloadSent?: () => void,
+  onLocalPayloadSent?: (partnerPayload?: PartnerPayload) => void,
 ): Promise<PartnerPayload> {
   if (handshakeRole === "initiator") {
-    await conn.send(localPayload);
-    onLocalPayloadSent?.();
+    await sendPayloadReportingHandOff(conn, localPayload, onLocalPayloadSent);
     return toPartnerPayload(await receiveParsed(conn, payloadWireSchema));
   }
   const partnerPayload = toPartnerPayload(
@@ -951,9 +961,37 @@ export async function exchangePayloads(
   // before teardown (WebRTC). See the send/close contract in types.ts /
   // messageConnection.ts and docs/COMMUNICATION.md. Do not "fix" this by
   // assuming send has delivered.
-  await conn.send(localPayload);
-  onLocalPayloadSent?.();
+  await sendPayloadReportingHandOff(conn, localPayload, (): void => {
+    onLocalPayloadSent?.(partnerPayload);
+  });
   return partnerPayload;
+}
+
+/**
+ * Send this party's payload frame, reporting the send through `report` on a
+ * resolution and on a rejection the transport classifies as indeterminate, and
+ * rethrowing every rejection unchanged.
+ *
+ * An indeterminate rejection is a hand-off the transport could neither confirm
+ * nor retract -- the payload file may already sit in the partner's directory --
+ * so the disclosure a record attests may have occurred, and the report is what
+ * opens the caller's obligation to write one (docs/spec/EXCHANGE_RECORD.md,
+ * When a record is owed). It stays a rejection: the run fails, and the record
+ * its `outcome` marks as terminated is the accounting entry for a disclosure
+ * that cannot be ruled out, never a claim of delivery.
+ */
+async function sendPayloadReportingHandOff(
+  conn: MessageConnection,
+  localPayload: PayloadWireMessage,
+  report: (() => void) | undefined,
+): Promise<void> {
+  try {
+    await conn.send(localPayload);
+  } catch (error) {
+    if (isTransportPublishIndeterminate(error)) report?.();
+    throw error;
+  }
+  report?.();
 }
 
 function quoteCsvField(value: string): string {

@@ -12,8 +12,10 @@ import {
   TransportPublishIndeterminateError,
   causeChainSome,
   isPeerWaitTimeout,
+  isTransportPublishIndeterminate,
   markPeerWaitTimeout,
 } from "../src/errors";
+import { ConnectionError } from "../src/connection/messageConnection";
 
 // The recovery step each of the three classes chains behind its summary: the
 // first cause link, read off the error itself rather than restated here.
@@ -254,6 +256,37 @@ describe("isPeerWaitTimeout cause-chain walk", () => {
     (tagged as { cause?: unknown }).cause = outer;
 
     expect(isPeerWaitTimeout(outer)).toBe(true);
+  });
+});
+
+describe("isTransportPublishIndeterminate", () => {
+  const indeterminate = (): TransportPublishIndeterminateError =>
+    new TransportPublishIndeterminateError("publish torn", {
+      cause: new Error("_rename: No such file or directory"),
+    });
+
+  test("finds the class under the wrapping a send's rejection reaches a caller through", () => {
+    // The shape the payload exchange classifies: the message connection
+    // re-raises whatever the transport threw as a transport ConnectionError
+    // holding it as the cause, so a top-level instanceof would miss it.
+    const wrapped = new ConnectionError(
+      "the publish could not be confirmed",
+      "transport",
+      { cause: indeterminate() },
+    );
+
+    expect(isTransportPublishIndeterminate(wrapped)).toBe(true);
+    expect(isTransportPublishIndeterminate(indeterminate())).toBe(true);
+  });
+
+  test("is false for a publish the transport settled, and for what holds no error", () => {
+    expect(
+      isTransportPublishIndeterminate(
+        new ConnectionError("the connection dropped", "transport"),
+      ),
+    ).toBe(false);
+    expect(isTransportPublishIndeterminate(undefined)).toBe(false);
+    expect(isTransportPublishIndeterminate("publish torn")).toBe(false);
   });
 });
 
