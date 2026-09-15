@@ -1787,8 +1787,7 @@ describe("the signing identity's bound name against the agreed terms", () => {
       termsName("Agency A "),
     );
     expect(statement).toBeDefined();
-    expect(statement).toContain('this exchange names you "Agency A"');
-    expect(statement).toMatch(/set 'Your name' for this exchange/);
+    expect(statement).toContain('the "Agency A" this exchange names you by');
   });
 
   test("two Unicode forms of one name are one name", () => {
@@ -1801,6 +1800,42 @@ describe("the signing identity's bound name against the agreed terms", () => {
         termsName("Age\u0301ncia A"),
       ),
     ).toBeUndefined();
+  });
+
+  test("a bound name the field cannot be set to states the re-key alone", () => {
+    // Retyping is what the ordinary divergence offers first, and these two
+    // identities are bound to names no entry in the field reaches: the terms
+    // trim and NFC-normalize what is typed, so the operator would meet the same
+    // refusal with nothing changed. Both cases are driven against the terms the
+    // authoring path really builds, so the two cannot come apart.
+    for (const [bound, reason] of [
+      ["Agency A ", "it holds surrounding space"],
+      ["Age\u0301ncia A", "it holds letters in a different Unicode form"],
+    ] as const) {
+      const statement = signingIdentityDivergence(
+        resolved(bound),
+        termsName(bound),
+      );
+      expect(statement).toBeDefined();
+      expect(statement).toContain(reason);
+      expect(statement).not.toMatch(/set 'Your name' for this exchange to/);
+      expect(statement).toMatch(/Create a new signing identity under the name/);
+      expect(statement).toMatch(/this run is refused before it connects/);
+      // The two names differ invisibly, so only the one the run states is
+      // quoted: a statement holding both would read as one name against itself.
+      expect(statement).not.toContain(`"${bound}"`);
+    }
+  });
+
+  test("a bound name the field can be set to keeps the local edit first", () => {
+    // The ordinary divergence is untouched: the bound name is one the terms
+    // state as it stands, so retyping it reconciles the two and stays the
+    // cheaper of the two remedies.
+    const statement = signingIdentityDivergence(
+      resolved("County Registrar"),
+      termsName("Agency A"),
+    );
+    expect(statement).toMatch(/set 'Your name' for this exchange to/);
   });
 });
 

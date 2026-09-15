@@ -282,17 +282,55 @@ const DIVERGENCE_RECONCILE_GUIDANCE =
   "the old one must be sent before their verification works again.";
 
 /**
+ * The re-key remedy, for the two divergences the 'Your name' edit cannot
+ * reconcile. `boundTo` names what to bind the new identity to, the whole
+ * difference between them; the rest is one action with one consequence.
+ */
+function rekeyGuidance(boundTo: string): string {
+  return (
+    `Create a new signing identity ${boundTo} at the command line -- ` +
+    "'psilink fingerprint --force --identity' -- then send every partner who " +
+    "pinned the old fingerprint the new one before their verification works " +
+    "again."
+  );
+}
+
+/**
  * The one exit left where the bound name is one no terms document may state
  * (`reasonTermsCannotStateIdentity` in `@psilink/core`): naming it in the terms
  * is closed to its holder, so a new identity is the only way out. Core's own
  * answer decides which names those are, read rather than restated so this
  * boundary and the run's cannot disagree.
  */
-const DIVERGENCE_REKEY_GUIDANCE =
-  "Create a new signing identity under a name the terms admit at the command " +
-  "line -- 'psilink fingerprint --force --identity' -- then send every " +
-  "partner who pinned the old fingerprint the new one before their " +
-  "verification works again.";
+const DIVERGENCE_REKEY_GUIDANCE = rekeyGuidance("under a name the terms admit");
+
+/**
+ * The exit where the bound name is one 'Your name' cannot be set to
+ * ({@link reasonNameFieldCannotStateIdentity}). The new identity binds to the
+ * name the terms state, the form of it this exchange runs under.
+ */
+const DIVERGENCE_REKEY_UNDER_TERMS_NAME = rekeyGuidance(
+  "under the name these terms state",
+);
+
+/**
+ * Why 'Your name' cannot be set to `bound`, phrased as a clause the statement
+ * reads inside, or undefined when it can. What is typed there reaches the terms
+ * trimmed and NFC-normalized (`normalizeText`,
+ * `@psi/authoring/advancedInviteTerms`), so the terms state another form of a
+ * bound name holding either difference however carefully it is copied, and the
+ * local edit the ordinary divergence offers first closes.
+ *
+ * The clause names the class rather than the name: both differences are
+ * invisible where a name is shown, so quoting the two values would read as one
+ * name differing from itself.
+ */
+function reasonNameFieldCannotStateIdentity(bound: string): string | undefined {
+  if (bound.trim() !== bound) return "it holds surrounding space";
+  if (bound.normalize("NFC") !== bound)
+    return "it holds letters in a different Unicode form";
+  return undefined;
+}
 
 /**
  * The one line the card shows about a divergence, where the identity itself is
@@ -307,8 +345,9 @@ export const SIGNING_IDENTITY_DIVERGENCE_POINTER =
 
 /**
  * The pre-launch statement for a signed run whose signing identity is bound to
- * a party name other than the one the agreed terms state -- both names and how
- * to reconcile them -- or undefined when there is nothing to state.
+ * a party name other than the one the agreed terms state -- the names it may
+ * quote and how to reconcile them -- or undefined when there is nothing to
+ * state.
  *
  * A REFUSAL rather than an advisory, matching the CLI, which refuses such a run
  * at identity load before any connection, credential, or data leaves the
@@ -333,7 +372,14 @@ export const SIGNING_IDENTITY_DIVERGENCE_POINTER =
  * the bound one comes out of a file the operator's own command line may have
  * written, so it is display-escaped like any other value read from the mount. A
  * bound name no terms document may state is never named at all, for the reason
- * core's own answer gives.
+ * core's own answer gives, and neither is one 'Your name' cannot be set to
+ * ({@link reasonNameFieldCannotStateIdentity}).
+ *
+ * The remedy is the local name edit and a re-key together, except where the
+ * field cannot reach the bound name at all: a name no terms document may state,
+ * and a name the terms would state another form of. Those two state the re-key
+ * alone, so the operator is not sent to a field that hands them back the same
+ * refusal.
  */
 export function signingIdentityDivergence(
   draft: ReceiptsDraft,
@@ -353,6 +399,14 @@ export function signingIdentityDivergence(
       `state -- ${unstatable} -- so it differs from the "${termsName}" this ` +
       "exchange names you by, and no change to 'Your name' can bring the two " +
       `into agreement. ${DIVERGENCE_CONSEQUENCE} ${DIVERGENCE_REKEY_GUIDANCE}`
+    );
+  const fieldCannotState = reasonNameFieldCannotStateIdentity(bound);
+  if (fieldCannotState !== undefined)
+    return (
+      "Your signing identity is bound to a name 'Your name' cannot be set " +
+      `to -- ${fieldCannotState} -- so it differs from the "${termsName}" ` +
+      `this exchange names you by. ${DIVERGENCE_CONSEQUENCE} ` +
+      DIVERGENCE_REKEY_UNDER_TERMS_NAME
     );
   return (
     `Your signing identity is bound to "${redactAndDisplayPartyIdentity(

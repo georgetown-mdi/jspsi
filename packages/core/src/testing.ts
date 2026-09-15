@@ -22,6 +22,16 @@ export {
   hostileVariants,
 } from "./consent/displayEscapingFixtures.js";
 
+export {
+  CERTIFICATE_ONLY_LOAD_IDENTITY,
+  boundIdentityOf,
+  certificateOnlyLoadCases,
+} from "./records/signingIdentityDocuments.js";
+export type {
+  CertificateOnlyLoadCase,
+  CertificateOnlyLoadCaseId,
+} from "./records/signingIdentityDocuments.js";
+
 // The key-schedule core, so the browser cross-implementation suite can run the
 // checked-in known-answer vectors through the browser build the way the Node
 // suite runs them through the Node build. It stays out of the main entry point:
