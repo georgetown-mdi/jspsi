@@ -547,9 +547,10 @@ describe("summarizeInvitation", () => {
   const transformFor = (fn: string) => transformsFor([{ function: fn }])[0];
 
   test("names a param as the document writes it", () => {
-    // The terms screen paints these entries as core renders them, and the
-    // acceptor meets the same name in a refusal of the param, whose path stops
-    // at `params`. One spelling for both, the one the file holds.
+    // The terms screen paints these entries as core renders them, and a
+    // refusal of the param names it the same way in its message. The web's
+    // linkage-terms renderer cuts an issue path at `params`; core's
+    // decode-error renderer prints the path whole, camelized key included.
     const params = transformsFor([
       {
         function: "split_on",

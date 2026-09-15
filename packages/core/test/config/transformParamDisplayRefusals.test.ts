@@ -444,8 +444,9 @@ describe("a multi-word param name", () => {
 
   test("is refused on the line the summary would have shown", () => {
     // The refusal judges the rendered entry, so the name it reads is the one
-    // the row states: a reader meets `key_material` in the document, in the
-    // row, and in a refusal of the param.
+    // the row states: `key_material`, whichever of the two spellings that
+    // camelize alike the document wrote. This refusal's message names no
+    // param, the issue path locating the offending text instead.
     expectRefusedEverywhere(keyUnderMultiWordName, PRIVATE_KEY_PARAM_MESSAGE);
     expect(displayedParamsOf(keyUnderMultiWordName)).toEqual([
       "key_material: [redacted private key]",

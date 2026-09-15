@@ -4655,9 +4655,10 @@ describe("displayInvitation: linkage-key detail, heading order, and the repeated
   });
 
   test("displayInvitation: a param is named as the document writes it", () => {
-    // The acceptor meets this name twice -- on this line and in a refusal of
-    // the same param, whose path stops at `params` -- so the two state one
-    // spelling, the one the file holds.
+    // The acceptor meets this name on this line and in the message of a
+    // refusal of the same param, both in the schema's snake_case spelling. The
+    // CLI's config-file renderer cuts an issue path at `params`; core's
+    // decode-error renderer prints the path whole, camelized key included.
     const log = getLogger("accept-display-param-spelling-test");
     log.setLevel("silent");
     const lines = renderDisplayInvitation(log, {
