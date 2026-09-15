@@ -87,6 +87,14 @@ function fakeFolder(failWrite?: Error, holding: Array<string> = []) {
   };
 }
 
+/** The refusal Chromium raises while the write lock an aborted stream took is
+ * still held, which a removal has to wait out rather than accept. */
+function writeLockRefusal(): Error {
+  const refusal = new Error("modifications are not allowed here");
+  refusal.name = "NoModificationAllowedError";
+  return refusal;
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -206,6 +214,53 @@ describe("writing a run's results into the granted folder", () => {
     );
 
     expect([...folder.names]).toEqual([]);
+  });
+
+  test("asks again when the removal is refused over the write lock", async () => {
+    const folder = fakeFolder(new Error("the disk is full"));
+    let asked = 0;
+    const lockedOnce = {
+      name: "Riverbend results",
+      getFileHandle: folder.handle.getFileHandle,
+      removeEntry: (fileName: string) =>
+        asked++ === 0
+          ? Promise.reject(writeLockRefusal())
+          : folder.handle.removeEntry(fileName),
+    } as unknown as FileSystemDirectoryHandle;
+
+    await writeResultsToOutputDirectory(
+      lockedOnce,
+      "psilink-results-2026-03-01.csv",
+      new Blob([RESULTS_CSV]),
+      fakePermission("granted"),
+    );
+
+    expect(asked).toBe(2);
+    expect([...folder.names]).toEqual([]);
+  });
+
+  test("gives up on a write lock that never clears", async () => {
+    const folder = fakeFolder(new Error("the disk is full"));
+    let asked = 0;
+    const lockedThroughout = {
+      name: "Riverbend results",
+      getFileHandle: folder.handle.getFileHandle,
+      removeEntry: () => {
+        asked++;
+        return Promise.reject(writeLockRefusal());
+      },
+    } as unknown as FileSystemDirectoryHandle;
+
+    await expect(
+      writeResultsToOutputDirectory(
+        lockedThroughout,
+        "psilink-results-2026-03-01.csv",
+        new Blob([RESULTS_CSV]),
+        fakePermission("granted"),
+      ),
+    ).resolves.toMatchObject({ kind: "write-failed" });
+    // Settling at all is the bound; more than one ask is the retry it bounds.
+    expect(asked).toBeGreaterThan(1);
   });
 
   test("keeps a file the folder already held when the write fails", async () => {
