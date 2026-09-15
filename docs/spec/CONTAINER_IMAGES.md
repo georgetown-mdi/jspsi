@@ -759,6 +759,14 @@ generation, the query the rows came from, and the architectures compared.
 reaches no OS package, so these two files are where an image's OS layer is
 attributed.
 
+Beside them,
+[`NOTICE-os-packages.md`](../../NOTICE-os-packages.md) states where the
+corresponding source for the listed binaries is published -- Alpine's aports
+for the default image, Amazon Linux source RPMs for the variant -- with the
+retrieval path for a row's own version, the reading of both Dockerfiles that
+makes the packages unmodified distribution packages, and the source-offer
+question it records as open.
+
 **How they are derived.** `scripts/generate-os-package-attribution.mjs` reads
 each image's own package-manager metadata, queried against the built image by
 tag.

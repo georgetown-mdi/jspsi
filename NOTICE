@@ -74,3 +74,12 @@ All other npm dependencies were audited for NOTICE files. The three packages
 that ship a NOTICE file (bare-path, playwright, playwright-core) are
 development or build-time only dependencies and are not redistributed to end
 users. No further entries are required.
+
+---
+
+The container images this repository publishes also redistribute their base
+distributions' operating-system packages, which no entry above reaches. Those
+packages are listed beside this file, one list per image, in
+NOTICE-os-packages-default.tsv and NOTICE-os-packages-fips.tsv;
+NOTICE-os-packages.md states where the corresponding source for them is
+published and what remains open about an offer of source.
