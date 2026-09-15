@@ -1,4 +1,9 @@
-# Hostname egress allowlist for the infra dev-container profile.
+# Hostname egress allowlist ADDITIONS for the infra dev-container profile.
+#
+# The build appends this file to .devcontainer/egress-allowlist, the list every
+# profile's proxy lane starts from, so the infra profile's assembled reach is
+# that file plus this one. `cat /etc/psilink-egress-proxy/filter` in a running
+# container prints the result.
 #
 # One pattern per line; `#` starts a comment. A pattern is a hostname, or a
 # hostname whose FIRST label carries `*` wildcards (`*.githubusercontent.com`,
@@ -16,9 +21,9 @@
 # The proxy is the SECOND egress lane. The first is init-firewall.sh's IP
 # allowlist, which the infra profile leaves exactly as the default profile has
 # it; the hosts it already admits are repeated at the bottom of this file so
-# that this file is a complete statement of the profile's reach, and so that
-# SSH (which is routed through the proxy for every destination) can reach
-# github.com.
+# that the assembled list is a complete statement of the profile's reach, and
+# so that SSH (which is routed through the proxy for every destination) can
+# reach github.com.
 #
 # PSILINK_EGRESS_EXTRA_HOSTS in the repository-root .env adds a comma-separated
 # list of further patterns at container start, for a zone name or an instance
