@@ -13,6 +13,7 @@ import {
   parseDualSignedRecord,
   parseExchangeRecord,
   parseVerificationKeys,
+  partnerTermsForVerification,
   reconstructCommittedData,
   recordAlterationIsTheOnlyExplanation,
   recordedVersionMatches,
@@ -158,7 +159,8 @@ export function builder(cmd: Argv): Argv {
       type: "string",
       describe:
         "the partner's linkage terms (config or exported terms), for the " +
-        "agreed-terms hash check; the partner's terms are not retained by default",
+        "agreed-terms hash check; a dual-signed record holds the partner's " +
+        "terms, and this stands in for one that does not",
     });
   return addLoggingOptions(beforeLogging);
 }
@@ -176,6 +178,35 @@ function readTextFile(pathValue: string, kind: string): string {
   }
 }
 
+// The receipt format's version family, taken from the literal this build reads
+// so the two cannot drift apart. A file whose version is in it is a dual-signed
+// record of another format -- the case the remedy below speaks to.
+const RECEIPT_VERSION_FAMILY = SIGNED_RECEIPT_VERSION.slice(
+  0,
+  SIGNED_RECEIPT_VERSION.lastIndexOf("/") + 1,
+);
+
+// A dual-signed record of another format is refused rather than read, and the
+// run it attests is still verifiable from its exchange record, so the refusal
+// says where to go rather than stopping at the version.
+const OTHER_RECEIPT_FORMAT_REMEDY =
+  ". A dual-signed record of another format is not read: verify that run from " +
+  "its exchange record, passing the partner's terms with --partner-terms";
+
+function otherReceiptFormatRemedy(version: unknown): string {
+  return typeof version === "string" &&
+    version !== SIGNED_RECEIPT_VERSION &&
+    version.startsWith(RECEIPT_VERSION_FAMILY)
+    ? OTHER_RECEIPT_FORMAT_REMEDY
+    : "";
+}
+
+function recordedVersionValue(raw: unknown): unknown {
+  return raw !== null && typeof raw === "object"
+    ? (raw as Record<string, unknown>)["version"]
+    : undefined;
+}
+
 // Reject an unrecognized version with a specific message BEFORE the schema
 // parse -- so a future-format or hand-edited file is not mis-reported as a generic
 // shape error. The version literal is also enforced by the schema; this only makes
@@ -187,14 +218,12 @@ function assertRecognizedVersion(
   kind: string,
 ): void {
   if (!recordedVersionMatches(raw, expected)) {
-    const version =
-      raw !== null && typeof raw === "object"
-        ? (raw as Record<string, unknown>)["version"]
-        : undefined;
+    const version = recordedVersionValue(raw);
     throw new UsageError(
       `${kind} file ${pathValue} has an unrecognized version ` +
         `(${typeof version === "string" ? version : "missing"}); this build ` +
-        `recognizes ${expected}`,
+        `recognizes ${expected}` +
+        otherReceiptFormatRemedy(version),
     );
   }
 }
@@ -271,15 +300,13 @@ export function readVerifiableArtifact(pathValue: string): VerifiableArtifact {
     return { kind: "record", record: parseRecord(raw, pathValue) };
   if (recordedVersionMatches(raw, SIGNED_RECEIPT_VERSION))
     return { kind: "signed", signed: parseSignedRecord(raw, pathValue) };
-  const version =
-    raw !== null && typeof raw === "object"
-      ? (raw as Record<string, unknown>)["version"]
-      : undefined;
+  const version = recordedVersionValue(raw);
   throw new UsageError(
     `record file ${pathValue} has an unrecognized version ` +
       `(${typeof version === "string" ? version : "missing"}); this build ` +
       `recognizes ${EXCHANGE_RECORD_VERSION} (an exchange record) and ` +
-      `${SIGNED_RECEIPT_VERSION} (a dual-signed record)`,
+      `${SIGNED_RECEIPT_VERSION} (a dual-signed record)` +
+      otherReceiptFormatRemedy(version),
   );
 }
 
@@ -365,7 +392,8 @@ export interface SuppliedVerificationInputs {
   configFile?: string;
   /** Whether that config defined `linkage_terms`. */
   localTerms: boolean;
-  /** Whether `--partner-terms` was supplied. */
+  /** Whether the partner's terms were in hand: carried by the dual-signed
+   * record, or supplied on `--partner-terms`. */
   partnerTerms: boolean;
   /** Whether this section includes the note explaining a config that defines no
    * `linkage_terms`. A run reporting both artifacts prints it once, under the
@@ -771,11 +799,12 @@ function configFileTerms(
 }
 
 /**
- * The partner's linkage terms, from the file named by `--partner-terms`. That
- * file has the one purpose, so unlike `--config-file` a file defining no
- * `linkage_terms` is refused rather than noted, and a path that does not exist is
- * refused as well: either would otherwise leave the agreed-terms hash reported as
- * not checked, which is what a run with no partner terms at all looks like.
+ * The partner's linkage terms, from the file named by `--partner-terms`, which
+ * stand in for the copy a dual-signed record holds. That file has the one
+ * purpose, so unlike `--config-file` a file defining no `linkage_terms` is
+ * refused rather than noted, and a path that does not exist is refused as well:
+ * either would otherwise leave the agreed-terms hash reported as not checked,
+ * which is what a run with no partner terms at all looks like.
  */
 function partnerTermsFrom(
   partnerTermsFile: string | undefined,
@@ -1065,13 +1094,20 @@ export async function handler(argv: Arguments): Promise<void> {
     }
 
     const localTerms = configFileTerms(configFile, log);
-    const partnerTerms = partnerTermsFrom(partnerTermsFile);
+    const suppliedPartnerTerms = partnerTermsFrom(partnerTermsFile);
     const signedRecord =
       artifact.kind === "signed"
         ? artifact.signed
         : signedRecordArg !== undefined
           ? readSignedRecordFile(signedRecordArg)
           : undefined;
+    // The dual-signed record holds the partner's terms, so a run naming one
+    // checks the agreed-terms hash with no second file; a file the operator
+    // named wins over that copy.
+    const partnerTerms = partnerTermsForVerification(
+      suppliedPartnerTerms,
+      signedRecord,
+    );
 
     if (signedRecord === undefined && partnerFingerprintArgs.length > 0)
       throw new UsageError(

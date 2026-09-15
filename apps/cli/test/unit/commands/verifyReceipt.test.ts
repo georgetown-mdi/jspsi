@@ -10,6 +10,7 @@ import YAML from "yaml";
 import {
   buildExchangeRecord,
   computeCertificateFingerprint,
+  EXCHANGE_RECORD_VERSION,
   generateSigningIdentity,
   getDefaultLinkageTerms,
   serializeDualSignedRecord,
@@ -114,6 +115,7 @@ const receiptContent: ReceiptContent = {
 async function writeSignedRecord(
   dir: string,
   content: ReceiptContent = receiptContent,
+  partnerTerms: LinkageTerms | undefined = baseInputs.partnerTerms,
 ): Promise<string> {
   const a = await generateSigningIdentity("Party A", {
     privateKey: {
@@ -144,6 +146,7 @@ async function writeSignedRecord(
       certificate: b.certificate,
       signature: await signReceiptContent(b, content, "responder"),
     },
+    partnerTerms,
   };
   const path = join(dir, "receipt.json");
   writeFileSync(path, serializeDualSignedRecord(record));
@@ -800,8 +803,12 @@ describe("reading a dual-signed record", () => {
     writeFileSync(path, JSON.stringify({ version: "something-else/v1" }));
     expect(() => readVerifiableArtifact(path)).toThrow(UsageError);
     expect(() => readVerifiableArtifact(path)).toThrow(
-      /recognizes psilink-exchange-record\/v8 .* and psilink-signed-receipt\/v2/,
+      `recognizes ${EXCHANGE_RECORD_VERSION} (an exchange record) and ` +
+        `${SIGNED_RECEIPT_VERSION} (a dual-signed record)`,
     );
+    // A version of neither family earns no receipt-format remedy: nothing says
+    // the file is a receipt at all.
+    expect(() => readVerifiableArtifact(path)).not.toThrow(/--partner-terms/);
   });
 });
 
@@ -1375,6 +1382,124 @@ describe("handler", () => {
     // No exchange record was named, so no commitment is opened or reported.
     expect(stdout).not.toContain("commitment");
     expect(exitCode).toBe(0);
+  });
+
+  test("the terms the receipt holds carry a run to both verdicts", async () => {
+    // The run's own artifacts, this party's retained files, and its config,
+    // which is all an operator keeps: the receipt supplies the partner's half of
+    // the agreed terms, so the record and the receipt both grade verified with
+    // no terms document kept beside them.
+    const { recordPath, signedPath, identityPath, pin } =
+      await exchangeArtifacts({
+        associationTable: [[0], [0]],
+        resultSize: 1,
+        partnerPayloadReceived: { columns: ["status"], rows: [["active"]] },
+      });
+    const dir = tmp();
+    const inputPath = join(dir, "input.csv");
+    writeFileSync(inputPath, "pid,dose\nP0,10mg\n");
+    const resultPath = join(dir, "result.csv");
+    writeFileSync(resultPath, "pid,row_id,status\nP0,0,active\n");
+    const { stdout, exits, exitCode } = await runVerify({
+      record: recordPath,
+      "input-file": inputPath,
+      "result-file": resultPath,
+      "signed-record": signedPath,
+      "identity-file": identityPath,
+      "partner-fingerprint": pin,
+      "config-file": writeYaml(
+        YAML.stringify({ linkage_terms: baseInputs.localTerms }),
+      ),
+    });
+    expect(exits).toEqual([]);
+    expect(stdout).toContain("agreed-terms hash: re-derives and matches");
+    expect(stdout).toContain(
+      "agreed-terms hash: matches the terms this exchange agreed",
+    );
+    expect(stdout).toMatch(/^VERIFIED/);
+    expect(stdout).toContain("SIGNED RECEIPT VERIFIED");
+    expect(stdout).not.toContain("INCOMPLETE");
+    expect(exitCode).toBe(0);
+  });
+
+  test("a --partner-terms file is what governs when the receipt holds terms too", async () => {
+    // The receipt is verified on its own, so the agreed-terms hash is re-derived
+    // from the two terms documents rather than read off an exchange record:
+    // whichever source this run used is what the line reports. The file the
+    // operator named wins, and terms that are not this run's are reported as a
+    // mismatch rather than passing on the carried copy.
+    const { signedPath, pin, ownFingerprint } = await exchangeArtifacts();
+    const shared = {
+      record: signedPath,
+      "partner-fingerprint": [pin, ownFingerprint],
+      "config-file": writeYaml(
+        YAML.stringify({ linkage_terms: baseInputs.localTerms }),
+      ),
+    };
+    const carried = await runVerify(shared);
+    expect(carried.stdout).toContain(
+      "agreed-terms hash: matches the terms this exchange agreed",
+    );
+    const supplied = await runVerify({
+      ...shared,
+      "partner-terms": writeYaml(
+        YAML.stringify({
+          linkage_terms: { ...baseInputs.partnerTerms, date: "2025-02-02" },
+        }),
+        "partner.yaml",
+      ),
+    });
+    expect(supplied.exits).toEqual([]);
+    expect(supplied.stdout).toContain(
+      "agreed-terms hash: DOES NOT MATCH the terms this exchange agreed",
+    );
+    expect(supplied.exitCode).toBe(RECEIPT_VERIFICATION_FAILED_EXIT_CODE);
+  });
+
+  test("a receipt whose carried terms were stripped leaves the hash to a terms file", async () => {
+    // The envelope is unsigned, so a holder may drop it: every signature check
+    // is unchanged and the line names the input that supplies the hash instead.
+    const { signedPath, pin, ownFingerprint } = await exchangeArtifacts();
+    const { partnerTerms: _dropped, ...stripped } =
+      readSignedRecordFile(signedPath);
+    writeFileSync(signedPath, JSON.stringify(stripped, null, 2) + "\n");
+    const { stdout, exits, exitCode } = await runVerify({
+      record: signedPath,
+      "partner-fingerprint": [pin, ownFingerprint],
+      "config-file": writeYaml(
+        YAML.stringify({ linkage_terms: baseInputs.localTerms }),
+      ),
+    });
+    expect(exits).toEqual([]);
+    expect(stdout).toContain("receipt signature: verifies over this receipt's");
+    expect(stdout).toContain("agreed-terms hash: not checked");
+    expect(stdout).toContain("--partner-terms");
+    expect(exitCode).toBe(0);
+  });
+
+  test("a dual-signed record of another format is refused naming the remedy", async () => {
+    // Pre-release the earlier format is refused rather than migrated, and the
+    // refusal leaves the operator somewhere to go: the run's exchange record,
+    // whose agreed-terms hash a supplied terms file still checks.
+    const { recordPath, signedPath } = await exchangeArtifacts();
+    const earlier = {
+      ...readSignedRecordFile(signedPath),
+      version: "psilink-signed-receipt/v2",
+    };
+    writeFileSync(signedPath, JSON.stringify(earlier, null, 2) + "\n");
+    const { stdout, stderr, exits } = await runVerify({
+      record: recordPath,
+      "signed-record": signedPath,
+    });
+    expect(exits).toEqual([64]);
+    expect(stderr).toContain(
+      "unrecognized version (psilink-signed-receipt/v2)",
+    );
+    expect(stderr).toContain(
+      "verify that run from its exchange record, passing the partner's terms " +
+        "with --partner-terms",
+    );
+    expect(stdout).toBe("");
   });
 
   test("an exchange record with --signed-record verifies both artifacts", async () => {
