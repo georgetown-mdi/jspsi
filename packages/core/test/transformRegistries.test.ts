@@ -148,16 +148,18 @@ describe("the transform registries a decoded document indexes", () => {
         String,
       );
     };
+    // Each line names its param in the spelling a document writes, which is
+    // the spelling a refusal of that param states (`snakeizeKey`).
     expect(displayedParams("parse_date")).toEqual([
-      "outputFormat: YYYYMMDD",
-      "inputFormat: MM/DD/YYYY",
-      "unlistedParam: x",
+      "output_format: YYYYMMDD",
+      "input_format: MM/DD/YYYY",
+      "unlisted_param: x",
     ]);
     for (const name of PROTOTYPE_MEMBER_NAMES)
       expect(displayedParams(name), name).toEqual([
-        "unlistedParam: x",
-        "outputFormat: YYYYMMDD",
-        "inputFormat: MM/DD/YYYY",
+        "unlisted_param: x",
+        "output_format: YYYYMMDD",
+        "input_format: MM/DD/YYYY",
       ]);
   });
 });

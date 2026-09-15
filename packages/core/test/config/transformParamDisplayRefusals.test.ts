@@ -281,6 +281,9 @@ describe("a transform param name holding private key material", () => {
   });
 
   test("would have been displayed with the marker where the name goes", () => {
+    // A name reaches the display in the spelling a document writes it, which
+    // lower-cases a marker's letters; one holding a marker keeps the spelling
+    // it was authored in, so the redaction has a marker to replace.
     expect(displayedParamsOf(keyInParamName)).toEqual([
       "[redacted private key]: partner_value",
     ]);
@@ -430,6 +433,30 @@ describe("a param declared with an explicit undefined value", () => {
     expectRefusedEverywhere(pastCap, TRANSFORM_PARAM_COUNT_MESSAGE);
     const displayed = displayedParamsOf(pastCap);
     expect(displayed[displayed.length - 1]).toBe("... 1 more");
+  });
+});
+
+describe("a multi-word param name", () => {
+  const keyUnderMultiWordName = {
+    function: "trim",
+    params: { keyMaterial: FAKE_PRIVATE_KEY },
+  };
+
+  test("is refused on the line the summary would have shown", () => {
+    // The refusal judges the rendered entry, so the name it reads is the one
+    // the row states: `key_material`, whichever of the two spellings that
+    // camelize alike the document wrote. This refusal's message names no
+    // param, the issue path locating the offending text instead.
+    expectRefusedEverywhere(keyUnderMultiWordName, PRIVATE_KEY_PARAM_MESSAGE);
+    expect(displayedParamsOf(keyUnderMultiWordName)).toEqual([
+      "key_material: [redacted private key]",
+    ]);
+  });
+
+  test("renders the entry a refusal reads", () => {
+    expect(describedTransformParamEntry("keyMaterial", "partner_value")).toBe(
+      "key_material: partner_value",
+    );
   });
 });
 

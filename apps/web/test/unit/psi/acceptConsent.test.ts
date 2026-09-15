@@ -546,6 +546,23 @@ describe("summarizeInvitation", () => {
   // The summary shown for a lone transform declaring `fn`.
   const transformFor = (fn: string) => transformsFor([{ function: fn }])[0];
 
+  test("names a param as the document writes it", () => {
+    // The terms screen paints these entries as core renders them, and a
+    // refusal of the param names it the same way in its message. The web's
+    // linkage-terms renderer cuts an issue path at `params`; core's
+    // decode-error renderer prints the path whole, camelized key included.
+    const params = transformsFor([
+      {
+        function: "split_on",
+        params: { delimiter: ";", includeOriginal: true },
+      },
+    ])[0].params.map(String);
+    expect(params).toContain("include_original: true");
+    expect(params.some((entry) => entry.includes("includeOriginal"))).toBe(
+      false,
+    );
+  });
+
   test("the transform glossary stays in sync with core's function set", () => {
     // Two-directional: every function core recognizes has a description, and the
     // glossary has no entry for a function core does not (a stale key). A new
