@@ -69,6 +69,10 @@ import {
   signingCertificatePath,
   signingIdentityPath,
 } from "@jobs/signingIdentity";
+import {
+  buildAdvancedTerms,
+  seedAdvancedInvite,
+} from "@psi/authoring/advancedInvite";
 import { browseSegment } from "@jobs/workInputName";
 import { importLinkageTerms } from "@psi/linkageTermsIO";
 import { resolveWorkdirFile } from "@jobs/workdir";
@@ -163,6 +167,10 @@ const draft = (overrides: Partial<ReceiptsDraft> = {}): ReceiptsDraft => ({
 
 /** The name this exchange states, for the cases that are not about the name. */
 const THIS_PARTY = "Agency A";
+
+/** Columns enough to seed an authoring draft, for the cases that build the terms
+ * an exchange would state from a name as the operator typed it. */
+const TERMS_COLUMNS = ["first_name", "last_name", "dob"];
 
 /** The card's problems for a draft on an exchange that names this party. The
  * name is the model's second input and exactly one refusal turns on it, so the
@@ -1748,6 +1756,51 @@ describe("the signing identity's bound name against the agreed terms", () => {
     const bound = resolved("County Registrar");
     expect(signingIdentityDivergence(bound, "")).toBeUndefined();
     expect(signingIdentityDivergence(bound, "Someone Else")).toBeDefined();
+  });
+
+  /** The name an exchange authored with this typed name states: the terms value
+   * the review step compares and the request binds, which is the typed value
+   * NFC-normalized and trimmed. */
+  const termsName = (typed: string): string => {
+    const stated = buildAdvancedTerms(
+      seedAdvancedInvite(typed, TERMS_COLUMNS).draft,
+    ).identity;
+    expect(stated).toBeDefined();
+    return stated ?? "";
+  };
+
+  test("the compare is over the name the terms state, not the typed one", () => {
+    // A trailing space typed against an identity bound to the trimmed name: the
+    // terms state the trimmed name, the certificate is bound to it, and there is
+    // nothing to hold the launch over.
+    expect(
+      signingIdentityDivergence(resolved("Agency A"), termsName("Agency A ")),
+    ).toBeUndefined();
+  });
+
+  test("a bound name the terms cannot restate is reported against theirs", () => {
+    // An identity bound outside the console can hold the untrimmed name: the
+    // terms state "Agency A", which that identity is not, so the refusal holds
+    // and names the value the run states.
+    const statement = signingIdentityDivergence(
+      resolved("Agency A "),
+      termsName("Agency A "),
+    );
+    expect(statement).toBeDefined();
+    expect(statement).toContain('this exchange names you "Agency A"');
+    expect(statement).toMatch(/set 'Your name' for this exchange/);
+  });
+
+  test("two Unicode forms of one name are one name", () => {
+    // A decomposed accented name typed against an identity bound to the
+    // precomposed one: the terms state the precomposed form, so the certificate
+    // the partner checks is bound to the name those terms state.
+    expect(
+      signingIdentityDivergence(
+        resolved("Ag\u00e9ncia A"),
+        termsName("Age\u0301ncia A"),
+      ),
+    ).toBeUndefined();
   });
 });
 

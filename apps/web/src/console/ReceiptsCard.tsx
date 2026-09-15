@@ -163,10 +163,13 @@ export function ReceiptsCard({
   onChange,
 }: {
   draft: ReceiptsDraft;
-  /** This exchange's `linkage_terms.identity` -- the name, organization, and
-   * contact a NEW signing identity is bound to, and the value a partner checks
-   * the certificate against. Blank until the operator states it, which the
-   * fingerprint request then reports rather than binding an empty identity. */
+  /** This exchange's `linkage_terms.identity` as the run will state it -- the
+   * name, organization, and contact a NEW signing identity is bound to, and the
+   * value a partner checks the certificate against. Blank until the operator
+   * states it, which the fingerprint request then reports rather than binding an
+   * empty identity. It is the terms value rather than a typed one because the
+   * request binds it verbatim: a label the terms do not state is bound to a key
+   * the run then refuses. */
   identity: string;
   /** The console's rendezvous report, or undefined before it resolves (or off a
    * console build). It decides whether the identity-location advisory applies to
@@ -236,7 +239,7 @@ export function ReceiptsCard({
     setResolving(true);
     setFailure(undefined);
     const location = draftRef.current.identityLocation;
-    const outcome = await resolveSigningFingerprint(identity.trim(), {
+    const outcome = await resolveSigningFingerprint(identity, {
       exportCertificate,
       ...(location !== undefined ? { identityLocation: location } : {}),
     });

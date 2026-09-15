@@ -277,6 +277,23 @@ describe("ReceiptsCard: asking the console for this party's fingerprint", () => 
       .toBeInTheDocument();
   });
 
+  test("binds the name the terms state, not a copy of its own", async () => {
+    // The label is `linkage_terms.identity` as the run will state it, sent
+    // verbatim: a trim or a re-normalization here would bind the key to a name
+    // those terms do not state, which the run then refuses at identity load.
+    const asTheTermsStateIt = `${IDENTITY} `;
+    const stub = stubSigningApi();
+    await renderCard(asTheTermsStateIt);
+    await chooseCertificateMode();
+
+    await createButton().click();
+
+    await expect
+      .element(page.getByLabelText("Your certificate fingerprint"))
+      .toHaveTextContent(FINGERPRINT);
+    expect(JSON.parse(stub.bodies[0])).toEqual({ identity: asTheTermsStateIt });
+  });
+
   test("distinguishes an identity that was already there", async () => {
     stubSigningApi({ responses: [{ body: okBody({ created: false }) }] });
     await renderCard();

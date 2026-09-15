@@ -183,6 +183,12 @@ export function ReviewCreateSection({
     () => inertCoalesceNotice(editor.draft, currentTerms),
     [editor.draft, currentTerms],
   );
+  // The name this party signs under, read off the built terms rather than the
+  // typed draft: the terms state a normalized form of what was typed, and that
+  // form is what the certificate is bound to, what the partner authorizes
+  // against, and what the run's own refusal compares. Terms stating no name at
+  // all read as empty, which is what an unnamed exchange is held over.
+  const termsIdentity = currentTerms.identity ?? "";
   const sftpConfigured = sftpConnection != null;
   const rendezvousConfigured = rendezvous?.configured === true;
   const available = availableTransports(
@@ -245,13 +251,13 @@ export function ReviewCreateSection({
     exchangeFilesOffered && runDiagnosticsProblems(runDiagnostics).length > 0;
   const receiptsBlocked =
     exchangeFilesOffered &&
-    receiptsProblems(receipts, editor.draft.identity).length > 0;
+    receiptsProblems(receipts, termsIdentity).length > 0;
   // Read only where this console conducts the run: a save-a-file or browser
   // transport signs nothing here, so there is no identity of this console's to
   // diverge from the terms.
   const identityDivergence = !exchangeFilesOffered
     ? undefined
-    : signingIdentityDivergence(receipts, editor.draft.identity);
+    : signingIdentityDivergence(receipts, termsIdentity);
   // The SFTP session mode applies only where a session exists, so the card
   // withholds it on the shared-directory transport.
   const tuningCapabilities =
@@ -408,7 +414,7 @@ export function ReviewCreateSection({
           />
           <ReceiptsCard
             draft={receipts}
-            identity={editor.draft.identity}
+            identity={termsIdentity}
             rendezvous={rendezvous}
             onChange={onReceipts}
           />
