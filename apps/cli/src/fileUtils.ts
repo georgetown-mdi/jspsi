@@ -405,45 +405,44 @@ export function writeFileOwnerOnly(
       // sensitive content. The brief window while the empty file has
       // inherited ACEs (e.g. BUILTIN\Users read) exposes only the file's
       // existence, not its contents.
+      //
+      // One descriptor serves the file's whole life: narrowing runs against
+      // the path while this descriptor stays open, and the content goes
+      // through the same descriptor, so it can be fsync'd before the rename
+      // as on POSIX. Reopening the narrowed path instead is not available:
+      // Node maps O_TRUNC without O_CREAT to TRUNCATE_EXISTING, which fails
+      // EINVAL here. Only the directory-entry flush (fsyncParentDir below)
+      // stays POSIX-only.
       const fd = fs.openSync(
         tmp,
         fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY,
       );
-      fs.closeSync(fd);
       try {
-        // /inheritance:r strips inherited ACEs (e.g. BUILTIN\Users group read);
-        // /grant:r replaces any existing explicit grant for owner only.
-        // (M) is the standard Modify level: FILE_GENERIC_READ |
-        // FILE_GENERIC_WRITE | DELETE; it unambiguously includes the DELETE
-        // right that MoveFileEx requires on the source file to complete the
-        // subsequent rename.
-        execFileSync(
-          "icacls",
-          [tmp, "/inheritance:r", "/grant:r", `${owner}:(M)`],
-          { stdio: "ignore", timeout: 5000 },
-        );
-      } catch {
-        // Surface a clear remediation; the outer catch removes the placeholder.
-        throw new Error(
-          `Could not restrict ACLs on ${destPath}; restrict manually to ` +
-            "owner-read-only via icacls or File Properties",
-        );
-      }
-      // Reopen by path (rather than disturb the placeholder-create/close/
-      // icacls sequence above) to write through a retained fd, so the data can
-      // be fsync'd before the rename, matching the POSIX branch. O_TRUNC is a
-      // no-op on the empty placeholder and guards against a stale tail. Only
-      // the directory-entry flush (fsyncParentDir below) stays POSIX-only.
-      const contentFd = fs.openSync(
-        tmp,
-        fs.constants.O_WRONLY | fs.constants.O_TRUNC,
-      );
-      try {
-        fs.writeFileSync(contentFd, content, "utf8");
-        fs.fsyncSync(contentFd);
+        try {
+          // /inheritance:r strips inherited ACEs (e.g. BUILTIN\Users group read);
+          // /grant:r replaces any existing explicit grant for owner only.
+          // (M) is the standard Modify level: FILE_GENERIC_READ |
+          // FILE_GENERIC_WRITE | DELETE; it unambiguously includes the DELETE
+          // right that MoveFileEx requires on the source file to complete the
+          // subsequent rename.
+          execFileSync(
+            "icacls",
+            [tmp, "/inheritance:r", "/grant:r", `${owner}:(M)`],
+            { stdio: "ignore", timeout: 5000 },
+          );
+        } catch {
+          // State a clear remediation; the outer catch removes the placeholder,
+          // which this branch's close has already released.
+          throw new Error(
+            `Could not restrict ACLs on ${destPath}; restrict manually to ` +
+              "owner-read-only via icacls or File Properties",
+          );
+        }
+        fs.writeFileSync(fd, content, "utf8");
+        fs.fsyncSync(fd);
       } finally {
         try {
-          fs.closeSync(contentFd);
+          fs.closeSync(fd);
         } catch {
           /* best-effort close; a write/fsync failure above already propagates */
         }

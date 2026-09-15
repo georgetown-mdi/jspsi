@@ -279,9 +279,15 @@ ensures the token is never on disk while the file still has inherited ACEs
 in a restricted container environment), the placeholder is deleted and an error
 is raised; no key material is written.
 
+One handle serves the placeholder's whole life: the writer keeps the
+exclusive-create handle open while `icacls` narrows the path, writes the content
+through that same handle, and closes it before the rename. Reopening the
+narrowed path is not an option, because Node maps `O_TRUNC` without `O_CREAT` to
+the `TRUNCATE_EXISTING` disposition, which Windows rejects with `EINVAL`.
+
 On Windows the token's data is flushed the same way as on Unix -- the writer
-reopens the ACL-narrowed file to write the content and `FlushFileBuffers` it
-through a handle before the rename -- but the parent-directory flush is not
+`FlushFileBuffers` it through that handle before the rename -- but the
+parent-directory flush is not
 reachable: Node's `fs` exposes no way to open a directory handle and
 `FlushFileBuffers` it (the directory `fsync` the Unix path performs). So the
 cross-write crash-ordering guarantee above is confined to the Unix write path,
