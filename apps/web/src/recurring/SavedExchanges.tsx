@@ -34,8 +34,10 @@ import {
   handedOffImportReason,
 } from "./managedHandoffGate";
 import { loadSavedExchanges } from "./savedExchangesLoad";
+import { managedImportGrantNotice } from "./managedImportGrantNotice";
 import { recoveryRows } from "./savedExchangesRecovery";
 
+import type { ManagedImportGrantNotice } from "./managedImportGrantNotice";
 import type { ManagedSpentHandoff } from "@psi/managed/managedLocalState";
 import type { RecoveryRow } from "./savedExchangesRecovery";
 import type { SavedExchangeRow } from "./savedExchangesModel";
@@ -554,23 +556,34 @@ function RecoveryListing({ reload }: { reload: () => void }) {
 }
 
 /** The standing restore-from-backup import affordance, shared by the empty state and the
- * read-failed surface so both render one markup. A successful import takes the operator
- * to the imported exchange's run surface, so it is a way forward even when the list read
+ * read-failed surface so both render one markup. A successful import puts the operator
+ * on the imported exchange's run surface, so it is a way forward even when the list read
  * itself cannot be mended.
  *
  * An import the store refuses because its exchange was handed off from this browser is
  * not the unreadable-file failure and does not read as one: the file is fine and the
  * exchange is still here, running somewhere else, so that refusal names the exchange
- * and the recovery it actually has ({@link handedOffImportReason}). */
+ * and the recovery it actually has ({@link handedOffImportReason}).
+ *
+ * An import that could not bring the source's input file or output folder stops here
+ * with that notice and a button onward, rather than taking the operator straight to
+ * the exchange ({@link managedImportGrantNotice}): the grants are what they have to
+ * choose again, and the notice is only read where it is shown. An import with nothing
+ * to say goes straight through. */
 function RestoreFromBackup() {
   const navigate = useNavigate();
   const [importFailure, setImportFailure] = useState<
     { kind: "unreadable" } | { kind: "handed-off"; reason: string }
   >();
+  const [grantNotice, setGrantNotice] = useState<{
+    id: string;
+    notice: ManagedImportGrantNotice;
+  }>();
 
   function onFile(file: File | null) {
     if (file === null) return;
     setImportFailure(undefined);
+    setGrantNotice(undefined);
     // Cap the file size before reading it: the artifact is a small JSON document, so
     // an over-cap file is rejected with the same import-failure copy rather than read
     // into memory ahead of the bounded parse.
@@ -584,8 +597,13 @@ function RestoreFromBackup() {
         // Best-effort persistence on the imported record's origin, the same request
         // a create makes; a denied grant does not fail the import.
         void requestPersistentStorage();
-        const installed = await importManagedExchange(source);
-        await navigate({ to: "/saved/$id", params: { id: installed.id } });
+        const { record, missingGrants } = await importManagedExchange(source);
+        const notice = managedImportGrantNotice(missingGrants);
+        if (notice !== undefined) {
+          setGrantNotice({ id: record.id, notice });
+          return;
+        }
+        await navigate({ to: "/saved/$id", params: { id: record.id } });
       } catch (error) {
         setImportFailure(
           error instanceof ManagedImportHandedOffError
@@ -606,6 +624,27 @@ function RestoreFromBackup() {
         If this browser was cleared or you are moving to a new device, import
         the backup file you exported to bring the exchange back here.
       </p>
+      {grantNotice !== undefined && (
+        <Alert color="yellow" title={grantNotice.notice.title} mb="sm">
+          <p className={styles.small}>{grantNotice.notice.lead}</p>
+          <ul className={styles.small}>
+            {grantNotice.notice.consequences.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+          <Button
+            mt="sm"
+            onClick={() =>
+              void navigate({
+                to: "/saved/$id",
+                params: { id: grantNotice.id },
+              })
+            }
+          >
+            Open this exchange
+          </Button>
+        </Alert>
+      )}
       {importFailure?.kind === "handed-off" ? (
         <Alert color="yellow" title={HANDED_OFF_IMPORT_TITLE} mb="sm">
           {importFailure.reason}

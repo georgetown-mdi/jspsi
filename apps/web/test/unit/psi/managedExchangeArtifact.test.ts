@@ -112,7 +112,7 @@ describe("export/import round-trip", () => {
     const bytes = serializeManagedExchangeArtifact(
       encodeManagedExchangeArtifact(record),
     );
-    const restored = importManagedExchangeArtifact(bytes);
+    const { record: restored } = importManagedExchangeArtifact(bytes);
     expect(restored.sharedSecret).toBe(record.sharedSecret);
     expect(restored.exchangeFile).toEqual(record.exchangeFile);
   });
@@ -192,6 +192,74 @@ describe("CLI separability", () => {
       "tokenMaxAgeDays",
     ]);
     expect(artifact.artifactVersion).toBe(MANAGED_EXCHANGE_ARTIFACT_VERSION);
+  });
+});
+
+describe("the grants the source held", () => {
+  test("a source holding both handles marks both, and an import reports both", () => {
+    const record = buildManagedExchangeRecord(
+      newExchange({
+        inputFileHandle: { name: "records.csv" } as FileSystemFileHandle,
+        outputDirectoryHandle: { name: "results" } as FileSystemDirectoryHandle,
+      }),
+    );
+    const artifact = encodeManagedExchangeArtifact(record);
+    expect(artifact.local.heldInputFile).toBe(true);
+    expect(artifact.local.heldOutputFolder).toBe(true);
+    // The handles themselves do not cross the bytes, so the markers are all an
+    // import has to go on.
+    const imported = importManagedExchangeArtifact(
+      serializeManagedExchangeArtifact(artifact),
+    );
+    expect(imported.heldGrants).toEqual(["input-file", "output-folder"]);
+    expect(imported.record).not.toHaveProperty("inputFileHandle");
+    expect(imported.record).not.toHaveProperty("outputDirectoryHandle");
+  });
+
+  test("a source holding one handle marks only that one", () => {
+    const record = buildManagedExchangeRecord(
+      newExchange({
+        outputDirectoryHandle: { name: "results" } as FileSystemDirectoryHandle,
+      }),
+    );
+    const artifact = encodeManagedExchangeArtifact(record);
+    expect(artifact.local).not.toHaveProperty("heldInputFile");
+    expect(
+      importManagedExchangeArtifact(serializeManagedExchangeArtifact(artifact))
+        .heldGrants,
+    ).toEqual(["output-folder"]);
+  });
+
+  test("a source holding neither writes no marker and reports none", () => {
+    const artifact = encodeManagedExchangeArtifact(
+      buildManagedExchangeRecord(newExchange()),
+    );
+    expect(artifact.local).not.toHaveProperty("heldInputFile");
+    expect(artifact.local).not.toHaveProperty("heldOutputFolder");
+    expect(
+      importManagedExchangeArtifact(serializeManagedExchangeArtifact(artifact))
+        .heldGrants,
+    ).toEqual([]);
+  });
+
+  test("an artifact written before the markers existed reports none", () => {
+    // An older backup file the operator still holds: no marker is not a claim the
+    // source had nothing, so the import says nothing rather than guessing.
+    const artifact = JSON.parse(
+      serializeManagedExchangeArtifact(
+        encodeManagedExchangeArtifact(
+          buildManagedExchangeRecord(
+            newExchange({
+              inputFileHandle: { name: "records.csv" } as FileSystemFileHandle,
+            }),
+          ),
+        ),
+      ),
+    );
+    delete artifact.local.heldInputFile;
+    expect(
+      importManagedExchangeArtifact(JSON.stringify(artifact)).heldGrants,
+    ).toEqual([]);
   });
 });
 

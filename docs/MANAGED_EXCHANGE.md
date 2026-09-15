@@ -1477,6 +1477,20 @@ post-eviction one -- which is exactly why the managed-exchange list's empty
 state has the import affordance standing, rather than exposing it only
 behind a detected loss.
 
+**The import says which grants this browser does not hold.** An artifact holds the
+exchange, not the two pointers into this device that the record also keeps: the
+input file each run reads, and the folder a scheduled run writes its results to
+(see [The input file each run](#the-input-file-each-run) and [Where a scheduled
+run's results go](#where-a-scheduled-runs-results-go)). A restored exchange
+therefore has neither until the operator chooses them again here. Left unsaid,
+what would report it is a scheduled run -- which stops without an input file, and
+keeps its results in the browser without a folder -- a whole window after the
+import that lost them. The import states it instead, while the operator is still
+standing there, naming only the grants the source record actually had and
+offering the way to the exchange where both are chosen. A record revived in
+place on the profile that handed it off keeps the grants it already had, and
+says nothing.
+
 ## Deleting a managed exchange
 
 Removing a managed exchange is a fully supported, always-available action, and

@@ -17,14 +17,18 @@
  * - `key` is the `.psilink.key` pair -- `sharedSecret` and, when a bound is in
  *   force, `expires` -- so the secret half maps onto a valid key file;
  * - `local` holds the browser-only fields the two CLI artifacts do not
- *   (`label`, `side`, `schedule`, `lastRun`, `tokenMaxAgeDays`), cleanly separable
- *   and ignorable by the CLI toolchain.
+ *   (`label`, `side`, `schedule`, `lastRun`, `tokenMaxAgeDays`, and a marker per
+ *   platform handle the source held), cleanly separable and ignorable by the CLI
+ *   toolchain.
  *
- * The input-file handle is absent by design (a device- and profile-local
- * platform object with no file serialization), so the first run after an import
- * re-acquires one by selection. No secret-derived value and no rotation epoch is
- * written: the artifact snapshots the secret current at export and holds no
- * history (see the spec's "No anti-rollback").
+ * Both platform handles are absent by design (device- and profile-local platform
+ * objects with no file serialization), so the input file is re-acquired by
+ * selection at the first run after an import and the output folder is granted
+ * again. What the artifact does hold is a marker per handle saying the source
+ * record had one, which is all an import needs to tell the operator which grants
+ * to take again here. No secret-derived value and no
+ * rotation epoch is written: the artifact snapshots the secret current at export
+ * and holds no history (see the spec's "No anti-rollback").
  *
  * Import is a trust boundary: the artifact is untrusted structured input, so the
  * whole document is parsed through the shared sensitive-JSON chokepoint (bounded,
@@ -98,12 +102,26 @@ interface ManagedExchangeArtifactLocal {
   lastRun?: ManagedExchangeLastRun;
   /** The max-token-age policy, when the operator opted in. */
   tokenMaxAgeDays?: number;
+  /** Whether the source record held a pointer to the operator's input file.
+   * Omitted rather than written `false`, matching the artifact's other optional
+   * fields; the handle itself cannot be written at all. */
+  heldInputFile?: boolean;
+  /** Whether the source record held a grant on a folder for a scheduled run's
+   * results. Omitted rather than written `false`, for the same reason. */
+  heldOutputFolder?: boolean;
 }
+
+/** A pointer to somewhere on this device that a record can hold and an artifact
+ * cannot: the operator's input file, and the folder a scheduled run's results are
+ * written to. Both are File System Access handles, taken by a picker under an
+ * operator gesture and stored by structured clone, so a record restored on another
+ * browser profile holds neither until the operator takes them again there. */
+export type ManagedPlatformGrant = "input-file" | "output-folder";
 
 /**
  * The export artifact: a version tag, the embedded `psilink.yaml` document as
- * text, the `.psilink.key` pair, and the separable local fields. The input-file
- * handle is not a member (no file serialization; see the module header).
+ * text, the `.psilink.key` pair, and the separable local fields. Neither platform
+ * handle is a member (no file serialization; see the module header).
  */
 interface ManagedExchangeArtifact {
   /** The single recognized artifact-format literal; a reader rejects any other
@@ -152,9 +170,10 @@ export function keyFileFieldsFromRecord(
  * {@link serializeExchangeDocument} for the embedded document). Both platform
  * handles are dropped -- neither the input file's nor the granted output
  * folder's serializes, so a record imported from this artifact re-acquires the
- * input file by selection and re-grants the folder -- and the record's `id` is
- * not included, since an import mints a fresh local record rather than copying
- * this one.
+ * input file by selection and re-grants the folder -- and each leaves behind a
+ * marker in `local` recording that the source held it, so an import can name the
+ * grants to take again. The record's `id` is not included either, since an import
+ * mints a fresh local record rather than copying this one.
  */
 export function encodeManagedExchangeArtifact(
   record: ManagedExchangeRecord,
@@ -170,6 +189,10 @@ export function encodeManagedExchangeArtifact(
       ...(record.lastRun !== undefined ? { lastRun: record.lastRun } : {}),
       ...(record.tokenMaxAgeDays !== undefined
         ? { tokenMaxAgeDays: record.tokenMaxAgeDays }
+        : {}),
+      ...(record.inputFileHandle !== undefined ? { heldInputFile: true } : {}),
+      ...(record.outputDirectoryHandle !== undefined
+        ? { heldOutputFolder: true }
         : {}),
     },
   };
@@ -198,6 +221,8 @@ const artifactLocalSchema: ZodType<ManagedExchangeArtifactLocal> = z
     schedule: scheduleSchema.optional(),
     lastRun: lastRunSchema.optional(),
     tokenMaxAgeDays: tokenMaxAgeDaysSchema.optional(),
+    heldInputFile: z.boolean().optional(),
+    heldOutputFolder: z.boolean().optional(),
   })
   .strict();
 
@@ -274,11 +299,35 @@ export function reconstructRecordFromArtifact(
   });
 }
 
+/** Which platform grants the source record held when the artifact was written, in
+ * the order an operator retakes them. Empty for a source that held neither, and for
+ * an artifact written before the markers existed -- both read as "nothing to say"
+ * rather than as a claim the source had nothing. */
+function heldPlatformGrants(
+  artifact: ManagedExchangeArtifact,
+): Array<ManagedPlatformGrant> {
+  return [
+    ...(artifact.local.heldInputFile === true ? (["input-file"] as const) : []),
+    ...(artifact.local.heldOutputFolder === true
+      ? (["output-folder"] as const)
+      : []),
+  ];
+}
+
+/** What an import gets out of the artifact's bytes: the runnable record, and which
+ * device-local grants the source record held that no artifact can bring with it. */
+export interface ImportedManagedExchangeArtifact {
+  /** The reconstructed record, holding neither platform handle. */
+  record: ManagedExchangeRecord;
+  /** The grants the source held (see {@link heldPlatformGrants}). */
+  heldGrants: Array<ManagedPlatformGrant>;
+}
+
 /**
  * Parse and reconstruct in one step: the untrusted-input entry point a caller uses
- * to turn artifact bytes into a runnable record. Rejects a malformed or tampered
- * artifact by throwing, so a caller installs nothing on a rejection and the store is
- * left untouched.
+ * to turn artifact bytes into a runnable record and the grants its source held.
+ * Rejects a malformed or tampered artifact by throwing, so a caller installs nothing
+ * on a rejection and the store is left untouched.
  *
  * @throws {UsageError} if the bytes are not parseable JSON or the embedded document
  *   is not parseable YAML.
@@ -286,6 +335,10 @@ export function reconstructRecordFromArtifact(
  */
 export function importManagedExchangeArtifact(
   source: string,
-): ManagedExchangeRecord {
-  return reconstructRecordFromArtifact(parseManagedExchangeArtifact(source));
+): ImportedManagedExchangeArtifact {
+  const artifact = parseManagedExchangeArtifact(source);
+  return {
+    record: reconstructRecordFromArtifact(artifact),
+    heldGrants: heldPlatformGrants(artifact),
+  };
 }
