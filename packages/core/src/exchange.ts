@@ -719,73 +719,97 @@ export async function assertReceiptBindingsOrAbort(
   return namedParties;
 }
 
-// The abort reasons the terms-time partner-certificate refusals send. Fixed
-// literals, as every reason on this frame must be (see sendAbort), and each
-// reads correctly from either side: the frame is a disclosure to the partner
-// like any other, so none of them names a fingerprint, a certificate field, or
-// any other value.
-const PARTNER_CERTIFICATE_UNREADABLE_ABORT_REASON =
-  "a party presented a signing certificate the wire format does not admit";
-const PARTNER_CERTIFICATE_ABSENT_ABORT_REASON =
-  "a party signs receipts and its partner presented no signing certificate";
-const PARTNER_CERTIFICATE_UNVERIFIED_ABORT_REASON =
-  "a party presented a signing certificate that does not verify under its own " +
-  "key";
-const PARTNER_CERTIFICATE_DIVERGENT_ABORT_REASON =
-  "a party presented a signing certificate that is not the one its partner " +
-  "pinned";
-const PARTNER_CERTIFICATE_UNAUTHORIZED_IDENTITY_ABORT_REASON =
-  "a party presented a signing certificate that does not authorize the " +
-  "identity its holder agreed terms under";
+// The abort reason a caller that could not record the pin it adopted sends.
+// Outside the refusal table below: the run ends on this party's own failure,
+// not on anything the partner presented, and the caller's error is what
+// propagates. A fixed literal, as every reason on this frame must be (see
+// sendAbort).
 const PARTNER_CERTIFICATE_UNRECORDED_ABORT_REASON =
   "a party could not record the fingerprint it pinned on this first contact";
 
-// The five refusals the terms-time pin resolution raises. Each is a fixed
-// literal holding no byte from the partner's frame, and each states that the
-// run stopped before any linkage key or payload row was sent -- which is what
-// the refusal buys over the same failure at the signature swap.
-//
-// Each also names its own next step, so each is raised through
-// {@link partnerCertificateRefusal}, which tags the instance
-// `psilinkRecoveryHintEmitted`.
-const PARTNER_CERTIFICATE_UNREADABLE_MESSAGE =
-  "the partner presented a signing certificate this build cannot read, so " +
-  "this run cannot finish: the field was on the terms exchange but does not " +
-  "match the certificate format, leaving nothing to pin and nothing to check " +
-  "a receipt against. The run stopped before any linkage key or payload row " +
-  "was sent. Have the partner re-share an identity produced by " +
-  "'psilink fingerprint', or set signing.mode to \"none\" to run unsigned.";
-const PARTNER_CERTIFICATE_ABSENT_MESSAGE =
-  "the partner is not signing receipts, so this run cannot finish: this " +
-  "exchange signs receipts (signing.mode: certificate) and the partner " +
-  "presented no signing certificate, so no receipt can be produced. The run " +
-  "stopped before any linkage key or payload row was sent. Have the partner " +
-  'set signing.mode to "certificate" with a signing identity of their own, ' +
-  'or set signing.mode to "none" to run unsigned.';
-const PARTNER_CERTIFICATE_UNVERIFIED_MESSAGE =
-  "the partner's signing certificate does not verify under its own key, so " +
-  "this first contact pinned nothing and the run cannot finish: a " +
-  "certificate that is not internally consistent could never sign a receipt " +
-  "this exchange would accept. The run stopped before any linkage key or " +
-  "payload row was sent. Have the partner re-share an identity produced by " +
-  "'psilink fingerprint'.";
-const PARTNER_CERTIFICATE_UNAUTHORIZED_IDENTITY_MESSAGE =
-  "the partner's signing certificate does not authorize the identity its " +
-  "holder agreed terms under, so this first contact pinned nothing and the " +
-  "run cannot finish: a certificate bound to a different party than the " +
-  "agreed terms name could never sign a receipt this exchange would accept. " +
-  "The run stopped before any linkage key or payload row was sent. Have the " +
-  "partner present the certificate bound to the identity they agree terms " +
-  "under, or agree terms under the identity their certificate names.";
-const PARTNER_CERTIFICATE_DIVERGENT_MESSAGE =
-  "the partner's signing certificate is not the one pinned in " +
-  "signing.partner_fingerprint, so this run cannot finish: the pin is what " +
-  "makes a receipt attributable to the partner, and a certificate that does " +
-  "not match it is refused rather than trusted. The run stopped before any " +
-  "linkage key or payload row was sent, and the pin on file is unchanged. " +
-  "Confirm the partner's fingerprint out-of-band -- they produce it with " +
-  "'psilink fingerprint' -- and, where they regenerated their signing " +
-  "identity, replace signing.partner_fingerprint with the new value.";
+/**
+ * The five refusals the terms-time pin resolution raises, by the condition the
+ * partner's certificate met, each holding the abort reason its refusal sends
+ * the partner and the message it raises to this party's operator.
+ *
+ * Both are fixed literals holding no byte from the partner's frame. The abort
+ * reason reads correctly from either side -- the frame is a disclosure to the
+ * partner like any other, so none of them names a fingerprint, a certificate
+ * field, or any other value. The message states that the run stopped before
+ * any linkage key or payload row was sent, which is what the refusal buys over
+ * the same failure at the signature swap, and then names its own next step.
+ *
+ * Keyed on the vocabulary the swap's own refusals use
+ * (PARTNER_CERTIFICATE_MISMATCH_OBSERVED, records/signingIdentity.ts), so one
+ * name means one condition wherever it is raised and a key here that no
+ * condition matches does not compile. Partial: nothing is pinned yet at the
+ * terms exchange, so `unpinned` has no refusal here.
+ */
+const PARTNER_CERTIFICATE_REFUSALS = {
+  unreadable: {
+    abortReason:
+      "a party presented a signing certificate the wire format does not admit",
+    message:
+      "the partner presented a signing certificate this build cannot read, so " +
+      "this run cannot finish: the field was on the terms exchange but does not " +
+      "match the certificate format, leaving nothing to pin and nothing to check " +
+      "a receipt against. The run stopped before any linkage key or payload row " +
+      "was sent. Have the partner re-share an identity produced by " +
+      "'psilink fingerprint', or set signing.mode to \"none\" to run unsigned.",
+  },
+  absent: {
+    abortReason:
+      "a party signs receipts and its partner presented no signing certificate",
+    message:
+      "the partner is not signing receipts, so this run cannot finish: this " +
+      "exchange signs receipts (signing.mode: certificate) and the partner " +
+      "presented no signing certificate, so no receipt can be produced. The run " +
+      "stopped before any linkage key or payload row was sent. Have the partner " +
+      'set signing.mode to "certificate" with a signing identity of their own, ' +
+      'or set signing.mode to "none" to run unsigned.',
+  },
+  unverified: {
+    abortReason:
+      "a party presented a signing certificate that does not verify under its own " +
+      "key",
+    message:
+      "the partner's signing certificate does not verify under its own key, so " +
+      "this first contact pinned nothing and the run cannot finish: a " +
+      "certificate that is not internally consistent could never sign a receipt " +
+      "this exchange would accept. The run stopped before any linkage key or " +
+      "payload row was sent. Have the partner re-share an identity produced by " +
+      "'psilink fingerprint'.",
+  },
+  unauthorizedIdentity: {
+    abortReason:
+      "a party presented a signing certificate that does not authorize the " +
+      "identity its holder agreed terms under",
+    message:
+      "the partner's signing certificate does not authorize the identity its " +
+      "holder agreed terms under, so this first contact pinned nothing and the " +
+      "run cannot finish: a certificate bound to a different party than the " +
+      "agreed terms name could never sign a receipt this exchange would accept. " +
+      "The run stopped before any linkage key or payload row was sent. Have the " +
+      "partner present the certificate bound to the identity they agree terms " +
+      "under, or agree terms under the identity their certificate names.",
+  },
+  divergent: {
+    abortReason:
+      "a party presented a signing certificate that is not the one its partner " +
+      "pinned",
+    message:
+      "the partner's signing certificate is not the one pinned in " +
+      "signing.partner_fingerprint, so this run cannot finish: the pin is what " +
+      "makes a receipt attributable to the partner, and a certificate that does " +
+      "not match it is refused rather than trusted. The run stopped before any " +
+      "linkage key or payload row was sent, and the pin on file is unchanged. " +
+      "Confirm the partner's fingerprint out-of-band -- they produce it with " +
+      "'psilink fingerprint' -- and, where they regenerated their signing " +
+      "identity, replace signing.partner_fingerprint with the new value.",
+  },
+} as const satisfies Partial<
+  Record<PartnerCertificateCondition, { abortReason: string; message: string }>
+>;
 
 /**
  * The five terms-time pin refusals by what the partner's certificate did, so a
@@ -795,39 +819,49 @@ const PARTNER_CERTIFICATE_DIVERGENT_MESSAGE =
  * instruction for the command line and not one every seat's operator can take.
  *
  * Keyed rather than listed: a consumer's own copy is declared over this union,
- * so a refusal added here is a compile error there rather than a case that
- * falls through to the message it cannot act on.
+ * so a refusal added to the table is a compile error there rather than a case
+ * that falls through to the message it cannot act on.
  */
-export const PARTNER_CERTIFICATE_REFUSAL_MESSAGES = {
-  unreadable: PARTNER_CERTIFICATE_UNREADABLE_MESSAGE,
-  absent: PARTNER_CERTIFICATE_ABSENT_MESSAGE,
-  unverified: PARTNER_CERTIFICATE_UNVERIFIED_MESSAGE,
-  unauthorizedIdentity: PARTNER_CERTIFICATE_UNAUTHORIZED_IDENTITY_MESSAGE,
-  divergent: PARTNER_CERTIFICATE_DIVERGENT_MESSAGE,
-  // Held to the vocabulary the swap's own refusals use
-  // (PARTNER_CERTIFICATE_MISMATCH_OBSERVED, records/signingIdentity.ts), so one
-  // name means one condition wherever it is raised and a key here that no
-  // condition matches does not compile. Partial: nothing is pinned yet at the
-  // terms exchange, so `unpinned` has no refusal here.
-} as const satisfies Partial<Record<PartnerCertificateCondition, string>>;
+export const PARTNER_CERTIFICATE_REFUSAL_MESSAGES = Object.fromEntries(
+  Object.entries(PARTNER_CERTIFICATE_REFUSALS).map(([condition, refusal]) => [
+    condition,
+    refusal.message,
+  ]),
+) as {
+  [
+    K in keyof typeof PARTNER_CERTIFICATE_REFUSALS
+  ]: (typeof PARTNER_CERTIFICATE_REFUSALS)[K]["message"];
+};
+
+/** `K` unchanged, refusing any key the swap's condition vocabulary does not
+ * hold: a projection whose keys widened to `string` fails this constraint,
+ * rather than typing a consumer's copy table over `string`. */
+type PartnerCertificateConditionKey<K extends PartnerCertificateCondition> = K;
 
 /** Which of the five refusals {@link PARTNER_CERTIFICATE_REFUSAL_MESSAGES}
  * holds: the condition the terms-time pin resolution refused on. */
-export type PartnerCertificateRefusalKind =
-  keyof typeof PARTNER_CERTIFICATE_REFUSAL_MESSAGES;
+export type PartnerCertificateRefusalKind = PartnerCertificateConditionKey<
+  keyof typeof PARTNER_CERTIFICATE_REFUSAL_MESSAGES
+>;
 
 /**
- * One of the five terms-time pin refusals, tagged `psilinkRecoveryHintEmitted`
- * per instance on the convention `TransportPublishIndeterminateError`
- * (`./errors.ts`) states: an error is tagged exactly when it holds its own next
- * step, and each of these messages ends in one. The tag suppresses the CLI's
- * generic advisory and lets a display layer show the message instead of fixed
- * copy -- which is what keeps a divergent pin from being reported as an
- * ordinary failed partner check.
+ * Send the partner the abort `condition` calls for and return the refusal to
+ * raise for it, tagged `psilinkRecoveryHintEmitted` per instance on the
+ * convention `TransportPublishIndeterminateError` (`./errors.ts`) states: an
+ * error is tagged exactly when it holds its own next step, and each of these
+ * messages ends in one. The tag suppresses the CLI's generic advisory and lets
+ * a display layer show the message instead of fixed copy -- which is what
+ * keeps a divergent pin from being reported as an ordinary failed partner
+ * check.
  *
  * The tag is per instance rather than on {@link ReceiptVerificationError}: the
  * receipt step raises that class for a signature that does not verify too, and
  * that message prescribes no step of its own.
+ *
+ * Returning the refusal rather than raising it leaves the `throw` at the call
+ * site, so the branch that refused reads whole. The abort goes first and is
+ * best effort: the refusal is one-sided, so without that frame a peer deriving
+ * no refusal of its own waits out its peer-inactivity budget.
  *
  * The refusal also holds the condition it refused on, on the vocabulary the
  * swap's own refusals use, so one name means one condition at both points. All
@@ -835,10 +869,12 @@ export type PartnerCertificateRefusalKind =
  * record build; holding them to the one vocabulary is what keeps that true of
  * the names rather than of where they happen to be raised.
  */
-function partnerCertificateRefusal(
+async function refusePartnerCertificate(
+  conn: MessageConnection,
   condition: PartnerCertificateRefusalKind,
-  message: string,
-): ReceiptVerificationError {
+): Promise<ReceiptVerificationError> {
+  const { abortReason, message } = PARTNER_CERTIFICATE_REFUSALS[condition];
+  await sendAbort(conn, [abortReason]);
   return withPartnerCertificateCondition(
     Object.assign(new ReceiptVerificationError(message), {
       psilinkRecoveryHintEmitted: true,
@@ -910,18 +946,10 @@ export async function resolvePartnerCertificateOrAbort(
 ): Promise<string> {
   const { partnerCertificate, pinnedFingerprint } = resolution;
   if (resolution.partnerCertificateMalformed) {
-    await sendAbort(conn, [PARTNER_CERTIFICATE_UNREADABLE_ABORT_REASON]);
-    throw partnerCertificateRefusal(
-      "unreadable",
-      PARTNER_CERTIFICATE_UNREADABLE_MESSAGE,
-    );
+    throw await refusePartnerCertificate(conn, "unreadable");
   }
   if (partnerCertificate === undefined) {
-    await sendAbort(conn, [PARTNER_CERTIFICATE_ABSENT_ABORT_REASON]);
-    throw partnerCertificateRefusal(
-      "absent",
-      PARTNER_CERTIFICATE_ABSENT_MESSAGE,
-    );
+    throw await refusePartnerCertificate(conn, "absent");
   }
   if (partnerPinIsPresent(pinnedFingerprint)) {
     // Constant time over the decoded digest bytes, and a malformed configured
@@ -931,11 +959,7 @@ export async function resolvePartnerCertificateOrAbort(
     // beside that body is weighed.
     if (await matchesPinnedFingerprint(partnerCertificate, pinnedFingerprint))
       return pinnedFingerprint;
-    await sendAbort(conn, [PARTNER_CERTIFICATE_DIVERGENT_ABORT_REASON]);
-    throw partnerCertificateRefusal(
-      "divergent",
-      PARTNER_CERTIFICATE_DIVERGENT_MESSAGE,
-    );
+    throw await refusePartnerCertificate(conn, "divergent");
   }
   // First authenticated contact. The self-signature is checked before the
   // fingerprint is adopted: a certificate that does not verify under its own
@@ -943,11 +967,7 @@ export async function resolvePartnerCertificateOrAbort(
   // would write a pin onto the operator's configuration that no later run
   // could satisfy.
   if (!(await verifyCertificateSelfSignature(partnerCertificate))) {
-    await sendAbort(conn, [PARTNER_CERTIFICATE_UNVERIFIED_ABORT_REASON]);
-    throw partnerCertificateRefusal(
-      "unverified",
-      PARTNER_CERTIFICATE_UNVERIFIED_MESSAGE,
-    );
+    throw await refusePartnerCertificate(conn, "unverified");
   }
   // The certificate also has to name the party that agreed these terms: the
   // swap authorizes it against that same name, so adopting the fingerprint of
@@ -959,13 +979,7 @@ export async function resolvePartnerCertificateOrAbort(
       resolution.partnerAgreedIdentity,
     )
   ) {
-    await sendAbort(conn, [
-      PARTNER_CERTIFICATE_UNAUTHORIZED_IDENTITY_ABORT_REASON,
-    ]);
-    throw partnerCertificateRefusal(
-      "unauthorizedIdentity",
-      PARTNER_CERTIFICATE_UNAUTHORIZED_IDENTITY_MESSAGE,
-    );
+    throw await refusePartnerCertificate(conn, "unauthorizedIdentity");
   }
   const adopted = await computeCertificateFingerprint(partnerCertificate);
   try {
