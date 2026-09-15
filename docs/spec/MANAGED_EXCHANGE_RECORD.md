@@ -801,6 +801,15 @@ above). The artifact's own
   `snake_case` conversion, so a `camelCase` `key` block is what maps onto a valid
   key file with no renaming. Only the embedded `exchangeDocument` is `snake_case`,
   because the CLI loads it as YAML through `camelizeKeys`.
+- **What an older reader does with the held-grant markers.** The
+  `artifactVersion` literal does not move for `heldInputFile` and
+  `heldOutputFolder`: both keys are optional, so the format does not version for
+  them. That does not make an artifact holding one readable everywhere. A build
+  whose `local` schema does not know the two keys refuses it whole, because the
+  strict reader-rejects-unknown schema rejects an unknown nested key and the
+  top-level parse fails with it. What the operator meets is the generic
+  unreadable-file alert on the import surface, which does not name a version
+  difference.
 - **What a reconstructed `lastRun` can and cannot assert.** The `local.lastRun`
   block is validated against the record's own `lastRun` schema rather than a
   narrower one, so an artifact is accepted with every outcome and

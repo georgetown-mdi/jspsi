@@ -1488,8 +1488,9 @@ keeps its results in the browser without a folder -- a whole window after the
 import that lost them. The import states it instead, while the operator is still
 standing there, naming only the grants the source record actually had and
 offering the way to the exchange where both are chosen. A record revived in
-place on the profile that handed it off keeps the grants it already had, and
-says nothing.
+place on the profile that handed it off keeps the grants it already had, so what
+the import names is whatever that record does not hold: nothing when it still
+holds both, and the one grant it lost when it lost one.
 
 ## Deleting a managed exchange
 

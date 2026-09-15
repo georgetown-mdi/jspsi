@@ -35,8 +35,9 @@
  * not hold. The artifact has no field for a File System Access handle, only a marker
  * saying the source had one, so a fresh install holds neither the input file nor the
  * output folder and a scheduled run would otherwise be the first to say so -- a whole
- * window later. A revive keeps the grants the record it revives already had, so it
- * reports nothing missing.
+ * window later. A revive keeps the grants the record it revives already had, so
+ * what it reports is whatever that record does not hold: nothing when the record
+ * still holds both, and the one grant it lost when it lost one.
  *
  * Either way the installed or revived record is marked imported and backed-up as of
  * the import instant: the file just imported from is itself a current backup of the
