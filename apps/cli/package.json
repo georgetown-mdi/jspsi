@@ -27,7 +27,7 @@
     "werift": "0.24.4",
     "yaml": "^2.9.0",
     "yargs": "^18.1.0",
-    "zod": "^4.1.5"
+    "zod": "^4.5.4"
   },
   "devDependencies": {
     "@psilink/testkit": "file:../../packages/testkit",

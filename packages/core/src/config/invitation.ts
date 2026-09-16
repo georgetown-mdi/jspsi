@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { maxCodeUnits } from "../utils/maxCodeUnits.js";
 import {
   columnsNamedOnce,
   LinkageTermsSchema,
@@ -190,7 +191,7 @@ export const MAX_ENDPOINT_PATH_LENGTH = 4096;
 export const WebRTCEndpointSchema = z.strictObject(
   {
     channel: z.literal("webrtc"),
-    host: z.string().min(1).max(MAX_ENDPOINT_HOST_LENGTH),
+    host: z.string().min(1).check(maxCodeUnits(MAX_ENDPOINT_HOST_LENGTH)),
     // A reachable rendezvous port is 1-65535. Port 0 means "let the OS assign
     // an ephemeral port" and can never be an address an acceptor connects to,
     // so the endpoint is stricter here than connection.ts (which allows 0): an
@@ -198,7 +199,11 @@ export const WebRTCEndpointSchema = z.strictObject(
     port: z.int().min(1).max(65535).optional(),
     // Non-empty when present: an empty path is a meaningless locator (a blank
     // signaling path), so omit the field rather than send "".
-    path: z.string().min(1).max(MAX_ENDPOINT_PATH_LENGTH).optional(),
+    path: z
+      .string()
+      .min(1)
+      .check(maxCodeUnits(MAX_ENDPOINT_PATH_LENGTH))
+      .optional(),
   },
   { error: endpointKeyError },
 );
@@ -206,13 +211,17 @@ export const WebRTCEndpointSchema = z.strictObject(
 const SFTPEndpointSchema = z.strictObject(
   {
     channel: z.literal("sftp"),
-    host: z.string().min(1).max(MAX_ENDPOINT_HOST_LENGTH),
+    host: z.string().min(1).check(maxCodeUnits(MAX_ENDPOINT_HOST_LENGTH)),
     // >= 1: a locator must name a reachable port; see the WebRTCEndpointSchema
     // port note (0 is an OS-assigned ephemeral port, never a connect target).
     port: z.int().min(1).max(65535).optional(),
     // Non-empty when present: an empty remote working directory is meaningless;
     // omit the field instead of sending "".
-    path: z.string().min(1).max(MAX_ENDPOINT_PATH_LENGTH).optional(),
+    path: z
+      .string()
+      .min(1)
+      .check(maxCodeUnits(MAX_ENDPOINT_PATH_LENGTH))
+      .optional(),
     // The split-directory pair (the inviter's own inbound/outbound
     // directories), mirror-swapped by the acceptor. Non-empty like `path`;
     // ConnectionEndpointSchema's directory-mode refines enforce
@@ -220,8 +229,16 @@ const SFTPEndpointSchema = z.strictObject(
     // Absoluteness stays deferred to connection.ts on the acceptor's final
     // config, since the acceptor remaps the paths and the inviter's
     // absoluteness is not meaningful here.
-    inboundPath: z.string().min(1).max(MAX_ENDPOINT_PATH_LENGTH).optional(),
-    outboundPath: z.string().min(1).max(MAX_ENDPOINT_PATH_LENGTH).optional(),
+    inboundPath: z
+      .string()
+      .min(1)
+      .check(maxCodeUnits(MAX_ENDPOINT_PATH_LENGTH))
+      .optional(),
+    outboundPath: z
+      .string()
+      .min(1)
+      .check(maxCodeUnits(MAX_ENDPOINT_PATH_LENGTH))
+      .optional(),
     // No `username` (or other identity/auth field) by design: those are not
     // part of a public locator. Like credentials, the acceptor configures the
     // SSH identity in the credential portion of its own connection block, so an
@@ -246,9 +263,21 @@ const SFTPEndpointSchema = z.strictObject(
 const FileDropEndpointSchema = z.strictObject(
   {
     channel: z.literal("filedrop"),
-    path: z.string().min(1).max(MAX_ENDPOINT_PATH_LENGTH).optional(),
-    inboundPath: z.string().min(1).max(MAX_ENDPOINT_PATH_LENGTH).optional(),
-    outboundPath: z.string().min(1).max(MAX_ENDPOINT_PATH_LENGTH).optional(),
+    path: z
+      .string()
+      .min(1)
+      .check(maxCodeUnits(MAX_ENDPOINT_PATH_LENGTH))
+      .optional(),
+    inboundPath: z
+      .string()
+      .min(1)
+      .check(maxCodeUnits(MAX_ENDPOINT_PATH_LENGTH))
+      .optional(),
+    outboundPath: z
+      .string()
+      .min(1)
+      .check(maxCodeUnits(MAX_ENDPOINT_PATH_LENGTH))
+      .optional(),
   },
   { error: endpointKeyError },
 );
@@ -578,7 +607,7 @@ const InvitationTokenBodySchema = z.object({
   // once and writes it once as `expectedPayloadColumns`, which
   // reconcileReceivedPayload compares against the set the partner transmits.
   disclosedPayloadColumns: boundedArray(
-    nameValue(z.string().min(1).max(MAX_NAME_LENGTH)),
+    nameValue(z.string().min(1).check(maxCodeUnits(MAX_NAME_LENGTH))),
     MAX_PAYLOAD_ENTRIES,
     `disclosedPayloadColumns must not exceed ${MAX_PAYLOAD_ENTRIES} entries`,
   )
@@ -782,7 +811,7 @@ const CHECKSUM_CHARS = 6;
  *
  * This is the boundary that transitively bounds every untrusted field at
  * decode, so no per-field check has to do oversized-input work; the per-field
- * `.max()` bounds in linkageTermsSchema.ts are defense-in-depth atop it.
+ * length bounds in linkageTermsSchema.ts are defense-in-depth atop it.
  * {@link encodeInvitation} enforces the same cap on its output, so psilink
  * never produces a token it could not itself decode.
  */

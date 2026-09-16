@@ -1,4 +1,5 @@
 import * as z from "zod";
+import { maxCodeUnits } from "./utils/maxCodeUnits";
 
 import type { HandshakeRole, PsiRole } from "./types";
 import type { LinkageTerms, Output } from "./config/linkageTermsSchema";
@@ -56,8 +57,8 @@ const MAX_ABORT_REASONS = 256;
 // no-host-key partner from a non-conforming one (see
 // TermsExchangeResult.partnerHostKeyMalformed).
 const hostKeyAdvertisement = z.object({
-  fingerprint: z.string().max(100),
-  keyType: z.string().max(64),
+  fingerprint: z.string().check(maxCodeUnits(100)),
+  keyType: z.string().check(maxCodeUnits(64)),
 });
 
 /**
@@ -609,7 +610,7 @@ export async function exchangeTerms(
       await sendAbort(conn, ["partner linkage terms failed to parse"]);
       // These terms are partner-controlled, so the description holds partner
       // bytes: Zod's `invalid_key` code on the bounded `z.record` key in
-      // `transform.params` (z.string().max(MAX_NAME_LENGTH)) places the
+      // `transform.params` (a string bounded at MAX_NAME_LENGTH) places the
       // offending raw key verbatim into the issue path. It composes raw and is
       // escaped once by sanitizeErrorForDisplay where this error is rendered
       // (CONTRIBUTING.md, Operator-facing escaping), so bidi-override,

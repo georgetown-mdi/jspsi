@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { maxCodeUnits } from "../utils/maxCodeUnits.js";
 
 import {
   canonicalBytes,
@@ -585,7 +586,7 @@ const MAX_BASE64URL_LENGTH = 256;
 // linear-time, so a capped value stays cheap to scan regardless.
 const base64UrlSchema = z
   .string()
-  .max(MAX_BASE64URL_LENGTH)
+  .check(maxCodeUnits(MAX_BASE64URL_LENGTH))
   .regex(/^[A-Za-z0-9_-]+$/, "must be an unpadded base64url string");
 
 // Both the intersection size and the records-exposed count are non-negative safe
@@ -600,7 +601,10 @@ const recordsExposedSchema = nonNegativeCountSchema("records exposed");
 // The retention/disposition pointer is a non-empty free-text note. An absent
 // pointer is the omitted key, never an empty string, so reject "" here: the
 // builder validates with this same schema, keeping the absence explicit.
-const retentionDispositionSchema = z.string().min(1).max(MAX_TEXT_LENGTH);
+const retentionDispositionSchema = z
+  .string()
+  .min(1)
+  .check(maxCodeUnits(MAX_TEXT_LENGTH));
 
 // Shared by the parser and the builder so both agree on what `createdAt` may
 // be: an ISO 8601 datetime in UTC (ending in `Z`). `z.iso.datetime()` rejects
@@ -614,7 +618,7 @@ const createdAtSchema = z.iso.datetime();
 
 // Shared by the parser and the builder so both agree the identities are
 // non-empty strings; validated at build time alongside createdAt and resultSize.
-const identitySchema = z.string().min(1).max(MAX_TEXT_LENGTH);
+const identitySchema = z.string().min(1).check(maxCodeUnits(MAX_TEXT_LENGTH));
 
 // The record's commitments and its verification salts share one base64url-triple
 // shape (both keyed by CommitmentName), so validate both against one schema to
@@ -634,23 +638,23 @@ const RecordPayloadColumnSchema: z.ZodType<RecordPayloadColumn> = z.object({
   // wire bound in payloadExchange.ts -- an over-long name cannot reach the
   // record by any path. MAX_NAME_LENGTH matches both the wire predicate and the
   // operator's own `terms.payload.send`/`receive` names.
-  name: z.string().min(1).max(MAX_NAME_LENGTH),
-  description: z.string().max(MAX_TEXT_LENGTH).optional(),
+  name: z.string().min(1).check(maxCodeUnits(MAX_NAME_LENGTH)),
+  description: z.string().check(maxCodeUnits(MAX_TEXT_LENGTH)).optional(),
 });
 
 const RecordLegalAgreementSchema: z.ZodType<RecordLegalAgreement> = z.object({
-  reference: z.string().min(1).max(MAX_NAME_LENGTH),
-  purpose: z.string().min(1).max(MAX_TEXT_LENGTH),
+  reference: z.string().min(1).check(maxCodeUnits(MAX_NAME_LENGTH)),
+  purpose: z.string().min(1).check(maxCodeUnits(MAX_TEXT_LENGTH)),
   expirationDate: z.iso.date(),
 });
 
 const RecordLinkageFieldSchema: z.ZodType<RecordLinkageField> = z.object({
-  name: z.string().min(1).max(MAX_NAME_LENGTH),
+  name: z.string().min(1).check(maxCodeUnits(MAX_NAME_LENGTH)),
   // `type` is not pinned to the current LinkageField type enum: the record is a
   // frozen log, so a reader accepts whatever category a (possibly newer) writer
   // recorded rather than rejecting an unrecognized type. It has the same
   // length cap as a name -- a semantic category is a short label, not prose.
-  type: z.string().min(1).max(MAX_NAME_LENGTH),
+  type: z.string().min(1).check(maxCodeUnits(MAX_NAME_LENGTH)),
 });
 
 // Both halves take the same shape, so the identity is declared once. `version`
@@ -660,8 +664,8 @@ const RecordLinkageFieldSchema: z.ZodType<RecordLinkageField> = z.object({
 // re-deciding its form. The linkage-terms schema is where a version's form is
 // enforced, on the document that travels.
 const RecordLinkageSetIdentitySchema = z.object({
-  name: z.string().min(1).max(MAX_NAME_LENGTH),
-  version: z.string().min(1).max(MAX_NAME_LENGTH),
+  name: z.string().min(1).check(maxCodeUnits(MAX_NAME_LENGTH)),
+  version: z.string().min(1).check(maxCodeUnits(MAX_NAME_LENGTH)),
 });
 
 const RecordLinkageRuleSetSchema: z.ZodType<RecordLinkageRuleSet> = z.object({

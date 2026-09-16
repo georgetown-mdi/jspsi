@@ -152,6 +152,9 @@ export type { CanonicalValue } from "./utils/canonical";
 // naming the fault before a parse, the terms schema, and the encoder that would
 // throw all refuse the same strings.
 export { loneSurrogateIndex } from "./utils/wellFormedString";
+// The package's one counting unit for a string length bound, shared so a schema
+// the web app declares bounds a name the way the wire and the record do.
+export { maxCodeUnits } from "./utils/maxCodeUnits";
 export {
   sanitizeForDisplay,
   renderOperatorSuppliedText,

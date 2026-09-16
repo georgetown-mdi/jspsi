@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { maxCodeUnits } from "../utils/maxCodeUnits.js";
 import { MAX_LINKAGE_ENTRIES } from "./linkageTermsBounds.js";
 import { declaredWidthRefusal } from "../fanOutFunctions.js";
 import { AlgorithmSchema } from "../types.js";
@@ -34,7 +35,8 @@ import {
 // These terms travel inside an invitation token from an unauthenticated
 // counterparty, and again off the exchange wire under the far larger
 // MAX_FRAME_SIZE_BYTES cap (connection/frameSize.ts). Every partner-controlled
-// free-text string has a generous length `.max()`, and every
+// free-text string has a generous length ceiling in the code units
+// `maxCodeUnits` counts (utils/maxCodeUnits.ts), and every
 // partner-controlled collection has a count bound applied before per-element
 // validation: `boundedArray` for an array, or an equivalent count-refine +
 // pipe for the `transform.params` record, which `boundedArray` does not
@@ -440,7 +442,7 @@ export const MAX_PAYLOAD_ENTRIES = 4096;
  *
  * Unlike the `allowedCharacters` refine below, this one needs no pre-length
  * short-circuit. Zod does not short-circuit chained checks, so the scan runs on a
- * value the `.max()` already rejected -- but it is a linear regex test rather
+ * value the length ceiling already rejected -- but it is a linear regex test rather
  * than a super-linear regex COMPILE, so an oversized value costs one pass over
  * bytes the parser has already walked and reports both issues.
  */
@@ -563,7 +565,7 @@ function firstWellFormednessRefusal(
  * defined once.
  */
 const ExcludeSchema = boundedArray(
-  freeTextValue(z.string().max(MAX_TEXT_LENGTH)),
+  freeTextValue(z.string().check(maxCodeUnits(MAX_TEXT_LENGTH))),
   MAX_EXCLUDE_ENTRIES,
   `exclude must not exceed ${MAX_EXCLUDE_ENTRIES} entries`,
 );
@@ -621,12 +623,12 @@ const NameConstraintsSchema: z.ZodType<NameConstraints> = z.object({
   // class is treated as an allow-list, not a negation. The length check runs
   // before the compile so an oversized value never reaches it -- Zod does
   // not short-circuit chained checks, so the refine still runs after a
-  // failed `.max()`; an over-length value passes the refine on that
-  // short-circuit and is rejected by `.max()` alone. Full reasoning:
+  // failed length ceiling; an over-length value passes the refine on that
+  // short-circuit and is rejected by the ceiling alone. Full reasoning:
   // docs/spec/CHANNEL_SECURITY.md, "Name-constraint character class".
   allowedCharacters: z
     .string()
-    .max(MAX_NAME_LENGTH)
+    .check(maxCodeUnits(MAX_NAME_LENGTH))
     .refine(
       (val) =>
         val.length > MAX_NAME_LENGTH || patternConformsToDialect(`[${val}]`),
@@ -678,7 +680,7 @@ const AnyConstraintsSchema: z.ZodType<AnyConstraints> = z.object({
 
 // Shared fields for all linkage field variants.
 const linkageFieldBase = <C>(constraints: z.ZodType<C>) => ({
-  name: nameValue(z.string().min(1).max(MAX_NAME_LENGTH)),
+  name: nameValue(z.string().min(1).check(maxCodeUnits(MAX_NAME_LENGTH))),
   constraints: constraints.optional(),
 });
 
@@ -842,7 +844,7 @@ const TransformParamValueSchema = z
 // Not annotated as ZodType<TransformStep> because the concrete ZodObject is the
 // base the pad_left refine below chains onto (mirrors LinkageTermsBaseSchema).
 const TransformStepBaseSchema = z.object({
-  function: nameValue(z.string().min(1).max(MAX_NAME_LENGTH)),
+  function: nameValue(z.string().min(1).check(maxCodeUnits(MAX_NAME_LENGTH))),
   // The record's keys (parameter names) take the name shape beside their length
   // bound, for the reason NAME_SHAPE_PATTERN records; each string value is
   // length-bounded only, by TransformParamValueSchema above. The entry count is bounded at
@@ -867,7 +869,7 @@ const TransformStepBaseSchema = z.object({
     )
     .pipe(
       z.record(
-        nameValue(z.string().max(MAX_NAME_LENGTH)),
+        nameValue(z.string().check(maxCodeUnits(MAX_NAME_LENGTH))),
         TransformParamValueSchema,
       ),
     )
@@ -1060,8 +1062,8 @@ const linkageKeyElementSchema = (
   options: TransformParamRefusalOptions,
 ): z.ZodType<LinkageKeyElement> =>
   z.object({
-    field: nameValue(z.string().min(1).max(MAX_NAME_LENGTH)),
-    name: nameValue(z.string().max(MAX_NAME_LENGTH)).optional(),
+    field: nameValue(z.string().min(1).check(maxCodeUnits(MAX_NAME_LENGTH))),
+    name: nameValue(z.string().check(maxCodeUnits(MAX_NAME_LENGTH))).optional(),
     generateFuzzyComparisons: GenerateFuzzyComparisonsSchema.optional(),
     // The step COUNT is bounded at MAX_TRANSFORM_STEPS before per-element
     // validation; see boundedArray and the untrusted-input bounds note.
@@ -1100,7 +1102,7 @@ const linkageKeySchema = (
   options: TransformParamRefusalOptions,
 ): z.ZodType<LinkageKey> =>
   z.object({
-    name: nameValue(z.string().min(1).max(MAX_NAME_LENGTH)),
+    name: nameValue(z.string().min(1).check(maxCodeUnits(MAX_NAME_LENGTH))),
     // The element COUNT is bounded at MAX_KEY_ELEMENTS before per-element
     // validation, with the existing .min(1) floor preserved; see boundedArray
     // and the untrusted-input bounds note.
@@ -1112,8 +1114,8 @@ const linkageKeySchema = (
     ),
     swap: z
       .tuple([
-        nameValue(z.string().max(MAX_NAME_LENGTH)),
-        nameValue(z.string().max(MAX_NAME_LENGTH)),
+        nameValue(z.string().check(maxCodeUnits(MAX_NAME_LENGTH))),
+        nameValue(z.string().check(maxCodeUnits(MAX_NAME_LENGTH))),
       ])
       .optional(),
   });
@@ -1161,9 +1163,9 @@ export interface PayloadColumn {
 }
 
 const PayloadColumnSchema: z.ZodType<PayloadColumn> = z.object({
-  name: nameValue(z.string().min(1).max(MAX_NAME_LENGTH)),
+  name: nameValue(z.string().min(1).check(maxCodeUnits(MAX_NAME_LENGTH))),
   description: recordedFreeTextValue(
-    z.string().max(MAX_TEXT_LENGTH),
+    z.string().check(maxCodeUnits(MAX_TEXT_LENGTH)),
   ).optional(),
 });
 
@@ -1258,8 +1260,10 @@ interface LegalAgreement {
 }
 
 const LegalAgreementSchema: z.ZodType<LegalAgreement> = z.object({
-  reference: nameValue(z.string().min(1).max(MAX_NAME_LENGTH)),
-  purpose: recordedFreeTextValue(z.string().min(1).max(MAX_TEXT_LENGTH)),
+  reference: nameValue(z.string().min(1).check(maxCodeUnits(MAX_NAME_LENGTH))),
+  purpose: recordedFreeTextValue(
+    z.string().min(1).check(maxCodeUnits(MAX_TEXT_LENGTH)),
+  ),
   expirationDate: z.iso.date(),
 });
 
@@ -1303,10 +1307,10 @@ export interface LinkageSetIdentity {
 }
 
 const LinkageSetIdentitySchema: z.ZodType<LinkageSetIdentity> = z.object({
-  name: nameValue(z.string().min(1).max(MAX_NAME_LENGTH)),
+  name: nameValue(z.string().min(1).check(maxCodeUnits(MAX_NAME_LENGTH))),
   version: z
     .string()
-    .max(MAX_NAME_LENGTH)
+    .check(maxCodeUnits(MAX_NAME_LENGTH))
     .regex(/^\d+\.\d+\.\d+$/, "version must be a valid semver string"),
 });
 
@@ -1472,13 +1476,15 @@ const linkageTermsBaseSchema = (options: TransformParamRefusalOptions) =>
   z.object({
     version: z
       .string()
-      .max(MAX_NAME_LENGTH)
+      .check(maxCodeUnits(MAX_NAME_LENGTH))
       .regex(/^\d+\.\d+\.\d+$/, "version must be a valid semver string"),
     // Optional, and bounded where it is present: a party that names itself is held
     // to a non-empty, length-capped label with no control or text-direction
     // character in it and no private-key material, and a party that supplies none
     // omits the field rather than sending an empty string or a placeholder.
-    identity: recordedFreeTextValue(z.string().min(1).max(MAX_TEXT_LENGTH))
+    identity: recordedFreeTextValue(
+      z.string().min(1).check(maxCodeUnits(MAX_TEXT_LENGTH)),
+    )
       .refine((value) => !holdsPrivateKeyMaterial(value), {
         message: PRIVATE_KEY_IDENTITY_MESSAGE,
       })

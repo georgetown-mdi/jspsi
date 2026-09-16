@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { maxCodeUnits } from "../utils/maxCodeUnits.js";
 import { camelizeKeys } from "../utils/camelizeKeys.js";
 import { safeParseCamelized } from "./safeParseCamelized.js";
 import {
@@ -34,7 +35,7 @@ import { boundedArray } from "../utils/boundedArray.js";
  */
 const payloadColumnNameList = (message: string): z.ZodType<string[]> =>
   boundedArray(
-    nameValue(z.string().min(1).max(MAX_NAME_LENGTH)),
+    nameValue(z.string().min(1).check(maxCodeUnits(MAX_NAME_LENGTH))),
     MAX_PAYLOAD_ENTRIES,
     message,
   ).transform((names) => columnsNamedOnce(names, (name) => name));
@@ -88,7 +89,11 @@ export const ExchangeSpecSchema = z
     // linkage-field, or payload value. Length-capped to the record schema's
     // bound (MAX_TEXT_LENGTH) so an over-long note fails here rather than at
     // record build. See EXCHANGE_REFERENCE.md and EXCHANGE_RECORD.md.
-    retentionDisposition: z.string().min(1).max(MAX_TEXT_LENGTH).optional(),
+    retentionDisposition: z
+      .string()
+      .min(1)
+      .check(maxCodeUnits(MAX_TEXT_LENGTH))
+      .optional(),
     // Optional local enforcement record: the payload columns (in the
     // PARTNER's namespace) this party will enforce it receives at runtime
     // (reconcileReceivedPayload). Per-party and local like

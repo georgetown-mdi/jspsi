@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { maxCodeUnits } from "../utils/maxCodeUnits.js";
 
 import { UsageError } from "../errors.js";
 import { SEMANTIC_TYPES } from "../types";
@@ -68,10 +69,10 @@ export const METADATA_NAME_SHAPE_MESSAGE =
   "the name, to make the declared name match the header that is read";
 
 const ColumnMetadataSchema: z.ZodType<ColumnMetadata> = z.object({
-  // Bounded `.min(1).max(MAX_NAME_LENGTH)` and held to NAME_SHAPE_PATTERN to
-  // match the linkage-terms schema's `name` fields, rejecting an empty or
-  // ill-shaped name at config parse rather than as a later downstream
-  // failure. A declared name is not a data value: this block names the
+  // Floored at one code unit, capped at MAX_NAME_LENGTH of them, and held to
+  // NAME_SHAPE_PATTERN, matching the linkage-terms schema's `name` fields and
+  // rejecting an empty or ill-shaped name at config parse rather than as a
+  // later downstream failure. A declared name is not a data value: this block names the
   // columns matched on, and each disclosed one reaches the partner in the
   // invitation's payload column list and both parties' exchange records. Like
   // the uniqueness refine below, the messages are static and do not echo the
@@ -79,7 +80,7 @@ const ColumnMetadataSchema: z.ZodType<ColumnMetadata> = z.object({
   name: z
     .string()
     .min(1)
-    .max(MAX_NAME_LENGTH)
+    .check(maxCodeUnits(MAX_NAME_LENGTH))
     .regex(NAME_SHAPE_PATTERN, METADATA_NAME_SHAPE_MESSAGE),
   type: z.enum(SEMANTIC_TYPES),
   role: ColumnRoleSchema,
@@ -197,9 +198,10 @@ export function assertCountOnlyTransmitsNoColumn(
  * that is never sent costs nothing and is often a vendor export the
  * operator cannot rewrite.
  *
- * Counted in UTF-16 code units (`name.length`), matching the `.max` bound
- * on every other transmitted-name schema; a code-point count would pass a
- * name of astral characters those bounds refuse.
+ * Counted in UTF-16 code units (`name.length`), the unit every
+ * transmitted-name schema bound counts through {@link maxCodeUnits}; a
+ * code-point count would pass a name of astral characters those bounds
+ * refuse.
  *
  * Positions, not names -- an offending name is by construction too long
  * to include in a message. The position is the entry's place in the

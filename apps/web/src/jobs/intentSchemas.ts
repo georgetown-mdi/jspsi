@@ -22,6 +22,7 @@ import {
   SHARED_SECRET_REGEX,
   StandardizationSchema,
   holdsPrivateKeyMaterial,
+  maxCodeUnits,
   safeParseFileSyncOptions,
 } from "@psilink/core";
 
@@ -938,12 +939,16 @@ const jobExchangeIntentCommonFields = {
       SHARED_SECRET_REGEX,
       "sharedSecret must be a base64url-encoded 32-byte value (43 base64url characters)",
     ),
-  inputCsv: z.string().min(1).max(MAX_INPUT_CSV_LENGTH).optional(),
+  inputCsv: z
+    .string()
+    .min(1)
+    .check(maxCodeUnits(MAX_INPUT_CSV_LENGTH))
+    .optional(),
   inputFile: jobInputFileReferenceSchema.optional(),
   metadata: boundedMetadataSchema.optional(),
   standardization: boundedStandardizationSchema.optional(),
   expectedPayloadColumns: z
-    .array(z.string().max(MAX_NAME_LENGTH))
+    .array(z.string().check(maxCodeUnits(MAX_NAME_LENGTH)))
     .max(MAX_EXPECTED_PAYLOAD_COLUMNS)
     .optional(),
   expectedPartnerDeduplicate: z.boolean().optional(),
@@ -954,7 +959,7 @@ const jobExchangeIntentCommonFields = {
   retentionDisposition: z
     .string()
     .min(1)
-    .max(MAX_TEXT_LENGTH)
+    .check(maxCodeUnits(MAX_TEXT_LENGTH))
     .refine((note) => !NOTE_CONTROL_CHAR_PATTERN.test(note), {
       message: "retentionDisposition must not contain control characters",
     })
@@ -1092,7 +1097,11 @@ export const jobExchangeIntentSchema: z.ZodType<JobExchangeIntent> = z
 // bounded selectors. `inputCsv` reuses the exchange mode's cap.
 const jobZeroSetupIntentCommonFields = {
   ...jobRunControlFields,
-  inputCsv: z.string().min(1).max(MAX_INPUT_CSV_LENGTH).optional(),
+  inputCsv: z
+    .string()
+    .min(1)
+    .check(maxCodeUnits(MAX_INPUT_CSV_LENGTH))
+    .optional(),
   inputFile: jobInputFileReferenceSchema.optional(),
   eventStream: z.boolean().optional(),
   linkageStrategy: z.enum(["cascade", "single-pass"]).optional(),
@@ -1105,7 +1114,7 @@ const jobZeroSetupIntentCommonFields = {
   identity: z
     .string()
     .min(1)
-    .max(MAX_IDENTITY_LENGTH)
+    .check(maxCodeUnits(MAX_IDENTITY_LENGTH))
     .regex(/^[^-]/, "identity must not begin with '-'")
     .refine((label) => !IDENTITY_CONTROL_CHAR_PATTERN.test(label), {
       message: IDENTITY_CONTROL_CHAR_MESSAGE,

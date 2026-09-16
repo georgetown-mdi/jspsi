@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 
 import { z } from "zod";
 
-import { holdsPrivateKeyMaterial } from "@psilink/core";
+import { holdsPrivateKeyMaterial, maxCodeUnits } from "@psilink/core";
 
 import {
   IDENTITY_CONTROL_CHAR_MESSAGE,
@@ -49,7 +49,7 @@ const fingerprintBodySchema = z.strictObject({
   identity: z
     .string()
     .min(1)
-    .max(MAX_IDENTITY_LENGTH)
+    .check(maxCodeUnits(MAX_IDENTITY_LENGTH))
     .regex(/^[^-]/, "identity must not begin with '-'")
     .refine((label) => !IDENTITY_CONTROL_CHAR_PATTERN.test(label), {
       message: IDENTITY_CONTROL_CHAR_MESSAGE,

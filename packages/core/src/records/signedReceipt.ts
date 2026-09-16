@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { maxCodeUnits } from "../utils/maxCodeUnits.js";
 
 import { canonicalBytes } from "../utils/canonical.js";
 import { safeParseLinkageTerms } from "../config/linkageTermsSchema.js";
@@ -404,7 +405,7 @@ const MAX_BASE64URL_LENGTH = 256;
 // signature over the decoded bytes, so the exact length is not schema-pinned).
 const base64UrlSchema = z
   .string()
-  .max(MAX_BASE64URL_LENGTH)
+  .check(maxCodeUnits(MAX_BASE64URL_LENGTH))
   .regex(/^[A-Za-z0-9_-]+$/, "must be an unpadded base64url string");
 
 const ReceiptContentSchema: z.ZodType<ReceiptContent> = z.object({
