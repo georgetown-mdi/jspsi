@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Alert, Button, CopyButton, FileButton, Loader } from "@mantine/core";
 import { Link, useNavigate } from "@tanstack/react-router";
@@ -33,6 +33,14 @@ import {
 } from "@psi/disclosureAccountingStore";
 
 import { clearParkedResults, readParkedResults } from "@psi/parkedResultsStore";
+import {
+  clearUnfiledExchangeFlag,
+  unfiledExchangeFlagged,
+} from "@psi/unfiledDisclosureFlag";
+import {
+  fileUnfiledDisclosures,
+  readUnfiledDisclosures,
+} from "@psi/unfiledDisclosureStore";
 
 import { MANAGED_EXCHANGE_ARTIFACT_MIME } from "@psi/managed/managedExchangeArtifact";
 import { canReinviteFromRecord } from "@psi/managed/managedReinvite";
@@ -110,6 +118,7 @@ import type { ManagedRunFailureAlert } from "./managedRunLaunchModel";
 import type { ManagedStandingConditionView } from "./managedStandingConditionModel";
 import type { ParkedResultsRead } from "@psi/parkedResultsStore";
 import type { RunOutputs } from "@psi/runOutputs";
+import type { UnfiledDisclosureRead } from "@psi/unfiledDisclosureStore";
 
 /**
  * The attended re-run surface: open a stored managed exchange, confirm the input,
@@ -158,8 +167,18 @@ export function ManagedRunSurface({ id }: { id: string }) {
     useState<DisclosureAccountingRead>();
   // Bumped to re-read the accounting: after a reset, so the surface shows what the
   // store actually holds rather than assuming the delete took, and on an explicit
-  // retry of a read that never reached the store.
+  // retry of a read that never reached the store. The unfiled-run note is read
+  // again with it, so one retry answers for the whole section.
   const [accountingReads, setAccountingReads] = useState(0);
+  // The runs this exchange noted as having disclosed without filing a record, as
+  // their own read classified them: a store that did not answer must not render
+  // as "nothing is missing". `undefined` while the read is in flight.
+  const [unfiledRead, setUnfiledRead] = useState<UnfiledDisclosureRead>();
+  // The exchange this visit found flagged as holding a run this browser could
+  // record nowhere -- the id rather than a flag, so switching exchanges cannot
+  // carry the state, and a re-read that finds the flag already cleared cannot
+  // retract what this visit has shown.
+  const [flaggedUnrecordedId, setFlaggedUnrecordedId] = useState<string>();
   // What a scheduled run left for this visit, as its own read classified it. Read
   // here for the same reason the accounting is: a store that did not answer must
   // not render as "no run left anything". `undefined` while the read is in
@@ -312,6 +331,31 @@ export function ManagedRunSurface({ id }: { id: string }) {
       // the section on its spinner.
       .catch(() => {
         if (live) setAccountingRead({ kind: "unavailable" });
+      });
+    return () => {
+      live = false;
+    };
+  }, [id, finishedAt, accountingReads]);
+
+  // The runs the accounting is short, read beside it and keyed the same way, so a
+  // run that has just failed to file is read back without a reload and a re-read
+  // of the accounting re-reads what it owes. The flag is read here too, and
+  // dropped only once its alert has rendered: this surface shows nothing at all
+  // for a missing, unloadable or spent exchange, and clearing on the visit
+  // instead would destroy the only trace of that run unseen.
+  useEffect(() => {
+    let live = true;
+    if (unfiledExchangeFlagged(id)) setFlaggedUnrecordedId(id);
+    void readUnfiledDisclosures(id)
+      .then((read) => {
+        if (live) setUnfiledRead(read);
+      })
+      // The read classifies every failure rather than rejecting, so this is the
+      // safety check for that contract lapsing. Unavailable claims nothing about
+      // what is stored, where an unhandled rejection would leave the section
+      // stating that nothing is missing.
+      .catch(() => {
+        if (live) setUnfiledRead({ kind: "unavailable" });
       });
     return () => {
       live = false;
@@ -770,7 +814,23 @@ export function ManagedRunSurface({ id }: { id: string }) {
   // which displays as an inert control, beside an irreversible one.
   function readAccountingAgain(): void {
     setAccountingRead(undefined);
+    setUnfiledRead(undefined);
     setAccountingReads((reads) => reads + 1);
+  }
+
+  // Drop the flag, called by the alert that shows it. Held stable across renders
+  // so the alert's mount effect runs once rather than on every render of the
+  // section around it.
+  const dropUnrecordedRunFlag = useCallback(() => {
+    clearUnfiledExchangeFlag(id);
+  }, [id]);
+
+  // File the records the unfiled-run note retained, then read both again so the
+  // section shows what the store holds afterwards: a filing that did not take
+  // leaves the shortfall standing rather than an entry that is not there.
+  async function fileUnfiled(): Promise<void> {
+    await fileUnfiledDisclosures(id);
+    readAccountingAgain();
   }
 
   // Destroy the accounting this build cannot read, then re-read it: the surface
@@ -1100,7 +1160,11 @@ export function ManagedRunSurface({ id }: { id: string }) {
             <ManagedExchangeDetail
               record={record}
               accountingRead={accountingRead}
+              unfiledDisclosureRead={unfiledRead}
+              unrecordedRunFlagged={flaggedUnrecordedId === id}
               parkedResultsRead={parkedResultsRead}
+              onFileUnfiledDisclosures={fileUnfiled}
+              onUnrecordedRunFlagShown={dropUnrecordedRunFlag}
               onResetAccounting={resetAccounting}
               onRetryAccountingRead={retryAccountingRead}
               onRetryParkedResultsRead={retryParkedResultsRead}

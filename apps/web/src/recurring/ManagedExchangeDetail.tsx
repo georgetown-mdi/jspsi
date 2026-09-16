@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   Alert,
@@ -53,6 +53,8 @@ import {
   disclosureEntries,
   storedDisclosureAccountingDocument,
   storedDisclosureAccountingFileName,
+  unfiledDisclosureRows,
+  unfiledDisclosureShortfall,
 } from "./disclosureAccountingModel";
 import {
   MAX_SCHEDULE_INTERVAL_DAYS,
@@ -104,6 +106,7 @@ import type { DisclosureAccountingRead } from "@psi/disclosureAccountingStore";
 import type { DisclosureFact } from "./disclosureAccountingModel";
 import type { ParkedResultsRead } from "@psi/parkedResultsStore";
 import type { StoredDisclosureAccounting } from "@psi/disclosureAccounting";
+import type { UnfiledDisclosureRead } from "@psi/unfiledDisclosureStore";
 
 /**
  * The managed exchange detail sections composed onto the per-partnership home at
@@ -123,7 +126,11 @@ import type { StoredDisclosureAccounting } from "@psi/disclosureAccounting";
 export function ManagedExchangeDetail({
   record,
   accountingRead,
+  unfiledDisclosureRead,
+  unrecordedRunFlagged,
   parkedResultsRead,
+  onFileUnfiledDisclosures,
+  onUnrecordedRunFlagShown,
   onResetAccounting,
   onRetryAccountingRead,
   onRetryParkedResultsRead,
@@ -144,11 +151,29 @@ export function ManagedExchangeDetail({
    * disclosed" and a store that did not answer can never render as a value this
    * build refused. */
   accountingRead: DisclosureAccountingRead | undefined;
+  /** How reading the note of any run whose record never reached the accounting
+   * turned out; `undefined` while the read is in flight. Classified like the
+   * accounting read: a store that did not answer must not render as "nothing is
+   * missing". */
+  unfiledDisclosureRead: UnfiledDisclosureRead | undefined;
+  /** Whether this browser could store neither a run's record nor the note of it,
+   * and flagged the exchange instead (see {@link ../psi/unfiledDisclosureFlag.ts}).
+   * The run cannot be recovered, so the section states it and names the run
+   * history as the place the run itself is recorded. */
+  unrecordedRunFlagged: boolean;
   /** How reading the results a scheduled run left for this visit turned out;
    * `undefined` while the read is in flight. Classified for the same reason the
    * accounting read is: a store that did not answer must not render as "no run
    * left anything here". */
   parkedResultsRead: ParkedResultsRead | undefined;
+  /** Add the records the unfiled-run note retained to the accounting. Offered
+   * only where a noted run still has a record to add. Rejects where the store
+   * refused it or the accounting is one this build cannot append to; the control
+   * shows the failure and the note stands. */
+  onFileUnfiledDisclosures: () => Promise<void>;
+  /** Fired where the flag's alert has rendered, so the surface that read the
+   * flag drops it only once an operator has been shown it. */
+  onUnrecordedRunFlagShown: () => void;
   /** Destroy the stored accounting so the exchange can file disclosures again,
    * leaving the exchange itself untouched. Offered only from the unreadable state,
    * behind an explicit confirm, and after the export. Rejects on a store failure;
@@ -239,8 +264,12 @@ export function ManagedExchangeDetail({
       />
       <DisclosureAccountingView
         read={accountingRead}
+        unfiledRead={unfiledDisclosureRead}
+        unrecordedRunFlagged={unrecordedRunFlagged}
         completedRunOnRecord={completedRunRecorded(record)}
         lastRunMayHaveSent={lastRunMayHaveSentPayload(record)}
+        onFileUnfiled={onFileUnfiledDisclosures}
+        onUnrecordedRunFlagShown={onUnrecordedRunFlagShown}
         onReset={onResetAccounting}
         onRetryRead={onRetryAccountingRead}
       />
@@ -1220,6 +1249,11 @@ function factRow(fact: DisclosureFact): ConfigRow {
  * replace the CSV export and the footer's offer of it, since neither can
  * speak for entries this read did not obtain.
  *
+ * A run that disclosed and whose record never reached the accounting is stated
+ * above the entries ({@link UnfiledDisclosureNotice}), and the number of such
+ * runs qualifies the count of entries, so neither a list of entries nor an empty
+ * state reads as a complete account of what this exchange disclosed.
+ *
  * Each entry starts collapsed behind its date and partner, keeping a long
  * history scannable.
  *
@@ -1236,12 +1270,22 @@ function factRow(fact: DisclosureFact): ConfigRow {
  */
 function DisclosureAccountingView({
   read,
+  unfiledRead,
+  unrecordedRunFlagged,
   completedRunOnRecord,
   lastRunMayHaveSent,
+  onFileUnfiled,
+  onUnrecordedRunFlagShown,
   onReset,
   onRetryRead,
 }: {
   read: DisclosureAccountingRead | undefined;
+  /** How reading the note of the runs this accounting is short turned out (see
+   * {@link UnfiledDisclosureNotice}). */
+  unfiledRead: UnfiledDisclosureRead | undefined;
+  /** Whether a run of this exchange is flagged as one this browser could not
+   * record at all (see {@link UnfiledDisclosureNotice}). */
+  unrecordedRunFlagged: boolean;
   /** Whether the record beside this accounting remembers a completed run,
    * which an empty accounting must reflect accurately (see
    * {@link EmptyAccountingNotice}). */
@@ -1250,6 +1294,10 @@ function DisclosureAccountingView({
    * sent, which the empty accounting must not deny (see
    * {@link EmptyAccountingNotice}). */
   lastRunMayHaveSent: boolean;
+  onFileUnfiled: () => Promise<void>;
+  /** Fired where the flag's alert renders, which is what drops the flag (see
+   * {@link UnrecordedRunAlert}). */
+  onUnrecordedRunFlagShown: () => void;
   onReset: () => Promise<void>;
   onRetryRead: () => void;
 }) {
@@ -1259,6 +1307,11 @@ function DisclosureAccountingView({
   const accounting = read?.kind === "accounting" ? read.accounting : undefined;
   const entries = accounting === undefined ? [] : disclosureEntries(accounting);
   const partialCount = entries.filter((entry) => entry.partial).length;
+  // How many runs the accounting is short, which qualifies the count of entries
+  // below: a count of what is here reads as a count of what was disclosed unless
+  // what is missing is stated beside it.
+  const unfiledCount =
+    unfiledRead?.kind === "unfiled" ? unfiledRead.disclosures.length : 0;
   const exportCsv = () => {
     if (accounting === undefined) return;
     triggerBlobDownload(
@@ -1281,6 +1334,12 @@ function DisclosureAccountingView({
         hold and deliberately unsigned: an honest local account, not a signed or
         non-repudiable receipt.
       </p>
+      <UnfiledDisclosureNotice
+        read={unfiledRead}
+        flagged={unrecordedRunFlagged}
+        onFile={onFileUnfiled}
+        onFlagShown={onUnrecordedRunFlagShown}
+      />
       {read === undefined ? (
         <>
           <Loader size="sm" />
@@ -1309,6 +1368,7 @@ function DisclosureAccountingView({
               (partialCount === 1
                 ? " 1 of them stopped before the run finished."
                 : ` ${partialCount} of them stopped before the run finished.`)}
+            {unfiledCount > 0 && ` ${unfiledDisclosureShortfall(unfiledCount)}`}
           </p>
           {entries.map((entry) => (
             <DisclosureSection
@@ -1348,6 +1408,182 @@ function DisclosureAccountingView({
         <Link to="/verify">verify page</Link> and drop it in.
       </p>
     </div>
+  );
+}
+
+/**
+ * What this accounting owes and does not hold: the runs that disclosed and whose
+ * records never reached it.
+ *
+ * It renders above the entries, in every state of the accounting's own read: the
+ * shortfall is a fact about this exchange rather than about the accounting's
+ * readability, and an accounting that reads perfectly is exactly where a missing
+ * run would otherwise pass unseen. The run that hit it raised a notice at the
+ * time, which needed somebody present; this is what the next visit reads (see
+ * {@link ../psi/unfiledDisclosure.ts}).
+ *
+ * Each state offers only what it supports. A run whose record was retained can
+ * be filed, and the control says so. A run that cannot be filed is told plainly
+ * rather than given a control that would do nothing, and its note says which of
+ * the two states it is in -- no record was built, or one is stored that this
+ * build cannot read -- since the second still holds bytes. A note this build
+ * cannot read states that a run is missing without naming it, since the fact and
+ * the record are separate things at rest. A flagged run -- the one this
+ * browser could store nothing about -- names the run history as where that run
+ * is recorded.
+ *
+ * Nothing is offered for a read that never reached the store: it is the
+ * accounting's own storage, whose read states that condition and offers the
+ * retry that re-reads both.
+ */
+function UnfiledDisclosureNotice({
+  read,
+  flagged,
+  onFile,
+  onFlagShown,
+}: {
+  read: UnfiledDisclosureRead | undefined;
+  flagged: boolean;
+  onFile: () => Promise<void>;
+  onFlagShown: () => void;
+}) {
+  const rows =
+    read?.kind === "unfiled" ? unfiledDisclosureRows(read.disclosures) : [];
+  const fileable = rows.filter((row) => row.fileable).length;
+  return (
+    <>
+      {flagged && <UnrecordedRunAlert onShown={onFlagShown} />}
+      {read?.kind === "unreadable" && (
+        <Alert
+          color="yellow"
+          title="A run's record is missing from this accounting"
+          mt="sm"
+        >
+          A run of this exchange disclosed your payload and its record was not
+          saved to the accounting below. The note of which run it was cannot be
+          read by this version of the app, so the run is not named here. The
+          accounting below is short at least one entry.
+        </Alert>
+      )}
+      {read?.kind === "unavailable" && (
+        <p className={`${styles.small} ${styles.sub}`}>
+          Whether any run&apos;s record is missing from this accounting could
+          not be read from this browser&apos;s storage.
+        </p>
+      )}
+      {rows.length > 0 && (
+        <Alert
+          color="yellow"
+          title={
+            rows.length === 1
+              ? "A run's record is missing from this accounting"
+              : "Some runs' records are missing from this accounting"
+          }
+          mt="sm"
+        >
+          <p>
+            Each run below disclosed your payload and its record was not saved
+            to the accounting, so the accounting is not a complete account of
+            what this exchange has disclosed. An accounting exported while this
+            stands is short these runs.
+          </p>
+          {rows.map((row) => (
+            <div key={row.key} className={styles.dlRow}>
+              <span className={styles.dlLabel}>{row.when}</span>
+              {row.partner !== undefined && <span>{row.partner}</span>}
+              <span
+                className={`${styles.dlNote} ${styles.small} ${styles.sub}`}
+              >
+                {row.note}
+              </span>
+            </div>
+          ))}
+          {fileable > 0 && (
+            <FileUnfiledDisclosuresControl count={fileable} onFile={onFile} />
+          )}
+        </Alert>
+      )}
+    </>
+  );
+}
+
+/**
+ * The flag's own alert: a run this browser could store nothing about, named by
+ * the exchange alone.
+ *
+ * It reports that it has been shown, which is what drops the flag. The fact has
+ * no detail to come back to, so an operator who has read it once is not shown it
+ * again; a visit that renders this nowhere leaves the flag standing, since the
+ * flag is then still the only trace of that run.
+ */
+function UnrecordedRunAlert({ onShown }: { onShown: () => void }) {
+  useEffect(() => {
+    onShown();
+  }, [onShown]);
+  return (
+    <Alert
+      color="yellow"
+      title="At least one run of this exchange could not be recorded"
+      mt="sm"
+    >
+      <p>
+        At least one run of this exchange disclosed your payload, and this
+        browser&apos;s storage would take neither its record nor a note of which
+        run it was. The accounting below has no entry for it, and there is
+        nothing left to add: check this exchange&apos;s run history above for
+        the run, and record the disclosure in your own compliance material.
+      </p>
+      <p>
+        The run&apos;s record could not be stored. If this browser is low on
+        storage, free space on this device so the next run can file its record.
+      </p>
+    </Alert>
+  );
+}
+
+/**
+ * The control that adds the retained records to the accounting. No confirm: it
+ * files an entry for a disclosure that happened, which is what the accounting is
+ * for, and the append it runs is idempotent on the record's own binding nonce so
+ * a second press cannot double an entry.
+ *
+ * A rejected filing keeps the records where they are and says what to do next:
+ * the one failure the operator can act on is an accounting this build cannot
+ * append to, whose own recovery is below.
+ */
+function FileUnfiledDisclosuresControl({
+  count,
+  onFile,
+}: {
+  count: number;
+  onFile: () => Promise<void>;
+}) {
+  const [filing, setFiling] = useState(false);
+  const [fileFailed, setFileFailed] = useState(false);
+
+  function file() {
+    setFiling(true);
+    setFileFailed(false);
+    void onFile()
+      .catch(() => setFileFailed(true))
+      .finally(() => setFiling(false));
+  }
+
+  return (
+    <>
+      <Button variant="default" mt="sm" loading={filing} onClick={file}>
+        {count === 1
+          ? "Add this record to the accounting"
+          : "Add these records to the accounting"}
+      </Button>
+      {fileFailed && (
+        <p className={styles.small}>
+          The records could not be added and are still kept in this browser. If
+          the accounting below cannot be read, start a fresh accounting first,
+          then add them again.
+        </p>
+      )}
+    </>
   );
 }
 

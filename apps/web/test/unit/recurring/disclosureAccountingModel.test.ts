@@ -10,13 +10,17 @@ import {
 import {
   DISCLOSED_AT_LABEL,
   DISCLOSURE_FACT_LABELS,
+  FILEABLE_DISCLOSURE_NOTE,
   PARTIAL_DISCLOSURE_LABEL,
+  UNBUILT_DISCLOSURE_NOTE,
+  UNREADABLE_DISCLOSURE_NOTE,
   disclosureAccountingCsv,
   disclosureAccountingFileName,
   disclosureEntries,
   disclosureFacts,
   storedDisclosureAccountingDocument,
   storedDisclosureAccountingFileName,
+  unfiledDisclosureRows,
 } from "../../../src/recurring/disclosureAccountingModel.js";
 import {
   DISCLOSURE_ACCOUNTING_VERSION,
@@ -526,6 +530,45 @@ describe("the accounting's entries", () => {
 
     expect(entries.map((entry) => entry.partial)).toEqual([true, false]);
     expect(PARTIAL_DISCLOSURE_LABEL).not.toBe("");
+  });
+});
+
+/**
+ * The rows for the runs the accounting is short. What each row says is left to
+ * do must match what the browser holds for that run: two runs are equally
+ * unfilable while one has a record at rest and the other never had one.
+ */
+describe("the runs the accounting is short", () => {
+  test("a retained record says it can still be filed", async () => {
+    const missed = await disclosureRecord();
+
+    const [row] = unfiledDisclosureRows([
+      { at: missed.createdAt, record: missed },
+    ]);
+
+    expect(row.fileable).toBe(true);
+    expect(row.note).toBe(FILEABLE_DISCLOSURE_NOTE);
+  });
+
+  test("a run that built no record says none was made", () => {
+    const [row] = unfiledDisclosureRows([{ at: "2026-08-01T09:00:00.000Z" }]);
+
+    expect(row.fileable).toBe(false);
+    expect(row.note).toBe(UNBUILT_DISCLOSURE_NOTE);
+    expect(row.note).toContain("No record of this run was made");
+  });
+
+  test("a record this build cannot read says that, not that none is kept", () => {
+    const [row] = unfiledDisclosureRows([
+      { at: "2026-08-01T09:00:00.000Z", unreadableRecordRetained: true },
+    ]);
+
+    // The bytes are still in this browser; only this version's refusal makes the
+    // run unfilable, so the copy must not report that nothing was kept.
+    expect(row.fileable).toBe(false);
+    expect(row.note).toBe(UNREADABLE_DISCLOSURE_NOTE);
+    expect(row.note).toContain("cannot be read by this version of the app");
+    expect(row.note).not.toContain("No record");
   });
 });
 

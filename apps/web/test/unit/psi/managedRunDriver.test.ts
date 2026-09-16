@@ -36,6 +36,7 @@ import { authenticateExchange } from "../../../src/psi/authenticateExchange.js";
 import { beginManagedRendezvous } from "../../../src/psi/managed/managedRendezvous.js";
 import { buildRunOutputs } from "../../../src/psi/runOutputs.js";
 import { disclosureRecord } from "../../utils/disclosureFixtures.js";
+import { noteUnfiledDisclosureRun } from "../../../src/psi/unfiledDisclosureStore.js";
 import { openPeerMessageConnection } from "../../../src/psi/transport/peerMessageConnection.js";
 
 import type { ManagedExchangeRecord } from "../../../src/psi/managed/managedExchangeRecord.js";
@@ -117,6 +118,9 @@ vi.mock("../../../src/psi/managed/managedInputHandle.js", () => ({
 vi.mock("../../../src/psi/disclosureAccountingStore.js", () => ({
   appendDisclosureRecordToStore: vi.fn(() => Promise.resolve()),
 }));
+vi.mock("../../../src/psi/unfiledDisclosureStore.js", () => ({
+  noteUnfiledDisclosureRun: vi.fn(() => Promise.resolve("noted")),
+}));
 vi.mock("../../../src/psi/managed/managedPreparedExchange.js", () => ({
   prepareManagedRerunExchange: vi.fn(() =>
     minimalPreparedExchange({
@@ -167,6 +171,7 @@ vi.mock("@psilink/core", async (importOriginal) => {
 
 const mockedAuthenticate = vi.mocked(authenticateExchange);
 const mockedAppendDisclosure = vi.mocked(appendDisclosureRecordToStore);
+const mockedNoteUnfiled = vi.mocked(noteUnfiledDisclosureRun);
 const mockedBuildRunOutputs = vi.mocked(buildRunOutputs);
 const mockedRendezvous = vi.mocked(beginManagedRendezvous);
 const mockedRecordFromFailure = vi.mocked(exchangeRecordFromFailure);
@@ -941,8 +946,10 @@ describe("filing the run's disclosure", () => {
     await runDriver(new AbortController().signal, onWarning);
 
     expect(mockedAppendDisclosure.mock.calls).toEqual([[RECORD.id, record]]);
-    // The entry is in the accounting, so there is no loss to state.
+    // The entry is in the accounting, so there is no loss to state -- and
+    // nothing for the next visit to read, which a note would assert.
     expect(onWarning).not.toHaveBeenCalled();
+    expect(mockedNoteUnfiled).not.toHaveBeenCalled();
   });
 
   test("files the disclosure before the run yields its outputs", async () => {
@@ -1053,6 +1060,58 @@ describe("filing the run's disclosure", () => {
     ).rejects.toThrow("results blob failed");
 
     expect(onWarning.mock.calls).toEqual([[DISCLOSURE_RECORD_UNBUILT_WARNING]]);
+  });
+
+  test("a failed filing is noted for the next visit, with the run's record", async () => {
+    // The notice below needs somebody present. A scheduled run has nobody, so the
+    // shortfall is left where the exchange's own page reads it, holding the
+    // record the next visit can file.
+    const { mc } = makeParkedCloseMc();
+    mockedOpen.mockResolvedValue(mc);
+    acquireResources();
+    const record = await exchangeYieldsRecord();
+    mockedAppendDisclosure.mockRejectedValueOnce(new Error("quota exceeded"));
+    const logged = vi.spyOn(log, "error").mockImplementation(() => {});
+
+    await runDriver(new AbortController().signal);
+
+    expect(mockedNoteUnfiled.mock.calls).toEqual([
+      [RECORD.id, record, expect.any(String)],
+    ]);
+    logged.mockRestore();
+  });
+
+  test("a run with nobody watching still notes the shortfall", async () => {
+    // The whole point of the note: this run raises its notice into no sink at
+    // all, and the next visit still learns the accounting is short an entry.
+    const { mc } = makeParkedCloseMc();
+    mockedOpen.mockResolvedValue(mc);
+    acquireResources();
+    await exchangeYieldsRecord();
+    mockedAppendDisclosure.mockRejectedValueOnce(new Error("quota exceeded"));
+    const logged = vi.spyOn(log, "error").mockImplementation(() => {});
+
+    await runDriver(new AbortController().signal);
+
+    expect(mockedNoteUnfiled).toHaveBeenCalledTimes(1);
+    logged.mockRestore();
+  });
+
+  test("a completed run whose record could not be built is noted with no record", async () => {
+    // There is no record to retain, so the note keeps the fact alone and the next
+    // visit is told the entry cannot be recovered rather than offered a retry.
+    const { mc } = makeParkedCloseMc();
+    mockedOpen.mockResolvedValue(mc);
+    acquireResources();
+    mockedRunExchange.mockResolvedValueOnce(
+      minimalExchangeResult({ recordOwedButUnbuilt: true }),
+    );
+
+    await runDriver(new AbortController().signal);
+
+    expect(mockedNoteUnfiled.mock.calls).toEqual([
+      [RECORD.id, undefined, expect.any(String)],
+    ]);
   });
 
   test("a failed filing warns the operator and leaves the run's results standing", async () => {
@@ -1307,6 +1366,48 @@ describe("filing a stopped run's disclosure", () => {
     logged.mockRestore();
   });
 
+  test("a stopped run's failed filing is noted with the record it disclosed under", async () => {
+    // A stopped run has no results surface at all, so the note is the only thing
+    // that reaches a later visit -- and it holds the record core handed back, so
+    // that visit can still file the entry.
+    const { mc } = makeParkedCloseMc();
+    mockedOpen.mockResolvedValue(mc);
+    acquireResources();
+    const audit = await terminatedAudit();
+    mockedRunExchange.mockRejectedValueOnce(new Error("data channel closed"));
+    mockedRecordFromFailure.mockReturnValueOnce(audit);
+    mockedAppendDisclosure.mockRejectedValueOnce(new Error("quota exceeded"));
+    const logged = vi.spyOn(log, "error").mockImplementation(() => {});
+
+    await expect(runDriver(new AbortController().signal)).rejects.toThrow(
+      "data channel closed",
+    );
+
+    expect(mockedNoteUnfiled.mock.calls).toEqual([
+      [RECORD.id, audit.record, expect.any(String)],
+    ]);
+    logged.mockRestore();
+  });
+
+  test("a stopped run whose record could not be built is noted with no record", async () => {
+    // Nothing was built to retain, so the note keeps the fact alone: the
+    // accounting is short an entry for a disclosure that happened, and no later
+    // filing can add it.
+    const { mc } = makeParkedCloseMc();
+    mockedOpen.mockResolvedValue(mc);
+    acquireResources();
+    mockedRunExchange.mockRejectedValueOnce(new Error("data channel closed"));
+    mockedRecordOwedButUnbuilt.mockReturnValueOnce(true);
+
+    await expect(runDriver(new AbortController().signal)).rejects.toThrow(
+      "data channel closed",
+    );
+
+    expect(mockedNoteUnfiled.mock.calls).toEqual([
+      [RECORD.id, undefined, expect.any(String)],
+    ]);
+  });
+
   test("a record accessor that throws is logged, and neither replaces the run's failure nor claims a lost entry", async () => {
     // The accessor walks the failure's `cause` chain, so an error whose chain
     // raises on the way makes it throw. What that leaves unknown is whether a
@@ -1334,6 +1435,9 @@ describe("filing a stopped run's disclosure", () => {
     expect(logged).toHaveBeenCalled();
     expect(onWarning).not.toHaveBeenCalled();
     expect(mockedAppendDisclosure).not.toHaveBeenCalled();
+    // And nothing is noted for the next visit either: a note asserts that a
+    // disclosure went unfiled, which this run cannot show happened.
+    expect(mockedNoteUnfiled).not.toHaveBeenCalled();
     logged.mockRestore();
   });
 });

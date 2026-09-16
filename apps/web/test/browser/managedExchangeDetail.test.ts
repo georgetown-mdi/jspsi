@@ -31,7 +31,10 @@ import {
 import { ManagedExchangeDetail } from "@recurring/ManagedExchangeDetail";
 
 import {
+  FILEABLE_DISCLOSURE_NOTE,
   PARTIAL_DISCLOSURE_LABEL,
+  UNBUILT_DISCLOSURE_NOTE,
+  UNREADABLE_DISCLOSURE_NOTE,
   disclosureEntries,
 } from "@recurring/disclosureAccountingModel";
 
@@ -60,7 +63,9 @@ import type {
   ManagedExchangeSide,
   NewManagedExchange,
 } from "@psi/managed/managedExchangeRecord";
+import type { DisclosureAccountingRead } from "@psi/disclosureAccountingStore";
 import type { ParkedResultsRead } from "@psi/parkedResultsStore";
+import type { UnfiledDisclosureRead } from "@psi/unfiledDisclosureStore";
 import type { WebRTCExchangeLocator } from "@psilink/core";
 
 // The managed exchange detail sections, rendered: the read-only configuration with
@@ -133,6 +138,10 @@ describe("managed exchange detail configuration", () => {
         reinviting: false,
         reinviteFailed: false,
         compromiseResponse: false,
+        unfiledDisclosureRead: { kind: "none" },
+        unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
+        onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
 
@@ -181,6 +190,10 @@ describe("managed exchange detail configuration", () => {
         reinviting: false,
         reinviteFailed: false,
         compromiseResponse: false,
+        unfiledDisclosureRead: { kind: "none" },
+        unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
+        onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
 
@@ -242,6 +255,10 @@ describe("managed exchange detail configuration", () => {
         reinviting: false,
         reinviteFailed: false,
         compromiseResponse: false,
+        unfiledDisclosureRead: { kind: "none" },
+        unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
+        onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
 
@@ -293,6 +310,10 @@ describe("managed exchange detail configuration", () => {
           compromiseResponse: false,
           reinviting,
           reinviteFailed,
+          unfiledDisclosureRead: { kind: "none" },
+          unrecordedRunFlagged: false,
+          onUnrecordedRunFlagShown: () => undefined,
+          onFileUnfiledDisclosures: () => Promise.resolve(),
         }),
       );
     }
@@ -350,6 +371,10 @@ describe("managed exchange detail local fields", () => {
         reinviting: false,
         reinviteFailed: false,
         compromiseResponse: false,
+        unfiledDisclosureRead: { kind: "none" },
+        unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
+        onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
 
@@ -388,6 +413,10 @@ describe("managed exchange detail local fields", () => {
         reinviting: false,
         reinviteFailed: false,
         compromiseResponse: false,
+        unfiledDisclosureRead: { kind: "none" },
+        unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
+        onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
 
@@ -416,6 +445,10 @@ describe("managed exchange detail local fields", () => {
         reinviting: false,
         reinviteFailed: false,
         compromiseResponse: false,
+        unfiledDisclosureRead: { kind: "none" },
+        unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
+        onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
 
@@ -473,6 +506,10 @@ describe("managed exchange detail schedule entry", () => {
         reinviting: false,
         reinviteFailed: false,
         compromiseResponse: false,
+        unfiledDisclosureRead: { kind: "none" },
+        unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
+        onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
     return { saved, granted };
@@ -927,6 +964,10 @@ describe("managed exchange detail local fields against the real store", () => {
         reinviting: false,
         reinviteFailed: false,
         compromiseResponse: false,
+        unfiledDisclosureRead: { kind: "none" },
+        unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
+        onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
     // The form has read the record before the store moves under it.
@@ -984,6 +1025,10 @@ describe("managed exchange detail local fields against the real store", () => {
         reinviting: false,
         reinviteFailed: false,
         compromiseResponse: false,
+        unfiledDisclosureRead: { kind: "none" },
+        unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
+        onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
     await expect
@@ -1053,6 +1098,10 @@ describe("managed exchange detail run schedule", () => {
         reinviting: false,
         reinviteFailed: false,
         compromiseResponse: false,
+        unfiledDisclosureRead: { kind: "none" },
+        unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
+        onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
   }
@@ -1273,6 +1322,10 @@ describe("managed exchange detail accounting of disclosures", () => {
         reinviting: false,
         reinviteFailed: false,
         compromiseResponse: false,
+        unfiledDisclosureRead: { kind: "none" },
+        unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
+        onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
 
@@ -1313,6 +1366,10 @@ describe("managed exchange detail accounting of disclosures", () => {
         reinviting: false,
         reinviteFailed: false,
         compromiseResponse: false,
+        unfiledDisclosureRead: { kind: "none" },
+        unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
+        onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
 
@@ -1380,6 +1437,10 @@ describe("managed exchange detail accounting of disclosures", () => {
           reinviting: false,
           reinviteFailed: false,
           compromiseResponse: false,
+          unfiledDisclosureRead: { kind: "none" },
+          unrecordedRunFlagged: false,
+          onUnrecordedRunFlagShown: () => undefined,
+          onFileUnfiledDisclosures: () => Promise.resolve(),
         }),
       );
 
@@ -1447,6 +1508,10 @@ describe("managed exchange detail accounting of disclosures", () => {
         reinviting: false,
         reinviteFailed: false,
         compromiseResponse: false,
+        unfiledDisclosureRead: { kind: "none" },
+        unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
+        onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
 
@@ -1522,6 +1587,10 @@ describe("managed exchange detail accounting of disclosures", () => {
         reinviting: false,
         reinviteFailed: false,
         compromiseResponse: false,
+        unfiledDisclosureRead: { kind: "none" },
+        unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
+        onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
 
@@ -1577,6 +1646,10 @@ describe("managed exchange detail accounting of disclosures", () => {
         reinviting: false,
         reinviteFailed: false,
         compromiseResponse: false,
+        unfiledDisclosureRead: { kind: "none" },
+        unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
+        onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
 
@@ -1635,6 +1708,10 @@ describe("managed exchange detail accounting of disclosures", () => {
         reinviting: false,
         reinviteFailed: false,
         compromiseResponse: false,
+        unfiledDisclosureRead: { kind: "none" },
+        unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
+        onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
 
@@ -1699,6 +1776,10 @@ describe("managed exchange detail accounting of disclosures", () => {
         reinviting: false,
         reinviteFailed: false,
         compromiseResponse: false,
+        unfiledDisclosureRead: { kind: "none" },
+        unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
+        onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
 
@@ -1741,6 +1822,10 @@ describe("managed exchange detail accounting of disclosures", () => {
         reinviting: false,
         reinviteFailed: false,
         compromiseResponse: false,
+        unfiledDisclosureRead: { kind: "none" },
+        unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
+        onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
 
@@ -1797,6 +1882,10 @@ describe("managed exchange detail accounting of disclosures", () => {
         reinviting: false,
         reinviteFailed: false,
         compromiseResponse: false,
+        unfiledDisclosureRead: { kind: "none" },
+        unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
+        onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
 
@@ -1846,6 +1935,10 @@ describe("managed exchange detail accounting of disclosures", () => {
         reinviting: false,
         reinviteFailed: false,
         compromiseResponse: false,
+        unfiledDisclosureRead: { kind: "none" },
+        unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
+        onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
 
@@ -1883,6 +1976,10 @@ describe("managed exchange detail accounting of disclosures", () => {
         reinviting: false,
         reinviteFailed: false,
         compromiseResponse: false,
+        unfiledDisclosureRead: { kind: "none" },
+        unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
+        onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
 
@@ -1970,6 +2067,10 @@ describe("recovering an accounting this version cannot read", () => {
         reinviting: false,
         reinviteFailed: false,
         compromiseResponse: false,
+        unfiledDisclosureRead: { kind: "none" },
+        unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
+        onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
 
@@ -2028,6 +2129,10 @@ describe("recovering an accounting this version cannot read", () => {
           reinviting: false,
           reinviteFailed: false,
           compromiseResponse: false,
+          unfiledDisclosureRead: { kind: "none" },
+          unrecordedRunFlagged: false,
+          onUnrecordedRunFlagShown: () => undefined,
+          onFileUnfiledDisclosures: () => Promise.resolve(),
         }),
       );
 
@@ -2079,6 +2184,10 @@ describe("recovering an accounting this version cannot read", () => {
         reinviting: false,
         reinviteFailed: false,
         compromiseResponse: false,
+        unfiledDisclosureRead: { kind: "none" },
+        unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
+        onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
 
@@ -2134,6 +2243,10 @@ describe("recovering an accounting this version cannot read", () => {
         reinviting: false,
         reinviteFailed: false,
         compromiseResponse: false,
+        unfiledDisclosureRead: { kind: "none" },
+        unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
+        onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
     const download = () =>
@@ -2192,6 +2305,10 @@ describe("recovering an accounting this version cannot read", () => {
           reinviting: false,
           reinviteFailed: false,
           compromiseResponse: false,
+          unfiledDisclosureRead: { kind: "none" },
+          unrecordedRunFlagged: false,
+          onUnrecordedRunFlagShown: () => undefined,
+          onFileUnfiledDisclosures: () => Promise.resolve(),
         }),
       );
 
@@ -2246,6 +2363,10 @@ describe("recovering an accounting this version cannot read", () => {
         reinviting: false,
         reinviteFailed: false,
         compromiseResponse: false,
+        unfiledDisclosureRead: { kind: "none" },
+        unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
+        onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
 
@@ -2282,6 +2403,10 @@ describe("recovering an accounting this version cannot read", () => {
         reinviting: false,
         reinviteFailed: false,
         compromiseResponse: false,
+        unfiledDisclosureRead: { kind: "none" },
+        unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
+        onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
 
@@ -2324,6 +2449,10 @@ describe("recovering an accounting this version cannot read", () => {
         reinviting: false,
         reinviteFailed: false,
         compromiseResponse: false,
+        unfiledDisclosureRead: { kind: "none" },
+        unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
+        onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
 
@@ -2379,6 +2508,10 @@ describe("an accounting a newer version of the app filed", () => {
       reinviting: false,
       reinviteFailed: false,
       compromiseResponse: false,
+      unfiledDisclosureRead: { kind: "none" },
+      unrecordedRunFlagged: false,
+      onUnrecordedRunFlagShown: () => undefined,
+      onFileUnfiledDisclosures: () => Promise.resolve(),
     });
 
   test("names the page as the stale side and asks for a reload", async () => {
@@ -2493,6 +2626,10 @@ describe("an accounting that could not be read at all", () => {
       reinviting: false,
       reinviteFailed: false,
       compromiseResponse: false,
+      unfiledDisclosureRead: { kind: "none" },
+      unrecordedRunFlagged: false,
+      onUnrecordedRunFlagShown: () => undefined,
+      onFileUnfiledDisclosures: () => Promise.resolve(),
     });
 
   test("is treated as transient, and offers nothing destructive", async () => {
@@ -2578,6 +2715,10 @@ describe("an accounting read still in flight", () => {
       reinviting: false,
       reinviteFailed: false,
       compromiseResponse: false,
+      unfiledDisclosureRead: { kind: "none" },
+      unrecordedRunFlagged: false,
+      onUnrecordedRunFlagShown: () => undefined,
+      onFileUnfiledDisclosures: () => Promise.resolve(),
     });
 
   test("says the read is under way and claims nothing about what is stored", async () => {
@@ -2692,6 +2833,10 @@ describe("the results a scheduled run left for this visit", () => {
         reinviting: false,
         reinviteFailed: false,
         compromiseResponse: false,
+        unfiledDisclosureRead: { kind: "none" },
+        unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
+        onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
   }
@@ -3012,5 +3157,226 @@ describe("the results a scheduled run left for this visit", () => {
     expect(
       page.getByRole("button", { name: "Clear what is kept here" }).query(),
     ).toBeNull();
+  });
+});
+
+/**
+ * The runs the accounting owes and does not hold. An unattended run that could
+ * not file raises a notice nobody is there for, so this is where the shortfall
+ * reaches a person: stated above the entries, counted beside them, and offering
+ * only the remedy each state supports.
+ */
+describe("a run whose record never reached the accounting", () => {
+  function renderUnfiled(
+    unfiledDisclosureRead: UnfiledDisclosureRead,
+    overrides: {
+      accountingRead?: DisclosureAccountingRead;
+      unrecordedRunFlagged?: boolean;
+      onFileUnfiledDisclosures?: () => Promise<void>;
+      onUnrecordedRunFlagShown?: () => void;
+    } = {},
+  ) {
+    app.render(
+      createElement(ManagedExchangeDetail, {
+        record: record("inviter"),
+        parkedResultsRead: { kind: "none" },
+        accountingRead: overrides.accountingRead ?? { kind: "none" },
+        unfiledDisclosureRead,
+        unrecordedRunFlagged: overrides.unrecordedRunFlagged ?? false,
+        onUnrecordedRunFlagShown:
+          overrides.onUnrecordedRunFlagShown ?? (() => undefined),
+        onFileUnfiledDisclosures:
+          overrides.onFileUnfiledDisclosures ?? (() => Promise.resolve()),
+        onResetAccounting: () => Promise.resolve(),
+        onRetryAccountingRead: () => undefined,
+        onRetryParkedResultsRead: () => undefined,
+        onClearParkedResults: () => Promise.resolve(),
+        onGrantOutputFolder: () => Promise.resolve(),
+        onStopUsingOutputFolder: () => Promise.resolve(),
+        onSaveLocalFields: () => Promise.resolve(),
+        onReinviteToChangeTerms: () => undefined,
+        canReinvite: true,
+        reinviting: false,
+        reinviteFailed: false,
+        compromiseResponse: false,
+      }),
+    );
+  }
+
+  test("a retained record is named, and filing it is offered", async () => {
+    const missed = await disclosureRecord();
+    const onFileUnfiledDisclosures = vi.fn(() => Promise.resolve());
+
+    renderUnfiled(
+      {
+        kind: "unfiled",
+        disclosures: [{ at: missed.createdAt, record: missed }],
+      },
+      { onFileUnfiledDisclosures },
+    );
+
+    await expect
+      .element(page.getByText(FILEABLE_DISCLOSURE_NOTE))
+      .toBeInTheDocument();
+    await page
+      .getByRole("button", { name: "Add this record to the accounting" })
+      .click();
+
+    expect(onFileUnfiledDisclosures).toHaveBeenCalledTimes(1);
+  });
+
+  test("the entry count states what is missing beside what is here", async () => {
+    const accounting = appendDisclosureRecord(
+      undefined,
+      await disclosureRecord(),
+    );
+    const missed = await disclosureRecord({
+      createdAt: "2026-08-01T09:00:00.000Z",
+    });
+
+    renderUnfiled(
+      {
+        kind: "unfiled",
+        disclosures: [{ at: missed.createdAt, record: missed }],
+      },
+      { accountingRead: { kind: "accounting", accounting } },
+    );
+
+    // The count of entries is the claim that needs qualifying: one entry here is
+    // not one disclosure made.
+    await expect
+      .element(
+        page.getByText(
+          "1 further run of this exchange disclosed and has no entry here",
+          { exact: false },
+        ),
+      )
+      .toBeInTheDocument();
+  });
+
+  test("a run with no record left is told so, and offered nothing", async () => {
+    renderUnfiled({
+      kind: "unfiled",
+      disclosures: [{ at: "2026-08-01T09:00:00.000Z" }],
+    });
+
+    await expect
+      .element(page.getByText(UNBUILT_DISCLOSURE_NOTE))
+      .toBeInTheDocument();
+    // A control that would do nothing is worse than none: there is no record to
+    // add, and the copy says where to record the disclosure instead.
+    expect(
+      page.getByRole("button", { name: /Add .* to the accounting/ }).query(),
+    ).toBeNull();
+  });
+
+  test("a run whose record this build cannot read is not told none is kept", async () => {
+    renderUnfiled({
+      kind: "unfiled",
+      disclosures: [
+        { at: "2026-08-01T09:00:00.000Z", unreadableRecordRetained: true },
+      ],
+    });
+
+    // The record is at rest; only this version's refusal makes it unfilable, so
+    // the copy states that rather than denying the browser holds anything.
+    await expect
+      .element(page.getByText(UNREADABLE_DISCLOSURE_NOTE))
+      .toBeInTheDocument();
+    expect(page.getByText(UNBUILT_DISCLOSURE_NOTE).query()).toBeNull();
+    expect(
+      page.getByRole("button", { name: /Add .* to the accounting/ }).query(),
+    ).toBeNull();
+  });
+
+  test("a failed filing keeps the records and names the state to clear first", async () => {
+    const missed = await disclosureRecord();
+
+    renderUnfiled(
+      {
+        kind: "unfiled",
+        disclosures: [{ at: missed.createdAt, record: missed }],
+      },
+      {
+        onFileUnfiledDisclosures: () =>
+          Promise.reject(new Error("the accounting refused the append")),
+      },
+    );
+    await page
+      .getByRole("button", { name: "Add this record to the accounting" })
+      .click();
+
+    await expect
+      .element(
+        page.getByText(
+          "could not be added and are still kept in this browser",
+          {
+            exact: false,
+          },
+        ),
+      )
+      .toBeInTheDocument();
+  });
+
+  test("a note this build cannot read still says a run is missing", async () => {
+    renderUnfiled({ kind: "unreadable" });
+
+    await expect
+      .element(
+        page.getByText("its record was not saved to the accounting below", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+    expect(
+      page.getByRole("button", { name: /Add .* to the accounting/ }).query(),
+    ).toBeNull();
+  });
+
+  test("a run this browser could record nowhere names the run history", async () => {
+    const onUnrecordedRunFlagShown = vi.fn();
+
+    renderUnfiled(
+      { kind: "none" },
+      { unrecordedRunFlagged: true, onUnrecordedRunFlagShown },
+    );
+
+    await expect
+      .element(
+        page.getByText(
+          "At least one run of this exchange could not be recorded",
+          {
+            exact: false,
+          },
+        ),
+      )
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText("check this exchange's run history above", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+    // The alert reports that it has been shown, which is what drops the flag:
+    // the fact is kept until an operator has read it.
+    await vi.waitFor(() =>
+      expect(onUnrecordedRunFlagShown).toHaveBeenCalledTimes(1),
+    );
+  });
+
+  test("nothing missing says nothing, and drops no flag", async () => {
+    const onUnrecordedRunFlagShown = vi.fn();
+
+    renderUnfiled({ kind: "none" }, { onUnrecordedRunFlagShown });
+
+    expect(
+      page.getByText("missing from this accounting", { exact: false }).query(),
+    ).toBeNull();
+    expect(
+      page.getByText("could not be recorded", { exact: false }).query(),
+    ).toBeNull();
+    await flushPendingUpdates();
+    expect(onUnrecordedRunFlagShown).not.toHaveBeenCalled();
   });
 });
