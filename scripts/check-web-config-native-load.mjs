@@ -58,24 +58,24 @@
 //     transform the config out from under the control fixture, which is why the
 //     control's rejection is asserted rather than assumed.
 
-import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import {
+  CHILD_FLAG,
+  LOAD_STATUSES,
+  loadConfigInChild,
+  runChildLoad,
+} from "./lib/configLoadHarness.mjs";
+
 /** The config this check guards, relative to the repository root. */
 export const WEB_CONFIG = "apps/web/vite.config.ts";
 
 /** Node's refusal of a construct strip-only type stripping cannot erase. */
 export const REJECTION_CODE = "ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX";
-
-/** argv[2] that puts this file in child mode: perform one load and exit. */
-const CHILD_FLAG = "--load";
-
-/** The line a child prints before its stack when the load threw. */
-const FAILURE_MARKER = "psilink-config-load-failed";
 
 async function loadThroughVite(configFile, viteFrom) {
   // Resolve Vite from the web app rather than from this script or from the file
@@ -154,38 +154,10 @@ export function writeStripOnlyControl(directory) {
  * resolved from (see loadThroughVite); the plain-import loader ignores it.
  */
 export function loadInChildProcess(loaderId, configFile, viteFrom) {
-  const environment = { ...process.env };
-  // A TypeScript loader in NODE_OPTIONS would transform the config and hide
-  // exactly what this measures; VITEST changes which plugins the web config
-  // constructs, so dropping it makes the result the same whether this check runs
-  // from a shell or from inside its own vitest suite.
-  delete environment.NODE_OPTIONS;
-  delete environment.VITEST;
-
-  const result = spawnSync(
-    process.execPath,
-    [
-      fileURLToPath(import.meta.url),
-      CHILD_FLAG,
-      loaderId,
-      configFile,
-      viteFrom,
-    ],
-    { encoding: "utf8", env: environment, stdio: ["ignore", "pipe", "pipe"] },
-  );
-  const output = [result.stdout, result.stderr]
-    .filter((part) => typeof part === "string" && part.trim() !== "")
-    .join("\n")
-    .trim();
-  if (result.error) {
-    return { ok: false, code: null, output: result.error.message };
-  }
-  const marker = output.match(new RegExp(`^${FAILURE_MARKER} (\\S+)$`, "m"));
-  return {
-    ok: result.status === 0,
-    code: marker ? marker[1] : null,
-    output,
-  };
+  return loadConfigInChild({
+    childModule: import.meta.url,
+    args: [loaderId, configFile, viteFrom],
+  });
 }
 
 /**
@@ -205,7 +177,7 @@ export function checkWebConfigNativeLoad({
   if (!existsSync(configFile)) {
     return {
       ok: false,
-      status: "missing",
+      status: LOAD_STATUSES.missing,
       message: `${WEB_CONFIG} is absent, so there is nothing to load.`,
     };
   }
@@ -218,14 +190,14 @@ export function checkWebConfigNativeLoad({
       if (result.ok) {
         return {
           ok: false,
-          status: "control-loaded",
+          status: LOAD_STATUSES.controlLoaded,
           message: `${loader.label} loaded a config whose import graph holds a TypeScript parameter property, which strip-only type stripping refuses. That load path is no longer strip-only, so driving ${WEB_CONFIG} through it would prove nothing about the syntax it may contain. This check fails rather than report a measurement it did not make -- re-establish what the leg measures, or retire it, in scripts/check-web-config-native-load.mjs.`,
         };
       }
       if (result.code !== REJECTION_CODE) {
         return {
           ok: false,
-          status: "control-failed-otherwise",
+          status: LOAD_STATUSES.controlFailedOtherwise,
           message: `${loader.label} refused the control fixture, but with ${result.code ?? "no error code"} rather than ${REJECTION_CODE}, so it is not the strip-only refusal this check is calibrated against and the result below it would be unsound:\n\n${result.output}`,
         };
       }
@@ -243,7 +215,7 @@ export function checkWebConfigNativeLoad({
           : `The load failed for a reason other than ${REJECTION_CODE}, so it is the config or its imports, not their syntax.`;
       return {
         ok: false,
-        status: "refused",
+        status: LOAD_STATUSES.refused,
         message: `${WEB_CONFIG} does not load under ${loader.label}. ${cause}\n\n${result.output}`,
       };
     }
@@ -251,7 +223,7 @@ export function checkWebConfigNativeLoad({
 
   return {
     ok: true,
-    status: "loads",
+    status: LOAD_STATUSES.loads,
     message: `${WEB_CONFIG} and everything it imports load under ${LOADERS.map((loader) => loader.label).join(" and ")}.`,
   };
 }
@@ -266,13 +238,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       console.error(`unknown loader ${loaderId}`);
       process.exit(2);
     }
-    try {
-      await loader.load(configFile, viteFrom);
-    } catch (error) {
-      console.error(`${FAILURE_MARKER} ${error?.code ?? "no-code"}`);
-      console.error(error?.stack ?? String(error));
-      process.exit(1);
-    }
+    await runChildLoad(
+      () => loader.load(configFile, viteFrom),
+      (error) => error?.stack ?? String(error),
+    );
   } else {
     const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
     const result = checkWebConfigNativeLoad({ root });

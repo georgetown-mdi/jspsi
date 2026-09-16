@@ -91,6 +91,20 @@ npm run check:web-config-native-load
 That guards the property, on every pull request and locally.
 It drives both load paths for real, and calibrates each against a control fixture first, so a loader that stopped being strip-only fails rather than passing silently.
 
+## What the config may import
+
+The image's builder stage copies this app's config, `src/`, `server/` and `public/`, and no test tree (see the root `Dockerfile`), and the config loader bundles `vite.config.ts` rather than importing it.
+Bundling resolves every literal specifier the file holds -- inside a dynamic `import()` as much as a static import, and whether or not the branch holding it is ever taken -- so one import of a test-tree module fails `npm run build -w apps/web` in the image while the dev server, vitest, typecheck and lint all stay green on a tree that has the file.
+
+Reach anything outside that subset through a path built at runtime instead, as the config does for the live-webrtc leg's browser commands.
+
+```sh
+npm run check:web-config-image-load
+```
+
+That guards the property, on every pull request and locally.
+It replays the builder stage's `COPY` instructions into a temporary tree and loads the real config there, calibrated first against a control config that imports the test tree, so a replication that stopped excluding it fails rather than passing silently.
+
 ## Running tests
 
 ```sh

@@ -9,7 +9,7 @@ import { spawn } from "node:child_process";
  * real command-line program, spawned exactly as the console's job driver spawns
  * it (apps/web/src/jobs/cliDriver.ts).
  */
-const cliEntry = path.resolve(
+export const cliEntry = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "../../../../apps/cli/dist/index.js",
 );

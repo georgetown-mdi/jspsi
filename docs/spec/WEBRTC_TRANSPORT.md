@@ -352,6 +352,37 @@ leaving it open for the length of the transfer, and a teardown that lands inside
 it while this page keeps running is reported as the loss it is rather than as a
 delivery.
 
+### What each side's wait costs, measured
+
+The two waits above are specified against what each stack exposes, not against a
+duration. What they cost when a CLI party and a browser party close the same
+healthy exchange is measured by the live leg
+([docs/TESTING.md](../TESTING.md#live-webrtc-leg)), which prints both numbers on
+every run and gates on neither. A tracked limit, in other words: the numbers are
+here to be read across runs, and any bound drawn from them is a later decision
+taken against the spread rather than against one measurement.
+
+| Side | What it waits for | Measured |
+| ---- | ----------------- | -------- |
+| The CLI party | The peer's acknowledgement of every frame, then the sentinel onto the wire | under 50 ms |
+| The browser party | The peer to close the data channel | 15-18 s, ending on the no-live-peer exit rather than on the peer's close |
+
+Conditions, over four runs: two parties on one machine over a loopback host
+candidate, six records between them, Chromium against the shipped CLI
+transport, in the development container. A wide-area link and a real dataset
+move the CLI's number with the data still unacknowledged; they do not move the
+browser's, which is not a function of the data.
+
+The browser's number is the asymmetry: a CLI party tears its session down as
+soon as the sentinel has been handed to the wire, and the browser peer's wait
+does not end on a close of the peer's. It ends on the no-live-peer exit, once
+ICE gives up on a peer that has stopped answering. So a completed
+CLI-to-browser exchange spends about sixteen seconds in the drain and raises
+the browser operator's "the connection closed before the partner could confirm"
+notice, on a run whose result is already correct and already on screen. Neither
+the result nor the CLI party's copy is in doubt: the exchange completed on both
+sides, and it is the close signal alone that is absent.
+
 ## ICE
 
 A configured `iceServers` list replaces the built-in STUN default rather than

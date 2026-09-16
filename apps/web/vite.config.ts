@@ -1,6 +1,7 @@
 /// <reference types="vitest/config" />
 import fs from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { defineConfig } from "vite";
 import logLibrary from "loglevel";
@@ -13,10 +14,31 @@ import { ConfigManager } from "./src/utils/serverConfig.ts";
 
 import { registerServer } from "./src/httpServer.ts";
 
+// A type-only import, erased before either config loader resolves anything.
+import type * as liveWebrtcLeg from "./test/liveWebrtc/legCommands.ts";
 import type { Plugin, PreviewServer, ViteDevServer } from "vite";
 
 const configManager = new ConfigManager();
 const config = await configManager.load({ dotenv: true });
+
+// Set by a vitest run, and by nothing a dev server or a build does.
+const underVitest = !!process.env.VITEST;
+
+// The Node half of the live CLI-to-browser WebRTC leg, registered as browser
+// commands on the `live-webrtc` project below. It lives in the test tree, which
+// the image's builder stage does not copy (Dockerfile), and the config loader
+// BUNDLES this file: every literal specifier in it is resolved, a dynamic
+// import's included, taken branch or not. Building the path at runtime leaves
+// the loader nothing to resolve (scripts/check-web-config-image-load.mjs).
+const liveWebrtcLegCommands = underVitest
+  ? (
+      (await import(
+        pathToFileURL(
+          path.resolve(import.meta.dirname, "test/liveWebrtc/legCommands.ts"),
+        ).href
+      )) as typeof liveWebrtcLeg
+    ).liveWebrtcLegCommands
+  : {};
 
 logLibrary.setDefaultLevel(config.LOG_LEVEL);
 
@@ -132,10 +154,6 @@ async function warmPeerSignaling(port: number): Promise<void> {
 }
 
 export default defineConfig((_configEnv) => {
-  // Vitest evaluates this config but starts no dev/preview server, so the server
-  // snagger plugins below have no httpServer to capture (the hook would just warn
-  // "http server is undefined"). Skip them under test.
-  const underVitest = !!process.env.VITEST;
   return {
     server: {
       host: "127.0.0.1",
@@ -296,6 +314,45 @@ export default defineConfig((_configEnv) => {
           // reloads the run on a cold optimizer cache (see psiWorkerWasmEngine).
           optimizeDeps: { include: [psiWorkerWasmEngine] },
         },
+        {
+          test: {
+            include: ["test/liveWebrtc/**/*.{test,spec}.ts"],
+            name: "live-webrtc",
+            // The live CLI-to-browser leg: a real `psilink` process and a real
+            // browser peer completing one WebRTC exchange through the
+            // standalone broker. A project of its own, off every other script,
+            // because it needs the built CLI and minutes of real ICE, DTLS and
+            // WASM work per run -- it runs nightly rather than on a pull
+            // request (.github/workflows/nightly_live_webrtc.yaml, and
+            // docs/TESTING.md for why).
+            //
+            // It stands up no dev server: the broker it meets the CLI at is a
+            // process of its own, on an origin that is NOT this page's, and the
+            // leg's Node side starts it (test/liveWebrtc/legCommands.ts).
+            testTimeout: 420_000,
+            hookTimeout: 120_000,
+            browser: {
+              // The same loopback-candidate reasoning as the browser project
+              // above: the two peers configure a public STUN list they cannot
+              // reach here, so a host candidate is the only one that connects,
+              // and Chromium otherwise obfuscates those as `.local` mDNS names
+              // that do not resolve in a container.
+              provider: playwright({
+                launchOptions: {
+                  args: ["--disable-features=WebRtcHideLocalIpsWithMdns"],
+                },
+              }),
+              headless: true,
+              enabled: true,
+              instances: [{ browser: "chromium" }],
+              // The broker and the `psilink` party the browser half cannot
+              // spawn itself. Registered here because this is where vitest
+              // takes them; the implementations are in the test tree.
+              commands: liveWebrtcLegCommands,
+            },
+          },
+          resolve: { alias: srcAliases },
+        },
       ],
     },
     plugins: [
@@ -307,6 +364,9 @@ export default defineConfig((_configEnv) => {
       }),
       nitroV2Plugin({ preset: "node-server" }),
       viteReact(),
+      // Vitest evaluates this config but starts no dev/preview server, so the
+      // server snagger plugins here have no httpServer to capture (the hook
+      // would just warn "http server is undefined"). Skip them under test.
       ...(underVitest
         ? []
         : [
