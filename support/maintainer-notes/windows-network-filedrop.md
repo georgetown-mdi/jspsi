@@ -698,6 +698,11 @@ comma.
 
 ## If you pick this up
 
+The machine the pass in the State section asks for -- Docker Desktop, a share
+served by another host, an interactive desktop session -- is specified in
+[windows-test-vm-handoff.md](windows-test-vm-handoff.md), as a virtual machine
+on the maintainer's own cluster.
+
 Settling the DFS question needs a domain-joined machine with a real namespace
 and an elevated PowerShell session, since `Get-SmbConnection` is readable only
 to an Administrator.
