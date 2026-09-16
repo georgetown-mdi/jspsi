@@ -275,7 +275,7 @@ export function parseManagedExchangeArtifact(
  * installs the one owner. The embedded document is parsed back through
  * {@link parseSensitiveYaml} and {@link parseExchangeSpec}, the secret and
  * `expires` come from the key pair, and the local fields pass through
- * unchanged. Built through {@link buildManagedExchangeRecord} -- a fresh `id`, the v1
+ * unchanged. Built through {@link buildManagedExchangeRecord} -- a fresh `id`, the v2
  * `schemaVersion`, re-validated through the record schema -- so a malformed
  * document or secret is rejected and nothing is installed. Holds no
  * input-file handle: the first run re-acquires one by selection.

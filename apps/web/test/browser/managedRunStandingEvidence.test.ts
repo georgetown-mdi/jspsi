@@ -21,6 +21,7 @@ import {
 } from "@psi/managed/managedExchangeStore";
 import { failedRun, missedRun } from "@psi/managed/managedRunRotate";
 import { ManagedRunSurface } from "@recurring/ManagedRunSurface";
+import { STANDING_CONDITION_CLEAR_LABEL } from "@recurring/managedStandingConditionModel";
 
 import { createAppMount, flushPendingUpdates } from "./renderApp";
 
@@ -261,5 +262,63 @@ describe("a standing condition at the next visit", () => {
     await expect
       .element(page.getByRole("button", { name: "Create a fresh invitation" }))
       .toBeInTheDocument();
+  });
+});
+
+describe("a cleared standing condition beside this visit's own failure", () => {
+  test("keeps its re-invite after a run in the same visit no-shows", async () => {
+    // Clearing the condition settles what an earlier run raised; it does not
+    // re-establish the secret, so the re-invite it offers stands whatever this
+    // visit's run then does. The storage condition is raised by a run two stamps
+    // back, and the no-show stamp over it is the state a page reads.
+    const created = await createManagedExchange(
+      newExchange({ inputFileHandle: await inputHandle() }),
+    );
+    const failedAt = Date.now() - 120_000;
+    await recordManagedExchangeLastRun(
+      created.id,
+      failedRun(failedAt, "failed", "storage"),
+      failedAt,
+    );
+    const missedAt = Date.now() - 60_000;
+    await recordManagedExchangeLastRun(
+      created.id,
+      missedRun(missedAt),
+      missedAt,
+    );
+
+    app.render(createElement(ManagedRunSurface, { id: created.id }));
+    const clear = page.getByRole("button", {
+      name: STANDING_CONDITION_CLEAR_LABEL,
+    });
+    await expect.element(clear).toBeInTheDocument();
+    await clear.click();
+    await vi.waitFor(async () => {
+      expect((await getManagedExchange(created.id))?.standingCondition).toEqual(
+        NO_STANDING_CONDITION,
+      );
+    });
+    // The section has settled: its acknowledge control is spent and gone, and the
+    // re-invite below it is what the section now holds on its own.
+    await expect.element(clear).not.toBeInTheDocument();
+    await expect
+      .element(page.getByRole("button", { name: "Create a fresh invitation" }))
+      .toBeInTheDocument();
+
+    const runButton = page.getByRole("button", { name: "Run exchange" });
+    await expect.element(runButton).toBeEnabled();
+    await runButton.click();
+    await expect
+      .element(page.getByText("Your partner did not arrive"))
+      .toBeInTheDocument();
+    await flushPendingUpdates();
+
+    await expect
+      .element(page.getByRole("button", { name: "Create a fresh invitation" }))
+      .toBeInTheDocument();
+    // The live state really is the benign no-show, whose own recovery is nothing
+    // at all: without this the assertion above would pass against a failure that
+    // offers the re-invite itself.
+    expect(app.container.textContent).toContain("not a fault on this device");
   });
 });

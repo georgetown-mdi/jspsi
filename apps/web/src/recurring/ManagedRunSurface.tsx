@@ -689,18 +689,18 @@ export function ManagedRunSurface({ id }: { id: string }) {
 
   // The standing condition as the page would render it, and whether it renders at
   // all. A live run's own failure already speaks for this run, and where it landed
-  // on the state the condition resolves to it carries that recovery too -- so the
+  // on the state the condition resolves to it holds that recovery too -- so the
   // section stands down rather than putting a second re-invite beside the first.
   // It returns as soon as the live state is something else, and at the next visit.
+  // Once cleared it holds its place whatever this visit's run then does.
   const standingView =
     record !== undefined
       ? managedStandingConditionView(record, localState)
       : undefined;
   const showStanding =
     reinvite === undefined &&
-    (standingSettled
-      ? failure === undefined
-      : standingView !== undefined && standingView.tier !== failure?.kind);
+    (standingSettled ||
+      (standingView !== undefined && standingView.tier !== failure?.kind));
 
   // Persist an in-place edit to the local fields (label, max-token-age policy)
   // through the single-transaction store path, then adopt the returned record so
