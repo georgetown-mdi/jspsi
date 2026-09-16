@@ -28,6 +28,8 @@
 
 import { dateTimeLabel } from "../formatting";
 
+import { raisedStandingCondition } from "./managedExchangeRecord";
+
 import type { ManagedExchangeRecord } from "./managedExchangeRecord";
 
 /** The two outcomes the operator picks after the partner replies -- the two-outcome
@@ -78,7 +80,7 @@ export function composeConfirmationMessage(
   // The standing condition's instant first: where one stands, the handshake the
   // operator is asking about is the one that raised it, and `lastRun` may since
   // hold a no-show or a success that is not what they are confirming.
-  const at = record.standingCondition?.since ?? record.lastRun?.at;
+  const at = raisedStandingCondition(record)?.since ?? record.lastRun?.at;
   const when = at !== undefined ? dateTimeLabel(new Date(at)) : undefined;
   const failedLine =
     when !== undefined

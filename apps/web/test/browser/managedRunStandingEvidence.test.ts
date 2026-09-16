@@ -10,6 +10,10 @@ import { createElement } from "react";
 import "@mantine/core/styles.css";
 
 import {
+  NO_STANDING_CONDITION,
+  composeManagedExchangeFile,
+} from "@psi/managed/managedExchangeRecord";
+import {
   clearManagedExchanges,
   createManagedExchange,
   getManagedExchange,
@@ -17,7 +21,6 @@ import {
 } from "@psi/managed/managedExchangeStore";
 import { failedRun, missedRun } from "@psi/managed/managedRunRotate";
 import { ManagedRunSurface } from "@recurring/ManagedRunSurface";
-import { composeManagedExchangeFile } from "@psi/managed/managedExchangeRecord";
 
 import { createAppMount, flushPendingUpdates } from "./renderApp";
 
@@ -249,8 +252,8 @@ describe("a standing condition at the next visit", () => {
     await confirmed.click();
 
     await vi.waitFor(async () => {
-      expect(await getManagedExchange(created.id)).not.toHaveProperty(
-        "standingCondition",
+      expect((await getManagedExchange(created.id))?.standingCondition).toEqual(
+        NO_STANDING_CONDITION,
       );
     });
     // The re-invite stays offered: settling the condition is not the same act as

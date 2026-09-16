@@ -17,6 +17,7 @@
  */
 
 import { managedStandingConditionTier } from "@psi/managed/managedFailureTiers";
+import { raisedStandingCondition } from "@psi/managed/managedExchangeRecord";
 
 import { dateTimeLabel } from "@psi/formatting";
 
@@ -76,7 +77,7 @@ export function managedStandingConditionView(
   record: ManagedExchangeRecord,
   local: ManagedLocalState | undefined,
 ): ManagedStandingConditionView | undefined {
-  const condition = record.standingCondition;
+  const condition = raisedStandingCondition(record);
   if (condition === undefined) return undefined;
   const when = dateTimeLabel(new Date(condition.since));
   const tier = managedStandingConditionTier(condition, local);

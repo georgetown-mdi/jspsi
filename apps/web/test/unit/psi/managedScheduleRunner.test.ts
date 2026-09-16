@@ -16,6 +16,7 @@ import {
   ManagedExchangeSpentError,
 } from "@psi/managed/managedExchangeRun";
 import {
+  NO_STANDING_CONDITION,
   applyManagedExchangeLastRun,
   applyManagedExchangeLocalEdits,
   applyManagedExchangeScheduleAdvance,
@@ -688,8 +689,8 @@ describe("a window whose run raised a standing condition", () => {
     await tickManagedSchedules(runner.seams);
 
     expect(runner.advances[0].advance.standingCondition).toBeUndefined();
-    expect(runner.stored.get(record.id)).not.toHaveProperty(
-      "standingCondition",
+    expect(runner.stored.get(record.id)?.standingCondition).toEqual(
+      NO_STANDING_CONDITION,
     );
   });
 

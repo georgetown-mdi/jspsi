@@ -32,13 +32,16 @@ import type {
 import type { ZodType } from "zod";
 
 /**
- * The single recognized `schemaVersion` literal for the v1 record. A reader
+ * The single recognized `schemaVersion` literal for the v2 record. A reader
  * rejects any other value rather than migrating it (the reader-rejects-unknown
- * rule the exchange-record and verification-keys files follow); a future shape
- * change is a new literal under a new version, never a v1 record holding
- * speculative fields.
+ * rule the exchange-record and verification-keys files follow), the v1 literal
+ * among them: a record stored under it has no
+ * {@link ManagedExchangeRecord.standingCondition}, which v2 requires, and its
+ * recovery is re-invite rather than a migration. A later shape change is a new
+ * literal under a new version, never an existing version holding speculative
+ * fields.
  */
-export const MANAGED_EXCHANGE_SCHEMA_VERSION = "psilink-managed-exchange/v1";
+export const MANAGED_EXCHANGE_SCHEMA_VERSION = "psilink-managed-exchange/v2";
 
 /**
  * The single recognized `artifactVersion` literal for the v1 export/import
@@ -167,6 +170,26 @@ export interface ManagedStandingCondition {
   kind: ManagedStandingConditionKind;
 }
 
+/** The `standingCondition` of a record holding none. The field is required, so a
+ * record states that no condition stands rather than leaving the field out, and
+ * a reader never has to tell that state from a record written by something that
+ * did not know the field. */
+export interface ManagedStandingConditionNone {
+  /** The closed enum's unset member; a raised condition takes `"auth"` or
+   * `"storage"`, with the instant that raised it. */
+  kind: "none";
+}
+
+/** What the required `standingCondition` field holds: a raised condition, or the
+ * explicit none form. */
+export type ManagedStandingConditionField =
+  ManagedStandingCondition | ManagedStandingConditionNone;
+
+/** The `standingCondition` value of a record with none standing. */
+export const NO_STANDING_CONDITION: ManagedStandingConditionNone = {
+  kind: "none",
+};
+
 /**
  * A managed exchange record: the minimal state this party's browser retains so a
  * recurring exchange with the same partner over the same terms can run again. It
@@ -174,7 +197,7 @@ export interface ManagedStandingCondition {
  * docs/spec/MANAGED_EXCHANGE_RECORD.md for the field-by-field shape.
  */
 export interface ManagedExchangeRecord {
-  /** The single recognized v1 literal; a reader rejects an unrecognized value
+  /** The single recognized v2 literal; a reader rejects an unrecognized value
    * rather than migrating (see {@link MANAGED_EXCHANGE_SCHEMA_VERSION}). */
   schemaVersion: typeof MANAGED_EXCHANGE_SCHEMA_VERSION;
   /** Locally-generated identifier for this managed exchange, distinct from any
@@ -226,11 +249,11 @@ export interface ManagedExchangeRecord {
   schedule?: ManagedExchangeSchedule;
   /** Run bookkeeping; absent until the first run records an outcome. */
   lastRun?: ManagedExchangeLastRun;
-  /** The unanswered standing condition an `auth` or `storage` failure raised;
-   * absent when none stands. Cleared by the operator's explicit
-   * clear-and-acknowledge, by a re-invite, or with the record itself -- never by
-   * a no-show and never by a successful run alone. */
-  standingCondition?: ManagedStandingCondition;
+  /** The unanswered standing condition an `auth` or `storage` failure raised, or
+   * {@link NO_STANDING_CONDITION} while none stands. Cleared by the operator's
+   * explicit clear-and-acknowledge, by a re-invite, or with the record itself --
+   * never by a no-show and never by a successful run alone. */
+  standingCondition: ManagedStandingConditionField;
 }
 
 /**
@@ -299,6 +322,12 @@ export const standingConditionSchema: ZodType<ManagedStandingCondition> =
     kind: z.enum(["auth", "storage"]),
   });
 
+/** The canonical validator for the record's required `standingCondition` field:
+ * a raised condition, or the none form. The artifact validates the raised shape
+ * alone, its own field being optional and omitted where none stands. */
+export const standingConditionFieldSchema: ZodType<ManagedStandingConditionField> =
+  z.union([standingConditionSchema, z.object({ kind: z.literal("none") })]);
+
 /** The canonical `tokenMaxAgeDays` validator (a positive integer bounded by
  * {@link MAX_TOKEN_MAX_AGE_DAYS}). Exported so the export/import artifact reuses it
  * rather than re-declaring a laxer copy. */
@@ -359,7 +388,7 @@ const ManagedExchangeRecordSchema: ZodType<ManagedExchangeRecord> = z.object({
   tokenMaxAgeDays: tokenMaxAgeDaysSchema.optional(),
   schedule: scheduleSchema.optional(),
   lastRun: lastRunSchema.optional(),
-  standingCondition: standingConditionSchema.optional(),
+  standingCondition: standingConditionFieldSchema,
 });
 
 /**
@@ -368,7 +397,7 @@ const ManagedExchangeRecordSchema: ZodType<ManagedExchangeRecord> = z.object({
  * secret, or a document holding an `authentication` block, rather than migrating
  * or silently accepting -- the reader-rejects-unknown rule.
  *
- * @throws {ZodError} if the value is not a valid v1 record.
+ * @throws {ZodError} if the value is not a valid v2 record.
  */
 export function parseManagedExchangeRecord(
   raw: unknown,
@@ -382,7 +411,7 @@ export function safeParseManagedExchangeRecord(raw: unknown) {
 }
 
 /**
- * A per-entry read of the stored list: the entries that parsed as v1 records, and
+ * A per-entry read of the stored list: the entries that parsed as v2 records, and
  * the stored keys of the entries that did not. The unreadable half is the STORED
  * KEY rather than the entry's own `id`, which a failed parse leaves untrusted --
  * the same reason the diagnostic read's unreadable marker holds the key (see
@@ -456,7 +485,7 @@ export interface ManagedExchangeDiagnosticEssentials {
  * {@link parseManagedExchangeRecord} throws here exactly as it would on the
  * strict read; the caller catches that to mark the entry unreadable.
  *
- * @throws {ZodError} if the value is not a valid v1 record.
+ * @throws {ZodError} if the value is not a valid v2 record.
  */
 export function diagnoseManagedExchangeRecord(
   raw: unknown,
@@ -562,11 +591,12 @@ export interface NewManagedExchange {
 
 /**
  * Build a complete {@link ManagedExchangeRecord} from the caller's fields: assign
- * a fresh `id` and the v1 `schemaVersion`, then validate the whole record through
+ * a fresh `id` and the v2 `schemaVersion`, then validate the whole record through
  * the schema so the label cap, the credential-free document, and the secret
  * format are enforced at write. The optional local fields are attached only when
  * present, so an absent policy is an omitted key rather than an explicit
- * `undefined`.
+ * `undefined`; `standingCondition` is required, so it is always written, holding
+ * {@link NO_STANDING_CONDITION} unless an import supplies one to retain.
  *
  * @throws {ZodError} if the assembled record is invalid (an over-long label, a
  *   malformed secret, a document holding an `authentication` block).
@@ -593,9 +623,7 @@ export function buildManagedExchangeRecord(
     ...(fields.expires !== undefined ? { expires: fields.expires } : {}),
     ...(fields.schedule !== undefined ? { schedule: fields.schedule } : {}),
     ...(fields.lastRun !== undefined ? { lastRun: fields.lastRun } : {}),
-    ...(fields.standingCondition !== undefined
-      ? { standingCondition: fields.standingCondition }
-      : {}),
+    standingCondition: fields.standingCondition ?? NO_STANDING_CONDITION,
   };
   return parseManagedExchangeRecord(record);
 }
@@ -663,7 +691,7 @@ export function applyManagedExchangeReinviteRotation(
   if (rotation.expires === null) delete next.expires;
   else next.expires = rotation.expires;
   delete next.lastRun;
-  delete next.standingCondition;
+  next.standingCondition = NO_STANDING_CONDITION;
   return parseManagedExchangeRecord(next);
 }
 
@@ -729,6 +757,16 @@ export function standingConditionFrom(
   return { since: lastRun.at, kind };
 }
 
+/** The raised condition a record holds, or `undefined` where its
+ * `standingCondition` records that none stands. The one place the none form is
+ * read, so every surface asks the field the same question. */
+export function raisedStandingCondition(
+  record: ManagedExchangeRecord,
+): ManagedStandingCondition | undefined {
+  const condition = record.standingCondition;
+  return condition.kind === "none" ? undefined : condition;
+}
+
 /** Raise a standing condition on a record, unless one already stands or there is
  * none to raise. First raise wins: the standing condition is the one the operator
  * has yet to answer, and answering it is a single act over everything that stood
@@ -737,23 +775,24 @@ function withStandingCondition(
   record: ManagedExchangeRecord,
   condition: ManagedStandingCondition | undefined,
 ): ManagedExchangeRecord {
-  if (condition === undefined || record.standingCondition !== undefined)
+  if (condition === undefined || raisedStandingCondition(record) !== undefined)
     return record;
   return { ...record, standingCondition: condition };
 }
 
 /** Apply the operator's clear-and-acknowledge to a record, producing a validated
- * new record with only `standingCondition` dropped -- the run bookkeeping, the
- * secret, and the document remain untouched. A record holding none is returned
- * unchanged. The input record is not mutated.
+ * new record whose `standingCondition` is back to {@link NO_STANDING_CONDITION}
+ * -- the run bookkeeping, the secret, and the document remain untouched. A record
+ * holding none is returned unchanged. The input record is not mutated.
  *
  * @throws {ZodError} if the stored record is invalid. */
 export function applyManagedExchangeStandingConditionCleared(
   record: ManagedExchangeRecord,
 ): ManagedExchangeRecord {
-  const next: ManagedExchangeRecord = { ...record };
-  delete next.standingCondition;
-  return parseManagedExchangeRecord(next);
+  return parseManagedExchangeRecord({
+    ...record,
+    standingCondition: NO_STANDING_CONDITION,
+  });
 }
 
 /** Whether two stored instants denote the same moment, compared as parsed

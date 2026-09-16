@@ -10,6 +10,7 @@ import {
   MANAGED_EXCHANGE_SCHEMA_VERSION,
   MAX_LABEL_LENGTH,
   MAX_SCHEDULE_INTERVAL_DAYS,
+  NO_STANDING_CONDITION,
   applyManagedExchangeInputHandle,
   applyManagedExchangeLastRun,
   applyManagedExchangeLocalEdits,
@@ -204,6 +205,7 @@ describe("no-input-content invariant", () => {
       "schemaVersion",
       "sharedSecret",
       "side",
+      "standingCondition",
     ]);
   });
 });
@@ -211,15 +213,35 @@ describe("no-input-content invariant", () => {
 describe("parseManagedExchangeRecord reader-rejects-unknown", () => {
   test("rejects an unrecognized schemaVersion rather than migrating", () => {
     const record = buildManagedExchangeRecord(newExchange());
-    const future = { ...record, schemaVersion: "psilink-managed-exchange/v2" };
+    const future = { ...record, schemaVersion: "psilink-managed-exchange/v3" };
     const result = safeParseManagedExchangeRecord(future);
     expect(result.success).toBe(false);
     expect(() => parseManagedExchangeRecord(future)).toThrow();
   });
 
-  test("accepts the recognized v1 schemaVersion", () => {
+  test("accepts the recognized v2 schemaVersion", () => {
     const record = buildManagedExchangeRecord(newExchange());
     expect(safeParseManagedExchangeRecord(record).success).toBe(true);
+  });
+
+  test("rejects a record stored under the v1 literal", () => {
+    // The shape a v1 record has: the older literal, and no `standingCondition`.
+    // The recovery is re-invite, so the reader refuses it rather than filling in
+    // the field.
+    const stored: Record<string, unknown> = {
+      ...buildManagedExchangeRecord(newExchange()),
+      schemaVersion: "psilink-managed-exchange/v1",
+    };
+    delete stored.standingCondition;
+    expect(safeParseManagedExchangeRecord(stored).success).toBe(false);
+  });
+
+  test("rejects a record with no standingCondition: the field is required", () => {
+    const stored: Record<string, unknown> = {
+      ...buildManagedExchangeRecord(newExchange()),
+    };
+    delete stored.standingCondition;
+    expect(safeParseManagedExchangeRecord(stored).success).toBe(false);
   });
 
   test("reads back every recorded failure kind, the terms shortfall included", () => {
@@ -1091,7 +1113,7 @@ describe("diagnoseManagedExchangeRecord", () => {
     expect(() =>
       diagnoseManagedExchangeRecord({
         ...record,
-        schemaVersion: "psilink-managed-exchange/v2",
+        schemaVersion: "psilink-managed-exchange/v3",
       }),
     ).toThrow();
   });
@@ -1149,7 +1171,7 @@ describe("partitionReadableManagedExchanges", () => {
     const good = buildManagedExchangeRecord(newExchange({ label: "Good" }));
     const read = partitionReadableManagedExchanges(
       ["future", good.id],
-      [{ ...good, schemaVersion: "psilink-managed-exchange/v2" }, good],
+      [{ ...good, schemaVersion: "psilink-managed-exchange/v3" }, good],
     );
 
     expect(read.records.map((record) => record.id)).toEqual([good.id]);
@@ -1309,7 +1331,7 @@ describe("the standing condition across the bookkeeping writes", () => {
       sharedSecret: generateSharedSecret(),
       expires: null,
     });
-    expect(reinvited).not.toHaveProperty("standingCondition");
+    expect(reinvited.standingCondition).toEqual(NO_STANDING_CONDITION);
     expect(reinvited).not.toHaveProperty("lastRun");
   });
 
@@ -1324,7 +1346,7 @@ describe("the standing condition across the bookkeeping writes", () => {
   test("the operator's acknowledgement clears it and nothing else", () => {
     const record = withCondition();
     const cleared = applyManagedExchangeStandingConditionCleared(record);
-    expect(cleared).not.toHaveProperty("standingCondition");
+    expect(cleared.standingCondition).toEqual(NO_STANDING_CONDITION);
     expect(cleared.lastRun).toEqual(record.lastRun);
     expect(cleared.sharedSecret).toBe(record.sharedSecret);
     // The input record is not mutated.
@@ -1334,8 +1356,8 @@ describe("the standing condition across the bookkeeping writes", () => {
   test("clearing a record that holds none is a no-op", () => {
     const record = buildManagedExchangeRecord(newExchange());
     expect(
-      applyManagedExchangeStandingConditionCleared(record),
-    ).not.toHaveProperty("standingCondition");
+      applyManagedExchangeStandingConditionCleared(record).standingCondition,
+    ).toEqual(NO_STANDING_CONDITION);
   });
 
   test("a schedule advance carries a condition its window's run could not persist", () => {

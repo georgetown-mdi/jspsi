@@ -8,6 +8,7 @@ import {
 
 import {
   MANAGED_EXCHANGE_ARTIFACT_VERSION,
+  NO_STANDING_CONDITION,
   buildManagedExchangeRecord,
   composeManagedExchangeFile,
   keyFileFieldsSchema,
@@ -121,6 +122,15 @@ describe("export/import round-trip", () => {
       encodeManagedExchangeArtifact(withCondition),
     );
     expect(restored.standingCondition).toEqual(withCondition.standingCondition);
+  });
+
+  test("a record with none standing round-trips to the none form", () => {
+    const record = buildManagedExchangeRecord(newExchange());
+    const artifact = encodeManagedExchangeArtifact(record);
+    expect(artifact.local).not.toHaveProperty("standingCondition");
+    expect(reconstructRecordFromArtifact(artifact).standingCondition).toEqual(
+      NO_STANDING_CONDITION,
+    );
   });
 
   test("serialize then importManagedExchangeArtifact round-trips from bytes", () => {

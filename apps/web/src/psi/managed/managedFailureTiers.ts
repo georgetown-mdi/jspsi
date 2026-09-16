@@ -15,6 +15,7 @@
  */
 
 import { managedExchangeLapsed } from "./managedExpiry";
+import { raisedStandingCondition } from "./managedExchangeRecord";
 
 import type {
   ManagedExchangeRecord,
@@ -158,7 +159,7 @@ export function readManagedFailure(
   if (managedExchangeLapsed(record, now))
     return { tier: "expired", standing: false };
   const recorded = recordedFailureTier(record, local);
-  const condition = record.standingCondition;
+  const condition = raisedStandingCondition(record);
   if (condition === undefined) return { tier: recorded, standing: false };
   if (recorded === "none" || recorded === "missed")
     return {

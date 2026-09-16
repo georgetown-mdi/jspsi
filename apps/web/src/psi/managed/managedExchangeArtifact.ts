@@ -56,6 +56,7 @@ import {
   keyFileFieldsSchema,
   lastRunSchema,
   parseManagedExchangeRecord,
+  raisedStandingCondition,
   scheduleSchema,
   standingConditionSchema,
   tokenMaxAgeDaysSchema,
@@ -102,9 +103,10 @@ interface ManagedExchangeArtifactLocal {
   schedule?: ManagedExchangeSchedule;
   /** The run bookkeeping retained from the imported record. */
   lastRun?: ManagedExchangeLastRun;
-  /** The standing condition the source record held, unanswered. It travels
-   * because an export that dropped it would be a fourth way to clear one, and
-   * only the operator's acknowledgement, a re-invite, and a delete may. */
+  /** The standing condition the source record held, unanswered; omitted where
+   * none stood. It travels because an export that dropped it would be a fourth
+   * way to clear one, and only the operator's acknowledgement, a re-invite, and
+   * a delete may. */
   standingCondition?: ManagedStandingCondition;
   /** The max-token-age policy, when the operator opted in. */
   tokenMaxAgeDays?: number;
@@ -184,6 +186,7 @@ export function keyFileFieldsFromRecord(
 export function encodeManagedExchangeArtifact(
   record: ManagedExchangeRecord,
 ): ManagedExchangeArtifact {
+  const standing = raisedStandingCondition(record);
   return {
     artifactVersion: MANAGED_EXCHANGE_ARTIFACT_VERSION,
     exchangeDocument: serializeExchangeDocument(record.exchangeFile),
@@ -193,9 +196,7 @@ export function encodeManagedExchangeArtifact(
       side: record.side,
       ...(record.schedule !== undefined ? { schedule: record.schedule } : {}),
       ...(record.lastRun !== undefined ? { lastRun: record.lastRun } : {}),
-      ...(record.standingCondition !== undefined
-        ? { standingCondition: record.standingCondition }
-        : {}),
+      ...(standing !== undefined ? { standingCondition: standing } : {}),
       ...(record.tokenMaxAgeDays !== undefined
         ? { tokenMaxAgeDays: record.tokenMaxAgeDays }
         : {}),

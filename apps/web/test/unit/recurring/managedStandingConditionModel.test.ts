@@ -3,6 +3,7 @@ import { generateSharedSecret, getDefaultLinkageTerms } from "@psilink/core";
 
 import {
   MANAGED_EXCHANGE_SCHEMA_VERSION,
+  NO_STANDING_CONDITION,
   composeManagedExchangeFile,
 } from "@psi/managed/managedExchangeRecord";
 import {
@@ -38,6 +39,7 @@ function record(
     }),
     side: "inviter",
     sharedSecret: generateSharedSecret(),
+    standingCondition: NO_STANDING_CONDITION,
     ...overrides,
   };
 }

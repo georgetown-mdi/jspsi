@@ -18,6 +18,7 @@ import {
 } from "@psi/managed/managedFailureTiers";
 import { deriveManagedBackupState } from "@psi/managed/managedBackupState";
 import { managedExchangeLapsed } from "@psi/managed/managedExpiry";
+import { raisedStandingCondition } from "@psi/managed/managedExchangeRecord";
 
 import { dateLabel, dateTimeLabel } from "@psi/formatting";
 import {
@@ -170,7 +171,7 @@ function lastRunStatus(
   now: number,
 ): string {
   const reading = readManagedFailure(record, local, now);
-  const condition = record.standingCondition;
+  const condition = raisedStandingCondition(record);
   if (reading.standing && condition !== undefined)
     return standingStatus(
       managedStandingConditionTier(condition, local),
