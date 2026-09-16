@@ -953,6 +953,18 @@ Describe 'The launcher flow, driven against a stub engine' {
                 (($output.Substring([Math]::Max(0, $output.Length - 300))) -replace '\s+', ' ')
         }
 
+        function Get-ConsoleCalls {
+            <#  The recorded calls that started the console. 'serve' is matched
+                as the last argument of the run, which 'The console argument
+                vector' above holds, rather than anywhere in the line: the
+                engine's own 'version --format {{.Server.Os}}' and a volume made
+                for a file server both hold the word as text and start nothing. #>
+            param([string] $Calls)
+
+            return @($Calls -split '\r?\n' | ForEach-Object { $_.Trim() } |
+                    Where-Object { $_ -and (($_ -split '\s+')[-1] -eq 'serve') })
+        }
+
         # An engine that records the argument vector it is handed and answers
         # every doctor battery with a verdict that blocks nothing. A .cmd rather
         # than something this session could run itself: the launcher reaches its
@@ -1124,7 +1136,7 @@ Describe 'The launcher flow, driven against a stub engine' {
 
         $created = @($calls -split '\r?\n' | Where-Object { $_ -like '*volume create*' }) -join ' :: '
         $checked = @($calls -split '\r?\n' | Where-Object { $_ -like '*doctor mount*' }) -join ' :: '
-        $served = @($calls -split '\r?\n' | Where-Object { $_ -like '*serve*' }) -join ' :: '
+        $served = @(Get-ConsoleCalls -Calls $calls) -join ' :: '
 
         $created | Should -BeLike "*$volumeName*" -Because $shape
         $checked | Should -BeLike "*--volume ${volumeName}:/rz*" -Because $shape
@@ -1162,7 +1174,7 @@ Describe 'The launcher flow, driven against a stub engine' {
         $created = @($calls -split '\r?\n' | Where-Object { $_ -like '*volume create*' }) -join ' :: '
         $probed = @($calls -split '\r?\n' | Where-Object { $_ -like '*doctor probe*' })
         $checked = @($calls -split '\r?\n' | Where-Object { $_ -like '*doctor mount*' }) -join ' :: '
-        $served = @($calls -split '\r?\n' | Where-Object { $_ -like '*serve*' }) -join ' :: '
+        $served = @(Get-ConsoleCalls -Calls $calls) -join ' :: '
 
         # One volume, over the folder that holds both rather than over either.
         @($calls -split '\r?\n' | Where-Object { $_ -like '*volume create*' }).Count |
@@ -1206,7 +1218,7 @@ Describe 'The launcher flow, driven against a stub engine' {
         $output | Should -Match 'The console is at' -Because $shape
 
         $checked = @($calls -split '\r?\n' | Where-Object { $_ -like '*doctor mount*' })
-        $served = @($calls -split '\r?\n' | Where-Object { $_ -like '*serve*' }) -join ' :: '
+        $served = @(Get-ConsoleCalls -Calls $calls) -join ' :: '
 
         $checked.Count | Should -Be 2 -Because $shape
         $calls | Should -Not -BeLike '*volume create*' -Because $shape
@@ -1238,7 +1250,8 @@ Describe 'The launcher flow, driven against a stub engine' {
         $run.Exit | Should -Be 1 -Because $shape
         $output | Should -BeLike '*Only one of the two folders shared with your partner*' -Because $shape
         $output | Should -BeLike '*-RendezvousDir*' -Because $shape
-        ([string] $run.Calls) | Should -Not -BeLike '*serve*' -Because $shape
+        (@(Get-ConsoleCalls -Calls ([string] $run.Calls)) -join ' :: ') |
+            Should -BeNullOrEmpty -Because $shape
     }
 
     It 'refuses a pair whose folders are one inside the other' {
@@ -1257,7 +1270,8 @@ Describe 'The launcher flow, driven against a stub engine' {
         $run.TimedOut | Should -BeFalse -Because $shape
         $run.Exit | Should -Be 1 -Because $shape
         $output | Should -BeLike '*inside the other*' -Because $shape
-        ([string] $run.Calls) | Should -Not -BeLike '*serve*' -Because $shape
+        (@(Get-ConsoleCalls -Calls ([string] $run.Calls)) -join ' :: ') |
+            Should -BeNullOrEmpty -Because $shape
     }
 
     It 'names the folder for the console with no setup script beside it' {
@@ -1302,7 +1316,7 @@ Describe 'The launcher flow, driven against a stub engine' {
         $output | Should -BeLike '*Setup-PsilinkFileDrop.ps1 is not in this folder*' -Because $shape
         $output | Should -Match 'The console is at' -Because $shape
 
-        $served = @($calls -split '\r?\n' | Where-Object { $_ -like '*serve*' }) -join ' :: '
+        $served = @(Get-ConsoleCalls -Calls $calls) -join ' :: '
         $served | Should -BeLike '*JOB_RENDEZVOUS_NAME=agency-a-agency-b*' -Because $shape
     }
 
@@ -1333,7 +1347,7 @@ Describe 'The launcher flow, driven against a stub engine' {
         $output | Should -BeLike '*DFS tab*' -Because $shape
         @($calls -split '\r?\n' | Where-Object { $_ -like '*volume create*' }).Count |
             Should -Be 1 -Because $shape
-        $calls | Should -Not -BeLike '*serve*' -Because $shape
+        (@(Get-ConsoleCalls -Calls $calls) -join ' :: ') | Should -BeNullOrEmpty -Because $shape
 
         $output | Should -BeLike '*cleartext*' -Because $shape
         $output | Should -BeLike "*volume rm $volumeName*" -Because $shape
@@ -1371,7 +1385,7 @@ Describe 'The launcher flow, driven against a stub engine' {
         $checked = @($calls -split '\r?\n' | Where-Object { $_ -like '*doctor mount*' })
         $checked.Count | Should -Be 1 -Because $shape
         $checked[0] | Should -BeLike '*doctor mount /rz/from-clinic*' -Because $shape
-        $calls | Should -Not -BeLike '*serve*' -Because $shape
+        (@(Get-ConsoleCalls -Calls $calls) -join ' :: ') | Should -BeNullOrEmpty -Because $shape
 
         $output | Should -BeLike '*cleartext*' -Because $shape
         $output | Should -BeLike "*volume rm $volumeName*" -Because $shape
