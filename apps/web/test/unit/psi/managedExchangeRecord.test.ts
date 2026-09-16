@@ -17,12 +17,14 @@ import {
   applyManagedExchangeReinviteRotation,
   applyManagedExchangeRotation,
   applyManagedExchangeScheduleAdvance,
+  applyManagedExchangeStandingConditionCleared,
   buildManagedExchangeRecord,
   composeManagedExchangeFile,
   diagnoseManagedExchangeRecord,
   parseManagedExchangeRecord,
   partitionReadableManagedExchanges,
   safeParseManagedExchangeRecord,
+  standingConditionFrom,
 } from "@psi/managed/managedExchangeRecord";
 import { withTimeZone } from "../../utils/hostTimeZone";
 
@@ -30,6 +32,7 @@ import type {
   ManagedExchangeLastRun,
   ManagedExchangeRecord,
   ManagedExchangeSchedule,
+  ManagedStandingCondition,
   NewManagedExchange,
 } from "@psi/managed/managedExchangeRecord";
 import type { WebRTCExchangeLocator } from "@psilink/core";
@@ -1169,5 +1172,220 @@ describe("partitionReadableManagedExchanges", () => {
 
     expect(read.records).toEqual([record]);
     expect(read.unreadableIds).toEqual([]);
+  });
+});
+
+// The standing condition: raised by the two failure kinds whose remedy is
+// out-of-band, cleared by the operator's acknowledgement, by a re-invite, and by
+// deleting the record -- never by a stamp, which is the whole point of keeping it
+// beside `lastRun` rather than inside it.
+
+describe("standingConditionFrom", () => {
+  const at = "2026-07-14T12:00:00.000Z";
+
+  test("a failed-closed handshake and a failed rotation persist raise one", () => {
+    expect(
+      standingConditionFrom({ at, outcome: "failed", failureKind: "auth" }),
+    ).toEqual({ since: at, kind: "auth" });
+    expect(
+      standingConditionFrom({ at, outcome: "failed", failureKind: "storage" }),
+    ).toEqual({ since: at, kind: "storage" });
+  });
+
+  test("every other outcome raises none", () => {
+    // Each of these is answered by an act on this device, or by nothing at all,
+    // so `lastRun` accounts for it whole.
+    const kinds: Array<ManagedExchangeLastRun["failureKind"]> = [
+      "transport",
+      "custody-unreadable",
+      "input",
+      "terms-shortfall",
+      "consent",
+      "handed-off",
+      "cancelled",
+    ];
+    for (const failureKind of kinds)
+      expect(
+        standingConditionFrom({ at, outcome: "failed", failureKind }),
+      ).toBeUndefined();
+    expect(standingConditionFrom({ at, outcome: "missed" })).toBeUndefined();
+    expect(standingConditionFrom({ at, outcome: "succeeded" })).toBeUndefined();
+  });
+});
+
+describe("the standing condition across the bookkeeping writes", () => {
+  const raisedAt = "2026-07-14T12:00:00.000Z";
+  const laterAt = "2026-07-14T13:00:00.000Z";
+  const standing: ManagedStandingCondition = { since: raisedAt, kind: "auth" };
+
+  function withCondition(): ManagedExchangeRecord {
+    return applyManagedExchangeLastRun(
+      buildManagedExchangeRecord(newExchange({ schedule })),
+      { at: raisedAt, outcome: "failed", failureKind: "auth" },
+      Date.parse(raisedAt),
+    );
+  }
+
+  test("a failed handshake raises it beside its own stamp", () => {
+    const record = withCondition();
+    expect(record.standingCondition).toEqual(standing);
+    expect(record.lastRun?.failureKind).toBe("auth");
+  });
+
+  test("a no-show stamp replaces the entry and leaves the condition standing", () => {
+    // The stamp that consumed the evidence before this field existed: it holds no
+    // failure kind of its own, so the record would read as a benign no-show.
+    const missed: ManagedExchangeLastRun = { at: laterAt, outcome: "missed" };
+    const after = applyManagedExchangeLastRun(
+      withCondition(),
+      missed,
+      Date.parse(laterAt),
+    );
+    expect(after.lastRun).toEqual(missed);
+    expect(after.standingCondition).toEqual(standing);
+  });
+
+  test("a no-show rotates nothing, so it cannot clear a rotation-derived marker", () => {
+    // The invariant the carry-forward leans on. A clear runs off a rotation write
+    // or the operator's own act, and this write reaches neither: the secret, the
+    // bound, and the condition all come through a no-show untouched.
+    const record = withCondition();
+    const after = applyManagedExchangeLastRun(
+      record,
+      { at: laterAt, outcome: "missed" },
+      Date.parse(laterAt),
+    );
+    expect(after.sharedSecret).toBe(record.sharedSecret);
+    expect(after.expires).toBe(record.expires);
+    expect(after.standingCondition).toEqual(standing);
+  });
+
+  test("a successful run advances the stamp and does not settle the condition", () => {
+    const after = applyManagedExchangeLastRun(
+      withCondition(),
+      { at: laterAt, outcome: "succeeded" },
+      Date.parse(laterAt),
+    );
+    expect(after.lastRun?.outcome).toBe("succeeded");
+    expect(after.standingCondition).toEqual(standing);
+  });
+
+  test("the first condition stands; a later one leaves it as it is", () => {
+    const after = applyManagedExchangeLastRun(
+      withCondition(),
+      { at: laterAt, outcome: "failed", failureKind: "storage" },
+      Date.parse(laterAt),
+    );
+    expect(after.standingCondition).toEqual(standing);
+  });
+
+  test("it is raised even where the write rules drop the entry that raised it", () => {
+    // The rules choose which of two runs' stamps the record keeps; the condition is
+    // not a stamp but evidence nobody has answered, so a run that met one raises it
+    // whether or not its entry lands.
+    const succeeded = applyManagedExchangeLastRun(
+      buildManagedExchangeRecord(newExchange()),
+      { at: laterAt, outcome: "succeeded" },
+      Date.parse(laterAt),
+    );
+    const after = applyManagedExchangeLastRun(
+      succeeded,
+      {
+        at: "2026-07-14T13:30:00.000Z",
+        outcome: "failed",
+        failureKind: "auth",
+      },
+      Date.parse(raisedAt),
+    );
+    expect(after.lastRun?.outcome).toBe("succeeded");
+    expect(after.standingCondition).toEqual({
+      since: "2026-07-14T13:30:00.000Z",
+      kind: "auth",
+    });
+  });
+
+  test("a re-invite drops it with the run bookkeeping", () => {
+    const reinvited = applyManagedExchangeReinviteRotation(withCondition(), {
+      sharedSecret: generateSharedSecret(),
+      expires: null,
+    });
+    expect(reinvited).not.toHaveProperty("standingCondition");
+    expect(reinvited).not.toHaveProperty("lastRun");
+  });
+
+  test("a run's own rotation does not drop it: only the re-invite recovery does", () => {
+    const rotated = applyManagedExchangeRotation(withCondition(), {
+      sharedSecret: generateSharedSecret(),
+      expires: null,
+    });
+    expect(rotated.standingCondition).toEqual(standing);
+  });
+
+  test("the operator's acknowledgement clears it and nothing else", () => {
+    const record = withCondition();
+    const cleared = applyManagedExchangeStandingConditionCleared(record);
+    expect(cleared).not.toHaveProperty("standingCondition");
+    expect(cleared.lastRun).toEqual(record.lastRun);
+    expect(cleared.sharedSecret).toBe(record.sharedSecret);
+    // The input record is not mutated.
+    expect(record.standingCondition).toEqual(standing);
+  });
+
+  test("clearing a record that holds none is a no-op", () => {
+    const record = buildManagedExchangeRecord(newExchange());
+    expect(
+      applyManagedExchangeStandingConditionCleared(record),
+    ).not.toHaveProperty("standingCondition");
+  });
+
+  test("a schedule advance carries a condition its window's run could not persist", () => {
+    // The window that counts no miss at all: the store refused the rotation write
+    // and the run's own bookkeeping write, then answered this one.
+    const record = buildManagedExchangeRecord(newExchange({ schedule }));
+    const advanced = applyManagedExchangeScheduleAdvance(record, {
+      schedule: {
+        ...schedule,
+        nextWindow: "2026-01-20T14:00:00.000Z",
+        consecutiveMisses: schedule.consecutiveMisses,
+      },
+      fromNextWindow: schedule.nextWindow,
+      fromConsecutiveMisses: schedule.consecutiveMisses,
+      standingCondition: { since: raisedAt, kind: "storage" },
+    });
+    expect(advanced.standingCondition).toEqual({
+      since: raisedAt,
+      kind: "storage",
+    });
+    expect(advanced).not.toHaveProperty("lastRun");
+  });
+
+  test("the advance does not replace a condition the run's own write already raised", () => {
+    const advanced = applyManagedExchangeScheduleAdvance(withCondition(), {
+      schedule: {
+        ...schedule,
+        nextWindow: "2026-01-20T14:00:00.000Z",
+        consecutiveMisses: schedule.consecutiveMisses,
+      },
+      fromNextWindow: schedule.nextWindow,
+      fromConsecutiveMisses: schedule.consecutiveMisses,
+      standingCondition: { since: laterAt, kind: "storage" },
+    });
+    expect(advanced.standingCondition).toEqual(standing);
+  });
+
+  test("a stored condition survives the record's own parse", () => {
+    const parsed = parseManagedExchangeRecord({
+      ...buildManagedExchangeRecord(newExchange()),
+      standingCondition: standing,
+    });
+    expect(parsed.standingCondition).toEqual(standing);
+  });
+
+  test("an unknown condition kind is rejected rather than read with the kind dropped", () => {
+    const result = safeParseManagedExchangeRecord({
+      ...buildManagedExchangeRecord(newExchange()),
+      standingCondition: { since: raisedAt, kind: "tampered" },
+    });
+    expect(result.success).toBe(false);
   });
 });

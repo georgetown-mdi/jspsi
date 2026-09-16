@@ -351,3 +351,100 @@ describe("savedExchangeRows", () => {
     expect(rows[1].spentAsOf).toBeDefined();
   });
 });
+
+// A standing condition takes the row's line wherever the record's own bookkeeping
+// has no failure to show, so the state keeps its place in the list across every
+// later no-show and success rather than being consumed by the first one.
+
+describe("savedExchangeRow: a standing condition", () => {
+  const standingAt = "2026-07-10T09:00:00.000Z";
+  const missedAt = "2026-07-12T09:00:00.000Z";
+
+  test("an unexplained handshake failure still names the state after a no-show", () => {
+    const row = savedExchangeRow(
+      record({
+        lastRun: { at: missedAt, outcome: "missed" },
+        standingCondition: { since: standingAt, kind: "auth" },
+      }),
+      undefined,
+      NOW,
+    );
+    expect(row.status).toMatch(/^A run failed and is unexplained /);
+    expect(row.status).toMatch(/check with your partner$/);
+  });
+
+  test("it names the condition's own instant, not the no-show's", () => {
+    const row = savedExchangeRow(
+      record({
+        lastRun: { at: missedAt, outcome: "missed" },
+        standingCondition: { since: standingAt, kind: "auth" },
+      }),
+      undefined,
+      NOW,
+    );
+    const runRow = savedExchangeRow(
+      record({ lastRun: { at: standingAt, outcome: "succeeded" } }),
+      undefined,
+      NOW,
+    );
+    // The succeeded row phrases the same instant, so the two agree on the date
+    // wording without this test pinning a locale format.
+    const [phrased] = /\d.*$/.exec(runRow.status) ?? [];
+    expect(phrased).toBeDefined();
+    expect(row.status).toContain(phrased as string);
+  });
+
+  test("a persist failure names the re-invite recovery after a no-show", () => {
+    const row = savedExchangeRow(
+      record({
+        lastRun: { at: missedAt, outcome: "missed" },
+        standingCondition: { since: standingAt, kind: "storage" },
+      }),
+      undefined,
+      NOW,
+    );
+    expect(row.status).toMatch(/^A run could not save this exchange's secret /);
+    expect(row.status).toMatch(/re-invite to reconnect$/);
+  });
+
+  test("a later successful run does not return the row to a green line", () => {
+    const row = savedExchangeRow(
+      record({
+        lastRun: { at: missedAt, outcome: "succeeded" },
+        standingCondition: { since: standingAt, kind: "auth" },
+      }),
+      undefined,
+      NOW,
+    );
+    expect(row.status).toMatch(/^A run failed and is unexplained /);
+  });
+
+  test("a lapsed bound still takes the line: expiry is never attack framing", () => {
+    const row = savedExchangeRow(
+      record({
+        expires: "2026-07-13T00:00:00.000Z",
+        lastRun: { at: missedAt, outcome: "missed" },
+        standingCondition: { since: standingAt, kind: "auth" },
+      }),
+      undefined,
+      NOW,
+    );
+    expect(row.status).toBe("Stored secret lapsed; re-invite to run again");
+    expect(row.expired).toBe(true);
+  });
+
+  test("a restore since the last success explains a standing handshake failure", () => {
+    const restored: ManagedLocalState = {
+      imported: { importedAt: "2026-07-09T00:00:00.000Z" },
+    };
+    const row = savedExchangeRow(
+      record({
+        lastRun: { at: missedAt, outcome: "missed" },
+        standingCondition: { since: standingAt, kind: "auth" },
+      }),
+      restored,
+      NOW,
+    );
+    expect(row.status).toBe("Restored from a backup; re-invite to reconnect");
+  });
+});

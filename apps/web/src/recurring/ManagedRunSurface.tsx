@@ -20,6 +20,7 @@ import {
   exportManagedBackup,
 } from "@psi/managed/managedExchangeExport";
 import {
+  clearManagedExchangeStandingCondition,
   getManagedExchange,
   persistManagedExchangeOutputDirectory,
   readRecordAndMarkBackedUp,
@@ -78,6 +79,10 @@ import {
   SUPERSEDED_HANDOFF_TITLE,
   supersededHandoffReason,
 } from "./managedHandoffGate";
+import {
+  STANDING_CONDITION_CLEAR_LABEL,
+  managedStandingConditionView,
+} from "./managedStandingConditionModel";
 import { DeleteExchangeButton } from "./SavedExchanges";
 import { ManagedCronExportPanel } from "./ManagedCronExportPanel";
 import { useManagedRunInFlight } from "./useManagedRunInFlight";
@@ -93,12 +98,16 @@ import type {
   ManagedHandoffRefusal,
   ManagedMigrationDispatch,
 } from "@psi/managed/managedExchangeExport";
+import type {
+  ManagedLocalState,
+  ManagedSpentState,
+} from "@psi/managed/managedLocalState";
 import type { DisclosureAccountingRead } from "@psi/disclosureAccountingStore";
 import type { ManagedBackupMarker } from "@psi/managed/managedBackupState";
 import type { ManagedInputSource } from "@psi/managed/managedInputHandle";
 import type { ManagedReinvite } from "@psi/managed/managedReinvite";
 import type { ManagedRunFailureAlert } from "./managedRunLaunchModel";
-import type { ManagedSpentState } from "@psi/managed/managedLocalState";
+import type { ManagedStandingConditionView } from "./managedStandingConditionModel";
 import type { ParkedResultsRead } from "@psi/parkedResultsStore";
 import type { RunOutputs } from "@psi/runOutputs";
 
@@ -136,6 +145,10 @@ export function ManagedRunSurface({ id }: { id: string }) {
   // the spent surface owe the operator an account of that run.
   const [spentByRefusedRun, setSpentByRefusedRun] = useState(false);
   const [backupMarker, setBackupMarker] = useState<ManagedBackupMarker>();
+  // The local sibling state as the load read it, for the standing condition's own
+  // section: the import marker is what tells a restored copy's stale secret from a
+  // handshake nothing on this device explains.
+  const [localState, setLocalState] = useState<ManagedLocalState>();
   // This exchange's accounting of disclosures as its own read classified it, one
   // value rather than an accounting beside flags: an unreadable accounting must
   // not render as an empty one (which would be treated as "nothing was disclosed"), and
@@ -214,6 +227,13 @@ export function ManagedRunSurface({ id }: { id: string }) {
   // the compromise-response copy instead.
   const [confirmationGated, setConfirmationGated] = useState(false);
   const [compromiseResponse, setCompromiseResponse] = useState(false);
+  // The standing condition's own gate, held apart from the live failure's above:
+  // the two can stand at once (a no-show this visit over a condition an earlier run
+  // raised), and resolving one must not move the other.
+  const [standingSettled, setStandingSettled] = useState(false);
+  const [standingCompromise, setStandingCompromise] = useState(false);
+  const [clearingStanding, setClearingStanding] = useState(false);
+  const [clearStandingFailed, setClearStandingFailed] = useState(false);
   // A fresh re-invite the operator forwards out-of-band. Present once a re-invite is
   // composed and the fresh secret persisted onto the record.
   const [reinvite, setReinvite] = useState<ManagedReinvite>();
@@ -255,6 +275,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
           setLoadFailure("spent");
         } else {
           setBackupMarker(local?.backup);
+          setLocalState(local);
           setRecord(loaded);
         }
       })
@@ -632,6 +653,55 @@ export function ManagedRunSurface({ id }: { id: string }) {
       reinviteNow("recovery");
   }
 
+  // The standing condition's clear-and-acknowledge: the operator's own act, and the
+  // only clearance a page offers (a re-invite drops the condition in its own rotation
+  // write, and deleting the exchange takes it with the record). The re-invite stays
+  // offered afterwards, which is why the section holds its place rather than
+  // disappearing on the write.
+  function clearStanding() {
+    if (record === undefined || clearingStanding) return;
+    setClearingStanding(true);
+    setClearStandingFailed(false);
+    clearManagedExchangeStandingCondition(record.id)
+      .then((updated) => {
+        setRecord(updated);
+        setStandingSettled(true);
+      })
+      .catch((error) => {
+        whenDiagnostic(() => console.error(error));
+        setClearStandingFailed(true);
+      })
+      .finally(() => setClearingStanding(false));
+  }
+
+  // The standing condition's two-outcome gate, the same routing the live Tier-2
+  // failure takes: a confirmed partner-side failure clears the condition, and a reply
+  // that does not add up clears nothing and routes to the compromise response.
+  function resolveStanding(
+    outcome: Parameters<typeof routeConfirmationReply>[0],
+  ) {
+    if (routeConfirmationReply(outcome) === "compromise-response") {
+      setStandingCompromise(true);
+      return;
+    }
+    clearStanding();
+  }
+
+  // The standing condition as the page would render it, and whether it renders at
+  // all. A live run's own failure already speaks for this run, and where it landed
+  // on the state the condition resolves to it carries that recovery too -- so the
+  // section stands down rather than putting a second re-invite beside the first.
+  // It returns as soon as the live state is something else, and at the next visit.
+  const standingView =
+    record !== undefined
+      ? managedStandingConditionView(record, localState)
+      : undefined;
+  const showStanding =
+    reinvite === undefined &&
+    (standingSettled
+      ? failure === undefined
+      : standingView !== undefined && standingView.tier !== failure?.kind);
+
   // Persist an in-place edit to the local fields (label, max-token-age policy)
   // through the single-transaction store path, then adopt the returned record so
   // the surface reflects the edit -- including the conservatively re-derived
@@ -921,6 +991,21 @@ export function ManagedRunSurface({ id }: { id: string }) {
                 </>
               )
             )}
+            {showStanding && (
+              <StandingConditionSection
+                record={record}
+                view={standingView}
+                settled={standingSettled}
+                compromise={standingCompromise}
+                clearing={clearingStanding}
+                clearFailed={clearStandingFailed}
+                reinviting={reinviting}
+                reinviteFailed={reinviteFailed && reinviteSource === "recovery"}
+                onReinvite={() => reinviteNow("recovery")}
+                onClear={clearStanding}
+                onResolve={resolveStanding}
+              />
+            )}
             {!hasHandle && (
               <div className={styles.callout}>
                 <p className={styles.calloutLead}>Choose your input file.</p>
@@ -1082,6 +1167,107 @@ function FailureRecovery({
     );
 
   return null;
+}
+
+/**
+ * The standing condition on the exchange's page: the unanswered evidence an
+ * earlier run raised, carried past every no-show and success since, with the one
+ * clearance a page offers.
+ *
+ * The copy and which clearance applies are the pure model's
+ * ({@link managedStandingConditionView}); this renders them. The unexplained tier
+ * goes through the same two-outcome gate the live Tier-2 failure uses, so a reply
+ * that does not add up reaches the compromise response here exactly as it does
+ * there, and clears nothing. Every other tier's explanation the record already
+ * holds, so it gets the re-invite recovery and a short acknowledgement instead of
+ * an attack checklist (docs/MANAGED_EXCHANGE.md, "Telling a desync from an
+ * attack").
+ *
+ * Once cleared, the section keeps its place and shows the re-invite: settling a
+ * condition is not the same act as re-establishing the secret it was raised over.
+ */
+function StandingConditionSection({
+  record,
+  view,
+  settled,
+  compromise,
+  clearing,
+  clearFailed,
+  reinviting,
+  reinviteFailed,
+  onReinvite,
+  onClear,
+  onResolve,
+}: {
+  record: ManagedExchangeRecord;
+  /** The condition as the page renders it, absent once nothing stands. */
+  view: ManagedStandingConditionView | undefined;
+  /** Whether the operator has cleared the condition on this visit. */
+  settled: boolean;
+  /** Whether the gate's "does not add up" leg was taken. */
+  compromise: boolean;
+  clearing: boolean;
+  clearFailed: boolean;
+  reinviting: boolean;
+  reinviteFailed: boolean;
+  onReinvite: () => void;
+  onClear: () => void;
+  onResolve: (outcome: Parameters<typeof routeConfirmationReply>[0]) => void;
+}) {
+  if (settled)
+    return (
+      <ReinviteRecovery
+        record={record}
+        reinviting={reinviting}
+        reinviteFailed={reinviteFailed}
+        onReinvite={onReinvite}
+      />
+    );
+  if (view === undefined) return null;
+  if (compromise)
+    return (
+      <Alert color="red" title={COMPROMISE_RESPONSE_TITLE} mb="md">
+        <span style={{ whiteSpace: "pre-line" }}>
+          {COMPROMISE_RESPONSE_MESSAGE}
+        </span>
+      </Alert>
+    );
+  return (
+    <>
+      <Alert
+        color={view.clearance === "confirmation" ? "red" : "yellow"}
+        title={view.title}
+        mb="md"
+      >
+        {view.message}
+      </Alert>
+      {view.clearance === "confirmation" ? (
+        <ConfirmationPanel record={record} onResolve={onResolve} />
+      ) : (
+        <>
+          <ReinviteRecovery
+            record={record}
+            reinviting={reinviting}
+            reinviteFailed={reinviteFailed}
+            onReinvite={onReinvite}
+          />
+          {clearFailed && (
+            <Alert color="red" title="Could not clear this" mt="sm">
+              Nothing changed here; try again.
+            </Alert>
+          )}
+          <Button
+            mt="sm"
+            variant="default"
+            loading={clearing}
+            onClick={onClear}
+          >
+            {STANDING_CONDITION_CLEAR_LABEL}
+          </Button>
+        </>
+      )}
+    </>
+  );
 }
 
 /** The re-invite recovery for a re-invite tier (lapsed, storage, imported). The

@@ -51,7 +51,9 @@ interface ManagedFailureConfirmation {
    * text, interpolating only this record's own local fields. */
   message: string;
   /** The label for the "the partner confirmed a real failure on their side" gate
-   * option, which routes to fast re-invite. */
+   * option, which routes to fast re-invite. Short: the three asks it stands for
+   * are in the message above it, and the panel introduces both options together,
+   * so the button names the reply rather than restating them. */
   confirmedOption: string;
   /** The label for the "something does not add up" gate option, which routes to the
    * compromise response. */
@@ -60,7 +62,8 @@ interface ManagedFailureConfirmation {
 
 /**
  * Compose the forwardable confirmation message from a record's own local fields. The
- * partnership label (or a neutral fallback when unlabeled) and the failure time are
+ * partnership label (or a neutral fallback when unlabeled) and the failure time --
+ * the standing condition's instant where one stands, the last run's otherwise -- are
  * this record's own local values -- never partner-influenced -- so an impersonator
  * cannot steer the message. The three asks are fixed and follow the doc's framing
  * exactly; the message names no benign cause and offers the partner no leading
@@ -72,14 +75,15 @@ export function composeConfirmationMessage(
 ): string {
   const partnership =
     record.label === "" ? "our recurring data exchange" : `"${record.label}"`;
-  const when =
-    record.lastRun !== undefined
-      ? dateTimeLabel(new Date(record.lastRun.at))
-      : undefined;
+  // The standing condition's instant first: where one stands, the handshake the
+  // operator is asking about is the one that raised it, and `lastRun` may since
+  // hold a no-show or a success that is not what they are confirming.
+  const at = record.standingCondition?.since ?? record.lastRun?.at;
+  const when = at !== undefined ? dateTimeLabel(new Date(at)) : undefined;
   const failedLine =
     when !== undefined
-      ? `A scheduled run of ${partnership} failed to authenticate on my side on ${when}.`
-      : `A scheduled run of ${partnership} failed to authenticate on my side.`;
+      ? `A run of ${partnership} failed to authenticate on my side on ${when}.`
+      : `A run of ${partnership} failed to authenticate on my side.`;
   return [
     failedLine,
     "",
@@ -109,8 +113,7 @@ export function composeManagedFailureConfirmation(
 ): ManagedFailureConfirmation {
   return {
     message: composeConfirmationMessage(record),
-    confirmedOption:
-      "My partner confirmed their identity and a real failure on their side",
+    confirmedOption: "My partner confirmed",
     doesNotAddUpOption: "Something does not add up",
   };
 }

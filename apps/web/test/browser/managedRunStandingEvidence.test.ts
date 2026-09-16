@@ -15,9 +15,9 @@ import {
   getManagedExchange,
   recordManagedExchangeLastRun,
 } from "@psi/managed/managedExchangeStore";
+import { failedRun, missedRun } from "@psi/managed/managedRunRotate";
 import { ManagedRunSurface } from "@recurring/ManagedRunSurface";
 import { composeManagedExchangeFile } from "@psi/managed/managedExchangeRecord";
-import { storageFailureRun } from "@psi/managed/managedRunRotate";
 
 import { createAppMount, flushPendingUpdates } from "./renderApp";
 
@@ -114,7 +114,7 @@ async function runUntilItNoShows(): Promise<string> {
   );
   await recordManagedExchangeLastRun(
     created.id,
-    storageFailureRun(Date.now() - 60_000),
+    failedRun(Date.now() - 60_000, "failed", "storage"),
     Date.now() - 60_000,
   );
   app.render(createElement(ManagedRunSurface, { id: created.id }));
@@ -209,5 +209,54 @@ describe("a live no-show is read against the evidence standing at launch", () =>
     const stored = await getManagedExchange(created.id);
     expect(stored?.lastRun?.outcome).toBe("missed");
     expect(stored?.lastRun?.failureKind).toBeUndefined();
+  });
+});
+
+describe("a standing condition at the next visit", () => {
+  test("survives the no-show stamp and is cleared through the gate, not by the runs after it", async () => {
+    // The next visit: no live run, only what the store holds. The handshake
+    // failure the first run recorded has been replaced by a no-show stamp, which
+    // records no failure kind at all -- so the condition beside it is the whole of
+    // what asks the operator for the confirmation.
+    const created = await createManagedExchange(
+      newExchange({ inputFileHandle: await inputHandle() }),
+    );
+    const failedAt = Date.now() - 120_000;
+    await recordManagedExchangeLastRun(
+      created.id,
+      failedRun(failedAt, "failed", "auth"),
+      failedAt,
+    );
+    const missedAt = Date.now() - 60_000;
+    await recordManagedExchangeLastRun(
+      created.id,
+      missedRun(missedAt),
+      missedAt,
+    );
+    expect((await getManagedExchange(created.id))?.lastRun?.outcome).toBe(
+      "missed",
+    );
+
+    app.render(createElement(ManagedRunSurface, { id: created.id }));
+    await expect
+      .element(page.getByText("A run failed and has not been explained"))
+      .toBeInTheDocument();
+
+    const confirmed = page.getByRole("button", {
+      name: "My partner confirmed",
+    });
+    await expect.element(confirmed).toBeInTheDocument();
+    await confirmed.click();
+
+    await vi.waitFor(async () => {
+      expect(await getManagedExchange(created.id)).not.toHaveProperty(
+        "standingCondition",
+      );
+    });
+    // The re-invite stays offered: settling the condition is not the same act as
+    // re-establishing the secret it was raised over.
+    await expect
+      .element(page.getByRole("button", { name: "Create a fresh invitation" }))
+      .toBeInTheDocument();
   });
 });

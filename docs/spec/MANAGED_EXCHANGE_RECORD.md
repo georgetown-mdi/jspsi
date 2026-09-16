@@ -71,10 +71,10 @@ no-parallel-format contract in [EXCHANGE_FILE.md](EXCHANGE_FILE.md) exists to
 prevent. `camelCase` on the TypeScript side; the persisted key names below are
 the normative field names.
 
-The two bookkeeping fields, `schedule` and `lastRun`, hold **no free text**:
-every field of each is a timestamp, an integer duration, or a closed enum, so
-neither can accumulate narrative, a match result, a count, or a row value. The
-constraint is the type, not a prose promise.
+The three bookkeeping fields, `schedule`, `lastRun`, and `standingCondition`,
+hold **no free text**: every field of each is a timestamp, an integer duration,
+or a closed enum, so none can accumulate narrative, a match result, a count, or
+a row value. The constraint is the type, not a prose promise.
 
 The CLI parity has one deliberate break. The CLI's two artifacts are separable:
 an operator can retire the secret alone (delete `.psilink.key`, keep the config)
@@ -105,6 +105,8 @@ are the standing definition of the managed exchange.
 | `tokenMaxAgeDays` | integer or absent | The operator's max-token-age policy for this exchange, the browser analog of the CLI `authentication.token_max_age_days`, and like it **off by default**: absent means no bound is in force, and a record is created with it absent unless the operator sets one. When set, each successful run stamps `expires` this many days out onto the rotated secret. The reason to opt in is a dormant partnership: rotation caps exposure only for an exchange that actually runs, so an idle stored secret has no automatic exposure bound without it (see [The primary controls](../SECURITY_DESIGN.md#the-primary-controls)). It is a **local field** the operator may edit in place without a re-invite; what the edit does to `expires` is [Edit-time re-derivation of `expires`](#edit-time-re-derivation-of-expires). |
 | `schedule` | object or absent | The partnership-agreed run schedule the unattended path executes: the agreed recurrence and run window -- the schedule is partnership-level agreement, coordinated out-of-band exactly as the terms are -- plus the retry bookkeeping for a missed window (the next planned attempt). Absent for an exchange run attended-only. The field-by-field layout is in [The `schedule` object](#the-schedule-object). |
 | `lastRun` | object or absent | Run bookkeeping the backup state and the tiered desync UX read (see [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md)): `at` (ISO 8601 UTC), `outcome` (`"succeeded"` \| `"failed"` \| `"desynced"` \| `"missed"`), and, for a non-succeeded outcome, an optional `failureKind` (`"auth"` \| `"transport"` \| `"storage"` \| `"custody-unreadable"` \| `"input"` \| `"terms-shortfall"` \| `"consent"` \| `"handed-off"` \| `"cancelled"`). A `"missed"` outcome records a no-show: the wait for the other party's runner spent its whole budget with nobody arriving, so no handshake ran. A scheduled run reaches it when an agreed window passes without a completed handshake; an attended run reaches it when its own wait for the partner expires. It has no `failureKind` -- the outcome is the whole account, and it is held apart from `"transport"` (a connection that was made and broke, whose remedy is retrying the connection) and from `"cancelled"` (the operator stopped the run). It is benign, retried at the next window or whenever the operator runs the exchange again, and never routed through the desync/attack framing (see [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md#a-missed-window-is-neither-desync-nor-attack)). An `"input"` failure records a benign pre-run acquisition problem -- the handle's file missing, moved, or unreadable at run start -- detected before any connection, likewise never routed through that framing; putting the file back clears it, so its surface offers the run again. A `"terms-shortfall"` failure records the other benign pre-run input state, held apart from it because its remedy is not another attempt: the file was read and cannot satisfy every linkage key the standing terms declare, so the run is refused before connecting (by the run-start input guard, or by the run boundary's own `assertLinkageTermsSatisfiable` inside the pre-connection prepare), and the same file refuses identically at the next window. Its remedy is a file covering every agreed key, or terms re-agreed with the partner out of band -- never a retry or a bare re-pick. A `"consent"` failure records the third pre-connection refusal: a send-side disclosure gate refused because the set this run would send is not the one the exchange recorded agreeing to send (see [What the setup consent covers across runs](../MANAGED_EXCHANGE.md#what-the-setup-consent-covers-across-runs)). It is likewise benign and outside that framing. A `"handed-off"` failure records the fourth: the run found this device's copy [spent](#the-backup-marker-the-spent-state-and-the-import-marker-local-siblings-never-in-the-artifact) by an export and refused inside the run+rotate lock, before reading the input file and before connecting, rather than rotating a secret whose owner is now elsewhere. It is the single-owner invariant holding rather than a fault, so it too stays outside the desync/attack framing, and it is the record's own account of a run -- attended or scheduled -- that met a hand-off nobody was present to answer for. A `"custody-unreadable"` failure records the fifth, and it is that same refusal failing to read the entry it decides on: the sibling entry did not validate, or its store did not answer, so the run stopped in the same place rather than rotating on custody it could not establish. It is held apart from `"storage"` because the two leave different states behind -- a `"storage"` failure rotated a secret it could not save, which can leave the two parties holding different ones and is recovered by re-inviting, while this refusal precedes the handshake and rotates nothing, so nothing here is a desync and a fresh secret would replace one nothing moved. `"consent"`, `"terms-shortfall"`, `"handed-off"`, and `"custody-unreadable"` are the failure kinds a surface must **not** present as retryable: the same input determines the same disclosure and falls the same way short of the same keys, a handed-off copy refuses identically at every later run, and a run reads the same unreadable entry every time, so the remedy is the operator's, not another attempt's. A record written before a kind was added to the enum still reads -- an entry with `"input"` for a shortfall loads and tiers as the generic input state; the converse is the reader-rejects-unknown rule's consequence, an artifact with a kind this reader does not know being refused whole rather than read with the kind dropped. A **re-invite clears `lastRun`** in the same rotation transaction that advances the fresh secret: the re-invite is the recovery for the failure the entry recorded, so leaving it would re-derive a consumed tier at the next visit -- and once the import marker is cleared alongside, a stale `"auth"` failure would re-derive as the attack tier rather than the benign import one. A successful run instead advances `lastRun` to `"succeeded"`; only the re-invite recovery drops it. Which of two runs' entries the store keeps is [Recording a run outcome](#recording-a-run-outcome). |
+
+| `standingCondition` | object or absent | The unanswered **standing condition**: evidence that this device's secret may no longer be the partnership's, raised by a run and not answered since. Two fields, no free text: `since` (ISO 8601 UTC, the instant of the run that raised it) and `kind` (`"auth"` \| `"storage"`), the two `failureKind`s whose remedy is out-of-band rather than an act on this device. It stands BESIDE `lastRun` rather than inside it because `lastRun` holds one run: the next run's stamp replaces it, so a no-show or a later success would otherwise carry the evidence off with the entry that held it and the operator would never again be asked for the confirmation the design requires (see [A standing condition outlives the run that raised it](../MANAGED_EXCHANGE.md#a-standing-condition-outlives-the-run-that-raised-it)). What raises and clears it is [The standing condition](#the-standing-condition). It is a v1 field, written by every version that knows it and absent from every record written before it, which reads and tiers exactly as it did; a page version predating the field drops it on the next write it makes, the same older-page exposure [an app upgrade](../MANAGED_EXCHANGE.md#when-this-page-is-the-older-version) carries elsewhere. |
 
 Everything in this table except `sharedSecret` is non-secret but not
 non-sensitive. Together the persisted fields disclose the partnership's
@@ -280,6 +282,56 @@ after the fact. They do not reach the entry a [schedule advance](#catch-up-on-wa
 carries: that one is the catch-up walk's verdict on an already-closed window
 rather than a run in flight, so it states no run start and the monotonic rule is
 what holds a newer success off it.
+
+Neither rule reaches the [standing condition](#the-standing-condition) an entry
+raises. They choose which of two runs' **stamps** the record keeps, while the
+condition is not one run's stamp but evidence nobody has answered, so a run that
+met one raises it whether or not its own entry lands.
+
+#### The standing condition
+
+A `"storage"` or `"auth"` failure is the one class whose remedy is out-of-band --
+re-inviting the partner, or the confirmation that tells a desync from an attack --
+and it is also the class a later run's stamp would quietly consume: a no-show
+replaces `lastRun` with an entry that records no failure kind at all. The
+`standingCondition` field is that evidence held where no run stamp reaches it.
+
+**Raised** by any `lastRun` entry whose `failureKind` is `"auth"` or `"storage"`,
+at that entry's own instant. The first raise stands: a later condition leaves the
+standing one as it is, since answering is a single act over everything that stood
+before it, and the earlier evidence is the one still unanswered. It is raised at
+two sites, and needs both:
+
+- the `lastRun` write above, which every runner records through; and
+- the [schedule advance](#catch-up-on-wake), which carries the condition its
+  window's run raised. That is the second chance for the window whose run could
+  not write at all: a store failure spanning the rotation write and the run's own
+  best-effort bookkeeping write, recovering in time to answer the advance, would
+  otherwise leave the plan moved past a window that neither ran nor recorded
+  anything. It lands under the same plan condition as the rest of the advance, so
+  it is a second chance and not a guarantee.
+
+**Cleared** by exactly three things, and nothing else:
+
+- the operator's explicit clear-and-acknowledge on the exchange's page, which for
+  an unexplained handshake failure is the two-outcome gate (see
+  [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md#a-standing-condition-outlives-the-run-that-raised-it));
+- a **re-invite**, in the same rotation transaction that drops `lastRun` -- the
+  fresh secret is what the condition's recovery asked for;
+- **deleting** the record, which takes it along with everything else.
+
+A no-show never clears it, and neither does a successful run on its own: a later
+success rules out neither a third party's attempt nor an accidental self-fork,
+which are exactly the readings the confirmation exists to separate. A no-show
+cannot clear it structurally as well as by rule -- clearing runs only off a
+rotation write or an operator's act, and a no-show rotates nothing.
+
+The condition tiers as the equivalent `lastRun` entry would: a `"storage"`
+condition is the benign persist-failure state, and an `"auth"` condition is the
+benign restore state while the import marker stands and the unexplained state
+otherwise. Surfaces read it where the record's own bookkeeping has no failure to
+show, and they phrase it as the standing state it is rather than as a reading of
+the last run, which may since be a no-show or a success.
 
 ### The schedule object
 
@@ -794,8 +846,11 @@ valid `psilink.yaml` (the snake_case YAML the CLI loads, serialized through the
 same discipline the mint layer applies to a validated spec). `key` is the
 `.psilink.key` pair (`sharedSecret` and, when a bound is in force, `expires`).
 And `local` holds the browser-only fields the two CLI artifacts do not (`label`,
-`side`, `schedule`, `lastRun`, `tokenMaxAgeDays`, and the two held-grant markers
-above). The artifact's own
+`side`, `schedule`, `lastRun`, `standingCondition`, `tokenMaxAgeDays`, and the
+two held-grant markers above). The [standing
+condition](#the-standing-condition) travels because an export that dropped it
+would be a fourth way to clear one, and only the operator's acknowledgement, a
+re-invite, and a delete may. The artifact's own
   JSON keys are `camelCase`, by design: the `.psilink.key` file the CLI reads is
   itself `camelCase` JSON (`sharedSecret`, `expires`), parsed without a
   `snake_case` conversion, so a `camelCase` `key` block is what maps onto a valid

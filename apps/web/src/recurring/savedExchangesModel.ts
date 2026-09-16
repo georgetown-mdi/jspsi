@@ -12,8 +12,11 @@
  * summary, so the operator can recognize a partnership and launch a re-run.
  */
 
+import {
+  managedStandingConditionTier,
+  readManagedFailure,
+} from "@psi/managed/managedFailureTiers";
 import { deriveManagedBackupState } from "@psi/managed/managedBackupState";
-import { deriveManagedFailureTier } from "@psi/managed/managedFailureTiers";
 import { managedExchangeLapsed } from "@psi/managed/managedExpiry";
 
 import { dateLabel, dateTimeLabel } from "@psi/formatting";
@@ -29,10 +32,13 @@ import type {
   ManagedExchangeSide,
 } from "@psi/managed/managedExchangeRecord";
 import type {
+  ManagedFailureTier,
+  ManagedStandingTier,
+} from "@psi/managed/managedFailureTiers";
+import type {
   ManagedLocalState,
   ManagedSpentHandoff,
 } from "@psi/managed/managedLocalState";
-import type { ManagedFailureTier } from "@psi/managed/managedFailureTiers";
 
 /** This party's side, as the run list names it: the operator recognizes "you
  * invite" / "you accept" more readily than the wire roles. Shared with the
@@ -134,16 +140,43 @@ function tierStatus(tier: ManagedFailureTier, at: string): string {
   }
 }
 
+/** The one-line status a STANDING condition displays as: the same quiet register as
+ * {@link tierStatus}, phrased for a condition the record carries rather than for the
+ * last run -- which may since be a no-show or a success, and saying "last run" of
+ * either would be false. `at` is the condition's own instant. */
+function standingStatus(tier: ManagedStandingTier, at: string): string {
+  switch (tier) {
+    case "storage":
+      return `A run could not save this exchange's secret (${at}); re-invite to reconnect`;
+    case "imported":
+      return "Restored from a backup; re-invite to reconnect";
+    case "unexplained":
+      return `A run failed and is unexplained (${at}); check with your partner`;
+  }
+}
+
 /** The last-run status line for a record. A record that has never run is treated as
  * never-run; a succeeded run names its date; a non-succeeded outcome is tiered from the
- * record's own bookkeeping ({@link deriveManagedFailureTier}) into its specific,
- * non-alarming state -- the list's quiet form of the tiers the run surface expands. */
+ * record's own bookkeeping ({@link readManagedFailure}) into its specific,
+ * non-alarming state -- the list's quiet form of the tiers the run surface expands.
+ *
+ * A standing condition takes the line wherever the reading rests on it, so the state
+ * keeps its place in the list across every later no-show and success. It does not
+ * displace a lapsed bound: the reading checks the lapse first, exactly as the
+ * pre-connection check does. */
 function lastRunStatus(
   record: ManagedExchangeRecord,
   local: ManagedLocalState | undefined,
   now: number,
 ): string {
-  const tier = deriveManagedFailureTier(record, local, now);
+  const reading = readManagedFailure(record, local, now);
+  const condition = record.standingCondition;
+  if (reading.standing && condition !== undefined)
+    return standingStatus(
+      managedStandingConditionTier(condition, local),
+      dateTimeLabel(new Date(condition.since)),
+    );
+  const { tier } = reading;
   if (tier === "none") {
     if (record.lastRun === undefined) return "Not run yet";
     // The only "none" with a recorded run is a succeeded one.

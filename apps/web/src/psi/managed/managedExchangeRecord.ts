@@ -146,6 +146,27 @@ export interface ManagedExchangeLastRun {
   failureKind?: ManagedExchangeFailureKind;
 }
 
+/** The failure kinds that raise a standing condition: a rotation this device
+ * could not save (`"storage"`, which may have left the two parties on different
+ * secrets) and a handshake that failed closed (`"auth"`). A strict subset of
+ * {@link ManagedExchangeFailureKind}: every other kind is answered by an act on
+ * this device, so `lastRun` accounts for it whole. */
+export type ManagedStandingConditionKind = "auth" | "storage";
+
+/** Evidence that this device's secret may no longer be the partnership's, raised
+ * by a run and unanswered since. It stands BESIDE `lastRun` rather than inside
+ * it because `lastRun` holds one run: the next run's stamp replaces it, so a
+ * no-show or a later success would otherwise carry the evidence off with the
+ * entry that held it. No free text, like every other bookkeeping field -- an
+ * instant and a closed enum. Its normative shape, and what clears it, are in
+ * docs/spec/MANAGED_EXCHANGE_RECORD.md, the `standingCondition` row. */
+export interface ManagedStandingCondition {
+  /** ISO 8601 UTC instant of the run whose failure raised it. */
+  since: string;
+  /** The failure kind that raised it. */
+  kind: ManagedStandingConditionKind;
+}
+
 /**
  * A managed exchange record: the minimal state this party's browser retains so a
  * recurring exchange with the same partner over the same terms can run again. It
@@ -205,6 +226,11 @@ export interface ManagedExchangeRecord {
   schedule?: ManagedExchangeSchedule;
   /** Run bookkeeping; absent until the first run records an outcome. */
   lastRun?: ManagedExchangeLastRun;
+  /** The unanswered standing condition an `auth` or `storage` failure raised;
+   * absent when none stands. Cleared by the operator's explicit
+   * clear-and-acknowledge, by a re-invite, or with the record itself -- never by
+   * a no-show and never by a successful run alone. */
+  standingCondition?: ManagedStandingCondition;
 }
 
 /**
@@ -262,6 +288,16 @@ export const lastRunSchema: ZodType<ManagedExchangeLastRun> = z.object({
     ])
     .optional(),
 });
+
+/** The canonical `standingCondition` validator. Exported so the export/import
+ * artifact reuses it rather than re-declaring a laxer copy: the condition travels
+ * with the record, since an export that dropped it would clear a state only the
+ * operator, a re-invite, or a delete may clear. */
+export const standingConditionSchema: ZodType<ManagedStandingCondition> =
+  z.object({
+    since: z.iso.datetime(),
+    kind: z.enum(["auth", "storage"]),
+  });
 
 /** The canonical `tokenMaxAgeDays` validator (a positive integer bounded by
  * {@link MAX_TOKEN_MAX_AGE_DAYS}). Exported so the export/import artifact reuses it
@@ -323,6 +359,7 @@ const ManagedExchangeRecordSchema: ZodType<ManagedExchangeRecord> = z.object({
   tokenMaxAgeDays: tokenMaxAgeDaysSchema.optional(),
   schedule: scheduleSchema.optional(),
   lastRun: lastRunSchema.optional(),
+  standingCondition: standingConditionSchema.optional(),
 });
 
 /**
@@ -517,6 +554,10 @@ export interface NewManagedExchange {
    * the artifact's snapshot of `lastRun` so the first wake after an import reads the
    * same catch-up state the source had; a freshly-created record has no run yet. */
   lastRun?: ManagedExchangeLastRun;
+  /** A standing condition to retain. Set only by an import, for the reason
+   * `lastRun` is: an import that dropped one would be a way to clear a condition
+   * only the operator, a re-invite, or a delete may clear. */
+  standingCondition?: ManagedStandingCondition;
 }
 
 /**
@@ -552,6 +593,9 @@ export function buildManagedExchangeRecord(
     ...(fields.expires !== undefined ? { expires: fields.expires } : {}),
     ...(fields.schedule !== undefined ? { schedule: fields.schedule } : {}),
     ...(fields.lastRun !== undefined ? { lastRun: fields.lastRun } : {}),
+    ...(fields.standingCondition !== undefined
+      ? { standingCondition: fields.standingCondition }
+      : {}),
   };
   return parseManagedExchangeRecord(record);
 }
@@ -619,6 +663,7 @@ export function applyManagedExchangeReinviteRotation(
   if (rotation.expires === null) delete next.expires;
   else next.expires = rotation.expires;
   delete next.lastRun;
+  delete next.standingCondition;
   return parseManagedExchangeRecord(next);
 }
 
@@ -639,6 +684,12 @@ export function applyManagedExchangeReinviteRotation(
  * otherwise land after -- and mask -- a newer outcome; this guard makes the
  * stale write a no-op instead.
  *
+ * A standing condition the entry raises ({@link standingConditionFrom}) is
+ * raised whether or not the entry itself lands: the two rules below choose which
+ * of two runs' STAMPS the record keeps, while the condition is not one run's
+ * stamp but evidence nobody has answered yet, so the run that met it raises it
+ * even where a newer entry keeps the `lastRun` slot.
+ *
  * A failure never overwrites a success stamped after its own run began:
  * `runStartedAtMs` is the instant the run producing `lastRun` began, and a
  * non-`"succeeded"` outcome is dropped when the stored entry is a
@@ -654,16 +705,55 @@ export function applyManagedExchangeLastRun(
   lastRun: ManagedExchangeLastRun,
   runStartedAtMs: number,
 ): ManagedExchangeRecord {
+  const raised = withStandingCondition(record, standingConditionFrom(lastRun));
   const stored = record.lastRun;
   if (stored !== undefined && Date.parse(stored.at) > Date.parse(lastRun.at))
-    return parseManagedExchangeRecord(record);
+    return parseManagedExchangeRecord(raised);
   if (
     lastRun.outcome !== "succeeded" &&
     stored?.outcome === "succeeded" &&
     Date.parse(stored.at) >= runStartedAtMs
   )
-    return parseManagedExchangeRecord(record);
-  return parseManagedExchangeRecord({ ...record, lastRun });
+    return parseManagedExchangeRecord(raised);
+  return parseManagedExchangeRecord({ ...raised, lastRun });
+}
+
+/** The standing condition a `lastRun` entry raises, or `undefined` for an entry
+ * that raises none. Read off the entry's own `failureKind`, so the stamp a run
+ * writes and the condition it raises cannot disagree about what failed. */
+export function standingConditionFrom(
+  lastRun: ManagedExchangeLastRun,
+): ManagedStandingCondition | undefined {
+  const kind = lastRun.failureKind;
+  if (kind !== "auth" && kind !== "storage") return undefined;
+  return { since: lastRun.at, kind };
+}
+
+/** Raise a standing condition on a record, unless one already stands or there is
+ * none to raise. First raise wins: the standing condition is the one the operator
+ * has yet to answer, and answering it is a single act over everything that stood
+ * before it. The input record is not mutated. */
+function withStandingCondition(
+  record: ManagedExchangeRecord,
+  condition: ManagedStandingCondition | undefined,
+): ManagedExchangeRecord {
+  if (condition === undefined || record.standingCondition !== undefined)
+    return record;
+  return { ...record, standingCondition: condition };
+}
+
+/** Apply the operator's clear-and-acknowledge to a record, producing a validated
+ * new record with only `standingCondition` dropped -- the run bookkeeping, the
+ * secret, and the document remain untouched. A record holding none is returned
+ * unchanged. The input record is not mutated.
+ *
+ * @throws {ZodError} if the stored record is invalid. */
+export function applyManagedExchangeStandingConditionCleared(
+  record: ManagedExchangeRecord,
+): ManagedExchangeRecord {
+  const next: ManagedExchangeRecord = { ...record };
+  delete next.standingCondition;
+  return parseManagedExchangeRecord(next);
 }
 
 /** Whether two stored instants denote the same moment, compared as parsed
@@ -699,6 +789,11 @@ export interface ManagedExchangeScheduleAdvance {
    * the single-writer lock was held through, or one a run already recorded its
    * own outcome for. */
   lastRun?: ManagedExchangeLastRun;
+  /** The standing condition the window's run raised, carried here so a window
+   * whose run could not write its own stamp still leaves the evidence behind
+   * (see {@link ./managedScheduleRunner.ts}). Omitted when the window raised
+   * none. */
+  standingCondition?: ManagedStandingCondition;
 }
 
 /** Apply a scheduled window's bookkeeping to a record, producing a validated new
@@ -726,7 +821,11 @@ export interface ManagedExchangeScheduleAdvance {
  * is what holds a newer success off it and there is no run start to state.
  * Both stamps are read through {@link parseStoredInstant} rather than
  * `Date.parse`, so a stamp having no UTC designator compares as no run at all,
- * letting the window's own bookkeeping land over it. */
+ * letting the window's own bookkeeping land over it.
+ *
+ * A standing condition the advance carries is raised under the same plan
+ * condition as the rest -- it is this write's second chance at evidence the
+ * window's own run may not have persisted, not a guarantee. */
 export function applyManagedExchangeScheduleAdvance(
   record: ManagedExchangeRecord,
   advance: ManagedExchangeScheduleAdvance,
@@ -741,7 +840,10 @@ export function applyManagedExchangeScheduleAdvance(
     stored.consecutiveMisses !== advance.fromConsecutiveMisses
   )
     return parseManagedExchangeRecord(record);
-  const next: ManagedExchangeRecord = { ...record, schedule: advance.schedule };
+  const next: ManagedExchangeRecord = {
+    ...withStandingCondition(record, advance.standingCondition),
+    schedule: advance.schedule,
+  };
   if (
     advance.lastRun !== undefined &&
     !(

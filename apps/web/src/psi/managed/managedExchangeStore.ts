@@ -21,6 +21,7 @@ import {
   applyManagedExchangeReinviteRotation,
   applyManagedExchangeRotation,
   applyManagedExchangeScheduleAdvance,
+  applyManagedExchangeStandingConditionCleared,
   buildManagedExchangeRecord,
   diagnoseManagedExchangeRecord,
   parseManagedExchangeRecord,
@@ -889,6 +890,32 @@ export async function recordManagedExchangeLastRun(
       throw new Error(`no managed exchange with id ${id}`);
     const existing = parseManagedExchangeRecord(stored);
     return applyManagedExchangeLastRun(existing, lastRun, runStartedAtMs);
+  });
+}
+
+/**
+ * Clear the stored record's standing condition -- the operator's explicit
+ * clear-and-acknowledge -- advancing only that field through
+ * {@link applyManagedExchangeStandingConditionCleared} inside one
+ * strict-durability readwrite transaction, so the acknowledgement cannot carry a
+ * stale secret or a stale document back over a concurrent rotation write.
+ *
+ * This is the only clear that is not part of another write: a re-invite drops the
+ * condition in its own rotation transaction, and deleting the exchange takes it
+ * with the record (docs/spec/MANAGED_EXCHANGE_RECORD.md, the `standingCondition`
+ * row).
+ *
+ * @throws {Error} if no record with `id` exists.
+ * @throws {ZodError} if the stored value or the resulting record is invalid.
+ */
+export async function clearManagedExchangeStandingCondition(
+  id: string,
+): Promise<ManagedExchangeRecord> {
+  return readModifyWriteRecord(id, (stored) => {
+    if (stored === undefined)
+      throw new Error(`no managed exchange with id ${id}`);
+    const existing = parseManagedExchangeRecord(stored);
+    return applyManagedExchangeStandingConditionCleared(existing);
   });
 }
 

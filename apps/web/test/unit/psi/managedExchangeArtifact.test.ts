@@ -107,6 +107,22 @@ describe("export/import round-trip", () => {
     expect(restored.lastRun).toEqual(withRun.lastRun);
   });
 
+  test("keeps a standing condition across the round trip", () => {
+    // An export that dropped it would be a fourth way to clear one, and only the
+    // operator's acknowledgement, a re-invite, and a delete may.
+    const withCondition = {
+      ...buildManagedExchangeRecord(newExchange()),
+      standingCondition: {
+        since: "2026-07-10T09:00:00.000Z",
+        kind: "auth" as const,
+      },
+    };
+    const restored = reconstructRecordFromArtifact(
+      encodeManagedExchangeArtifact(withCondition),
+    );
+    expect(restored.standingCondition).toEqual(withCondition.standingCondition);
+  });
+
   test("serialize then importManagedExchangeArtifact round-trips from bytes", () => {
     const record = buildManagedExchangeRecord(newExchange());
     const bytes = serializeManagedExchangeArtifact(
