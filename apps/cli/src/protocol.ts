@@ -51,6 +51,11 @@ import { persistPartnerFingerprint } from "./config";
 import { buildRotatedKeyFile, saveKeyFile } from "./keyFile";
 import { preflightKeyFilePath } from "./keyFilePreflight";
 import { loadCliPsiBackend } from "./psiBackend";
+import {
+  createPsiProgressDisplay,
+  terminalPsiStatusLine,
+  type PsiProgressDisplay,
+} from "./psiProgressDisplay";
 import { createPsiEngine } from "./psiWorkerHost";
 import { writeExchangeRecord, type RecordOutput } from "./recordFile";
 import { writeDualSignedRecord, type ReceiptOutput } from "./receiptFile";
@@ -509,6 +514,7 @@ async function runExchangeStage(params: {
   signing: SigningPersist | null;
   recordOutput: RecordOutput | undefined;
   stageTimer: { open: (id: string) => void; close: () => void };
+  psiProgress: PsiProgressDisplay;
   onRunPhase: () => void;
   log: ReturnType<typeof getLogger>;
   emit: (fn: (e: EventStreamEmitter) => void) => void;
@@ -525,6 +531,7 @@ async function runExchangeStage(params: {
     signing,
     recordOutput,
     stageTimer,
+    psiProgress,
     onRunPhase,
     log,
     emit,
@@ -603,6 +610,10 @@ async function runExchangeStage(params: {
       // webrtc, so this is also a no-op there.
       observedHostKey:
         run.secure !== undefined ? build.fileSync?.observedHostKey : undefined,
+      // Each crypto operation's element count and duration, rendered as the
+      // phase's live progress. Counts and durations only -- no value from
+      // either party's data reaches the display.
+      onPsiProgress: (progress) => psiProgress.report(progress),
       onStage: (id: string) => {
         const label = stageLabels[id] ?? id;
         // The label derives from linkage-key names the partner may have
@@ -1932,6 +1943,15 @@ export async function runProtocol(
 
   const stageTimer = createStageTimer(emit);
 
+  // The PSI phase's progress display: a live line on the terminal while one
+  // crypto operation runs, and one logged line per operation that completes.
+  // Closed by doCleanup -- an interrupt included -- so no half-drawn line is
+  // left on the terminal the run's last message goes to.
+  const psiProgress = createPsiProgressDisplay({
+    statusLine: terminalPsiStatusLine(verbosity),
+    milestone: (line) => log.info(line),
+  });
+
   // The one operational-counter summary, emitted immediately before each
   // terminal event so the terminal event stays last on the stream. recordsProcessed
   // is this party's own input row count; the retry/reconnect counts are read from
@@ -2006,6 +2026,7 @@ export async function runProtocol(
   async function doCleanup() {
     if (cleaned) return;
     cleaned = true;
+    psiProgress.close();
     await closeRunLayers({ build, run, log });
     logTransportCounters(build.client, log);
     process.off("SIGINT", onSigint);
@@ -2165,6 +2186,7 @@ export async function runProtocol(
       signing,
       recordOutput,
       stageTimer,
+      psiProgress,
       onRunPhase: () => {
         terminalPhase = "run";
       },
