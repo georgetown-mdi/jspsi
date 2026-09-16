@@ -1376,7 +1376,10 @@ record's own binding nonce, or for an entry with no record on its instant, so th
 number of entries is the number of runs the accounting is short. The record is
 held to the exchange-record format on the way in and the parsed result is what is
 retained, so a record the reader would refuse is never retained -- an entry with
-nothing filable is written instead, which is what that state is.
+nothing filable is written instead, which is what that state is. A note already
+stored that this build cannot read refuses the write rather than being replaced:
+those bytes are the only thing standing for the runs they name, so the new run's
+fact takes the fallback below instead.
 
 **What it holds at rest, and retention.** A retained record is one exchange
 record's own cleartext content -- the same names, categories, references, and
@@ -1409,11 +1412,12 @@ exchange disclosed, and **MUST** state the number of runs it is short where it
 states the number of entries it holds. A run whose record cannot be filed **MUST**
 be stated as unrecoverable rather than offered a control that would not file it.
 
-**When the database refuses the note.** Storage full, or a database that will not
-open, leaves the note unwritable at exactly the moment it is owed. The fact then
-falls back to origin-local `localStorage` under `psilink-unfiled-disclosure`: a
-version literal and a bounded list of exchange ids, holding no instant and no
-record, so it can be written where a record-sized write was refused. The flag is
+**When the note cannot be written.** Storage full, a database that will not
+open, or a note already stored that this build cannot read leaves the note
+unwritable at exactly the moment it is owed. The fact then falls back to
+origin-local `localStorage` under `psilink-unfiled-disclosure`: a version literal
+and a bounded list of exchange ids, holding no instant and no record, so it can
+be written where a record-sized write was refused. The flag is
 cleared when the exchange's page shows it and when the exchange is deleted, so no
 id of an exchange the browser no longer holds is kept. A run named only by that
 flag can never be filed: that is the limit of what is recoverable, and the

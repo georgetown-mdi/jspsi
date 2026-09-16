@@ -1,7 +1,19 @@
 /// <reference types="@vitest/browser-playwright/context" />
 
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { generateSharedSecret, getDefaultLinkageTerms } from "@psilink/core";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  onTestFinished,
+  test,
+  vi,
+} from "vitest";
+import {
+  generateSharedSecret,
+  getDefaultLinkageTerms,
+  getLogger,
+} from "@psilink/core";
 
 import {
   MANAGED_EXCHANGE_DISCLOSURE_STORE_NAME,
@@ -14,6 +26,10 @@ import {
   appendDisclosureRecordToStore,
   readDisclosureAccounting,
 } from "@psi/disclosureAccountingStore";
+import {
+  clearUnfiledExchangeFlag,
+  unfiledExchangeFlagged,
+} from "@psi/unfiledDisclosureFlag";
 import {
   fileUnfiledDisclosures,
   noteUnfiledDisclosureRun,
@@ -108,6 +124,20 @@ async function accountingEntries(
   return read.kind === "accounting" ? read.accounting.entries : [];
 }
 
+/** Hold the store's own report of a note it could not write, which the suite's
+ * output would otherwise carry, and clear the flag it falls back to once the test
+ * is done, so no exchange stays named past it. */
+function captureRefusedNoteReport(id: string) {
+  const failure = vi
+    .spyOn(getLogger("unfiledDisclosureStore"), "error")
+    .mockImplementation(() => {});
+  onTestFinished(() => {
+    failure.mockRestore();
+    clearUnfiledExchangeFlag(id);
+  });
+  return failure;
+}
+
 beforeEach(clearManagedExchanges);
 afterEach(clearManagedExchanges);
 
@@ -171,6 +201,47 @@ describe("what a run that could not file leaves", () => {
     expect(await readUnfiledDisclosures(created.id)).toEqual({
       kind: "unreadable",
     });
+  });
+
+  test("noting a run over a note this build cannot read keeps the stored value", async () => {
+    const created = await createManagedExchange(newExchange());
+    const unreadable = { noted: "yesterday" };
+    await putRawStored(unfiledDisclosureKey(created.id), unreadable);
+    captureRefusedNoteReport(created.id);
+
+    const noted = await noteUnfiledDisclosureRun(
+      created.id,
+      await disclosureRecord(),
+      NOTED_AT,
+    );
+
+    // Those bytes are the only thing standing for the runs they name, so the
+    // write fails rather than replacing them with this run alone.
+    expect(noted).toBe("flagged");
+    expect(await rawStored(unfiledDisclosureKey(created.id))).toEqual(
+      unreadable,
+    );
+  });
+
+  test("the run refused that way lands in the flag and the diagnostic log", async () => {
+    const created = await createManagedExchange(newExchange());
+    await putRawStored(unfiledDisclosureKey(created.id), {
+      noted: "yesterday",
+    });
+    const failure = captureRefusedNoteReport(created.id);
+
+    await noteUnfiledDisclosureRun(
+      created.id,
+      await disclosureRecord(),
+      NOTED_AT,
+    );
+
+    // What the run driver's append-failure path leaves for a note that could not
+    // be written, database refusal and unreadable note alike: the exchange is
+    // named for the next visit, and the loss is stated where an unattended run's
+    // only account of it goes.
+    expect(unfiledExchangeFlagged(created.id)).toBe(true);
+    expect(failure).toHaveBeenCalledOnce();
   });
 });
 

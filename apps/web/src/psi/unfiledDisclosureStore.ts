@@ -15,8 +15,9 @@
  * The note and the accounting are written in ONE transaction wherever both move,
  * so an entry cannot be dropped from the note without landing in the accounting.
  *
- * Where the database itself refuses the note -- storage full, or an open that
- * does not complete -- the fact falls back to the localStorage flag
+ * Where the note cannot be written -- storage full, an open that does not
+ * complete, or a stored note this build cannot read, which a write leaves exactly
+ * as it sits -- the fact falls back to the localStorage flag
  * ({@link ./unfiledDisclosureFlag.ts}), which keeps the exchange id alone. That
  * is the limit of what is recoverable: a run named only by that flag has no
  * record left to file.
@@ -84,7 +85,7 @@ export type UnfiledDisclosureNote =
   /** In the disclosure store, beside the accounting, with the run's record
    * retained where the run built one. */
   | "noted"
-  /** In the localStorage flag alone: the database refused the note, so the
+  /** In the localStorage flag alone: the note could not be written, so the
    * exchange is named and the run's record is gone. */
   | "flagged"
   /** Nowhere. Both refused, so nothing in this browser stands for the
@@ -154,17 +155,21 @@ async function withStoredNote<T>(
   }
 }
 
-/** The stored note, or `undefined` where nothing is stored or the stored value is
- * one this build cannot read. A value it cannot read is treated as absent for a
- * WRITE alone: the new fact is what the next visit needs, and a value that does
- * not parse cannot be merged into. The read keeps it as its own state rather
- * than reporting that nothing is missing. */
-function notedOrAbsent(raw: unknown): StoredUnfiledDisclosures | undefined {
+/** The note a write merges its entry into, or `undefined` where nothing is
+ * stored.
+ *
+ * @throws where a value is stored that this build cannot read, which fails the
+ *   write rather than replacing those bytes: they are the only thing standing for
+ *   the runs they name, and the caller falls back to the flag instead. */
+function noteToMergeInto(raw: unknown): StoredUnfiledDisclosures | undefined {
   if (raw === undefined) return undefined;
   try {
     return parseStoredUnfiledDisclosures(raw);
-  } catch {
-    return undefined;
+  } catch (error) {
+    throw new Error(
+      "a note this build cannot read is already stored for this exchange",
+      { cause: error },
+    );
   }
 }
 
@@ -191,9 +196,14 @@ function retainable(record: ExchangeRecord | undefined): unknown {
  * built none leaves its instant alone: nothing can be appended for it later, and
  * the surface states that rather than offering a retry that would do nothing.
  *
+ * A note already stored that this build cannot read fails the write, its stored
+ * bytes untouched: they are the only thing standing for the runs they name, so
+ * this run's fact takes the fallback rather than replacing them.
+ *
  * Total, and never throws: the run has already disclosed and is not made a
- * failure by a note that could not be written, so a refused note falls back to
- * the localStorage flag and the return value says where the fact landed.
+ * failure by a note that could not be written, so a note the store did not take
+ * falls back to the localStorage flag and the return value says where the fact
+ * landed.
  */
 export async function noteUnfiledDisclosureRun(
   id: string,
@@ -205,7 +215,7 @@ export async function noteUnfiledDisclosureRun(
   try {
     await withStoredNote(id, "readwrite", ({ raw, store }) => {
       store.put(
-        noteUnfiledDisclosure(notedOrAbsent(raw), entry),
+        noteUnfiledDisclosure(noteToMergeInto(raw), entry),
         unfiledDisclosureKey(id),
       );
     });
