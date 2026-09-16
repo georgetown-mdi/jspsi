@@ -1455,8 +1455,9 @@ function UnfiledDisclosureNotice({
             material.
           </p>
           <p>
-            This browser was out of storage, or could not open its database.
-            Free space on this device so the next run can file its record.
+            The run&apos;s record could not be stored. If this browser is low on
+            storage, free space on this device so the next run can file its
+            record.
           </p>
         </Alert>
       )}
