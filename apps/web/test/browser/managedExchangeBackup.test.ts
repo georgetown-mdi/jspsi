@@ -5,11 +5,14 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { generateSharedSecret, getDefaultLinkageTerms } from "@psilink/core";
 
 import {
+  MANAGED_EXCHANGE_STORE_NAME,
   clearManagedExchanges,
   createManagedExchange,
   deleteManagedExchange,
   getManagedExchange,
   listManagedExchanges,
+  listManagedExchangesDiagnostic,
+  openManagedExchangeDatabase,
   persistManagedExchangeRotation,
   readRecordAndMarkBackedUp,
   recordManagedExchangeLastRun,
@@ -48,7 +51,8 @@ import type { WebRTCExchangeLocator } from "@psilink/core";
 // Chromium (real IndexedDB and the sibling object store). The pure encode/parse and
 // derivation are unit-tested without a database; this suite proves an export/import
 // round-trip installs one owner against the real store, a migration spends the
-// source, the backup marker and spent state persist beside the record, and a delete
+// source, the backup marker and spent state persist beside the record, a record
+// this build cannot parse is skipped rather than failing an import, and a delete
 // leaves no sibling entry behind.
 
 const linkageTerms = getDefaultLinkageTerms("County Health Dept");
@@ -694,6 +698,164 @@ describe("importing a spent secret-match revives in place", () => {
     expect(installed.id).not.toBe(source.id);
     const all = await listManagedExchanges();
     expect(all).toHaveLength(2);
+  });
+});
+
+describe("a record this build cannot parse is skipped, not fatal to the import", () => {
+  /** Plant an invalid record under `id`, keeping every other field of `fields`, so a
+   * test stages the record an app upgrade left unreadable. Bypasses the validating
+   * write, as no supported path stores one. */
+  async function plantUnreadable(id: string, fields: object): Promise<void> {
+    const db = await openManagedExchangeDatabase();
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const transaction = db.transaction(
+          MANAGED_EXCHANGE_STORE_NAME,
+          "readwrite",
+        );
+        transaction
+          .objectStore(MANAGED_EXCHANGE_STORE_NAME)
+          .put({ ...fields, id, schemaVersion: "psilink-managed-exchange/v3" });
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+        transaction.onabort = () => reject(transaction.error);
+      });
+    } finally {
+      db.close();
+    }
+  }
+
+  /** The stored keys the diagnostic read reports as unreadable -- what an operator
+   * still has to discard after an import from the read-failed state. */
+  async function unreadableIds(): Promise<Array<string>> {
+    const entries = await listManagedExchangesDiagnostic();
+    return entries.flatMap((entry) =>
+      entry.kind === "unreadable" ? [entry.id] : [],
+    );
+  }
+
+  test("an unrelated import lands beside an invalid record and a handed-off one", async () => {
+    // The read-failed state an operator meets: one record this build cannot parse,
+    // beside a valid record handed off to the command line. The artifact is a third
+    // exchange's, so the import has nothing to reconcile -- and the invalid record
+    // must not refuse it, which is the way forward the surface offers.
+    const other = await createManagedExchange(
+      newExchange({ label: "Other partnership" }),
+    );
+    const bytes = serializeManagedExchangeArtifact(
+      encodeManagedExchangeArtifact(other),
+    );
+    await deleteManagedExchange(other.id);
+    const handedOff = await createManagedExchange(
+      newExchange({ label: "Handed to the command line" }),
+    );
+    expect(
+      await spendManagedExchangeIfCurrent(
+        handedOff.id,
+        handedOff.sharedSecret,
+        "2026-07-14T13:00:00.000Z",
+        "command-line",
+      ),
+    ).toBe("spent");
+    await plantUnreadable("zzz-bad-record", {
+      ...handedOff,
+      sharedSecret: generateSharedSecret(),
+    });
+    // Precondition: the attended list read rejects wholesale, so this is the state
+    // the read-failed recovery surface renders from.
+    await expect(listManagedExchanges()).rejects.toThrow();
+
+    const { record: installed } = await importManagedExchange(bytes);
+
+    expect(installed.sharedSecret).toBe(other.sharedSecret);
+    expect(installed.label).toBe("Other partnership");
+    // The invalid record is left in place and still reported, for the operator to
+    // discard from the recovery listing.
+    expect(await unreadableIds()).toEqual(["zzz-bad-record"]);
+    // The handed-off record is untouched: no revive, and its spent state stands.
+    expect(await getManagedExchange(handedOff.id)).toEqual(handedOff);
+    expect(await getManagedLocalState(handedOff.id)).toEqual({
+      spent: { spentAt: "2026-07-14T13:00:00.000Z", handoff: "command-line" },
+    });
+  });
+
+  test("a skipped record's own hand-off still refuses the import", async () => {
+    // The record became unreadable after the hand-off spent it, so its secret field
+    // still reads: the refusal fires on it rather than installing a second live copy
+    // beside the machine the hand-off runs on. It names no label, the failed parse
+    // leaving the record's own fields untrusted.
+    const handedOff = await createManagedExchange(newExchange());
+    const bytes = serializeManagedExchangeArtifact(
+      encodeManagedExchangeArtifact(handedOff),
+    );
+    expect(
+      await spendManagedExchangeIfCurrent(
+        handedOff.id,
+        handedOff.sharedSecret,
+        "2026-07-14T13:00:00.000Z",
+        "command-line",
+      ),
+    ).toBe("spent");
+    await plantUnreadable(handedOff.id, handedOff);
+
+    await expect(importManagedExchange(bytes)).rejects.toMatchObject({
+      name: "ManagedImportHandedOffError",
+      handoff: "command-line",
+      label: "",
+    });
+
+    // Nothing was written: the store still holds that one unreadable record.
+    expect(await unreadableIds()).toEqual([handedOff.id]);
+    expect(await getManagedLocalState(handedOff.id)).toEqual({
+      spent: { spentAt: "2026-07-14T13:00:00.000Z", handoff: "command-line" },
+    });
+  });
+
+  test("a skipped record whose secret field is unreadable too installs fresh", async () => {
+    // The stated limit of that refusal: the comparison needs the stored secret, so a
+    // record holding none this build can read matches nothing and the import lands.
+    const handedOff = await createManagedExchange(newExchange());
+    const bytes = serializeManagedExchangeArtifact(
+      encodeManagedExchangeArtifact(handedOff),
+    );
+    expect(
+      await spendManagedExchangeIfCurrent(
+        handedOff.id,
+        handedOff.sharedSecret,
+        "2026-07-14T13:00:00.000Z",
+        "command-line",
+      ),
+    ).toBe("spent");
+    await plantUnreadable(handedOff.id, { ...handedOff, sharedSecret: 42 });
+
+    const { record: installed } = await importManagedExchange(bytes);
+
+    expect(installed.id).not.toBe(handedOff.id);
+    expect(await unreadableIds()).toEqual([handedOff.id]);
+  });
+
+  test("a skipped migration-spent record installs fresh beside the husk", async () => {
+    // A revive rewrites the whole record, which needs a record this build can parse,
+    // so the migration's artifact installs fresh and the husk stays for the operator
+    // to discard.
+    const source = await createManagedExchange(newExchange());
+    const bytes = serializeManagedExchangeArtifact(
+      encodeManagedExchangeArtifact(source),
+    );
+    expect(
+      await spendManagedExchangeIfCurrent(
+        source.id,
+        source.sharedSecret,
+        "2026-07-14T13:00:00.000Z",
+      ),
+    ).toBe("spent");
+    await plantUnreadable(source.id, source);
+
+    const { record: installed } = await importManagedExchange(bytes);
+
+    expect(installed.id).not.toBe(source.id);
+    expect(installed.sharedSecret).toBe(source.sharedSecret);
+    expect(await unreadableIds()).toEqual([source.id]);
   });
 });
 

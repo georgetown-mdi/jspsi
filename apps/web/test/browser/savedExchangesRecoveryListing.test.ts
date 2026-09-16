@@ -3,7 +3,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { generateSharedSecret, getDefaultLinkageTerms } from "@psilink/core";
 
-import { page } from "vitest/browser";
+import { page, userEvent } from "vitest/browser";
 
 import { createElement } from "react";
 
@@ -14,9 +14,16 @@ import {
   MANAGED_EXCHANGE_STORE_NAME,
   clearManagedExchanges,
   createManagedExchange,
+  deleteManagedExchange,
   listManagedExchanges,
+  listManagedExchangesDiagnostic,
   openManagedExchangeDatabase,
+  spendManagedExchangeIfCurrent,
 } from "@psi/managed/managedExchangeStore";
+import {
+  encodeManagedExchangeArtifact,
+  serializeManagedExchangeArtifact,
+} from "@psi/managed/managedExchangeArtifact";
 import {
   listManagedLocalState,
   markManagedExchangeBackedUp,
@@ -26,7 +33,10 @@ import { composeManagedExchangeFile } from "@psi/managed/managedExchangeRecord";
 
 import { createAppMount } from "./renderApp";
 
-import type { NewManagedExchange } from "@psi/managed/managedExchangeRecord";
+import type {
+  ManagedExchangeRecord,
+  NewManagedExchange,
+} from "@psi/managed/managedExchangeRecord";
 
 // The read-failed recovery listing, against real Chromium (real IndexedDB).
 // Unlike savedExchangesFailed.test.ts, which mocks the strict read, this file
@@ -177,7 +187,7 @@ describe("read-failed recovery listing", () => {
   });
 });
 
-describe("recovery listing: the delete confirm's backup custody note", () => {
+describe("recovery listing: the delete confirm's custody notes", () => {
   /** Seed a good record (so a readable recovery row exists to delete) beside a bad
    * one (so the surface is the read-failed one), run `seedState` to stamp any sibling
    * state on the good record BEFORE the single mount, then render the always-list
@@ -185,15 +195,15 @@ describe("recovery listing: the delete confirm's backup custody note", () => {
    * randomUUID sorts before "zzz-bad-record"), so the `.first()` Delete opens it. */
   async function mountReadFailedWith(
     label: string,
-    seedState?: (id: string) => Promise<void>,
-  ): Promise<Awaited<ReturnType<typeof createManagedExchange>>> {
+    seedState?: (record: ManagedExchangeRecord) => Promise<unknown>,
+  ): Promise<ManagedExchangeRecord> {
     const good = await createManagedExchange(newExchange({ label }));
     await rawPut({
       ...good,
       id: "zzz-bad-record",
       schemaVersion: "psilink-managed-exchange/v3",
     });
-    if (seedState) await seedState(good.id);
+    if (seedState) await seedState(good);
     await expect(listManagedExchanges()).rejects.toThrow();
     app.render(createElement(SavedExchanges));
     await expect
@@ -203,8 +213,8 @@ describe("recovery listing: the delete confirm's backup custody note", () => {
   }
 
   test("marker present -> the custody note shows on the recovery confirm", async () => {
-    await mountReadFailedWith("Backed up partnership", (id) =>
-      markManagedExchangeBackedUp(id, "2026-07-10T09:00:00.000Z"),
+    await mountReadFailedWith("Backed up partnership", (record) =>
+      markManagedExchangeBackedUp(record.id, "2026-07-10T09:00:00.000Z"),
     );
 
     await page.getByRole("button", { name: "Delete" }).first().click();
@@ -259,6 +269,48 @@ describe("recovery listing: the delete confirm's backup custody note", () => {
       .toBeInTheDocument();
   });
 
+  test("a copy spent to the command line -> the hand-off note shows on the recovery confirm", async () => {
+    // Deleting this row is what removes the import refusal the hand-off stands on, so
+    // the confirm has to state what those saved files keep running -- the same note
+    // the normal list's confirm shows, from a surface whose list cannot be read.
+    let spend: string | undefined;
+    await mountReadFailedWith("Handed to the command line", async (record) => {
+      spend = await spendManagedExchangeIfCurrent(
+        record.id,
+        record.sharedSecret,
+        "2026-07-14T13:00:00.000Z",
+        "command-line",
+      );
+    });
+    expect(spend).toBe("spent");
+
+    await page.getByRole("button", { name: "Delete" }).first().click();
+    await expect
+      .element(
+        page.getByText(
+          "The psilink.yaml and .psilink.key you saved still run this exchange",
+          { exact: false },
+        ),
+      )
+      .toBeInTheDocument();
+  });
+
+  test("a live copy -> no hand-off note on the recovery confirm", async () => {
+    await mountReadFailedWith("Live partnership");
+
+    await page.getByRole("button", { name: "Delete" }).first().click();
+    await expect
+      .element(page.getByText("your partner is not notified", { exact: false }))
+      .toBeInTheDocument();
+    expect(
+      page
+        .getByText("The psilink.yaml and .psilink.key you saved", {
+          exact: false,
+        })
+        .query(),
+    ).toBeNull();
+  });
+
   test("an unlabeled readable entry's confirm displays 'Delete this exchange?', not the row's display text", async () => {
     // The row text is the display transform "(unnamed exchange)", but the confirm
     // must name the raw (empty) label, so the button's own empty-label branch fires.
@@ -272,5 +324,58 @@ describe("recovery listing: the delete confirm's backup custody note", () => {
     expect(
       page.getByText('Delete "(unnamed exchange)"?', { exact: false }).query(),
     ).toBeNull();
+  });
+});
+
+describe("the import this surface offers works from the read-failed state", () => {
+  test("an artifact of a different exchange lands beside the unreadable record", async () => {
+    // What the surface's copy offers as the way forward: one record this build cannot
+    // parse must not refuse an import for an unrelated exchange.
+    const other = await createManagedExchange(
+      newExchange({ label: "Other partnership" }),
+    );
+    const bytes = serializeManagedExchangeArtifact(
+      encodeManagedExchangeArtifact(other),
+    );
+    await deleteManagedExchange(other.id);
+    const good = await createManagedExchange(
+      newExchange({ label: "Riverbend quarterly" }),
+    );
+    await rawPut({
+      ...good,
+      id: "zzz-bad-record",
+      schemaVersion: "psilink-managed-exchange/v3",
+    });
+    await expect(listManagedExchanges()).rejects.toThrow();
+
+    app.render(createElement(SavedExchanges));
+    await expect
+      .element(page.getByRole("button", { name: "Import a backup file" }))
+      .toBeInTheDocument();
+    await userEvent.upload(
+      page.elementLocator(
+        document.querySelector('input[type="file"]') as HTMLElement,
+      ),
+      new File([bytes], "psilink-managed-backup-2026-07-14.json", {
+        type: "application/json",
+      }),
+    );
+
+    // The imported exchange is stored, beside the good record and the bad one.
+    await expect
+      .poll(async () => (await listManagedExchangesDiagnostic()).length)
+      .toBe(3);
+    // Neither refusal is shown: the file read fine and nothing was handed off.
+    expect(
+      page.getByText("That file could not be imported").query(),
+    ).toBeNull();
+    expect(page.getByText("That exchange was handed off").query()).toBeNull();
+    // The unreadable record is left in place, still listed for the operator.
+    const entries = await listManagedExchangesDiagnostic();
+    expect(
+      entries.flatMap((entry) =>
+        entry.kind === "unreadable" ? [entry.id] : [],
+      ),
+    ).toEqual(["zzz-bad-record"]);
   });
 });

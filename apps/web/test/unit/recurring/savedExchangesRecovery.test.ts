@@ -76,6 +76,26 @@ describe("recoveryRow", () => {
     expect(recoveryRow(readable({ backedUp: false })).backedUp).toBe(false);
   });
 
+  test("a readable entry spent to a hand-off threads the route through to the confirm", () => {
+    const row = recoveryRow({
+      ...readable(),
+      spent: { spentAt: "2026-07-14T13:00:00.000Z", handoff: "command-line" },
+    });
+    expect(row.spentHandoff).toBe("command-line");
+  });
+
+  test("a migration spend names no hand-off: its artifact imports the copy back", () => {
+    const row = recoveryRow({
+      ...readable(),
+      spent: { spentAt: "2026-07-14T13:00:00.000Z" },
+    });
+    expect(row.spentHandoff).toBeUndefined();
+  });
+
+  test("a live entry names no hand-off", () => {
+    expect(recoveryRow(readable()).spentHandoff).toBeUndefined();
+  });
+
   test("an unreadable entry shows the fixed label, an empty delete label, and its key", () => {
     const row = recoveryRow({
       kind: "unreadable",
@@ -95,6 +115,19 @@ describe("recoveryRow", () => {
       recoveryRow({ kind: "unreadable", id: "bad-key", backedUp: true })
         .backedUp,
     ).toBe(true);
+  });
+
+  test("an unreadable entry spent to a hand-off still names the route", () => {
+    // The spend is the sibling entry's, so it survives the record's unreadability:
+    // deleting this row is what removes the import refusal the hand-off stands on.
+    const row = recoveryRow({
+      kind: "unreadable",
+      id: "bad-key",
+      backedUp: false,
+      spent: { spentAt: "2026-07-14T13:00:00.000Z", handoff: "command-line" },
+    });
+    expect(row.spentHandoff).toBe("command-line");
+    expect(row.label).toBe(UNREADABLE_RECORD_LABEL);
   });
 });
 

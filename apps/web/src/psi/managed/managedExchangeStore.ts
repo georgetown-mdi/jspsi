@@ -26,6 +26,7 @@ import {
   diagnoseManagedExchangeRecord,
   parseManagedExchangeRecord,
   partitionReadableManagedExchanges,
+  safeParseManagedExchangeRecord,
 } from "./managedExchangeRecord";
 import { parseManagedLocalState } from "./managedLocalStateShape";
 
@@ -333,18 +334,27 @@ export async function listReadableManagedExchanges(): Promise<ManagedExchangeRea
  * One entry in the diagnostic read: for a stored key, either the display essentials
  * the entry parsed to (`readable`) or an unreadable marker (`unreadable`) holding
  * only the key. Both hold the stored `id`, so a delete-by-key acts on either
- * without requiring a successful parse. Both also hold `backedUp`, derived from
- * the sibling local-state store, so the delete confirm's custody note shows on the
- * recovery path exactly as on the normal list. A boolean suffices: the marker's
- * timestamp is never shown here.
+ * without requiring a successful parse. Both also hold the custody the sibling
+ * local-state store states -- `backedUp` and any `spent` state -- so the delete
+ * confirm's custody notes show on the recovery path exactly as on the normal list.
+ * A boolean suffices for the backup marker, whose timestamp is never shown here;
+ * the spend is the sibling's own {@link ManagedSpentState}, since what a surface
+ * reading it decides on is the route the copy was spent to, not the fact of a
+ * spend alone.
  */
 export type ManagedExchangeDiagnosticEntry =
   | {
       kind: "readable";
       essentials: ManagedExchangeDiagnosticEssentials;
       backedUp: boolean;
+      spent?: ManagedSpentState;
     }
-  | { kind: "unreadable"; id: string; backedUp: boolean };
+  | {
+      kind: "unreadable";
+      id: string;
+      backedUp: boolean;
+      spent?: ManagedSpentState;
+    };
 
 /**
  * Read every stored entry for the read-failed recovery listing, per-record and
@@ -355,15 +365,15 @@ export type ManagedExchangeDiagnosticEntry =
  * normal list cannot load.
  *
  * SECURITY: entries hold display essentials only (label, side, dates, key) plus
- * `backedUp`; the `sharedSecret`, the document, the input handle, and the marker's
- * timestamp never leave the diagnostic extraction. Keyed off the store's own keys
- * rather than the parsed records, so an unreadable entry still yields a key to
- * delete by.
+ * the sibling custody, which has no secret material and no rotation epoch; the
+ * `sharedSecret`, the document, the input handle, and the backup marker's timestamp
+ * never leave the diagnostic extraction. Keyed off the store's own keys rather than
+ * the parsed records, so an unreadable entry still yields a key to delete by.
  *
- * `backedUp` is read from the sibling local-state store in the same transaction,
+ * The custody is read from the sibling local-state store in the same transaction,
  * and is CONSERVATIVE on doubt: an unparseable sibling entry is treated as backed
  * up (a wrongly-shown custody warning is harmless; a wrongly-suppressed one is
- * not).
+ * not) and states no spend, nothing of its shape having been read.
  */
 export async function listManagedExchangesDiagnostic(): Promise<
   Array<ManagedExchangeDiagnosticEntry>
@@ -387,24 +397,24 @@ export async function listManagedExchangesDiagnostic(): Promise<
         transaction.oncomplete = () => {
           const keys = keysRequest.result;
           const values = valuesRequest.result;
-          const backedUpByKey = backedUpMarkersByKey(
+          const custodyByKey = siblingCustodyByKey(
             localKeysRequest.result,
             localValuesRequest.result,
           );
           const entries: Array<ManagedExchangeDiagnosticEntry> = [];
           for (let index = 0; index < keys.length; index += 1) {
             const key = String(keys[index]);
-            const backedUp = backedUpByKey.get(key) ?? false;
+            const custody = custodyByKey.get(key) ?? { backedUp: false };
             try {
               entries.push({
                 kind: "readable",
                 essentials: diagnoseManagedExchangeRecord(values[index]),
-                backedUp,
+                ...custody,
               });
             } catch {
               // The parse failed, so the record's own `id` is untrusted; the store
               // key is the delete target instead, and the only field shown.
-              entries.push({ kind: "unreadable", id: key, backedUp });
+              entries.push({ kind: "unreadable", id: key, ...custody });
             }
           }
           resolve(entries);
@@ -418,28 +428,37 @@ export async function listManagedExchangesDiagnostic(): Promise<
   }
 }
 
-/** Derive, per sibling-store key, whether an exported backup marker is present --
- * the `backedUp` boolean the diagnostic entries hold. CONSERVATIVE on doubt: a
- * sibling entry that cannot be parsed is treated as backed up (a wrongly-shown
- * custody warning is harmless; a wrongly-suppressed one is not). The marker's
- * timestamp is never shown -- only its presence. */
-function backedUpMarkersByKey(
+/** What a sibling entry states about one record's custody, for the diagnostic read:
+ * whether an exported backup remains with the operator, and the spend when an export
+ * handed this copy off. */
+interface ManagedExchangeDiagnosticCustody {
+  backedUp: boolean;
+  spent?: ManagedSpentState;
+}
+
+/** Derive each record's custody from the sibling store's parallel key and value
+ * arrays. CONSERVATIVE on doubt: a sibling entry that cannot be parsed is treated as
+ * backed up (a wrongly-shown custody warning is harmless; a wrongly-suppressed one is
+ * not) and states no spend. The backup marker's timestamp is never shown -- only its
+ * presence. */
+function siblingCustodyByKey(
   keys: ReadonlyArray<IDBValidKey>,
   values: ReadonlyArray<unknown>,
-): Map<string, boolean> {
-  const backedUpByKey = new Map<string, boolean>();
+): Map<string, ManagedExchangeDiagnosticCustody> {
+  const custodyByKey = new Map<string, ManagedExchangeDiagnosticCustody>();
   for (let index = 0; index < keys.length; index += 1) {
     const key = String(keys[index]);
     try {
-      backedUpByKey.set(
-        key,
-        parseManagedLocalState(values[index]).backup !== undefined,
-      );
+      const { backup, spent } = parseManagedLocalState(values[index]);
+      custodyByKey.set(key, {
+        backedUp: backup !== undefined,
+        ...(spent !== undefined ? { spent } : {}),
+      });
     } catch {
-      backedUpByKey.set(key, true);
+      custodyByKey.set(key, { backedUp: true });
     }
   }
-  return backedUpByKey;
+  return custodyByKey;
 }
 
 /**
@@ -1008,7 +1027,8 @@ export async function persistManagedExchangeOutputDirectory(
  * - `"handed-off"` -- a spent record holding the artifact's secret was handed off
  *   by a route of its own ({@link ManagedSpentHandoff}), which the artifact cannot
  *   take back. Nothing was written; the caller refuses the import, naming the record
- *   the store still holds.
+ *   the store still holds. The `label` is empty where the refusing record is one
+ *   this build cannot parse, which leaves its own fields untrusted.
  * - `"no-match"` -- no spent record holds the artifact's secret, so the caller
  *   installs a fresh record.
  */
@@ -1043,8 +1063,19 @@ export type ManagedReviveOutcome =
  * field update is re-validated through the record schema, so a malformed revive
  * aborts the transaction and leaves the store untouched.
  *
- * @throws {ZodError} if any stored record or sibling entry is invalid, or the
- *   revived record is invalid.
+ * Each stored record is parsed on its own, and an entry this build cannot parse is
+ * SKIPPED rather than failing the reconciliation: one invalid record must not block
+ * an import for a different exchange, which is the way forward the read-failed
+ * recovery surface offers. The invalid entry stays in the store, listed by that
+ * surface's diagnostic read, until the operator discards it. A skipped entry can
+ * still refuse the import -- when its sibling entry holds a hand-off and its stored
+ * secret is readable and equal to the artifact's, the outcome is that hand-off's
+ * refusal -- but it can never be revived, a revive needing the whole record, so an
+ * artifact matching a migration-spent entry this build cannot parse installs fresh
+ * beside it.
+ *
+ * @throws {ZodError} if a sibling entry is invalid, or the revived record is
+ *   invalid.
  */
 export async function reviveSpentManagedExchange(
   reconstructed: ManagedExchangeRecord,
@@ -1060,6 +1091,7 @@ export async function reviveSpentManagedExchange(
       );
       const records = transaction.objectStore(MANAGED_EXCHANGE_STORE_NAME);
       const local = transaction.objectStore(MANAGED_EXCHANGE_LOCAL_STORE_NAME);
+      const readRecordKeys = records.getAllKeys();
       const readRecords = records.getAll();
       const readKeys = local.getAllKeys();
       const readValues = local.getAll();
@@ -1067,6 +1099,7 @@ export async function reviveSpentManagedExchange(
       let failure: unknown;
       const applyWhenReady = () => {
         if (
+          readRecordKeys.readyState !== "done" ||
           readRecords.readyState !== "done" ||
           readKeys.readyState !== "done" ||
           readValues.readyState !== "done"
@@ -1081,28 +1114,49 @@ export async function reviveSpentManagedExchange(
             if (spent !== undefined)
               spentStates.set(String(keys[index]), spent);
           }
+          const recordKeys = readRecordKeys.result;
+          const rawRecords = readRecords.result;
           let match: ManagedExchangeRecord | undefined;
           let handedOff:
-            | { record: ManagedExchangeRecord; handoff: ManagedSpentHandoff }
-            | undefined;
-          // Every stored record is parsed, matched or not: an invalid one aborts
-          // this transaction rather than being skipped past.
-          for (const raw of readRecords.result) {
-            const existing = parseManagedExchangeRecord(raw);
-            const spent = spentStates.get(existing.id);
+            { label: string; handoff: ManagedSpentHandoff } | undefined;
+          let handedOffUnreadable: ManagedSpentHandoff | undefined;
+          for (let index = 0; index < rawRecords.length; index += 1) {
+            const raw = rawRecords[index];
+            // The store key, not the value's own `id`, which a failed parse leaves
+            // untrusted; for a record that parses the two are the same field.
+            const spent = spentStates.get(String(recordKeys[index]));
+            const parsed = safeParseManagedExchangeRecord(raw);
+            if (!parsed.success) {
+              if (
+                spent?.handoff !== undefined &&
+                storedSharedSecret(raw) === reconstructed.sharedSecret
+              )
+                handedOffUnreadable ??= spent.handoff;
+              continue;
+            }
+            const existing = parsed.data;
             if (
               spent === undefined ||
               existing.sharedSecret !== reconstructed.sharedSecret
             )
               continue;
             if (spent.handoff === undefined) match ??= existing;
-            else handedOff ??= { record: existing, handoff: spent.handoff };
+            else
+              handedOff ??= { label: existing.label, handoff: spent.handoff };
           }
           if (handedOff !== undefined) {
             outcome = {
               kind: "handed-off",
               handoff: handedOff.handoff,
-              label: handedOff.record.label,
+              label: handedOff.label,
+            };
+            return;
+          }
+          if (handedOffUnreadable !== undefined) {
+            outcome = {
+              kind: "handed-off",
+              handoff: handedOffUnreadable,
+              label: "",
             };
             return;
           }
@@ -1128,6 +1182,7 @@ export async function reviveSpentManagedExchange(
           transaction.abort();
         }
       };
+      readRecordKeys.onsuccess = applyWhenReady;
       readRecords.onsuccess = applyWhenReady;
       readKeys.onsuccess = applyWhenReady;
       readValues.onsuccess = applyWhenReady;
@@ -1138,6 +1193,23 @@ export async function reviveSpentManagedExchange(
   } finally {
     db.close();
   }
+}
+
+/**
+ * The `sharedSecret` a stored value holds as a string, read off the raw value
+ * without the record schema, or `undefined` where the field is absent or of another
+ * type. Read for ONE decision: whether an entry {@link reviveSpentManagedExchange}
+ * could not parse is the handed-off record an import must be refused on, which is
+ * the only comparison a skipped entry takes part in. A best-effort check rather than
+ * a guarantee: an entry whose secret field is unreadable too matches nothing and
+ * installs fresh, the same bound the refusal already has against a record rotated or
+ * deleted past the artifact (docs/spec/MANAGED_EXCHANGE_RECORD.md).
+ */
+function storedSharedSecret(raw: unknown): string | undefined {
+  if (typeof raw !== "object" || raw === null || !("sharedSecret" in raw))
+    return undefined;
+  const { sharedSecret } = raw;
+  return typeof sharedSecret === "string" ? sharedSecret : undefined;
 }
 
 /**

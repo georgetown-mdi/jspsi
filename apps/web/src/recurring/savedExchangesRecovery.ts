@@ -9,8 +9,10 @@
  * shows a fixed "Unreadable record" label and no other detail, since nothing
  * about it could be parsed. Every row holds the stored key the one-step
  * delete-by-key acts on, so an unreadable record is discardable without a
- * successful parse. Secret material never reaches this model: the diagnostic
- * entries hold display essentials only.
+ * successful parse, and the custody the delete confirm states -- an exported backup,
+ * and the hand-off a spend gave the copy to -- which survives a record's
+ * unreadability because it is the sibling entry's, not the record's. Secret material
+ * never reaches this model: the diagnostic entries hold display essentials only.
  */
 
 import { dateLabel } from "@psi/formatting";
@@ -18,6 +20,7 @@ import { dateLabel } from "@psi/formatting";
 import { SIDE_LABEL } from "./savedExchangesModel";
 
 import type { ManagedExchangeDiagnosticEntry } from "@psi/managed/managedExchangeStore";
+import type { ManagedSpentHandoff } from "@psi/managed/managedLocalState";
 
 /** The label a row shows for an unreadable entry: nothing about it could be
  * parsed, so it displays as an unreadable record rather than an empty or guessed
@@ -49,23 +52,35 @@ export interface RecoveryRow {
   /** Whether an exported backup remains under the operator's custody, so the delete
    * confirm states the custody note. Survives record unreadability. */
   backedUp: boolean;
+  /** Which hand-off spent this copy, when it was not the device migration: the
+   * delete confirm then states what those saved files keep running. Absent on a row
+   * that is not spent and on a migration spend, and survives record unreadability
+   * for the same reason {@link backedUp} does. */
+  spentHandoff?: ManagedSpentHandoff;
 }
 
 /** Derive one recovery row from a diagnostic entry. A readable entry shows
  * its essentials (an empty label displays as "(unnamed exchange)" for the row
  * text, matching the run list, while the delete confirm names the raw label);
  * an unreadable entry shows only its key and the fixed unreadable label. Both
- * hold the entry's backup custody state through to the delete confirm. */
+ * hold the entry's custody -- the exported backup and the hand-off that spent the
+ * copy -- through to the delete confirm. */
 export function recoveryRow(
   entry: ManagedExchangeDiagnosticEntry,
 ): RecoveryRow {
+  const custody = {
+    backedUp: entry.backedUp,
+    ...(entry.spent?.handoff !== undefined
+      ? { spentHandoff: entry.spent.handoff }
+      : {}),
+  };
   if (entry.kind === "unreadable")
     return {
       id: entry.id,
       label: UNREADABLE_RECORD_LABEL,
       deleteLabel: "",
       unreadable: true,
-      backedUp: entry.backedUp,
+      ...custody,
     };
   const { essentials } = entry;
   return {
@@ -77,7 +92,7 @@ export function recoveryRow(
       ? { lastRunAt: dateLabel(new Date(essentials.lastRunAt)) }
       : {}),
     unreadable: false,
-    backedUp: entry.backedUp,
+    ...custody,
   };
 }
 
