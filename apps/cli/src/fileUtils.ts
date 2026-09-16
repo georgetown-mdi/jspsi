@@ -2,7 +2,15 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { getLogger, sanitizeErrorForDisplay } from "@psilink/core";
+import {
+  getLogger,
+  keepOperatorSuppliedText,
+  messageWithOperatorText,
+  type MessageWithOperatorText,
+  operatorSuppliedText,
+  redactAndRenderOperatorSuppliedText,
+  sanitizeErrorForDisplay,
+} from "@psilink/core";
 
 const log = getLogger("file-utils");
 
@@ -122,6 +130,11 @@ function warnIfWindowsAclOverPermissive(
   // path is caller-supplied; '' escaping suffices because the user controls the
   // key file path
   const escaped = keyFilePath.replace(/'/g, "''");
+  // Every warning below names the same path, and it is the operator's own, so
+  // it renders once as they typed it rather than escaped per message.
+  const keyFileDisplay = redactAndRenderOperatorSuppliedText(
+    operatorSuppliedText(keyFilePath),
+  );
   let listing: ReturnType<typeof parseWindowsAclListing>;
   try {
     // Whitespace removed rather than trimmed: PowerShell wraps a long line to
@@ -154,7 +167,7 @@ function warnIfWindowsAclOverPermissive(
       )
     ) {
       log.warn(
-        `${keyFilePath} has ACL entries granting read access to other ` +
+        `${keyFileDisplay} has ACL entries granting read access to other ` +
           "users; restrict to owner-read-only via icacls or File " +
           `Properties to prevent other users from reading the ${secretLabel}`,
       );
@@ -167,13 +180,13 @@ function warnIfWindowsAclOverPermissive(
   // locale-independent, measured against the real tool on windows-latest -- and
   // this tier judges neither, so only an explicit allow entry tells it anything.
   const couldNotRead = (reason: string): string =>
-    `Could not read the access list on ${keyFilePath}: ${reason}; check it ` +
-    `by hand with \`icacls "${keyFilePath}"\` and restrict the file to ` +
+    `Could not read the access list on ${keyFileDisplay}: ${reason}; check it ` +
+    `by hand with \`icacls "${keyFileDisplay}"\` and restrict the file to ` +
     `owner-only so other users cannot read the ${secretLabel}`;
   const couldNotJudge = (reason: string): string =>
-    `The access list on ${keyFilePath} could not be checked: ${reason}; check ` +
-    `it by hand with \`icacls "${keyFilePath}"\` and restrict the file to ` +
-    `owner-only so other users cannot read the ${secretLabel}`;
+    `The access list on ${keyFileDisplay} could not be checked: ${reason}; ` +
+    `check it by hand with \`icacls "${keyFileDisplay}"\` and restrict the ` +
+    `file to owner-only so other users cannot read the ${secretLabel}`;
   let output: string;
   try {
     output = execFileSync("icacls", [keyFilePath], {
@@ -220,9 +233,10 @@ function warnIfWindowsAclOverPermissive(
     // command that worked.
     log.warn(
       `Could not determine the current user, so the access list on ` +
-        `${keyFilePath} could not be judged: ${sanitizeErrorForDisplay(err)}; ` +
-        `check it by hand with \`icacls "${keyFilePath}"\` and restrict the ` +
-        `file to owner-only so other users cannot read the ${secretLabel}`,
+        `${keyFileDisplay} could not be judged: ` +
+        `${sanitizeErrorForDisplay(err)}; check it by hand with ` +
+        `\`icacls "${keyFileDisplay}"\` and restrict the file to owner-only ` +
+        `so other users cannot read the ${secretLabel}`,
     );
     return;
   }
@@ -237,7 +251,7 @@ function warnIfWindowsAclOverPermissive(
     // write-only grant on a secret file is a misconfiguration worth flagging
     // too. The PowerShell tier above does mask for read and keeps that wording.
     log.warn(
-      `${keyFilePath} has ACL entries granting access to other users ` +
+      `${keyFileDisplay} has ACL entries granting access to other users ` +
         "(inherited entries and specific rights not inspected); restrict to " +
         "owner-only via icacls or File Properties to prevent other users " +
         `from accessing the ${secretLabel}`,
@@ -322,7 +336,11 @@ export function stripExtendedAcls(
     // into a file whose extended ACL could not be cleared. Each caller's own
     // catch handles what it created -- see
     // docs/spec/CREDENTIAL_STORAGE.md#macos-extended-acl-strip.
-    throw new Error(aclStripFailureMessage(reportedPath, err), { cause: err });
+    const message = aclStripFailureMessage(reportedPath, err);
+    throw keepOperatorSuppliedText(
+      new Error(message.text, { cause: err }),
+      message,
+    );
   }
 }
 
@@ -339,17 +357,19 @@ function absolutizeAgainstWorkingDirectory(filePath: string): string {
 // field present), so the operator is pointed at `ls -le` / `chmod -N` only
 // when there is an ACL state to inspect. The underlying error rides along as
 // `cause`. See docs/spec/CREDENTIAL_STORAGE.md#macos-extended-acl-strip.
-function aclStripFailureMessage(reportedPath: string, err: unknown): string {
+function aclStripFailureMessage(
+  reportedPath: string,
+  err: unknown,
+): MessageWithOperatorText {
   const chmodMayHaveRun =
     typeof err === "object" &&
     err !== null &&
     (typeof (err as { status?: unknown }).status === "number" ||
       typeof (err as { signal?: unknown }).signal === "string");
+  const marked = operatorSuppliedText(reportedPath);
   return chmodMayHaveRun
-    ? `Could not clear extended ACLs on ${reportedPath}; inspect them with ` +
-        "`ls -le` and clear them manually with `chmod -N`"
-    : `Could not run the extended-ACL strip on ${reportedPath}; no content ` +
-        "was written";
+    ? messageWithOperatorText`Could not clear extended ACLs on ${marked}; inspect them with \`ls -le\` and clear them manually with \`chmod -N\``
+    : messageWithOperatorText`Could not run the extended-ACL strip on ${marked}; no content was written`;
 }
 
 /**
@@ -371,7 +391,9 @@ export function warnIfFileOverPermissive(
       const { mode } = fs.statSync(filePath);
       if (mode & 0o077) {
         log.warn(
-          `${filePath} has permissions ` +
+          `${redactAndRenderOperatorSuppliedText(
+            operatorSuppliedText(filePath),
+          )} has permissions ` +
             `${(mode & 0o777).toString(8).padStart(4, "0")}; restrict to ` +
             `0600 (owner-read-only) to prevent other users from reading the ` +
             secretLabel,
@@ -420,13 +442,33 @@ export function detectFileConflicts(paths: string[]): string[] {
  */
 export class FileExistsError extends Error {
   constructor(public readonly path: string) {
-    super(
-      `refusing to overwrite ${path}: it already exists (another process may ` +
-        "have created it concurrently)",
-    );
+    const message = messageWithOperatorText`refusing to overwrite ${operatorSuppliedText(
+      path,
+    )}${FILE_EXISTS_REASON}`;
+    super(message.text);
     this.name = "FileExistsError";
+    keepOperatorSuppliedText(this, message);
   }
 }
+
+/** What {@link FileExistsError} states behind the destination path. */
+const FILE_EXISTS_REASON =
+  ": it already exists (another process may have created it concurrently)";
+
+/**
+ * The refusal both Windows writers raise when icacls could not narrow the
+ * destination's access list: the run refuses to put content in a file whose
+ * ACL it could not restrict.
+ */
+function aclRestrictFailureMessage(destPath: string): MessageWithOperatorText {
+  return messageWithOperatorText`Could not restrict ACLs on ${operatorSuppliedText(
+    destPath,
+  )}${ACL_RESTRICT_REMEDY}`;
+}
+
+/** What {@link aclRestrictFailureMessage} states behind the path. */
+const ACL_RESTRICT_REMEDY =
+  "; restrict manually to owner-read-only via icacls or File Properties";
 
 /** Options for {@link writeFileOwnerOnly}. */
 export interface WriteFileOwnerOnlyOptions {
@@ -543,10 +585,8 @@ export function writeFileOwnerOnly(
         } catch {
           // State a clear remediation; the outer catch removes the placeholder,
           // which this branch's close has already released.
-          throw new Error(
-            `Could not restrict ACLs on ${destPath}; restrict manually to ` +
-              "owner-read-only via icacls or File Properties",
-          );
+          const message = aclRestrictFailureMessage(destPath);
+          throw keepOperatorSuppliedText(new Error(message.text), message);
         }
         fs.writeFileSync(fd, content, "utf8");
         fs.fsyncSync(fd);
@@ -616,6 +656,7 @@ export function writeFileOwnerOnly(
         // rethrow the original error. The temp file is cleaned up by the outer
         // catch.
         if (code === "EEXIST" || (code === "EPERM" && fs.existsSync(destPath)))
+          // eslint-disable-next-line no-restricted-syntax -- FileExistsError marks the path in its own constructor.
           throw new FileExistsError(destPath);
         throw e;
       }
@@ -794,10 +835,8 @@ export function createOwnerOnlyWriteStream(destPath: string): fs.WriteStream {
     } catch {
       // Surface a clear remediation rather than stream PII into a file whose ACL
       // we could not restrict; the empty placeholder is left for the operator.
-      throw new Error(
-        `Could not restrict ACLs on ${destPath}; restrict manually to ` +
-          "owner-read-only via icacls or File Properties",
-      );
+      const message = aclRestrictFailureMessage(destPath);
+      throw keepOperatorSuppliedText(new Error(message.text), message);
     }
     // The narrowed ACL is a property of the file object and survives the reopen:
     // createWriteStream's default "w" truncates the (empty) file, not its DACL.

@@ -24,12 +24,16 @@ import {
   DISPLAY_TRUNCATION_MARKER,
   isDrawnFromLinkageRuleSet,
   keepFirstPartyLineBreaks,
+  keepOperatorSuppliedText,
   MAX_NESTING_DEPTH,
+  messageWithOperatorText,
   NestingDepthExceededError,
   OperatorConfigError,
+  operatorSuppliedText,
   partnerPinIsPresent,
   quoteTermsValue,
   quoteTermsValueList,
+  redactAndRenderOperatorSuppliedText,
   redactAndSanitizeForDisplay,
   redactPrivateKeyMaterial,
   renderedDisplayCost,
@@ -52,6 +56,7 @@ import {
 import { annotateConnectionGuidance } from "./connectionGuidance";
 import { writeFileOwnerOnly } from "./fileUtils";
 import { parseSensitiveYaml, editSensitiveYamlDocument } from "./sensitiveFile";
+import type { SensitiveFileLabel } from "./sensitiveFile";
 
 /**
  * Default path for the exchange config file written by the provisioning
@@ -1402,6 +1407,29 @@ export function saveConfig(configPath: string, spec: ExchangeSpec): void {
 }
 
 /**
+ * The label the sensitive-parse chokepoint names the operator's own
+ * configuration file by. Composed rather than concatenated so the path inside
+ * it stays marked as the operator's: a failure the chokepoint reports shows it
+ * as they typed it, separators and all.
+ */
+function configFileLabel(configPath: string): SensitiveFileLabel {
+  return messageWithOperatorText`config file ${operatorSuppliedText(configPath)}`;
+}
+
+/**
+ * A refusal about the operator's own configuration file, reading
+ * "config file <path> <rest>".
+ *
+ * `rest` is first-party copy and whatever the refusal quotes out of the
+ * document -- a channel or mode the operator wrote -- which takes the escape
+ * every unmarked fragment takes. Only the path is marked.
+ */
+function configFileRefusal(configPath: string, rest: string): UsageError {
+  const message = messageWithOperatorText`config file ${operatorSuppliedText(configPath)} ${rest}`;
+  return keepOperatorSuppliedText(new UsageError(message.text), message);
+}
+
+/**
  * Write (or overwrite) `connection.server.host_key_fingerprint` in an
  * existing `psilink.yaml`, used to persist a host-key pin established
  * interactively on first use. Unlike {@link saveConfig}, this edits the file
@@ -1428,7 +1456,7 @@ export function persistHostKeyFingerprint(
   // surgical one-field write.
   const serialized = editSensitiveYamlDocument(
     fs.readFileSync(configPath, "utf8"),
-    `config file ${configPath}`,
+    configFileLabel(configPath),
     (doc) => {
       // Read the channel discriminant off the parsed document (not a
       // schema-loaded spec) and reject anything but sftp before the write.
@@ -1440,10 +1468,11 @@ export function persistHostKeyFingerprint(
       if (channel !== "sftp") {
         const found =
           typeof channel === "string" ? `"${channel}"` : "absent or non-scalar";
-        throw new UsageError(
-          `config file ${configPath} has a non-sftp connection.channel ` +
-            `(${found}); a host-key fingerprint is an sftp-only pin and must ` +
-            `not be written to a non-sftp config.`,
+        throw configFileRefusal(
+          configPath,
+          `has a non-sftp connection.channel (${found}); a host-key ` +
+            "fingerprint is an sftp-only pin and must not be written to a " +
+            "non-sftp config.",
         );
       }
       // setIn creates the connection/server path nodes if absent; for an
@@ -1457,10 +1486,11 @@ export function persistHostKeyFingerprint(
           fingerprint,
         );
       } catch (err) {
-        throw new UsageError(
-          `config file ${configPath} could not be updated to persist the ` +
-            `host-key fingerprint (${err instanceof Error ? err.message : String(err)}); ` +
-            `connection.server must be a mapping.`,
+        throw configFileRefusal(
+          configPath,
+          "could not be updated to persist the host-key fingerprint " +
+            `(${err instanceof Error ? err.message : String(err)}); ` +
+            "connection.server must be a mapping.",
         );
       }
     },
@@ -1506,17 +1536,28 @@ export function assertPartnerFingerprintRecordable(
   try {
     fs.accessSync(path.dirname(configPath), fs.constants.W_OK);
   } catch {
-    throw new OperatorConfigError(
-      "this exchange signs receipts (signing.mode: certificate) and pins no " +
-        "partner fingerprint, so its first authenticated contact records the " +
-        `certificate the partner presents into ${configPath} -- and that ` +
-        "file cannot be replaced: recording the pin writes a new file in the " +
-        "directory holding it and renames that over the old one, which needs " +
-        "the directory writable by the user this run is. The run stopped " +
-        `before connecting. Either ${PARTNER_FINGERPRINT_REMEDIES}.`,
+    const message = messageWithOperatorText`${UNRECORDABLE_PIN_PREAMBLE}${operatorSuppliedText(
+      configPath,
+    )}${UNRECORDABLE_PIN_REMEDY}`;
+    throw keepOperatorSuppliedText(
+      new OperatorConfigError(message.text),
+      message,
     );
   }
 }
+
+/** What {@link assertPartnerFingerprintRecordable} states ahead of the path. */
+const UNRECORDABLE_PIN_PREAMBLE =
+  "this exchange signs receipts (signing.mode: certificate) and pins no " +
+  "partner fingerprint, so its first authenticated contact records the " +
+  "certificate the partner presents into ";
+
+/** What {@link assertPartnerFingerprintRecordable} states behind the path. */
+const UNRECORDABLE_PIN_REMEDY =
+  " -- and that file cannot be replaced: recording the pin writes a new file " +
+  "in the directory holding it and renames that over the old one, which " +
+  "needs the directory writable by the user this run is. The run stopped " +
+  `before connecting. Either ${PARTNER_FINGERPRINT_REMEDIES}.`;
 
 /**
  * Write `signing.partner_fingerprint` into an existing `psilink.yaml`, used to
@@ -1555,15 +1596,22 @@ export function persistPartnerFingerprint(
     // refusal the document edit composed; anything else is the read or the
     // atomic replace, which reaches the operator only here.
     if (err instanceof UsageError) throw err;
-    throw new OperatorConfigError(
-      "the partner's signing certificate was pinned on this first contact, " +
-        `but the fingerprint could not be recorded in ${configPath} ` +
-        `(${err instanceof Error ? err.message : String(err)}), so the run ` +
-        `stops here. The partner's fingerprint is ${fingerprint}; before the ` +
-        `next run, either ${PARTNER_FINGERPRINT_REMEDIES}.`,
+    const message = messageWithOperatorText`${PARTNER_PIN_UNRECORDED_PREAMBLE}${operatorSuppliedText(
+      configPath,
+    )} (${
+      err instanceof Error ? err.message : String(err)
+    }), so the run stops here. The partner's fingerprint is ${fingerprint}; before the next run, either ${PARTNER_FINGERPRINT_REMEDIES}.`;
+    throw keepOperatorSuppliedText(
+      new OperatorConfigError(message.text),
+      message,
     );
   }
 }
+
+/** What {@link persistPartnerFingerprint} states ahead of the path. */
+const PARTNER_PIN_UNRECORDED_PREAMBLE =
+  "the partner's signing certificate was pinned on this first contact, but " +
+  "the fingerprint could not be recorded in ";
 
 /** The configuration text {@link persistPartnerFingerprint} writes back: the
  * file at `configPath` with `signing.partner_fingerprint` set to
@@ -1577,7 +1625,7 @@ function partnerFingerprintRecorded(
   // order on this surgical one-field write.
   return editSensitiveYamlDocument(
     fs.readFileSync(configPath, "utf8"),
-    `config file ${configPath}`,
+    configFileLabel(configPath),
     (doc) => {
       // Read the mode off the parsed document (not a schema-loaded spec) and
       // reject anything but certificate before the write. getIn does not
@@ -1588,19 +1636,21 @@ function partnerFingerprintRecorded(
       if (mode !== "certificate") {
         const found =
           typeof mode === "string" ? `"${mode}"` : "absent or non-scalar";
-        throw new UsageError(
-          `config file ${configPath} does not sign receipts with a ` +
-            `certificate (signing.mode is ${found}); a partner certificate ` +
-            `fingerprint must not be written to it.`,
+        throw configFileRefusal(
+          configPath,
+          `does not sign receipts with a certificate (signing.mode is ` +
+            `${found}); a partner certificate fingerprint must not be ` +
+            "written to it.",
         );
       }
       const existing = doc.getIn(["signing", "partner_fingerprint"]);
       if (existing !== undefined && existing !== null)
-        throw new UsageError(
-          `config file ${configPath} already pins a partner fingerprint; it ` +
-            `was left unchanged. Changing a pin is a deliberate act: confirm ` +
-            `the partner's fingerprint out-of-band and edit ` +
-            `signing.partner_fingerprint yourself.`,
+        throw configFileRefusal(
+          configPath,
+          "already pins a partner fingerprint; it was left unchanged. " +
+            "Changing a pin is a deliberate act: confirm the partner's " +
+            "fingerprint out-of-band and edit signing.partner_fingerprint " +
+            "yourself.",
         );
       // setIn creates the signing path node if absent; for a certificate-mode
       // config loaded by the exchange command it already exists. A `signing`
@@ -1610,10 +1660,11 @@ function partnerFingerprintRecorded(
       try {
         doc.setIn(["signing", "partner_fingerprint"], fingerprint);
       } catch (err) {
-        throw new UsageError(
-          `config file ${configPath} could not be updated to record the ` +
-            `partner certificate fingerprint (${err instanceof Error ? err.message : String(err)}); ` +
-            `signing must be a mapping.`,
+        throw configFileRefusal(
+          configPath,
+          "could not be updated to record the partner certificate " +
+            `fingerprint (${err instanceof Error ? err.message : String(err)}); ` +
+            "signing must be a mapping.",
         );
       }
     },
@@ -1650,7 +1701,7 @@ export function persistDisclosedPayloadColumns(
   // on this surgical one-field write.
   const serialized = editSensitiveYamlDocument(
     fs.readFileSync(configPath, "utf8"),
-    `config file ${configPath}`,
+    configFileLabel(configPath),
     (doc) => {
       if (columns === undefined) {
         // No commitment on record for this mint: remove any stale field rather
@@ -1696,7 +1747,7 @@ export function persistExpectedPayloadColumns(
   // on this surgical one-field write.
   const serialized = editSensitiveYamlDocument(
     fs.readFileSync(configPath, "utf8"),
-    `config file ${configPath}`,
+    configFileLabel(configPath),
     (doc) => {
       if (columns === undefined) {
         // No consented subset on record for this acceptance: remove any stale
@@ -1742,7 +1793,7 @@ export function persistOutboundPayloadConsent(
   // on this surgical one-field write.
   const serialized = editSensitiveYamlDocument(
     fs.readFileSync(configPath, "utf8"),
-    `config file ${configPath}`,
+    configFileLabel(configPath),
     (doc) => {
       if (consent === undefined) {
         doc.deleteIn(["outbound_payload_consent"]);
@@ -1786,7 +1837,7 @@ export function persistExpectedPartnerDeduplicate(
   // on this surgical one-field write.
   const serialized = editSensitiveYamlDocument(
     fs.readFileSync(configPath, "utf8"),
-    `config file ${configPath}`,
+    configFileLabel(configPath),
     (doc) => {
       doc.setIn(["expected_partner_deduplicate"], declared);
     },
@@ -1930,21 +1981,23 @@ export function readConfigLinkageSource(
   } catch (err: unknown) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT")
       return { status: "no-config-file" };
-    throw new UsageError(
-      `config file ${configPath} could not be read: ` +
+    throw configFileRefusal(
+      configPath,
+      "could not be read: " +
         (err instanceof Error ? err.message : String(err)),
     );
   }
-  const raw = parseSensitiveYaml(source, `config file ${configPath}`);
+  const raw = parseSensitiveYaml(source, configFileLabel(configPath));
 
   // A top-level YAML mapping is required. Exclude an array (also
   // `typeof === "object"`) and a scalar explicitly, so a malformed config is
   // reported as such rather than misattributed to a missing `linkage_terms`
   // block (an array has no such key, so it would otherwise fall through below).
   if (raw === null || typeof raw !== "object" || Array.isArray(raw))
-    throw new UsageError(
-      `config file ${configPath} is not a valid configuration object ` +
-        "(expected a YAML mapping at the top level)",
+    throw configFileRefusal(
+      configPath,
+      "is not a valid configuration object (expected a YAML mapping at the " +
+        "top level)",
     );
   const obj = raw as Record<string, unknown>;
   const rawTerms = obj["linkage_terms"] ?? obj["linkageTerms"];
@@ -1956,8 +2009,9 @@ export function readConfigLinkageSource(
   // alone (@psilink/core, transformParamTypes.ts).
   const result = safeParseLinkageTermsTheReaderWrote(rawTerms);
   if (!result.success)
-    throw new UsageError(
-      `config file ${configPath} has invalid linkage_terms: ` +
+    throw configFileRefusal(
+      configPath,
+      "has invalid linkage_terms: " +
         describeSchemaIssues(result.error.issues, "camelized"),
     );
 
@@ -1972,8 +2026,9 @@ export function readConfigLinkageSource(
   if (rawStd !== undefined) {
     const stdResult = safeParseStandardization(rawStd);
     if (!stdResult.success)
-      throw new UsageError(
-        `config file ${configPath} has invalid standardization: ` +
+      throw configFileRefusal(
+        configPath,
+        "has invalid standardization: " +
           describeSchemaIssues(stdResult.error.issues, "camelized"),
       );
     standardization = stdResult.data;
@@ -1989,8 +2044,9 @@ export function readConfigLinkageSource(
   if (rawMetadata !== undefined) {
     const metaResult = safeParseMetadata(rawMetadata);
     if (!metaResult.success)
-      throw new UsageError(
-        `config file ${configPath} has invalid metadata: ` +
+      throw configFileRefusal(
+        configPath,
+        "has invalid metadata: " +
           describeSchemaIssues(metaResult.error.issues, "camelized"),
       );
     metadata = metaResult.data;
@@ -2073,10 +2129,11 @@ export function loadConfigLinkageSource(
   const result = readConfigLinkageSource(configPath);
   if (result.status === "no-config-file") return undefined;
   if (result.status === "no-linkage-terms")
-    throw new UsageError(
-      `config file ${configPath} has no linkage_terms and cannot be used as ` +
-        "the source for an invitation; supply an input file or a configuration " +
-        "that defines linkage terms",
+    throw configFileRefusal(
+      configPath,
+      "has no linkage_terms and cannot be used as the source for an " +
+        "invitation; supply an input file or a configuration that defines " +
+        "linkage terms",
     );
   return result.source;
 }
@@ -2246,7 +2303,8 @@ export function warnOnLinkageRuleSetCitationDrift(
         "rules the cited set defines.";
 
   log.warn(
-    `${configPath}: linkage_terms.linkage_rule_set cites ` +
+    `${redactAndRenderOperatorSuppliedText(operatorSuppliedText(configPath))}: ` +
+      `linkage_terms.linkage_rule_set cites ` +
       `${describeRuleSetCitation(cited)}, but ${drifted.join(", and ")}. ` +
       consequence,
   );

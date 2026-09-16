@@ -17,6 +17,7 @@ import {
   reconstructCommittedData,
   recordAlterationIsTheOnlyExplanation,
   recordedVersionMatches,
+  messageWithOperatorText,
   operatorSuppliedText,
   redactAndRenderOperatorSuppliedText,
   reproductionMismatchCauses,
@@ -236,7 +237,7 @@ function assertRecognizedVersion(
 function readJsonFile(pathValue: string, kind: string): unknown {
   return parseSensitiveJson(
     readTextFile(pathValue, kind),
-    `${kind} file ${pathValue}`,
+    messageWithOperatorText`${kind} file ${operatorSuppliedText(pathValue)}`,
   );
 }
 
@@ -874,7 +875,10 @@ export function readConfigSigningBlock(
   }
   // A YAML parse can echo source bytes (an inline connection credential), so it
   // routes through the sensitive-file chokepoint, which reports path-only.
-  const raw = parseSensitiveYaml(text, `config file ${configFile}`);
+  const raw = parseSensitiveYaml(
+    text,
+    messageWithOperatorText`config file ${operatorSuppliedText(configFile)}`,
+  );
   const root = (raw ?? {}) as Record<string, unknown>;
   return {
     configFile,

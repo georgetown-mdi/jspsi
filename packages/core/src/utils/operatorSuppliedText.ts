@@ -57,11 +57,30 @@ export interface DisplaySpan {
  * fragments interpolated raw -- what an `Error` built from it takes as its
  * message, so classification and message equality read the text they read
  * before the message was partitioned.
+ *
+ * Build one through {@link messageWithOperatorText} rather than as an object
+ * literal: only what that composes holds the brand the interpolation reads, so
+ * a hand-built value of this shape interpolates as its own `text`, escaped.
  */
 export interface MessageWithOperatorText {
   readonly text: string;
   readonly spans: ReadonlyArray<DisplaySpan>;
 }
+
+/**
+ * Where the spans of a partitioned message are kept: on the message
+ * {@link messageWithOperatorText} composes, and on the error
+ * {@link keepOperatorSuppliedText} marks with it for the renderer to read.
+ *
+ * A SYMBOL-keyed property, out of reach of the text the renderer defends
+ * against: no parse produces one, so no value a partner sends can ask for the
+ * treatment, on either route. Registered rather than module-private, so a
+ * process holding two copies of this module reads the mark the other copy
+ * wrote instead of escaping a path the operator typed.
+ */
+const OPERATOR_SUPPLIED_SPANS = Symbol.for(
+  "psilink.errorDisplay.operatorSuppliedSpans",
+);
 
 /**
  * Compose a message as a tagged template, keeping each fragment's origin:
@@ -72,13 +91,24 @@ export interface MessageWithOperatorText {
  * value is the one span rendered as given. A `number` is printable ASCII and
  * takes the escape like any unmarked value, which leaves it unchanged.
  *
+ * A message this function composed interpolates as its own spans rather than
+ * as text, so a message built around a label another call site partitioned --
+ * the file label the sensitive-parse chokepoint reports
+ * ({@link ../sensitiveFile.SensitiveFileLabel}) -- keeps the origin that site
+ * stated instead of flattening it back to an escaped string. A value of the
+ * same SHAPE that this function did not compose is not that: it holds no
+ * {@link OPERATOR_SUPPLIED_SPANS} brand, so its `text` is interpolated as a
+ * fragment nobody marked and escaped like any other.
+ *
  * The result is inert: it holds text and spans and reaches the operator only
  * through {@link keepOperatorSuppliedText}, which is what puts the partition
  * where the renderer reads it.
  */
 export function messageWithOperatorText(
   fixedSpans: TemplateStringsArray,
-  ...values: ReadonlyArray<OperatorSuppliedText | string | number>
+  ...values: ReadonlyArray<
+    OperatorSuppliedText | MessageWithOperatorText | string | number
+  >
 ): MessageWithOperatorText {
   const spans: DisplaySpan[] = [];
   const push = (text: string, operatorSupplied: boolean): void => {
@@ -87,11 +117,80 @@ export function messageWithOperatorText(
   push(fixedSpans[0]!, false);
   for (let index = 0; index < values.length; index += 1) {
     const value = values[index]!;
-    const supplied = operatorSuppliedValue(value);
-    push(supplied ?? String(value), supplied !== undefined);
+    const composed = composedSpans(value);
+    if (composed !== undefined) {
+      for (const span of composed) push(span.text, span.operatorSupplied);
+    } else {
+      const supplied = operatorSuppliedValue(value);
+      push(supplied ?? unmarkedText(value), supplied !== undefined);
+    }
     push(fixedSpans[index + 1]!, false);
   }
-  return { text: spans.map((span) => span.text).join(""), spans };
+  const message: MessageWithOperatorText = {
+    text: spans.map((span) => span.text).join(""),
+    spans,
+  };
+  Object.defineProperty(message, OPERATOR_SUPPLIED_SPANS, {
+    value: spans,
+    enumerable: false,
+    configurable: true,
+  });
+  return message;
+}
+
+/**
+ * What an interpolated value contributes when it holds no mark and is no
+ * composed message: its own `text` where it has one, and the value as a
+ * string otherwise.
+ *
+ * Reading `text` keeps the diagnosis of a value shaped like a composed message
+ * that {@link composedSpans} would not honour -- one nothing branded, or one
+ * whose spans do not join back -- which would otherwise reach the operator as
+ * `[object Object]`, naming nothing they can act on. The text is a fragment
+ * nobody marked either way, so it is escaped at the sink.
+ */
+function unmarkedText(value: unknown): string {
+  if (typeof value === "object" && value !== null) {
+    const { text } = value as { text?: unknown };
+    if (typeof text === "string") return text;
+  }
+  return String(value);
+}
+
+/**
+ * The spans of an interpolated value that is itself a composed message, or
+ * `undefined` for every other value, which is then interpolated as text.
+ *
+ * A composed message is told by the {@link OPERATOR_SUPPLIED_SPANS} brand
+ * {@link messageWithOperatorText} puts on what it returns, an OWN symbol-keyed
+ * property: text a partner sends cannot ask for the treatment here any more
+ * than it can at the mark on an error, whatever it spells, because no parse
+ * produces a symbol key. The brand is the registered symbol, so a message
+ * another copy of this module composed is read as this copy's own.
+ *
+ * The shape is then checked the way {@link operatorSuppliedSpans} checks the
+ * mark it reads off an error: `text` and `spans` own properties of the value
+ * rather than its prototype's, every span well-formed, and the spans joining
+ * back to the message's own `text`.
+ */
+function composedSpans(value: unknown): ReadonlyArray<DisplaySpan> | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  if (!Object.hasOwn(value, OPERATOR_SUPPLIED_SPANS)) return undefined;
+  if (!Object.hasOwn(value, "text") || !Object.hasOwn(value, "spans"))
+    return undefined;
+  const { text, spans } = value as Partial<MessageWithOperatorText>;
+  if (typeof text !== "string" || !Array.isArray(spans)) return undefined;
+  const checked: DisplaySpan[] = [];
+  for (const span of spans as unknown[]) {
+    if (typeof span !== "object" || span === null) return undefined;
+    const { text: spanText, operatorSupplied } = span as Partial<DisplaySpan>;
+    if (typeof spanText !== "string" || typeof operatorSupplied !== "boolean")
+      return undefined;
+    checked.push({ text: spanText, operatorSupplied });
+  }
+  return checked.map((span) => span.text).join("") === text
+    ? checked
+    : undefined;
 }
 
 /**
@@ -109,20 +208,6 @@ export function operatorSuppliedValue(value: unknown): string | undefined {
   const held = (value as Record<symbol, unknown>)[OPERATOR_SUPPLIED_VALUE];
   return typeof held === "string" ? held : undefined;
 }
-
-/**
- * Where the spans of a partitioned message are kept for the error renderer to
- * read.
- *
- * A SYMBOL-keyed property, out of reach of the text the renderer defends
- * against: no parse produces one, so no value a partner sends can ask for the
- * treatment. Registered rather than module-private, so a process holding two
- * copies of this module reads the mark the other copy wrote instead of
- * escaping a path the operator typed.
- */
-const OPERATOR_SUPPLIED_SPANS = Symbol.for(
-  "psilink.errorDisplay.operatorSuppliedSpans",
-);
 
 /**
  * Mark `error` with the spans of the message it was built from, so

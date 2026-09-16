@@ -9,6 +9,8 @@ import {
   getLogger,
   holdsPrivateKeyMaterial,
   MAX_TEXT_LENGTH,
+  messageWithOperatorText,
+  operatorSuppliedText,
   PRIVATE_KEY_IDENTITY_MESSAGE,
   reasonTermsCannotStateIdentity,
   redactAndDisplayPartyIdentity,
@@ -143,7 +145,10 @@ export function readConfigHints(
   // The YAML parse can echo source bytes (an inline connection credential), so it
   // routes through the sensitive-file chokepoint, which reports path-only (see
   // sensitiveFile.ts).
-  const raw = parseSensitiveYaml(text, `config file ${target}`);
+  const raw = parseSensitiveYaml(
+    text,
+    messageWithOperatorText`config file ${operatorSuppliedText(target)}`,
+  );
   const root = (raw ?? {}) as Record<string, unknown>;
   const signing = (root["signing"] ?? {}) as Record<string, unknown>;
   const linkageTerms = (root["linkage_terms"] ??

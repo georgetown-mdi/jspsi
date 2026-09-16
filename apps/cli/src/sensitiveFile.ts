@@ -9,3 +9,4 @@ export {
   editSensitiveYamlDocument,
   parseSensitiveJson,
 } from "@psilink/core";
+export type { SensitiveFileLabel } from "@psilink/core";
