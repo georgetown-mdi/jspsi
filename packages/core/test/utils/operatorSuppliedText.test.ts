@@ -14,7 +14,10 @@ import {
 import {
   COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
   DISPLAY_TRUNCATION_MARKER,
+  operatorDisplayMarker,
+  renderOperatorSuppliedText,
 } from "../../src/utils/sanitizeForDisplay";
+import { partnerOriginText } from "../../src/utils/partnerOriginText";
 
 // The fragment boundary the display escape is assigned to: bytes somebody else
 // chose are escaped, and bytes the operator supplied are rendered as they typed
@@ -147,25 +150,80 @@ describe("a message partitioned by origin", () => {
 
     expect(operatorSuppliedSpans(error, error.message)).toBeUndefined();
   });
+
+  it("reads a well-shaped mark under the registered symbol", () => {
+    // The symbol is registered so a mark another copy of this module wrote is
+    // read here, and what that buys any holder of the symbol is the same
+    // treatment: shape and join are checked, provenance is not.
+    const error = new Error(`could not read ${WINDOWS_PATH}`);
+    Object.defineProperty(
+      error,
+      Symbol.for("psilink.errorDisplay.operatorSuppliedSpans"),
+      {
+        value: [
+          { text: "could not read ", operatorSupplied: false },
+          { text: WINDOWS_PATH, operatorSupplied: true },
+        ],
+      },
+    );
+
+    expect(sanitizeErrorForDisplay(error)).toBe(
+      `could not read ${WINDOWS_PATH}`,
+    );
+  });
 });
 
 describe("an operator-supplied fragment bound for a log sink", () => {
   it("renders the path as typed and redacts key material in it", () => {
-    expect(redactAndRenderOperatorSuppliedText(WINDOWS_PATH)).toBe(
-      WINDOWS_PATH,
-    );
+    expect(
+      redactAndRenderOperatorSuppliedText(operatorSuppliedText(WINDOWS_PATH)),
+    ).toBe(WINDOWS_PATH);
     expect(
       redactAndRenderOperatorSuppliedText(
-        "C:\\keys\\-----BEGIN RSA PRIVATE KEY-----",
+        operatorSuppliedText("C:\\keys\\-----BEGIN RSA PRIVATE KEY-----"),
       ),
     ).toBe("C:\\keys\\[redacted private key]");
   });
 
   it("cuts an over-long path at the display budget and marks the cut", () => {
     const rendered = redactAndRenderOperatorSuppliedText(
-      "C:\\".concat("d".repeat(400)),
+      operatorSuppliedText("C:\\".concat("d".repeat(400))),
     );
 
     expect(rendered.endsWith(DISPLAY_TRUNCATION_MARKER)).toBe(true);
+  });
+
+  // The gate on this route is the parameter type, not a reviewer reading the
+  // call site: `npm run typecheck` runs these, and an `@ts-expect-error` over
+  // a line that compiles is itself an error, so a signature that stopped
+  // refusing one of these forms fails the build. The expressions still RUN
+  // under vitest, which transpiles without checking, so each one also measures
+  // what an unmarked value gets if it reaches the renderer anyway.
+  it("refuses an unmarked value, and escapes one that arrives regardless", () => {
+    const fromPartner = partnerOriginText(WINDOWS_PATH);
+    const escaped = "C:\\\\Users\\\\operator\\\\exchange\\\\input.csv";
+
+    // @ts-expect-error a plain string does not say who chose its bytes
+    const plain = redactAndRenderOperatorSuppliedText(WINDOWS_PATH);
+    // @ts-expect-error the partner's mark is not the operator's
+    const partner = redactAndRenderOperatorSuppliedText(fromPartner);
+    // @ts-expect-error the render behind it refuses the same forms
+    const rendered = renderOperatorSuppliedText(WINDOWS_PATH);
+
+    expect(plain).toBe(escaped);
+    expect(partner).toBe(escaped);
+    expect(rendered).toBe(escaped);
+  });
+
+  it("replaces a line separator and a lone surrogate in the path", () => {
+    const path = `C:\\logs\\\u2028run\ud83d.csv`;
+
+    expect(
+      redactAndRenderOperatorSuppliedText(operatorSuppliedText(path)),
+    ).toBe(
+      `C:\\logs\\${operatorDisplayMarker(0x2028)}run${operatorDisplayMarker(
+        0xd83d,
+      )}.csv`,
+    );
   });
 });

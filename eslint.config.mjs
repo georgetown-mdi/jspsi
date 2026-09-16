@@ -113,6 +113,7 @@ export const DISPLAYABLE_PRODUCERS = [
   "sanitizeForDisplay",
   "redactAndSanitizeForDisplay",
   "renderOperatorSuppliedText",
+  "renderOperatorSuppliedSpanText",
   "redactAndRenderOperatorSuppliedText",
   "displayText",
   "describeDecodeError",

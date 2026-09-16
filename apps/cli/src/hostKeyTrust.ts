@@ -1,5 +1,6 @@
 import {
   FileSyncConnection,
+  operatorSuppliedText,
   redactAndRenderOperatorSuppliedText,
   redactAndSanitizeForDisplay,
   redactPrivateKeyMaterial,
@@ -216,7 +217,9 @@ export async function establishHostKeyTrust(
       persistHostKeyFingerprint(persistence.configPath, presented.fingerprint);
       log.info(
         `pinned ${hostDisplay}'s host key (${presented.fingerprint}) to ` +
-          `${redactAndRenderOperatorSuppliedText(persistence.configPath)}; future ` +
+          `${redactAndRenderOperatorSuppliedText(
+            operatorSuppliedText(persistence.configPath),
+          )}; future ` +
           `connections will verify it automatically.`,
       );
       break;
@@ -226,7 +229,9 @@ export async function establishHostKeyTrust(
       log.info(
         `trusted ${hostDisplay}'s host key (${presented.fingerprint}); it ` +
           `will be saved to ` +
-          `${redactAndRenderOperatorSuppliedText(persistence.configPath)} and ` +
+          `${redactAndRenderOperatorSuppliedText(
+            operatorSuppliedText(persistence.configPath),
+          )} and ` +
           `verified automatically on future connections.`,
       );
       break;

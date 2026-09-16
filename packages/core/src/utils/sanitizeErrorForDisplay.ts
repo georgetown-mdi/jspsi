@@ -1,11 +1,14 @@
 import { errorMessage } from "../connection/messageConnection";
-import { operatorSuppliedSpans } from "./operatorSuppliedText";
-import type { DisplaySpan } from "./operatorSuppliedText";
+import {
+  operatorSuppliedSpans,
+  operatorSuppliedValue,
+} from "./operatorSuppliedText";
+import type { DisplaySpan, OperatorSuppliedText } from "./operatorSuppliedText";
 import {
   COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
   DISPLAY_TRUNCATION_MARKER,
   renderedDisplayCost,
-  renderOperatorSuppliedText,
+  renderOperatorSuppliedSpanText,
   replaceControlCharactersForDisplay,
   sanitizeForDisplay,
 } from "./sanitizeForDisplay";
@@ -312,8 +315,8 @@ export function redactAndSanitizeForDisplay(
 /**
  * {@link redactAndSanitizeForDisplay} for a fragment the OPERATOR supplied:
  * {@link redactPrivateKeyMaterial} first, then
- * {@link renderOperatorSuppliedText}, which leaves the operator's own bytes as
- * they typed them instead of escaping them.
+ * {@link ./sanitizeForDisplay.renderOperatorSuppliedText}, which leaves the
+ * operator's own bytes as they typed them instead of escaping them.
  *
  * This is the log-, console- and prompt-sink half of the fragment boundary,
  * pairing with the error route's per-span render: a path composed into a
@@ -322,6 +325,11 @@ export function redactAndSanitizeForDisplay(
  * where the chain is (`./operatorSuppliedText`). Either way the operator reads
  * one separator per separator they typed.
  *
+ * It takes the MARK on both routes, so this sink asks the same of its callers
+ * the error route asks of a composition site: an unmarked value does not
+ * compile, and one that reaches here unmarked despite the type is escaped by
+ * {@link redactAndSanitizeForDisplay} rather than rendered as given.
+ *
  * Redacting BEFORE rendering bounds the fail-closed dangling rule to the
  * fragment that held the marker, for the reason
  * {@link redactAndSanitizeForDisplay} states: a path an operator names with a
@@ -329,10 +337,13 @@ export function redactAndSanitizeForDisplay(
  * it.
  */
 export function redactAndRenderOperatorSuppliedText(
-  value: string,
+  value: OperatorSuppliedText,
   options?: SanitizeForDisplayOptions,
 ): Displayable {
-  return renderOperatorSuppliedText(redactPrivateKeyMaterial(value), options);
+  const text = operatorSuppliedValue(value);
+  return text === undefined
+    ? redactAndSanitizeForDisplay(String(value), options)
+    : renderOperatorSuppliedSpanText(redactPrivateKeyMaterial(text), options);
 }
 
 /**
@@ -543,7 +554,7 @@ function renderSpans(spans: ReadonlyArray<DisplaySpan>): string {
     if (room <= 0) break;
     const text = redactPrivateKeyMaterial(span.text);
     const shown = span.operatorSupplied
-      ? renderOperatorSuppliedText(text, { maxLength: room })
+      ? renderOperatorSuppliedSpanText(text, { maxLength: room })
       : sanitizeForDisplay(text, { maxLength: room });
     rendered += shown;
     // Past its room the render truncated and marked the span, and what the

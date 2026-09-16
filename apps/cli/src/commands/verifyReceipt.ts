@@ -17,6 +17,7 @@ import {
   reconstructCommittedData,
   recordAlterationIsTheOnlyExplanation,
   recordedVersionMatches,
+  operatorSuppliedText,
   redactAndRenderOperatorSuppliedText,
   reproductionMismatchCauses,
   sanitizeErrorForDisplay,
@@ -459,7 +460,9 @@ function configTermsNote(
   if (supplied.configFile === undefined || supplied.localTerms)
     return undefined;
   if (supplied.noteConfigTerms === false) return undefined;
-  const configFile = redactAndRenderOperatorSuppliedText(supplied.configFile);
+  const configFile = redactAndRenderOperatorSuppliedText(
+    operatorSuppliedText(supplied.configFile),
+  );
   return (
     `  note: config file ${configFile} defines no linkage_terms, ` +
     "so it supplied no terms for this check"

@@ -1,3 +1,6 @@
+import type { OperatorSuppliedText } from "./operatorSuppliedText";
+import { operatorSuppliedValue } from "./operatorSuppliedText";
+
 declare const displayableBrand: unique symbol;
 
 /**
@@ -25,7 +28,9 @@ declare const displayableBrand: unique symbol;
  * `Displayable` is safe in a React text child because JSX escapes it there,
  * and has no HTML-, attribute-, or URL-safety of its own. The claim is the
  * same width for an operator-supplied render, which leaves non-ASCII as the
- * operator typed it: what both producers take out is the control class.
+ * operator typed it: what that producer takes out is the control class, the
+ * U+2028 and U+2029 line separators, and a lone surrogate
+ * ({@link replaceUnrenderableForOperatorDisplay}).
  */
 export type Displayable = string & { readonly [displayableBrand]: true };
 
@@ -192,9 +197,20 @@ export function sanitizeForDisplay(
 
 /**
  * Render a fragment the OPERATOR supplied for operator-facing output: every
- * control character replaced by {@link controlCharacterMarker}, every other
- * code point left as the operator typed it, and the result truncated to
- * `maxLength` with {@link DISPLAY_TRUNCATION_MARKER} in place of the rest.
+ * character {@link replaceUnrenderableForOperatorDisplay} names replaced by a
+ * printable marker, every other code point left as the operator typed it, and
+ * the result truncated to `maxLength` with {@link DISPLAY_TRUNCATION_MARKER}
+ * in place of the rest.
+ *
+ * It takes the MARK rather than a string
+ * ({@link ./operatorSuppliedText.operatorSuppliedText}), so the statement
+ * "the operator chose these bytes" is made at the site that knows it and a
+ * value nobody marked -- a plain string, a
+ * {@link ./partnerOriginText.PartnerOriginText} -- is a compile error here
+ * instead of a review catch. A value that arrives unmarked despite the type
+ * is escaped by {@link sanitizeForDisplay} rather than rendered as given: the
+ * raw render is what the mark buys, so everything else keeps the standing
+ * treatment.
  *
  * The counterpart of {@link sanitizeForDisplay} on the other side of the
  * fragment boundary. That escape doubles a literal backslash to keep its
@@ -203,12 +219,14 @@ export function sanitizeForDisplay(
  * `C:\\data\\in.csv`, a path they cannot copy back. Here the separators, the
  * accented directory name and every other printable byte read as given.
  *
- * What it does NOT leave as given is the control class, the one class an
- * operator-supplied value shares its hazard with whoever else can reach it:
- * an ESC drives an ANSI sequence and a line break spoofs a log line, and a
- * path can be copied into a config from an invitation the partner wrote. The
- * marker is printable ASCII with no backslash, so the sink has nothing left
- * to escape.
+ * What it does NOT leave as given is the class an operator-supplied value
+ * shares its hazard with whoever else can reach it, since a path can be
+ * copied into a config from an invitation the partner wrote: the control
+ * characters, where an ESC drives an ANSI sequence and a break spoofs a log
+ * line, the U+2028 and U+2029 line separators a reader breaks a line on, and
+ * a lone surrogate, which would leave the rendered string non-well-formed.
+ * Each renders to a marker of printable ASCII with no backslash, so the sink
+ * has nothing left to escape.
  *
  * The bidi overrides and confusable characters {@link sanitizeForDisplay}
  * neutralizes are shown here as themselves: a value this renders is one the
@@ -218,7 +236,26 @@ export function sanitizeForDisplay(
  * ({@link ./operatorSuppliedText.operatorSuppliedText}).
  */
 export function renderOperatorSuppliedText(
-  value: string,
+  value: OperatorSuppliedText,
+  options?: SanitizeForDisplayOptions,
+): Displayable {
+  const text = operatorSuppliedValue(value);
+  return text === undefined
+    ? sanitizeForDisplay(String(value), options)
+    : renderOperatorSuppliedSpanText(text, options);
+}
+
+/**
+ * {@link renderOperatorSuppliedText} over text whose origin the caller has
+ * already established: one span of a message partitioned by
+ * {@link ./operatorSuppliedText.messageWithOperatorText}, marked where the
+ * value entered the message and read back off the error where the chain is
+ * rendered ({@link ./sanitizeErrorForDisplay.sanitizeErrorForDisplay}). The
+ * per-value entry points are where an unmarked value is refused, so a span
+ * reaching here takes a plain string.
+ */
+export function renderOperatorSuppliedSpanText(
+  text: string,
   options?: SanitizeForDisplayOptions,
 ): Displayable {
   const maxLength = options?.maxLength ?? DEFAULT_MAX_DISPLAY_LENGTH;
@@ -226,7 +263,7 @@ export function renderOperatorSuppliedText(
   let truncated = false;
   // By code point, like the escape above: an astral character is kept or
   // dropped whole rather than cut between its surrogates.
-  for (const ch of replaceControlCharactersForDisplay(value)) {
+  for (const ch of replaceUnrenderableForOperatorDisplay(text)) {
     if (out.length + ch.length > maxLength) {
       truncated = true;
       break;
@@ -235,7 +272,7 @@ export function renderOperatorSuppliedText(
   }
   return (
     truncated
-      ? trimPartialControlCharacterMarker(out) + DISPLAY_TRUNCATION_MARKER
+      ? trimPartialOperatorDisplayMarker(out) + DISPLAY_TRUNCATION_MARKER
       : out
   ) as Displayable;
 }
@@ -324,6 +361,71 @@ export function replaceControlCharactersForDisplay(value: string): string {
 }
 
 /**
+ * What an operator-supplied render replaces BEYOND the control class: the
+ * U+2028 and U+2029 line separators, which several log readers and a
+ * JavaScript source sink break a line on though `\p{Cc}` does not hold them,
+ * and an unpaired surrogate, which is not a Unicode scalar value and leaves
+ * the rendered string non-well-formed. Matched under `u`, where a surrogate
+ * PAIR is one code point outside the range and only an unpaired unit matches,
+ * so the class is the one {@link ./wellFormedString.loneSurrogateIndex}
+ * reports -- read off both by a check rather than stated here
+ * (`packages/core/test/utils/sanitizeForDisplay.test.ts`).
+ *
+ * The escape has no such list: it leaves printable ASCII alone and rewrites
+ * every other code point, these among them.
+ */
+const OPERATOR_DISPLAY_REPLACED_CHARACTERS = /[\u2028\u2029\uD800-\uDFFF]/gu;
+
+/**
+ * The same class as a whole-string test over one character, built from the
+ * pattern above for the reason {@link CONTROL_CHARACTER} states.
+ */
+const OPERATOR_DISPLAY_REPLACED_CHARACTER = new RegExp(
+  `^${OPERATOR_DISPLAY_REPLACED_CHARACTERS.source}$`,
+  "u",
+);
+
+/**
+ * How {@link replaceUnrenderableForOperatorDisplay} renders one code point
+ * outside the control class: the four hex digits {@link sanitizeForDisplay}
+ * would have escaped it with, inside the angle brackets
+ * {@link controlCharacterMarker} uses. The brackets rather than that escape's
+ * `\uHHHH` shape for the same reason it gives: the operator render leaves a
+ * literal backslash standing, so a marker spelled out of the escape's own
+ * alphabet would be one more thing a path can spell.
+ *
+ * Its domain is that class and nothing wider, refused rather than rendered,
+ * so {@link PARTIAL_OPERATOR_DISPLAY_MARKERS} covers every marker a cut can
+ * land inside.
+ */
+export function operatorDisplayMarker(codePoint: number): string {
+  if (
+    !OPERATOR_DISPLAY_REPLACED_CHARACTER.test(String.fromCodePoint(codePoint))
+  )
+    throw new RangeError(
+      `operator-display marker is defined over the line-separator and lone-surrogate classes only, not U+${codePoint.toString(16)}`,
+    );
+  return `<${codePoint.toString(16).padStart(4, "0")}>`;
+}
+
+/**
+ * Replace everything {@link renderOperatorSuppliedText} does not show as the
+ * operator typed it: the control class
+ * ({@link replaceControlCharactersForDisplay}) and the class
+ * {@link operatorDisplayMarker} names.
+ *
+ * One pass per class, in either order: neither replacement emits a character
+ * of the other's class, so each of the value's own characters is replaced
+ * once and the result holds no character of either.
+ */
+export function replaceUnrenderableForOperatorDisplay(value: string): string {
+  return replaceControlCharactersForDisplay(value).replace(
+    OPERATOR_DISPLAY_REPLACED_CHARACTERS,
+    (character) => operatorDisplayMarker(character.codePointAt(0)!),
+  );
+}
+
+/**
  * Every proper, non-empty prefix of a marker
  * ({@link replaceControlCharactersForDisplay}) -- what a cut landing inside one
  * leaves behind. Read off the treatment by running it over the code points it
@@ -344,6 +446,40 @@ const PARTIAL_CONTROL_CHARACTER_MARKERS: ReadonlySet<string> = new Set(
 
 const LONGEST_PARTIAL_CONTROL_CHARACTER_MARKER = Math.max(
   ...Array.from(PARTIAL_CONTROL_CHARACTER_MARKERS, (partial) => partial.length),
+);
+
+/**
+ * The code points {@link operatorDisplayMarker} is defined over, enumerated so
+ * the back-off below can be read off its markers the way
+ * {@link PARTIAL_CONTROL_CHARACTER_MARKERS} is read off the control class's.
+ */
+const OPERATOR_DISPLAY_REPLACED_CODE_POINTS: readonly number[] = [
+  0x2028,
+  0x2029,
+  ...Array.from(
+    { length: 0xe000 - 0xd800 },
+    (_unused, index) => 0xd800 + index,
+  ),
+];
+
+/**
+ * Every proper, non-empty prefix of a marker an OPERATOR-supplied render can
+ * emit: the control class's markers, which it emits unchanged, and the wider
+ * classes' beside them. Read off the markers rather than restating their
+ * shape, for the reason {@link PARTIAL_CONTROL_CHARACTER_MARKERS} gives.
+ */
+const PARTIAL_OPERATOR_DISPLAY_MARKERS: ReadonlySet<string> = new Set([
+  ...PARTIAL_CONTROL_CHARACTER_MARKERS,
+  ...OPERATOR_DISPLAY_REPLACED_CODE_POINTS.flatMap((codePoint) => {
+    const marker = operatorDisplayMarker(codePoint);
+    return Array.from({ length: marker.length - 1 }, (_unused, index) =>
+      marker.slice(0, index + 1),
+    );
+  }),
+]);
+
+const LONGEST_PARTIAL_OPERATOR_DISPLAY_MARKER = Math.max(
+  ...Array.from(PARTIAL_OPERATOR_DISPLAY_MARKERS, (partial) => partial.length),
 );
 
 /**
@@ -398,15 +534,43 @@ const LONGEST_PARTIAL_CONTROL_CHARACTER_MARKER_SUFFIX = Math.max(
  * the treatment split.
  */
 export function trimPartialControlCharacterMarker(text: string): string {
-  for (
-    let length = Math.min(
-      LONGEST_PARTIAL_CONTROL_CHARACTER_MARKER,
-      text.length,
-    );
-    length > 0;
-    length -= 1
-  )
-    if (PARTIAL_CONTROL_CHARACTER_MARKERS.has(text.slice(-length)))
+  return trimLongestTrailingPartial(
+    text,
+    PARTIAL_CONTROL_CHARACTER_MARKERS,
+    LONGEST_PARTIAL_CONTROL_CHARACTER_MARKER,
+  );
+}
+
+/**
+ * `text` with ONE trailing fragment of a marker the OPERATOR-supplied render
+ * emits removed, the counterpart of {@link trimPartialControlCharacterMarker}
+ * over that render's wider marker vocabulary
+ * ({@link replaceUnrenderableForOperatorDisplay}).
+ *
+ * Every constraint that one states holds here unchanged, with one width to
+ * read differently: a marker outside the control class is six characters, so
+ * the back-off undershoots the budget by up to five rather than three.
+ */
+function trimPartialOperatorDisplayMarker(text: string): string {
+  return trimLongestTrailingPartial(
+    text,
+    PARTIAL_OPERATOR_DISPLAY_MARKERS,
+    LONGEST_PARTIAL_OPERATOR_DISPLAY_MARKER,
+  );
+}
+
+/**
+ * `text` with its longest tail that is a fragment in `partials` removed, the
+ * walk both back-offs above take. `longest` is the widest fragment the set
+ * holds, where the walk starts.
+ */
+function trimLongestTrailingPartial(
+  text: string,
+  partials: ReadonlySet<string>,
+  longest: number,
+): string {
+  for (let length = Math.min(longest, text.length); length > 0; length -= 1)
+    if (partials.has(text.slice(-length)))
       return text.slice(0, text.length - length);
   return text;
 }

@@ -5,6 +5,7 @@ import {
   redactAndRenderOperatorSuppliedText,
   redactAndSanitizeForDisplay,
 } from "../../src/utils/sanitizeErrorForDisplay";
+import { operatorSuppliedText } from "../../src/utils/operatorSuppliedText";
 import {
   getLogger,
   getLoggerForVerbosity,
@@ -228,7 +229,7 @@ test("a log line holds the operator's path as typed and the partner's value esca
 
   log.warn(
     `could not read ${redactAndRenderOperatorSuppliedText(
-      "C:\\Users\\operator\\input.csv",
+      operatorSuppliedText("C:\\Users\\operator\\input.csv"),
     )}: the partner named ${redactAndSanitizeForDisplay("share\\inbox\u001b[2K")}`,
   );
 
@@ -243,7 +244,7 @@ test("the strip on an operator path leaves the guidance behind it", () => {
 
   log.warn(
     `could not read ${redactAndRenderOperatorSuppliedText(
-      "C:\\keys\\-----BEGIN OPENSSH PRIVATE KEY-----",
+      operatorSuppliedText("C:\\keys\\-----BEGIN OPENSSH PRIVATE KEY-----"),
     )}: set input_file and run again`,
   );
 

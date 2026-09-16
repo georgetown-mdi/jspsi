@@ -94,8 +94,17 @@ export function messageWithOperatorText(
   return { text: spans.map((span) => span.text).join(""), spans };
 }
 
-/** The string inside an {@link OperatorSuppliedText}, or `undefined`. */
-function operatorSuppliedValue(value: unknown): string | undefined {
+/**
+ * The string inside an {@link OperatorSuppliedText}, or `undefined` for a
+ * value holding no mark -- which is what the renderers read to decide between
+ * showing bytes as the operator typed them and escaping them
+ * ({@link ./sanitizeForDisplay.renderOperatorSuppliedText}). The mark keys a
+ * module-private symbol, so a mark another copy of this module made reads as
+ * no mark here; that copy's value stringifies to `[object Object]` rather
+ * than to the path, which is the limit of the value mark and the reason the
+ * SPAN mark keys a registered symbol instead.
+ */
+export function operatorSuppliedValue(value: unknown): string | undefined {
   if (typeof value !== "object" || value === null) return undefined;
   const held = (value as Record<symbol, unknown>)[OPERATOR_SUPPLIED_VALUE];
   return typeof held === "string" ? held : undefined;
@@ -154,9 +163,14 @@ export function keepOperatorSuppliedText<E extends Error>(
  * check falls back to escaping the message whole, the treatment of an
  * unmarked link.
  *
- * Read defensively, like every read that renderer makes: a mark of any other
- * shape -- another copy of this module's, an object built to hold the
- * registered symbol -- is no mark at all.
+ * Read by SHAPE and not by identity, which is what the registered symbol
+ * above asks for: a mark another copy of this module wrote is read as this
+ * copy's own, and so is any value holding a well-shaped spans array under
+ * that symbol. Setting a symbol-keyed property takes code -- no parse
+ * produces one, whatever the text spells -- so what this trusts is code
+ * running in the process, and it still checks the array's shape and its join
+ * against the message before rendering a span of it. A mark of any other
+ * shape is no mark at all.
  */
 export function operatorSuppliedSpans(
   link: unknown,
