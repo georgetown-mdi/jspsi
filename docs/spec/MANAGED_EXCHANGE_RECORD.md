@@ -333,6 +333,17 @@ otherwise. Surfaces read it where the record's own bookkeeping has no failure to
 show, and they phrase it as the standing state it is rather than as a reading of
 the last run, which may since be a no-show or a success.
 
+It supplies the tier in one further place: a recorded unexplained handshake
+failure standing beside a `"storage"` condition is treated as the storage tier,
+since the persist failure explains that handshake -- a one-sided persist failure
+leaves the two parties on different secrets, and the handshakes after it fail
+closed. It is the Tier 1 reading ("the record holds a benign explanation") made
+durable rather than a rule of its own, and the rationale for that tiering,
+including what an adversary gains by provoking the benign reading, is [Telling a
+desync from an attack](../MANAGED_EXCHANGE.md#telling-a-desync-from-an-attack).
+A recorded benign cause is not displaced by either rule: it is the run's own
+actionable state, and the condition stands until something clears it.
+
 ### The schedule object
 
 The optional `schedule` object holds the partnership-agreed run cadence, the

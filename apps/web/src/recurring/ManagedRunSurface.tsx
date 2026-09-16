@@ -226,12 +226,14 @@ export function ManagedRunSurface({ id }: { id: string }) {
   // failure, the surface proceeds to re-invite; a "does not add up" reply routes to
   // the compromise-response copy instead.
   const [confirmationGated, setConfirmationGated] = useState(false);
+  // The compromise response, one state for the whole visit across both gates: the
+  // operator answers "does not add up" once, at whichever gate asked, and a later
+  // run of the same visit lands under that answer rather than being asked again.
   const [compromiseResponse, setCompromiseResponse] = useState(false);
-  // The standing condition's own gate, held apart from the live failure's above:
-  // the two can stand at once (a no-show this visit over a condition an earlier run
-  // raised), and resolving one must not move the other.
+  // The standing condition's own clearance, held apart from the live failure's gate
+  // above: the two states can stand at once (a no-show this visit over a condition an
+  // earlier run raised), and clearing one must not move the other.
   const [standingSettled, setStandingSettled] = useState(false);
-  const [standingCompromise, setStandingCompromise] = useState(false);
   const [clearingStanding, setClearingStanding] = useState(false);
   const [clearStandingFailed, setClearStandingFailed] = useState(false);
   // A fresh re-invite the operator forwards out-of-band. Present once a re-invite is
@@ -393,7 +395,6 @@ export function ManagedRunSurface({ id }: { id: string }) {
     setRunWarnings([]);
     setMatching(undefined);
     setConfirmationGated(false);
-    setCompromiseResponse(false);
     setReinvite(undefined);
     setReinviteFailed(false);
     // This run's phase boundary, read by the failure classification below: a state
@@ -619,7 +620,10 @@ export function ManagedRunSurface({ id }: { id: string }) {
   // a subsequent run derives the rendezvous from the fresh one, and clearing the
   // consumed failure shows "fresh invitation sent" rather than the recovered tier.
   function reinviteNow(source: "recovery" | "detail") {
-    if (record === undefined || reinviting) return;
+    // Closed at the mint rather than at each control that reaches it: while a
+    // compromise response stands, a fresh invitation on this channel would hand the
+    // new secret to whoever is interfering, whichever part of the page asked for it.
+    if (record === undefined || reinviting || compromiseResponse) return;
     setReinviteSource(source);
     setReinviting(true);
     setReinviteFailed(false);
@@ -636,13 +640,14 @@ export function ManagedRunSurface({ id }: { id: string }) {
       .finally(() => setReinviting(false));
   }
 
-  // A compromise response holds the whole recovery region, whichever of the two gates
-  // the operator answered: a fresh invitation on the channel that just failed would
-  // hand the new secret to whoever is interfering, so neither gate is offered under
-  // one and neither the live failure nor the standing condition offers a mint while
-  // it stands. Its alert renders once -- at the gate that raised it, or in the live
-  // failure's place where a later run lands on the state that gate was raised over.
-  const compromiseActive = compromiseResponse || standingCompromise;
+  // While a compromise response stands, whichever gate the operator answered, every
+  // act that mints on this channel is withheld: neither gate is offered, no re-invite
+  // offer renders beside the live failure or the standing condition, the Configuration
+  // section's re-invite is withheld, and reinviteNow refuses whichever control asked.
+  // The response's alert renders in the live failure's place while that gate's own
+  // state is on screen, and in the standing condition's section otherwise.
+  const compromiseAtStanding =
+    compromiseResponse && failure?.recovery !== "confirm";
 
   // The two-outcome gate: a confirmed real partner-side failure proceeds to re-invite;
   // anything that does not add up routes to the compromise response (no quiet
@@ -654,7 +659,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
   ) {
     // No reply mints while a compromise response stands, including one raised at the
     // standing condition's gate: that channel is the one the operator flagged.
-    if (compromiseActive) return;
+    if (compromiseResponse) return;
     if (routeConfirmationReply(outcome) === "compromise-response") {
       setCompromiseResponse(true);
       return;
@@ -691,8 +696,11 @@ export function ManagedRunSurface({ id }: { id: string }) {
   function resolveStanding(
     outcome: Parameters<typeof routeConfirmationReply>[0],
   ) {
+    // The refusal the live gate's reply takes, for the same reason: no reply clears
+    // or mints on a channel the operator has already flagged.
+    if (compromiseResponse) return;
     if (routeConfirmationReply(outcome) === "compromise-response") {
-      setStandingCompromise(true);
+      setCompromiseResponse(true);
       return;
     }
     clearStanding();
@@ -719,7 +727,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
   // its clear control: one control for the act, not two identical buttons whose
   // failed mint alerts twice.
   const failureOffersReinvite =
-    !compromiseActive &&
+    !compromiseResponse &&
     failure !== undefined &&
     (managedRunReinvites(failure) ||
       (failure.recovery === "confirm" && confirmationGated));
@@ -1000,7 +1008,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
                     failure={failure}
                     record={record}
                     confirmationGated={confirmationGated}
-                    compromiseActive={compromiseActive}
+                    compromiseResponse={compromiseResponse}
                     reinviting={reinviting}
                     // The failed alert renders only at the site that triggered the
                     // mint, so the recovery and the detail section do not both show it.
@@ -1018,8 +1026,8 @@ export function ManagedRunSurface({ id }: { id: string }) {
                 record={record}
                 view={standingView}
                 settled={standingSettled}
-                compromise={standingCompromise}
-                compromiseActive={compromiseActive}
+                showCompromiseResponse={compromiseAtStanding}
+                compromiseResponse={compromiseResponse}
                 clearing={clearingStanding}
                 clearFailed={clearStandingFailed}
                 reinviting={reinviting}
@@ -1102,6 +1110,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
               onStopUsingOutputFolder={stopUsingOutputFolder}
               onReinviteToChangeTerms={() => reinviteNow("detail")}
               canReinvite={canReinviteFromRecord(record)}
+              compromiseResponse={compromiseResponse}
               reinviting={reinviting}
               // The failed alert renders here only when the detail section triggered
               // the mint, so it and the failure-path recovery do not both show it.
@@ -1138,7 +1147,7 @@ function FailureRecovery({
   failure,
   record,
   confirmationGated,
-  compromiseActive,
+  compromiseResponse,
   reinviting,
   reinviteFailed,
   onReinvite,
@@ -1150,8 +1159,8 @@ function FailureRecovery({
   /** Whether a compromise response stands on this page at all -- this gate's or the
    * standing condition's. No gate is offered and no re-invite offer renders under
    * one, and the alert takes the unexplained tier's slot here: the standing section
-   * stands down whenever the condition's tier is the live failure's own. */
-  compromiseActive: boolean;
+   * holds it for every other live state. */
+  compromiseResponse: boolean;
   reinviting: boolean;
   reinviteFailed: boolean;
   onReinvite: () => void;
@@ -1163,7 +1172,7 @@ function FailureRecovery({
     // The response stands in the gate's place, this gate's own or the standing
     // condition's: a reply that does not add up has already been given, and a later
     // run landing on the same state does not put the question again.
-    if (compromiseActive)
+    if (compromiseResponse)
       return (
         <Alert color="red" title={COMPROMISE_RESPONSE_TITLE} mb="md">
           <span style={{ whiteSpace: "pre-line" }}>
@@ -1184,11 +1193,15 @@ function FailureRecovery({
         />
       );
     return (
-      <ConfirmationPanel record={record} onResolve={onResolveConfirmation} />
+      <ConfirmationPanel
+        record={record}
+        busy={reinviting}
+        onResolve={onResolveConfirmation}
+      />
     );
   }
 
-  if (managedRunReinvites(failure) && !compromiseActive)
+  if (managedRunReinvites(failure) && !compromiseResponse)
     return (
       <ReinviteRecovery
         record={record}
@@ -1225,8 +1238,8 @@ function StandingConditionSection({
   record,
   view,
   settled,
-  compromise,
-  compromiseActive,
+  showCompromiseResponse,
+  compromiseResponse,
   clearing,
   clearFailed,
   reinviting,
@@ -1241,13 +1254,13 @@ function StandingConditionSection({
   view: ManagedStandingConditionView | undefined;
   /** Whether the operator has cleared the condition on this visit. */
   settled: boolean;
-  /** Whether this gate's "does not add up" leg was taken: the compromise alert
-   * renders here, unless this section has stood down for a live failure of the
-   * condition's own tier, which renders the alert in its place. */
-  compromise: boolean;
+  /** Whether this section holds the compromise response's alert: it renders in the
+   * live failure's place instead while that gate's own state is on screen, so the
+   * two sites never show it at once. */
+  showCompromiseResponse: boolean;
   /** Whether a compromise response stands on this page at all -- this gate's or the
-   * live failure's. No re-invite offer renders under one. */
-  compromiseActive: boolean;
+   * live failure's. No gate and no re-invite offer renders under one. */
+  compromiseResponse: boolean;
   clearing: boolean;
   clearFailed: boolean;
   reinviting: boolean;
@@ -1260,7 +1273,7 @@ function StandingConditionSection({
   onClear: () => void;
   onResolve: (outcome: Parameters<typeof routeConfirmationReply>[0]) => void;
 }) {
-  const offersReinvite = !reinviteOffered && !compromiseActive;
+  const offersReinvite = !reinviteOffered && !compromiseResponse;
   // The same alert on both legs: the confirming option and the acknowledge control
   // take the same store write, and a rejected one leaves the condition standing.
   const clearFailure = clearFailed ? (
@@ -1268,6 +1281,14 @@ function StandingConditionSection({
       Nothing changed here, so this still stands. Try again.
     </Alert>
   ) : null;
+  if (showCompromiseResponse)
+    return (
+      <Alert color="red" title={COMPROMISE_RESPONSE_TITLE} mb="md">
+        <span style={{ whiteSpace: "pre-line" }}>
+          {COMPROMISE_RESPONSE_MESSAGE}
+        </span>
+      </Alert>
+    );
   if (settled)
     return offersReinvite ? (
       <ReinviteRecovery
@@ -1278,14 +1299,6 @@ function StandingConditionSection({
       />
     ) : null;
   if (view === undefined) return null;
-  if (compromise)
-    return (
-      <Alert color="red" title={COMPROMISE_RESPONSE_TITLE} mb="md">
-        <span style={{ whiteSpace: "pre-line" }}>
-          {COMPROMISE_RESPONSE_MESSAGE}
-        </span>
-      </Alert>
-    );
   return (
     <>
       <Alert
@@ -1297,7 +1310,11 @@ function StandingConditionSection({
       </Alert>
       {view.clearance === "confirmation" ? (
         <>
-          <ConfirmationPanel record={record} onResolve={onResolve} />
+          <ConfirmationPanel
+            record={record}
+            busy={clearing}
+            onResolve={onResolve}
+          />
           {clearFailure}
         </>
       ) : (
@@ -1422,9 +1439,14 @@ function ForwardableMessage({
  * the gate labels are the pure model's; this renders them. */
 function ConfirmationPanel({
   record,
+  busy,
   onResolve,
 }: {
   record: ManagedExchangeRecord;
+  /** Whether the write a reply started is still in flight. Both legs are disabled
+   * for it: the two outcomes are one answer, and a second click landing before the
+   * write resolves would settle the condition under the other one. */
+  busy: boolean;
   onResolve: (outcome: Parameters<typeof routeConfirmationReply>[0]) => void;
 }) {
   const confirmation = composeManagedFailureConfirmation(record);
@@ -1445,12 +1467,16 @@ function ConfirmationPanel({
         When they reply:
       </p>
       <p>
-        <Button onClick={() => onResolve("confirmed-partner-failure")}>
+        <Button
+          disabled={busy}
+          onClick={() => onResolve("confirmed-partner-failure")}
+        >
           {confirmation.confirmedOption}
         </Button>{" "}
         <Button
           color="red"
           variant="light"
+          disabled={busy}
           onClick={() => onResolve("does-not-add-up")}
         >
           {confirmation.doesNotAddUpOption}

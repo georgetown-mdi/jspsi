@@ -1212,6 +1212,13 @@ framing is the CLI's posture: the tool reports the failure and structures the
 confirmation, but the operator, not the tool, makes the desync-versus-attack
 call out-of-band.
 
+Once given, a compromise response stands for the rest of the visit, wherever it
+was given: a later run that fails the same way does not put the question again,
+and no control on the exchange's page offers a fresh invitation while it stands
+-- neither the failure's own recovery nor the configuration section's re-invite
+on the same terms -- since minting one on that channel is the act the response
+names as the wrong one.
+
 ### Expiry is its own state, never routed through attack framing
 
 A lapsed age bound (`expires` in the past) is detected **before** any

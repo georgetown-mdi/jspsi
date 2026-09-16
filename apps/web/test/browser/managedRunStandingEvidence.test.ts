@@ -57,8 +57,14 @@ const driver = vi.hoisted(
 );
 
 // Whether the store's clear-and-acknowledge write rejects, so the page's failed-clear
-// alert can be driven on both legs of the gate.
-const clearWrite = vi.hoisted((): { fails: boolean } => ({ fails: false }));
+// alert can be driven on both legs of the gate, and a promise the write waits on, so
+// the gate can be driven while that write is still in flight.
+const clearWrite = vi.hoisted(
+  (): { fails: boolean; held: Promise<void> | undefined } => ({
+    fails: false,
+    held: undefined,
+  }),
+);
 
 // Everything but the clear-and-acknowledge write is the real store: the records these
 // tests read back are the ones the surface and the stubbed run actually wrote.
@@ -69,6 +75,7 @@ vi.mock("@psi/managed/managedExchangeStore", async () => {
   return {
     ...actual,
     clearManagedExchangeStandingCondition: async (id: string) => {
+      if (clearWrite.held !== undefined) await clearWrite.held;
       if (clearWrite.fails) throw new Error("the write failed");
       return await actual.clearManagedExchangeStandingCondition(id);
     },
@@ -185,6 +192,7 @@ beforeEach(async () => {
   driver.lapsedAt = undefined;
   driver.handshakeFailsClosed = false;
   clearWrite.fails = false;
+  clearWrite.held = undefined;
   await clearManagedExchanges();
 });
 
@@ -493,6 +501,111 @@ describe("a compromise response the operator has reached", () => {
     expect(stored?.standingCondition).not.toEqual(NO_STANDING_CONDITION);
   });
 
+  test("holds a live gate's response over a later run in the same visit", async () => {
+    // The live failure's own gate is answered "something does not add up", and the
+    // operator runs again into the same failed-closed handshake. The answer is one
+    // per visit, whichever gate asked it: the question is not put again, and nothing
+    // in the recovery region can mint on the channel the operator flagged.
+    driver.handshakeFailsClosed = true;
+    const created = await createManagedExchange(
+      newExchange({ inputFileHandle: await inputHandle() }),
+    );
+    const secretBefore = (await getManagedExchange(created.id))?.sharedSecret;
+
+    app.render(createElement(ManagedRunSurface, { id: created.id }));
+    const runButton = page.getByRole("button", { name: "Run exchange" });
+    await expect.element(runButton).toBeEnabled();
+    await runButton.click();
+    await expect
+      .element(
+        page.getByText(
+          "This run failed and needs you to check with your partner",
+        ),
+      )
+      .toBeInTheDocument();
+    await flushPendingUpdates();
+
+    const doesNotAddUp = page.getByRole("button", {
+      name: "Something does not add up",
+    });
+    await expect.element(doesNotAddUp).toBeInTheDocument();
+    await doesNotAddUp.click();
+    await expect
+      .element(page.getByText(COMPROMISE_RESPONSE_TITLE))
+      .toBeInTheDocument();
+
+    await expect.element(runButton).toBeEnabled();
+    await runButton.click();
+    await vi.waitFor(() => {
+      expect(driver.runs).toBe(2);
+    });
+    // The run control is disabled for the length of a run, so its return to
+    // enabled is the second run's classification having rendered.
+    await expect.element(runButton).toBeEnabled();
+    await flushPendingUpdates();
+
+    expect(page.getByText(COMPROMISE_RESPONSE_TITLE).elements()).toHaveLength(
+      1,
+    );
+    expect(
+      page
+        .getByRole("button", { name: "Partner confirmed their own failure" })
+        .elements(),
+    ).toHaveLength(0);
+    expect(doesNotAddUp.elements()).toHaveLength(0);
+    expect(
+      page
+        .getByRole("button", { name: "Create a fresh invitation" })
+        .elements(),
+    ).toHaveLength(0);
+
+    // Nothing rotated and nothing settled: the stored secret is the one the
+    // flagged channel was using, and the condition the failures raised still stands.
+    const stored = await getManagedExchange(created.id);
+    expect(stored?.sharedSecret).toBe(secretBefore);
+    expect(stored?.standingCondition).not.toEqual(NO_STANDING_CONDITION);
+  });
+
+  test("withholds the configuration section's re-invite and says why", async () => {
+    // The response tells the operator not to re-invite on this channel. The
+    // configuration section far below it mints on exactly that channel with the same
+    // terms, so its control is withheld too, with the reason where the operator
+    // reads it rather than a button that quietly does nothing.
+    const created = await createManagedExchange(
+      newExchange({ inputFileHandle: await inputHandle() }),
+    );
+    const failedAt = Date.now() - 120_000;
+    await recordManagedExchangeLastRun(
+      created.id,
+      failedRun(failedAt, "failed", "auth"),
+      failedAt,
+    );
+    const secretBefore = (await getManagedExchange(created.id))?.sharedSecret;
+
+    app.render(createElement(ManagedRunSurface, { id: created.id }));
+    const reinviteOnTerms = page.getByRole("button", {
+      name: "Re-invite with the same terms",
+    });
+    // The control really is live before the gate is answered: without this the
+    // assertion below would pass against a page that never offered it.
+    await expect.element(reinviteOnTerms).toBeEnabled();
+
+    await page
+      .getByRole("button", { name: "Something does not add up" })
+      .click();
+    await expect
+      .element(page.getByText(COMPROMISE_RESPONSE_TITLE))
+      .toBeInTheDocument();
+    await flushPendingUpdates();
+
+    await expect.element(reinviteOnTerms).toBeDisabled();
+    expect(app.container.textContent).toContain(
+      "no fresh invitation is offered on this channel",
+    );
+    const stored = await getManagedExchange(created.id);
+    expect(stored?.sharedSecret).toBe(secretBefore);
+  });
+
   test("leaves a settled condition no re-invite to offer under it", async () => {
     // The other way round: the condition was cleared earlier in this visit, so the
     // section below holds the re-invite on its own, and this visit's run then lands
@@ -543,6 +656,88 @@ describe("a compromise response the operator has reached", () => {
         .getByRole("button", { name: "Create a fresh invitation" })
         .elements(),
     ).toHaveLength(0);
+  });
+});
+
+describe("a clear-and-acknowledge write still in flight", () => {
+  test("holds both legs of the gate until it resolves", async () => {
+    // The two outcomes are one answer over the same evidence. The gate stays on
+    // screen while the confirming leg's write runs, so a second click on the other
+    // leg would raise the compromise response over a condition that is about to be
+    // cleared -- and the page would then show neither.
+    let release: () => void = () => undefined;
+    clearWrite.held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const created = await createManagedExchange(
+      newExchange({ inputFileHandle: await inputHandle() }),
+    );
+    const failedAt = Date.now() - 120_000;
+    await recordManagedExchangeLastRun(
+      created.id,
+      failedRun(failedAt, "failed", "auth"),
+      failedAt,
+    );
+
+    app.render(createElement(ManagedRunSurface, { id: created.id }));
+    const confirmed = page.getByRole("button", {
+      name: "Partner confirmed their own failure",
+    });
+    const doesNotAddUp = page.getByRole("button", {
+      name: "Something does not add up",
+    });
+    await expect.element(confirmed).toBeEnabled();
+    await expect.element(doesNotAddUp).toBeEnabled();
+    await confirmed.click();
+
+    await expect.element(confirmed).toBeDisabled();
+    await expect.element(doesNotAddUp).toBeDisabled();
+
+    release();
+    await vi.waitFor(async () => {
+      expect((await getManagedExchange(created.id))?.standingCondition).toEqual(
+        NO_STANDING_CONDITION,
+      );
+    });
+    await flushPendingUpdates();
+    // The answer the operator gave is the one that stands.
+    expect(page.getByText(COMPROMISE_RESPONSE_TITLE).elements()).toHaveLength(
+      0,
+    );
+  });
+
+  test("holds the short clear control on the acknowledge tier", async () => {
+    // The same hazard on the tier whose clearance is one button: the write is the
+    // same, and a second click must not reach it.
+    let release: () => void = () => undefined;
+    clearWrite.held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const created = await createManagedExchange(
+      newExchange({ inputFileHandle: await inputHandle() }),
+    );
+    const failedAt = Date.now() - 120_000;
+    await recordManagedExchangeLastRun(
+      created.id,
+      failedRun(failedAt, "failed", "storage"),
+      failedAt,
+    );
+
+    app.render(createElement(ManagedRunSurface, { id: created.id }));
+    const clear = page.getByRole("button", {
+      name: STANDING_CONDITION_CLEAR_LABEL,
+    });
+    await expect.element(clear).toBeEnabled();
+    await clear.click();
+
+    await expect.element(clear).toBeDisabled();
+
+    release();
+    await vi.waitFor(async () => {
+      expect((await getManagedExchange(created.id))?.standingCondition).toEqual(
+        NO_STANDING_CONDITION,
+      );
+    });
   });
 });
 
