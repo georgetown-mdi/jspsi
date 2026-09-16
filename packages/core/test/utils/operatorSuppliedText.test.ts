@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   keepOperatorSuppliedText,
   messageWithOperatorText,
+  type MessageWithOperatorText,
   operatorSuppliedSpans,
   operatorSuppliedText,
 } from "../../src/utils/operatorSuppliedText";
@@ -27,6 +28,8 @@ import { partnerOriginText } from "../../src/utils/partnerOriginText";
 // rendered output, where the operator reads it.
 
 const WINDOWS_PATH = "C:\\Users\\operator\\exchange\\input.csv";
+/** The same path as a fragment nobody marked reaches the operator. */
+const ESCAPED_WINDOWS_PATH = WINDOWS_PATH.replaceAll("\\", "\\\\");
 
 describe("a message partitioned by origin", () => {
   it("renders the operator's path as typed and escapes the partner's value", () => {
@@ -74,20 +77,74 @@ describe("a message partitioned by origin", () => {
     ).toBe("entry share\\\\inbox is unreadable");
   });
 
-  it("escapes a value shaped like a composed message whose spans do not join", () => {
-    // The nested read is checked the way the mark on an error is: spans that
-    // do not describe their own text are not a partition, so the value takes
-    // the escape rather than the origins it claims.
-    const forged = {
-      text: WINDOWS_PATH,
-      spans: [{ text: "something else", operatorSupplied: true }],
-    };
+  it("escapes a parsed value spelling the shape of a composed message", () => {
+    // What tells a composed message is the brand messageWithOperatorText puts
+    // on what it returns, a symbol-keyed property no parse produces -- so a
+    // value that spells the shape claims origins it does not hold, and its
+    // text is escaped like any fragment nobody marked.
+    const forged = JSON.parse(
+      JSON.stringify({
+        text: WINDOWS_PATH,
+        spans: [{ text: WINDOWS_PATH, operatorSupplied: true }],
+      }),
+    ) as MessageWithOperatorText;
     const message = messageWithOperatorText`could not read ${forged}`;
 
     expect(message.spans).toStrictEqual([
       { text: "could not read ", operatorSupplied: false },
-      { text: "[object Object]", operatorSupplied: false },
+      { text: WINDOWS_PATH, operatorSupplied: false },
     ]);
+    expect(
+      sanitizeErrorForDisplay(
+        keepOperatorSuppliedText(new Error(message.text), message),
+      ),
+    ).toBe(`could not read ${ESCAPED_WINDOWS_PATH}`);
+  });
+
+  it("escapes a value inheriting the composed shape from its prototype", () => {
+    // The brand and the fields are read as OWN properties: a message in a
+    // value's prototype chain must not lend the treatment to everything built
+    // from it.
+    const lending = messageWithOperatorText`config file ${operatorSuppliedText(
+      WINDOWS_PATH,
+    )}`;
+    const inheriting = Object.create(lending) as MessageWithOperatorText;
+    const message = messageWithOperatorText`${inheriting} could not be read`;
+
+    expect(
+      sanitizeErrorForDisplay(
+        keepOperatorSuppliedText(new Error(message.text), message),
+      ),
+    ).toBe(`config file ${ESCAPED_WINDOWS_PATH} could not be read`);
+  });
+
+  it("escapes the text of a message whose spans no longer join it", () => {
+    // A message this module composed and something edited afterwards: the
+    // spans no longer describe the text, so they are not honoured -- and what
+    // the operator reads is still the diagnosis, escaped, rather than a value
+    // naming nothing they can act on.
+    const edited = messageWithOperatorText`config file ${operatorSuppliedText(
+      WINDOWS_PATH,
+    )}`;
+    (edited as { text: string }).text = `config file ${WINDOWS_PATH} (edited)`;
+
+    const message = messageWithOperatorText`${edited} could not be read`;
+
+    expect(message.spans).toStrictEqual([
+      {
+        text: `config file ${WINDOWS_PATH} (edited)`,
+        operatorSupplied: false,
+      },
+      { text: " could not be read", operatorSupplied: false },
+    ]);
+  });
+
+  it("holds an object it can read no text off as [object Object]", () => {
+    const spansOnly = { spans: [] } as unknown as MessageWithOperatorText;
+
+    expect(messageWithOperatorText`could not read ${spansOnly}`.text).toBe(
+      "could not read [object Object]",
+    );
   });
 
   it("escapes the same path on a message nobody marked", () => {
