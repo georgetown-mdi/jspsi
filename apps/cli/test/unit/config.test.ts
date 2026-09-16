@@ -15,6 +15,7 @@ import {
   NAME_SHAPE_MESSAGE,
   NestingDepthExceededError,
   OperatorConfigError,
+  operatorSuppliedSpans,
   parseExchangeSpec,
   quoteTermsValue,
   renderedDisplayCost,
@@ -5188,11 +5189,16 @@ test("the record persistExpectedPartnerDeduplicate writes marks a reused config"
 
 // --- the operator's own path in a refusal ------------------------------------
 
-// The config reader's refusals name the path the operator typed. The display
+// Every refusal and warning below names a path the operator typed. The display
 // sink escapes a literal backslash to keep its own \xHH tokens unambiguous,
 // which would hand a Windows operator a path they cannot copy back into a
 // command, so these sites mark the path as theirs and the sink renders it as
 // given. The fragments beside it stay escaped.
+//
+// The fixture path holds backslashes on every platform -- native separators on
+// Windows, and one file name spelling them off it, where a backslash is a
+// legal filename character -- so every site is exercised wherever the suite
+// runs, and the Windows-gated case below pins the native separator itself.
 
 /** What `run` threw, or `undefined` for a call that returned. */
 function refusalFrom(run: () => unknown): unknown {
@@ -5204,22 +5210,170 @@ function refusalFrom(run: () => unknown): unknown {
   return undefined;
 }
 
-test.skipIf(process.platform === "win32")(
-  "a refusal names a backslashed path as the operator typed it",
-  () => {
-    // Off Windows a backslash is a legal filename character, so one file name
-    // stands in for the separator.
-    const configPath = path.join(dir, "C:\\psilink\\psilink.yaml");
-    fs.writeFileSync(configPath, "linkage_terms: 3\n");
+/** A path under `dir` holding backslashes, with its directory created. */
+function backslashedConfigPath(): string {
+  const configPath =
+    process.platform === "win32"
+      ? path.join(dir, "psilink", "psilink.yaml")
+      : path.join(dir, "C:\\psilink\\psilink.yaml");
+  fs.mkdirSync(path.dirname(configPath), { recursive: true });
+  return configPath;
+}
 
-    const err = refusalFrom(() => readConfigLinkageSource(configPath));
+/** The fragments a refusal marks as the operator's own, read off the error. */
+function markedFragments(thrown: unknown): string[] {
+  const error = thrown as Error;
+  return (operatorSuppliedSpans(error, error.message) ?? [])
+    .filter((span) => span.operatorSupplied)
+    .map((span) => span.text);
+}
 
-    expect(err).toBeInstanceOf(UsageError);
-    const rendered = sanitizeErrorForDisplay(err);
-    expect(rendered).toContain("C:\\psilink\\psilink.yaml");
-    expect(rendered).not.toContain("C:\\\\psilink\\\\psilink.yaml");
-  },
-);
+/** The same path as a fragment nobody marked reaches the operator. */
+const escaped = (value: string): string => value.replaceAll("\\", "\\\\");
+
+/**
+ * Whether a refusal ALSO states the path in a fragment nobody marked -- a
+ * runtime errno text, which keeps the escape every unmarked fragment takes.
+ * `"platform-decides"` for an errno whose text names the path on some
+ * platforms only, where the escaped copy is left unjudged.
+ */
+type UnmarkedCopy = "none" | "escaped" | "platform-decides";
+
+/** A refusal shows `configPath` as the operator typed it. */
+function expectNamesPathAsTyped(
+  thrown: unknown,
+  configPath: string,
+  unmarkedCopy: UnmarkedCopy = "none",
+): void {
+  expect(markedFragments(thrown)).toEqual([configPath]);
+  const rendered = sanitizeErrorForDisplay(thrown);
+  expect(rendered).toContain(configPath);
+  if (unmarkedCopy === "escaped")
+    expect(rendered).toContain(escaped(configPath));
+  else if (unmarkedCopy === "none")
+    expect(rendered).not.toContain(escaped(configPath));
+}
+
+const PIN_FINGERPRINT = `sha256:${"a".repeat(43)}`;
+/** Terms that parse, for the fields a reader only reaches past them. */
+const TERMS_YAML = YAML.stringify({
+  linkage_terms: getDefaultLinkageTerms("Agency A"),
+});
+/** A tab where YAML wants a space. */
+const UNPARSEABLE_YAML = "a:\n\tb: 1\n";
+
+// Each row drives one converted site to its refusal. They share a shape -- the
+// path is the operator's and everything else the message states is first-party
+// copy or a fragment nobody marked -- so they are held as one case per site.
+const CONFIG_REFUSALS: ReadonlyArray<
+  [string, (configPath: string) => void, UnmarkedCopy?]
+> = [
+  [
+    "a configuration file that cannot be read",
+    (configPath) => {
+      fs.mkdirSync(configPath);
+      readConfigLinkageSource(configPath);
+    },
+    // Which call fails on a directory, and whether its errno text names the
+    // path, is the platform's to decide.
+    "platform-decides",
+  ],
+  [
+    "a configuration that is not a YAML mapping",
+    (configPath) => {
+      fs.writeFileSync(configPath, "- one\n- two\n");
+      readConfigLinkageSource(configPath);
+    },
+  ],
+  [
+    "a configuration that cannot be parsed as YAML",
+    (configPath) => {
+      fs.writeFileSync(configPath, UNPARSEABLE_YAML);
+      readConfigLinkageSource(configPath);
+    },
+  ],
+  [
+    "invalid linkage terms",
+    (configPath) => {
+      fs.writeFileSync(configPath, "linkage_terms: 3\n");
+      readConfigLinkageSource(configPath);
+    },
+  ],
+  [
+    "invalid standardization",
+    (configPath) => {
+      fs.writeFileSync(configPath, `standardization: 3\n${TERMS_YAML}`);
+      readConfigLinkageSource(configPath);
+    },
+  ],
+  [
+    "invalid metadata",
+    (configPath) => {
+      fs.writeFileSync(configPath, `metadata: 3\n${TERMS_YAML}`);
+      readConfigLinkageSource(configPath);
+    },
+  ],
+  [
+    "a configuration with no linkage terms read as an invitation source",
+    (configPath) => {
+      fs.writeFileSync(
+        configPath,
+        "connection:\n  channel: filedrop\n  path: /x\n",
+      );
+      loadConfigLinkageSource(configPath);
+    },
+  ],
+  [
+    "a host-key pin on a non-sftp configuration",
+    (configPath) => {
+      fs.writeFileSync(
+        configPath,
+        "connection:\n  channel: filedrop\n  path: /x\n",
+      );
+      persistHostKeyFingerprint(configPath, PIN_FINGERPRINT);
+    },
+  ],
+  [
+    "a host-key pin on a configuration that cannot be parsed",
+    (configPath) => {
+      fs.writeFileSync(configPath, UNPARSEABLE_YAML);
+      persistHostKeyFingerprint(configPath, PIN_FINGERPRINT);
+    },
+  ],
+  [
+    "a partner pin on a configuration that signs no receipts",
+    (configPath) => {
+      fs.writeFileSync(configPath, "signing:\n  mode: none\n");
+      persistPartnerFingerprint(configPath, PIN_FINGERPRINT);
+    },
+  ],
+  [
+    "a partner pin on a configuration that already pins one",
+    (configPath) => {
+      fs.writeFileSync(
+        configPath,
+        `signing:\n  mode: certificate\n  partner_fingerprint: ${PIN_FINGERPRINT}\n`,
+      );
+      persistPartnerFingerprint(configPath, PIN_FINGERPRINT);
+    },
+  ],
+  [
+    "a partner pin whose configuration file is not there to record it",
+    (configPath) => persistPartnerFingerprint(configPath, PIN_FINGERPRINT),
+    "escaped",
+  ],
+];
+
+for (const [label, run, unmarkedCopy] of CONFIG_REFUSALS) {
+  test(`the refusal about ${label} names the path as typed`, () => {
+    const configPath = backslashedConfigPath();
+
+    const err = refusalFrom(() => run(configPath));
+
+    expect(err).toBeInstanceOf(Error);
+    expectNamesPathAsTyped(err, configPath, unmarkedCopy);
+  });
+}
 
 test.runIf(process.platform === "win32")(
   "a refusal names a Windows path as the operator typed it",
@@ -5230,10 +5384,8 @@ test.runIf(process.platform === "win32")(
 
     const err = refusalFrom(() => readConfigLinkageSource(configPath));
 
-    const rendered = sanitizeErrorForDisplay(err);
     expect(configPath).toContain("\\");
-    expect(rendered).toContain(configPath);
-    expect(rendered).not.toContain(configPath.replaceAll("\\", "\\\\"));
+    expectNamesPathAsTyped(err, configPath);
   },
 );
 
@@ -5245,7 +5397,7 @@ test("a refusal escapes the value it quotes out of the document", () => {
   fs.writeFileSync(configPath, "connection:\n  channel: 'file\\drop'\n");
 
   const err = refusalFrom(() =>
-    persistHostKeyFingerprint(configPath, `sha256:${"a".repeat(43)}`),
+    persistHostKeyFingerprint(configPath, PIN_FINGERPRINT),
   );
 
   expect(sanitizeErrorForDisplay(err)).toContain('"file\\\\drop"');
@@ -5254,17 +5406,15 @@ test("a refusal escapes the value it quotes out of the document", () => {
 test("the sensitive-parse failure names the path as the operator typed it", () => {
   // The label the chokepoint reports is composed through the mark too, so an
   // unparseable config names its path the way a refusal does.
-  const configPath = path.join(dir, "C:\\psilink\\broken.yaml");
-  fs.writeFileSync(configPath, "a:\n\tb: 1\n");
+  const configPath = backslashedConfigPath();
+  fs.writeFileSync(configPath, UNPARSEABLE_YAML);
 
   const err = refusalFrom(() => readConfigLinkageSource(configPath));
 
   expect((err as Error).message).toBe(
     `config file ${configPath} could not be parsed as YAML`,
   );
-  const rendered = sanitizeErrorForDisplay(err);
-  expect(rendered).toContain(configPath);
-  expect(rendered).not.toContain(configPath.replaceAll("\\", "\\\\"));
+  expectNamesPathAsTyped(err, configPath);
 });
 
 test.skipIf(process.platform === "win32")(
@@ -5279,9 +5429,7 @@ test.skipIf(process.platform === "win32")(
       );
 
       expect(err).toBeInstanceOf(OperatorConfigError);
-      const rendered = sanitizeErrorForDisplay(err);
-      expect(rendered).toContain(configPath);
-      expect(rendered).not.toContain(configPath.replaceAll("\\", "\\\\"));
+      expectNamesPathAsTyped(err, configPath);
     } finally {
       fs.chmodSync(configDir, 0o700);
     }
@@ -5289,7 +5437,10 @@ test.skipIf(process.platform === "win32")(
 );
 
 test("the citation-drift warning names the config path as the operator typed it", () => {
-  const configPath = "C:\\psilink\\psilink.yaml";
+  // A log sink, where nothing is escaped on the way out (the log prefixer
+  // redacts private-key material and no more), so what this holds is the one
+  // property the mark decides: the operator's path arrives single.
+  const configPath = backslashedConfigPath();
   const warnings: string[] = [];
   warnOnLinkageRuleSetCitationDrift(
     withReorderedKeys(getDefaultLinkageTerms("Agency A")),
@@ -5301,5 +5452,5 @@ test("the citation-drift warning names the config path as the operator typed it"
 
   expect(warnings).toHaveLength(1);
   expect(warnings[0]).toContain(`${configPath}: linkage_terms`);
-  expect(warnings[0]).not.toContain(configPath.replaceAll("\\", "\\\\"));
+  expect(warnings[0]).not.toContain(escaped(configPath));
 });

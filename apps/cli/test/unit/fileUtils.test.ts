@@ -5,6 +5,7 @@ import path from "node:path";
 import {
   getLogger,
   joinErrorCauseChain,
+  operatorSuppliedSpans,
   sanitizeErrorForDisplay,
 } from "@psilink/core";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
@@ -1290,6 +1291,7 @@ function runWindowsAclCheck(replies: AclReplies): {
 // so the spy lands on the same copy of the logger the fresh module will load.
 async function runWindowsAclCheckFresh(
   replies: AclReplies,
+  keyFilePath: string = path.join(dir, "secret"),
 ): Promise<{ commands: string[]; warnings: string[] }> {
   vi.resetModules();
   const { getLogger: freshGetLogger } = await import("@psilink/core");
@@ -1297,7 +1299,7 @@ async function runWindowsAclCheckFresh(
   const fresh = await import("../../src/fileUtils");
   answerAclCommands(replies);
   withPlatform("win32", () =>
-    fresh.warnIfFileOverPermissive(path.join(dir, "secret"), "shared secret"),
+    fresh.warnIfFileOverPermissive(keyFilePath, "shared secret"),
   );
   return { commands: execFile.commands.map((c) => c[0]), warnings };
 }
@@ -1309,8 +1311,11 @@ const UNSPAWNABLE = new Error("spawn ENOENT");
 // line then a summary line whose wording is locale-dependent close the listing.
 // icacls prints backslash separators whatever the caller passed, which is what
 // the parser normalizes the path it compares against.
-function icaclsListing(entries: string[]): string {
-  const echoed = path.join(dir, "secret").replace(/\//g, "\\");
+function icaclsListing(
+  entries: string[],
+  forPath: string = path.join(dir, "secret"),
+): string {
+  const echoed = forPath.replace(/\//g, "\\");
   const [first, ...rest] = entries;
   const indent = " ".repeat(echoed.length + 1);
   return (
@@ -1709,25 +1714,41 @@ describe("expandTilde", () => {
 
 // --- the operator's own path in a warning or refusal -------------------------
 
-// The permission and access-list warnings, and the refusal to overwrite, name
-// the path the operator handed in. The display escape doubles a literal
-// backslash to keep its own \xHH tokens unambiguous, which would hand a Windows
-// operator a path they cannot copy back into a command, so these sites mark the
-// path as theirs and it renders as given.
+// The permission and access-list warnings, the refusal to overwrite, and the
+// two access-list refusals of the writers name the path the operator handed
+// in. The display escape doubles a literal backslash to keep its own \xHH
+// tokens unambiguous, which would hand a Windows operator a path they cannot
+// copy back into a command, so these sites mark the path as theirs and it
+// renders as given.
+//
+// The fixture path holds backslashes on every platform -- native separators on
+// Windows, and one file name spelling them off it, where a backslash is a
+// legal filename character -- so every site is exercised wherever the suite
+// runs.
 
-describe("an operator's own path in a warning", () => {
-  // A backslashed path: real separators on Windows, and one file name spelling
-  // them off it, where a backslash is a legal filename character.
-  const backslashedPath = (): string =>
-    process.platform === "win32"
-      ? path.join(dir, "psilink", "secret")
-      : path.join(dir, "C:\\psilink\\secret");
+describe("an operator's own path in a warning or refusal", () => {
+  const backslashedPath = (name = "secret"): string => {
+    const full =
+      process.platform === "win32"
+        ? path.join(dir, "psilink", name)
+        : path.join(dir, `C:\\psilink\\${name}`);
+    fs.mkdirSync(path.dirname(full), { recursive: true });
+    return full;
+  };
 
-  const doubled = (value: string): string => value.replaceAll("\\", "\\\\");
+  /** The same path as a fragment nobody marked reaches the operator. */
+  const escaped = (value: string): string => value.replaceAll("\\", "\\\\");
+
+  /** The fragments a refusal marks as the operator's own. */
+  const markedFragments = (thrown: unknown): string[] => {
+    const error = thrown as Error;
+    return (operatorSuppliedSpans(error, error.message) ?? [])
+      .filter((span) => span.operatorSupplied)
+      .map((span) => span.text);
+  };
 
   test("the POSIX mode warning names the path as the operator typed it", () => {
     const p = backslashedPath();
-    fs.mkdirSync(path.dirname(p), { recursive: true });
     fs.writeFileSync(p, "x");
     fs.chmodSync(p, 0o644);
 
@@ -1736,38 +1757,163 @@ describe("an operator's own path in a warning", () => {
 
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain(p);
-    expect(warnings[0]).not.toContain(doubled(p));
+    expect(warnings[0]).not.toContain(escaped(p));
   });
 
-  test("the access-list warning names the path as the operator typed it", () => {
-    const p = backslashedPath();
-    const warnings = captureWarnings(getLogger("file-utils"));
-    answerAclCommands({
-      powershell: aclListing([[GUESTS_SID, READ_RIGHTS, ALLOW]]),
-    });
-    withPlatform("win32", () => warnIfFileOverPermissive(p, "shared secret"));
+  // Each tier of the Windows access-list check has a warning of its own, and
+  // every one of them names the same path. A log sink escapes nothing on the
+  // way out (the prefixer redacts private-key material and no more), so what
+  // these hold is the property the mark decides: the path arrives single.
+  const ACCESS_LIST_WARNINGS: ReadonlyArray<
+    [string, (keyFilePath: string) => AclReplies]
+  > = [
+    [
+      "a grant the PowerShell tier read",
+      () => ({ powershell: aclListing([[GUESTS_SID, READ_RIGHTS, ALLOW]]) }),
+    ],
+    [
+      "neither tier able to run",
+      () => ({ powershell: UNSPAWNABLE, icacls: UNSPAWNABLE }),
+    ],
+    [
+      "an icacls listing holding no entry",
+      () => ({
+        powershell: UNSPAWNABLE,
+        icacls: "Successfully processed 1 files; Failed processing 0 files\n",
+      }),
+    ],
+    [
+      "an icacls listing of inherited entries alone",
+      (keyFilePath) => ({
+        powershell: UNSPAWNABLE,
+        icacls: icaclsListing(INHERITED_ENTRIES, keyFilePath),
+      }),
+    ],
+    [
+      "an explicit grant the icacls tier read",
+      (keyFilePath) => ({
+        powershell: UNSPAWNABLE,
+        icacls: icaclsListing(
+          [EXPLICIT_FOREIGN_ENTRY, ...INHERITED_ENTRIES],
+          keyFilePath,
+        ),
+      }),
+    ],
+  ];
 
+  for (const [label, replies] of ACCESS_LIST_WARNINGS) {
+    test(`the warning about ${label} names the path as typed`, () => {
+      const p = backslashedPath();
+      const warnings = captureWarnings(getLogger("file-utils"));
+      answerAclCommands(replies(p));
+
+      withPlatform("win32", () => warnIfFileOverPermissive(p, "shared secret"));
+
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain(p);
+      expect(warnings[0]).not.toContain(escaped(p));
+    });
+  }
+
+  test("the unknown-user warning names the path as typed", async () => {
+    // The identity every entry is compared against is what is missing here, so
+    // this tier is reached only against a module that has yet to memoize it.
+    const p = backslashedPath();
+
+    const { commands, warnings } = await runWindowsAclCheckFresh(
+      {
+        powershell: UNSPAWNABLE,
+        icacls: icaclsListing(
+          [EXPLICIT_FOREIGN_ENTRY, ...INHERITED_ENTRIES],
+          p,
+        ),
+        whoami: UNSPAWNABLE,
+      },
+      p,
+    );
+
+    expect(commands).toContain("whoami");
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain(p);
-    expect(warnings[0]).not.toContain(doubled(p));
-  });
-
-  test("the unreadable-access-list warning names the path as typed", () => {
-    const p = backslashedPath();
-    const warnings = captureWarnings(getLogger("file-utils"));
-    answerAclCommands({ powershell: UNSPAWNABLE, icacls: UNSPAWNABLE });
-    withPlatform("win32", () => warnIfFileOverPermissive(p, "shared secret"));
-
-    expect(warnings).toHaveLength(1);
-    expect(warnings[0]).toContain(`icacls "${p}"`);
-    expect(warnings[0]).not.toContain(doubled(p));
+    expect(warnings[0]).not.toContain(escaped(p));
   });
 
   test("a refusal to overwrite names the destination as typed", () => {
     const p = backslashedPath();
-    const rendered = sanitizeErrorForDisplay(new FileExistsError(p));
+    const refusal = new FileExistsError(p);
 
+    expect(markedFragments(refusal)).toEqual([p]);
+    const rendered = sanitizeErrorForDisplay(refusal);
     expect(rendered).toContain(p);
-    expect(rendered).not.toContain(doubled(p));
+    expect(rendered).not.toContain(escaped(p));
   });
+
+  // Both Windows writers refuse the same way when icacls could not narrow the
+  // destination's access list, so both are held to the same rendering.
+  const ACL_RESTRICT_WRITERS: ReadonlyArray<
+    [string, (destPath: string) => void]
+  > = [
+    ["the atomic writer", (destPath) => writeFileOwnerOnly(destPath, "x")],
+    [
+      "the owner-only stream",
+      (destPath) => {
+        createOwnerOnlyWriteStream(destPath).close();
+      },
+    ],
+  ];
+
+  for (const [label, write] of ACL_RESTRICT_WRITERS) {
+    test(`${label}'s access-list refusal names the destination as typed`, () => {
+      const p = backslashedPath();
+      answerAclCommands({ powershell: "", icacls: UNSPAWNABLE });
+
+      const thrown = catchThrown(() => withPlatform("win32", () => write(p)));
+
+      expect(markedFragments(thrown)).toEqual([p]);
+      const rendered = sanitizeErrorForDisplay(thrown);
+      expect(rendered).toContain(p);
+      expect(rendered).not.toContain(escaped(p));
+    });
+  }
+
+  test.skipIf(process.platform === "win32")(
+    "the extended-ACL strip refusal names the destination as typed",
+    () => {
+      const p = backslashedPath();
+      // The refusal's own cause is the failed command line, which names the
+      // same path in a fragment nobody marked: it keeps the escape, while the
+      // path the refusal itself states arrives as the operator typed it.
+      const refused = capturedChmodRefusal(p);
+      failAclStripWith(refused);
+
+      const thrown = catchThrown(() =>
+        withPlatform("darwin", () => writeFileOwnerOnly(p, "x")),
+      );
+
+      expect(markedFragments(thrown)).toEqual([p]);
+      const rendered = sanitizeErrorForDisplay(thrown);
+      expect(rendered).toContain(p);
+      expect(rendered).toContain(escaped(p));
+    },
+  );
+
+  test.skipIf(process.platform === "win32")(
+    "a strip that never ran names the destination as typed",
+    () => {
+      const p = backslashedPath();
+      const missing = capturedExecFileFailure(() =>
+        childProcess.execFileSync(path.join(dir, "no-such-chmod"), [], {
+          stdio: "ignore",
+        }),
+      );
+      failAclStripWith(missing);
+
+      const thrown = catchThrown(() =>
+        withPlatform("darwin", () => writeFileOwnerOnly(p, "x")),
+      );
+
+      expect(markedFragments(thrown)).toEqual([p]);
+      expect(sanitizeErrorForDisplay(thrown)).toContain(p);
+    },
+  );
 });
