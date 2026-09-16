@@ -1778,7 +1778,7 @@ test("exchangePayloads: an empty partner column name is rejected as a protocol e
 });
 
 test("exchangePayloads: a pathological-count columns array fails cleanly, not with a RangeError", async () => {
-  // ~4M invalid (non-string) column names, past the ~3.5M `Invalid string
+  // ~4M invalid (non-string) column names, past the ~3.3M `Invalid string
   // length` threshold the unbounded `z.array(z.string())` schema hit (a ~4.5s
   // CPU burn then a RangeError). The single-issue validator caps that at one
   // clean issue; receiveParsed wraps it as ConnectionError("protocol").

@@ -695,10 +695,12 @@ interface ParseSchema<T> {
  * then parse -- and so cannot fold the receive and the parse into one call.
  * Routing those sites through it means a malformed final frame gets the same
  * clean `"protocol"` error there as everywhere else, instead of the validator's
- * raw throw escaping bare -- including a Zod `RangeError` ("Invalid string
- * length") built over a pathological-count payload, the residual the
- * single-issue array bounds (utils/singleIssueArray.ts) forestall at the schema
- * but which this wrap classifies cleanly regardless.
+ * raw throw escaping bare -- including the call-stack-overflow half of a Zod
+ * `RangeError` built over a pathological-count payload, which this wrap
+ * catches directly. The "Invalid string length" half is not thrown here at
+ * all: the `ZodError` message builds lazily, so it fires only where the
+ * cause's message is later read. Both are also forestalled at the schema by
+ * the single-issue array bounds (utils/singleIssueArray.ts).
  */
 export function parseOrProtocolError<T>(
   schema: ParseSchema<T>,

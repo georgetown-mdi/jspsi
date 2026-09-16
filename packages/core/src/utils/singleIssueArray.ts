@@ -8,7 +8,7 @@ import * as z from "zod";
  * partner-controlled post-handshake wire message can hold an array of millions
  * of INVALID elements. Under `z.array(element)` Zod accumulates one issue per
  * element, which raises one of TWO distinct `RangeError`s (both verified on Zod
- * 4.4.3), depending on the array's framing:
+ * 4.5.4), depending on the array's framing:
  *
  * - Nested under >=2 array/record/tuple frames (a tuple-of-arrays, a doubly
  *   nested `rows`): Zod overflows its own call stack spreading that issue array
@@ -16,7 +16,7 @@ import * as z from "zod";
  *   elements (the same mechanism the `transform.params` bound forestalls in
  *   config/linkageTermsSchema.ts).
  * - A single/root flat array (the residual the call-stack analysis missed): no
- *   frame to overflow, but at ~3.5M issues Zod throws `Invalid string length`
+ *   frame to overflow, but at ~3.3M issues Zod throws `Invalid string length`
  *   building its error string (`JSON.stringify` of the issues exceeds V8's max
  *   string length), after a ~4.5s CPU burn.
  *

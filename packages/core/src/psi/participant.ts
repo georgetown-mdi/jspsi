@@ -38,7 +38,7 @@ const statusCompletedMessage = z.object({
 // array/record/tuple frame, it cannot drive the ~130k STACK overflow
 // {@link associationTableMessage} faces -- but a far larger count (~millions
 // of invalid elements, within MAX_FRAME_SIZE_BYTES) makes Zod throw a
-// DIFFERENT RangeError ("Invalid string length", ~3.5M on Zod 4.4.3)
+// DIFFERENT RangeError ("Invalid string length", ~3.3M on Zod 4.5.4)
 // building its error string from one issue per element; nested it faces the
 // stack overflow as well. The single-issue validator caps issue accumulation
 // at one regardless of count and of framing (see utils/singleIssueArray.ts),
@@ -60,7 +60,7 @@ export const numberArrayMessage = singleIssueArray<number>(
 // send a tuple whose inner index array holds hundreds of thousands of invalid
 // (non-number) elements, and Zod overflows its call stack spreading one issue
 // per element up through the inner-array and tuple frames (RangeError reproduced
-// at ~130k on Zod 4.4.3). receiveParsed already caught that harmlessly; the
+// at ~130k on Zod 4.5.4). receiveParsed already caught that harmlessly; the
 // single-issue validators below turn it into a clean, bounded rejection instead.
 // A count `.max()` is not an option: the association table is the PSI
 // intersection, legitimately in the millions (MAX_FRAME_SIZE_BYTES bounds it),

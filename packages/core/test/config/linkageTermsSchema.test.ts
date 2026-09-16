@@ -3366,7 +3366,7 @@ test("a pathological-count linkage key elements list fails cleanly, not with a R
 // --- Payload send/receive count bounds ---------------------------------------
 // payload.send / payload.receive are partner-controlled column lists sitting one
 // object-frame below the root, so they do not drive the ~130k STACK overflow the
-// nested collections hit -- but at ~3.5M invalid entries Zod throws `Invalid
+// nested collections hit -- but at ~3.3M invalid entries Zod throws `Invalid
 // string length` building its error string (a RangeError that safeParse does NOT
 // catch). Unlike the post-handshake wire arrays, a payload legitimately holds at
 // most a few hundred columns, so a count gate (MAX_PAYLOAD_ENTRIES, applied
@@ -3397,7 +3397,7 @@ test("rejects a payload send list over the maximum count", () => {
 
 test("a pathological-count payload send list is rejected by the node budget, not with a RangeError", () => {
   // ~4M entries, past both the camelize node budget (MAX_NODE_COUNT) and the
-  // ~3.5M `Invalid string length` threshold the unbounded schema hit. The
+  // ~3.3M `Invalid string length` threshold the unbounded schema hit. The
   // camelize pre-pass fronts the boundedArray count gate: an over-budget partner
   // collection is rejected by that budget before the O(n) walk -- and so before
   // Zod (path b) -- never a RangeError. safeParseLinkageTerms ABSORBS that
@@ -3528,7 +3528,7 @@ test("rejects linkageFields over the maximum count", () => {
 
 test("a pathological-count linkageFields is rejected by the node budget, not with a RangeError", () => {
   // ~4M entries, past both the camelize node budget (MAX_NODE_COUNT) and the
-  // ~3.5M `Invalid string length` threshold the `.max()`-only schema hit. The
+  // ~3.3M `Invalid string length` threshold the `.max()`-only schema hit. The
   // camelize node budget fronts the boundedArray count gate, rejecting the
   // over-budget array by that budget before the walk -- and so before Zod (path
   // b) -- never a RangeError. safeParseLinkageTerms absorbs the bound into a
