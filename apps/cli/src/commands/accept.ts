@@ -10,6 +10,8 @@ import {
   getLogger,
   parseExchangeSpec,
   rawDecodeErrorDescription,
+  operatorSuppliedText,
+  redactAndRenderOperatorSuppliedText,
   redactAndSanitizeForDisplay,
   UsageError,
 } from "@psilink/core";
@@ -744,7 +746,9 @@ function keptConfigurationIdentity(params: {
         `("${redactAndSanitizeForDisplay(identity)}") names this party in the ` +
         "terms this acceptance agrees to, and in every exchange the file " +
         "governs. Edit linkage_terms.identity in " +
-        `${redactAndSanitizeForDisplay(configPath)} to change it.`,
+        `${redactAndRenderOperatorSuppliedText(
+          operatorSuppliedText(configPath),
+        )} to change it.`,
     );
   return identity;
 }

@@ -53,7 +53,6 @@ import {
   captureStdio,
   snapshotDiagnosticSinkAndLevel,
 } from "../../loggingTestSupport";
-import { pathAsDisplayed } from "../../platformPaths";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "verify-receipt-"));
 
@@ -1212,8 +1211,9 @@ describe("handler", () => {
       line.includes("agreed-terms hash: not checked"),
     );
     expect(termsAt).toBeGreaterThan(-1);
+    // The config path is the operator's own, so the note shows it as typed.
     expect(lines[termsAt + 1]).toBe(
-      `  note: config file ${pathAsDisplayed(configPath)} defines no ` +
+      `  note: config file ${configPath} defines no ` +
         "linkage_terms, so it " +
         "supplied no terms for this check",
     );

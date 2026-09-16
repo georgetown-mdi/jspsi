@@ -1,6 +1,12 @@
 import fs from "node:fs";
 import { z } from "zod";
-import { SHARED_SECRET_REGEX, UsageError } from "@psilink/core";
+import {
+  keepOperatorSuppliedText,
+  messageWithOperatorText,
+  operatorSuppliedText,
+  SHARED_SECRET_REGEX,
+  UsageError,
+} from "@psilink/core";
 
 import {
   detectFileConflicts,
@@ -199,15 +205,19 @@ export function saveKeyFile(
  * identical message regardless of which one catches the conflict.
  */
 function alreadyProvisionedError(keyFilePath: string): UsageError {
-  return new UsageError(
-    `--invitation cannot provision the key file at ${keyFilePath} because ` +
-      "one already exists: it is already provisioned. After the first " +
-      "exchange the shared secret rotates, so the original invitation code " +
-      "can no longer establish a valid key. Remove the file to re-provision " +
-      "(both parties must re-invite), or drop --invitation to run with the " +
-      "existing key.",
-  );
+  const message = messageWithOperatorText`--invitation cannot provision the key file at ${operatorSuppliedText(
+    keyFilePath,
+  )} ${ALREADY_PROVISIONED_REMEDY}`;
+  return keepOperatorSuppliedText(new UsageError(message.text), message);
 }
+
+/** What {@link alreadyProvisionedError} states behind the key file's path. */
+const ALREADY_PROVISIONED_REMEDY =
+  "because one already exists: it is already provisioned. After the first " +
+  "exchange the shared secret rotates, so the original invitation code " +
+  "can no longer establish a valid key. Remove the file to re-provision " +
+  "(both parties must re-invite), or drop --invitation to run with the " +
+  "existing key.";
 
 /**
  * Provision the key file at `keyFilePath` from an invitation code (the same

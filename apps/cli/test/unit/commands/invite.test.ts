@@ -1648,7 +1648,8 @@ test("validateInvite: --identity over a reused config is reported, not applied",
     );
     expect(ignored[0]).toContain('"Agency Flag"');
     expect(ignored[0]).toContain('"Agency Config"');
-    expect(ignored[0]).toContain(pathAsDisplayed(configPath));
+    // The config path is the operator's own, so the warning shows it as typed.
+    expect(ignored[0]).toContain(configPath);
   } finally {
     warnSpy.mockRestore();
     fs.rmSync(dir, { recursive: true, force: true });
@@ -1755,7 +1756,8 @@ test("validateInvite: --identity over a reused config redacts a planted key mark
     expect(ignored).toHaveLength(1);
     expect(ignored[0]).toContain("[redacted private key]");
     expect(ignored[0]).not.toContain("BEGIN OPENSSH PRIVATE KEY");
-    expect(ignored[0]).toContain(pathAsDisplayed(configPath));
+    // The config path is the operator's own, so the warning shows it as typed.
+    expect(ignored[0]).toContain(configPath);
     expect(ignored[0]).toMatch(/to change it\.$/);
   } finally {
     warnSpy.mockRestore();

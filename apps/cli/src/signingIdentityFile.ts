@@ -1,6 +1,9 @@
 import fs from "node:fs";
 
 import {
+  keepOperatorSuppliedText,
+  messageWithOperatorText,
+  operatorSuppliedText,
   parseCertificate,
   parseSigningIdentity,
   recordedVersionMatches,
@@ -37,10 +40,10 @@ function readIdentityDocument(
     source = fs.readFileSync(identityPath, "utf8");
   } catch (err: unknown) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-    throw new UsageError(
-      `signing identity at ${identityPath} could not be read: ` +
-        (err instanceof Error ? err.message : String(err)),
-    );
+    const message = messageWithOperatorText`signing identity at ${operatorSuppliedText(
+      identityPath,
+    )} could not be read: ${err instanceof Error ? err.message : String(err)}`;
+    throw keepOperatorSuppliedText(new UsageError(message.text), message);
   }
   // Warned about on the read rather than on a successful parse: a file whose
   // JSON or version a loader goes on to reject was still read off disk, and it
@@ -54,10 +57,12 @@ function readIdentityDocument(
 function malformedIdentity(identityPath: string, err: unknown): UsageError {
   // A schema or signing error names paths and types, never the key value, so it
   // is kept.
-  return new UsageError(
-    `signing identity at ${identityPath} is malformed or unsupported: ` +
-      (err instanceof Error ? err.message : String(err)),
-  );
+  const message = messageWithOperatorText`signing identity at ${operatorSuppliedText(
+    identityPath,
+  )} is malformed or unsupported: ${
+    err instanceof Error ? err.message : String(err)
+  }`;
+  return keepOperatorSuppliedText(new UsageError(message.text), message);
 }
 
 /**
