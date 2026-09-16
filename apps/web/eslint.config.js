@@ -5,6 +5,7 @@ import filledPrimaryContrastScope from "./eslint-rules/filled-primary-contrast-s
 import {
   crossWorkspaceImportBans,
   noBareRootLoglevelEmit,
+  noBareStringLengthBound,
 } from "../../eslint.boundaries.mjs";
 
 // The sensitive-file YAML-parse ban (shared by the broad block and the rawRows
@@ -264,6 +265,12 @@ const sharedSyntaxBans = [
   fetchedBodyReadBan,
   seatWarningSinkBan,
   noBareRootLoglevelEmit,
+  // A string length bound counts UTF-16 code units in this app's schemas as it
+  // does in core's, so a bare Zod bound is refused in both trees this array
+  // covers: the intent and job schemas are under src/, and a schema written in
+  // the server entry tree counts the same way (eslint.boundaries.mjs states
+  // what the selectors reach).
+  ...noBareStringLengthBound,
 ];
 
 // The no-restricted-imports `paths` entries every block covering src/ takes,

@@ -15,7 +15,9 @@ import { z } from "zod";
  * accepts a name of n astral characters -- 2n code units -- that those
  * predicates refuse. This check stands in for `.max()` on every string bound
  * so the two sides cannot disagree about which values are refused;
- * `test/config/lengthBoundUnitParity.test.ts` holds them to it.
+ * `test/config/lengthBoundUnitParity.test.ts` holds them to it, and the ESLint
+ * selector in `eslint.boundaries.mjs` refuses a bare bound in the trees it
+ * covers, up to the reach that file's header states.
  *
  * A `.min(1)` floor needs no counterpart: a string holds at least one code
  * unit exactly when it holds at least one code point.
