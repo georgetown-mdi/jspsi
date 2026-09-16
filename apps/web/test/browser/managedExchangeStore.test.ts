@@ -295,7 +295,9 @@ async function rawPut(value: unknown): Promise<void> {
 
 /** Overwrite the sibling local-state value under a key with an arbitrary object,
  * bypassing the validating write path, so a test can seed a corrupted sibling entry
- * the diagnostic read must treat conservatively (backed up on a parse failure). */
+ * the diagnostic read must treat conservatively (backed up on a parse failure), or a
+ * valid entry beside a record this build cannot parse, which no validating write
+ * reaches. */
 async function rawLocalPut(id: string, value: unknown): Promise<void> {
   const db = await openManagedExchangeDatabase();
   try {
@@ -1469,6 +1471,59 @@ describe("diagnostic read never rejects wholesale", () => {
 
     const [entry] = await listManagedExchangesDiagnostic();
     expect(entry.backedUp).toBe(true);
+    // Nothing of that entry's shape was read, so it states no spend either.
+    expect(entry.spent).toBeUndefined();
+  });
+
+  test("a spent copy is reported with the route it was spent to", async () => {
+    const created = await createManagedExchange(
+      newExchange({ label: "Handed off" }),
+    );
+    expect(
+      await spendManagedExchangeIfCurrent(
+        created.id,
+        created.sharedSecret,
+        "2026-07-14T13:00:00.000Z",
+        "command-line",
+      ),
+    ).toBe("spent");
+
+    const [entry] = await listManagedExchangesDiagnostic();
+    // The whole spent state, not a boolean: the delete confirm states what the
+    // hand-off left running elsewhere, which is the route rather than the spend.
+    expect(entry.spent).toEqual({
+      spentAt: "2026-07-14T13:00:00.000Z",
+      handoff: "command-line",
+    });
+  });
+
+  test("a live record reports no spend", async () => {
+    await createManagedExchange(newExchange({ label: "Live" }));
+    const [entry] = await listManagedExchangesDiagnostic();
+    expect(entry.spent).toBeUndefined();
+  });
+
+  test("an unreadable record's spend survives its unreadability", async () => {
+    const good = await createManagedExchange(newExchange({ label: "Good" }));
+    await rawPut({
+      ...good,
+      id: "bad-record",
+      schemaVersion: "psilink-managed-exchange/v3",
+    });
+    // The spend is the sibling entry's, so it reads whatever the record does: the
+    // delete confirm for this row must still state what the hand-off keeps running.
+    await rawLocalPut("bad-record", {
+      spent: { spentAt: "2026-07-14T13:00:00.000Z", handoff: "command-line" },
+    });
+
+    const entries = await listManagedExchangesDiagnostic();
+    const unreadable = entries.find((entry) => entry.kind === "unreadable");
+    expect(unreadable).toEqual({
+      kind: "unreadable",
+      id: "bad-record",
+      backedUp: false,
+      spent: { spentAt: "2026-07-14T13:00:00.000Z", handoff: "command-line" },
+    });
   });
 
   test("one unreadable record does not fail the read; it yields an unreadable marker keyed for delete", async () => {

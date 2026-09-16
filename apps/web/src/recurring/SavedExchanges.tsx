@@ -354,8 +354,7 @@ export function DeleteExchangeButton({
   backedUp: boolean;
   /** The hand-off that spent this copy, when the surface knows of one: its own
    * custody note then names what that hand-off left running elsewhere. Absent for a
-   * live copy, for a migration spend (which records no hand-off), and on the
-   * read-failed listing, whose diagnostic read holds no spent state. */
+   * live copy and for a migration spend, which records no hand-off. */
   handoff?: ManagedSpentHandoff;
   onDeleted: () => void;
 }) {
@@ -490,9 +489,10 @@ function SavedExchangesEmpty() {
  * diagnostic read ({@link listManagedExchangesDiagnostic}) that never rejects
  * wholesale: each stored entry appears with its label and side/date when
  * parseable, or "Unreadable record" when not, each with the same one-step
- * delete-by-key. A fresh import still cannot mend the list while the bad record
- * stands, so the restore-from-backup affordance stays as a way straight to a run
- * surface. */
+ * delete-by-key. A fresh import lands from this state, the store's reconciliation
+ * skipping the entry it cannot parse, but it does not mend the list while that
+ * record stands: the restore-from-backup affordance is a way straight to a run
+ * surface, not the repair. */
 function SavedExchangesFailed({ reload }: { reload: () => void }) {
   return (
     <>
@@ -552,6 +552,7 @@ function RecoveryListing({ reload }: { reload: () => void }) {
             id={row.id}
             label={row.deleteLabel}
             backedUp={row.backedUp}
+            handoff={row.spentHandoff}
             onDeleted={reload}
           />
         </li>

@@ -431,7 +431,7 @@ export interface ManagedExchangeReadableRecords {
  * {@link parseManagedExchangeRecord} over the values, which rejects the whole read
  * on the first entry that fails.
  *
- * Tolerance is for the UNATTENDED read alone (see
+ * Tolerance here is for the UNATTENDED read (see
  * {@link ./managedScheduleRunner.ts}); the attended list read stays strict, so an
  * operator still meets the read-failed recovery surface that identifies and
  * discards the offending entry.

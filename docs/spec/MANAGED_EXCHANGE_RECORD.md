@@ -1071,11 +1071,28 @@ record, in a separate origin-local store keyed by the record `id`, and are
   recovery that record actually has -- the exchange runs from the files the
   hand-off saved, and bringing it back to this browser is a re-invite. A stated
   limit bounds the surface. The import affordance renders only beside an empty
-  or unreadable listing, a handed-off record keeps the listing non-empty, and an
-  unreadable store fails the revive's own parse before the refusal can be
-  reported. So the guard binds at the store's import path, and a fully supported
-  surface for meeting it (an explicit re-take on the spent record) remains
-  future work.
+  or unreadable listing, and a handed-off record keeps the listing non-empty, so
+  a store whose records all read offers no import for the refusal to be met at.
+  The guard binds at the store's import path, and a fully supported surface for
+  meeting it (an explicit re-take on the spent record) remains future work.
+
+  **The reconciliation parses each stored record on its own.** An entry this
+  build cannot parse is **skipped** rather than failing the import: an invalid
+  record at rest must not block importing an artifact for a different exchange,
+  which is the way forward the read-failed recovery surface offers beside its
+  listing. The skipped entry stays in the store, listed by that surface's
+  per-entry diagnostic read, until the operator discards it.
+
+  Two limits follow from the skip. A skipped entry cannot be **revived**, a
+  revive rewriting the whole record, so an artifact matching a migration-spent
+  entry this build cannot parse installs fresh and leaves the husk for the
+  operator to discard. And the handed-off refusal reads such an entry's
+  `sharedSecret` off the raw value rather than through the schema, so it still
+  fires for a skipped entry whose sibling holds a `handoff` and whose secret
+  field is readable and equal to the artifact's -- naming no label, the failed
+  parse leaving the record's own fields untrusted. An entry whose secret field is
+  unreadable too matches nothing and the import installs fresh, the bound the
+  refusal already has against a record rotated or deleted past the artifact.
 
   **The refusal is scoped to this store's state at import**, and both of its
   conditions are the operator's to remove: the handed-off record must still be in
