@@ -529,3 +529,13 @@ export function inviterScreenReducer(
       };
   }
 }
+
+/** A function, not a constant, because the focus effect that shows a refusal
+ * keys on the alert's identity. */
+export function unmatchableFileAlert(): AlertContent {
+  return {
+    title: "This file cannot be matched",
+    message:
+      "None of the matching keys can be built from this file's columns. Matching needs columns like name, date of birth, Social Security number, ZIP code, phone, or email.",
+  };
+}

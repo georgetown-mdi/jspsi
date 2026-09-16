@@ -115,6 +115,7 @@ import {
   INVITER_SPINE_ORDER,
   inviterScreenReducer,
   isInviterSpineStep,
+  unmatchableFileAlert,
 } from "./inviterScreenModel";
 import { acceptKitFileName, buildAcceptKit } from "./acceptKit";
 import {
@@ -201,19 +202,6 @@ const SPINE_LABELS: Record<InviterSpineStep, string> = {
   columns: "Matching & sharing",
   review: "Review & create",
 };
-
-/** The file step's refusal for a file no matching key can be built from, shared by
- * the browser read and the console's mounted-file commit so the two intakes refuse
- * an unmatchable file in the same words. A function rather than a constant: the
- * focus effect that raises this refusal keys off the alert's identity, so a second
- * consecutive refusal needs a fresh object to re-trigger it. */
-function unmatchableFileAlert(): AlertContent {
-  return {
-    title: "This file cannot be matched",
-    message:
-      "None of the matching keys can be built from this file's columns. Matching needs columns like name, date of birth, Social Security number, ZIP code, phone, or email.",
-  };
-}
 
 /**
  * The alert for a mint that refused this file. The mint re-parses the retained file

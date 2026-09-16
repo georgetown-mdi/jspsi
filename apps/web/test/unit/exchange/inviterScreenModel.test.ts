@@ -15,6 +15,7 @@ import { RUN_DIAGNOSTICS_DEFAULT } from "@psi/runDiagnosticsModel";
 import {
   INVITER_SCREEN_INITIAL,
   inviterScreenReducer,
+  unmatchableFileAlert,
 } from "@exchange/inviterScreenModel";
 
 import type {
@@ -370,30 +371,21 @@ describe("the console's mounted-file commit", () => {
     columnSamples: new Map(),
   };
 
-  // The screen builds a fresh alert object per refusal rather than sharing one
-  // constant, so YourFileSection's identity-keyed focus effect re-fires on a
-  // second consecutive refusal (a shared reference would not).
-  function freshUnmatchableAlert(): AlertContent {
-    return {
-      title: "This file cannot be matched",
-      message: "None of the matching keys can be built from this file.",
-    };
-  }
-
   test("two consecutive refusals do not share an alert reference", () => {
+    expect(unmatchableFileAlert()).not.toBe(unmatchableFileAlert());
     const first = inviterScreenReducer(INVITER_SCREEN_INITIAL, {
       type: "console-file-seeded",
       source: PROFILE,
       acquired: csv,
       editor: editorFromCsv("Dana Okafor", csv),
-      alert: freshUnmatchableAlert(),
+      alert: unmatchableFileAlert(),
     });
     const second = inviterScreenReducer(first, {
       type: "console-file-seeded",
       source: PROFILE,
       acquired: csv,
       editor: editorFromCsv("Dana Okafor", csv),
-      alert: freshUnmatchableAlert(),
+      alert: unmatchableFileAlert(),
     });
     expect(first.intakeAlert).toEqual(second.intakeAlert);
     expect(first.intakeAlert).not.toBe(second.intakeAlert);
