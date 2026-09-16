@@ -13,6 +13,8 @@ import { ConfigManager } from "./src/utils/serverConfig.ts";
 
 import { registerServer } from "./src/httpServer.ts";
 
+import { liveWebrtcLegCommands } from "./test/liveWebrtc/legCommands.ts";
+
 import type { Plugin, PreviewServer, ViteDevServer } from "vite";
 
 const configManager = new ConfigManager();
@@ -295,6 +297,45 @@ export default defineConfig((_configEnv) => {
           // does not inherit the root `optimizeDeps`, so without this its first spawn
           // reloads the run on a cold optimizer cache (see psiWorkerWasmEngine).
           optimizeDeps: { include: [psiWorkerWasmEngine] },
+        },
+        {
+          test: {
+            include: ["test/liveWebrtc/**/*.{test,spec}.ts"],
+            name: "live-webrtc",
+            // The live CLI-to-browser leg: a real `psilink` process and a real
+            // browser peer completing one WebRTC exchange through the
+            // standalone broker. A project of its own, off every other script,
+            // because it needs the built CLI and minutes of real ICE, DTLS and
+            // WASM work per run -- it runs nightly rather than on a pull
+            // request (.github/workflows/nightly_live_webrtc.yaml, and
+            // docs/TESTING.md for why).
+            //
+            // It stands up no dev server: the broker it meets the CLI at is a
+            // process of its own, on an origin that is NOT this page's, and the
+            // leg's Node side starts it (test/liveWebrtc/legCommands.ts).
+            testTimeout: 420_000,
+            hookTimeout: 120_000,
+            browser: {
+              // The same loopback-candidate reasoning as the browser project
+              // above: the two peers configure a public STUN list they cannot
+              // reach here, so a host candidate is the only one that connects,
+              // and Chromium otherwise obfuscates those as `.local` mDNS names
+              // that do not resolve in a container.
+              provider: playwright({
+                launchOptions: {
+                  args: ["--disable-features=WebRtcHideLocalIpsWithMdns"],
+                },
+              }),
+              headless: true,
+              enabled: true,
+              instances: [{ browser: "chromium" }],
+              // The broker and the `psilink` party the browser half cannot
+              // spawn itself. Registered here because this is where vitest
+              // takes them; the implementations are in the test tree.
+              commands: liveWebrtcLegCommands,
+            },
+          },
+          resolve: { alias: srcAliases },
         },
       ],
     },

@@ -410,6 +410,76 @@ It runs on both `cli_build_and_test.yaml` and `eb_build_and_test.yaml`. That is
 by design rather than redundant: the drift it exists to catch can land on
 either runtime, and each workflow's path filter sees only its own.
 
+## Live WebRTC leg
+
+The interop suite above meets a CLI party over a file-drop directory, which is
+the only transport a Node host can stand up on its own. The `live-webrtc`
+project is where the two implementations meet over the transport they actually
+share: a real `psilink` process and a real browser peer, in Chromium, complete
+one WebRTC PSI exchange through the standalone signaling broker.
+
+```sh
+npm run build -w apps/cli             # the party on the CLI side is the built program
+npm run test:live-webrtc -w apps/web
+```
+
+Unlike the interop suite, an absent `apps/cli/dist/` fails this leg rather than
+skipping it. The leg is on no script but its own, so a run that asked for it and
+got a skip would report a pass over the one thing it was asked to cover.
+
+It lives in `apps/web/test/liveWebrtc/`, beside the interop suite and for the
+same reason: only that workspace may import `apps/web/src`, and the CLI side is
+a spawned child process. The broker and that process are started by the vitest
+browser commands in `test/liveWebrtc/legCommands.ts` -- the channel a browser
+test has for work it cannot do itself -- so the test body asserts both parties'
+association tables rather than leaving one to a teardown hook.
+
+The CLI holds the inviter seat, which is what puts the broker on an origin of
+its own rather than the page's: the invitation a CLI party mints from a `ws://`
+coordination-server URL names that broker's host, port and mount, and the
+browser peer dials what the invitation names. A browser inviter would name its
+own page's origin instead.
+
+A cross-origin broker is what lets the leg answer whether that broker needs a
+CORS header for the browser peer. It does not: PeerJS asks the broker for an id
+over HTTP only when constructed without one, and psilink always supplies the id
+derived from the invitation secret, so nothing but the signaling WebSocket
+crosses, and CORS does not govern a WebSocket. The leg holds that as a check
+rather than as a note here.
+
+One piece of the browser party is the harness's. `src/psi/transport/rendezvous`
+loads its config at module scope through a read of `process`, which the browser
+runner does not have, so the import throws there; the rest of the browser suite
+stubs the whole rendezvous module for that reason
+(`apps/web/test/browser/moduleMocks.ts`), and this leg stubs the CONFIG one
+level below instead, at the schema's own defaults, so the dial it drives is the
+app's own. Everything else is each runtime's own.
+
+**It runs nightly**, from `.github/workflows/nightly_live_webrtc.yaml`, and is
+off the pull-request gate. It pays for a CLI build, a browser build and minutes
+of real ICE, DTLS, SCTP and WASM work to exchange six records, while what it
+guards -- a divergence between the two implementations on the wire -- moves with
+the two transports rather than with the pull requests that land. The standing
+per-PR guarantees stay the interop suite above and the cross-implementation
+vectors in the browser project; this leg complements them and replaces neither.
+
+A leg that only ran nightly could decay into a flake nobody reads, so its two
+failure modes are kept apart in the output. Anything about the ENVIRONMENT -- an
+unbuilt CLI, a broker that would not start or answer its readiness endpoint, an
+invitation the CLI never printed, a party killed on its deadline -- is raised
+under the `live-webrtc leg environment failure:` prefix from the leg's Node side
+(`test/liveWebrtc/legTypes.ts`), and the leg's first test is an environment
+precondition that fails before the exchange is blamed. An interop divergence is
+a failed assertion on an association table, on the identity read off the agreed
+terms, or on the close outcome. A browser that will not launch fails the vitest
+session before any test runs, which is distinct from both.
+
+The leg also measures what each side's clean close waits, and asserts no bound
+on either number: they are recorded as a tracked limit in
+[docs/spec/WEBRTC_TRANSPORT.md](spec/WEBRTC_TRANSPORT.md#the-clean-close), to be
+read across runs before anything gates on them. Each run prints them on one
+`[live-webrtc]` line.
+
 ## What a run did not cover
 
 A run that quietly covers less than the suite does is worse than a red one: its
