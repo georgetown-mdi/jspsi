@@ -3,6 +3,7 @@ import webConfig from "./apps/web/eslint.config.js";
 import {
   crossWorkspaceImportBans,
   noBareRootLoglevelEmit,
+  noBareStringLengthBound,
 } from "./eslint.boundaries.mjs";
 
 function scopeToDir(dir, configs) {
@@ -481,6 +482,10 @@ export default tseslint.config(
     // are exempt (each owns its raw parser); tests are not matched. A genuinely
     // trusted/non-sensitive parse opts out with an eslint-disable-next-line
     // carrying a one-line why.
+    //
+    // And it bans a bare string length bound: core's schemas count a length in
+    // UTF-16 code units, as the web app's do in their own blocks
+    // (noBareStringLengthBound in eslint.boundaries.mjs states what it reaches).
     files: ["packages/core/src/**/*.ts"],
     ignores: [
       "packages/core/src/utils/boundedJson.ts",
@@ -501,6 +506,7 @@ export default tseslint.config(
         noBareRootLoglevelEmit,
         ...noRawErrorAtDisplaySink,
         ...noDisplayableAsErrorArgument,
+        ...noBareStringLengthBound,
       ],
       // Close the named-import bypass (`import { parse } from "yaml"`); the
       // chokepoint imports the YAML default, so this never hits legitimate code.
@@ -535,6 +541,29 @@ export default tseslint.config(
           message:
             "Parse untrusted JSON (a partner frame, transport file, or invitation token) through packages/core/src/utils/boundedJson.ts (parseBoundedJson); it structurally bounds the body before JSON.parse so a pathological object/array cannot crash the parser. A trusted parse: eslint-disable-next-line with a one-line justification.",
         },
+      ],
+    },
+  },
+  {
+    // The two chokepoint modules the block above exempts, held to the string
+    // length bound alone: their exemption is from the parse and display bans
+    // (each owns the raw parser one of them names), and a length bound written
+    // in either counts code units like every other bound under
+    // packages/core/src. A block of its own, re-carrying the Displayable entries
+    // the packages-wide block sets for them, because flat config replaces a
+    // rule's whole options across blocks.
+    files: [
+      "packages/core/src/utils/boundedJson.ts",
+      "packages/core/src/sensitiveFile.ts",
+    ],
+    // Fail CI on a stray or rule-silencing disable, as the block above does for
+    // the rest of the tree (a bare `eslint .` only warns).
+    linterOptions: { reportUnusedDisableDirectives: "error" },
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        ...noDisplayableAsErrorArgument,
+        ...noBareStringLengthBound,
       ],
     },
   },

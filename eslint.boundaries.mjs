@@ -110,3 +110,55 @@ export const noBareRootLoglevelEmit = {
   message:
     "Do not emit through the bare root logger (logLibrary.<level>()): a root emit skips the context prefix and the private-key redaction core's prefixed logger applies, and the CLI integration console sentinel and withCapturedLogs capture see named loggers only, so it escapes both leak-detection checks. Use getLogger / getLoggerForVerbosity; logLibrary is for setLevel / levels / getLogger only.",
 };
+
+/**
+ * How many intermediate calls the string-bound ban below reaches through
+ * between `z.string()` and the bound. esquery has no repetition operator, so
+ * each depth is a selector of its own and the reach is finite. Measured over
+ * the guarded trees, the longest chain holds seven calls after `z.string()`
+ * (`apps/web/src/jobs/intentSchemas.ts`), so a bound appended to any of them
+ * sits inside this reach.
+ */
+export const STRING_BOUND_CHAIN_REACH = 8;
+
+// Ban a bare `.max()`, `.length()`, or `.min()` above 1 on a `z.string()`
+// chain. Zod counts code POINTS from 4.5.0 on, and every hand-written length
+// predicate on partner-supplied content counts UTF-16 code units, so a bare
+// ceiling admits a value of astral characters those predicates refuse -- the
+// shared check that counts code units is `maxCodeUnits`
+// (packages/core/src/utils/maxCodeUnits.ts), and
+// packages/core/test/config/lengthBoundUnitParity.test.ts drives the schema
+// bounds and the predicates against one corpus. A `.min(1)` floor is exempt
+// because a string holds at least one code unit exactly when it holds at least
+// one code point, and a `.min(0)` floor refuses nothing.
+//
+// The bound is matched where the receiver chain roots at `z.string()`, through
+// up to STRING_BOUND_CHAIN_REACH intermediate calls, which covers a bound
+// appended after `.trim()`, `.min(1)`, `.check(...)` or `.regex(...)`. A chain
+// longer than that reach is NOT reported, nor is a bound applied to a schema
+// held in a variable or reached through a computed member
+// (`z.string()["max"](n)`): neither shape ties the bound to a string schema by
+// text alone, and this config runs no TypeScript program. The root is keyed on
+// the identifier `z`, which both zod import spellings in these trees bind.
+// scripts/eslint-bare-string-bound-ban.test.mjs pins each of those, reach
+// included, because a selector that stops matching keeps reporting zero.
+const BARE_STRING_BOUND_MESSAGE =
+  "Count a string length bound in UTF-16 code units: write a ceiling as .check(maxCodeUnits(n)) (packages/core/src/utils/maxCodeUnits.ts), and a floor above 1 or an exact length as a check of its own over value.length. Zod's .max(), .min() and .length() count code points, so a bare bound accepts a value of astral characters that the hand-written predicates sharing the ceiling refuse. A bound no predicate shares: eslint-disable-next-line with a one-line justification.";
+
+/**
+ * `no-restricted-syntax` entries banning a bare string length bound, one per
+ * chain depth and bound shape.
+ */
+export const noBareStringLengthBound = Array.from(
+  { length: STRING_BOUND_CHAIN_REACH + 1 },
+  (_unused, depth) => {
+    const root = `callee.object${".callee.object".repeat(depth)}`;
+    const stringChain = `[${root}.callee.object.name='z'][${root}.callee.property.name='string']`;
+    return [
+      `CallExpression[callee.property.name=/^(max|length)$/]${stringChain}`,
+      `CallExpression[callee.property.name='min']:not([arguments.0.value<=1])${stringChain}`,
+    ];
+  },
+)
+  .flat()
+  .map((selector) => ({ selector, message: BARE_STRING_BOUND_MESSAGE }));
