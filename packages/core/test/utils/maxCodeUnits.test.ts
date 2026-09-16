@@ -36,30 +36,122 @@ test("accepts a string at the ceiling in code units", () => {
   expect(bounded.safeParse("a".repeat(256)).success).toBe(true);
 });
 
-test("reports what the Zod bound it stands in for reports", () => {
-  // Same issue on an ASCII value, where the two counting units agree: a
-  // conversion site keeps the message and the issue shape it had. Compared as
-  // serialized text, since an issue array reaches an operator's log as JSON
-  // (the record-build failure warning in exchange.ts), where key order shows.
-  const over = "a".repeat(257);
-  const fromBound = z.object({ f: z.string().max(256) }).safeParse({ f: over });
-  const fromCheck = z.object({ f: bounded }).safeParse({ f: over });
-  expect(fromCheck.success).toBe(false);
-  expect(fromBound.success).toBe(false);
-  if (fromBound.success || fromCheck.success) return;
-  expect(JSON.stringify(fromCheck.error.issues)).toBe(
-    JSON.stringify(fromBound.error.issues),
+// What a `.max(4)` bound renders for the same refusal, measured by driving Zod
+// 4.4.3, whose `.max()` counted code units: the rendering this check stands in
+// for. Both forms are pinned because both reach a reader -- the issue array is
+// what a caller walks (`linkageTermsNegotiation.ts` renders each issue's path
+// and message), and the ZodError's own message is the indented JSON an uncaught
+// parse failure prints. Key order shows in both, so a refusal that names its
+// own message is pinned beside the default one.
+const RENDERED = {
+  default: {
+    issues:
+      '[{"origin":"string","code":"too_big","maximum":4,"inclusive":true,"path":[],"message":"Too big: expected string to have <=4 characters"}]',
+    text: `[
+  {
+    "origin": "string",
+    "code": "too_big",
+    "maximum": 4,
+    "inclusive": true,
+    "path": [],
+    "message": "Too big: expected string to have <=4 characters"
+  }
+]`,
+  },
+  custom: {
+    issues:
+      '[{"origin":"string","code":"too_big","maximum":4,"inclusive":true,"path":[],"message":"must not exceed 4 characters"}]',
+    text: `[
+  {
+    "origin": "string",
+    "code": "too_big",
+    "maximum": 4,
+    "inclusive": true,
+    "path": [],
+    "message": "must not exceed 4 characters"
+  }
+]`,
+  },
+  nested: {
+    issues:
+      '[{"origin":"string","code":"too_big","maximum":4,"inclusive":true,"path":["column","name"],"message":"Too big: expected string to have <=4 characters"}]',
+    text: `[
+  {
+    "origin": "string",
+    "code": "too_big",
+    "maximum": 4,
+    "inclusive": true,
+    "path": [
+      "column",
+      "name"
+    ],
+    "message": "Too big: expected string to have <=4 characters"
+  }
+]`,
+  },
+  array: {
+    issues:
+      '[{"expected":"string","code":"invalid_type","path":[],"message":"Invalid input: expected string, received array"},{"origin":"array","code":"too_big","maximum":4,"inclusive":true,"path":[],"message":"Too big: expected array to have <=4 items"}]',
+    text: `[
+  {
+    "expected": "string",
+    "code": "invalid_type",
+    "path": [],
+    "message": "Invalid input: expected string, received array"
+  },
+  {
+    "origin": "array",
+    "code": "too_big",
+    "maximum": 4,
+    "inclusive": true,
+    "path": [],
+    "message": "Too big: expected array to have <=4 items"
+  }
+]`,
+  },
+};
+
+const refusalOf = (schema: z.ZodType, input: unknown) => {
+  const result = schema.safeParse(input);
+  if (result.success) throw new Error("expected the value to be refused");
+  return {
+    issues: JSON.stringify(result.error.issues),
+    text: String(result.error),
+  };
+};
+
+test("renders a refusal as the bound it stands in for rendered it", () => {
+  expect(refusalOf(z.string().check(maxCodeUnits(4)), "abcde")).toEqual(
+    RENDERED.default,
   );
 });
 
-test("takes the message a bound named for itself", () => {
-  const named = z
-    .string()
-    .check(maxCodeUnits(4, "must not exceed 4 characters"));
-  const refused = named.safeParse("abcde");
-  expect(refused.success).toBe(false);
-  if (refused.success) return;
-  expect(refused.error.issues[0].message).toBe("must not exceed 4 characters");
+test("renders a bound's own message where that bound named one", () => {
+  expect(
+    refusalOf(
+      z.string().check(maxCodeUnits(4, "must not exceed 4 characters")),
+      "abcde",
+    ),
+  ).toEqual(RENDERED.custom);
+});
+
+test("renders the field's path in a nested document", () => {
+  const document = z.object({
+    column: z.object({ name: z.string().check(maxCodeUnits(4)) }),
+  });
+  expect(refusalOf(document, { column: { name: "abcde" } })).toEqual(
+    RENDERED.nested,
+  );
+});
+
+test("reports both issues for a non-string value that has a length", () => {
+  // A value that failed the string type check still reaches the ceiling, and
+  // the ceiling reports against the kind of value it got: an array of five
+  // elements is refused as an array, past the type refusal, exactly as the
+  // bound this stands in for refused it.
+  expect(
+    refusalOf(z.string().check(maxCodeUnits(4)), ["a", "b", "c", "d", "e"]),
+  ).toEqual(RENDERED.array);
 });
 
 test("does not abort the checks chained after it", () => {

@@ -332,12 +332,13 @@ test("a parse error does not echo a partner-supplied received value", () => {
   }
 
   // 2. The `invalid_key` code on the bounded `transform.params` record key
-  //    (z.string().max(MAX_NAME_LENGTH)) DOES place the offending key VERBATIM
-  //    in the issue PATH, which the raw `error.message` JSON-dumps -- so here
-  //    the display boundary does the protecting, not the schema. The dangerous
-  //    bytes lead the key (with padding past the bound after them) so escaping,
-  //    not the display-length cap, is what neutralizes them. Assert on the
-  //    escaped description a direct-display consumer renders.
+  //    (z.string().check(maxCodeUnits(MAX_NAME_LENGTH))) DOES place the
+  //    offending key VERBATIM in the issue PATH, which the raw `error.message`
+  //    JSON-dumps -- so here the display boundary does the protecting, not the
+  //    schema. The dangerous bytes lead the key (with padding past the bound
+  //    after them) so escaping, not the display-length cap, is what neutralizes
+  //    them. Assert on the escaped description a direct-display consumer
+  //    renders.
   const evilKey = "\x1b[31m\u202e" + "x".repeat(MAX_NAME_LENGTH);
   const invalidKey = safeParseLinkageTerms({
     ...base,
@@ -1928,9 +1929,10 @@ describe("linkageStrategy", () => {
 // --- Untrusted-input bounds --------------------------------------------------
 // These terms ride inside an invitation token whose only integrity check is a
 // transcription checksum anyone can recompute, so each partner-controlled
-// free-text and array field holds a generous `.max()`. The bounds are wide
-// enough that no real configuration hits them (asserted by the boundary-accept
-// cases) but still refuse a token padded to exhaust the recipient.
+// free-text and array field holds a generous bound -- `maxCodeUnits` on a
+// string length, a count gate on an array. The bounds are wide enough that no
+// real configuration hits them (asserted by the boundary-accept cases) but
+// still refuse a token padded to exhaust the recipient.
 
 test("accepts terms holding no identity, and round-trips the absence", () => {
   // `identity` is optional: a party that supplied no name sends terms with the
