@@ -5458,7 +5458,7 @@ test("the sensitive-parse failure names the path as the operator typed it", () =
   expectNamesPathAsTyped(err, configPath);
 });
 
-test.skipIf(process.platform === "win32")(
+test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
   "the unrecordable-pin refusal names the configuration path as typed",
   () => {
     const configDir = fs.mkdtempSync(path.join(dir, "readonly-"));

@@ -174,12 +174,13 @@ const noDisplayableAsErrorArgument = ERROR_TEXT_POSITIONS.map((position) => ({
 // holds -- this config runs no TypeScript program. Two shapes, both how
 // apps/cli/src names a path it took from the command line or from the
 // operator's configuration: an identifier or property ENDING in Path, File,
-// Dir, Directory or Folder (plural or not, or one of those words alone), and
-// one OPENING with path, file, dir, directory or folder before a capital or
-// the end of the name, which reaches pathValue, fileName and filename. A name
-// outside both -- target, output, destination -- is not reached, so what this
-// holds is the shape it can recognize and not every operator path
-// (docs/spec/CHANNEL_SECURITY.md, display-sanitization escape format).
+// Dir, Directory or Folder (with or without a trailing s, or one of those
+// words alone), and one OPENING with path, file, dir, directory or folder
+// before a capital or the end of the name, which reaches pathValue, fileName
+// and filename. A name outside both -- target, output, destination -- is not
+// reached, so what this holds is the shape it can recognize and not every
+// operator path (docs/spec/CHANNEL_SECURITY.md, display-sanitization escape
+// format).
 //
 // The name says nothing about WHO CHOSE the bytes, so a value a partner or a
 // server named -- a remote listing's entry, a path out of an invitation -- is
@@ -415,7 +416,7 @@ export default tseslint.config(
     // ignoring a named file rather than by listing the ones it covers, so a
     // source added later is held to it without an edit here.
     files: ["apps/cli/src/**/*.ts"],
-    ignores: ["apps/cli/src/sensitiveFile.ts", ...UNMARKED_OPERATOR_PATH_FILES],
+    ignores: [...UNMARKED_OPERATOR_PATH_FILES],
     rules: {
       "no-restricted-syntax": [
         "error",
