@@ -702,17 +702,23 @@ export function ManagedRunSurface({ id }: { id: string }) {
     (standingSettled ||
       (standingView !== undefined && standingView.tier !== failure?.kind));
 
+  // A compromise response holds the whole recovery region, whichever of the two
+  // gates the operator answered: a fresh invitation on the channel that just failed
+  // would hand the new secret to whoever is interfering, so neither the live failure
+  // nor the standing condition offers one while it stands. The alert itself renders
+  // at the gate that raised it.
+  const compromiseActive = compromiseResponse || standingCompromise;
+
   // Whether the live failure is already offering the re-invite -- directly, or past
   // the confirmation gate, which ends on the same offer. Both mint from this record,
   // so the standing section drops its own copy of the offer and keeps its status and
   // its clear control: one control for the act, not two identical buttons whose
   // failed mint alerts twice.
   const failureOffersReinvite =
+    !compromiseActive &&
     failure !== undefined &&
     (managedRunReinvites(failure) ||
-      (failure.recovery === "confirm" &&
-        confirmationGated &&
-        !compromiseResponse));
+      (failure.recovery === "confirm" && confirmationGated));
 
   // Persist an in-place edit to the local fields (label, max-token-age policy)
   // through the single-transaction store path, then adopt the returned record so
@@ -991,6 +997,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
                     record={record}
                     confirmationGated={confirmationGated}
                     compromiseResponse={compromiseResponse}
+                    compromiseActive={compromiseActive}
                     reinviting={reinviting}
                     // The failed alert renders only at the site that triggered the
                     // mint, so the recovery and the detail section do not both show it.
@@ -1009,6 +1016,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
                 view={standingView}
                 settled={standingSettled}
                 compromise={standingCompromise}
+                compromiseActive={compromiseActive}
                 clearing={clearingStanding}
                 clearFailed={clearStandingFailed}
                 reinviting={reinviting}
@@ -1127,6 +1135,7 @@ function FailureRecovery({
   record,
   confirmationGated,
   compromiseResponse,
+  compromiseActive,
   reinviting,
   reinviteFailed,
   onReinvite,
@@ -1135,7 +1144,12 @@ function FailureRecovery({
   failure: ManagedRunFailureAlert;
   record: ManagedExchangeRecord;
   confirmationGated: boolean;
+  /** Whether this gate's "does not add up" leg was taken: the compromise alert
+   * renders at the gate that raised it. */
   compromiseResponse: boolean;
+  /** Whether a compromise response stands on this page at all -- this gate's or the
+   * standing condition's. No re-invite offer renders under one. */
+  compromiseActive: boolean;
   reinviting: boolean;
   reinviteFailed: boolean;
   onReinvite: () => void;
@@ -1156,7 +1170,7 @@ function FailureRecovery({
     // re-invite -- the same panel a direct re-invite tier shows (which mints for the
     // inviter and names asking the partner for the acceptor, with a retry on failure).
     if (confirmationGated)
-      return (
+      return compromiseActive ? null : (
         <ReinviteRecovery
           record={record}
           reinviting={reinviting}
@@ -1169,7 +1183,7 @@ function FailureRecovery({
     );
   }
 
-  if (managedRunReinvites(failure))
+  if (managedRunReinvites(failure) && !compromiseActive)
     return (
       <ReinviteRecovery
         record={record}
@@ -1199,13 +1213,15 @@ function FailureRecovery({
  * Once cleared, the section keeps its place and shows the re-invite: settling a
  * condition is not the same act as re-establishing the secret it was raised over.
  * Where the live failure above is already offering that re-invite, the offer is
- * left to it -- one control for the act, whichever state asked for it.
+ * left to it -- one control for the act, whichever state asked for it -- and where
+ * either gate has routed to the compromise response, no offer renders here at all.
  */
 function StandingConditionSection({
   record,
   view,
   settled,
   compromise,
+  compromiseActive,
   clearing,
   clearFailed,
   reinviting,
@@ -1220,8 +1236,12 @@ function StandingConditionSection({
   view: ManagedStandingConditionView | undefined;
   /** Whether the operator has cleared the condition on this visit. */
   settled: boolean;
-  /** Whether the gate's "does not add up" leg was taken. */
+  /** Whether this gate's "does not add up" leg was taken: the compromise alert
+   * renders at the gate that raised it. */
   compromise: boolean;
+  /** Whether a compromise response stands on this page at all -- this gate's or the
+   * live failure's. No re-invite offer renders under one. */
+  compromiseActive: boolean;
   clearing: boolean;
   clearFailed: boolean;
   reinviting: boolean;
@@ -1234,15 +1254,23 @@ function StandingConditionSection({
   onClear: () => void;
   onResolve: (outcome: Parameters<typeof routeConfirmationReply>[0]) => void;
 }) {
+  const offersReinvite = !reinviteOffered && !compromiseActive;
+  // The same alert on both legs: the confirming option and the acknowledge control
+  // take the same store write, and a rejected one leaves the condition standing.
+  const clearFailure = clearFailed ? (
+    <Alert color="red" title="Could not clear this" mt="sm">
+      Nothing changed here, so this still stands. Try again.
+    </Alert>
+  ) : null;
   if (settled)
-    return reinviteOffered ? null : (
+    return offersReinvite ? (
       <ReinviteRecovery
         record={record}
         reinviting={reinviting}
         reinviteFailed={reinviteFailed}
         onReinvite={onReinvite}
       />
-    );
+    ) : null;
   if (view === undefined) return null;
   if (compromise)
     return (
@@ -1262,10 +1290,13 @@ function StandingConditionSection({
         {view.message}
       </Alert>
       {view.clearance === "confirmation" ? (
-        <ConfirmationPanel record={record} onResolve={onResolve} />
+        <>
+          <ConfirmationPanel record={record} onResolve={onResolve} />
+          {clearFailure}
+        </>
       ) : (
         <>
-          {!reinviteOffered && (
+          {offersReinvite && (
             <ReinviteRecovery
               record={record}
               reinviting={reinviting}
@@ -1273,11 +1304,7 @@ function StandingConditionSection({
               onReinvite={onReinvite}
             />
           )}
-          {clearFailed && (
-            <Alert color="red" title="Could not clear this" mt="sm">
-              Nothing changed here; try again.
-            </Alert>
-          )}
+          {clearFailure}
           <Button
             mt="sm"
             variant="default"

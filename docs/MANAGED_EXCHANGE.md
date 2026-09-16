@@ -1106,7 +1106,9 @@ So the evidence is **raised as a standing condition** as well, beside the run
 bookkeeping, where no later run's stamp reaches it. It carries the instant of the
 run that raised it and which of the two failures it was, and nothing else. The
 first one stands: a later failure of the same class leaves it as it is, because
-answering it is a single act over everything that stood before.
+answering it is a single act over everything that stood before -- and the message
+the operator forwards names that later failure beside the first, so the partner
+checks their own logs for both occasions.
 
 Three things clear a standing condition, and nothing else does:
 

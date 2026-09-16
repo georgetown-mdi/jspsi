@@ -28,7 +28,10 @@
 
 import { dateTimeLabel } from "../formatting";
 
-import { raisedStandingCondition } from "./managedExchangeRecord";
+import {
+  raisedStandingCondition,
+  standingConditionFrom,
+} from "./managedExchangeRecord";
 
 import type { ManagedExchangeRecord } from "./managedExchangeRecord";
 
@@ -65,13 +68,14 @@ interface ManagedFailureConfirmation {
 
 /**
  * Compose the forwardable confirmation message from a record's own local fields. The
- * partnership label (or a neutral fallback when unlabeled) and the failure time --
- * the standing condition's instant where one stands, the last run's otherwise -- are
- * this record's own local values -- never partner-influenced -- so an impersonator
- * cannot steer the message. The three asks are fixed and follow the doc's framing
- * exactly; the message names no benign cause and offers the partner no leading
- * "you also saw a failure, right?" -- it asks the partner to report what their tool
- * observed, so a real partner-side failure is established rather than assumed.
+ * partnership label (or a neutral fallback when unlabeled) and the failure times --
+ * the standing condition's instant where one stands, the last run's otherwise, and a
+ * later run that failed the same way beside it -- are this record's own local values
+ * -- never partner-influenced -- so an impersonator cannot steer the message. The
+ * three asks are fixed and follow the doc's framing exactly; the message names no
+ * benign cause and offers the partner no leading "you also saw a failure, right?" --
+ * it asks the partner to report what their tool observed, so a real partner-side
+ * failure is established rather than assumed.
  */
 export function composeConfirmationMessage(
   record: ManagedExchangeRecord,
@@ -83,10 +87,13 @@ export function composeConfirmationMessage(
   // hold a no-show or a success that is not what they are confirming.
   const at = raisedStandingCondition(record)?.since ?? record.lastRun?.at;
   const when = at !== undefined ? dateTimeLabel(new Date(at)) : undefined;
-  const failedLine =
-    when !== undefined
-      ? `A run of ${partnership} failed to authenticate on my side on ${when}.`
-      : `A run of ${partnership} failed to authenticate on my side.`;
+  const recurrence = laterFailureOfSameKind(record);
+  const again =
+    recurrence !== undefined ? dateTimeLabel(new Date(recurrence)) : undefined;
+  let failedLine = `A run of ${partnership} failed to authenticate on my side`;
+  if (when !== undefined) failedLine += ` on ${when}`;
+  if (again !== undefined) failedLine += `, and again on ${again}`;
+  failedLine += ".";
   return [
     failedLine,
     "",
@@ -104,6 +111,25 @@ export function composeConfirmationMessage(
     "",
     "Once you confirm all three, I will send a fresh invitation to reconnect.",
   ].join("\n");
+}
+
+/** The instant of a later run that failed the same way the standing condition was
+ * raised over, or `undefined` where there is none. First raise wins, so an unanswered
+ * condition keeps the first occasion's instant while `lastRun` holds the failure the
+ * operator just watched; the message names both, so the partner checks their logs for
+ * that occasion too. The failure class is read off the entry the same way a condition
+ * is raised from it ({@link standingConditionFrom}). */
+function laterFailureOfSameKind(
+  record: ManagedExchangeRecord,
+): string | undefined {
+  const condition = raisedStandingCondition(record);
+  const lastRun = record.lastRun;
+  if (condition === undefined || lastRun === undefined) return undefined;
+  const recent = standingConditionFrom(lastRun);
+  if (recent === undefined || recent.kind !== condition.kind) return undefined;
+  return Date.parse(recent.since) > Date.parse(condition.since)
+    ? recent.since
+    : undefined;
 }
 
 /**

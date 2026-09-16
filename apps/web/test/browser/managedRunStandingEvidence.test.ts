@@ -20,11 +20,13 @@ import {
   recordManagedExchangeLastRun,
 } from "@psi/managed/managedExchangeStore";
 import { failedRun, missedRun } from "@psi/managed/managedRunRotate";
+import { COMPROMISE_RESPONSE_TITLE } from "@psi/managed/managedFailureConfirmation";
 import { ManagedRunSurface } from "@recurring/ManagedRunSurface";
 import { STANDING_CONDITION_CLEAR_LABEL } from "@recurring/managedStandingConditionModel";
 
 import { createAppMount, flushPendingUpdates } from "./renderApp";
 
+import type * as ManagedExchangeStore from "@psi/managed/managedExchangeStore";
 import type { NewManagedExchange } from "@psi/managed/managedExchangeRecord";
 
 // A no-show must still show a standing persist failure and its re-invite recovery,
@@ -37,15 +39,41 @@ import type { NewManagedExchange } from "@psi/managed/managedExchangeRecord";
 const linkageTerms = getDefaultLinkageTerms("County Health Dept");
 
 // The stubbed run's script for one test, reset per test: how many runs it has served,
-// whether the first of them is the rotation persist failure rather than a no-show,
-// and the lapsed instant to fail every run with instead (the bound the pre-connection
-// check reads, whose own recovery is the re-invite).
+// whether the first of them is the rotation persist failure rather than a no-show, the
+// lapsed instant to fail every run with instead (the bound the pre-connection check
+// reads, whose own recovery is the re-invite), and whether every run's handshake fails
+// closed with nothing to explain it.
 const driver = vi.hoisted(
-  (): { runs: number; persistFailsFirstRun: boolean; lapsedAt?: string } => ({
+  (): {
+    runs: number;
+    persistFailsFirstRun: boolean;
+    lapsedAt?: string;
+    handshakeFailsClosed: boolean;
+  } => ({
     runs: 0,
     persistFailsFirstRun: false,
+    handshakeFailsClosed: false,
   }),
 );
+
+// Whether the store's clear-and-acknowledge write rejects, so the page's failed-clear
+// alert can be driven on both legs of the gate.
+const clearWrite = vi.hoisted((): { fails: boolean } => ({ fails: false }));
+
+// Everything but the clear-and-acknowledge write is the real store: the records these
+// tests read back are the ones the surface and the stubbed run actually wrote.
+vi.mock("@psi/managed/managedExchangeStore", async () => {
+  const actual = await vi.importActual<typeof ManagedExchangeStore>(
+    "@psi/managed/managedExchangeStore",
+  );
+  return {
+    ...actual,
+    clearManagedExchangeStandingCondition: async (id: string) => {
+      if (clearWrite.fails) throw new Error("the write failed");
+      return await actual.clearManagedExchangeStandingCondition(id);
+    },
+  };
+});
 
 vi.mock("@tanstack/react-router", async () =>
   (await import("./moduleMocks")).reactRouterMock(),
@@ -76,6 +104,17 @@ vi.mock("@psi/managed/managedRunDriver", async () => {
       // of its own -- the record already holds the lapse.
       if (driver.lapsedAt !== undefined)
         throw new ManagedExchangeExpiredError(driver.lapsedAt);
+      // A handshake that failed closed with nothing on this device to explain it:
+      // the run stamps its own `auth` entry and rethrows, which is the Tier-2
+      // unexplained state the confirmation gate is shown for.
+      if (driver.handshakeFailsClosed) {
+        await store.recordManagedExchangeLastRun(
+          config.record.id,
+          rotate.failedRun(at, "failed", "auth"),
+          at,
+        );
+        throw new Error("the handshake failed closed");
+      }
       if (driver.persistFailsFirstRun && driver.runs === 1) {
         await store.recordManagedExchangeLastRun(
           config.record.id,
@@ -144,6 +183,8 @@ beforeEach(async () => {
   driver.runs = 0;
   driver.persistFailsFirstRun = false;
   driver.lapsedAt = undefined;
+  driver.handshakeFailsClosed = false;
+  clearWrite.fails = false;
   await clearManagedExchanges();
 });
 
@@ -333,6 +374,148 @@ describe("a cleared standing condition beside this visit's own failure", () => {
     // at all: without this the assertion above would pass against a failure that
     // offers the re-invite itself.
     expect(app.container.textContent).toContain("not a fault on this device");
+  });
+});
+
+describe("a compromise response the operator has reached", () => {
+  test("leaves the live failure no re-invite to offer beside it", async () => {
+    // The standing gate is answered "something does not add up" while the live
+    // failure is a lapsed bound, whose own recovery is a fresh invitation. The
+    // compromise response says not to send one on this channel, so the page must
+    // not hold a button that does exactly that.
+    driver.lapsedAt = "2026-07-01T00:00:00.000Z";
+    const created = await createManagedExchange(
+      newExchange({ inputFileHandle: await inputHandle() }),
+    );
+    const failedAt = Date.now() - 120_000;
+    await recordManagedExchangeLastRun(
+      created.id,
+      failedRun(failedAt, "failed", "auth"),
+      failedAt,
+    );
+
+    app.render(createElement(ManagedRunSurface, { id: created.id }));
+    const runButton = page.getByRole("button", { name: "Run exchange" });
+    await expect.element(runButton).toBeEnabled();
+    await runButton.click();
+    await expect
+      .element(page.getByText("This exchange's stored secret has lapsed"))
+      .toBeInTheDocument();
+    await flushPendingUpdates();
+    // The live failure really is offering the re-invite before the gate is
+    // answered: without this the assertion below would pass against a state that
+    // never had a button to withdraw.
+    expect(
+      page
+        .getByRole("button", { name: "Create a fresh invitation" })
+        .elements(),
+    ).toHaveLength(1);
+
+    await page
+      .getByRole("button", { name: "Something does not add up" })
+      .click();
+    await expect
+      .element(page.getByText(COMPROMISE_RESPONSE_TITLE))
+      .toBeInTheDocument();
+    await flushPendingUpdates();
+
+    expect(
+      page
+        .getByRole("button", { name: "Create a fresh invitation" })
+        .elements(),
+    ).toHaveLength(0);
+    // The lapse is still stated: the compromise response withdraws the offer, not
+    // the account of what happened.
+    expect(app.container.textContent).toContain(
+      "This exchange's stored secret has lapsed",
+    );
+  });
+
+  test("leaves a settled condition no re-invite to offer under it", async () => {
+    // The other way round: the condition was cleared earlier in this visit, so the
+    // section below holds the re-invite on its own, and this visit's run then lands
+    // on the unexplained state whose gate the operator answers as a compromise.
+    const created = await createManagedExchange(
+      newExchange({ inputFileHandle: await inputHandle() }),
+    );
+    const failedAt = Date.now() - 120_000;
+    await recordManagedExchangeLastRun(
+      created.id,
+      failedRun(failedAt, "failed", "storage"),
+      failedAt,
+    );
+
+    app.render(createElement(ManagedRunSurface, { id: created.id }));
+    const clear = page.getByRole("button", {
+      name: STANDING_CONDITION_CLEAR_LABEL,
+    });
+    await expect.element(clear).toBeInTheDocument();
+    await clear.click();
+    await expect
+      .element(page.getByRole("button", { name: "Create a fresh invitation" }))
+      .toBeInTheDocument();
+
+    driver.handshakeFailsClosed = true;
+    const runButton = page.getByRole("button", { name: "Run exchange" });
+    await expect.element(runButton).toBeEnabled();
+    await runButton.click();
+    await expect
+      .element(
+        page.getByText(
+          "This run failed and needs you to check with your partner",
+        ),
+      )
+      .toBeInTheDocument();
+    await flushPendingUpdates();
+
+    await page
+      .getByRole("button", { name: "Something does not add up" })
+      .click();
+    await expect
+      .element(page.getByText(COMPROMISE_RESPONSE_TITLE))
+      .toBeInTheDocument();
+    await flushPendingUpdates();
+
+    expect(
+      page
+        .getByRole("button", { name: "Create a fresh invitation" })
+        .elements(),
+    ).toHaveLength(0);
+  });
+});
+
+describe("a clear-and-acknowledge write that rejects", () => {
+  test("states what happened on the gate's confirming leg, not only the short control", async () => {
+    // The confirming option takes the same store write the acknowledge control does.
+    // When it rejects, the condition stays raised -- so the operator has to be told,
+    // or the click reads as having settled something it did not.
+    clearWrite.fails = true;
+    const created = await createManagedExchange(
+      newExchange({ inputFileHandle: await inputHandle() }),
+    );
+    const failedAt = Date.now() - 120_000;
+    await recordManagedExchangeLastRun(
+      created.id,
+      failedRun(failedAt, "failed", "auth"),
+      failedAt,
+    );
+
+    app.render(createElement(ManagedRunSurface, { id: created.id }));
+    const confirmed = page.getByRole("button", {
+      name: "Partner confirmed their own failure",
+    });
+    await expect.element(confirmed).toBeInTheDocument();
+    await confirmed.click();
+
+    await expect
+      .element(page.getByText("Could not clear this"))
+      .toBeInTheDocument();
+    expect(app.container.textContent).toContain("this still stands");
+    // The condition really is still raised, and the gate is still there to retry on.
+    expect(
+      (await getManagedExchange(created.id))?.standingCondition,
+    ).not.toEqual(NO_STANDING_CONDITION);
+    await expect.element(confirmed).toBeInTheDocument();
   });
 });
 

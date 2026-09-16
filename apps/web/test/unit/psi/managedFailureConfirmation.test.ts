@@ -12,6 +12,8 @@ import {
   routeConfirmationReply,
 } from "@psi/managed/managedFailureConfirmation";
 
+import { dateTimeLabel } from "@psi/formatting";
+
 import type { ManagedExchangeRecord } from "@psi/managed/managedExchangeRecord";
 
 // The Tier-2 out-of-band confirmation, tested in Node: the forwardable message includes
@@ -79,6 +81,88 @@ describe("composeConfirmationMessage", () => {
     expect(unlabeled).toMatch(/our recurring data exchange/);
     // No stray empty quotes from an empty label.
     expect(unlabeled).not.toMatch(/""/);
+  });
+});
+
+// Which instants the message names. A standing condition is raised first-raise-wins,
+// so its `since` stays at the occasion that raised it while `lastRun` moves on: the
+// message has to name the failure the operator just watched as well as the first one,
+// or the partner checks their logs for the wrong occasion.
+describe("the instants composeConfirmationMessage names", () => {
+  const firstAt = "2026-07-14T09:00:00.000Z";
+  const laterAt = "2026-07-20T09:00:00.000Z";
+
+  function labelOf(at: string): string {
+    return dateTimeLabel(new Date(at));
+  }
+
+  test("names the standing condition's instant alone where the last run is the one that raised it", () => {
+    const message = composeConfirmationMessage(
+      record({
+        lastRun: { at: firstAt, outcome: "failed", failureKind: "auth" },
+        standingCondition: { since: firstAt, kind: "auth" },
+      }),
+    );
+
+    expect(message).toContain(`on ${labelOf(firstAt)}.`);
+    expect(message).not.toMatch(/and again on/);
+  });
+
+  test("names both instants where a later run failed the same way", () => {
+    const message = composeConfirmationMessage(
+      record({
+        lastRun: { at: laterAt, outcome: "failed", failureKind: "auth" },
+        standingCondition: { since: firstAt, kind: "auth" },
+      }),
+    );
+
+    expect(message).toContain(
+      `on ${labelOf(firstAt)}, and again on ${labelOf(laterAt)}.`,
+    );
+  });
+
+  test("names the standing instant alone where the later run failed another way", () => {
+    const message = composeConfirmationMessage(
+      record({
+        lastRun: { at: laterAt, outcome: "failed", failureKind: "storage" },
+        standingCondition: { since: firstAt, kind: "auth" },
+      }),
+    );
+
+    expect(message).toContain(`on ${labelOf(firstAt)}.`);
+    expect(message).not.toContain(labelOf(laterAt));
+  });
+
+  test("names the standing instant alone where the later run was a no-show", () => {
+    const message = composeConfirmationMessage(
+      record({
+        lastRun: { at: laterAt, outcome: "missed" },
+        standingCondition: { since: firstAt, kind: "auth" },
+      }),
+    );
+
+    expect(message).toContain(`on ${labelOf(firstAt)}.`);
+    expect(message).not.toContain(labelOf(laterAt));
+  });
+
+  test("names the last run's instant where no condition stands", () => {
+    const message = composeConfirmationMessage(
+      record({
+        lastRun: { at: laterAt, outcome: "failed", failureKind: "auth" },
+      }),
+    );
+
+    expect(message).toContain(`on ${labelOf(laterAt)}.`);
+    expect(message).not.toMatch(/and again on/);
+  });
+
+  test("names no instant for a record that has never run", () => {
+    const never = record();
+    delete never.lastRun;
+
+    const message = composeConfirmationMessage(never);
+
+    expect(message).toMatch(/failed to authenticate on my side\.$/m);
   });
 });
 
