@@ -341,15 +341,9 @@ export class PSIParticipant {
     const startedAt = performance.now();
     const durationMs = (): number =>
       Math.max(0, Math.round(performance.now() - startedAt));
+    let result: T;
     try {
-      const result = await run();
-      report({
-        operation,
-        elements,
-        state: "finished",
-        durationMs: durationMs(),
-      });
-      return result;
+      result = await run();
     } catch (error) {
       report({
         operation,
@@ -359,6 +353,15 @@ export class PSIParticipant {
       });
       throw error;
     }
+    // Outside the try: a reporter that raises on this report must not also
+    // relabel the operation that already completed as failed.
+    report({
+      operation,
+      elements,
+      state: "finished",
+      durationMs: durationMs(),
+    });
+    return result;
   }
 
   // Building-block PSI steps used by the single-pass strategy

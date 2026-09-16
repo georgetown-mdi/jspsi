@@ -18,24 +18,43 @@ vi.mock("@openmined/psi.js", () => ({
   default: vi.fn().mockResolvedValue({}),
 }));
 
+// What the run did, in the order it did it: each operator log line and each
+// close of the PSI progress display, so a test can assert which of the two the
+// interrupt reached first. Hoisted because the module mocks below close over it.
+const runEvents = vi.hoisted(() => ({ ordered: [] as Array<string> }));
+
 // Keep @psilink/core real -- FileSyncConnection and the rendezvous especially,
 // since the interrupt has to land on a live exchange -- and replace only the
-// operator logger, which nothing here asserts on, and runExchange, which
-// nothing here should reach.
+// operator logger, whose lines are recorded rather than printed, and
+// runExchange, which nothing here should reach.
 vi.mock("@psilink/core", async (importActual) => {
   const actual = await importActual<typeof import("@psilink/core")>();
+  const record =
+    (level: string) =>
+    (...args: unknown[]) =>
+      runEvents.ordered.push(`${level}: ${String(args[0])}`);
   return {
     ...actual,
     getLogger: () => ({
-      info: () => {},
-      warn: () => {},
-      error: () => {},
-      debug: () => {},
-      trace: () => {},
+      info: record("info"),
+      warn: record("warn"),
+      error: record("error"),
+      debug: record("debug"),
+      trace: record("trace"),
     }),
     runExchange: vi.fn(),
   };
 });
+
+// The display itself is unit-tested (psiProgressDisplay.test.ts); here only the
+// moment its close lands matters.
+vi.mock("../../src/psiProgressDisplay", () => ({
+  createPsiProgressDisplay: () => ({
+    report: () => {},
+    close: () => runEvents.ordered.push("progress display closed"),
+  }),
+  terminalPsiStatusLine: () => undefined,
+}));
 
 import { runExchange } from "@psilink/core";
 
@@ -83,6 +102,7 @@ let tmpDir: string;
 let dropDir: string;
 
 beforeEach(() => {
+  runEvents.ordered.length = 0;
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-proto-interrupt-"));
   dropDir = path.join(tmpDir, "drop");
   fs.mkdirSync(dropDir);
@@ -178,4 +198,45 @@ test("a SIGINT interrupt under --event-stream emits no terminal event", async ()
   expect(types).not.toContain("result");
   expect(types).not.toContain("error");
   expect(types).not.toContain("metrics");
+});
+
+test("an interrupt drops the live progress line before it logs anything", async () => {
+  // Ctrl-C lands mid-operation with the cursor parked on the redrawn progress
+  // row, so the display is closed before the first interrupt line: otherwise
+  // "caught SIGINT, exiting" is written over the half-drawn row.
+  const exitSpy = vi.spyOn(process, "exit").mockReturnValue(undefined as never);
+  const keyFile = path.join(tmpDir, "interrupted-progress.key");
+  const run = runProtocol({
+    connection: {
+      channel: "filedrop",
+      path: dropDir,
+      options: { pollIntervalMs: 1, peerTimeoutMs: 5_000 },
+    },
+    auth: { sharedSecret: TOKEN_A, keyFilePath: keyFile },
+    prepared: minimalPrepared,
+    output: undefined,
+    verbosity: -1,
+    loggerName: "test-b",
+  });
+  const settled = Promise.allSettled([run]);
+  try {
+    await vi.waitFor(
+      () => expect(fs.readdirSync(dropDir).length).toBeGreaterThan(0),
+      { timeout: 5_000 },
+    );
+    process.emit("SIGINT");
+    await vi.waitFor(() => expect(exitSpy).toHaveBeenCalledWith(130), {
+      timeout: 5_000,
+    });
+    await settled;
+  } finally {
+    exitSpy.mockRestore();
+  }
+
+  const closed = runEvents.ordered.indexOf("progress display closed");
+  const firstInterruptLine = runEvents.ordered.indexOf(
+    "info: caught SIGINT, exiting",
+  );
+  expect(closed).toBeGreaterThanOrEqual(0);
+  expect(firstInterruptLine).toBeGreaterThan(closed);
 });

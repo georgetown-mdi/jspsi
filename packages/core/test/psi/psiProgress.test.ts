@@ -177,6 +177,30 @@ test("an operation that raises reports failed, not finished", async () => {
   expect(reports[1].elements).toBe(senderValues.length);
 });
 
+test("a raising reporter neither relabels nor repeats a finished operation", async () => {
+  const reports: Array<PsiProgress> = [];
+  const raising = new PSIParticipant(
+    "sender",
+    psiLibrary,
+    { role: "starter", verbose: 0 },
+    UNBOUNDED_PSI_ELEMENTS,
+    undefined,
+    (progress) => {
+      reports.push(progress);
+      if (progress.state === "finished") throw new Error("reporter refused");
+    },
+  );
+
+  await expect(raising.createServerSetup(senderValues)).rejects.toThrow(
+    "reporter refused",
+  );
+
+  expect(reports.map((report) => report.state)).toStrictEqual([
+    "started",
+    "finished",
+  ]);
+});
+
 test("a participant given no reporter runs the operation unchanged", async () => {
   const silent = new PSIParticipant(
     "sender",

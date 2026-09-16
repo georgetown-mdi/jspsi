@@ -69,7 +69,7 @@ test.each([
 
 test("the live line names the operation, the count and the elapsed time", () => {
   expect(psiStatusText("processClientRequest", 1_204_833, 72_000)).toBe(
-    "doubly-encrypting the partner's data: 1,204,833 values, 1m 12s elapsed",
+    "doubly-encrypting partner's data: 1,204,833 values, 1m 12s elapsed",
   );
   expect(psiStatusText("createServerSetup", 12, 3000)).toBe(
     "encrypting my data: 12 values, 3s elapsed",
@@ -78,7 +78,7 @@ test("the live line names the operation, the count and the elapsed time", () => 
 
 test("a completion line states the measured rate", () => {
   expect(psiMilestoneText(finished(120_000, 60_000))).toBe(
-    "doubly-encrypting the partner's data: 120,000 values in 1m 0s " +
+    "doubly-encrypting partner's data: 120,000 values in 1m 0s " +
       "(2,000 values/s)",
   );
 });
@@ -87,7 +87,7 @@ test("a completion line drops a rate the figures do not support", () => {
   // An operation slower than one value a second: the rounded rate is nothing,
   // so the line states the count and the time and claims no throughput.
   expect(psiMilestoneText(finished(1, 4000))).toBe(
-    "doubly-encrypting the partner's data: 1 value in 4s",
+    "doubly-encrypting partner's data: 1 value in 4s",
   );
 });
 
@@ -125,7 +125,7 @@ test("a display with no status line still logs the completion", () => {
   display.report(finished(120_000, 60_000));
 
   expect(milestones).toStrictEqual([
-    "doubly-encrypting the partner's data: 120,000 values in 1m 0s " +
+    "doubly-encrypting partner's data: 120,000 values in 1m 0s " +
       "(2,000 values/s)",
   ]);
 });
@@ -152,8 +152,8 @@ test("the live line updates on each tick and is dropped when the operation settl
     clock = 2000;
     vi.advanceTimersByTime(1000);
     expect(draws).toStrictEqual([
-      "doubly-encrypting the partner's data: 120,000 values, 1s elapsed",
-      "doubly-encrypting the partner's data: 120,000 values, 2s elapsed",
+      "doubly-encrypting partner's data: 120,000 values, 1s elapsed",
+      "doubly-encrypting partner's data: 120,000 values, 2s elapsed",
     ]);
 
     clock = 60_000;
@@ -250,39 +250,139 @@ test("a failed operation clears the line and logs nothing", () => {
   }
 });
 
-// Which runs get a live line. A pipe, a file, a quiet run and a verbose one
-// each take the completion lines alone -- a redraw either lands in a log or
-// collides with the debug stream.
+test("a log line during a live operation drops the row and the next tick redraws it", () => {
+  vi.useFakeTimers();
+  try {
+    const { line, draws, clears } = recordingStatusLine();
+    let clearBeforeEachLogLine: (() => void) | undefined;
+    let removed = false;
+    let clock = 0;
+    const display = createPsiProgressDisplay({
+      milestone: () => {},
+      statusLine: line,
+      clearBeforeLogLine: (clearLine) => {
+        clearBeforeEachLogLine = clearLine;
+        return () => {
+          removed = true;
+        };
+      },
+      now: () => clock,
+      tickMs: 1000,
+    });
+
+    display.report(started(120_000));
+    clock = 1000;
+    vi.advanceTimersByTime(1000);
+    expect(draws).toHaveLength(1);
+
+    // The log line is about to be written: the live row goes first, so the
+    // warning lands on a row of its own.
+    clearBeforeEachLogLine?.();
+    expect(clears.count).toBe(1);
+
+    clock = 2000;
+    vi.advanceTimersByTime(1000);
+    expect(draws).toStrictEqual([
+      "doubly-encrypting partner's data: 120,000 values, 1s elapsed",
+      "doubly-encrypting partner's data: 120,000 values, 2s elapsed",
+    ]);
+
+    display.close();
+    expect(removed).toBe(true);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("a display with no live line leaves the log lines alone", () => {
+  let installed = false;
+  const display = createPsiProgressDisplay({
+    milestone: () => {},
+    clearBeforeLogLine: () => {
+      installed = true;
+      return () => {};
+    },
+    now: () => 0,
+  });
+
+  display.report(started(5));
+  display.close();
+
+  expect(installed).toBe(false);
+});
+
+// Which runs get a live line. A pipe, a --log-file, a terminal taking no cursor
+// escapes, a quiet run and a verbose one each take the completion lines alone --
+// a redraw either lands in a log, prints its escapes, or collides with the debug
+// stream.
 const originalIsTty = process.stderr.isTTY;
+const originalColumns = process.stderr.columns;
+const originalTerm = process.env.TERM;
 const originalLevel = logLibrary.getLevel();
 
 afterEach(() => {
   process.stderr.isTTY = originalIsTty;
+  process.stderr.columns = originalColumns;
+  process.env.TERM = originalTerm;
   logLibrary.setDefaultLevel(originalLevel);
 });
 
-test("a non-terminal stderr takes no live line", () => {
-  process.stderr.isTTY = false;
+// A terminal run at the default level with no redirect: the case every gate
+// below turns off one at a time.
+function defaultTerminalRun(): void {
+  process.stderr.isTTY = true;
+  process.env.TERM = "xterm-256color";
   logLibrary.setDefaultLevel(logLibrary.levels.INFO);
+}
 
-  expect(terminalPsiStatusLine(0)).toBeUndefined();
+test("a non-terminal stderr takes no live line", () => {
+  defaultTerminalRun();
+  process.stderr.isTTY = false;
+
+  expect(
+    terminalPsiStatusLine({ verbosity: 0, logFile: undefined }),
+  ).toBeUndefined();
+});
+
+test("a run whose diagnostics go to a log file takes no live line", () => {
+  defaultTerminalRun();
+
+  expect(
+    terminalPsiStatusLine({ verbosity: 0, logFile: "/tmp/run.log" }),
+  ).toBeUndefined();
+});
+
+test("a dumb terminal takes no live line", () => {
+  defaultTerminalRun();
+  process.env.TERM = "dumb";
+
+  expect(
+    terminalPsiStatusLine({ verbosity: 0, logFile: undefined }),
+  ).toBeUndefined();
 });
 
 test("a verbose or quiet run takes no live line", () => {
-  process.stderr.isTTY = true;
-  logLibrary.setDefaultLevel(logLibrary.levels.INFO);
-  expect(terminalPsiStatusLine(1)).toBeUndefined();
+  defaultTerminalRun();
+  expect(
+    terminalPsiStatusLine({ verbosity: 1, logFile: undefined }),
+  ).toBeUndefined();
 
   logLibrary.setDefaultLevel(logLibrary.levels.WARN);
-  expect(terminalPsiStatusLine(0)).toBeUndefined();
+  expect(
+    terminalPsiStatusLine({ verbosity: 0, logFile: undefined }),
+  ).toBeUndefined();
 
   logLibrary.setDefaultLevel(logLibrary.levels.SILENT);
-  expect(terminalPsiStatusLine(0)).toBeUndefined();
+  expect(
+    terminalPsiStatusLine({ verbosity: 0, logFile: undefined }),
+  ).toBeUndefined();
 });
 
-test("a terminal run redraws one line in place", () => {
-  process.stderr.isTTY = true;
-  logLibrary.setDefaultLevel(logLibrary.levels.INFO);
+// Capture what a status line writes to stderr, with the stream mocked so no
+// escape reaches the test runner's own output.
+function statusWrites(use: (line: PsiStatusLine | undefined) => void): {
+  written: Array<string>;
+} {
   const written: Array<string> = [];
   const write = vi
     .spyOn(process.stderr, "write")
@@ -291,12 +391,20 @@ test("a terminal run redraws one line in place", () => {
       return true;
     });
   try {
-    const line = terminalPsiStatusLine(0);
-    line?.draw("encrypting my data: 12 values, 3s elapsed");
-    line?.clear();
+    use(terminalPsiStatusLine({ verbosity: 0, logFile: undefined }));
   } finally {
     write.mockRestore();
   }
+  return { written };
+}
+
+test("a terminal run redraws one line in place", () => {
+  defaultTerminalRun();
+
+  const { written } = statusWrites((line) => {
+    line?.draw("encrypting my data: 12 values, 3s elapsed");
+    line?.clear();
+  });
 
   // Back to the start of the line, then erase what a longer previous draw left
   // past the new text.
@@ -306,16 +414,45 @@ test("a terminal run redraws one line in place", () => {
   ]);
 });
 
+test("a line longer than the terminal is cut a column short of its width", () => {
+  defaultTerminalRun();
+  process.stderr.columns = 20;
+
+  const { written } = statusWrites((line) => {
+    line?.draw("encrypting my data: 12 values, 3s elapsed");
+  });
+
+  // 19 characters: the last column stays free, so the row does not wrap and the
+  // next draw's carriage return still reaches the line it replaces.
+  expect(written).toStrictEqual(["\rencrypting my data:\x1b[K"]);
+});
+
+test("a terminal reporting no width takes the line as composed", () => {
+  defaultTerminalRun();
+  // Typed through the optional shape rather than assigned `undefined`: a
+  // non-terminal stderr holds no `columns` at all, which is the state under
+  // test here.
+  const stderrWidth: { columns?: number } = process.stderr;
+  stderrWidth.columns = undefined;
+
+  const { written } = statusWrites((line) => {
+    line?.draw("encrypting my data: 12 values, 3s elapsed");
+  });
+
+  expect(written).toStrictEqual([
+    "\rencrypting my data: 12 values, 3s elapsed\x1b[K",
+  ]);
+});
+
 test("a wedged stderr drops the line rather than raising", () => {
-  process.stderr.isTTY = true;
-  logLibrary.setDefaultLevel(logLibrary.levels.INFO);
+  defaultTerminalRun();
   const write = vi
     .spyOn(process.stderr, "write")
     .mockImplementation((): never => {
       throw new Error("EPIPE");
     });
   try {
-    const line = terminalPsiStatusLine(0);
+    const line = terminalPsiStatusLine({ verbosity: 0, logFile: undefined });
     expect(() =>
       line?.draw("encrypting my data: 12 values, 3s elapsed"),
     ).not.toThrow();

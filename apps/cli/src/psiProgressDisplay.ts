@@ -16,15 +16,20 @@
 
 import logLibrary from "loglevel";
 
-import type { PsiOperation, PsiProgress } from "@psilink/core";
+import {
+  SINGLE_PASS_STAGE_IDS,
+  type PsiOperation,
+  type PsiProgress,
+} from "@psilink/core";
 
-// How the operator is told which operation is running. Worded as the exchange's
-// existing stage lines are, so the two name the same work the same way.
+// How the operator is told which operation is running: the exchange's own stage
+// ids, except for the count-only round, whose stage lines are numbered rather
+// than named.
 const OPERATION_LABELS: Record<PsiOperation, string> = {
-  createServerSetup: "encrypting my data",
-  createClientRequest: "encrypting my data",
-  processClientRequest: "doubly-encrypting the partner's data",
-  computeAssociationTable: "identifying shared values",
+  createServerSetup: SINGLE_PASS_STAGE_IDS.encryptingOwnData,
+  createClientRequest: SINGLE_PASS_STAGE_IDS.encryptingOwnData,
+  processClientRequest: SINGLE_PASS_STAGE_IDS.encryptingPartnerData,
+  computeAssociationTable: SINGLE_PASS_STAGE_IDS.identifyingSharedValues,
   computeIntersectionCardinality: "counting shared values",
 };
 
@@ -61,7 +66,19 @@ export interface PsiProgressDisplayOptions {
   milestone: (line: string) => void;
   /** The terminal's live line, when this run has one. */
   statusLine?: PsiStatusLine;
-  /** The clock the elapsed figures are read from. Defaults to `Date.now`. */
+  /**
+   * Installs `clearLine` to run immediately before each diagnostic log line
+   * reaches its sink and returns the removal, as `runBeforeEachLogLine`
+   * (./util/logging) does. Passed with a status line, a log line drops the live
+   * row before writing and the next tick redraws it, so the two do not share a
+   * row. A display with no status line installs nothing.
+   */
+  clearBeforeLogLine?: (clearLine: () => void) => () => void;
+  /**
+   * The clock the elapsed figures are read from. Defaults to
+   * `performance.now`, the monotonic clock core measures `durationMs` on, so a
+   * clock adjustment mid-operation cannot move the elapsed figure.
+   */
   now?: () => number;
   /** Redraw interval. Defaults to {@link TICK_MS}. */
   tickMs?: number;
@@ -140,7 +157,7 @@ export function psiMilestoneText(progress: PsiProgress): string | undefined {
 export function createPsiProgressDisplay(
   options: PsiProgressDisplayOptions,
 ): PsiProgressDisplay {
-  const now = options.now ?? ((): number => Date.now());
+  const now = options.now ?? ((): number => performance.now());
   const tickMs = options.tickMs ?? TICK_MS;
   const statusLine = options.statusLine;
   let running:
@@ -160,6 +177,11 @@ export function createPsiProgressDisplay(
     drawn = false;
     statusLine?.clear();
   };
+
+  let removeLogLineHook =
+    statusLine === undefined
+      ? undefined
+      : options.clearBeforeLogLine?.(clearLine);
 
   const draw = (): void => {
     if (statusLine === undefined || running === undefined) return;
@@ -200,6 +222,8 @@ export function createPsiProgressDisplay(
       running = undefined;
       stopTicker();
       clearLine();
+      removeLogLineHook?.();
+      removeLogLineHook = undefined;
     },
   };
 }
@@ -214,25 +238,41 @@ function writeStatus(text: string): void {
   }
 }
 
+// The text a draw puts on the row, cut to one column short of the terminal's
+// width: a line filling the last column wraps onto a second row, which the
+// carriage return of the next draw no longer reaches, leaving a row per redraw
+// behind. A terminal reporting no width takes the text as composed.
+function fitToTerminalWidth(text: string): string {
+  const columns: number | undefined = process.stderr.columns;
+  if (columns === undefined) return text;
+  return text.slice(0, Math.max(0, columns - 1));
+}
+
 /**
  * The live line for a run whose terminal takes one, or `undefined` when it does
- * not: stderr must be a terminal (a pipe or a file takes the completion lines
- * only, never a redraw), and the run must be at the default verbosity and log
- * level -- a quieter run asked for less than this, and a `-v` or `--log-level
- * debug` run gets the debug stream, whose lines a redrawn line would land on
- * top of.
+ * not. Every condition has to hold: stderr is a terminal (a pipe or a file
+ * takes the completion lines only, never a redraw), `--log-file` was not given
+ * (the run's diagnostics go to the file, so a redraw on the terminal would be
+ * the only thing there), `TERM` is not `dumb` (a terminal that takes no cursor
+ * escapes, and the opt-out for an operator reading through one), and the run is
+ * at the default verbosity and log level -- a quieter run asked for less than
+ * this, and a `-v` or `--log-level debug` run gets the debug stream, whose
+ * lines a redrawn line would land on top of.
  *
  * `\r` returns to the column the line starts in and the erase-to-end-of-line
  * escape drops what the previous, possibly longer, draw left there.
  */
-export function terminalPsiStatusLine(
-  verbosity: number,
-): PsiStatusLine | undefined {
+export function terminalPsiStatusLine(params: {
+  verbosity: number;
+  logFile: string | undefined;
+}): PsiStatusLine | undefined {
   if (process.stderr.isTTY !== true) return undefined;
-  if (verbosity > 0) return undefined;
+  if (params.logFile !== undefined) return undefined;
+  if (process.env.TERM === "dumb") return undefined;
+  if (params.verbosity > 0) return undefined;
   if (logLibrary.getLevel() !== logLibrary.levels.INFO) return undefined;
   return {
-    draw: (text: string) => writeStatus(`\r${text}\x1b[K`),
+    draw: (text: string) => writeStatus(`\r${fitToTerminalWidth(text)}\x1b[K`),
     clear: () => writeStatus("\r\x1b[K"),
   };
 }

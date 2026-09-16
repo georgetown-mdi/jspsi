@@ -60,6 +60,7 @@ import { createPsiEngine } from "./psiWorkerHost";
 import { writeExchangeRecord, type RecordOutput } from "./recordFile";
 import { writeDualSignedRecord, type ReceiptOutput } from "./receiptFile";
 import { writeOutput } from "./util/dataIo";
+import { runBeforeEachLogLine } from "./util/logging";
 import { logRuntimeEnv } from "./util/runtimeEnv";
 import {
   PERSISTENCE_LOSS_EXIT_CODE,
@@ -1809,6 +1810,13 @@ export interface RunProtocolOptions {
   verbosity: number;
   /** The name of the logger this run's diagnostics are written through. */
   loggerName: string;
+  /**
+   * The `--log-file` path this run's diagnostics were redirected to (the value
+   * the caller handed `configureLogging`), or `undefined` when they go to
+   * stderr. Read only by the PSI progress display, which draws its live line on
+   * a terminal whose diagnostics it shares and nowhere else.
+   */
+  logFile?: string;
   /** Where to write the exchange record; omit to skip recording. */
   recordOutput?: RecordOutput;
   /** This party's zero-setup `--save` intent. Meaningful only with `auth: null`. */
@@ -1899,6 +1907,7 @@ export async function runProtocol(
     output,
     verbosity,
     loggerName,
+    logFile,
     recordOutput,
     saveIntent,
     onAuthenticated,
@@ -1948,7 +1957,8 @@ export async function runProtocol(
   // Closed by doCleanup -- an interrupt included -- so no half-drawn line is
   // left on the terminal the run's last message goes to.
   const psiProgress = createPsiProgressDisplay({
-    statusLine: terminalPsiStatusLine(verbosity),
+    statusLine: terminalPsiStatusLine({ verbosity, logFile }),
+    clearBeforeLogLine: runBeforeEachLogLine,
     milestone: (line) => log.info(line),
   });
 
@@ -2075,6 +2085,10 @@ export async function runProtocol(
     // Synchronous too, and before the cleanup it cannot substitute for: an
     // in-flight rendezvous tears itself down on this rather than on doCleanup.
     interrupted.abort();
+    // Before the first line of the interrupt: the live progress line holds the
+    // cursor mid-row, so dropping it here is what puts the lines below on rows
+    // of their own. doCleanup closes it again, idempotently.
+    psiProgress.close();
     try {
       log.info("caught SIGINT, exiting");
       logRotationStateOnInterrupt("the exchange was interrupted");
@@ -2092,6 +2106,8 @@ export async function runProtocol(
     // catch block sees it as soon as the cleanup-induced failure propagates.
     run.signalReceived = "SIGTERM";
     interrupted.abort();
+    // The live line is dropped before the first interrupt line, as in onSigint.
+    psiProgress.close();
     try {
       log.info("caught SIGTERM, exiting");
       logRotationStateOnInterrupt("the exchange was interrupted");

@@ -993,6 +993,7 @@ export async function handler(argv: Arguments): Promise<void> {
           output: ready.output,
           verbosity: options.verbosity,
           loggerName: "invite",
+          logFile: options.logFile,
           recordOutput: resolveRecordOutput({
             enabled: options.record,
             recordFile: options.recordFile,
