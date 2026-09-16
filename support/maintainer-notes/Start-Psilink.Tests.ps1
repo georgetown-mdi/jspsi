@@ -479,6 +479,48 @@ Describe 'The console argument vector' {
         $engineArgs | Should -Contain 'JOB_RENDEZVOUS_NAME='
     }
 
+    It 'reaches a pair on one share through one mount and a path for each' {
+        # The shape a pair on one share takes: one volume over the folder that
+        # holds both, and each folder named as a path within it.
+        $engineArgs = Get-ConsoleEngineArgs -ContainerName 'psilink-console-1' -ConsolePort 3000 `
+            -DataMount 'C:\work' -RendezvousMount 'psilink-sync' `
+            -RendezvousName 'from-clinic' -InboundLeg 'from-clinic' `
+            -OutboundLeg 'to-clinic' -OutboundName 'to-clinic'
+
+        $engineArgs | Should -Contain 'JOB_RENDEZVOUS_DIR=/rendezvous/from-clinic'
+        $engineArgs | Should -Contain 'JOB_RENDEZVOUS_OUTBOUND_DIR=/rendezvous/to-clinic'
+        $engineArgs | Should -Contain 'psilink-sync:/rendezvous'
+        $engineArgs | Should -Contain 'JOB_RENDEZVOUS_NAME=from-clinic'
+        $engineArgs | Should -Contain 'JOB_RENDEZVOUS_OUTBOUND_NAME=to-clinic'
+        # One mount, so there is no second one to bind.
+        ($engineArgs -join ' ') | Should -Not -Match ':/rendezvous-out'
+    }
+
+    It 'reaches a pair that cannot share a mount through two mounts' {
+        $engineArgs = Get-ConsoleEngineArgs -ContainerName 'psilink-console-1' -ConsolePort 3000 `
+            -DataMount 'C:\work' -RendezvousMount 'C:\drops\from-clinic' `
+            -RendezvousName 'from-clinic' -OutboundMount 'psilink-sync-outbound' `
+            -OutboundName 'to-clinic'
+
+        $engineArgs | Should -Contain 'JOB_RENDEZVOUS_DIR=/rendezvous'
+        $engineArgs | Should -Contain 'C:\drops\from-clinic:/rendezvous'
+        $engineArgs | Should -Contain 'JOB_RENDEZVOUS_OUTBOUND_DIR=/rendezvous-out'
+        $engineArgs | Should -Contain 'psilink-sync-outbound:/rendezvous-out'
+        $engineArgs | Should -Contain 'JOB_RENDEZVOUS_OUTBOUND_NAME=to-clinic'
+    }
+
+    It 'leaves the outbound variables out of a console with one folder' {
+        # The outbound directory variable is the console's only signal that a
+        # pair is provisioned, so -- unlike the name -- it never travels empty:
+        # an empty one would have the console refuse every shared-folder
+        # exchange rather than run the single-folder one this is.
+        $engineArgs = Get-ConsoleEngineArgs -ContainerName 'psilink-console-1' -ConsolePort 3000 `
+            -DataMount 'C:\work' -RendezvousMount 'psilink-sync' -RendezvousName 'from-clinic'
+
+        ($engineArgs -join ' ') | Should -Not -Match 'JOB_RENDEZVOUS_OUTBOUND_DIR'
+        ($engineArgs -join ' ') | Should -Not -Match 'JOB_RENDEZVOUS_OUTBOUND_NAME'
+    }
+
     It 'passes an empty name for a drive root, through the name it derives' {
         # The whole path the launcher takes for a folder it cannot name, driven
         # end to end: the drive root reduces to no name, and that is what reaches
@@ -488,6 +530,281 @@ Describe 'The console argument vector' {
 
         $engineArgs | Should -Contain 'JOB_RENDEZVOUS_NAME='
         ($engineArgs -join ' ') | Should -Not -Match 'JOB_RENDEZVOUS_NAME=\S'
+    }
+}
+
+Describe 'The mount a pair of folders shares' {
+    BeforeAll {
+        # Built through the setup script's own resolution rather than by hand,
+        # so an edit to what it reports about a network path is an edit this
+        # suite runs.
+        function Resolve-Pair {
+            param([string] $Inbound, [string] $Outbound)
+            return @{
+                Inbound  = (Resolve-DropPath -Raw $Inbound)
+                Outbound = (Resolve-DropPath -Raw $Outbound)
+            }
+        }
+    }
+
+    It 'mounts the folder that holds both and names each folder within it' {
+        $pair = Resolve-Pair '\\fileserver\exchange\clinic-study\from-clinic' `
+            '\\fileserver\exchange\clinic-study\to-clinic'
+        $plan = Resolve-SharedShareMount -Inbound $pair.Inbound -Outbound $pair.Outbound
+
+        $plan.Shared | Should -BeTrue
+        $plan.Server | Should -Be 'fileserver'
+        $plan.Share | Should -Be 'exchange'
+        $plan.SubPath | Should -Be 'clinic-study'
+        $plan.InboundLeg | Should -Be 'from-clinic'
+        $plan.OutboundLeg | Should -Be 'to-clinic'
+    }
+
+    It 'keeps the whole of a folder path that is more than one segment deep' {
+        $pair = Resolve-Pair '\\fileserver\exchange\study\in\drop' `
+            '\\fileserver\exchange\study\out\drop'
+        $plan = Resolve-SharedShareMount -Inbound $pair.Inbound -Outbound $pair.Outbound
+
+        $plan.SubPath | Should -Be 'study'
+        $plan.InboundLeg | Should -Be 'in/drop'
+        $plan.OutboundLeg | Should -Be 'out/drop'
+    }
+
+    It 'falls back to the share root when the two sit at the top of it' {
+        # The case the guidance exists to avoid: the container then reaches the
+        # whole share rather than one exchange folder.
+        $pair = Resolve-Pair '\\fileserver\exchange\from-clinic' `
+            '\\fileserver\exchange\to-clinic'
+        $plan = Resolve-SharedShareMount -Inbound $pair.Inbound -Outbound $pair.Outbound
+
+        $plan.Shared | Should -BeTrue
+        $plan.SubPath | Should -BeNullOrEmpty
+        $plan.InboundLeg | Should -Be 'from-clinic'
+        $plan.OutboundLeg | Should -Be 'to-clinic'
+    }
+
+    It 'matches the shared part without case and reads either separator' {
+        $pair = Resolve-Pair '//fileserver/exchange/Clinic-Study/from-clinic' `
+            '\\FILESERVER\Exchange\clinic-study\to-clinic'
+        $plan = Resolve-SharedShareMount -Inbound $pair.Inbound -Outbound $pair.Outbound
+
+        $plan.Shared | Should -BeTrue
+        $plan.InboundLeg | Should -Be 'from-clinic'
+        $plan.OutboundLeg | Should -Be 'to-clinic'
+    }
+
+    It 'gives no shared mount for two shares on one server' {
+        $pair = Resolve-Pair '\\fileserver\inbound\drop' '\\fileserver\outbound\drop'
+        (Resolve-SharedShareMount -Inbound $pair.Inbound -Outbound $pair.Outbound).Shared |
+            Should -BeFalse
+    }
+
+    It 'gives no shared mount for two servers' {
+        $pair = Resolve-Pair '\\fileserver-a\exchange\in' '\\fileserver-b\exchange\out'
+        (Resolve-SharedShareMount -Inbound $pair.Inbound -Outbound $pair.Outbound).Shared |
+            Should -BeFalse
+    }
+
+    It 'gives no shared mount when a folder is on this PC' {
+        # A folder on this PC is bind-mounted as it stands, so there is no
+        # volume for it to share.
+        $network = Resolve-DropPath -Raw '\\fileserver\exchange\in'
+        $local = @{ Kind = 'Local'; LocalPath = 'C:\drops\out' }
+
+        (Resolve-SharedShareMount -Inbound $network -Outbound $local).Shared | Should -BeFalse
+        (Resolve-SharedShareMount -Inbound $local -Outbound $network).Shared | Should -BeFalse
+        (Resolve-SharedShareMount -Inbound $local -Outbound $local).Shared | Should -BeFalse
+    }
+}
+
+Describe 'Join-SharePath' {
+    It 'joins the two parts with the separator a share takes' {
+        Join-SharePath -Parent 'clinic-study' -Child 'from-clinic' |
+            Should -Be 'clinic-study/from-clinic'
+    }
+
+    It 'answers either part alone when the other is empty' {
+        Join-SharePath -Parent '' -Child 'from-clinic' | Should -Be 'from-clinic'
+        Join-SharePath -Parent 'clinic-study' -Child '' | Should -Be 'clinic-study'
+        Join-SharePath -Parent '' -Child '' | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'The pair of folders an exchange over two folders needs' {
+    It 'accepts two folders side by side' {
+        $verdict = Test-RendezvousPair -InboundPath '\\fileserver\exchange\study\from-clinic' `
+            -OutboundPath '\\fileserver\exchange\study\to-clinic' `
+            -InboundName 'from-clinic' -OutboundName 'to-clinic'
+
+        $verdict.Usable | Should -BeTrue
+    }
+
+    It 'refuses one folder given twice, however it was written' {
+        # Either separator, a trailing one, and a different case are all the
+        # same folder to the file server.
+        foreach ($outbound in @('\\fileserver\exchange\drop', '//fileserver/exchange/drop',
+                '\\fileserver\exchange\drop\', '\\FILESERVER\Exchange\DROP')) {
+            $verdict = Test-RendezvousPair -InboundPath '\\fileserver\exchange\drop' `
+                -OutboundPath $outbound -InboundName 'drop' -OutboundName 'drop'
+            $verdict.Usable | Should -BeFalse -Because "[$outbound]"
+            $verdict.Remedy | Should -Not -BeNullOrEmpty -Because "[$outbound]"
+        }
+    }
+
+    It 'refuses a folder inside the other, whichever way round it is' {
+        # This side would read its own writes back as the partner's.
+        $inside = Test-RendezvousPair -InboundPath '\\fileserver\exchange\study' `
+            -OutboundPath '\\fileserver\exchange\study\to-clinic' `
+            -InboundName 'study' -OutboundName 'to-clinic'
+        $outside = Test-RendezvousPair -InboundPath '\\fileserver\exchange\study\from-clinic' `
+            -OutboundPath '\\fileserver\exchange\study' `
+            -InboundName 'from-clinic' -OutboundName 'study'
+
+        $inside.Usable | Should -BeFalse
+        $inside.Reason | Should -Match 'inside'
+        $outside.Usable | Should -BeFalse
+        $outside.Reason | Should -Match 'inside'
+    }
+
+    It 'refuses a folder with no name of its own' {
+        # A drive root and a share root reduce to no name, and an invitation
+        # holds a name for each folder of a pair: the console can put a locator
+        # on neither half, so it refuses every shared-folder exchange.
+        $verdict = Test-RendezvousPair -InboundPath 'D:\' -OutboundPath 'C:\drops\to-clinic' `
+            -InboundName (Get-LocalFolderName -Path 'D:\') -OutboundName 'to-clinic'
+
+        $verdict.Usable | Should -BeFalse
+        $verdict.Remedy | Should -Not -BeNullOrEmpty
+    }
+
+    It 'refuses two folders of the same name' {
+        # The partner is given a name per folder and has to tell the two apart.
+        $verdict = Test-RendezvousPair -InboundPath '\\fileserver\in\psilink' `
+            -OutboundPath '\\fileserver\out\psilink' `
+            -InboundName 'psilink' -OutboundName 'psilink'
+
+        $verdict.Usable | Should -BeFalse
+        $verdict.Reason | Should -Match 'psilink'
+    }
+
+    It 'keeps a folder on this PC apart from one on a share' {
+        $verdict = Test-RendezvousPair -InboundPath 'C:\drops\from-clinic' `
+            -OutboundPath '\\fileserver\exchange\to-clinic' `
+            -InboundName 'from-clinic' -OutboundName 'to-clinic'
+
+        $verdict.Usable | Should -BeTrue
+    }
+
+    It 'names a reason and a remedy on every refusal' {
+        # The refusal is the whole of what the operator gets, so neither half of
+        # it may be empty.
+        foreach ($case in @(
+                @{ In = 'C:\drops\x'; Out = 'C:\drops\x'; InName = 'x'; OutName = 'x' },
+                @{ In = 'C:\drops'; Out = 'C:\drops\x'; InName = 'drops'; OutName = 'x' },
+                @{ In = 'D:\'; Out = 'C:\drops\x'; InName = ''; OutName = 'x' },
+                @{ In = 'C:\a\x'; Out = 'C:\b\x'; InName = 'x'; OutName = 'x' })) {
+            $verdict = Test-RendezvousPair -InboundPath $case.In -OutboundPath $case.Out `
+                -InboundName $case.InName -OutboundName $case.OutName
+            $verdict.Usable | Should -BeFalse -Because "[$($case.In) | $($case.Out)]"
+            $verdict.Reason | Should -Not -BeNullOrEmpty -Because "[$($case.In) | $($case.Out)]"
+            $verdict.Remedy | Should -Not -BeNullOrEmpty -Because "[$($case.In) | $($case.Out)]"
+        }
+    }
+}
+
+Describe 'A folder as the correction from the DFS tab leaves it' {
+    It 'rebuilds the full path from the server and share confirmed' {
+        $corrected = Get-CorrectedShareTarget -Resolved (
+            Resolve-DropPath -Raw '\\namespace\dfs\clinic-study\from-clinic') `
+            -Server 'fs-04' -Share 'exchange'
+
+        $corrected.Server | Should -Be 'fs-04'
+        $corrected.Share | Should -Be 'exchange'
+        $corrected.Unc | Should -Be '\\fs-04\exchange'
+        $corrected.SubPath | Should -Be 'clinic-study/from-clinic'
+        $corrected.Full | Should -Be '\\fs-04\exchange\clinic-study\from-clinic'
+    }
+
+    It 'gives a folder on this PC back as it stands' {
+        $local = Get-CorrectedShareTarget -Resolved @{ Kind = 'Local'; LocalPath = 'C:\drops\to-clinic' } `
+            -Server 'fs-04' -Share 'exchange'
+
+        $local.Kind | Should -Be 'Local'
+        $local.LocalPath | Should -Be 'C:\drops\to-clinic'
+    }
+
+    It 'names a folder that is a share root after the share it was corrected to' {
+        # The name the console mints into the invitation: a folder that IS the
+        # share root takes the share's name, so a leg left at the namespace
+        # would give the partner a name for a share that holds nothing of
+        # theirs.
+        $corrected = Get-CorrectedShareTarget -Resolved (Resolve-DropPath -Raw '\\namespace\from-clinic') `
+            -Server 'fs-04' -Share 'exchange'
+
+        Get-RendezvousFolderName -Share $corrected.Share -SubPath $corrected.SubPath |
+            Should -Be 'exchange'
+    }
+
+    It 'refuses a pair the corrections put on one real folder' {
+        # Two paths that named two folders, and one folder behind both: the
+        # check before the console starts is held against the corrected paths,
+        # or it passes a console that refuses every exchange.
+        $before = Test-RendezvousPair -InboundPath '\\namespace\from-clinic' `
+            -OutboundPath '\\fs-04\exchange' -InboundName 'from-clinic' -OutboundName 'exchange'
+        $before.Usable | Should -BeTrue -Because 'the paths as typed name two folders'
+
+        $inbound = Get-CorrectedShareTarget -Resolved (Resolve-DropPath -Raw '\\namespace\from-clinic') `
+            -Server 'fs-04' -Share 'exchange'
+        $outbound = Get-CorrectedShareTarget -Resolved (Resolve-DropPath -Raw '\\fs-04\exchange') `
+            -Server 'fs-04' -Share 'exchange'
+        $verdict = Test-RendezvousPair `
+            -InboundPath (Get-ComparableFolderPath -Resolved $inbound) `
+            -OutboundPath (Get-ComparableFolderPath -Resolved $outbound) `
+            -InboundName (Get-RendezvousFolderName -Share $inbound.Share -SubPath $inbound.SubPath) `
+            -OutboundName (Get-RendezvousFolderName -Share $outbound.Share -SubPath $outbound.SubPath)
+
+        $verdict.Usable | Should -BeFalse
+        $verdict.Reason | Should -Match 'same folder'
+    }
+
+    It 'refuses a pair a correction puts one inside the other' {
+        $inbound = Get-CorrectedShareTarget -Resolved (
+            Resolve-DropPath -Raw '\\namespace\dfs\from-clinic') -Server 'fs-04' -Share 'exchange'
+        $outbound = Resolve-DropPath -Raw '\\fs-04\exchange'
+        $verdict = Test-RendezvousPair `
+            -InboundPath (Get-ComparableFolderPath -Resolved $inbound) `
+            -OutboundPath (Get-ComparableFolderPath -Resolved $outbound) `
+            -InboundName (Get-RendezvousFolderName -Share $inbound.Share -SubPath $inbound.SubPath) `
+            -OutboundName (Get-RendezvousFolderName -Share $outbound.Share -SubPath $outbound.SubPath)
+
+        $verdict.Usable | Should -BeFalse
+        $verdict.Reason | Should -Match 'inside the other'
+    }
+}
+
+Describe 'The volumes a run made, named on the way out' {
+    It 'names every volume and the command that removes them' {
+        $records = Show-VolumeRemoval -VolumeNames @('psilink-sync', 'psilink-sync-outbound') 6>&1
+        $text = @($records | ForEach-Object { [string] $_ }) -join ' '
+
+        $text | Should -Match 'cleartext in each volume''s'
+        $text | Should -Match 'volume inspect psilink-sync psilink-sync-outbound'
+        $text | Should -Match 'volume rm psilink-sync psilink-sync-outbound'
+    }
+
+    It 'reads one volume in the singular' {
+        $records = Show-VolumeRemoval -VolumeNames @('psilink-sync') 6>&1
+        $text = @($records | ForEach-Object { [string] $_ }) -join ' '
+
+        $text | Should -Match 'cleartext in the volume''s'
+        $text | Should -Match 'volume rm psilink-sync'
+    }
+
+    It 'prints nothing for a run that made none' {
+        $records = Show-VolumeRemoval -VolumeNames @() 6>&1
+        $text = @($records | ForEach-Object { [string] $_ }) -join ''
+
+        $text | Should -BeNullOrEmpty
     }
 }
 
@@ -559,10 +876,94 @@ Describe 'The launcher flow, driven against a stub engine' {
         $script:FlowBin = Join-Path $script:FlowRoot 'bin'
         $script:FlowStub = Join-Path $script:FlowRoot 'stub'
         $script:FlowData = Join-Path $script:FlowRoot 'data'
-        foreach ($directory in @($script:FlowRoot, $script:FlowBin, $script:FlowStub, $script:FlowData)) {
+        # A call log of its own per flow case, so that what one run called is
+        # read back whatever else in this file has run.
+        $script:SplitStub = Join-Path $script:FlowRoot 'split-stub'
+        $script:LocalStub = Join-Path $script:FlowRoot 'local-stub'
+        $script:RefusalStub = Join-Path $script:FlowRoot 'refusal-stub'
+        $script:TwoVolumeStub = Join-Path $script:FlowRoot 'two-volume-stub'
+        $script:MountFailStub = Join-Path $script:FlowRoot 'mount-fail-stub'
+        # A second stub engine, on a PATH entry of its own: the stub below
+        # answers every battery the same way, and one case needs the checks
+        # over a volume to fail while the ones before it pass.
+        $script:MountFailBin = Join-Path $script:FlowRoot 'mount-fail-bin'
+        $script:LocalInbound = Join-Path $script:FlowRoot 'from-clinic'
+        $script:LocalOutbound = Join-Path $script:FlowRoot 'to-clinic'
+        foreach ($directory in @($script:FlowRoot, $script:FlowBin, $script:FlowStub, $script:FlowData,
+                $script:SplitStub, $script:LocalStub, $script:RefusalStub, $script:TwoVolumeStub,
+                $script:MountFailStub, $script:MountFailBin,
+                $script:LocalInbound, $script:LocalOutbound)) {
             New-Item -ItemType Directory -Path $directory -Force | Out-Null
         }
         $script:FlowCalls = Join-Path $script:FlowStub 'calls.log'
+
+        function Invoke-LauncherFlow {
+            <#  One launcher run against the stub engine: the stub first on PATH
+                and nothing else that could answer behind it, so a runner with a
+                real engine installed is never reached. $BinDir names which stub
+                engine answers, and defaults to the one that blocks nothing.
+                Returns the run with the stub's call log read back on it. #>
+            param(
+                [Parameter(Mandatory = $true)][string] $Launcher,
+                [Parameter(Mandatory = $true)][string] $StubDir,
+                [string] $BinDir = '',
+                [string[]] $Arguments = @(),
+                [string[]] $InputLines = @(),
+                [int] $TimeoutSeconds = 150
+            )
+
+            $engineDir = $BinDir
+            if (-not $engineDir) { $engineDir = $script:FlowBin }
+
+            $originalPath = $env:PATH
+            $originalStubDir = $env:PSILINK_STUB_DIR
+            try {
+                $env:PATH = @($engineDir,
+                    (Join-Path $env:SystemRoot 'System32'),
+                    $env:SystemRoot,
+                    (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0')) -join ';'
+                $env:PSILINK_STUB_DIR = $StubDir
+                $run = Start-LauncherChild -Arguments (@(
+                        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$Launcher`"") + $Arguments) `
+                    -InputLines $InputLines -TimeoutSeconds $TimeoutSeconds
+            } finally {
+                $env:PATH = $originalPath
+                if ($null -eq $originalStubDir) {
+                    Remove-Item 'env:PSILINK_STUB_DIR' -ErrorAction SilentlyContinue
+                } else {
+                    $env:PSILINK_STUB_DIR = $originalStubDir
+                }
+            }
+
+            $calls = ''
+            $log = Join-Path $StubDir 'calls.log'
+            if (Test-Path -LiteralPath $log) { $calls = [string] (Get-Content -LiteralPath $log -Raw) }
+            $run['Calls'] = $calls
+            return $run
+        }
+
+        function Get-FlowShape {
+            <#  The run's shape and its tail, for a -Because: the failure
+                annotation is the only diagnostic that leaves the runner. #>
+            param($Run)
+
+            $output = [string] $Run.Output
+            return "timedout=$($Run.TimedOut) exit=$($Run.Exit) " +
+                "calls=$(@(([string] $Run.Calls) -split '\r?\n').Count) tail=" +
+                (($output.Substring([Math]::Max(0, $output.Length - 300))) -replace '\s+', ' ')
+        }
+
+        function Get-ConsoleCalls {
+            <#  The recorded calls that started the console. 'serve' is matched
+                as the last argument of the run, which 'The console argument
+                vector' above holds, rather than anywhere in the line: the
+                engine's own 'version --format {{.Server.Os}}' and a volume made
+                for a file server both hold the word as text and start nothing. #>
+            param([string] $Calls)
+
+            return @($Calls -split '\r?\n' | ForEach-Object { $_.Trim() } |
+                    Where-Object { $_ -and (($_ -split '\s+')[-1] -eq 'serve') })
+        }
 
         # An engine that records the argument vector it is handed and answers
         # every doctor battery with a verdict that blocks nothing. A .cmd rather
@@ -574,6 +975,22 @@ Describe 'The launcher flow, driven against a stub engine' {
             'echo %* >> "%PSILINK_STUB_DIR%\calls.log"',
             'echo %* | findstr /c:"doctor" >nul',
             'if not errorlevel 1 echo {"version":1,"mode":"mount","overall":"ok","checks":[]}',
+            'exit /b 0')
+
+        # The same engine, except that the checks over a volume fail: the
+        # share answers over the network and the volume is made, and only the
+        # battery run through it says no. A fatal verdict rather than one to
+        # retry, so the run stops where it is rather than prompting.
+        Set-Content -LiteralPath (Join-Path $script:MountFailBin 'docker.cmd') -Encoding Ascii -Value @(
+            '@echo off',
+            'echo %* >> "%PSILINK_STUB_DIR%\calls.log"',
+            'echo %* | findstr /c:"doctor mount" >nul',
+            'if not errorlevel 1 goto :mount',
+            'echo %* | findstr /c:"doctor" >nul',
+            'if not errorlevel 1 echo {"version":1,"mode":"probe","overall":"ok","checks":[]}',
+            'exit /b 0',
+            ':mount',
+            'echo {"version":1,"mode":"mount","overall":"fatal","checks":[]}',
             'exit /b 0')
 
         # The launcher refuses to run unstamped, so the copy under test carries
@@ -719,7 +1136,7 @@ Describe 'The launcher flow, driven against a stub engine' {
 
         $created = @($calls -split '\r?\n' | Where-Object { $_ -like '*volume create*' }) -join ' :: '
         $checked = @($calls -split '\r?\n' | Where-Object { $_ -like '*doctor mount*' }) -join ' :: '
-        $served = @($calls -split '\r?\n' | Where-Object { $_ -like '*serve*' }) -join ' :: '
+        $served = @(Get-ConsoleCalls -Calls $calls) -join ' :: '
 
         $created | Should -BeLike "*$volumeName*" -Because $shape
         $checked | Should -BeLike "*--volume ${volumeName}:/rz*" -Because $shape
@@ -730,6 +1147,131 @@ Describe 'The launcher flow, driven against a stub engine' {
         # param() block puts in place of what the operator typed.
         $calls | Should -Not -BeLike '*psilink-sync*' -Because $shape
         $output | Should -Not -BeLike '*psilink-sync*' -Because $shape
+    }
+
+    It 'reaches a pair on one share through one volume over the folder above them' {
+        # The whole of the network pair, driven end to end: one volume for the
+        # folder that holds both, a folder named for each leg within it, and
+        # each leg checked through the volume it will be reached by.
+        $volumeName = 'psilinkci-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+        $run = Invoke-LauncherFlow -Launcher $script:FlowLauncher -StubDir $script:SplitStub `
+            -Arguments @(
+                '-DataRoot', "`"$script:FlowData`"",
+                '-RendezvousDir', '\\psilink-ci-server\exchange\clinic-study\from-clinic',
+                '-RendezvousOutboundDir', '\\psilink-ci-server\exchange\clinic-study\to-clinic',
+                '-VolumeName', $volumeName,
+                '-Port', $script:FlowPort,
+                '-NoBrowser') `
+            -InputLines @('y', '', '', '', '')
+
+        $calls = [string] $run.Calls
+        $output = [string] $run.Output
+        $shape = Get-FlowShape -Run $run
+
+        $run.TimedOut | Should -BeFalse -Because $shape
+        $output | Should -Match 'The console is at' -Because $shape
+
+        $created = @($calls -split '\r?\n' | Where-Object { $_ -like '*volume create*' }) -join ' :: '
+        $probed = @($calls -split '\r?\n' | Where-Object { $_ -like '*doctor probe*' })
+        $checked = @($calls -split '\r?\n' | Where-Object { $_ -like '*doctor mount*' }) -join ' :: '
+        $served = @(Get-ConsoleCalls -Calls $calls) -join ' :: '
+
+        # One volume, over the folder that holds both rather than over either.
+        @($calls -split '\r?\n' | Where-Object { $_ -like '*volume create*' }).Count |
+            Should -Be 1 -Because $shape
+        $created | Should -BeLike '*device=//psilink-ci-server/exchange/clinic-study*' -Because $shape
+        $created | Should -BeLike "*$volumeName*" -Because $shape
+
+        # Each folder asked about over the share, then checked again through the
+        # volume: the marker the first leaves is what the second looks for.
+        $probed.Count | Should -Be 2 -Because $shape
+        $checked | Should -BeLike '*doctor mount /rz/from-clinic*' -Because $shape
+        $checked | Should -BeLike '*doctor mount /rz/to-clinic*' -Because $shape
+
+        $served | Should -BeLike "*--volume ${volumeName}:/rendezvous *" -Because $shape
+        $served | Should -BeLike '*JOB_RENDEZVOUS_DIR=/rendezvous/from-clinic*' -Because $shape
+        $served | Should -BeLike '*JOB_RENDEZVOUS_OUTBOUND_DIR=/rendezvous/to-clinic*' -Because $shape
+        $served | Should -BeLike '*JOB_RENDEZVOUS_NAME=from-clinic*' -Because $shape
+        $served | Should -BeLike '*JOB_RENDEZVOUS_OUTBOUND_NAME=to-clinic*' -Because $shape
+
+        # Nothing here removes the volume, so the closing screen has to name it.
+        $output | Should -BeLike "*volume rm $volumeName*" -Because $shape
+    }
+
+    It 'reaches a pair of folders on this PC as two mounts' {
+        # No share, so no volume and no credential: each folder is bind-mounted
+        # as it stands and checked over that mount.
+        $run = Invoke-LauncherFlow -Launcher $script:FlowLauncher -StubDir $script:LocalStub `
+            -Arguments @(
+                '-DataRoot', "`"$script:FlowData`"",
+                '-RendezvousDir', "`"$script:LocalInbound`"",
+                '-RendezvousOutboundDir', "`"$script:LocalOutbound`"",
+                '-Port', $script:FlowPort,
+                '-NoBrowser') `
+            -InputLines @('', '')
+
+        $calls = [string] $run.Calls
+        $output = [string] $run.Output
+        $shape = Get-FlowShape -Run $run
+
+        $run.TimedOut | Should -BeFalse -Because $shape
+        $output | Should -Match 'The console is at' -Because $shape
+
+        $checked = @($calls -split '\r?\n' | Where-Object { $_ -like '*doctor mount*' })
+        $served = @(Get-ConsoleCalls -Calls $calls) -join ' :: '
+
+        $checked.Count | Should -Be 2 -Because $shape
+        $calls | Should -Not -BeLike '*volume create*' -Because $shape
+
+        $served | Should -BeLike '*from-clinic:/rendezvous *' -Because $shape
+        $served | Should -BeLike '*to-clinic:/rendezvous-out*' -Because $shape
+        $served | Should -BeLike '*JOB_RENDEZVOUS_DIR=/rendezvous *' -Because $shape
+        $served | Should -BeLike '*JOB_RENDEZVOUS_OUTBOUND_DIR=/rendezvous-out*' -Because $shape
+        $served | Should -BeLike '*JOB_RENDEZVOUS_NAME=from-clinic*' -Because $shape
+        $served | Should -BeLike '*JOB_RENDEZVOUS_OUTBOUND_NAME=to-clinic*' -Because $shape
+    }
+
+    It 'refuses a pair with only one folder given, and names what to give' {
+        # Half a pair never falls back to the single-folder shape: the console
+        # would read the data root as the folder the partner writes into, and
+        # the run would sync the key file, the input and the results to them.
+        $run = Invoke-LauncherFlow -Launcher $script:FlowLauncher -StubDir $script:RefusalStub `
+            -Arguments @(
+                '-DataRoot', "`"$script:FlowData`"",
+                '-RendezvousOutboundDir', '\\psilink-ci-server\exchange\to-clinic',
+                '-Port', $script:FlowPort,
+                '-NoBrowser') `
+            -TimeoutSeconds 60
+
+        $output = [string] $run.Output
+        $shape = Get-FlowShape -Run $run
+
+        $run.TimedOut | Should -BeFalse -Because $shape
+        $run.Exit | Should -Be 1 -Because $shape
+        $output | Should -BeLike '*Only one of the two folders shared with your partner*' -Because $shape
+        $output | Should -BeLike '*-RendezvousDir*' -Because $shape
+        (@(Get-ConsoleCalls -Calls ([string] $run.Calls)) -join ' :: ') |
+            Should -BeNullOrEmpty -Because $shape
+    }
+
+    It 'refuses a pair whose folders are one inside the other' {
+        $run = Invoke-LauncherFlow -Launcher $script:FlowLauncher -StubDir $script:RefusalStub `
+            -Arguments @(
+                '-DataRoot', "`"$script:FlowData`"",
+                '-RendezvousDir', "`"$script:LocalInbound`"",
+                '-RendezvousOutboundDir', "`"$(Join-Path $script:LocalInbound 'to-clinic')`"",
+                '-Port', $script:FlowPort,
+                '-NoBrowser') `
+            -TimeoutSeconds 60
+
+        $output = [string] $run.Output
+        $shape = Get-FlowShape -Run $run
+
+        $run.TimedOut | Should -BeFalse -Because $shape
+        $run.Exit | Should -Be 1 -Because $shape
+        $output | Should -BeLike '*inside the other*' -Because $shape
+        (@(Get-ConsoleCalls -Calls ([string] $run.Calls)) -join ' :: ') |
+            Should -BeNullOrEmpty -Because $shape
     }
 
     It 'names the folder for the console with no setup script beside it' {
@@ -774,7 +1316,78 @@ Describe 'The launcher flow, driven against a stub engine' {
         $output | Should -BeLike '*Setup-PsilinkFileDrop.ps1 is not in this folder*' -Because $shape
         $output | Should -Match 'The console is at' -Because $shape
 
-        $served = @($calls -split '\r?\n' | Where-Object { $_ -like '*serve*' }) -join ' :: '
+        $served = @(Get-ConsoleCalls -Calls $calls) -join ' :: '
         $served | Should -BeLike '*JOB_RENDEZVOUS_NAME=agency-a-agency-b*' -Because $shape
+    }
+
+    It 'names the volume already made when a later folder is refused' {
+        # Two folders on two shares take a volume each, and the first is made
+        # before the second is confirmed. A run that stops at the second has
+        # left a volume holding the share password, so what the closing screen
+        # would have said is said on the way out instead.
+        $volumeName = 'psilinkci-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+        $run = Invoke-LauncherFlow -Launcher $script:FlowLauncher -StubDir $script:TwoVolumeStub `
+            -Arguments @(
+                '-DataRoot', "`"$script:FlowData`"",
+                '-RendezvousDir', '\\psilink-ci-fs\exchange\from-clinic',
+                '-RendezvousOutboundDir', '\\psilink-ci-fs\outbound\to-clinic',
+                '-VolumeName', $volumeName,
+                '-Port', $script:FlowPort,
+                '-NoBrowser') `
+            -InputLines @('', 'n', '', '', '')
+
+        $calls = [string] $run.Calls
+        $output = [string] $run.Output
+        $shape = Get-FlowShape -Run $run
+
+        $run.TimedOut | Should -BeFalse -Because $shape
+        $run.Exit | Should -Be 1 -Because $shape
+        # Where the run stopped: the second folder's server and share were not
+        # confirmed, and neither route out of that reaches a second volume.
+        $output | Should -BeLike '*DFS tab*' -Because $shape
+        @($calls -split '\r?\n' | Where-Object { $_ -like '*volume create*' }).Count |
+            Should -Be 1 -Because $shape
+        (@(Get-ConsoleCalls -Calls $calls) -join ' :: ') | Should -BeNullOrEmpty -Because $shape
+
+        $output | Should -BeLike '*cleartext*' -Because $shape
+        $output | Should -BeLike "*volume rm $volumeName*" -Because $shape
+        $output | Should -Not -BeLike "*$volumeName-outbound*" -Because $shape
+    }
+
+    It 'names the volume it made when the checks over it fail' {
+        # The volume is made before the folders are checked through it, so a
+        # failure there leaves one behind holding the share password. Nothing
+        # here removes it, so the run names it on the way out rather than
+        # leaving the operator a volume they were never told about.
+        $volumeName = 'psilinkci-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+        $run = Invoke-LauncherFlow -Launcher $script:FlowLauncher -StubDir $script:MountFailStub `
+            -BinDir $script:MountFailBin `
+            -Arguments @(
+                '-DataRoot', "`"$script:FlowData`"",
+                '-RendezvousDir', '\\psilink-ci-server\exchange\clinic-study\from-clinic',
+                '-RendezvousOutboundDir', '\\psilink-ci-server\exchange\clinic-study\to-clinic',
+                '-VolumeName', $volumeName,
+                '-Port', $script:FlowPort,
+                '-NoBrowser') `
+            -InputLines @('', '') -TimeoutSeconds 90
+
+        $calls = [string] $run.Calls
+        $output = [string] $run.Output
+        $shape = Get-FlowShape -Run $run
+
+        $run.TimedOut | Should -BeFalse -Because $shape
+        $run.Exit | Should -Be 1 -Because $shape
+
+        # Where the run stopped: the volume was made, and the first folder
+        # checked through it is what failed.
+        @($calls -split '\r?\n' | Where-Object { $_ -like '*volume create*' }).Count |
+            Should -Be 1 -Because $shape
+        $checked = @($calls -split '\r?\n' | Where-Object { $_ -like '*doctor mount*' })
+        $checked.Count | Should -Be 1 -Because $shape
+        $checked[0] | Should -BeLike '*doctor mount /rz/from-clinic*' -Because $shape
+        (@(Get-ConsoleCalls -Calls $calls) -join ' :: ') | Should -BeNullOrEmpty -Because $shape
+
+        $output | Should -BeLike '*cleartext*' -Because $shape
+        $output | Should -BeLike "*volume rm $volumeName*" -Because $shape
     }
 }
