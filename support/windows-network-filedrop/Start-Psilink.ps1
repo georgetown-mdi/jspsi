@@ -8,6 +8,11 @@
     Docker has to be told about them, checks them with the container's own
     checks, starts the console and opens it.
 
+    Some partners share one folder with you; others name two, one they write
+    into for you to read and one you write into for them. Both are asked for
+    here, and two folders on the same share are reached through a single
+    connection to the folder that holds them.
+
     It is plaintext on purpose, so whoever has to approve it can read all of it:
     it fetches nothing itself, keeps nothing between runs, and never updates
     itself. The container image it runs is pinned by digest, stamped in by the
@@ -36,6 +41,7 @@ param(
     [string] $DataRoot,
     [string] $InputDir,
     [string] $RendezvousDir,
+    [string] $RendezvousOutboundDir,
     [ValidateRange(1, 65535)]
     [int] $Port = 3000,
     [string] $VolumeName = 'psilink-sync',
@@ -603,6 +609,160 @@ function Resolve-DfsSuggestion {
 }
 
 # ==========================================================================
+# Reaching a folder from inside the container
+# ==========================================================================
+
+function Confirm-ShareTarget {
+    <#  The server and share the volume will be made for, shown to the operator
+        and corrected from the DFS tab when they say it is wrong. One share
+        answers for however many folders are on it, so the folders are listed
+        together under it.
+
+        Returns @{ Accepted = $true } with the server and share to use, or
+        @{ Accepted = $false } once the reason has been printed. #>
+    param(
+        [Parameter(Mandatory = $true)][string] $Server,
+        [Parameter(Mandatory = $true)][string] $Share,
+        [string[]] $SubPaths = @('')
+    )
+
+    Show-Ok "Server:       $Server"
+    Show-Ok "Share:        $Share"
+    foreach ($subPath in $SubPaths) {
+        Show-Ok "Subdirectory: $(if ($subPath) { $subPath } else { '(share root)' })"
+    }
+    Write-Host ''
+    Write-Host 'Everything below depends on those being right, and one case where'
+    Write-Host 'they will not be is a DFS path: it names a namespace rather than a'
+    Write-Host 'machine, and the real server, share and folder can all be different.'
+    Write-Host ''
+
+    $answer = Read-Host 'Are those correct? [Y/n]'
+    if (-not $answer -or $answer -match '^\s*(y|yes)\s*$') {
+        return @{ Accepted = $true; Server = $Server; Share = $Share }
+    }
+
+    $suggestion = Resolve-DfsSuggestion -NamespaceServer $Server -NamespaceShare $Share
+    if (-not $suggestion.Accepted) { return @{ Accepted = $false } }
+    Write-Host ''
+    Show-Ok "Server:       $($suggestion.Server)"
+    Show-Ok "Share:        $($suggestion.Share)"
+    foreach ($subPath in $SubPaths) {
+        Show-Ok "Subdirectory: $(if ($subPath) { $subPath } else { '(share root)' })"
+    }
+    return @{ Accepted = $true; Server = $suggestion.Server; Share = $suggestion.Share }
+}
+
+function New-RendezvousShareMount {
+    <#  Make one network-share volume and check every folder reached through it.
+        $SubPath is what the volume mounts; each leg is a folder within it, and
+        an empty leg is the mounted folder itself.
+
+        Each folder is asked about over smbclient first, which is the battery
+        that applies to a share nothing has mounted yet, and then checked again
+        through the volume. The marker the first leaves behind is what the
+        second looks for, so a volume pointed at the wrong server, share or
+        subfolder is caught here rather than by an exchange.
+
+        Read-ShareCredential and New-ShareVolume come from the setup script
+        dot-sourced by the flow below: those sequences have been run against a
+        real file server there, and a second copy here would be a second copy to
+        drift. This function cannot be reached without that dot-source, because
+        classifying a folder as a network path is the setup script's own work.
+
+        Returns $true when every folder passed. #>
+    param(
+        [Parameter(Mandatory = $true)][string] $VolumeName,
+        [Parameter(Mandatory = $true)][string] $Server,
+        [Parameter(Mandatory = $true)][string] $Share,
+        [string] $SubPath = '',
+        [Parameter(Mandatory = $true)][hashtable[]] $Legs
+    )
+
+    Show-Head 'Credentials for the file server'
+    $credential = Read-ShareCredential
+    if (-not $credential) { return $false }
+    $plainPass = $credential.Password
+    $token = [Guid]::NewGuid().ToString('N')
+
+    try {
+        $env:SMB_SERVER = $Server
+        $env:SMB_SHARE = $Share
+        $env:SMB_USER = $credential.Username
+        $env:SMB_DOMAIN = $credential.Domain
+        $env:SMB_MARKER = $PsilinkMarkerName
+        $env:SMB_TOKEN = $token
+        $env:SMB_PASS = $plainPass
+
+        # The names are passed by name rather than by value, so the password
+        # never becomes an argv element any process listing on this PC could
+        # read.
+        $probeEnvArgs = @(
+            '--env', 'SMB_SERVER', '--env', 'SMB_SHARE', '--env', 'SMB_PATH',
+            '--env', 'SMB_USER', '--env', 'SMB_DOMAIN', '--env', 'SMB_PASS',
+            '--env', 'SMB_MARKER', '--env', 'SMB_TOKEN')
+
+        foreach ($leg in $Legs) {
+            Show-Head "Checking $($leg.Label) from inside a container"
+            $env:SMB_PATH = Join-SharePath -Parent $SubPath -Child $leg.Path
+            if (-not (Invoke-DoctorLoop -EngineArgs $probeEnvArgs -BatteryArgs @('doctor', 'probe'))) {
+                return $false
+            }
+        }
+
+        Show-Head "Creating the network-share volume '$VolumeName'"
+        if ($script:PsilinkEngine -ne 'docker') {
+            Show-Alert 'The volume options below have only ever been driven against docker.'
+            Show-Note "$script:PsilinkEngine may reject or read them differently. If it"
+            Show-Note 'does, its own message is the answer -- nothing here predicts'
+            Show-Note 'what it will make of them.'
+        }
+
+        $volumeMade = New-ShareVolume -VolumeName $VolumeName `
+            -Server $Server -Share $Share -SubPath $SubPath `
+            -Username $credential.Username -Password $plainPass -Domain $credential.Domain `
+            -Engine $script:PsilinkEngine
+        if (-not $volumeMade) { return $false }
+
+        foreach ($leg in $Legs) {
+            Show-Head "Checking the volume over $($leg.Label)"
+            # The folder within the mount, and nothing where the volume mounts
+            # the folder itself rather than the one that holds it.
+            $legSuffix = ''
+            if ($leg.Path) { $legSuffix = "/$($leg.Path)" }
+            if (-not (Invoke-DoctorLoop -EngineArgs @('--env', 'SMB_MARKER', '--env', 'SMB_TOKEN',
+                        '--volume', "${VolumeName}:/rz") -BatteryArgs @('doctor', 'mount', "/rz$legSuffix"))) {
+                return $false
+            }
+        }
+    } finally {
+        foreach ($name in 'SMB_SERVER', 'SMB_SHARE', 'SMB_PATH', 'SMB_USER', 'SMB_DOMAIN',
+            'SMB_PASS', 'SMB_MARKER', 'SMB_TOKEN') {
+            Remove-Item "env:$name" -ErrorAction SilentlyContinue
+        }
+        $plainPass = $null
+        $credential = $null
+    }
+    return $true
+}
+
+function Test-LocalRendezvousFolder {
+    <#  A folder on this PC is bind-mounted as it stands, so the kernel's view is
+        the only view there is -- and that is what the mount battery checks: the
+        write, the exclusive create, and the rename onto an existing file that
+        psilink's rendezvous is built on. There is no share to ask over the
+        network, so the probe battery does not apply. #>
+    param(
+        [Parameter(Mandatory = $true)][string] $Path,
+        [Parameter(Mandatory = $true)][string] $Label
+    )
+
+    Show-Head "Checking $Label"
+    return (Invoke-DoctorLoop -EngineArgs @('--volume', "${Path}:/rz") `
+            -BatteryArgs @('doctor', 'mount', '/rz'))
+}
+
+# ==========================================================================
 # Picking folders
 # ==========================================================================
 
@@ -713,6 +873,150 @@ function Get-LocalFolderName {
     return $name
 }
 
+function Get-FolderSegments {
+    <#  A path as the segments it names, either separator, empty ones dropped.
+        The form the comparisons below are made in: a file server reads
+        \\server\share\a and //server/share//a/ as the same folder. #>
+    param([string] $Path = '')
+
+    return @($Path.Trim().Trim('"') -split '[\\/]+' | Where-Object { $_ })
+}
+
+function Get-ComparableFolderPath {
+    <#  The path a resolved folder is compared by: the full network path where
+        the folder is on a share, and the path on this PC where it is not. A
+        drive letter is not compared by, because two letters can be mapped to
+        one share. #>
+    param($Resolved)
+
+    if ($Resolved.Kind -eq 'Network') { return [string] $Resolved.Full }
+    return [string] $Resolved.LocalPath
+}
+
+function Test-FolderWithin {
+    <#  Whether $Inner names a folder inside $Outer. Segment by segment and
+        without case, which is how a file server reads a path. #>
+    param([string] $Inner, [string] $Outer)
+
+    $innerSegments = Get-FolderSegments -Path $Inner
+    $outerSegments = Get-FolderSegments -Path $Outer
+    if ($outerSegments.Count -eq 0 -or $innerSegments.Count -le $outerSegments.Count) { return $false }
+    for ($i = 0; $i -lt $outerSegments.Count; $i++) {
+        if ($innerSegments[$i] -ne $outerSegments[$i]) { return $false }
+    }
+    return $true
+}
+
+function Test-RendezvousPair {
+    <#  Whether two folders can be the two halves of one exchange: different
+        folders, neither inside the other, each with a name of its own, and the
+        two names different. Those are the console's own rules for a pair, and
+        a pair that breaks one starts a console that refuses every shared-folder
+        exchange -- so it is refused here, before a volume holding a share
+        password is made for it.
+
+        Folders are compared as written rather than as the file server would
+        finally resolve them, so two routes to one folder -- a junction, a
+        second share over the same directory -- are not caught here. The
+        console compares the resolved paths as well and refuses such a pair.
+
+        Returns @{ Usable = $true }, or $false with Reason and Remedy. #>
+    param(
+        [string] $InboundPath,
+        [string] $OutboundPath,
+        [string] $InboundName,
+        [string] $OutboundName
+    )
+
+    $inboundSegments = Get-FolderSegments -Path $InboundPath
+    $outboundSegments = Get-FolderSegments -Path $OutboundPath
+    $same = ($inboundSegments.Count -eq $outboundSegments.Count)
+    if ($same) {
+        for ($i = 0; $i -lt $inboundSegments.Count; $i++) {
+            if ($inboundSegments[$i] -ne $outboundSegments[$i]) { $same = $false; break }
+        }
+    }
+    if ($same) {
+        return @{ Usable = $false
+                  Reason = 'Those are the same folder.'
+                  Remedy = 'An exchange over two folders reads one and writes the other. Pick the folder your partner writes into and the folder you write into.' }
+    }
+    if ((Test-FolderWithin -Inner $InboundPath -Outer $OutboundPath) -or
+        (Test-FolderWithin -Inner $OutboundPath -Outer $InboundPath)) {
+        return @{ Usable = $false
+                  Reason = 'One of those folders is inside the other.'
+                  Remedy = 'This side would read its own files back as your partner''s. Pick two folders side by side, both inside one exchange folder.' }
+    }
+    if (-not $InboundName -or -not $OutboundName) {
+        return @{ Usable = $false
+                  Reason = 'One of those folders has no name of its own.'
+                  Remedy = 'A drive root and a share root have none, and the invitation gives your partner a name for each folder. Pick a named folder inside it.' }
+    }
+    if ($InboundName -eq $OutboundName) {
+        return @{ Usable = $false
+                  Reason = "Both folders are called '$InboundName'."
+                  Remedy = 'The invitation gives your partner a name for each, and your partner has to tell the two apart. Rename one of them.' }
+    }
+    return @{ Usable = $true }
+}
+
+function Show-PairRefusal {
+    <# Why a pair of folders cannot run an exchange, and what to do about it. #>
+    param($Verdict)
+
+    Show-Fail $Verdict.Reason
+    Write-Host ''
+    Show-Note $Verdict.Remedy
+}
+
+function Join-SharePath {
+    <# Two parts of a path within a share, either of which may be empty. #>
+    param([string] $Parent = '', [string] $Child = '')
+
+    return (@($Parent, $Child) | Where-Object { $_ }) -join '/'
+}
+
+function Resolve-SharedShareMount {
+    <#  The one network volume both folders of a pair can be reached through:
+        the nearest folder on the share that holds them both, with each folder's
+        path within it. Two folders on different servers or shares have no such
+        folder and take a volume each.
+
+        One volume where one will do, because nothing here removes the volumes
+        it makes: each holds the share password in its metadata until the
+        operator removes it. The folder that holds both can be the share root
+        when the two sit far apart, and the container then reaches the whole
+        share -- which is why the guidance is to keep the pair inside one
+        exchange folder.
+
+        Returns @{ Shared = $true } with the volume's server, share and
+        subdirectory and the two folders within it, or @{ Shared = $false }. #>
+    param($Inbound, $Outbound)
+
+    if ($Inbound.Kind -ne 'Network' -or $Outbound.Kind -ne 'Network') { return @{ Shared = $false } }
+    if ($Inbound.Server -ne $Outbound.Server -or $Inbound.Share -ne $Outbound.Share) {
+        return @{ Shared = $false }
+    }
+
+    $inboundSegments = Get-FolderSegments -Path $Inbound.SubPath
+    $outboundSegments = Get-FolderSegments -Path $Outbound.SubPath
+    $shared = @()
+    $limit = [Math]::Min($inboundSegments.Count, $outboundSegments.Count)
+    for ($i = 0; $i -lt $limit; $i++) {
+        if ($inboundSegments[$i] -ne $outboundSegments[$i]) { break }
+        $shared += $inboundSegments[$i]
+    }
+
+    return @{
+        Shared      = $true
+        Server      = $Inbound.Server
+        Share       = $Inbound.Share
+        SubPath     = ($shared -join '/')
+        InboundLeg  = (@($inboundSegments | Select-Object -Skip $shared.Count) -join '/')
+        OutboundLeg = (@($outboundSegments | Select-Object -Skip $shared.Count) -join '/')
+    }
+}
+
 function Get-ConsoleEngineArgs {
     <#  The engine's argument vector for the console.
 
@@ -729,14 +1033,26 @@ function Get-ConsoleEngineArgs {
         empty value is what tells the console this script could not name the
         folder. Omitting the variable would instead have the console name the
         folder after the mount point THIS script picked -- "rendezvous" or
-        "data", a name no partner could match. #>
+        "data", a name no partner could match.
+
+        A pair of folders arrives one of two ways. Two folders on one share are
+        reached through a single mount, so -InboundLeg and -OutboundLeg name
+        each folder's path within it and -OutboundMount is empty. Two folders
+        that cannot share a mount arrive as two mounts, -RendezvousMount and
+        -OutboundMount, with neither leg set. The outbound directory variable is
+        set only for a pair: it is the console's only signal that one is
+        provisioned, so it never travels empty the way the name does. #>
     param(
         [Parameter(Mandatory = $true)][string] $ContainerName,
         [Parameter(Mandatory = $true)][int] $ConsolePort,
         [Parameter(Mandatory = $true)][string] $DataMount,
         [string] $InputMount = '',
         [string] $RendezvousMount = '',
-        [string] $RendezvousName = ''
+        [string] $RendezvousName = '',
+        [string] $InboundLeg = '',
+        [string] $OutboundMount = '',
+        [string] $OutboundLeg = '',
+        [string] $OutboundName = ''
     )
 
     $engineArgs = @(
@@ -747,9 +1063,21 @@ function Get-ConsoleEngineArgs {
         $engineArgs += @('--env', 'JOB_INPUT_DIR=/input', '--volume', "${InputMount}:/input")
     }
     if ($RendezvousMount) {
-        $engineArgs += @('--env', 'JOB_RENDEZVOUS_DIR=/rendezvous', '--volume', "${RendezvousMount}:/rendezvous")
+        $inboundDirectory = '/rendezvous'
+        if ($InboundLeg) { $inboundDirectory = "/rendezvous/$InboundLeg" }
+        $engineArgs += @('--env', "JOB_RENDEZVOUS_DIR=$inboundDirectory",
+            '--volume', "${RendezvousMount}:/rendezvous")
+    }
+    if ($OutboundMount) {
+        $engineArgs += @('--env', 'JOB_RENDEZVOUS_OUTBOUND_DIR=/rendezvous-out',
+            '--volume', "${OutboundMount}:/rendezvous-out")
+    } elseif ($OutboundLeg) {
+        $engineArgs += @('--env', "JOB_RENDEZVOUS_OUTBOUND_DIR=/rendezvous/$OutboundLeg")
     }
     $engineArgs += @('--env', "JOB_RENDEZVOUS_NAME=$RendezvousName")
+    if ($OutboundMount -or $OutboundLeg) {
+        $engineArgs += @('--env', "JOB_RENDEZVOUS_OUTBOUND_NAME=$OutboundName")
+    }
     return $engineArgs + @((Get-PsilinkImage), 'serve')
 }
 
@@ -863,12 +1191,26 @@ if ($ExecutionContext.SessionState.LanguageMode -ne 'FullLanguage') {
 # ==========================================================================
 Show-Head 'Part 1: the folders the console works in'
 
+# An exchange over two partner folders takes both of them from the operator,
+# and nothing stands in for a missing one: the console reads the data root as
+# the folder the partner writes into when it is given one folder, which on a
+# pair would sync the key file, the input and the results to them.
+if ($RendezvousOutboundDir -and -not $RendezvousDir) {
+    Show-Fail 'Only one of the two folders shared with your partner was given.'
+    Show-Note 'An exchange over two folders needs both: -RendezvousDir for the'
+    Show-Note 'folder your partner writes into, and -RendezvousOutboundDir for the'
+    Show-Note 'folder you write into. Give both, or give -RendezvousDir alone for'
+    Show-Note 'the one folder you and your partner share.'
+    exit 1
+}
+
 Write-Host 'The console needs somewhere to keep this exchange: your input CSV,'
 Write-Host 'the key file, and the results it writes back.'
 Write-Host ''
 Write-Host 'One folder for all of it is the simplest console, and the one to'
 Write-Host 'start with. Separate folders keep the partner-written rendezvous away'
-Write-Host 'from your own files, which is worth doing once this works.'
+Write-Host 'from your own files, which is worth doing once this works -- and are'
+Write-Host 'what an exchange over two partner folders needs.'
 
 if (-not $DataRoot) {
     Write-Host ''
@@ -887,10 +1229,33 @@ if (-not $DataRoot) {
             Show-Fail 'No folder chosen.'
             exit 1
         }
-        $RendezvousDir = Select-HostFolder -Prompt 'The folder shared with your partner'
-        if (-not $RendezvousDir) {
-            Show-Fail 'No folder chosen.'
-            exit 1
+
+        Write-Host ''
+        Write-Host 'Some partners share one folder with you. Others name two: one they'
+        Write-Host 'write into for you to read, and one you write into for them. Their'
+        Write-Host 'invitation says which. Keep a pair side by side inside one exchange'
+        Write-Host 'folder -- this reaches them through a single connection to the'
+        Write-Host 'folder that holds both.'
+        Write-Host ''
+        $answer = Read-Host 'Did your partner name two folders? [y/N]'
+        if ($answer -match '^\s*(y|yes)\s*$') {
+            $RendezvousDir = Select-HostFolder -Prompt 'The folder your partner writes into (you read it)'
+            if ($RendezvousDir) {
+                $RendezvousOutboundDir = Select-HostFolder -Prompt 'The folder you write into (your partner reads it)'
+            }
+            if (-not $RendezvousDir -or -not $RendezvousOutboundDir) {
+                Show-Fail 'An exchange over two folders needs both of them.'
+                Show-Note 'Run this again and pick the folder your partner writes into and'
+                Show-Note 'the folder you write into. If your partner named one shared'
+                Show-Note 'folder instead, answer no to that question.'
+                exit 1
+            }
+        } else {
+            $RendezvousDir = Select-HostFolder -Prompt 'The folder shared with your partner'
+            if (-not $RendezvousDir) {
+                Show-Fail 'No folder chosen.'
+                exit 1
+            }
         }
     }
 }
@@ -922,15 +1287,53 @@ foreach ($pair in @(@{ Label = 'working folder'; Path = $DataRoot },
 # exchange's own rendezvous semantics have to hold over, so it is the folder the
 # checks below are run against. Absent a separate one, that is the data root.
 $rendezvousPath = if ($RendezvousDir) { $RendezvousDir } else { $DataRoot }
+$splitRendezvous = [bool] $RendezvousOutboundDir
 
 $rendezvousResolved = @{ Kind = 'Local'; LocalPath = $rendezvousPath }
 if ($canResolveNetworkPaths) { $rendezvousResolved = Resolve-DropPath -Raw $rendezvousPath }
 
-if ($rendezvousResolved.Kind -eq 'Unknown') {
-    Show-Fail 'Could not use that folder.'
+$outboundResolved = @{ Kind = 'Local'; LocalPath = $RendezvousOutboundDir }
+if ($splitRendezvous -and $canResolveNetworkPaths) {
+    $outboundResolved = Resolve-DropPath -Raw $RendezvousOutboundDir
+}
+
+foreach ($leg in @(@{ Path = $rendezvousPath; Resolved = $rendezvousResolved },
+        @{ Path = $RendezvousOutboundDir; Resolved = $outboundResolved })) {
+    if (-not $leg.Path) { continue }
+    if ($leg.Resolved.Kind -ne 'Unknown') { continue }
+    Show-Fail "Could not use $($leg.Path)."
     Write-Host ''
-    Show-Note "$($rendezvousResolved.Reason)."
+    Show-Note "$($leg.Resolved.Reason)."
     exit 1
+}
+
+# The name each folder goes by, which is what the console mints into the
+# invitation for the partner to look for. The setup script's rule where it was
+# loaded, and this script's copy of that rule's local arm where it was not: a
+# folder on this PC is usable either way, and it keeps its name either way.
+if ($canResolveNetworkPaths) {
+    $rendezvousFolderName = Get-RendezvousFolderName -Path $rendezvousPath
+    $outboundFolderName = Get-RendezvousFolderName -Path $RendezvousOutboundDir
+} else {
+    $rendezvousFolderName = Get-LocalFolderName -Path $rendezvousPath
+    $outboundFolderName = Get-LocalFolderName -Path $RendezvousOutboundDir
+}
+if ($rendezvousResolved.Kind -eq 'Network') {
+    $rendezvousFolderName = Get-RendezvousFolderName -Share $rendezvousResolved.Share -SubPath $rendezvousResolved.SubPath
+}
+if ($outboundResolved.Kind -eq 'Network') {
+    $outboundFolderName = Get-RendezvousFolderName -Share $outboundResolved.Share -SubPath $outboundResolved.SubPath
+}
+
+if ($splitRendezvous) {
+    $pairVerdict = Test-RendezvousPair `
+        -InboundPath (Get-ComparableFolderPath -Resolved $rendezvousResolved) `
+        -OutboundPath (Get-ComparableFolderPath -Resolved $outboundResolved) `
+        -InboundName $rendezvousFolderName -OutboundName $outboundFolderName
+    if (-not $pairVerdict.Usable) {
+        Show-PairRefusal -Verdict $pairVerdict
+        exit 1
+    }
 }
 
 $inputLabel = "$DataRoot (the working folder)"
@@ -939,142 +1342,110 @@ if ($InputDir) { $inputLabel = $InputDir }
 Write-Host ''
 Show-Ok "Working folder:    $DataRoot"
 Show-Ok "Input folder:      $inputLabel"
-Show-Ok "Rendezvous folder: $rendezvousPath"
-
-# ==========================================================================
-# Part 2: make the rendezvous folder reachable from the container
-# ==========================================================================
-$rendezvousMount = $rendezvousPath
-$usingVolume = $false
-# The folder's own name, passed to the console because the container is shown
-# this script's mount points rather than the operator's folder. The setup
-# script's rule where it was loaded, and this script's copy of that rule's local
-# arm where it was not: a folder on this PC is usable either way, and it keeps
-# its name either way.
-if ($canResolveNetworkPaths) {
-    $rendezvousFolderName = Get-RendezvousFolderName -Path $rendezvousPath
+if ($splitRendezvous) {
+    Show-Ok "Partner writes to: $rendezvousPath"
+    Show-Ok "You write to:      $RendezvousOutboundDir"
 } else {
-    $rendezvousFolderName = Get-LocalFolderName -Path $rendezvousPath
+    Show-Ok "Rendezvous folder: $rendezvousPath"
 }
 
-if ($rendezvousResolved.Kind -eq 'Network') {
-    Show-Head 'Part 2: the network folder'
+# ==========================================================================
+# Part 2: make the rendezvous folders reachable from the container
+# ==========================================================================
+$rendezvousMount = $rendezvousPath
+$outboundMount = ''
+$inboundLeg = ''
+$outboundLeg = ''
+# Every volume this run makes, for the removal line the closing screen prints:
+# nothing here removes them, and each holds the share password.
+$volumesMade = @()
 
-    $server = $rendezvousResolved.Server
-    $share = $rendezvousResolved.Share
-    $subPath = $rendezvousResolved.SubPath
+$sharedMount = @{ Shared = $false }
+if ($splitRendezvous) {
+    $sharedMount = Resolve-SharedShareMount -Inbound $rendezvousResolved -Outbound $outboundResolved
+}
 
+if ($rendezvousResolved.Kind -eq 'Network' -or $outboundResolved.Kind -eq 'Network') {
+    if ($splitRendezvous) { Show-Head 'Part 2: the network folders' } else { Show-Head 'Part 2: the network folder' }
     Write-Host 'Docker cannot open a network folder directly -- its engine runs in'
     Write-Host 'a Linux virtual machine that cannot see Windows drive letters or'
     Write-Host 'network paths. It has to be given the server and share instead, and'
     Write-Host 'a username and password of its own to reach them with.'
     Write-Host ''
-    Show-Ok "Server:       $server"
-    Show-Ok "Share:        $share"
-    Show-Ok "Subdirectory: $(if ($subPath) { $subPath } else { '(share root)' })"
-    Write-Host ''
-    Write-Host 'Everything below depends on those three being right, and one case'
-    Write-Host 'where they will not be is a DFS path: it names a namespace rather'
-    Write-Host 'than a machine, and the real server, share and folder can all be'
-    Write-Host 'different.'
-    Write-Host ''
-
-    $answer = Read-Host 'Are those correct? [Y/n]'
-    if ($answer -and $answer -notmatch '^\s*(y|yes)\s*$') {
-        $suggestion = Resolve-DfsSuggestion -NamespaceServer $server -NamespaceShare $share
-        if (-not $suggestion.Accepted) { exit 1 }
-        $server = $suggestion.Server
-        $share = $suggestion.Share
-        Write-Host ''
-        Show-Ok "Server:       $server"
-        Show-Ok "Share:        $share"
-        Show-Ok "Subdirectory: $(if ($subPath) { $subPath } else { '(share root)' })"
-    }
-
-    # From the share as resolved, and after any correction above: the drive letter
-    # or namespace path the operator typed is theirs alone, and a volume is mounted
-    # by server and share rather than by that path.
-    $rendezvousFolderName = Get-RendezvousFolderName -Share $share -SubPath $subPath
-
-    Show-Head 'Credentials for the file server'
-    # Read-ShareCredential, and New-ShareVolume below, come from the setup script
-    # dot-sourced above: those two sequences have been run against a real file
-    # server there, and a second copy here would be a second copy to drift. This
-    # branch cannot be reached without that dot-source, because classifying a
-    # folder as a network path is the setup script's own function.
-    $credential = Read-ShareCredential
-    if (-not $credential) { exit 1 }
-    $username = $credential.Username
-    $domain = $credential.Domain
-    $plainPass = $credential.Password
-
-    $token = [Guid]::NewGuid().ToString('N')
-
-    Show-Head 'Checking the share from inside a container'
-    try {
-        $env:SMB_SERVER = $server
-        $env:SMB_SHARE = $share
-        $env:SMB_PATH = $subPath
-        $env:SMB_USER = $username
-        $env:SMB_DOMAIN = $domain
-        $env:SMB_MARKER = $PsilinkMarkerName
-        $env:SMB_TOKEN = $token
-        $env:SMB_PASS = $plainPass
-
-        # The probe battery is the one that applies to a share nothing has
-        # mounted yet: it asks the server directly over smbclient. The names are
-        # passed by name rather than by value, so the password never becomes an
-        # argv element any process listing on this PC could read.
-        $probeEnvArgs = @(
-            '--env', 'SMB_SERVER', '--env', 'SMB_SHARE', '--env', 'SMB_PATH',
-            '--env', 'SMB_USER', '--env', 'SMB_DOMAIN', '--env', 'SMB_PASS',
-            '--env', 'SMB_MARKER', '--env', 'SMB_TOKEN')
-        if (-not (Invoke-DoctorLoop -EngineArgs $probeEnvArgs -BatteryArgs @('doctor', 'probe'))) {
-            exit 1
-        }
-
-        Show-Head 'Creating the network-share volume'
-        if ($script:PsilinkEngine -ne 'docker') {
-            Show-Alert 'The volume options below have only ever been driven against docker.'
-            Show-Note "$script:PsilinkEngine may reject or read them differently. If it"
-            Show-Note 'does, its own message is the answer -- nothing here predicts'
-            Show-Note 'what it will make of them.'
-        }
-
-        $volumeMade = New-ShareVolume -VolumeName $VolumeName `
-            -Server $server -Share $share -SubPath $subPath `
-            -Username $username -Password $plainPass -Domain $domain `
-            -Engine $script:PsilinkEngine
-        if (-not $volumeMade) { exit 1 }
-        $rendezvousMount = $VolumeName
-        $usingVolume = $true
-
-        # The mount battery over the volume, carrying the same marker and token
-        # the probe left behind. That cross-check is what catches a wrong
-        # server, share or subfolder -- the DFS case -- before an exchange does,
-        # and it is the backstop behind the suggestion offered above.
-        Show-Head 'Checking the volume'
-        if (-not (Invoke-DoctorLoop -EngineArgs @('--env', 'SMB_MARKER', '--env', 'SMB_TOKEN',
-                    '--volume', "${VolumeName}:/rz") -BatteryArgs @('doctor', 'mount', '/rz'))) {
-            exit 1
-        }
-    } finally {
-        foreach ($name in 'SMB_SERVER', 'SMB_SHARE', 'SMB_PATH', 'SMB_USER', 'SMB_DOMAIN',
-            'SMB_PASS', 'SMB_MARKER', 'SMB_TOKEN') {
-            Remove-Item "env:$name" -ErrorAction SilentlyContinue
-        }
-        $plainPass = $null
-        $credential = $null
-    }
+} elseif ($splitRendezvous) {
+    Show-Head 'Part 2: the rendezvous folders'
 } else {
-    # A folder on this PC is bind-mounted as it stands, so the kernel's view is
-    # the only view there is -- and that is what the mount battery checks: the
-    # write, the exclusive create, and the rename onto an existing file that
-    # psilink's rendezvous is built on. There is no share to ask over the
-    # network, so the probe battery does not apply.
-    Show-Head 'Part 2: checking the rendezvous folder'
-    if (-not (Invoke-DoctorLoop -EngineArgs @('--volume', "${rendezvousPath}:/rz") `
-                -BatteryArgs @('doctor', 'mount', '/rz'))) {
+    Show-Head 'Part 2: the rendezvous folder'
+}
+
+if ($sharedMount.Shared) {
+    # One share holds both folders, so one volume reaches both and the two are
+    # passed to the console as paths within it.
+    $target = Confirm-ShareTarget -Server $sharedMount.Server -Share $sharedMount.Share `
+        -SubPaths @((Join-SharePath -Parent $sharedMount.SubPath -Child $sharedMount.InboundLeg),
+        (Join-SharePath -Parent $sharedMount.SubPath -Child $sharedMount.OutboundLeg))
+    if (-not $target.Accepted) { exit 1 }
+
+    $mounted = New-RendezvousShareMount -VolumeName $VolumeName `
+        -Server $target.Server -Share $target.Share -SubPath $sharedMount.SubPath `
+        -Legs @(@{ Label = 'the folder your partner writes into'; Path = $sharedMount.InboundLeg },
+        @{ Label = 'the folder you write into'; Path = $sharedMount.OutboundLeg })
+    if (-not $mounted) { exit 1 }
+
+    $volumesMade += $VolumeName
+    $rendezvousMount = $VolumeName
+    $inboundLeg = $sharedMount.InboundLeg
+    $outboundLeg = $sharedMount.OutboundLeg
+} else {
+    $inboundLabel = 'the shared folder'
+    if ($splitRendezvous) { $inboundLabel = 'the folder your partner writes into' }
+    $legs = @(@{ Resolved = $rendezvousResolved; Path = $rendezvousPath
+            Volume = $VolumeName; Label = $inboundLabel; Outbound = $false })
+    if ($splitRendezvous) {
+        # The second volume's name is derived rather than asked for, so that
+        # -VolumeName names every volume one launch makes.
+        $legs += @{ Resolved = $outboundResolved; Path = $RendezvousOutboundDir
+            Volume = "$VolumeName-outbound"; Label = 'the folder you write into'; Outbound = $true }
+    }
+
+    foreach ($leg in $legs) {
+        $mount = $leg.Path
+        if ($leg.Resolved.Kind -eq 'Network') {
+            $target = Confirm-ShareTarget -Server $leg.Resolved.Server -Share $leg.Resolved.Share `
+                -SubPaths @($leg.Resolved.SubPath)
+            if (-not $target.Accepted) { exit 1 }
+
+            # From the share as resolved, and after any correction above: the
+            # drive letter or namespace path the operator typed is theirs alone,
+            # and a volume is mounted by server and share rather than by that
+            # path.
+            $correctedName = Get-RendezvousFolderName -Share $target.Share -SubPath $leg.Resolved.SubPath
+            if ($leg.Outbound) { $outboundFolderName = $correctedName } else { $rendezvousFolderName = $correctedName }
+
+            $mounted = New-RendezvousShareMount -VolumeName $leg.Volume `
+                -Server $target.Server -Share $target.Share -SubPath $leg.Resolved.SubPath `
+                -Legs @(@{ Label = $leg.Label; Path = '' })
+            if (-not $mounted) { exit 1 }
+
+            $volumesMade += $leg.Volume
+            $mount = $leg.Volume
+        } elseif (-not (Test-LocalRendezvousFolder -Path $leg.Path -Label $leg.Label)) {
+            exit 1
+        }
+        if ($leg.Outbound) { $outboundMount = $mount } else { $rendezvousMount = $mount }
+    }
+}
+
+# A correction from the DFS tab settles which share a folder is really on, and a
+# folder that is a share root takes its name from it, so the pair is held to the
+# console's rules once more against the names it will actually be given.
+if ($splitRendezvous) {
+    $pairVerdict = Test-RendezvousPair `
+        -InboundPath (Get-ComparableFolderPath -Resolved $rendezvousResolved) `
+        -OutboundPath (Get-ComparableFolderPath -Resolved $outboundResolved) `
+        -InboundName $rendezvousFolderName -OutboundName $outboundFolderName
+    if (-not $pairVerdict.Usable) {
+        Show-PairRefusal -Verdict $pairVerdict
         exit 1
     }
 }
@@ -1093,11 +1464,12 @@ $containerName = "psilink-console-$PID"
 # folder its own home; with one folder for everything the console falls back to
 # JOB_DATA_ROOT, which is the shape docs/DEPLOYMENT.md calls the simplest one.
 $rendezvousMountArgument = ''
-if ($usingVolume -or $RendezvousDir) { $rendezvousMountArgument = $rendezvousMount }
+if ($volumesMade.Count -gt 0 -or $RendezvousDir) { $rendezvousMountArgument = $rendezvousMount }
 
 $consoleArgs = Get-ConsoleEngineArgs -ContainerName $containerName -ConsolePort $Port `
     -DataMount $DataRoot -InputMount $InputDir -RendezvousMount $rendezvousMountArgument `
-    -RendezvousName $rendezvousFolderName
+    -RendezvousName $rendezvousFolderName -InboundLeg $inboundLeg `
+    -OutboundMount $outboundMount -OutboundLeg $outboundLeg -OutboundName $outboundFolderName
 
 $started = Invoke-EngineQuiet -EngineArgs $consoleArgs
 if ($started.ExitCode -ne 0) {
@@ -1131,15 +1503,20 @@ try {
 }
 Write-Host ''
 Write-Host 'The console has stopped.'
-if ($usingVolume) {
+if ($volumesMade.Count -gt 0) {
+    $volumeList = $volumesMade -join ' '
+    $storedLine = "Docker stored the share password in cleartext in the volume's"
+    if ($volumesMade.Count -gt 1) {
+        $storedLine = "Docker stored the share password in cleartext in each volume's"
+    }
     Write-Host ''
-    Show-Alert "Docker stored the share password in cleartext in the volume's"
-    Show-Note "metadata: '$script:PsilinkEngine volume inspect $VolumeName' shows it"
+    Show-Alert $storedLine
+    Show-Note "metadata: '$script:PsilinkEngine volume inspect $volumeList' shows it"
     Show-Note 'to anyone who can run Docker on this PC. When you are finished:'
     Show-Info ''
-    Show-Info "    $script:PsilinkEngine volume rm $VolumeName"
+    Show-Info "    $script:PsilinkEngine volume rm $volumeList"
     Show-Info ''
-    Show-Info 'That removes the volume but not every trace of the password, so'
+    Show-Info 'That removes what it names but not every trace of the password, so'
     Show-Info 'retire or rotate the account when the exchanges are done. The'
     Show-Info 'passwords page, "Ending the exposure", says why.'
 }

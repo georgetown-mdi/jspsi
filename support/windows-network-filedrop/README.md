@@ -38,6 +38,12 @@ release beside it, or `start-psilink.sh` on macOS or Linux, which you run with
 `bash start-psilink.sh`. A copy taken from anywhere else refuses to run, because
 only a release copy names the exact psilink image it will run.
 
+`Start-Psilink.ps1` takes one folder shared with your partner, or the pair some
+partners name -- one they write into for you to read, and one you write into
+for them. Keep a pair side by side inside one exchange folder: two folders on
+one share are reached through a single connection to the folder that holds
+both, so folders further apart leave it reaching everything between them.
+
 The rest of this page is the setup script on its own, which makes the volume and
 stops there. That is what you want if you run your exchanges from the command
 line, or if the launcher will not run here.

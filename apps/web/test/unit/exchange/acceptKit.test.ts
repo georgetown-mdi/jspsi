@@ -541,17 +541,18 @@ describe("accept kit, a split filedrop rendezvous", () => {
     expect(text).not.toContain("path: /sync\n");
   });
 
-  test("directs a two-mount run, and says the launcher route cannot serve it", () => {
+  test("directs a two-mount run, and sends route A to the launcher", () => {
     const text = retainSheet(FILEDROP_SPLIT);
     expect(text).toContain("inbound_path: /sync-in");
     expect(text).toContain("outbound_path: /sync-out");
     expect(text).toContain('-v "/path/to/the/folder/you/read":/sync-in');
     expect(text).toContain('-v "/path/to/the/folder/you/write":/sync-out');
-    // The PowerShell launchers provision one rendezvous folder, so route A is
-    // accurate about not serving this exchange rather than sending the reader to a
-    // console that cannot run it.
-    expect(text).toContain("cover a single shared");
-    expect(text).toContain("cannot start this one");
+    // The launcher provisions a pair, so route A hands the reader to it and
+    // tells it which folder is which rather than sending them away.
+    expect(text).toContain(RELEASES_URL);
+    expect(text).toContain("Start-Psilink.ps1");
+    expect(text).toContain("Answer yes when it asks whether your");
+    expect(text).toContain("inside one exchange folder");
     // The single-folder route's own mount never appears.
     expect(text).not.toContain('":/sync ');
   });
