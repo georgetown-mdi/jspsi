@@ -114,10 +114,10 @@ export const noBareRootLoglevelEmit = {
 /**
  * How many intermediate calls the string-bound ban below reaches through
  * between `z.string()` and the bound. esquery has no repetition operator, so
- * each depth is a selector of its own and the reach is finite. Measured over
- * the guarded trees, the longest chain holds seven calls after `z.string()`
- * (`apps/web/src/jobs/intentSchemas.ts`), so a bound appended to any of them
- * sits inside this reach.
+ * each depth is a selector of its own and the reach is finite.
+ * scripts/eslint-bare-string-bound-ban.test.mjs scans the guarded trees for the
+ * longest chain they write and fails once it grows near enough this reach that
+ * a bound written at its end would sit past it.
  */
 export const STRING_BOUND_CHAIN_REACH = 8;
 
