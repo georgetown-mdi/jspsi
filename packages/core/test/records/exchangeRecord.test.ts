@@ -795,14 +795,19 @@ describe("governance metadata", () => {
       fixedRandomness,
     );
     expect(() => parseExchangeRecord(record)).not.toThrow();
-    const overLong = {
+    const withName = (name: string) => ({
       ...record,
-      governance: {
-        ...record.governance,
-        payloadReceived: [{ name: "a".repeat(MAX_NAME_LENGTH + 1) }],
-      },
-    };
-    expect(() => parseExchangeRecord(overLong)).toThrow();
+      governance: { ...record.governance, payloadReceived: [{ name }] },
+    });
+    expect(() =>
+      parseExchangeRecord(withName("a".repeat(MAX_NAME_LENGTH + 1))),
+    ).toThrow();
+    // The same ceiling in the unit the wire counts: a name of astral
+    // characters over it in code units, which is under it in code points.
+    const astral = "\u{1F600}".repeat(MAX_NAME_LENGTH / 2 + 1);
+    expect(astral.length).toBeGreaterThan(MAX_NAME_LENGTH);
+    expect([...astral].length).toBeLessThan(MAX_NAME_LENGTH);
+    expect(() => parseExchangeRecord(withName(astral))).toThrow();
   });
 
   // The privacy invariant on the record body: it holds only readable governance

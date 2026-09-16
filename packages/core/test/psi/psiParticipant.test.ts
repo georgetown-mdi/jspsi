@@ -159,7 +159,7 @@ test("joiner: a pathological-count final frame fails cleanly, not with a bare Ra
     { role: "joiner", verbose: 0 },
     UNBOUNDED_PSI_ELEMENTS,
   );
-  // ~4M invalid (non-number) elements, past the ~3.5M `Invalid string length`
+  // ~4M invalid (non-number) elements, past the ~3.3M `Invalid string length`
   // threshold the unbounded `z.array(z.number())` schema hit (a ~4.5s CPU burn
   // then a bare RangeError). The joiner's 3rd receive is the final original-index
   // frame parsed at the direct-`.parse()` site; replacing it drives the joiner to

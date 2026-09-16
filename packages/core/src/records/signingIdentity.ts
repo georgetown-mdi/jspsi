@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { maxCodeUnits } from "../utils/maxCodeUnits.js";
 
 import { camelizeKeys } from "../utils/camelizeKeys.js";
 import { causeChainSome } from "../errors.js";
@@ -180,7 +181,7 @@ const MAX_WIRE_BASE64URL_LENGTH = 256;
 
 const boundedBase64UrlSchema = z
   .string()
-  .max(MAX_WIRE_BASE64URL_LENGTH)
+  .check(maxCodeUnits(MAX_WIRE_BASE64URL_LENGTH))
   .regex(/^[A-Za-z0-9_-]+$/, "must be an unpadded base64url string");
 
 /**
@@ -202,7 +203,7 @@ export const boundedWireCertificateSchema: z.ZodType<SigningCertificate> =
   z.object({
     version: z.literal(SIGNING_CERTIFICATE_VERSION),
     algorithm: SigningAlgorithmSchema,
-    identity: z.string().min(1).max(MAX_TEXT_LENGTH),
+    identity: z.string().min(1).check(maxCodeUnits(MAX_TEXT_LENGTH)),
     publicKey: z.object({
       kty: z.literal("EC"),
       crv: z.literal("P-256"),

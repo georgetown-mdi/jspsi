@@ -1563,9 +1563,16 @@ const isWellFormed = (value: string): boolean =>
 
 const wellFormed = (schema: z.ZodString) => schema.refine(isWellFormed);
 
+// The length rule spelled out rather than taken from Zod's `.max()`, which
+// counts code points: the rule the wire holds is at most MAX_NAME_LENGTH UTF-16
+// code units, so the oracle states that and the astral corpus entry below
+// separates the two.
+const withinNameLength = (schema: z.ZodString) =>
+  schema.refine((value) => value.length <= MAX_NAME_LENGTH);
+
 const referenceFrameSchema = z.object({
   hasData: z.literal(true),
-  columns: z.array(wellFormed(z.string().min(1).max(MAX_NAME_LENGTH))),
+  columns: z.array(withinNameLength(wellFormed(z.string().min(1)))),
   rowIndices: z.array(z.number().int().nonnegative()),
   rows: z.array(z.array(wellFormed(z.string()).nullable())),
 });
@@ -1597,6 +1604,13 @@ const elementShapeCorpus: Array<{ label: string; frame: unknown }> = [
   {
     label: "an overlong column name",
     frame: frameWith({ columns: ["x".repeat(MAX_NAME_LENGTH + 1)] }),
+  },
+  {
+    label:
+      "a column name over the ceiling in code units, under it in code points",
+    frame: frameWith({
+      columns: ["\u{1F600}".repeat(MAX_NAME_LENGTH / 2 + 1)],
+    }),
   },
   { label: "a numeric column name", frame: frameWith({ columns: [1] }) },
   {
@@ -1764,7 +1778,7 @@ test("exchangePayloads: an empty partner column name is rejected as a protocol e
 });
 
 test("exchangePayloads: a pathological-count columns array fails cleanly, not with a RangeError", async () => {
-  // ~4M invalid (non-string) column names, past the ~3.5M `Invalid string
+  // ~4M invalid (non-string) column names, past the ~3.3M `Invalid string
   // length` threshold the unbounded `z.array(z.string())` schema hit (a ~4.5s
   // CPU burn then a RangeError). The single-issue validator caps that at one
   // clean issue; receiveParsed wraps it as ConnectionError("protocol").

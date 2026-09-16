@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { maxCodeUnits } from "./utils/maxCodeUnits.js";
 import { getLogger } from "./utils/logger.js";
 import {
   InternalConsistencyError,
@@ -989,15 +990,19 @@ const noParams = z.object({});
 const regexPatternSchema = z
   .string()
   .min(1)
-  .max(MAX_TRANSFORM_PATTERN_LENGTH, {
-    message: `must not exceed ${MAX_TRANSFORM_PATTERN_LENGTH} characters`,
-  })
+  .check(
+    maxCodeUnits(
+      MAX_TRANSFORM_PATTERN_LENGTH,
+      `must not exceed ${MAX_TRANSFORM_PATTERN_LENGTH} characters`,
+    ),
+  )
   .refine(
-    // Skip the compile for an over-length source: the `.max` above does not abort
-    // (Zod string checks are non-aborting), so without this length re-check `.refine`
-    // would compile an oversized pattern -- and RE2 compile is super-linear in length,
-    // which a live editor preview must never pay on the main thread. The `.max` already
-    // reports the length error; this guard only spares the compile.
+    // Skip the compile for an over-length source: the ceiling above does not
+    // abort (Zod string checks are non-aborting), so without this length
+    // re-check `.refine` would compile an oversized pattern -- and RE2 compile
+    // is super-linear in length, which a live editor preview must never pay on
+    // the main thread. The ceiling already reports the length error; this
+    // guard only spares the compile.
     (pattern) =>
       pattern.length <= MAX_TRANSFORM_PATTERN_LENGTH &&
       patternConformsToDialect(pattern),
@@ -1147,16 +1152,22 @@ export const STANDARDIZATION_FUNCTION_DESCRIPTORS: Readonly<
       inputFormat: z
         .string()
         .min(1)
-        .max(MAX_DATE_FORMAT_LENGTH, {
-          message: `must not exceed ${MAX_DATE_FORMAT_LENGTH} characters`,
-        })
+        .check(
+          maxCodeUnits(
+            MAX_DATE_FORMAT_LENGTH,
+            `must not exceed ${MAX_DATE_FORMAT_LENGTH} characters`,
+          ),
+        )
         .default("MM/DD/YYYY"),
       outputFormat: z
         .string()
         .min(1)
-        .max(MAX_DATE_FORMAT_LENGTH, {
-          message: `must not exceed ${MAX_DATE_FORMAT_LENGTH} characters`,
-        })
+        .check(
+          maxCodeUnits(
+            MAX_DATE_FORMAT_LENGTH,
+            `must not exceed ${MAX_DATE_FORMAT_LENGTH} characters`,
+          ),
+        )
         .default("YYYYMMDD"),
     }),
   },

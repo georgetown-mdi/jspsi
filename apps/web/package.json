@@ -46,7 +46,7 @@
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "yaml": "^2.9.0",
-    "zod": "^4.0.17"
+    "zod": "^4.5.4"
   },
   "devDependencies": {
     "@psilink/testkit": "file:../../packages/testkit",

@@ -279,9 +279,10 @@ test("keyTypeFromBlob collapses rejected types that differ only past those 24 by
 });
 
 test("keyTypeFromBlob's placeholder fits the bound a partner parses under", () => {
-  // The partner reads an advertised key type under z.string().max(64); a
-  // longer placeholder would make this party's advertisement be treated as
-  // malformed and drop the reconciliation entirely.
+  // The partner reads an advertised key type under a 64-code-unit ceiling
+  // (z.string().check(maxCodeUnits(64))); a longer placeholder would make this
+  // party's advertisement be treated as malformed and drop the reconciliation
+  // entirely.
   for (const type of [
     new Uint8Array(1),
     new Uint8Array(24).fill(0xff),

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { maxCodeUnits } from "../utils/maxCodeUnits.js";
 
 import { boundedArray } from "../utils/boundedArray.js";
 import {
@@ -68,7 +69,7 @@ export const OutboundPayloadConsentSchema: z.ZodType<OutboundPayloadConsent> =
     z.object({
       status: z.literal("confirmed"),
       columns: boundedArray(
-        nameValue(z.string().min(1).max(MAX_NAME_LENGTH)),
+        nameValue(z.string().min(1).check(maxCodeUnits(MAX_NAME_LENGTH))),
         MAX_PAYLOAD_ENTRIES,
         `outbound payload consent must not exceed ${MAX_PAYLOAD_ENTRIES} columns`,
       ).transform((names) => columnsNamedOnce(names, (name) => name)),

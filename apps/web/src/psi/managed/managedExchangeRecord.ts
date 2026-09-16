@@ -18,6 +18,7 @@ import {
   SHARED_SECRET_REGEX,
   assembleExchangeSpec,
   connectionFromLocator,
+  maxCodeUnits,
 } from "@psilink/core";
 
 import { z } from "zod";
@@ -313,7 +314,7 @@ export const keyFileFieldsSchema = z
 const ManagedExchangeRecordSchema: ZodType<ManagedExchangeRecord> = z.object({
   schemaVersion: z.literal(MANAGED_EXCHANGE_SCHEMA_VERSION),
   id: z.string().min(1),
-  label: z.string().max(MAX_LABEL_LENGTH),
+  label: z.string().check(maxCodeUnits(MAX_LABEL_LENGTH)),
   exchangeFile: persistedExchangeFileSchema,
   side: z.enum(["inviter", "acceptor"]),
   inputFileHandle: z.custom<FileSystemFileHandle>().optional(),

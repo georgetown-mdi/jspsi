@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { maxCodeUnits } from "../utils/maxCodeUnits.js";
 
 import { MAX_NAME_LENGTH } from "./linkageTermsSchema.js";
 import { safeParseCamelized } from "./safeParseCamelized.js";
@@ -107,8 +108,8 @@ const StandardizationTransformationSchema: z.ZodType<StandardizationTransformati
     // ceiling every other name in a configuration has. Neither is sent to the
     // partner, which is why the bound stands alone here and the terms names'
     // character rule does not (docs/spec/CHANNEL_SECURITY.md).
-    output: z.string().min(1).max(MAX_NAME_LENGTH),
-    input: z.string().min(1).max(MAX_NAME_LENGTH),
+    output: z.string().min(1).check(maxCodeUnits(MAX_NAME_LENGTH)),
+    input: z.string().min(1).check(maxCodeUnits(MAX_NAME_LENGTH)),
     steps: z.array(StandardizationStepSchema).optional(),
   });
 

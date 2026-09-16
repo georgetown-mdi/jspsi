@@ -64,11 +64,11 @@ export interface PartnerPayload {
 // `rows` is a 2-D partner-controlled collection, bounded as ONE single-issue
 // validator (utils/singleIssueArray.ts) over the whole structure rather than
 // `z.array(z.array(z.string().nullable()))`. It is exposed to BOTH Zod
-// RangeError classes on Zod 4.4.3: a single row of hundreds of thousands of
+// RangeError classes on Zod 4.5.4: a single row of hundreds of thousands of
 // invalid inner cells overflows the call stack spreading one issue per cell up
 // through the inner-array and outer-`rows` frames (`Maximum call stack size
 // exceeded`, ~300k), and a payload of millions of invalid ROWS throws `Invalid
-// string length` building the error string from one issue per row (~3.5M).
+// string length` building the error string from one issue per row (~3.3M).
 // `isPayloadRow` validates a whole row (is-array, every cell string-or-null)
 // INSIDE the outer single-issue `every`, so the entire structure yields at
 // most one issue regardless of row OR cell count. A `.max()` is unsafe on
@@ -142,10 +142,13 @@ const payloadWireSchema = z.discriminatedUnion("hasData", [
       // object, so a pathological count cannot drive the ~130k STACK overflow
       // `rows` faces -- but a far larger count (~millions of invalid elements,
       // within the frame cap) makes Zod throw a DIFFERENT RangeError ("Invalid
-      // string length", ~3.5M on Zod 4.4.3) building its error string from one
-      // issue per element. receiveParsed catches that harmlessly as
-      // ConnectionError("protocol"), but the single-issue validators below cap
-      // issue accumulation at one regardless of count
+      // string length", ~3.3M on Zod 4.5.4) building its error string from one
+      // issue per element. receiveParsed reports that as a clean
+      // ConnectionError("protocol"); on 4.5.4 the ZodError's message is built
+      // lazily, so the wrap sees only the ZodError, and the RangeError, if it
+      // fires at all, does so later when something reads the cause's message.
+      // The single-issue validators below cap issue accumulation at one
+      // regardless of count
       // (utils/singleIssueArray.ts), which payloadExchange.test.ts drives at a
       // count that would otherwise build that string. A count `.max()` is
       // wrong for `rowIndices` (one per matched record, legitimately in the

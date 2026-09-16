@@ -10,6 +10,7 @@ import {
   StandardizationSchema,
   inferDateFormat,
   inferDateOfBirthColumn,
+  maxCodeUnits,
   readRowColumn,
   streamCSVRows,
 } from "@psilink/core";
@@ -434,7 +435,7 @@ interface CoverageRequestBody {
  * resolved against the mounted directory at sweep time. */
 export const coverageRequestSchema: z.ZodType<CoverageRequestBody> = z
   .object({
-    name: z.string().min(1).max(MAX_INPUT_NAME_LENGTH),
+    name: z.string().min(1).check(maxCodeUnits(MAX_INPUT_NAME_LENGTH)),
     standardization: coverageStandardizationSchema,
   })
   .strict();
