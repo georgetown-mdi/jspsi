@@ -167,12 +167,66 @@ export enum ProcessState {
   Done,
 }
 
+/**
+ * Which crypto operation a {@link PsiProgress} report describes, named by the
+ * {@link PSIParticipant} method that runs it. These are the operations that mask
+ * or match every element of a set, so they are the ones a long round spends its
+ * minutes inside.
+ */
+export type PsiOperation =
+  | "createServerSetup"
+  | "processClientRequest"
+  | "createClientRequest"
+  | "computeAssociationTable"
+  | "computeIntersectionCardinality";
+
+/**
+ * Where one crypto operation stands: `started` when the participant dispatched
+ * it to the engine, and `finished` or `failed` when the engine settled. An
+ * operation that failed did not produce a result, so a display shows no
+ * completion figure for it.
+ */
+export type PsiProgressState = "started" | "finished" | "failed";
+
+/**
+ * One report about a PSI crypto operation, for a progress display. Every figure
+ * is a count or a duration -- how many elements the operation covers and how
+ * long it ran -- never a value from either party's data, and none of it goes on
+ * the wire.
+ */
+export interface PsiProgress {
+  operation: PsiOperation;
+  /**
+   * How many encrypted elements the operation covers: the values it was handed,
+   * for one that masks this party's own set, and the element count the frame
+   * declares, for one that reads the partner's. A count-only round masks only
+   * the values occurring exactly once, so for it the first figure is an upper
+   * bound.
+   */
+  elements: number;
+  state: PsiProgressState;
+  /**
+   * Wall-clock milliseconds the operation ran, measured on the monotonic clock
+   * so a clock adjustment cannot make it negative. Present on `finished` and
+   * `failed`, absent on `started`.
+   */
+  durationMs?: number;
+}
+
+/**
+ * Takes each {@link PsiProgress} report from a {@link PSIParticipant}. Called
+ * synchronously from the participant's own call path, so an implementation
+ * returns quickly and does not throw: a raise here reaches the exchange.
+ */
+export type PsiProgressReporter = (progress: PsiProgress) => void;
+
 export class PSIParticipant {
   id: string;
   config: Config;
   private log: ReturnType<typeof getLoggerForVerbosity>;
   private elementBounds: PsiElementBounds;
   private engine: PsiEngine;
+  private onProgress?: PsiProgressReporter;
 
   constructor(
     id: string,
@@ -193,10 +247,15 @@ export class PSIParticipant {
     // key objects in its worker, so `library` is used only to build the
     // default.
     engine?: PsiEngine,
+    // Takes a report as each crypto operation below starts and settles, for a
+    // caller rendering a progress display. Omitted, no report is composed at
+    // all, so a caller that shows nothing pays nothing.
+    onProgress?: PsiProgressReporter,
   ) {
     this.id = id;
     this.config = config;
     this.elementBounds = elementBounds;
+    this.onProgress = onProgress;
 
     if (this.config.verbose === undefined) {
       this.config.verbose = DEFAULT_VERBOSITY;
@@ -239,11 +298,15 @@ export class PSIParticipant {
   // count exceeds the ceiling, so an over-declared frame costs O(ceiling),
   // not O(frame); a malformed frame is a clean protocol abort too. See
   // connection/psiElementScan.ts.
+  // Returns the count the frame declares, for the progress report on the
+  // operation that follows: the scan stops early only above the ceiling, and
+  // such a frame is rejected here, so the figure returned is the scan's own
+  // count -- exact for a conforming frame, an upper bound otherwise.
   private assertInboundElementBound(
     kind: PsiMessageKind,
     bytes: Uint8Array,
     authenticatedBound: number,
-  ): void {
+  ): number {
     const ceiling = Math.min(authenticatedBound, MAX_PSI_DECODE_ELEMENTS);
     let declared: number;
     try {
@@ -258,6 +321,44 @@ export class PSIParticipant {
         `${this.id} protocol error: inbound PSI ${kind} declares more than ` +
           `${ceiling} encrypted element(s)`,
       );
+    return declared;
+  }
+
+  // Report one crypto operation's element count and duration around the engine
+  // call that runs it, for a caller rendering a progress display. The timing is
+  // taken here, on the participant's own thread, rather than inside the engine:
+  // a worker-backed engine runs the masking inside one blocking library call,
+  // so its own thread cannot post anything until that call returns, and the
+  // report a display ticks against has to come from the thread that is free.
+  private async reportProgress<T>(
+    operation: PsiOperation,
+    elements: number,
+    run: () => Promise<T>,
+  ): Promise<T> {
+    const report = this.onProgress;
+    if (report === undefined) return run();
+    report({ operation, elements, state: "started" });
+    const startedAt = performance.now();
+    const durationMs = (): number =>
+      Math.max(0, Math.round(performance.now() - startedAt));
+    try {
+      const result = await run();
+      report({
+        operation,
+        elements,
+        state: "finished",
+        durationMs: durationMs(),
+      });
+      return result;
+    } catch (error) {
+      report({
+        operation,
+        elements,
+        state: "failed",
+        durationMs: durationMs(),
+      });
+      throw error;
+    }
   }
 
   // Building-block PSI steps used by the single-pass strategy
@@ -279,7 +380,9 @@ export class PSIParticipant {
     setup: Uint8Array;
     permutation: Array<number>;
   }> {
-    return this.engine.createServerSetup(values);
+    return this.reportProgress("createServerSetup", values.length, () =>
+      this.engine.createServerSetup(values),
+    );
   }
 
   /**
@@ -289,13 +392,15 @@ export class PSIParticipant {
   public async processClientRequest(
     requestBytes: Uint8Array,
   ): Promise<Uint8Array> {
-    this.assertInboundElementBound(
+    const elements = this.assertInboundElementBound(
       "request",
       requestBytes,
       this.elementBounds.request,
     );
-    return decodePsiBinaryFrame(this.id, "request", () =>
-      this.engine.processClientRequest(requestBytes),
+    return this.reportProgress("processClientRequest", elements, () =>
+      decodePsiBinaryFrame(this.id, "request", () =>
+        this.engine.processClientRequest(requestBytes),
+      ),
     );
   }
 
@@ -306,7 +411,9 @@ export class PSIParticipant {
   public async createClientRequest(
     values: ReadonlyArray<string>,
   ): Promise<Uint8Array> {
-    return this.engine.createClientRequest(values);
+    return this.reportProgress("createClientRequest", values.length, () =>
+      this.engine.createClientRequest(values),
+    );
   }
 
   /**
@@ -348,13 +455,15 @@ export class PSIParticipant {
   private computeAssociationTable(
     responseBytes: Uint8Array,
   ): Promise<[Array<number>, Array<number>]> {
-    this.assertInboundElementBound(
+    const elements = this.assertInboundElementBound(
       "response",
       responseBytes,
       this.elementBounds.response,
     );
-    return decodePsiBinaryFrame(this.id, "response", () =>
-      this.engine.computeAssociationTable(responseBytes),
+    return this.reportProgress("computeAssociationTable", elements, () =>
+      decodePsiBinaryFrame(this.id, "response", () =>
+        this.engine.computeAssociationTable(responseBytes),
+      ),
     );
   }
 
@@ -366,13 +475,15 @@ export class PSIParticipant {
   private computeIntersectionCardinality(
     responseBytes: Uint8Array,
   ): Promise<number> {
-    this.assertInboundElementBound(
+    const elements = this.assertInboundElementBound(
       "response",
       responseBytes,
       this.elementBounds.response,
     );
-    return decodePsiBinaryFrame(this.id, "response", () =>
-      this.engine.computeIntersectionCardinality(responseBytes),
+    return this.reportProgress("computeIntersectionCardinality", elements, () =>
+      decodePsiBinaryFrame(this.id, "response", () =>
+        this.engine.computeIntersectionCardinality(responseBytes),
+      ),
     );
   }
 
