@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Alert, Button, CopyButton, FileButton, Loader } from "@mantine/core";
 import { Link, useNavigate } from "@tanstack/react-router";
@@ -339,15 +339,13 @@ export function ManagedRunSurface({ id }: { id: string }) {
 
   // The runs the accounting is short, read beside it and keyed the same way, so a
   // run that has just failed to file is read back without a reload and a re-read
-  // of the accounting re-reads what it owes. The flag is read here too and
-  // cleared as it is shown: it holds no run detail to come back to, so keeping it
-  // past the visit that showed it would repeat a notice nothing can act on.
+  // of the accounting re-reads what it owes. The flag is read here too, and
+  // dropped only once its alert has rendered: this surface shows nothing at all
+  // for a missing, unloadable or spent exchange, and clearing on the visit
+  // instead would destroy the only trace of that run unseen.
   useEffect(() => {
     let live = true;
-    if (unfiledExchangeFlagged(id)) {
-      setFlaggedUnrecordedId(id);
-      clearUnfiledExchangeFlag(id);
-    }
+    if (unfiledExchangeFlagged(id)) setFlaggedUnrecordedId(id);
     void readUnfiledDisclosures(id)
       .then((read) => {
         if (live) setUnfiledRead(read);
@@ -820,6 +818,13 @@ export function ManagedRunSurface({ id }: { id: string }) {
     setAccountingReads((reads) => reads + 1);
   }
 
+  // Drop the flag, called by the alert that shows it. Held stable across renders
+  // so the alert's mount effect runs once rather than on every render of the
+  // section around it.
+  const dropUnrecordedRunFlag = useCallback(() => {
+    clearUnfiledExchangeFlag(id);
+  }, [id]);
+
   // File the records the unfiled-run note retained, then read both again so the
   // section shows what the store holds afterwards: a filing that did not take
   // leaves the shortfall standing rather than an entry that is not there.
@@ -1159,6 +1164,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
               unrecordedRunFlagged={flaggedUnrecordedId === id}
               parkedResultsRead={parkedResultsRead}
               onFileUnfiledDisclosures={fileUnfiled}
+              onUnrecordedRunFlagShown={dropUnrecordedRunFlag}
               onResetAccounting={resetAccounting}
               onRetryAccountingRead={retryAccountingRead}
               onRetryParkedResultsRead={retryParkedResultsRead}

@@ -107,6 +107,41 @@ describe("the flag", () => {
     );
   });
 
+  test("flags past the count bound are refused, keeping the ones stored", () => {
+    const store = installStorage();
+    for (let index = 0; index < 20; index += 1)
+      expect(flagUnfiledExchange(`exchange-${index}`)).toBe(true);
+
+    // An earlier exchange's unrecorded run is no less true than a later one's,
+    // so the twenty-first is refused rather than displacing the first.
+    expect(flagUnfiledExchange("exchange-20")).toBe(false);
+    expect(unfiledExchangeFlagged("exchange-0")).toBe(true);
+    expect(unfiledExchangeFlagged("exchange-20")).toBe(false);
+    expect(store.get(KEY)).toContain("exchange-0");
+  });
+
+  test("a flag that would take the value past its length bound is refused", () => {
+    const store = installStorage();
+    // A record id is any non-empty string, so an imported record can carry one
+    // this long; the value is written where storage is already short, so the
+    // write is refused rather than grown.
+    const enormous = "x".repeat(5000);
+
+    expect(flagUnfiledExchange(enormous)).toBe(false);
+    expect(store.has(KEY)).toBe(false);
+  });
+
+  test("a flag within the length bound is stored", () => {
+    installStorage();
+    const long = "x".repeat(4000);
+
+    expect(flagUnfiledExchange(long)).toBe(true);
+    expect(unfiledExchangeFlagged(long)).toBe(true);
+    // The next flag no longer fits beside it, and the one stored stands.
+    expect(flagUnfiledExchange("x".repeat(500))).toBe(false);
+    expect(unfiledExchangeFlagged(long)).toBe(true);
+  });
+
   test("a storage that refuses the write reports that nothing was kept", () => {
     vi.stubGlobal("localStorage", {
       getItem: () => null,

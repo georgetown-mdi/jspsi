@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   Alert,
@@ -47,9 +47,7 @@ import {
 import {
   DISCLOSURE_EXPORT_MIME,
   DISCLOSURE_STORED_EXPORT_MIME,
-  FILEABLE_DISCLOSURE_NOTE,
   PARTIAL_DISCLOSURE_LABEL,
-  UNFILEABLE_DISCLOSURE_NOTE,
   disclosureAccountingCsv,
   disclosureAccountingFileName,
   disclosureEntries,
@@ -132,6 +130,7 @@ export function ManagedExchangeDetail({
   unrecordedRunFlagged,
   parkedResultsRead,
   onFileUnfiledDisclosures,
+  onUnrecordedRunFlagShown,
   onResetAccounting,
   onRetryAccountingRead,
   onRetryParkedResultsRead,
@@ -172,6 +171,9 @@ export function ManagedExchangeDetail({
    * refused it or the accounting is one this build cannot append to; the control
    * shows the failure and the note stands. */
   onFileUnfiledDisclosures: () => Promise<void>;
+  /** Fired where the flag's alert has rendered, so the surface that read the
+   * flag drops it only once an operator has been shown it. */
+  onUnrecordedRunFlagShown: () => void;
   /** Destroy the stored accounting so the exchange can file disclosures again,
    * leaving the exchange itself untouched. Offered only from the unreadable state,
    * behind an explicit confirm, and after the export. Rejects on a store failure;
@@ -267,6 +269,7 @@ export function ManagedExchangeDetail({
         completedRunOnRecord={completedRunRecorded(record)}
         lastRunMayHaveSent={lastRunMayHaveSentPayload(record)}
         onFileUnfiled={onFileUnfiledDisclosures}
+        onUnrecordedRunFlagShown={onUnrecordedRunFlagShown}
         onReset={onResetAccounting}
         onRetryRead={onRetryAccountingRead}
       />
@@ -1272,6 +1275,7 @@ function DisclosureAccountingView({
   completedRunOnRecord,
   lastRunMayHaveSent,
   onFileUnfiled,
+  onUnrecordedRunFlagShown,
   onReset,
   onRetryRead,
 }: {
@@ -1291,6 +1295,9 @@ function DisclosureAccountingView({
    * {@link EmptyAccountingNotice}). */
   lastRunMayHaveSent: boolean;
   onFileUnfiled: () => Promise<void>;
+  /** Fired where the flag's alert renders, which is what drops the flag (see
+   * {@link UnrecordedRunAlert}). */
+  onUnrecordedRunFlagShown: () => void;
   onReset: () => Promise<void>;
   onRetryRead: () => void;
 }) {
@@ -1331,6 +1338,7 @@ function DisclosureAccountingView({
         read={unfiledRead}
         flagged={unrecordedRunFlagged}
         onFile={onFileUnfiled}
+        onFlagShown={onUnrecordedRunFlagShown}
       />
       {read === undefined ? (
         <>
@@ -1415,10 +1423,12 @@ function DisclosureAccountingView({
  * {@link ../psi/unfiledDisclosure.ts}).
  *
  * Each state offers only what it supports. A run whose record was retained can
- * be filed, and the control says so. A run with no record left cannot, and is
- * told plainly rather than given a control that would do nothing. A note this
- * build cannot read states that a run is missing without naming it, since the
- * fact and the record are separate things at rest. A flagged run -- the one this
+ * be filed, and the control says so. A run that cannot be filed is told plainly
+ * rather than given a control that would do nothing, and its note says which of
+ * the two states it is in -- no record was built, or one is stored that this
+ * build cannot read -- since the second still holds bytes. A note this build
+ * cannot read states that a run is missing without naming it, since the fact and
+ * the record are separate things at rest. A flagged run -- the one this
  * browser could store nothing about -- names the run history as where that run
  * is recorded.
  *
@@ -1430,37 +1440,19 @@ function UnfiledDisclosureNotice({
   read,
   flagged,
   onFile,
+  onFlagShown,
 }: {
   read: UnfiledDisclosureRead | undefined;
   flagged: boolean;
   onFile: () => Promise<void>;
+  onFlagShown: () => void;
 }) {
   const rows =
     read?.kind === "unfiled" ? unfiledDisclosureRows(read.disclosures) : [];
   const fileable = rows.filter((row) => row.fileable).length;
   return (
     <>
-      {flagged && (
-        <Alert
-          color="yellow"
-          title="A run of this exchange could not be recorded"
-          mt="sm"
-        >
-          <p>
-            A run of this exchange disclosed your payload, and this
-            browser&apos;s storage would take neither its record nor a note of
-            which run it was. The accounting below has no entry for it, and
-            there is nothing left to add: check this exchange&apos;s run history
-            above for the run, and record the disclosure in your own compliance
-            material.
-          </p>
-          <p>
-            The run&apos;s record could not be stored. If this browser is low on
-            storage, free space on this device so the next run can file its
-            record.
-          </p>
-        </Alert>
-      )}
+      {flagged && <UnrecordedRunAlert onShown={onFlagShown} />}
       {read?.kind === "unreadable" && (
         <Alert
           color="yellow"
@@ -1502,9 +1494,7 @@ function UnfiledDisclosureNotice({
               <span
                 className={`${styles.dlNote} ${styles.small} ${styles.sub}`}
               >
-                {row.fileable
-                  ? FILEABLE_DISCLOSURE_NOTE
-                  : UNFILEABLE_DISCLOSURE_NOTE}
+                {row.note}
               </span>
             </div>
           ))}
@@ -1514,6 +1504,40 @@ function UnfiledDisclosureNotice({
         </Alert>
       )}
     </>
+  );
+}
+
+/**
+ * The flag's own alert: a run this browser could store nothing about, named by
+ * the exchange alone.
+ *
+ * It reports that it has been shown, which is what drops the flag. The fact has
+ * no detail to come back to, so an operator who has read it once is not shown it
+ * again; a visit that renders this nowhere leaves the flag standing, since the
+ * flag is then still the only trace of that run.
+ */
+function UnrecordedRunAlert({ onShown }: { onShown: () => void }) {
+  useEffect(() => {
+    onShown();
+  }, [onShown]);
+  return (
+    <Alert
+      color="yellow"
+      title="A run of this exchange could not be recorded"
+      mt="sm"
+    >
+      <p>
+        A run of this exchange disclosed your payload, and this browser&apos;s
+        storage would take neither its record nor a note of which run it was.
+        The accounting below has no entry for it, and there is nothing left to
+        add: check this exchange&apos;s run history above for the run, and
+        record the disclosure in your own compliance material.
+      </p>
+      <p>
+        The run&apos;s record could not be stored. If this browser is low on
+        storage, free space on this device so the next run can file its record.
+      </p>
+    </Alert>
   );
 }
 

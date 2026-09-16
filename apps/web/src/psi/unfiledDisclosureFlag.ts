@@ -12,8 +12,9 @@
  * stated limit (see docs/spec/MANAGED_EXCHANGE_RECORD.md, "A run whose record
  * was not filed").
  *
- * A flag is cleared when the exchange's page shows it, and when the exchange is
- * deleted, so nothing keeps the id of an exchange this browser no longer holds.
+ * A flag is cleared where its alert has rendered, and where the exchange is
+ * deleted or every exchange is cleared, so nothing keeps the id of an exchange
+ * this browser no longer holds.
  */
 
 import { getLogger, parseBoundedJson } from "@psilink/core";
@@ -30,12 +31,18 @@ const STORAGE_KEY = "psilink-unfiled-disclosure";
  * migrated). */
 const FLAG_VERSION = 1;
 
-/** How many exchanges the value names at once. One id per exchange keeps the
- * whole value under a kilobyte at this bound, which matters because the
- * condition it is written under is a browser out of storage. A flag past the
- * bound is refused rather than displacing one already stored: an earlier
- * exchange's unrecorded run is no less true than a later one's. */
+/** How many exchanges the value names at once. A flag past the bound is refused
+ * rather than displacing one already stored: an earlier exchange's unrecorded
+ * run is no less true than a later one's. */
 const MAX_FLAGGED_EXCHANGES = 20;
+
+/** How long the stored value may be, in the UTF-16 code units a browser's
+ * storage counts. The count bound above does not bound the value's size: a
+ * record id is any non-empty string, so an imported record's id is bounded only
+ * by the artifact it came in. The value is written where storage has already
+ * refused a record-sized write, so a flag that would take it past this is
+ * refused like one past the count bound. */
+const MAX_FLAG_VALUE_LENGTH = 4096;
 
 /** The flagged ids as the stored value holds them, oldest first, or an empty
  * list where nothing is stored, the value is not this version, or storage is
@@ -62,18 +69,20 @@ function flaggedExchanges(): Array<string> {
   );
 }
 
+/** The stored form of these ids: what the length bound above is measured on,
+ * before a write is attempted. */
+function serializedFlags(exchanges: ReadonlyArray<string>): string {
+  return JSON.stringify({ v: FLAG_VERSION, exchanges });
+}
+
 /** Write the flagged ids back, removing the key entirely when none are left so
  * no empty value sits at rest.
  *
- * @throws if storage refuses the write, which is what the flag write below
- *   reports as not having taken. */
+ * @throws if storage refuses the write, which the clear below reports to the
+ *   diagnostic log. */
 function writeFlaggedExchanges(exchanges: ReadonlyArray<string>): void {
   if (exchanges.length === 0) globalThis.localStorage.removeItem(STORAGE_KEY);
-  else
-    globalThis.localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({ v: FLAG_VERSION, exchanges }),
-    );
+  else globalThis.localStorage.setItem(STORAGE_KEY, serializedFlags(exchanges));
 }
 
 /**
@@ -82,15 +91,17 @@ function writeFlaggedExchanges(exchanges: ReadonlyArray<string>): void {
  * the fact this value holds, and the flag holds no per-run detail to accumulate.
  *
  * `false` means this browser kept nothing at all about the run -- storage
- * refused this too, or the bound above is reached -- which the caller reports to
- * the diagnostic log, the only place left to state it.
+ * refused this too, or either bound above is reached -- which the caller reports
+ * to the diagnostic log, the only place left to state it.
  */
 export function flagUnfiledExchange(id: string): boolean {
   const flagged = flaggedExchanges();
   if (flagged.includes(id)) return true;
   if (flagged.length >= MAX_FLAGGED_EXCHANGES) return false;
+  const value = serializedFlags([...flagged, id]);
+  if (value.length > MAX_FLAG_VALUE_LENGTH) return false;
   try {
-    writeFlaggedExchanges([...flagged, id]);
+    globalThis.localStorage.setItem(STORAGE_KEY, value);
     return true;
   } catch (error) {
     whenDiagnostic(() =>
@@ -105,13 +116,25 @@ export function unfiledExchangeFlagged(id: string): boolean {
   return flaggedExchanges().includes(id);
 }
 
-/** Drop this exchange's flag, best-effort: it is cleared where the exchange's
- * page has shown it, and where the exchange is deleted. */
+/** Drop this exchange's flag, best-effort: it is cleared where its alert has
+ * rendered, and where the exchange is deleted. */
 export function clearUnfiledExchangeFlag(id: string): void {
   const flagged = flaggedExchanges();
   if (!flagged.includes(id)) return;
   try {
     writeFlaggedExchanges(flagged.filter((flaggedId) => flaggedId !== id));
+  } catch (error) {
+    whenDiagnostic(() =>
+      log.warn("unfiled disclosure flag clear failed:", error),
+    );
+  }
+}
+
+/** Drop every flag, best-effort: nothing this browser holds names an exchange
+ * once every exchange has been cleared from it. */
+export function clearUnfiledExchangeFlags(): void {
+  try {
+    globalThis.localStorage.removeItem(STORAGE_KEY);
   } catch (error) {
     whenDiagnostic(() =>
       log.warn("unfiled disclosure flag clear failed:", error),

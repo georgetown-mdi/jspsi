@@ -537,7 +537,26 @@ export interface UnfiledDisclosureRow {
   /** Whether the retained record can still be filed. `false` is the state no
    * action recovers, which the surface states instead of offering a control. */
   fileable: boolean;
+  /** What this row says is left to do: this app's own copy for the row's state,
+   * chosen here so the surface renders one string rather than deciding between
+   * them. */
+  note: string;
 }
+
+/** What a row whose record can still be filed says is left to do. */
+export const FILEABLE_DISCLOSURE_NOTE =
+  "This run's record is kept in this browser and can still be added to the accounting.";
+
+/** What a row whose run built no record says, plainly: nothing was stored for
+ * it, so nothing here can add the entry and the account of this disclosure has
+ * to be kept elsewhere. */
+export const UNBUILT_DISCLOSURE_NOTE =
+  "No record of this run was made, so it cannot be added to the accounting. Record this disclosure in your own compliance material.";
+
+/** What a row whose stored record this build refuses says: the record is still
+ * at rest, and this version of the app can neither read nor file it. */
+export const UNREADABLE_DISCLOSURE_NOTE =
+  "This run's record cannot be read by this version of the app, so it cannot be added to the accounting. Record this disclosure in your own compliance material.";
 
 /**
  * The noted runs as rows, oldest first -- the order the accounting's own export
@@ -545,6 +564,11 @@ export interface UnfiledDisclosureRow {
  *
  * A fact comes from the retained record or is left out: a row for a run with no
  * record shows the instant it was noted at and nothing else.
+ *
+ * The two unfilable states get their own note. A run that built no record and a
+ * run whose stored record this build cannot read are equally unfilable, but the
+ * browser holds different things for them, and copy that denied the stored
+ * record would understate what is at rest.
  */
 export function unfiledDisclosureRows(
   disclosures: ReadonlyArray<UnfiledDisclosure>,
@@ -556,17 +580,14 @@ export function unfiledDisclosureRows(
       ? {}
       : { partner: displayPartyIdentity(disclosure.record.partnerIdentity) }),
     fileable: disclosure.record !== undefined,
+    note:
+      disclosure.record !== undefined
+        ? FILEABLE_DISCLOSURE_NOTE
+        : disclosure.unreadableRecordRetained === true
+          ? UNREADABLE_DISCLOSURE_NOTE
+          : UNBUILT_DISCLOSURE_NOTE,
   }));
 }
-
-/** What a row whose record can still be filed says is left to do. */
-export const FILEABLE_DISCLOSURE_NOTE =
-  "This run's record is kept in this browser and can still be added to the accounting.";
-
-/** What a row with no record left says, plainly: nothing here can add the entry,
- * so the account of this disclosure has to be kept elsewhere. */
-export const UNFILEABLE_DISCLOSURE_NOTE =
-  "No record of this run is kept, so it cannot be added to the accounting. Record this disclosure in your own compliance material.";
 
 /** How many runs the accounting is short, stated beside the entries it does
  * hold, so a count of entries is never read as a count of disclosures. */

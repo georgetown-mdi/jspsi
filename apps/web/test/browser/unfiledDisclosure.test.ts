@@ -28,6 +28,7 @@ import {
 } from "@psi/disclosureAccountingStore";
 import {
   clearUnfiledExchangeFlag,
+  flagUnfiledExchange,
   unfiledExchangeFlagged,
 } from "@psi/unfiledDisclosureFlag";
 import {
@@ -334,5 +335,31 @@ describe("deleting the exchange", () => {
     // retains a run's own record.
     expect(await rawStored(unfiledDisclosureKey(created.id))).toBeUndefined();
     expect(await readUnfiledDisclosures(created.id)).toEqual({ kind: "none" });
+  });
+
+  test("takes the fallback flag with it", async () => {
+    const created = await createManagedExchange(newExchange());
+    expect(flagUnfiledExchange(created.id)).toBe(true);
+
+    await deleteManagedExchange(created.id);
+
+    // The flag lives outside the delete's transaction, so the delete itself
+    // drops it: no caller can leave an id of an exchange this browser no longer
+    // holds behind.
+    expect(unfiledExchangeFlagged(created.id)).toBe(false);
+  });
+});
+
+describe("clearing every exchange", () => {
+  test("leaves no flag behind", async () => {
+    const first = await createManagedExchange(newExchange());
+    const second = await createManagedExchange(newExchange());
+    expect(flagUnfiledExchange(first.id)).toBe(true);
+    expect(flagUnfiledExchange(second.id)).toBe(true);
+
+    await clearManagedExchanges();
+
+    expect(unfiledExchangeFlagged(first.id)).toBe(false);
+    expect(unfiledExchangeFlagged(second.id)).toBe(false);
   });
 });

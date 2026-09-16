@@ -33,7 +33,8 @@ import { ManagedExchangeDetail } from "@recurring/ManagedExchangeDetail";
 import {
   FILEABLE_DISCLOSURE_NOTE,
   PARTIAL_DISCLOSURE_LABEL,
-  UNFILEABLE_DISCLOSURE_NOTE,
+  UNBUILT_DISCLOSURE_NOTE,
+  UNREADABLE_DISCLOSURE_NOTE,
   disclosureEntries,
 } from "@recurring/disclosureAccountingModel";
 
@@ -139,6 +140,7 @@ describe("managed exchange detail configuration", () => {
         compromiseResponse: false,
         unfiledDisclosureRead: { kind: "none" },
         unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
         onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
@@ -190,6 +192,7 @@ describe("managed exchange detail configuration", () => {
         compromiseResponse: false,
         unfiledDisclosureRead: { kind: "none" },
         unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
         onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
@@ -254,6 +257,7 @@ describe("managed exchange detail configuration", () => {
         compromiseResponse: false,
         unfiledDisclosureRead: { kind: "none" },
         unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
         onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
@@ -308,6 +312,7 @@ describe("managed exchange detail configuration", () => {
           reinviteFailed,
           unfiledDisclosureRead: { kind: "none" },
           unrecordedRunFlagged: false,
+          onUnrecordedRunFlagShown: () => undefined,
           onFileUnfiledDisclosures: () => Promise.resolve(),
         }),
       );
@@ -368,6 +373,7 @@ describe("managed exchange detail local fields", () => {
         compromiseResponse: false,
         unfiledDisclosureRead: { kind: "none" },
         unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
         onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
@@ -409,6 +415,7 @@ describe("managed exchange detail local fields", () => {
         compromiseResponse: false,
         unfiledDisclosureRead: { kind: "none" },
         unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
         onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
@@ -440,6 +447,7 @@ describe("managed exchange detail local fields", () => {
         compromiseResponse: false,
         unfiledDisclosureRead: { kind: "none" },
         unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
         onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
@@ -500,6 +508,7 @@ describe("managed exchange detail schedule entry", () => {
         compromiseResponse: false,
         unfiledDisclosureRead: { kind: "none" },
         unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
         onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
@@ -957,6 +966,7 @@ describe("managed exchange detail local fields against the real store", () => {
         compromiseResponse: false,
         unfiledDisclosureRead: { kind: "none" },
         unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
         onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
@@ -1017,6 +1027,7 @@ describe("managed exchange detail local fields against the real store", () => {
         compromiseResponse: false,
         unfiledDisclosureRead: { kind: "none" },
         unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
         onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
@@ -1089,6 +1100,7 @@ describe("managed exchange detail run schedule", () => {
         compromiseResponse: false,
         unfiledDisclosureRead: { kind: "none" },
         unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
         onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
@@ -1312,6 +1324,7 @@ describe("managed exchange detail accounting of disclosures", () => {
         compromiseResponse: false,
         unfiledDisclosureRead: { kind: "none" },
         unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
         onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
@@ -1355,6 +1368,7 @@ describe("managed exchange detail accounting of disclosures", () => {
         compromiseResponse: false,
         unfiledDisclosureRead: { kind: "none" },
         unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
         onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
@@ -1425,6 +1439,7 @@ describe("managed exchange detail accounting of disclosures", () => {
           compromiseResponse: false,
           unfiledDisclosureRead: { kind: "none" },
           unrecordedRunFlagged: false,
+          onUnrecordedRunFlagShown: () => undefined,
           onFileUnfiledDisclosures: () => Promise.resolve(),
         }),
       );
@@ -1495,6 +1510,7 @@ describe("managed exchange detail accounting of disclosures", () => {
         compromiseResponse: false,
         unfiledDisclosureRead: { kind: "none" },
         unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
         onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
@@ -1573,6 +1589,7 @@ describe("managed exchange detail accounting of disclosures", () => {
         compromiseResponse: false,
         unfiledDisclosureRead: { kind: "none" },
         unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
         onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
@@ -1631,6 +1648,7 @@ describe("managed exchange detail accounting of disclosures", () => {
         compromiseResponse: false,
         unfiledDisclosureRead: { kind: "none" },
         unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
         onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
@@ -1692,6 +1710,7 @@ describe("managed exchange detail accounting of disclosures", () => {
         compromiseResponse: false,
         unfiledDisclosureRead: { kind: "none" },
         unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
         onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
@@ -1759,6 +1778,7 @@ describe("managed exchange detail accounting of disclosures", () => {
         compromiseResponse: false,
         unfiledDisclosureRead: { kind: "none" },
         unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
         onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
@@ -1804,6 +1824,7 @@ describe("managed exchange detail accounting of disclosures", () => {
         compromiseResponse: false,
         unfiledDisclosureRead: { kind: "none" },
         unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
         onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
@@ -1863,6 +1884,7 @@ describe("managed exchange detail accounting of disclosures", () => {
         compromiseResponse: false,
         unfiledDisclosureRead: { kind: "none" },
         unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
         onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
@@ -1915,6 +1937,7 @@ describe("managed exchange detail accounting of disclosures", () => {
         compromiseResponse: false,
         unfiledDisclosureRead: { kind: "none" },
         unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
         onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
@@ -1955,6 +1978,7 @@ describe("managed exchange detail accounting of disclosures", () => {
         compromiseResponse: false,
         unfiledDisclosureRead: { kind: "none" },
         unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
         onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
@@ -2045,6 +2069,7 @@ describe("recovering an accounting this version cannot read", () => {
         compromiseResponse: false,
         unfiledDisclosureRead: { kind: "none" },
         unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
         onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
@@ -2106,6 +2131,7 @@ describe("recovering an accounting this version cannot read", () => {
           compromiseResponse: false,
           unfiledDisclosureRead: { kind: "none" },
           unrecordedRunFlagged: false,
+          onUnrecordedRunFlagShown: () => undefined,
           onFileUnfiledDisclosures: () => Promise.resolve(),
         }),
       );
@@ -2160,6 +2186,7 @@ describe("recovering an accounting this version cannot read", () => {
         compromiseResponse: false,
         unfiledDisclosureRead: { kind: "none" },
         unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
         onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
@@ -2218,6 +2245,7 @@ describe("recovering an accounting this version cannot read", () => {
         compromiseResponse: false,
         unfiledDisclosureRead: { kind: "none" },
         unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
         onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
@@ -2279,6 +2307,7 @@ describe("recovering an accounting this version cannot read", () => {
           compromiseResponse: false,
           unfiledDisclosureRead: { kind: "none" },
           unrecordedRunFlagged: false,
+          onUnrecordedRunFlagShown: () => undefined,
           onFileUnfiledDisclosures: () => Promise.resolve(),
         }),
       );
@@ -2336,6 +2365,7 @@ describe("recovering an accounting this version cannot read", () => {
         compromiseResponse: false,
         unfiledDisclosureRead: { kind: "none" },
         unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
         onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
@@ -2375,6 +2405,7 @@ describe("recovering an accounting this version cannot read", () => {
         compromiseResponse: false,
         unfiledDisclosureRead: { kind: "none" },
         unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
         onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
@@ -2420,6 +2451,7 @@ describe("recovering an accounting this version cannot read", () => {
         compromiseResponse: false,
         unfiledDisclosureRead: { kind: "none" },
         unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
         onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
@@ -2478,6 +2510,7 @@ describe("an accounting a newer version of the app filed", () => {
       compromiseResponse: false,
       unfiledDisclosureRead: { kind: "none" },
       unrecordedRunFlagged: false,
+      onUnrecordedRunFlagShown: () => undefined,
       onFileUnfiledDisclosures: () => Promise.resolve(),
     });
 
@@ -2595,6 +2628,7 @@ describe("an accounting that could not be read at all", () => {
       compromiseResponse: false,
       unfiledDisclosureRead: { kind: "none" },
       unrecordedRunFlagged: false,
+      onUnrecordedRunFlagShown: () => undefined,
       onFileUnfiledDisclosures: () => Promise.resolve(),
     });
 
@@ -2683,6 +2717,7 @@ describe("an accounting read still in flight", () => {
       compromiseResponse: false,
       unfiledDisclosureRead: { kind: "none" },
       unrecordedRunFlagged: false,
+      onUnrecordedRunFlagShown: () => undefined,
       onFileUnfiledDisclosures: () => Promise.resolve(),
     });
 
@@ -2800,6 +2835,7 @@ describe("the results a scheduled run left for this visit", () => {
         compromiseResponse: false,
         unfiledDisclosureRead: { kind: "none" },
         unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
         onFileUnfiledDisclosures: () => Promise.resolve(),
       }),
     );
@@ -3137,6 +3173,7 @@ describe("a run whose record never reached the accounting", () => {
       accountingRead?: DisclosureAccountingRead;
       unrecordedRunFlagged?: boolean;
       onFileUnfiledDisclosures?: () => Promise<void>;
+      onUnrecordedRunFlagShown?: () => void;
     } = {},
   ) {
     app.render(
@@ -3146,6 +3183,8 @@ describe("a run whose record never reached the accounting", () => {
         accountingRead: overrides.accountingRead ?? { kind: "none" },
         unfiledDisclosureRead,
         unrecordedRunFlagged: overrides.unrecordedRunFlagged ?? false,
+        onUnrecordedRunFlagShown:
+          overrides.onUnrecordedRunFlagShown ?? (() => undefined),
         onFileUnfiledDisclosures:
           overrides.onFileUnfiledDisclosures ?? (() => Promise.resolve()),
         onResetAccounting: () => Promise.resolve(),
@@ -3222,10 +3261,29 @@ describe("a run whose record never reached the accounting", () => {
     });
 
     await expect
-      .element(page.getByText(UNFILEABLE_DISCLOSURE_NOTE))
+      .element(page.getByText(UNBUILT_DISCLOSURE_NOTE))
       .toBeInTheDocument();
     // A control that would do nothing is worse than none: there is no record to
     // add, and the copy says where to record the disclosure instead.
+    expect(
+      page.getByRole("button", { name: /Add .* to the accounting/ }).query(),
+    ).toBeNull();
+  });
+
+  test("a run whose record this build cannot read is not told none is kept", async () => {
+    renderUnfiled({
+      kind: "unfiled",
+      disclosures: [
+        { at: "2026-08-01T09:00:00.000Z", unreadableRecordRetained: true },
+      ],
+    });
+
+    // The record is at rest; only this version's refusal makes it unfilable, so
+    // the copy states that rather than denying the browser holds anything.
+    await expect
+      .element(page.getByText(UNREADABLE_DISCLOSURE_NOTE))
+      .toBeInTheDocument();
+    expect(page.getByText(UNBUILT_DISCLOSURE_NOTE).query()).toBeNull();
     expect(
       page.getByRole("button", { name: /Add .* to the accounting/ }).query(),
     ).toBeNull();
@@ -3276,7 +3334,12 @@ describe("a run whose record never reached the accounting", () => {
   });
 
   test("a run this browser could record nowhere names the run history", async () => {
-    renderUnfiled({ kind: "none" }, { unrecordedRunFlagged: true });
+    const onUnrecordedRunFlagShown = vi.fn();
+
+    renderUnfiled(
+      { kind: "none" },
+      { unrecordedRunFlagged: true, onUnrecordedRunFlagShown },
+    );
 
     await expect
       .element(
@@ -3292,10 +3355,17 @@ describe("a run whose record never reached the accounting", () => {
         }),
       )
       .toBeInTheDocument();
+    // The alert reports that it has been shown, which is what drops the flag:
+    // the fact is kept until an operator has read it.
+    await vi.waitFor(() =>
+      expect(onUnrecordedRunFlagShown).toHaveBeenCalledTimes(1),
+    );
   });
 
-  test("nothing missing says nothing", () => {
-    renderUnfiled({ kind: "none" });
+  test("nothing missing says nothing, and drops no flag", async () => {
+    const onUnrecordedRunFlagShown = vi.fn();
+
+    renderUnfiled({ kind: "none" }, { onUnrecordedRunFlagShown });
 
     expect(
       page.getByText("missing from this accounting", { exact: false }).query(),
@@ -3303,5 +3373,7 @@ describe("a run whose record never reached the accounting", () => {
     expect(
       page.getByText("could not be recorded", { exact: false }).query(),
     ).toBeNull();
+    await flushPendingUpdates();
+    expect(onUnrecordedRunFlagShown).not.toHaveBeenCalled();
   });
 });

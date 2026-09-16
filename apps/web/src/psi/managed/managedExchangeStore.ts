@@ -9,6 +9,10 @@
  * docs/spec/MANAGED_EXCHANGE_RECORD.md).
  */
 
+import {
+  clearUnfiledExchangeFlag,
+  clearUnfiledExchangeFlags,
+} from "../unfiledDisclosureFlag";
 import { unfiledDisclosureKey } from "../unfiledDisclosure";
 
 import {
@@ -1156,8 +1160,11 @@ export async function reviveSpentManagedExchange(
  * history, and leaving it behind would strand cleartext partner and agreement
  * metadata under an id nothing surfaces. The unfiled-run note goes for the same
  * reason -- it retains a run's own record ({@link ../unfiledDisclosure.ts}) --
- * and its localStorage fallback flag is cleared by the surface that deletes the
- * exchange. An operator who must keep the accounting exports it before deleting;
+ * and its localStorage fallback flag goes with it. That flag sits in a separate
+ * store, so it is dropped after the transaction completes rather than in it: a
+ * delete that did not take leaves the flag standing. It is dropped here rather
+ * than by a caller so no delete path can leave an id of an exchange this browser
+ * no longer holds. An operator who must keep the accounting exports it before deleting;
  * the delete confirm says so. The parked results go with it for a stronger
  * reason: they are matched rows, and an id no surface offers would leave them at
  * rest with nothing to remove them but the retention.
@@ -1187,6 +1194,7 @@ export async function deleteManagedExchange(id: string): Promise<void> {
       transaction.onerror = () => reject(transaction.error);
       transaction.onabort = () => reject(transaction.error);
     });
+    clearUnfiledExchangeFlag(id);
   } finally {
     db.close();
   }
@@ -1196,7 +1204,10 @@ export async function deleteManagedExchange(id: string): Promise<void> {
  * Delete every managed exchange record, all local sibling state, every accounting
  * of disclosures with the unfiled-run notes beside them, and every scheduled
  * run's parked results. Used to reset the store; all four stores are cleared in
- * one transaction, so no sibling entry outlives the records it belonged to.
+ * one transaction, so no sibling entry outlives the records it belonged to. The
+ * notes' localStorage fallback flags go too, on the same terms the single delete
+ * clears one: after the transaction, so nothing is dropped for a clear that did
+ * not take.
  */
 export async function clearManagedExchanges(): Promise<void> {
   const db = await openManagedExchangeDatabase();
@@ -1219,6 +1230,7 @@ export async function clearManagedExchanges(): Promise<void> {
       transaction.onerror = () => reject(transaction.error);
       transaction.onabort = () => reject(transaction.error);
     });
+    clearUnfiledExchangeFlags();
   } finally {
     db.close();
   }

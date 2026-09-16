@@ -159,6 +159,11 @@ export interface UnfiledDisclosure {
    * absence is what makes the entry unrecoverable: there is nothing left to
    * append. */
   record?: ExchangeRecord;
+  /** Set where a record for this run IS stored and this build's record format
+   * refuses it. Nothing can be filed either way, which is why it is not a
+   * record; what differs is what the browser holds, so a surface can state the
+   * two without claiming that nothing was kept. */
+  unreadableRecordRetained?: true;
 }
 
 /**
@@ -168,9 +173,11 @@ export interface UnfiledDisclosure {
  *
  * A record this build does not admit leaves the entry standing with no record,
  * which is what the surface states as unrecoverable: the append holds an entry
- * to the same validation, so a record it refuses could not be filed either. The
- * stored bytes are untouched by this reading -- only a write prunes an entry --
- * so a build that admits them again finds them.
+ * to the same validation, so a record it refuses could not be filed either. It
+ * is marked as retained-but-unreadable rather than folded into the run that
+ * built no record, because those bytes are still stored. The stored bytes are
+ * untouched by this reading -- only a write prunes an entry -- so a build that
+ * admits them again finds them.
  */
 export function unfiledDisclosuresOf(
   stored: StoredUnfiledDisclosures,
@@ -181,7 +188,7 @@ export function unfiledDisclosuresOf(
       const record = parseExchangeRecord(entry.record);
       return { at: record.createdAt, record };
     } catch {
-      return { at: entry.at };
+      return { at: entry.at, unreadableRecordRetained: true };
     }
   });
 }

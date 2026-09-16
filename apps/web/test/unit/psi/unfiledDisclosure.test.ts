@@ -132,9 +132,12 @@ describe("the stored note", () => {
 
     // The note survives a record-format move because the parse looks inside no
     // record: what it keeps is that a run disclosed and was never filed, which
-    // no record format can invalidate.
+    // no record format can invalidate. The record is still at rest, so the
+    // reading marks it apart from a run that built none.
     expect(stored.entries).toHaveLength(1);
-    expect(unfiledDisclosuresOf(stored)).toEqual([{ at: NOTED_AT }]);
+    expect(unfiledDisclosuresOf(stored)).toEqual([
+      { at: NOTED_AT, unreadableRecordRetained: true },
+    ]);
   });
 });
 

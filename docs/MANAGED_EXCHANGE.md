@@ -1429,6 +1429,10 @@ exchange's page shows it at your next visit, above the entries:
   entry -- the record was never built -- so no control is offered for it. Record
   that disclosure in your own compliance material; the run history above names
   the run.
+- **Where the run's record cannot be read by this version, the page says that
+  instead.** The record is still stored; this version of the app will not read
+  it, so it cannot be added to the accounting either. That run is recorded in
+  your own compliance material too.
 - **It is deleted with the exchange**, like the accounting itself, and it is not
   in the export/import artifact.
 
@@ -1441,6 +1445,13 @@ database will not open -- and then even the note cannot be written. The page say
 a run of this exchange could not be recorded and points you at the run history;
 that run cannot be added to the accounting afterwards. Free space on the device
 so the next run can file its record.
+
+That last-resort marker has a limit of its own: it holds at most 20 exchanges and
+stays small on purpose, because a browser out of space is what it is written
+under. Past that, or where the browser refuses even that much, nothing is kept
+and no page can tell you the run happened -- so treat a browser that has run out
+of space as the thing to fix, not a state to keep exchanging through. A marker is
+shown once, on the exchange's page, and is cleared once you have seen it.
 
 ### When an app upgrade leaves an accounting unreadable
 

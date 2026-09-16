@@ -1392,10 +1392,11 @@ true statement that a disclosure has no entry.
 **Reading it.** The fact that a run went unfiled outlives any record format, so
 the envelope parse looks inside no retained record. The reading then validates
 each retained record on its own and treats one this build refuses as an entry
-with no record, which is the same thing that state means for the operator: the
-append would refuse it too, so it cannot be filed. The stored bytes are untouched
-by that reading -- only a write prunes an entry -- so a build that admits them
-again finds them.
+with nothing filable, the same thing an entry with no record means for filing:
+the append would refuse it too. The two are marked apart because what the browser
+holds differs -- the refused record is still at rest -- and a surface states them
+apart for that reason. The stored bytes are untouched by that reading -- only a
+write prunes an entry -- so a build that admits them again finds them.
 
 **Filing what a note retained.** The note's records are appended to the
 accounting in ONE transaction over both keys, so an entry cannot be dropped from
@@ -1410,18 +1411,30 @@ export-then-reset path above.
 an entry stands **MUST NOT** present it as a complete account of what the
 exchange disclosed, and **MUST** state the number of runs it is short where it
 states the number of entries it holds. A run whose record cannot be filed **MUST**
-be stated as unrecoverable rather than offered a control that would not file it.
+be stated as unrecoverable rather than offered a control that would not file it,
+and **MUST NOT** be stated as a run no record is kept for where its record is
+still at rest and only this build's refusal makes it unfilable.
 
 **When the note cannot be written.** Storage full, a database that will not
 open, or a note already stored that this build cannot read leaves the note
 unwritable at exactly the moment it is owed. The fact then falls back to
 origin-local `localStorage` under `psilink-unfiled-disclosure`: a version literal
 and a bounded list of exchange ids, holding no instant and no record, so it can
-be written where a record-sized write was refused. The flag is
-cleared when the exchange's page shows it and when the exchange is deleted, so no
-id of an exchange the browser no longer holds is kept. A run named only by that
-flag can never be filed: that is the limit of what is recoverable, and the
-surface states it rather than offering a remedy.
+be written where a record-sized write was refused. The flag is cleared where its
+own alert has rendered -- not on a visit that shows nothing for the exchange,
+which would destroy the fact unseen -- and where the exchange is deleted or every
+exchange is cleared, so no id of an exchange the browser no longer holds is kept.
+A run named only by that flag can never be filed: that is the limit of what is
+recoverable, and the surface states it rather than offering a remedy.
+
+That fallback has a floor of its own. The value names at most **20** exchanges
+and is bounded to **4096** UTF-16 code units, and a flag past either bound, or one
+`localStorage` refuses outright, is not stored: the fact then lands nowhere in
+this browser, and the run reports it to the diagnostic log, which is the only
+place left to state it. A browser out of storage is exactly the condition both
+bounds hold the value small for, and a flag is refused rather than displacing one
+already stored, since an earlier exchange's unrecorded run is no less true than a
+later one's.
 
 ## The parked results of a scheduled run
 
