@@ -133,6 +133,7 @@ export function ManagedExchangeDetail({
   onStopUsingOutputFolder,
   onReinviteToChangeTerms,
   canReinvite,
+  compromiseResponse,
   reinviting,
   reinviteFailed,
 }: {
@@ -182,6 +183,10 @@ export function ManagedExchangeDetail({
   /** Whether this party can mint a re-invite (inviter-only); drives the terms
    * re-invite affordance's copy. */
   canReinvite: boolean;
+  /** Whether the operator has answered a failure gate "something does not add up"
+   * on this visit (see {@link ./ManagedRunSurface.tsx}). The terms re-invite is
+   * withheld under one: it mints a fresh secret on the channel they flagged. */
+  compromiseResponse: boolean;
   /** Whether a re-invite is in flight, so the terms button shows loading. Shared
    * with the run surface's own re-invite state (see {@link ./ManagedRunSurface.tsx}),
    * so an in-flight re-invite displays the same on a healthy exchange as on a failed one. */
@@ -213,6 +218,7 @@ export function ManagedExchangeDetail({
         record={record}
         onReinviteToChangeTerms={onReinviteToChangeTerms}
         canReinvite={canReinvite}
+        compromiseResponse={compromiseResponse}
         reinviting={reinviting}
         reinviteFailed={reinviteFailed}
       />
@@ -286,18 +292,22 @@ function ConfigRowItem({ row }: { row: ConfigRow }) {
  * the `exchangeFile` row). The re-invite affordance refreshes the partnership
  * with a new secret on the SAME terms: the inviter mints a fresh invitation; the
  * acceptor is told the terms cannot change by re-invite, and that different
- * terms mean a new exchange from the partner.
+ * terms mean a new exchange from the partner. It is withheld while a compromise
+ * response stands, which is the one state where minting would put a fresh secret
+ * on a channel the operator has flagged.
  */
 function ConfigurationView({
   record,
   onReinviteToChangeTerms,
   canReinvite,
+  compromiseResponse,
   reinviting,
   reinviteFailed,
 }: {
   record: ManagedExchangeRecord;
   onReinviteToChangeTerms: () => void;
   canReinvite: boolean;
+  compromiseResponse: boolean;
   reinviting: boolean;
   reinviteFailed: boolean;
 }) {
@@ -336,9 +346,17 @@ function ConfigurationView({
             variant="default"
             onClick={onReinviteToChangeTerms}
             loading={reinviting}
+            disabled={compromiseResponse}
           >
             Re-invite with the same terms
           </Button>
+          {compromiseResponse && (
+            <p className={styles.small}>
+              You answered that something does not add up, so no fresh
+              invitation is offered on this channel. Reach your partner on a
+              different trusted channel first.
+            </p>
+          )}
         </>
       ) : (
         <p className={styles.small}>

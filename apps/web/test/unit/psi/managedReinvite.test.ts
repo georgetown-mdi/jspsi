@@ -9,6 +9,7 @@ import { describe, expect, test } from "vitest";
 
 import {
   MANAGED_EXCHANGE_SCHEMA_VERSION,
+  NO_STANDING_CONDITION,
   composeManagedExchangeFile,
 } from "@psi/managed/managedExchangeRecord";
 import {
@@ -65,6 +66,7 @@ function inviterRecord(
     }),
     side: "inviter",
     sharedSecret: STORED_SECRET,
+    standingCondition: NO_STANDING_CONDITION,
     ...overrides,
   };
 }

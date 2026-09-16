@@ -10,17 +10,23 @@ import { createElement } from "react";
 import "@mantine/core/styles.css";
 
 import {
+  NO_STANDING_CONDITION,
+  composeManagedExchangeFile,
+} from "@psi/managed/managedExchangeRecord";
+import {
   clearManagedExchanges,
   createManagedExchange,
   getManagedExchange,
   recordManagedExchangeLastRun,
 } from "@psi/managed/managedExchangeStore";
+import { failedRun, missedRun } from "@psi/managed/managedRunRotate";
+import { COMPROMISE_RESPONSE_TITLE } from "@psi/managed/managedFailureConfirmation";
 import { ManagedRunSurface } from "@recurring/ManagedRunSurface";
-import { composeManagedExchangeFile } from "@psi/managed/managedExchangeRecord";
-import { storageFailureRun } from "@psi/managed/managedRunRotate";
+import { STANDING_CONDITION_CLEAR_LABEL } from "@recurring/managedStandingConditionModel";
 
 import { createAppMount, flushPendingUpdates } from "./renderApp";
 
+import type * as ManagedExchangeStore from "@psi/managed/managedExchangeStore";
 import type { NewManagedExchange } from "@psi/managed/managedExchangeRecord";
 
 // A no-show must still show a standing persist failure and its re-invite recovery,
@@ -32,10 +38,49 @@ import type { NewManagedExchange } from "@psi/managed/managedExchangeRecord";
 
 const linkageTerms = getDefaultLinkageTerms("County Health Dept");
 
-// The stubbed run's script for one test, reset per test: how many runs it has served
-// and whether the first of them is the rotation persist failure rather than a
-// no-show.
-const driver = vi.hoisted(() => ({ runs: 0, persistFailsFirstRun: false }));
+// The stubbed run's script for one test, reset per test: how many runs it has served,
+// whether the first of them is the rotation persist failure rather than a no-show, the
+// lapsed instant to fail every run with instead (the bound the pre-connection check
+// reads, whose own recovery is the re-invite), and whether every run's handshake fails
+// closed with nothing to explain it.
+const driver = vi.hoisted(
+  (): {
+    runs: number;
+    persistFailsFirstRun: boolean;
+    lapsedAt?: string;
+    handshakeFailsClosed: boolean;
+  } => ({
+    runs: 0,
+    persistFailsFirstRun: false,
+    handshakeFailsClosed: false,
+  }),
+);
+
+// Whether the store's clear-and-acknowledge write rejects, so the page's failed-clear
+// alert can be driven on both legs of the gate, and a promise the write waits on, so
+// the gate can be driven while that write is still in flight.
+const clearWrite = vi.hoisted(
+  (): { fails: boolean; held: Promise<void> | undefined } => ({
+    fails: false,
+    held: undefined,
+  }),
+);
+
+// Everything but the clear-and-acknowledge write is the real store: the records these
+// tests read back are the ones the surface and the stubbed run actually wrote.
+vi.mock("@psi/managed/managedExchangeStore", async () => {
+  const actual = await vi.importActual<typeof ManagedExchangeStore>(
+    "@psi/managed/managedExchangeStore",
+  );
+  return {
+    ...actual,
+    clearManagedExchangeStandingCondition: async (id: string) => {
+      if (clearWrite.held !== undefined) await clearWrite.held;
+      if (clearWrite.fails) throw new Error("the write failed");
+      return await actual.clearManagedExchangeStandingCondition(id);
+    },
+  };
+});
 
 vi.mock("@tanstack/react-router", async () =>
   (await import("./moduleMocks")).reactRouterMock(),
@@ -54,12 +99,29 @@ vi.mock("@psi/transport/rendezvous", async () =>
 vi.mock("@psi/managed/managedRunDriver", async () => {
   const { PartnerNoShowError } =
     await import("@psi/transport/waitForConnection");
+  const { ManagedExchangeExpiredError } =
+    await import("@psi/managed/managedExpiry");
   const rotate = await import("@psi/managed/managedRunRotate");
   const store = await import("@psi/managed/managedExchangeStore");
   return {
     runManagedExchangeInBrowser: async (config: { record: { id: string } }) => {
       driver.runs += 1;
       const at = Date.now();
+      // The lapse is read before any connection, so the run stamps no bookkeeping
+      // of its own -- the record already holds the lapse.
+      if (driver.lapsedAt !== undefined)
+        throw new ManagedExchangeExpiredError(driver.lapsedAt);
+      // A handshake that failed closed with nothing on this device to explain it:
+      // the run stamps its own `auth` entry and rethrows, which is the Tier-2
+      // unexplained state the confirmation gate is shown for.
+      if (driver.handshakeFailsClosed) {
+        await store.recordManagedExchangeLastRun(
+          config.record.id,
+          rotate.failedRun(at, "failed", "auth"),
+          at,
+        );
+        throw new Error("the handshake failed closed");
+      }
       if (driver.persistFailsFirstRun && driver.runs === 1) {
         await store.recordManagedExchangeLastRun(
           config.record.id,
@@ -114,7 +176,7 @@ async function runUntilItNoShows(): Promise<string> {
   );
   await recordManagedExchangeLastRun(
     created.id,
-    storageFailureRun(Date.now() - 60_000),
+    failedRun(Date.now() - 60_000, "failed", "storage"),
     Date.now() - 60_000,
   );
   app.render(createElement(ManagedRunSurface, { id: created.id }));
@@ -127,6 +189,10 @@ async function runUntilItNoShows(): Promise<string> {
 beforeEach(async () => {
   driver.runs = 0;
   driver.persistFailsFirstRun = false;
+  driver.lapsedAt = undefined;
+  driver.handshakeFailsClosed = false;
+  clearWrite.fails = false;
+  clearWrite.held = undefined;
   await clearManagedExchanges();
 });
 
@@ -209,5 +275,548 @@ describe("a live no-show is read against the evidence standing at launch", () =>
     const stored = await getManagedExchange(created.id);
     expect(stored?.lastRun?.outcome).toBe("missed");
     expect(stored?.lastRun?.failureKind).toBeUndefined();
+  });
+});
+
+describe("a standing condition at the next visit", () => {
+  test("survives the no-show stamp and is cleared through the gate, not by the runs after it", async () => {
+    // The next visit: no live run, only what the store holds. The handshake
+    // failure the first run recorded has been replaced by a no-show stamp, which
+    // records no failure kind at all -- so the condition beside it is the whole of
+    // what asks the operator for the confirmation.
+    const created = await createManagedExchange(
+      newExchange({ inputFileHandle: await inputHandle() }),
+    );
+    const failedAt = Date.now() - 120_000;
+    await recordManagedExchangeLastRun(
+      created.id,
+      failedRun(failedAt, "failed", "auth"),
+      failedAt,
+    );
+    const missedAt = Date.now() - 60_000;
+    await recordManagedExchangeLastRun(
+      created.id,
+      missedRun(missedAt),
+      missedAt,
+    );
+    expect((await getManagedExchange(created.id))?.lastRun?.outcome).toBe(
+      "missed",
+    );
+
+    app.render(createElement(ManagedRunSurface, { id: created.id }));
+    await expect
+      .element(page.getByText("A run failed and has not been explained"))
+      .toBeInTheDocument();
+
+    const confirmed = page.getByRole("button", {
+      name: "Partner confirmed their own failure",
+    });
+    await expect.element(confirmed).toBeInTheDocument();
+    await confirmed.click();
+
+    await vi.waitFor(async () => {
+      expect((await getManagedExchange(created.id))?.standingCondition).toEqual(
+        NO_STANDING_CONDITION,
+      );
+    });
+    // The re-invite stays offered: settling the condition is not the same act as
+    // re-establishing the secret it was raised over.
+    await expect
+      .element(page.getByRole("button", { name: "Create a fresh invitation" }))
+      .toBeInTheDocument();
+  });
+});
+
+describe("a cleared standing condition beside this visit's own failure", () => {
+  test("keeps its re-invite after a run in the same visit no-shows", async () => {
+    // Clearing the condition settles what an earlier run raised; it does not
+    // re-establish the secret, so the re-invite it offers stands whatever this
+    // visit's run then does. The storage condition is raised by a run two stamps
+    // back, and the no-show stamp over it is the state a page reads.
+    const created = await createManagedExchange(
+      newExchange({ inputFileHandle: await inputHandle() }),
+    );
+    const failedAt = Date.now() - 120_000;
+    await recordManagedExchangeLastRun(
+      created.id,
+      failedRun(failedAt, "failed", "storage"),
+      failedAt,
+    );
+    const missedAt = Date.now() - 60_000;
+    await recordManagedExchangeLastRun(
+      created.id,
+      missedRun(missedAt),
+      missedAt,
+    );
+
+    app.render(createElement(ManagedRunSurface, { id: created.id }));
+    const clear = page.getByRole("button", {
+      name: STANDING_CONDITION_CLEAR_LABEL,
+    });
+    await expect.element(clear).toBeInTheDocument();
+    await clear.click();
+    await vi.waitFor(async () => {
+      expect((await getManagedExchange(created.id))?.standingCondition).toEqual(
+        NO_STANDING_CONDITION,
+      );
+    });
+    // The section has settled: its acknowledge control is spent and gone, and the
+    // re-invite below it is what the section now holds on its own.
+    await expect.element(clear).not.toBeInTheDocument();
+    await expect
+      .element(page.getByRole("button", { name: "Create a fresh invitation" }))
+      .toBeInTheDocument();
+
+    const runButton = page.getByRole("button", { name: "Run exchange" });
+    await expect.element(runButton).toBeEnabled();
+    await runButton.click();
+    await expect
+      .element(page.getByText("Your partner did not arrive"))
+      .toBeInTheDocument();
+    await flushPendingUpdates();
+
+    await expect
+      .element(page.getByRole("button", { name: "Create a fresh invitation" }))
+      .toBeInTheDocument();
+    // The live state really is the benign no-show, whose own recovery is nothing
+    // at all: without this the assertion above would pass against a failure that
+    // offers the re-invite itself.
+    expect(app.container.textContent).toContain("not a fault on this device");
+  });
+});
+
+describe("a compromise response the operator has reached", () => {
+  test("leaves the live failure no re-invite to offer beside it", async () => {
+    // The standing gate is answered "something does not add up" while the live
+    // failure is a lapsed bound, whose own recovery is a fresh invitation. The
+    // compromise response says not to send one on this channel, so the page must
+    // not hold a button that does exactly that.
+    driver.lapsedAt = "2026-07-01T00:00:00.000Z";
+    const created = await createManagedExchange(
+      newExchange({ inputFileHandle: await inputHandle() }),
+    );
+    const failedAt = Date.now() - 120_000;
+    await recordManagedExchangeLastRun(
+      created.id,
+      failedRun(failedAt, "failed", "auth"),
+      failedAt,
+    );
+
+    app.render(createElement(ManagedRunSurface, { id: created.id }));
+    const runButton = page.getByRole("button", { name: "Run exchange" });
+    await expect.element(runButton).toBeEnabled();
+    await runButton.click();
+    await expect
+      .element(page.getByText("This exchange's stored secret has lapsed"))
+      .toBeInTheDocument();
+    await flushPendingUpdates();
+    // The live failure really is offering the re-invite before the gate is
+    // answered: without this the assertion below would pass against a state that
+    // never had a button to withdraw.
+    expect(
+      page
+        .getByRole("button", { name: "Create a fresh invitation" })
+        .elements(),
+    ).toHaveLength(1);
+
+    await page
+      .getByRole("button", { name: "Something does not add up" })
+      .click();
+    await expect
+      .element(page.getByText(COMPROMISE_RESPONSE_TITLE))
+      .toBeInTheDocument();
+    await flushPendingUpdates();
+
+    expect(
+      page
+        .getByRole("button", { name: "Create a fresh invitation" })
+        .elements(),
+    ).toHaveLength(0);
+    // The lapse is still stated: the compromise response withdraws the offer, not
+    // the account of what happened.
+    expect(app.container.textContent).toContain(
+      "This exchange's stored secret has lapsed",
+    );
+  });
+
+  test("holds the recovery region when a later run fails the same way", async () => {
+    // The standing gate is answered "something does not add up", and the next run
+    // fails closed the same way the condition was raised over. The section stands
+    // down for a live failure of its own tier, so the response has to hold the
+    // region from the live failure's place: the question the operator answered is
+    // not put again, and nothing there can mint on the channel they flagged.
+    const created = await createManagedExchange(
+      newExchange({ inputFileHandle: await inputHandle() }),
+    );
+    const failedAt = Date.now() - 120_000;
+    await recordManagedExchangeLastRun(
+      created.id,
+      failedRun(failedAt, "failed", "auth"),
+      failedAt,
+    );
+    const secretBefore = (await getManagedExchange(created.id))?.sharedSecret;
+
+    app.render(createElement(ManagedRunSurface, { id: created.id }));
+    const doesNotAddUp = page.getByRole("button", {
+      name: "Something does not add up",
+    });
+    await expect.element(doesNotAddUp).toBeInTheDocument();
+    await doesNotAddUp.click();
+    await expect
+      .element(page.getByText(COMPROMISE_RESPONSE_TITLE))
+      .toBeInTheDocument();
+
+    driver.handshakeFailsClosed = true;
+    const runButton = page.getByRole("button", { name: "Run exchange" });
+    await expect.element(runButton).toBeEnabled();
+    await runButton.click();
+    await expect
+      .element(
+        page.getByText(
+          "This run failed and needs you to check with your partner",
+        ),
+      )
+      .toBeInTheDocument();
+    await flushPendingUpdates();
+
+    expect(page.getByText(COMPROMISE_RESPONSE_TITLE).elements()).toHaveLength(
+      1,
+    );
+    expect(
+      page
+        .getByRole("button", { name: "Partner confirmed their own failure" })
+        .elements(),
+    ).toHaveLength(0);
+    expect(doesNotAddUp.elements()).toHaveLength(0);
+    expect(
+      page
+        .getByRole("button", { name: "Create a fresh invitation" })
+        .elements(),
+    ).toHaveLength(0);
+
+    // Nothing rotated and nothing settled: the stored secret is the one the
+    // flagged channel was using, and the condition still stands.
+    const stored = await getManagedExchange(created.id);
+    expect(stored?.sharedSecret).toBe(secretBefore);
+    expect(stored?.standingCondition).not.toEqual(NO_STANDING_CONDITION);
+  });
+
+  test("holds a live gate's response over a later run in the same visit", async () => {
+    // The live failure's own gate is answered "something does not add up", and the
+    // operator runs again into the same failed-closed handshake. The answer is one
+    // per visit, whichever gate asked it: the question is not put again, and nothing
+    // in the recovery region can mint on the channel the operator flagged.
+    driver.handshakeFailsClosed = true;
+    const created = await createManagedExchange(
+      newExchange({ inputFileHandle: await inputHandle() }),
+    );
+    const secretBefore = (await getManagedExchange(created.id))?.sharedSecret;
+
+    app.render(createElement(ManagedRunSurface, { id: created.id }));
+    const runButton = page.getByRole("button", { name: "Run exchange" });
+    await expect.element(runButton).toBeEnabled();
+    await runButton.click();
+    await expect
+      .element(
+        page.getByText(
+          "This run failed and needs you to check with your partner",
+        ),
+      )
+      .toBeInTheDocument();
+    await flushPendingUpdates();
+
+    const doesNotAddUp = page.getByRole("button", {
+      name: "Something does not add up",
+    });
+    await expect.element(doesNotAddUp).toBeInTheDocument();
+    await doesNotAddUp.click();
+    await expect
+      .element(page.getByText(COMPROMISE_RESPONSE_TITLE))
+      .toBeInTheDocument();
+
+    await expect.element(runButton).toBeEnabled();
+    await runButton.click();
+    await vi.waitFor(() => {
+      expect(driver.runs).toBe(2);
+    });
+    // The run control is disabled for the length of a run, so its return to
+    // enabled is the second run's classification having rendered.
+    await expect.element(runButton).toBeEnabled();
+    await flushPendingUpdates();
+
+    expect(page.getByText(COMPROMISE_RESPONSE_TITLE).elements()).toHaveLength(
+      1,
+    );
+    expect(
+      page
+        .getByRole("button", { name: "Partner confirmed their own failure" })
+        .elements(),
+    ).toHaveLength(0);
+    expect(doesNotAddUp.elements()).toHaveLength(0);
+    expect(
+      page
+        .getByRole("button", { name: "Create a fresh invitation" })
+        .elements(),
+    ).toHaveLength(0);
+
+    // Nothing rotated and nothing settled: the stored secret is the one the
+    // flagged channel was using, and the condition the failures raised still stands.
+    const stored = await getManagedExchange(created.id);
+    expect(stored?.sharedSecret).toBe(secretBefore);
+    expect(stored?.standingCondition).not.toEqual(NO_STANDING_CONDITION);
+  });
+
+  test("withholds the configuration section's re-invite and says why", async () => {
+    // The response tells the operator not to re-invite on this channel. The
+    // configuration section far below it mints on exactly that channel with the same
+    // terms, so its control is withheld too, with the reason where the operator
+    // reads it rather than a button that quietly does nothing.
+    const created = await createManagedExchange(
+      newExchange({ inputFileHandle: await inputHandle() }),
+    );
+    const failedAt = Date.now() - 120_000;
+    await recordManagedExchangeLastRun(
+      created.id,
+      failedRun(failedAt, "failed", "auth"),
+      failedAt,
+    );
+    const secretBefore = (await getManagedExchange(created.id))?.sharedSecret;
+
+    app.render(createElement(ManagedRunSurface, { id: created.id }));
+    const reinviteOnTerms = page.getByRole("button", {
+      name: "Re-invite with the same terms",
+    });
+    // The control really is live before the gate is answered: without this the
+    // assertion below would pass against a page that never offered it.
+    await expect.element(reinviteOnTerms).toBeEnabled();
+
+    await page
+      .getByRole("button", { name: "Something does not add up" })
+      .click();
+    await expect
+      .element(page.getByText(COMPROMISE_RESPONSE_TITLE))
+      .toBeInTheDocument();
+    await flushPendingUpdates();
+
+    await expect.element(reinviteOnTerms).toBeDisabled();
+    expect(app.container.textContent).toContain(
+      "no fresh invitation is offered on this channel",
+    );
+    const stored = await getManagedExchange(created.id);
+    expect(stored?.sharedSecret).toBe(secretBefore);
+  });
+
+  test("leaves a settled condition no re-invite to offer under it", async () => {
+    // The other way round: the condition was cleared earlier in this visit, so the
+    // section below holds the re-invite on its own, and this visit's run then lands
+    // on the unexplained state whose gate the operator answers as a compromise.
+    const created = await createManagedExchange(
+      newExchange({ inputFileHandle: await inputHandle() }),
+    );
+    const failedAt = Date.now() - 120_000;
+    await recordManagedExchangeLastRun(
+      created.id,
+      failedRun(failedAt, "failed", "storage"),
+      failedAt,
+    );
+
+    app.render(createElement(ManagedRunSurface, { id: created.id }));
+    const clear = page.getByRole("button", {
+      name: STANDING_CONDITION_CLEAR_LABEL,
+    });
+    await expect.element(clear).toBeInTheDocument();
+    await clear.click();
+    await expect
+      .element(page.getByRole("button", { name: "Create a fresh invitation" }))
+      .toBeInTheDocument();
+
+    driver.handshakeFailsClosed = true;
+    const runButton = page.getByRole("button", { name: "Run exchange" });
+    await expect.element(runButton).toBeEnabled();
+    await runButton.click();
+    await expect
+      .element(
+        page.getByText(
+          "This run failed and needs you to check with your partner",
+        ),
+      )
+      .toBeInTheDocument();
+    await flushPendingUpdates();
+
+    await page
+      .getByRole("button", { name: "Something does not add up" })
+      .click();
+    await expect
+      .element(page.getByText(COMPROMISE_RESPONSE_TITLE))
+      .toBeInTheDocument();
+    await flushPendingUpdates();
+
+    expect(
+      page
+        .getByRole("button", { name: "Create a fresh invitation" })
+        .elements(),
+    ).toHaveLength(0);
+  });
+});
+
+describe("a clear-and-acknowledge write still in flight", () => {
+  test("holds both legs of the gate until it resolves", async () => {
+    // The two outcomes are one answer over the same evidence. The gate stays on
+    // screen while the confirming leg's write runs, so a second click on the other
+    // leg would raise the compromise response over a condition that is about to be
+    // cleared -- and the page would then show neither.
+    let release: () => void = () => undefined;
+    clearWrite.held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const created = await createManagedExchange(
+      newExchange({ inputFileHandle: await inputHandle() }),
+    );
+    const failedAt = Date.now() - 120_000;
+    await recordManagedExchangeLastRun(
+      created.id,
+      failedRun(failedAt, "failed", "auth"),
+      failedAt,
+    );
+
+    app.render(createElement(ManagedRunSurface, { id: created.id }));
+    const confirmed = page.getByRole("button", {
+      name: "Partner confirmed their own failure",
+    });
+    const doesNotAddUp = page.getByRole("button", {
+      name: "Something does not add up",
+    });
+    await expect.element(confirmed).toBeEnabled();
+    await expect.element(doesNotAddUp).toBeEnabled();
+    await confirmed.click();
+
+    await expect.element(confirmed).toBeDisabled();
+    await expect.element(doesNotAddUp).toBeDisabled();
+
+    release();
+    await vi.waitFor(async () => {
+      expect((await getManagedExchange(created.id))?.standingCondition).toEqual(
+        NO_STANDING_CONDITION,
+      );
+    });
+    await flushPendingUpdates();
+    // The answer the operator gave is the one that stands.
+    expect(page.getByText(COMPROMISE_RESPONSE_TITLE).elements()).toHaveLength(
+      0,
+    );
+  });
+
+  test("holds the short clear control on the acknowledge tier", async () => {
+    // The same hazard on the tier whose clearance is one button: the write is the
+    // same, and a second click must not reach it.
+    let release: () => void = () => undefined;
+    clearWrite.held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const created = await createManagedExchange(
+      newExchange({ inputFileHandle: await inputHandle() }),
+    );
+    const failedAt = Date.now() - 120_000;
+    await recordManagedExchangeLastRun(
+      created.id,
+      failedRun(failedAt, "failed", "storage"),
+      failedAt,
+    );
+
+    app.render(createElement(ManagedRunSurface, { id: created.id }));
+    const clear = page.getByRole("button", {
+      name: STANDING_CONDITION_CLEAR_LABEL,
+    });
+    await expect.element(clear).toBeEnabled();
+    await clear.click();
+
+    await expect.element(clear).toBeDisabled();
+
+    release();
+    await vi.waitFor(async () => {
+      expect((await getManagedExchange(created.id))?.standingCondition).toEqual(
+        NO_STANDING_CONDITION,
+      );
+    });
+  });
+});
+
+describe("a clear-and-acknowledge write that rejects", () => {
+  test("states what happened on the gate's confirming leg, not only the short control", async () => {
+    // The confirming option takes the same store write the acknowledge control does.
+    // When it rejects, the condition stays raised -- so the operator has to be told,
+    // or the click reads as having settled something it did not.
+    clearWrite.fails = true;
+    const created = await createManagedExchange(
+      newExchange({ inputFileHandle: await inputHandle() }),
+    );
+    const failedAt = Date.now() - 120_000;
+    await recordManagedExchangeLastRun(
+      created.id,
+      failedRun(failedAt, "failed", "auth"),
+      failedAt,
+    );
+
+    app.render(createElement(ManagedRunSurface, { id: created.id }));
+    const confirmed = page.getByRole("button", {
+      name: "Partner confirmed their own failure",
+    });
+    await expect.element(confirmed).toBeInTheDocument();
+    await confirmed.click();
+
+    await expect
+      .element(page.getByText("Could not clear this"))
+      .toBeInTheDocument();
+    expect(app.container.textContent).toContain("this still stands");
+    // The condition really is still raised, and the gate is still there to retry on.
+    expect(
+      (await getManagedExchange(created.id))?.standingCondition,
+    ).not.toEqual(NO_STANDING_CONDITION);
+    await expect.element(confirmed).toBeInTheDocument();
+  });
+});
+
+describe("a standing condition beside a live failure of another tier", () => {
+  test("leaves the re-invite to the live failure rather than offering a second", async () => {
+    // A lapsed bound over a standing persist failure: two states, one recovery
+    // between them -- a single fresh invitation minted from this record. The
+    // condition keeps its own words and its clearance; the offer is the live
+    // failure's, so the operator has one button to press rather than two
+    // identical ones whose failed mint would alert twice.
+    driver.lapsedAt = "2026-07-01T00:00:00.000Z";
+    const created = await createManagedExchange(
+      newExchange({ inputFileHandle: await inputHandle() }),
+    );
+    const failedAt = Date.now() - 60_000;
+    await recordManagedExchangeLastRun(
+      created.id,
+      failedRun(failedAt, "failed", "storage"),
+      failedAt,
+    );
+
+    app.render(createElement(ManagedRunSurface, { id: created.id }));
+    const runButton = page.getByRole("button", { name: "Run exchange" });
+    await expect.element(runButton).toBeEnabled();
+    await runButton.click();
+    await expect
+      .element(page.getByText("This exchange's stored secret has lapsed"))
+      .toBeInTheDocument();
+    await flushPendingUpdates();
+
+    await expect
+      .element(
+        page.getByText("A run could not save this exchange's new secret"),
+      )
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByRole("button", { name: STANDING_CONDITION_CLEAR_LABEL }),
+      )
+      .toBeInTheDocument();
+    expect(
+      page
+        .getByRole("button", { name: "Create a fresh invitation" })
+        .elements(),
+    ).toHaveLength(1);
   });
 });

@@ -69,6 +69,8 @@ import type {
   ManagedExchangeRecord,
   ManagedExchangeSchedule,
   ManagedExchangeScheduleAdvance,
+  ManagedStandingCondition,
+  ManagedStandingConditionKind,
 } from "./managedExchangeRecord";
 import type {
   ManagedScheduleWindow,
@@ -338,16 +340,22 @@ async function occupyDueWindow(
     ),
     fromNextWindow: planned.nextWindow,
     fromConsecutiveMisses: planned.consecutiveMisses,
+    ...(occupancy.standingCondition !== undefined
+      ? { standingCondition: occupancy.standingCondition }
+      : {}),
   });
   return { ...entry };
 }
 
-/** What occupying one window produced: how many attempts it took and the
- * window's disposition, absent when the window ended before anything decided
- * it. */
+/** What occupying one window produced: how many attempts it took, the window's
+ * disposition (absent when the window ended before anything decided it), and the
+ * standing condition its attempts raised. */
 interface WindowOccupancy {
   attempts: number;
   disposition?: ManagedScheduleWindowDisposition;
+  /** The first standing condition an attempt raised, carried into the window's
+   * own write; absent when none did. */
+  standingCondition?: ManagedStandingCondition;
 }
 
 /**
@@ -359,6 +367,14 @@ interface WindowOccupancy {
  * and no later than the window's close, which ends the occupancy anyway.
  * The window's disposition folds every attempt rather than reading the last one
  * (see {@link foldWindowDisposition}).
+ *
+ * The first standing condition an attempt raises is carried out with the
+ * disposition, for the window's own write to persist. Each attempt's run already
+ * stamps it best-effort, so this is a second chance rather than the only one:
+ * the case it covers is a store that refused the run's stamp -- the rotation
+ * write and the bookkeeping write alike -- and then answered the window's write,
+ * which would otherwise advance the plan past a window whose failure left no
+ * evidence at all.
  */
 async function occupyWindow(
   record: ManagedExchangeRecord,
@@ -375,6 +391,7 @@ async function occupyWindow(
   let partnerWasAbsent = false;
   let contactWasProven = false;
   let disposition: ManagedScheduleWindowDisposition | undefined;
+  let standingCondition: ManagedStandingCondition | undefined;
   for (;;) {
     // A runtime going away mid-window leaves the window UNRESOLVED: it is still
     // open, and recording a miss for one this runner simply stopped occupying
@@ -400,6 +417,11 @@ async function occupyWindow(
       const verdict = managedScheduleWindowVerdict(error, dataExchangeStarted);
       if (verdict.disposition === "missed") partnerWasAbsent = true;
       if (verdict.provesContact) contactWasProven = true;
+      if (verdict.standing !== undefined && standingCondition === undefined)
+        standingCondition = {
+          since: new Date(seams.now()).toISOString(),
+          kind: verdict.standing,
+        };
       if (!verdict.retryable)
         return {
           attempts,
@@ -408,6 +430,7 @@ async function occupyWindow(
             partnerWasAbsent,
             contactWasProven,
           ),
+          ...(standingCondition !== undefined ? { standingCondition } : {}),
         };
       disposition = verdict.disposition;
     }
@@ -437,6 +460,7 @@ async function occupyWindow(
           ),
         }
       : {}),
+    ...(standingCondition !== undefined ? { standingCondition } : {}),
   };
 }
 
@@ -479,6 +503,11 @@ interface ManagedScheduleWindowVerdict {
    * which is what keeps an earlier attempt's absence from folding the window to
    * `"missed"` (see {@link attemptProvesContact}). */
   provesContact: boolean;
+  /** The standing condition this failure raises, absent for a failure that
+   * raises none. The attempt's own run stamps it too, best-effort; the window
+   * carries it so a store that refused that stamp and then recovered still
+   * leaves the evidence behind (see {@link occupyWindow}). */
+  standing?: ManagedStandingConditionKind;
 }
 
 /**
@@ -537,7 +566,8 @@ function attemptProvesContact(
  * would disclose a second time.
  *
  * The verdict also states whether the failure proves the partner was met, for
- * the window's fold to read (see {@link attemptProvesContact}).
+ * the window's fold to read (see {@link attemptProvesContact}), and the standing
+ * condition it raises, for the window's bookkeeping to carry.
  */
 function managedScheduleWindowVerdict(
   error: unknown,
@@ -553,15 +583,30 @@ function managedScheduleWindowVerdict(
   const provesContact = attemptProvesContact(error, dataExchangeStarted);
   if (error instanceof PartnerNoShowError)
     return { disposition: "missed", retryable, provesContact };
+  if (error instanceof RotationPersistError)
+    return {
+      disposition: "failed",
+      retryable: false,
+      provesContact,
+      standing: "storage",
+    };
+  if (error instanceof ConnectionError && error.kind === "security")
+    return {
+      disposition: "failed",
+      retryable: false,
+      provesContact,
+      // Gated on the phase boundary exactly as the attempt's own stamp is
+      // ({@link ./managedRun.ts}, `rerunFailureLastRun`), so the window and the
+      // run cannot disagree about whether the handshake is what failed.
+      ...(dataExchangeStarted ? {} : { standing: "auth" as const }),
+    };
   if (
     error instanceof ManagedExchangeExpiredError ||
     error instanceof ManagedExchangeSpentError ||
     error instanceof ManagedExchangeCustodyUnreadableError ||
     error instanceof ManagedInputError ||
     error instanceof LinkageTermsUnsatisfiableError ||
-    error instanceof OutboundDisclosureRefusalError ||
-    error instanceof RotationPersistError ||
-    (error instanceof ConnectionError && error.kind === "security")
+    error instanceof OutboundDisclosureRefusalError
   )
     return { disposition: "failed", retryable: false, provesContact };
   return { disposition: "failed", retryable, provesContact };

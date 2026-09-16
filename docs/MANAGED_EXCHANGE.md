@@ -1080,19 +1080,63 @@ launch read itself fails, or finds no record to read, the run falls back to
 the record the run surface already holds, for that run alone.
 
 A no-show's own bookkeeping entry replaces the previous one and records no
-failure kind, so a one-sided persist failure is no longer in the record for
-anything reading it afterwards: the recurring-exchanges list line, the run
-history, and a later run all name the no-show. A recorded failed handshake goes
-the same way: a record whose last run was a no-show is treated as that no-show
-rather than as the unexplained state, so the next visit does not put the
-out-of-band confirmation in front of the operator. The other two reasons live
-outside that entry -- a lapsed bound is the record's own `expires`, and a
-restore since the last success its import marker. The lapsed bound reads
-through everywhere; the import marker is read by the run that meets the
-no-show, and not by the recurring-exchanges list line or a later visit's launch
-state, whose reading stops at the recorded no-show. An operator whose last run
-could not save its rotated secret is therefore told so on the run that meets
-the no-show.
+failure kind, so the entry that held a one-sided persist failure or a
+failed-closed handshake is gone from the record the moment a no-show is stamped.
+The evidence is not: both are also raised as a **standing condition** beside that
+entry, which no run stamp reaches (see [A standing condition outlives the run
+that raised it](#a-standing-condition-outlives-the-run-that-raised-it)), so the
+recurring-exchanges list line, the exchange's own page, and a later run all still
+read it. The other two reasons live outside the entry as well -- a lapsed bound
+is the record's own `expires`, and a restore since the last success its import
+marker, which a standing failed-closed handshake is read against exactly as a
+freshly recorded one is.
+
+### A standing condition outlives the run that raised it
+
+Two failures have a remedy the operator must carry out with their partner rather
+than on this device: a rotation this device could not save, which may have left
+the two parties on different secrets, and a handshake that failed closed with
+nothing to explain it. Both are recorded as a run's `failureKind`, and a run's
+bookkeeping holds one run -- so the next stamp, a benign no-show above all,
+replaces it. Left there, the confirmation the tiering below reserves for exactly
+this class would be asked for once and never again: every visit after the first
+no-show would read "your partner did not arrive" and stop.
+
+So the evidence is **raised as a standing condition** as well, beside the run
+bookkeeping, where no later run's stamp reaches it. It carries the instant of the
+run that raised it and which of the two failures it was, and nothing else. The
+first one stands: a later failure of the same class leaves it as it is, because
+answering it is a single act over everything that stood before -- and the message
+the operator forwards names that later failure beside the first, so the partner
+checks their own logs for both occasions.
+
+Three things clear a standing condition, and nothing else does:
+
+- **The operator's explicit clear-and-acknowledge**, on the exchange's own page.
+  For a handshake failure nothing explains, that control is the two-outcome gate
+  below: a partner who confirms their identity and a real failure on their side
+  clears the condition, with the re-invite still offered as the remedy, and a
+  reply that does not add up clears nothing and routes to the compromise
+  response. Where the record already holds the explanation -- a persist failure,
+  or a restore since the last success -- there is no attack checklist to pass:
+  the page states the condition and its re-invite recovery, and a short
+  acknowledgement clears it.
+- **A re-invite**, which drops it with the run bookkeeping in the same rotation
+  that installs the fresh secret. It is the recovery the condition asked for.
+- **Deleting the exchange**, which takes it along with the record.
+
+A no-show never clears one, and neither does a successful run on its own. The
+success is tempting to read as the all-clear, and it is not one: it rules out
+neither a third party who tried and moved on nor an accidental self-fork, which
+are exactly the two readings the confirmation exists to separate. The operator
+settles it, or a re-invite does.
+
+One window needs the condition raised twice over. A store failure can span a
+run's rotation write and its own best-effort bookkeeping write, and then recover
+in time to answer the schedule's advance -- leaving the plan moved past a window
+that neither ran nor recorded anything at all. So the window's own write carries
+the condition its run raised, as a second chance at the evidence the run could
+not persist.
 
 A pattern of missed windows is a coordination problem, resolved out-of-band
 where the schedule itself was agreed -- reported, not auto-paused (see [Retry
@@ -1167,6 +1211,13 @@ The partner's reply feeds a **two-outcome gate**, not a free-form judgment:
 framing is the CLI's posture: the tool reports the failure and structures the
 confirmation, but the operator, not the tool, makes the desync-versus-attack
 call out-of-band.
+
+Once given, a compromise response stands for the rest of the visit, wherever it
+was given: a later run that fails the same way does not put the question again,
+and no control on the exchange's page offers a fresh invitation while it stands
+-- neither the failure's own recovery nor the configuration section's re-invite
+on the same terms -- since minting one on that channel is the act the response
+names as the wrong one.
 
 ### Expiry is its own state, never routed through attack framing
 

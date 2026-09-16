@@ -17,9 +17,9 @@
  * - `key` is the `.psilink.key` pair -- `sharedSecret` and, when a bound is in
  *   force, `expires` -- so the secret half maps onto a valid key file;
  * - `local` holds the browser-only fields the two CLI artifacts do not
- *   (`label`, `side`, `schedule`, `lastRun`, `tokenMaxAgeDays`, and a marker per
- *   platform handle the source held), cleanly separable and ignorable by the CLI
- *   toolchain.
+ *   (`label`, `side`, `schedule`, `lastRun`, `standingCondition`,
+ *   `tokenMaxAgeDays`, and a marker per platform handle the source held), cleanly
+ *   separable and ignorable by the CLI toolchain.
  *
  * Both platform handles are absent by design (device- and profile-local platform
  * objects with no file serialization), so the input file is re-acquired by
@@ -56,7 +56,9 @@ import {
   keyFileFieldsSchema,
   lastRunSchema,
   parseManagedExchangeRecord,
+  raisedStandingCondition,
   scheduleSchema,
+  standingConditionSchema,
   tokenMaxAgeDaysSchema,
 } from "./managedExchangeRecord";
 
@@ -65,6 +67,7 @@ import type {
   ManagedExchangeRecord,
   ManagedExchangeSchedule,
   ManagedExchangeSide,
+  ManagedStandingCondition,
 } from "./managedExchangeRecord";
 import type { ExchangeSpec } from "@psilink/core";
 import type { ZodType } from "zod";
@@ -100,6 +103,11 @@ interface ManagedExchangeArtifactLocal {
   schedule?: ManagedExchangeSchedule;
   /** The run bookkeeping retained from the imported record. */
   lastRun?: ManagedExchangeLastRun;
+  /** The standing condition the source record held, unanswered; omitted where
+   * none stood. It travels because an export that dropped it would be a fourth
+   * way to clear one, and only the operator's acknowledgement, a re-invite, and
+   * a delete may. */
+  standingCondition?: ManagedStandingCondition;
   /** The max-token-age policy, when the operator opted in. */
   tokenMaxAgeDays?: number;
   /** Whether the source record held a pointer to the operator's input file.
@@ -178,6 +186,7 @@ export function keyFileFieldsFromRecord(
 export function encodeManagedExchangeArtifact(
   record: ManagedExchangeRecord,
 ): ManagedExchangeArtifact {
+  const standing = raisedStandingCondition(record);
   return {
     artifactVersion: MANAGED_EXCHANGE_ARTIFACT_VERSION,
     exchangeDocument: serializeExchangeDocument(record.exchangeFile),
@@ -187,6 +196,7 @@ export function encodeManagedExchangeArtifact(
       side: record.side,
       ...(record.schedule !== undefined ? { schedule: record.schedule } : {}),
       ...(record.lastRun !== undefined ? { lastRun: record.lastRun } : {}),
+      ...(standing !== undefined ? { standingCondition: standing } : {}),
       ...(record.tokenMaxAgeDays !== undefined
         ? { tokenMaxAgeDays: record.tokenMaxAgeDays }
         : {}),
@@ -210,7 +220,8 @@ export function serializeManagedExchangeArtifact(
 }
 
 /** The local block's validator: reader-rejects-unknown (strict), reusing the
- * canonical `schedule`, `lastRun`, and `tokenMaxAgeDays` schemas from the record
+ * canonical `schedule`, `lastRun`, `standingCondition`, and `tokenMaxAgeDays`
+ * schemas from the record
  * module so the artifact cannot be laxer than the record it reconstructs -- a
  * tampered artifact with `intervalDays: 0` is rejected here exactly as a stored
  * record would be, not merely at the reconstructed record's later re-validation. */
@@ -220,6 +231,7 @@ const artifactLocalSchema: ZodType<ManagedExchangeArtifactLocal> = z
     side: z.enum(["inviter", "acceptor"]),
     schedule: scheduleSchema.optional(),
     lastRun: lastRunSchema.optional(),
+    standingCondition: standingConditionSchema.optional(),
     tokenMaxAgeDays: tokenMaxAgeDaysSchema.optional(),
     heldInputFile: z.boolean().optional(),
     heldOutputFolder: z.boolean().optional(),
@@ -263,7 +275,7 @@ export function parseManagedExchangeArtifact(
  * installs the one owner. The embedded document is parsed back through
  * {@link parseSensitiveYaml} and {@link parseExchangeSpec}, the secret and
  * `expires` come from the key pair, and the local fields pass through
- * unchanged. Built through {@link buildManagedExchangeRecord} -- a fresh `id`, the v1
+ * unchanged. Built through {@link buildManagedExchangeRecord} -- a fresh `id`, the v2
  * `schemaVersion`, re-validated through the record schema -- so a malformed
  * document or secret is rejected and nothing is installed. Holds no
  * input-file handle: the first run re-acquires one by selection.
@@ -295,6 +307,9 @@ export function reconstructRecordFromArtifact(
       : {}),
     ...(artifact.local.lastRun !== undefined
       ? { lastRun: artifact.local.lastRun }
+      : {}),
+    ...(artifact.local.standingCondition !== undefined
+      ? { standingCondition: artifact.local.standingCondition }
       : {}),
   });
 }

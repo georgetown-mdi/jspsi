@@ -825,7 +825,7 @@ describe("deposit persists a managed record of the party's side", () => {
 describe("reader rejects unknown on a store read", () => {
   test("a future schemaVersion in the store rejects rather than loading", async () => {
     const created = await createManagedExchange(newExchange());
-    await rawPut({ ...created, schemaVersion: "psilink-managed-exchange/v2" });
+    await rawPut({ ...created, schemaVersion: "psilink-managed-exchange/v3" });
     await expect(getManagedExchange(created.id)).rejects.toThrow();
     await expect(listManagedExchanges()).rejects.toThrow();
   });
@@ -1478,7 +1478,7 @@ describe("diagnostic read never rejects wholesale", () => {
     await rawPut({
       ...good,
       id: "bad-record",
-      schemaVersion: "psilink-managed-exchange/v2",
+      schemaVersion: "psilink-managed-exchange/v3",
     });
 
     // The strict read still rejects wholesale -- the untouched contract.
@@ -1501,7 +1501,7 @@ describe("diagnostic read never rejects wholesale", () => {
     await rawPut({
       ...good,
       id: "bad-record",
-      schemaVersion: "psilink-managed-exchange/v2",
+      schemaVersion: "psilink-managed-exchange/v3",
     });
     // The sibling backup marker survives the record's unreadability: a delete of the
     // bad record must still warn about the exported backup's custody.
@@ -1521,7 +1521,7 @@ describe("diagnostic read never rejects wholesale", () => {
     await rawPut({
       ...good,
       id: "bad-record",
-      schemaVersion: "psilink-managed-exchange/v2",
+      schemaVersion: "psilink-managed-exchange/v3",
     });
 
     await deleteManagedExchange("bad-record");

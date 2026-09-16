@@ -132,6 +132,7 @@ describe("managed exchange detail configuration", () => {
         canReinvite: true,
         reinviting: false,
         reinviteFailed: false,
+        compromiseResponse: false,
       }),
     );
 
@@ -179,6 +180,7 @@ describe("managed exchange detail configuration", () => {
         canReinvite: false,
         reinviting: false,
         reinviteFailed: false,
+        compromiseResponse: false,
       }),
     );
 
@@ -239,6 +241,7 @@ describe("managed exchange detail configuration", () => {
         canReinvite: true,
         reinviting: false,
         reinviteFailed: false,
+        compromiseResponse: false,
       }),
     );
 
@@ -287,6 +290,7 @@ describe("managed exchange detail configuration", () => {
             });
           },
           canReinvite: true,
+          compromiseResponse: false,
           reinviting,
           reinviteFailed,
         }),
@@ -345,6 +349,7 @@ describe("managed exchange detail local fields", () => {
         canReinvite: true,
         reinviting: false,
         reinviteFailed: false,
+        compromiseResponse: false,
       }),
     );
 
@@ -382,6 +387,7 @@ describe("managed exchange detail local fields", () => {
         canReinvite: true,
         reinviting: false,
         reinviteFailed: false,
+        compromiseResponse: false,
       }),
     );
 
@@ -409,6 +415,7 @@ describe("managed exchange detail local fields", () => {
         canReinvite: true,
         reinviting: false,
         reinviteFailed: false,
+        compromiseResponse: false,
       }),
     );
 
@@ -465,6 +472,7 @@ describe("managed exchange detail schedule entry", () => {
         canReinvite: true,
         reinviting: false,
         reinviteFailed: false,
+        compromiseResponse: false,
       }),
     );
     return { saved, granted };
@@ -918,6 +926,7 @@ describe("managed exchange detail local fields against the real store", () => {
         canReinvite: true,
         reinviting: false,
         reinviteFailed: false,
+        compromiseResponse: false,
       }),
     );
     // The form has read the record before the store moves under it.
@@ -974,6 +983,7 @@ describe("managed exchange detail local fields against the real store", () => {
         canReinvite: true,
         reinviting: false,
         reinviteFailed: false,
+        compromiseResponse: false,
       }),
     );
     await expect
@@ -1042,6 +1052,7 @@ describe("managed exchange detail run schedule", () => {
         canReinvite: true,
         reinviting: false,
         reinviteFailed: false,
+        compromiseResponse: false,
       }),
     );
   }
@@ -1261,6 +1272,7 @@ describe("managed exchange detail accounting of disclosures", () => {
         canReinvite: true,
         reinviting: false,
         reinviteFailed: false,
+        compromiseResponse: false,
       }),
     );
 
@@ -1300,6 +1312,7 @@ describe("managed exchange detail accounting of disclosures", () => {
         canReinvite: true,
         reinviting: false,
         reinviteFailed: false,
+        compromiseResponse: false,
       }),
     );
 
@@ -1366,6 +1379,7 @@ describe("managed exchange detail accounting of disclosures", () => {
           canReinvite: true,
           reinviting: false,
           reinviteFailed: false,
+          compromiseResponse: false,
         }),
       );
 
@@ -1432,6 +1446,7 @@ describe("managed exchange detail accounting of disclosures", () => {
         canReinvite: true,
         reinviting: false,
         reinviteFailed: false,
+        compromiseResponse: false,
       }),
     );
 
@@ -1506,6 +1521,7 @@ describe("managed exchange detail accounting of disclosures", () => {
         canReinvite: true,
         reinviting: false,
         reinviteFailed: false,
+        compromiseResponse: false,
       }),
     );
 
@@ -1560,6 +1576,7 @@ describe("managed exchange detail accounting of disclosures", () => {
         canReinvite: true,
         reinviting: false,
         reinviteFailed: false,
+        compromiseResponse: false,
       }),
     );
 
@@ -1617,6 +1634,7 @@ describe("managed exchange detail accounting of disclosures", () => {
         canReinvite: true,
         reinviting: false,
         reinviteFailed: false,
+        compromiseResponse: false,
       }),
     );
 
@@ -1680,6 +1698,7 @@ describe("managed exchange detail accounting of disclosures", () => {
         canReinvite: true,
         reinviting: false,
         reinviteFailed: false,
+        compromiseResponse: false,
       }),
     );
 
@@ -1721,6 +1740,7 @@ describe("managed exchange detail accounting of disclosures", () => {
         canReinvite: true,
         reinviting: false,
         reinviteFailed: false,
+        compromiseResponse: false,
       }),
     );
 
@@ -1776,6 +1796,7 @@ describe("managed exchange detail accounting of disclosures", () => {
         canReinvite: true,
         reinviting: false,
         reinviteFailed: false,
+        compromiseResponse: false,
       }),
     );
 
@@ -1824,6 +1845,7 @@ describe("managed exchange detail accounting of disclosures", () => {
         canReinvite: true,
         reinviting: false,
         reinviteFailed: false,
+        compromiseResponse: false,
       }),
     );
 
@@ -1860,6 +1882,7 @@ describe("managed exchange detail accounting of disclosures", () => {
         canReinvite: true,
         reinviting: false,
         reinviteFailed: false,
+        compromiseResponse: false,
       }),
     );
 
@@ -1946,6 +1969,7 @@ describe("recovering an accounting this version cannot read", () => {
         canReinvite: true,
         reinviting: false,
         reinviteFailed: false,
+        compromiseResponse: false,
       }),
     );
 
@@ -2003,6 +2027,7 @@ describe("recovering an accounting this version cannot read", () => {
           canReinvite: true,
           reinviting: false,
           reinviteFailed: false,
+          compromiseResponse: false,
         }),
       );
 
@@ -2053,6 +2078,7 @@ describe("recovering an accounting this version cannot read", () => {
         canReinvite: true,
         reinviting: false,
         reinviteFailed: false,
+        compromiseResponse: false,
       }),
     );
 
@@ -2107,6 +2133,7 @@ describe("recovering an accounting this version cannot read", () => {
         canReinvite: true,
         reinviting: false,
         reinviteFailed: false,
+        compromiseResponse: false,
       }),
     );
     const download = () =>
@@ -2164,6 +2191,7 @@ describe("recovering an accounting this version cannot read", () => {
           canReinvite: true,
           reinviting: false,
           reinviteFailed: false,
+          compromiseResponse: false,
         }),
       );
 
@@ -2217,6 +2245,7 @@ describe("recovering an accounting this version cannot read", () => {
         canReinvite: true,
         reinviting: false,
         reinviteFailed: false,
+        compromiseResponse: false,
       }),
     );
 
@@ -2252,6 +2281,7 @@ describe("recovering an accounting this version cannot read", () => {
         canReinvite: true,
         reinviting: false,
         reinviteFailed: false,
+        compromiseResponse: false,
       }),
     );
 
@@ -2293,6 +2323,7 @@ describe("recovering an accounting this version cannot read", () => {
         canReinvite: true,
         reinviting: false,
         reinviteFailed: false,
+        compromiseResponse: false,
       }),
     );
 
@@ -2347,6 +2378,7 @@ describe("an accounting a newer version of the app filed", () => {
       canReinvite: true,
       reinviting: false,
       reinviteFailed: false,
+      compromiseResponse: false,
     });
 
   test("names the page as the stale side and asks for a reload", async () => {
@@ -2460,6 +2492,7 @@ describe("an accounting that could not be read at all", () => {
       canReinvite: true,
       reinviting: false,
       reinviteFailed: false,
+      compromiseResponse: false,
     });
 
   test("is treated as transient, and offers nothing destructive", async () => {
@@ -2544,6 +2577,7 @@ describe("an accounting read still in flight", () => {
       canReinvite: true,
       reinviting: false,
       reinviteFailed: false,
+      compromiseResponse: false,
     });
 
   test("says the read is under way and claims nothing about what is stored", async () => {
@@ -2657,6 +2691,7 @@ describe("the results a scheduled run left for this visit", () => {
         canReinvite: true,
         reinviting: false,
         reinviteFailed: false,
+        compromiseResponse: false,
       }),
     );
   }

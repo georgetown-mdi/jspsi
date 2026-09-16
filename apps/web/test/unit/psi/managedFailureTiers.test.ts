@@ -9,6 +9,7 @@ import { describe, expect, test } from "vitest";
 
 import {
   MANAGED_EXCHANGE_SCHEMA_VERSION,
+  NO_STANDING_CONDITION,
   composeManagedExchangeFile,
 } from "@psi/managed/managedExchangeRecord";
 import {
@@ -18,6 +19,8 @@ import {
 import {
   deriveManagedFailureTier,
   importedSinceLastSuccess,
+  managedStandingConditionTier,
+  readManagedFailure,
 } from "@psi/managed/managedFailureTiers";
 import { prepareManagedRerunExchange } from "@psi/managed/managedPreparedExchange";
 import { rerunFailureLastRun } from "@psi/managed/managedRun";
@@ -51,6 +54,7 @@ function record(
     }),
     side: "inviter",
     sharedSecret: generateSharedSecret(),
+    standingCondition: NO_STANDING_CONDITION,
     ...overrides,
   };
 }
@@ -370,6 +374,162 @@ describe("deriveManagedFailureTier: the unexplained tier and the secret-farming 
         backedUp,
         NOW,
       ),
+    ).toBe("unexplained");
+  });
+});
+
+// The standing condition beside the run stamp: the evidence a later stamp would
+// otherwise consume. A no-show replaces `lastRun` with an entry holding no failure
+// kind at all, so without it the confirmation the design reserves for a
+// failed-closed handshake would be asked for once and never again.
+
+const RAISED_AT = "2026-07-14T08:00:00.000Z";
+const LATER_RUN_AT = "2026-07-14T10:00:00.000Z";
+
+describe("readManagedFailure: a standing condition outlives the stamps after it", () => {
+  test("an unexplained handshake failure survives a later no-show", () => {
+    expect(
+      readManagedFailure(
+        record({
+          lastRun: { at: LATER_RUN_AT, outcome: "missed" },
+          standingCondition: { since: RAISED_AT, kind: "auth" },
+        }),
+        undefined,
+        NOW,
+      ),
+    ).toEqual({ tier: "unexplained", standing: true });
+  });
+
+  test("a persist failure survives a later no-show", () => {
+    expect(
+      readManagedFailure(
+        record({
+          lastRun: { at: LATER_RUN_AT, outcome: "missed" },
+          standingCondition: { since: RAISED_AT, kind: "storage" },
+        }),
+        undefined,
+        NOW,
+      ),
+    ).toEqual({ tier: "storage", standing: true });
+  });
+
+  test("it survives however many no-shows follow: the reading is of the condition, not the run", () => {
+    // Every later visit reads the same record shape, so a second, third, and
+    // hundredth no-show cannot consume what the first one did not.
+    const record_ = record({
+      lastRun: { at: LATER_RUN_AT, outcome: "missed" },
+      standingCondition: { since: RAISED_AT, kind: "auth" },
+    });
+    for (const now of [NOW, NOW + 86_400_000, NOW + 400 * 86_400_000])
+      expect(readManagedFailure(record_, undefined, now).tier).toBe(
+        "unexplained",
+      );
+  });
+
+  test("a successful run does not settle it either", () => {
+    // A later success rules out neither a third party's attempt nor an accidental
+    // self-fork, so it is not the all-clear it reads as.
+    expect(
+      readManagedFailure(
+        record({
+          lastRun: { at: LATER_RUN_AT, outcome: "succeeded" },
+          standingCondition: { since: RAISED_AT, kind: "auth" },
+        }),
+        undefined,
+        NOW,
+      ),
+    ).toEqual({ tier: "unexplained", standing: true });
+  });
+
+  test("a record with no condition reads exactly as it did", () => {
+    expect(
+      readManagedFailure(
+        record({ lastRun: { at: LATER_RUN_AT, outcome: "missed" } }),
+        undefined,
+        NOW,
+      ),
+    ).toEqual({ tier: "missed", standing: false });
+  });
+
+  test("a standing handshake failure is the benign import state while a restore stands", () => {
+    const restored: ManagedLocalState = {
+      imported: { importedAt: "2026-07-13T00:00:00.000Z" },
+    };
+    expect(
+      readManagedFailure(
+        record({
+          lastRun: { at: LATER_RUN_AT, outcome: "missed" },
+          standingCondition: { since: RAISED_AT, kind: "auth" },
+        }),
+        restored,
+        NOW,
+      ),
+    ).toEqual({ tier: "imported", standing: true });
+  });
+
+  test("a standing persist failure explains a freshly recorded unexplained handshake", () => {
+    // Tier 1's "the record holds a benign explanation", made durable: the desync a
+    // persist failure may have left is what the handshake is failing on.
+    expect(
+      readManagedFailure(
+        record({
+          lastRun: failed("auth"),
+          standingCondition: { since: RAISED_AT, kind: "storage" },
+        }),
+        undefined,
+        NOW,
+      ),
+    ).toEqual({ tier: "storage", standing: true });
+  });
+
+  test("it does not displace a recorded benign cause the operator can act on", () => {
+    // The input problem is this run's own actionable state; the condition stands and
+    // is read again as soon as the record's bookkeeping has no failure to show.
+    expect(
+      readManagedFailure(
+        record({
+          lastRun: failed("input"),
+          standingCondition: { since: RAISED_AT, kind: "auth" },
+        }),
+        undefined,
+        NOW,
+      ),
+    ).toEqual({ tier: "input", standing: false });
+  });
+
+  test("a lapsed bound still reads first, never through the attack framing", () => {
+    expect(
+      readManagedFailure(
+        record({
+          expires: "2026-07-14T00:00:00.000Z",
+          lastRun: { at: LATER_RUN_AT, outcome: "missed" },
+          standingCondition: { since: RAISED_AT, kind: "auth" },
+        }),
+        undefined,
+        NOW,
+      ),
+    ).toEqual({ tier: "expired", standing: false });
+  });
+});
+
+describe("managedStandingConditionTier", () => {
+  test("a persist failure is the storage tier whatever the local markers say", () => {
+    const restored: ManagedLocalState = {
+      imported: { importedAt: "2026-07-13T00:00:00.000Z" },
+    };
+    expect(
+      managedStandingConditionTier(
+        { since: RAISED_AT, kind: "storage" },
+        restored,
+      ),
+    ).toBe("storage");
+  });
+
+  test("a handshake failure is unexplained once the restore has been consumed", () => {
+    // The import marker is cleared by the first rotation after an import, so a
+    // success since the restore leaves nothing to explain the failure.
+    expect(
+      managedStandingConditionTier({ since: RAISED_AT, kind: "auth" }, {}),
     ).toBe("unexplained");
   });
 });

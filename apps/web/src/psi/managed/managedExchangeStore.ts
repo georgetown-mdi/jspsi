@@ -21,6 +21,7 @@ import {
   applyManagedExchangeReinviteRotation,
   applyManagedExchangeRotation,
   applyManagedExchangeScheduleAdvance,
+  applyManagedExchangeStandingConditionCleared,
   buildManagedExchangeRecord,
   diagnoseManagedExchangeRecord,
   parseManagedExchangeRecord,
@@ -260,7 +261,7 @@ export async function putManagedExchange(
  * app upgrade has otherwise invalidated -- rejects loudly rather than loading
  * (the recovery is re-invite, not migration).
  *
- * @throws {ZodError} if the stored value is not a valid v1 record.
+ * @throws {ZodError} if the stored value is not a valid v2 record.
  */
 export async function getManagedExchange(
   id: string,
@@ -276,7 +277,7 @@ export async function getManagedExchange(
  * read rather than silently dropping it, so a corrupted or app-upgrade-
  * invalidated store surfaces rather than partially loading.
  *
- * @throws {ZodError} if any stored value is not a valid v1 record.
+ * @throws {ZodError} if any stored value is not a valid v2 record.
  */
 export async function listManagedExchanges(): Promise<
   Array<ManagedExchangeRecord>
@@ -790,7 +791,7 @@ function markBackupOnLocalStore(
  * transaction opens, since the field-scoped transform must be synchronous.
  *
  * @throws {Error} if no record with `id` exists.
- * @throws {ZodError} if the stored value is not a valid v1 record or the edit
+ * @throws {ZodError} if the stored value is not a valid v2 record or the edit
  *   produces an invalid one; the transaction aborts and nothing is written.
  */
 export async function updateManagedExchangeLocalFields(
@@ -817,7 +818,7 @@ export async function updateManagedExchangeLocalFields(
  * docs/spec/MANAGED_EXCHANGE_RECORD.md).
  *
  * @throws {Error} if no record with `id` exists.
- * @throws {ZodError} if the stored value is not a valid v1 record or the rotation
+ * @throws {ZodError} if the stored value is not a valid v2 record or the rotation
  *   produces an invalid one; the transaction aborts and nothing is written.
  */
 export async function persistManagedExchangeRotation(
@@ -846,7 +847,7 @@ export async function persistManagedExchangeRotation(
  * include a stale secret or document.
  *
  * @throws {Error} if no record with `id` exists.
- * @throws {ZodError} if the stored value is not a valid v1 record or the rotation
+ * @throws {ZodError} if the stored value is not a valid v2 record or the rotation
  *   produces an invalid one; the transaction aborts and nothing is written.
  */
 export async function persistManagedExchangeReinvite(
@@ -893,6 +894,32 @@ export async function recordManagedExchangeLastRun(
 }
 
 /**
+ * Clear the stored record's standing condition -- the operator's explicit
+ * clear-and-acknowledge -- advancing only that field through
+ * {@link applyManagedExchangeStandingConditionCleared} inside one
+ * strict-durability readwrite transaction, so the acknowledgement cannot carry a
+ * stale secret or a stale document back over a concurrent rotation write.
+ *
+ * This is the only clear that is not part of another write: a re-invite drops the
+ * condition in its own rotation transaction, and deleting the exchange takes it
+ * with the record (docs/spec/MANAGED_EXCHANGE_RECORD.md, the `standingCondition`
+ * row).
+ *
+ * @throws {Error} if no record with `id` exists.
+ * @throws {ZodError} if the stored value or the resulting record is invalid.
+ */
+export async function clearManagedExchangeStandingCondition(
+  id: string,
+): Promise<ManagedExchangeRecord> {
+  return readModifyWriteRecord(id, (stored) => {
+    if (stored === undefined)
+      throw new Error(`no managed exchange with id ${id}`);
+    const existing = parseManagedExchangeRecord(stored);
+    return applyManagedExchangeStandingConditionCleared(existing);
+  });
+}
+
+/**
  * Persist a scheduled window's bookkeeping to the stored record: `nextWindow`,
  * `consecutiveMisses`, and the window's `lastRun` advance in ONE strict-durability
  * readwrite transaction ({@link readModifyWriteRecord}), leaving the rotated
@@ -931,7 +958,7 @@ export async function persistManagedExchangeScheduleAdvance(
  * handle after a missing-file failure.
  *
  * @throws {Error} if no record with `id` exists.
- * @throws {ZodError} if the stored value is not a valid v1 record or the result is
+ * @throws {ZodError} if the stored value is not a valid v2 record or the result is
  *   invalid; the transaction aborts and nothing is written.
  */
 export async function persistManagedExchangeInputHandle(
@@ -957,7 +984,7 @@ export async function persistManagedExchangeInputHandle(
  * scheduled run writes its results into.
  *
  * @throws {Error} if no record with `id` exists.
- * @throws {ZodError} if the stored value is not a valid v1 record or the result is
+ * @throws {ZodError} if the stored value is not a valid v2 record or the result is
  *   invalid; the transaction aborts and nothing is written.
  */
 export async function persistManagedExchangeOutputDirectory(

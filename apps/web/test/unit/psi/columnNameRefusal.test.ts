@@ -17,6 +17,7 @@ import {
 } from "@psi/jobClient/serverJobExchangeDriver";
 import {
   MANAGED_EXCHANGE_SCHEMA_VERSION,
+  NO_STANDING_CONDITION,
   composeManagedExchangeFile,
   safeParseManagedExchangeRecord,
 } from "@psi/managed/managedExchangeRecord";
@@ -99,6 +100,7 @@ function storedRecord(columns: Metadata): unknown {
     exchangeFile: { ...exchangeFile, metadata: columns },
     side: "inviter",
     sharedSecret: generateSharedSecret(),
+    standingCondition: NO_STANDING_CONDITION,
   };
 }
 

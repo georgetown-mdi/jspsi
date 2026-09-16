@@ -16,6 +16,7 @@ import {
   ManagedExchangeSpentError,
 } from "@psi/managed/managedExchangeRun";
 import {
+  NO_STANDING_CONDITION,
   applyManagedExchangeLastRun,
   applyManagedExchangeLocalEdits,
   applyManagedExchangeScheduleAdvance,
@@ -610,6 +611,100 @@ describe("a window nobody arrived in", () => {
     await tickManagedSchedules(runner.seams);
 
     expect(runner.advances[0].advance.lastRun).toBeUndefined();
+  });
+});
+
+describe("a window whose run raised a standing condition", () => {
+  test("the window's own write carries the persist failure the run could not save", async () => {
+    // The window that counts no miss at all: a store failure spanning the
+    // rotation write and the run's best-effort bookkeeping write, recovering in
+    // time to answer this one, would otherwise advance the plan past a window
+    // that neither ran nor recorded anything.
+    const record = recordWith();
+    const runner = harness({
+      records: [record],
+      startAt: "2026-01-06T14:00:00.000Z",
+      script: [
+        {
+          kind: "fail",
+          error: new RotationPersistError(
+            at("2026-01-06T14:05:00.000Z"),
+            new Error("the store refused the rotation"),
+          ),
+        },
+      ],
+    });
+
+    await tickManagedSchedules(runner.seams);
+
+    expect(runner.advances[0].advance.standingCondition).toEqual({
+      since: "2026-01-06T14:00:00.000Z",
+      kind: "storage",
+    });
+    expect(runner.stored.get(record.id)?.standingCondition).toEqual({
+      since: "2026-01-06T14:00:00.000Z",
+      kind: "storage",
+    });
+  });
+
+  test("a handshake that failed closed is carried the same way", async () => {
+    const record = recordWith();
+    const runner = harness({
+      records: [record],
+      startAt: "2026-01-06T14:00:00.000Z",
+      script: [
+        {
+          kind: "fail",
+          error: new ConnectionError(
+            "could not verify the partner",
+            "security",
+          ),
+        },
+      ],
+    });
+
+    await tickManagedSchedules(runner.seams);
+
+    expect(runner.stored.get(record.id)?.standingCondition).toMatchObject({
+      kind: "auth",
+    });
+  });
+
+  test("a failure past the data-exchange boundary carries none", async () => {
+    // The same boundary the attempt's own stamp applies: past it the handshake
+    // is not what failed.
+    const record = recordWith();
+    const runner = harness({
+      records: [record],
+      startAt: "2026-01-06T14:00:00.000Z",
+      script: [
+        {
+          kind: "fail",
+          error: new ConnectionError("the connection dropped", "security"),
+          startsDataExchange: true,
+        },
+      ],
+    });
+
+    await tickManagedSchedules(runner.seams);
+
+    expect(runner.advances[0].advance.standingCondition).toBeUndefined();
+    expect(runner.stored.get(record.id)?.standingCondition).toEqual(
+      NO_STANDING_CONDITION,
+    );
+  });
+
+  test("a window nobody arrived in carries none", async () => {
+    const record = recordWith();
+    const runner = harness({
+      records: [record],
+      startAt: "2026-01-06T14:00:00.000Z",
+      script: noShowScript(),
+    });
+
+    await tickManagedSchedules(runner.seams);
+
+    expect(runner.advances[0].advance.standingCondition).toBeUndefined();
   });
 });
 

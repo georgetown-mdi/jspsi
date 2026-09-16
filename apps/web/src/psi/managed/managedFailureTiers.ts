@@ -1,8 +1,9 @@
 /**
  * The pure derivation of a managed exchange's failure tier from the record's own
- * evidence -- `lastRun.failureKind`, a lapsed `expires`, and the local
- * `imported` marker -- never the live error, so an unattended run's failure
- * tiers the same way at the next visit as it would at the moment it failed.
+ * evidence -- `lastRun.failureKind`, the standing condition beside it, a lapsed
+ * `expires`, and the local `imported` marker -- never the live error, so an
+ * unattended run's failure tiers the same way at the next visit as it would at
+ * the moment it failed.
  * Design rationale for the desync-versus-attack tiering: docs/MANAGED_EXCHANGE.md,
  * "Telling a desync from an attack".
  *
@@ -14,8 +15,12 @@
  */
 
 import { managedExchangeLapsed } from "./managedExpiry";
+import { raisedStandingCondition } from "./managedExchangeRecord";
 
-import type { ManagedExchangeRecord } from "./managedExchangeRecord";
+import type {
+  ManagedExchangeRecord,
+  ManagedStandingCondition,
+} from "./managedExchangeRecord";
 import type { ManagedLocalState } from "./managedLocalStateShape";
 
 /**
@@ -90,24 +95,108 @@ export function importedSinceLastSuccess(
   return local?.imported !== undefined;
 }
 
+/** A record's failure tier and where the evidence for it came from: the run
+ * bookkeeping the record currently holds, or the standing condition beside it.
+ * Surfaces read `standing` to phrase the state accurately -- a condition raised
+ * by an earlier run is not a statement about the last one, which may have been a
+ * no-show or a success. */
+export interface ManagedFailureReading {
+  /** The tier the record's evidence resolves to. */
+  tier: ManagedFailureTier;
+  /** Whether the standing condition supplied the tier rather than the record's
+   * current run bookkeeping. */
+  standing: boolean;
+}
+
+/** The tiers a standing condition can resolve to -- the three whose recovery is
+ * re-invite or the out-of-band confirmation. A narrower union than
+ * {@link ManagedFailureTier} so a surface phrasing a standing condition is
+ * exhaustive over what one can actually say. */
+export type ManagedStandingTier = "storage" | "imported" | "unexplained";
+
+/** The tier a standing condition resolves to: a persist failure is the benign
+ * Tier-1 storage state, and a failed-closed handshake is the benign import state
+ * while a restore since the last success explains it and the Tier-2 unexplained
+ * state otherwise -- the same reading {@link deriveManagedFailureTier} makes of
+ * the equivalent `lastRun` entry, so a condition tiers identically whether it was
+ * raised by the last run or five no-shows ago.
+ *
+ * Exported for the surface that shows the condition on its own, which must name
+ * the state whether or not the record's current bookkeeping happens to be
+ * showing it (see {@link ../../recurring/managedStandingConditionModel.ts}). */
+export function managedStandingConditionTier(
+  condition: ManagedStandingCondition,
+  local: ManagedLocalState | undefined,
+): ManagedStandingTier {
+  if (condition.kind === "storage") return "storage";
+  return importedSinceLastSuccess(local) ? "imported" : "unexplained";
+}
+
+/**
+ * Read a record's failure tier and its source from the structured bookkeeping and
+ * the local sibling state as of `now`. The recorded reading is
+ * {@link recordedFailureTier}; the standing condition supplies the tier in two
+ * places:
+ *
+ * - where the recorded reading has no failure to show (`"none"` from a success or
+ *   a record never run, and `"missed"` from a no-show), which is what keeps a
+ *   condition visible across the stamps that would otherwise consume it;
+ * - where the recorded reading is `"unexplained"` and a standing persist failure
+ *   explains it, which is Tier 1's "the record holds a benign explanation" made
+ *   durable (docs/MANAGED_EXCHANGE.md, "Telling a desync from an attack").
+ *
+ * It does not displace a recorded benign cause: an input problem or a consent
+ * refusal is this run's own actionable state, and the condition stands until
+ * something clears it, so nothing is lost by showing that state first.
+ */
+export function readManagedFailure(
+  record: ManagedExchangeRecord,
+  local: ManagedLocalState | undefined,
+  now: number,
+): ManagedFailureReading {
+  // Checked first: never routed through attack framing, matching the
+  // pre-connection check.
+  if (managedExchangeLapsed(record, now))
+    return { tier: "expired", standing: false };
+  const recorded = recordedFailureTier(record, local);
+  const condition = raisedStandingCondition(record);
+  if (condition === undefined) return { tier: recorded, standing: false };
+  if (recorded === "none" || recorded === "missed")
+    return {
+      tier: managedStandingConditionTier(condition, local),
+      standing: true,
+    };
+  if (recorded === "unexplained" && condition.kind === "storage")
+    return { tier: "storage", standing: true };
+  return { tier: recorded, standing: false };
+}
+
 /**
  * Derive the failure tier for a record from its structured bookkeeping and its
- * local sibling state as of `now`, in precedence order: a lapsed bound first
- * (mirroring the pre-connection check), then a recorded benign `lastRun` cause,
- * then a restore since the last success, and only then `"unexplained"` for a
- * failed-closed (`auth`) handshake with none of those. Rationale for the
- * ordering and the secret-farming caveat: docs/MANAGED_EXCHANGE.md, "Telling a
- * desync from an attack".
+ * local sibling state as of `now` -- {@link readManagedFailure} without the
+ * source, for a caller that only maps a tier to copy.
  */
 export function deriveManagedFailureTier(
   record: ManagedExchangeRecord,
   local: ManagedLocalState | undefined,
   now: number,
 ): ManagedFailureTier {
-  // Checked first: never routed through attack framing, matching the
-  // pre-connection check.
-  if (managedExchangeLapsed(record, now)) return "expired";
+  return readManagedFailure(record, local, now).tier;
+}
 
+/**
+ * The tier the record's CURRENT run bookkeeping resolves to, in precedence
+ * order: a recorded benign `lastRun` cause, then a restore since the last
+ * success, and only then `"unexplained"` for a failed-closed (`auth`) handshake
+ * with none of those. The lapse check is its caller's, mirroring the
+ * pre-connection check's own position. Rationale for the ordering and the
+ * secret-farming caveat: docs/MANAGED_EXCHANGE.md, "Telling a desync from an
+ * attack".
+ */
+function recordedFailureTier(
+  record: ManagedExchangeRecord,
+  local: ManagedLocalState | undefined,
+): ManagedFailureTier {
   const lastRun = record.lastRun;
   if (lastRun === undefined || lastRun.outcome === "succeeded") return "none";
   if (lastRun.outcome === "missed") return "missed";
