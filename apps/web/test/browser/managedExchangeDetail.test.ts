@@ -3343,9 +3343,12 @@ describe("a run whose record never reached the accounting", () => {
 
     await expect
       .element(
-        page.getByText("A run of this exchange could not be recorded", {
-          exact: false,
-        }),
+        page.getByText(
+          "At least one run of this exchange could not be recorded",
+          {
+            exact: false,
+          },
+        ),
       )
       .toBeInTheDocument();
     await expect

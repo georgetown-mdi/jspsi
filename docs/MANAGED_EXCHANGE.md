@@ -1442,16 +1442,19 @@ the records again.
 
 Occasionally this browser can store nothing at all -- it is out of space, or its
 database will not open -- and then even the note cannot be written. The page says
-a run of this exchange could not be recorded and points you at the run history;
-that run cannot be added to the accounting afterwards. Free space on the device
-so the next run can file its record.
+at least one run of this exchange could not be recorded and points you at the
+run history; that run cannot be added to the accounting afterwards. Free space
+on the device so the next run can file its record.
 
 That last-resort marker has a limit of its own: it holds at most 20 exchanges and
 stays small on purpose, because a browser out of space is what it is written
 under. Past that, or where the browser refuses even that much, nothing is kept
 and no page can tell you the run happened -- so treat a browser that has run out
 of space as the thing to fix, not a state to keep exchanging through. A marker is
-shown once, on the exchange's page, and is cleared once you have seen it.
+shown once, on the exchange's page, and is cleared once that page has shown
+it, whether or not anyone was there to read it. An exchange page left open
+unattended can clear the marker that way, so check the exchange's run history
+if in doubt.
 
 ### When an app upgrade leaves an accounting unreadable
 

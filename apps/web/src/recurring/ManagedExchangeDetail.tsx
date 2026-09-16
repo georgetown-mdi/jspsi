@@ -1523,15 +1523,15 @@ function UnrecordedRunAlert({ onShown }: { onShown: () => void }) {
   return (
     <Alert
       color="yellow"
-      title="A run of this exchange could not be recorded"
+      title="At least one run of this exchange could not be recorded"
       mt="sm"
     >
       <p>
-        A run of this exchange disclosed your payload, and this browser&apos;s
-        storage would take neither its record nor a note of which run it was.
-        The accounting below has no entry for it, and there is nothing left to
-        add: check this exchange&apos;s run history above for the run, and
-        record the disclosure in your own compliance material.
+        At least one run of this exchange disclosed your payload, and this
+        browser&apos;s storage would take neither its record nor a note of which
+        run it was. The accounting below has no entry for it, and there is
+        nothing left to add: check this exchange&apos;s run history above for
+        the run, and record the disclosure in your own compliance material.
       </p>
       <p>
         The run&apos;s record could not be stored. If this browser is low on

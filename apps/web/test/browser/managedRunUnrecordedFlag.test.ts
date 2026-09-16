@@ -51,7 +51,8 @@ vi.mock("@psi/transport/rendezvous", async () =>
   (await import("./moduleMocks")).rendezvousMock(),
 );
 
-const FLAG_ALERT_TITLE = "A run of this exchange could not be recorded";
+const FLAG_ALERT_TITLE =
+  "At least one run of this exchange could not be recorded";
 
 function newExchange(): NewManagedExchange {
   return {
