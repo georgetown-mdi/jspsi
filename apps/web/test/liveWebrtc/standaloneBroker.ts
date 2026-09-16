@@ -3,6 +3,8 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { spawn } from "node:child_process";
 
+import { READINESS_SEGMENT } from "@psilink/peerjs-broker/standaloneOptions";
+
 import { LEG_ENVIRONMENT_FAILURE } from "./legTypes.ts";
 import { trackChild } from "./childProcess.ts";
 
@@ -158,7 +160,10 @@ export async function startStandaloneBroker(): Promise<StandaloneBroker> {
   const origin = `http://127.0.0.1:${port}`;
   let readinessBody: string;
   try {
-    readinessBody = await probeReadiness(origin, `${mountPath}/health`);
+    readinessBody = await probeReadiness(
+      origin,
+      `${mountPath}/${READINESS_SEGMENT}`,
+    );
   } catch (error) {
     await stop();
     throw error;

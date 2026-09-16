@@ -116,12 +116,21 @@ function readPairs(
  * Rejects with a {@link LEG_ENVIRONMENT_FAILURE} message when the CLI is not
  * built, cannot be spawned, exits before printing, or prints nothing that looks
  * like an invitation -- none of which is an interop divergence.
+ *
+ * `program` is what is spawned -- this process's own `node` running the built
+ * CLI entry -- which a test overrides to drive a spawn that does not happen.
  */
-export async function startCliInviter(brokerUrl: string): Promise<CliInviter> {
-  if (!existsSync(cliEntry))
+export async function startCliInviter(
+  brokerUrl: string,
+  program: { executable: string; entry: string } = {
+    executable: process.execPath,
+    entry: cliEntry,
+  },
+): Promise<CliInviter> {
+  if (!existsSync(program.entry))
     throw new Error(
       `${LEG_ENVIRONMENT_FAILURE} the CLI party is the built program at ` +
-        `${cliEntry}, which is absent. Run 'npm run build -w apps/cli'.`,
+        `${program.entry}, which is absent. Run 'npm run build -w apps/cli'.`,
     );
 
   const work = mkdtempSync(path.join(tmpdir(), "psilink-live-webrtc-"));
@@ -130,9 +139,9 @@ export async function startCliInviter(brokerUrl: string): Promise<CliInviter> {
   writeFileSync(inputPath, CLI_CSV);
 
   const child = spawn(
-    process.execPath,
+    program.executable,
     [
-      cliEntry,
+      program.entry,
       "invite",
       brokerUrl,
       inputPath,
@@ -218,6 +227,15 @@ export async function startCliInviter(brokerUrl: string): Promise<CliInviter> {
       else fail("the CLI party's first stdout line is not an invitation");
     };
     child.stdout.on("data", onData);
+    // A failure raised on the child rather than by its exit -- a spawn that
+    // never happened, a signal that could not be delivered. Unlistened, Node
+    // throws it as an uncaught exception that takes the vitest worker with it.
+    // Registered for the whole run: its text stays in the output the outcome
+    // reports, and settling once makes a later one a no-op for the wait below.
+    child.on("error", (error: Error) => {
+      output += `${error.message}\n`;
+      fail("the CLI party could not be spawned");
+    });
     void ended.then(({ exitCode }) =>
       fail(`the CLI party exited with code ${exitCode} before inviting`),
     );

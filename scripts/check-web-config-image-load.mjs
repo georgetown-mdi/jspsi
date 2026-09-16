@@ -50,7 +50,6 @@
 //     working tree, where a stray build output under a copied source directory
 //     is reachable to the load and would not be in the image.
 
-import { spawnSync } from "node:child_process";
 import {
   cpSync,
   existsSync,
@@ -68,6 +67,13 @@ import { dirname, join, posix, relative, resolve, sep } from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import {
+  CHILD_FLAG,
+  LOAD_STATUSES,
+  loadConfigInChild,
+  runChildLoad,
+} from "./lib/configLoadHarness.mjs";
+
 /** The Dockerfile whose builder stage decides what the image build can read. */
 export const DOCKERFILE = "Dockerfile";
 
@@ -80,11 +86,17 @@ export const WEB_CONFIG = "apps/web/vite.config.ts";
 /** The tree the image does not copy, and the control's import target. */
 export const WEB_TEST_TREE = "apps/web/test";
 
-/** argv[2] that puts this file in child mode: perform one load and exit. */
-const CHILD_FLAG = "--load";
-
-/** The line a child prints before its stack when the load threw. */
-const FAILURE_MARKER = "psilink-config-load-failed";
+/** The statuses this check reports: the shared vocabulary, plus the three
+ * outcomes only the replication has. */
+const STATUSES = Object.freeze({
+  ...LOAD_STATUSES,
+  /** This checkout has no node_modules for the replicated tree to borrow. */
+  uninstalled: "uninstalled",
+  /** The web test tree holds no module for the control to import. */
+  noTestTree: "no-test-tree",
+  /** The builder stage copies the test tree, so the subset proves nothing. */
+  testTreeCopied: "test-tree-copied",
+});
 
 /** The control config written into the replicated tree, named so a stray copy
  * of it is recognizable. */
@@ -305,35 +317,17 @@ export function writeTestTreeControl(configFile, specifier) {
 
 /**
  * Load `configFile` in a child `node` process, with `root` as the working
- * directory, and report `{ ok, output }`.
- *
- * NODE_OPTIONS and VITEST are scrubbed for the same reasons
- * check-web-config-native-load.mjs scrubs them: a loader installed through the
- * environment would transform the config out from under the measurement, and
- * VITEST changes what the config itself loads -- which is the whole point here,
- * since the image build sets neither.
+ * directory, and report `{ ok, code, output }` (see
+ * scripts/lib/configLoadHarness.mjs, which also states what the child
+ * environment drops and why). The image build sets no NODE_OPTIONS and no
+ * VITEST, and the subset this replicates is measured against that.
  */
 export function loadInChildProcess(configFile, root) {
-  const environment = { ...process.env };
-  delete environment.NODE_OPTIONS;
-  delete environment.VITEST;
-
-  const result = spawnSync(
-    process.execPath,
-    [fileURLToPath(import.meta.url), CHILD_FLAG, configFile],
-    {
-      cwd: root,
-      encoding: "utf8",
-      env: environment,
-      stdio: ["ignore", "pipe", "pipe"],
-    },
-  );
-  const output = [result.stdout, result.stderr]
-    .filter((part) => typeof part === "string" && part.trim() !== "")
-    .join("\n")
-    .trim();
-  if (result.error) return { ok: false, output: result.error.message };
-  return { ok: result.status === 0, output };
+  return loadConfigInChild({
+    childModule: import.meta.url,
+    args: [configFile],
+    cwd: root,
+  });
 }
 
 /**
@@ -353,14 +347,14 @@ export function checkWebConfigImageLoad({
   if (!existsSync(configFile)) {
     return {
       ok: false,
-      status: "missing",
+      status: STATUSES.missing,
       message: `${WEB_CONFIG} is absent, so there is nothing to load.`,
     };
   }
   if (!existsSync(resolve(root, "node_modules"))) {
     return {
       ok: false,
-      status: "uninstalled",
+      status: STATUSES.uninstalled,
       message: `The replicated tree borrows this checkout's node_modules, and there is none. Run \`npm install\`.`,
     };
   }
@@ -368,7 +362,7 @@ export function checkWebConfigImageLoad({
   if (controlImport === undefined) {
     return {
       ok: false,
-      status: "no-test-tree",
+      status: STATUSES.noTestTree,
       message: `${WEB_TEST_TREE} holds no module, so the control this check is calibrated against cannot be built and the load below it would prove nothing. Re-establish what the control measures, or retire it, in scripts/check-web-config-image-load.mjs.`,
     };
   }
@@ -383,14 +377,14 @@ export function checkWebConfigImageLoad({
     if (!replicated.includes(WEB_CONFIG)) {
       return {
         ok: false,
-        status: "missing",
+        status: STATUSES.missing,
         message: `The ${BUILDER_STAGE} stage copies no ${WEB_CONFIG}, so the image build evaluates no config of this app at all.`,
       };
     }
     if (existsSync(resolve(into, WEB_TEST_TREE))) {
       return {
         ok: false,
-        status: "test-tree-copied",
+        status: STATUSES.testTreeCopied,
         message: `The ${BUILDER_STAGE} stage copies ${WEB_TEST_TREE} into the image build, so loading the config from that subset says nothing about whether the config reaches test-tree code. This check fails rather than report a measurement it did not make -- re-establish what it measures, or retire it, in scripts/check-web-config-image-load.mjs.`,
       };
     }
@@ -403,14 +397,14 @@ export function checkWebConfigImageLoad({
     if (control.ok) {
       return {
         ok: false,
-        status: "control-loaded",
+        status: STATUSES.controlLoaded,
         message: `A config importing ${controlImport} loaded from the replicated tree, which holds no ${WEB_TEST_TREE}. The loader is resolving that import from somewhere else, so driving ${WEB_CONFIG} through it would prove nothing. This check fails rather than report a measurement it did not make -- re-establish what it measures, or retire it, in scripts/check-web-config-image-load.mjs.`,
       };
     }
     if (!control.output.includes(controlImport)) {
       return {
         ok: false,
-        status: "control-failed-otherwise",
+        status: STATUSES.controlFailedOtherwise,
         message: `The control config was refused, but for something other than its ${controlImport} import, so it is not the unresolved-import refusal this check is calibrated against and the result below it would be unsound:\n\n${control.output}`,
       };
     }
@@ -419,7 +413,7 @@ export function checkWebConfigImageLoad({
     if (!result.ok) {
       return {
         ok: false,
-        status: "refused",
+        status: STATUSES.refused,
         message: `${WEB_CONFIG} does not load from the file subset the ${DOCKERFILE} ${BUILDER_STAGE} stage copies, so \`npm run build -w apps/web\` fails in the image while every local command stays green. The config loader bundles the config and resolves every literal specifier in it, a dynamic import's included, so a module outside that subset -- the test tree above all -- has to be reached through a path built at runtime rather than named in an import.\n\n${result.output}`,
       };
     }
@@ -429,7 +423,7 @@ export function checkWebConfigImageLoad({
 
   return {
     ok: true,
-    status: "loads",
+    status: STATUSES.loads,
     message: `${WEB_CONFIG} loads from the ${copies.length} COPY instructions the ${DOCKERFILE} ${BUILDER_STAGE} stage runs, with no ${WEB_TEST_TREE} among them.`,
   };
 }
@@ -456,13 +450,10 @@ async function loadThroughVite(configFile) {
 // runs on import, so the test can drive the functions above directly.
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   if (process.argv[2] === CHILD_FLAG) {
-    try {
-      await loadThroughVite(process.argv[3]);
-    } catch (error) {
-      console.error(`${FAILURE_MARKER} ${error?.code ?? "no-code"}`);
-      console.error(error?.message ?? String(error));
-      process.exit(1);
-    }
+    await runChildLoad(
+      () => loadThroughVite(process.argv[3]),
+      (error) => error?.message ?? String(error),
+    );
   } else {
     const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
     const result = checkWebConfigImageLoad({ root });
