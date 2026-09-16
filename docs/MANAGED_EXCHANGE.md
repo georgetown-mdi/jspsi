@@ -1410,6 +1410,38 @@ exchange's own page, below its run history.
   the exchange; the record files offered at a run's completion stand in only for
   the runs somebody was there to download one from.
 
+### When a run's record is missing from the accounting
+
+A run can disclose and still fail to file its record -- this browser's storage
+refuses the write, or the run could not build a record at all. The run raises a
+message about it while it happens, which needs somebody there; a scheduled run
+has nobody. So the run also leaves a note beside the accounting, and the
+exchange's page shows it at your next visit, above the entries:
+
+- **The accounting says what it is short.** Where it lists entries, it states how
+  many further runs disclosed with no entry here, so a count of entries is never
+  read as a count of disclosures. An accounting exported while that stands is
+  short those runs.
+- **Where the run's record was kept, you can add it.** The note holds that run's
+  own record, so one action files it into the accounting and the note goes.
+  Adding the same run twice cannot double an entry.
+- **Where no record was kept, the page says so plainly.** Nothing can add the
+  entry -- the record was never built -- so no control is offered for it. Record
+  that disclosure in your own compliance material; the run history above names
+  the run.
+- **It is deleted with the exchange**, like the accounting itself, and it is not
+  in the export/import artifact.
+
+Filing can fail for the same reason the run's own filing did. The commonest is an
+accounting this version of the app cannot read: clear it first (below), then add
+the records again.
+
+Occasionally this browser can store nothing at all -- it is out of space, or its
+database will not open -- and then even the note cannot be written. The page says
+a run of this exchange could not be recorded and points you at the run history;
+that run cannot be added to the accounting afterwards. Free space on the device
+so the next run can file its record.
+
 ### When an app upgrade leaves an accounting unreadable
 
 An upgrade can change the format of the records an accounting is made of. When
@@ -1628,6 +1660,6 @@ until then).
 - [SECURITY_DESIGN.md](SECURITY_DESIGN.md#hosted-at-rest-threat-model-for-managed-exchanges) - the browser at-rest threat model, the discard-secret reversal, the rollback and metadata-at-rest analyses, and the egress-hardening limits
 - [SECURITY_DESIGN.md](SECURITY_DESIGN.md#recurring-exchange-authentication) - the shared-secret rotation, `token_max_age_days`, and re-invite recovery the managed lifecycle reuses
 - [EXCHANGE_RECORD.md](spec/EXCHANGE_RECORD.md) - the self-attested per-run record of what this party disclosed, produced by every successful run
-- [MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md#the-accounting-of-disclosures) - the accounting of disclosures' stored shape, its append rule, and its retention
+- [MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md#the-accounting-of-disclosures) - the accounting of disclosures' stored shape, its append rule, its retention, and the note a run leaves where its record was not filed
 - [COMPLIANCE.md](COMPLIANCE.md#hipaa-considerations) - how those per-run records serve an accounting of disclosures
 - [DEPLOYMENT.md](DEPLOYMENT.md) - the hosted web app deployment posture and the reverse-proxy responsibilities

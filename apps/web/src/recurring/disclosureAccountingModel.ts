@@ -1,7 +1,8 @@
 /**
  * The pure derivation behind a managed exchange's accounting of disclosures: one
  * entry per run it filed, each read off that run's self-attested exchange record,
- * plus the CSV a compliance reader is handed. No React, no IndexedDB -- the
+ * plus the CSV a compliance reader is handed and the rows for the runs it could
+ * not file ({@link unfiledDisclosureRows}). No React, no IndexedDB -- the
  * derivations and the exported bytes are unit-testable in Node.
  *
  * Every fact here comes from the run's exchange record and nothing else (see
@@ -44,6 +45,7 @@ import type {
   DisclosureAccounting,
   StoredDisclosureAccounting,
 } from "@psi/disclosureAccounting";
+import type { UnfiledDisclosure } from "@psi/unfiledDisclosure";
 
 /**
  * One fact of one disclosure: its label, the display values it holds (several,
@@ -518,4 +520,58 @@ export function storedDisclosureAccountingDocument(
  */
 export function storedDisclosureAccountingFileName(exportedAt: Date): string {
   return `psilink-disclosures-stored-${recordFileStamp(exportedAt.toISOString())}.json`;
+}
+
+/** One run the accounting is short an entry for, as the surface shows it. */
+export interface UnfiledDisclosureRow {
+  /** The row's identity: the retained record's own binding nonce, or the noted
+   * instant for a run that retained no record. */
+  key: string;
+  /** The run instant phrased for display, as an entry's own is. */
+  when: string;
+  /** The partner this run disclosed to, at the display boundary. Present only
+   * where a record was retained -- a run with none names no partner, and
+   * inferring one from the exchange's terms would attest a fact the missing
+   * record is the only source of. */
+  partner?: Displayable;
+  /** Whether the retained record can still be filed. `false` is the state no
+   * action recovers, which the surface states instead of offering a control. */
+  fileable: boolean;
+}
+
+/**
+ * The noted runs as rows, oldest first -- the order the accounting's own export
+ * reads, and the order these runs would have been filed in.
+ *
+ * A fact comes from the retained record or is left out: a row for a run with no
+ * record shows the instant it was noted at and nothing else.
+ */
+export function unfiledDisclosureRows(
+  disclosures: ReadonlyArray<UnfiledDisclosure>,
+): Array<UnfiledDisclosureRow> {
+  return disclosures.map((disclosure) => ({
+    key: disclosure.record?.bindingNonce ?? disclosure.at,
+    when: dateTimeLabel(new Date(disclosure.at)),
+    ...(disclosure.record === undefined
+      ? {}
+      : { partner: displayPartyIdentity(disclosure.record.partnerIdentity) }),
+    fileable: disclosure.record !== undefined,
+  }));
+}
+
+/** What a row whose record can still be filed says is left to do. */
+export const FILEABLE_DISCLOSURE_NOTE =
+  "This run's record is kept in this browser and can still be added to the accounting.";
+
+/** What a row with no record left says, plainly: nothing here can add the entry,
+ * so the account of this disclosure has to be kept elsewhere. */
+export const UNFILEABLE_DISCLOSURE_NOTE =
+  "No record of this run is kept, so it cannot be added to the accounting. Record this disclosure in your own compliance material.";
+
+/** How many runs the accounting is short, stated beside the entries it does
+ * hold, so a count of entries is never read as a count of disclosures. */
+export function unfiledDisclosureShortfall(count: number): string {
+  return count === 1
+    ? "1 further run of this exchange disclosed and has no entry here."
+    : `${count} further runs of this exchange disclosed and have no entry here.`;
 }

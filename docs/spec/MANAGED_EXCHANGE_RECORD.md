@@ -13,8 +13,9 @@ supplied at each run -- the field types, and the key-derivation implications of
 the persisted secret. It also covers the schedule and run bookkeeping the
 unattended path relies on, the local sibling stores beside the record (the
 backup, spent, and import markers, the accounting of disclosures each run files
-its record into, and the results a scheduled run parks for the operator's next
-visit), and the export artifact's custody model and rollback caveats. It is the
+its record into with the note left by a run that could not, and the results a
+scheduled run parks for the operator's next visit), and the export artifact's
+custody model and rollback caveats. It is the
 implementation-level complement to the **Managed exchange lifecycle** overview in
 [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md), which says what the feature is for,
 its automation goal and platform envelope, its durability and single-owner
@@ -1191,7 +1192,10 @@ on a run that STOPPED raises a notice of its own, beside the run's failure rathe
 than in place of it: the run still reports the failure it had, and the notice
 states that the accounting is missing a disclosure that happened. It offers no
 record download, unlike the completed run's, because a stopped run has no results
-surface to offer one from. Both go to the diagnostic log as well.
+surface to offer one from. Both go to the diagnostic log as well, and both leave
+a note of the run for the next visit (see [A run whose record was not
+filed](#a-run-whose-record-was-not-filed)), which is what reaches an operator who
+was not there for the notice.
 
 **When no record could be built.** An owed record can still fail to build: the
 build is a secondary artifact, so its failure leaves the run's result untouched
@@ -1206,7 +1210,8 @@ operator log an unattended run discards. A run that FINISHED in that state raise
 the matching notice, before its outputs are built. It names no download either --
 the build produced no record file to offer -- and that ordering is what keeps it
 independent of the completion surface, which a run whose outputs also fail to
-build never reaches.
+build never reaches. Both runs leave a note holding no record, since nothing was
+built to retain and no later filing can add the entry.
 
 **What a stopped run's entry states.** The entry is the record, so what it states
 is the record's fields and nothing beside them: the columns this party consented
@@ -1235,8 +1240,8 @@ partner and agreement metadata to what a reader of the store learns (see
 rest](../SECURITY_DESIGN.md#metadata-at-rest-presence-and-shape)). It is bounded
 only by the exchange's own run history: nothing prunes it, since a silently
 dropped entry would falsify the account. Deleting the managed exchange deletes
-its accounting in the same one-step delete, so an operator who must keep it
-exports it first.
+its accounting, and the note of any run it could not file, in the same one-step
+delete, so an operator who must keep it exports it first.
 
 ### What an exchange-record version bump does to a stored accounting
 
@@ -1337,6 +1342,82 @@ A bump is held to re-taking this decision by
 `npm run check:exchange-record-version`,
 which pins the record version literal and fails the move rather than letting it
 ship past the obligation.
+
+### A run whose record was not filed
+
+A run that disclosed and did not file its entry -- the append refused it, or no
+record could be built for it -- leaves a **note** in the same disclosure store,
+under a key of its own: the array key of the record `id` and the fixed part
+`unfiled`, beside the accounting that same id keys on its own. An array key
+equals no string key, so a note collides with no exchange's accounting whatever
+the id holds.
+
+**Why it is neither a row nor a record field.** An accounting entry is a
+self-attested exchange record that was filed; a placeholder row for a run that
+was never filed would put a non-attested row into a log whose rows are attested
+artifacts, and every count drawn from the log would have to be qualified by
+which rows are real. The managed record cannot hold it either, for the reason it
+holds no accounting: `lastRun` is a timestamp and closed enums with no free-text
+field, and it keeps only the most recent run.
+
+**Shape.** One object per exchange: a `version`
+(`psilink-unfiled-disclosure/v1`, its own reader-rejects-unknown literal) and
+`entries`, oldest first. An entry holds `at`, the ISO 8601 instant the shortfall
+was noted, which falls inside the run it stands for; and, where the run built a
+record the reader admits, `record`, that run's exchange record retained verbatim.
+An entry with no `record` is a run whose record could not be built, and nothing
+can file it later.
+
+**When an entry is written.** Whenever a run that disclosed does not file --
+either arm above -- and on the same terms the append itself takes: best-effort,
+never the run's outcome, and beside the notice the run raises rather than in
+place of it. One entry per run: a repeated write is matched on the retained
+record's own binding nonce, or for an entry with no record on its instant, so the
+number of entries is the number of runs the accounting is short. The record is
+held to the exchange-record format on the way in and the parsed result is what is
+retained, so a record the reader would refuse is never retained -- an entry with
+nothing filable is written instead, which is what that state is.
+
+**What it holds at rest, and retention.** A retained record is one exchange
+record's own cleartext content -- the same names, categories, references, and
+aggregate counts an accounting entry holds, and never a payload value, a
+linkage-field value, or a matched identifier. An entry is deleted when its record
+is filed into the accounting, and the whole note is deleted with the exchange, in
+the same one-step delete. Nothing else prunes it: a dropped entry would retract a
+true statement that a disclosure has no entry.
+
+**Reading it.** The fact that a run went unfiled outlives any record format, so
+the envelope parse looks inside no retained record. The reading then validates
+each retained record on its own and treats one this build refuses as an entry
+with no record, which is the same thing that state means for the operator: the
+append would refuse it too, so it cannot be filed. The stored bytes are untouched
+by that reading -- only a write prunes an entry -- so a build that admits them
+again finds them.
+
+**Filing what a note retained.** The note's records are appended to the
+accounting in ONE transaction over both keys, so an entry cannot be dropped from
+the note without landing in the accounting. The append is the accounting's own
+and is idempotent on the record's binding nonce, so filing a run the accounting
+already holds adds no second entry. An entry with no usable record stays noted.
+An accounting this build refuses refuses the filing too, exactly as it refuses a
+run's own append, so the note stands until that accounting is recovered by the
+export-then-reset path above.
+
+**What a surface reading it must state.** A surface showing the accounting while
+an entry stands **MUST NOT** present it as a complete account of what the
+exchange disclosed, and **MUST** state the number of runs it is short where it
+states the number of entries it holds. A run whose record cannot be filed **MUST**
+be stated as unrecoverable rather than offered a control that would not file it.
+
+**When the database refuses the note.** Storage full, or a database that will not
+open, leaves the note unwritable at exactly the moment it is owed. The fact then
+falls back to origin-local `localStorage` under `psilink-unfiled-disclosure`: a
+version literal and a bounded list of exchange ids, holding no instant and no
+record, so it can be written where a record-sized write was refused. The flag is
+cleared when the exchange's page shows it and when the exchange is deleted, so no
+id of an exchange the browser no longer holds is kept. A run named only by that
+flag can never be filed: that is the limit of what is recoverable, and the
+surface states it rather than offering a remedy.
 
 ## The parked results of a scheduled run
 

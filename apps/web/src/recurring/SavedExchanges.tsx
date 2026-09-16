@@ -22,6 +22,7 @@ import {
   requestPersistentStorage,
 } from "@psi/managed/managedExchangeStore";
 import { MAX_ARTIFACT_IMPORT_BYTES } from "@psi/managed/managedExchangeArtifact";
+import { clearUnfiledExchangeFlag } from "@psi/unfiledDisclosureFlag";
 import { listManagedLocalState } from "@psi/managed/managedLocalState";
 
 import { Lobby } from "@exchange/Lobby";
@@ -370,6 +371,11 @@ export function DeleteExchangeButton({
     void (async () => {
       try {
         await deleteManagedExchange(id);
+        // The one thing the delete transaction cannot reach: the localStorage
+        // flag naming an exchange whose run this browser could record nowhere.
+        // It is dropped here so no id of an exchange this browser no longer
+        // holds is kept.
+        clearUnfiledExchangeFlag(id);
         onDeleted();
         setConfirming(false);
       } catch {

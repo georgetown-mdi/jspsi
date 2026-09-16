@@ -44,6 +44,7 @@ import { appendDisclosureRecordToStore } from "../disclosureAccountingStore";
 import { authenticateExchange } from "../authenticateExchange";
 import { createBrowserPsiEngineFactory } from "../workers/psiCryptoController";
 import { defaultSpawnPsiCryptoWorker } from "../workers/psiCryptoWorkerClient";
+import { noteUnfiledDisclosureRun } from "../unfiledDisclosureStore";
 import { openPeerMessageConnection } from "../transport/peerMessageConnection";
 import { waitForIncomingConnection } from "../transport/waitForConnection";
 
@@ -56,6 +57,7 @@ import { acquireValidatedManagedInput } from "./managedInputHandle";
 
 import type {
   BuiltExchangeRecord,
+  ExchangeRecord,
   ExchangeResult,
   MessageConnection,
   ResolvedMatching,
@@ -442,17 +444,50 @@ export const STOPPED_DISCLOSURE_RECORD_UNBUILT_WARNING =
   "This run sent your payload and then stopped, and no record of it could be built, so this exchange's accounting of disclosures has no entry for it. Note this run's time and partner if you keep an account of disclosures.";
 
 /**
+ * Note the disclosure this run made and could not file, so the exchange's own
+ * page reports the shortfall at the next visit. The notices above reach whoever
+ * is present; an unattended run has nobody, and this is what it leaves instead
+ * ({@link ../unfiledDisclosureStore.ts}).
+ *
+ * The record is passed where the run built one, so the next visit can file the
+ * entry it retains; a run that built none is noted by its instant alone, which
+ * no later filing recovers. Awaited, like the append it stands in for: a local
+ * write of bounded duration, and the run must not report its outputs before the
+ * shortfall is durable.
+ *
+ * Never throws, so it cannot cost the run an outcome the disclosure has already
+ * made moot. Where the fact reached neither the store nor the fallback flag, the
+ * diagnostic log is the only place left to state it.
+ */
+async function noteUnfiledDisclosure(
+  id: string,
+  record: ExchangeRecord | undefined,
+): Promise<void> {
+  const noted = await noteUnfiledDisclosureRun(
+    id,
+    record,
+    new Date().toISOString(),
+  );
+  if (noted === "nowhere")
+    log.error(
+      "managed re-run: this browser stored nothing standing for a disclosure that could not be filed",
+    );
+}
+
+/**
  * Append this run's self-attested exchange record to the exchange's accounting
  * of disclosures. Best-effort by design: the exchange has already happened, so a
  * failed append can neither undo it nor make the run a failure -- it raises the
- * notice instead.
+ * notice instead, and notes the shortfall for the next visit
+ * ({@link noteUnfiledDisclosure}).
  *
  * A result with no audit appends nothing and raises
  * {@link DISCLOSURE_RECORD_UNBUILT_WARNING} instead: the exchange disclosed, core
  * could not build the record for it, and the accounting stays short an entry with
  * core's own warning going to the operator log, which an unattended run discards.
  * The notice is raised here rather than from the completion surface, which a run
- * whose outputs also fail to build never reaches.
+ * whose outputs also fail to build never reaches. The shortfall is noted for that
+ * run too, holding no record, since the accounting is short an entry either way.
  */
 async function appendDisclosure(
   id: string,
@@ -461,8 +496,10 @@ async function appendDisclosure(
 ): Promise<void> {
   const { audit } = result;
   if (audit === undefined) {
-    if (result.recordOwedButUnbuilt)
+    if (result.recordOwedButUnbuilt) {
       onWarning?.(DISCLOSURE_RECORD_UNBUILT_WARNING);
+      await noteUnfiledDisclosure(id, undefined);
+    }
     return;
   }
   try {
@@ -470,6 +507,7 @@ async function appendDisclosure(
   } catch (error) {
     log.error("managed re-run: filing the disclosure record failed:", error);
     onWarning?.(DISCLOSURE_NOT_FILED_WARNING);
+    await noteUnfiledDisclosure(id, audit.record);
   }
 }
 
@@ -498,7 +536,9 @@ async function appendDisclosure(
  * {@link STOPPED_DISCLOSURE_NOT_FILED_WARNING} beside that failure, since the
  * accounting is what an unattended run leaves behind and nobody would otherwise
  * learn it is missing a disclosure that happened. The loss also goes to the
- * diagnostic log.
+ * diagnostic log, and to the note the next visit reads
+ * ({@link noteUnfiledDisclosure}) -- on the unbuilt-record arm as well, where the
+ * accounting is short an entry with no record to retain.
  *
  * Both questions are asked of the failure's `cause` chain and both are guarded, so
  * a throwing accessor -- an error whose own chain raises while core walks it --
@@ -525,7 +565,10 @@ async function fileTerminatedDisclosure(
     return;
   }
   if (audit === undefined) {
-    if (owedButUnbuilt) onWarning?.(STOPPED_DISCLOSURE_RECORD_UNBUILT_WARNING);
+    if (owedButUnbuilt) {
+      onWarning?.(STOPPED_DISCLOSURE_RECORD_UNBUILT_WARNING);
+      await noteUnfiledDisclosure(id, undefined);
+    }
     return;
   }
   try {
@@ -536,6 +579,7 @@ async function fileTerminatedDisclosure(
       failure,
     );
     onWarning?.(STOPPED_DISCLOSURE_NOT_FILED_WARNING);
+    await noteUnfiledDisclosure(id, audit.record);
   }
 }
 
