@@ -1137,6 +1137,7 @@ export async function handler(argv: Arguments): Promise<void> {
         output,
         verbosity,
         loggerName: "exchange",
+        logFile,
         recordOutput,
         fileSyncRuntime: { sweepExchangeFiles, forceRetainSweep, eventStream },
         signing,

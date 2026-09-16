@@ -311,6 +311,28 @@ export function configureStderrLogging(): LogSink {
 }
 
 /**
+ * Run `before` immediately ahead of every diagnostic line the installed sink
+ * writes, returning the removal that puts the sink back as it was found. The
+ * PSI progress display passes its live-line clear, so a log line drops the live
+ * row before writing rather than landing on top of it.
+ *
+ * Installed over whatever sink a command's {@link configureLogging} put in
+ * place, so the destination is unchanged -- stderr, or the `--log-file` -- and
+ * only the moment before each write is added. With no sink installed there is
+ * nothing to wrap: this installs nothing and the removal is a no-op, leaving
+ * core's own per-level routing alone.
+ */
+export function runBeforeEachLogLine(before: () => void): () => void {
+  const sink = getDiagnosticSink();
+  if (sink === undefined) return () => {};
+  setDiagnosticSink((methodName, prefix, args) => {
+    before();
+    sink(methodName, prefix, args);
+  });
+  return () => setDiagnosticSink(sink);
+}
+
+/**
  * The logger-and-cleanup pair returned by {@link configureLogging}: the command's
  * logger, built after the sink and level are installed, and a `close` that
  * restores the prior diagnostic sink and releases any file descriptor.

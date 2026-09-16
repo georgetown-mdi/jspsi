@@ -1037,6 +1037,19 @@ For unattended runs, set `--peer-timeout` to a value that suits how long you are
 
 One case does not consume the whole budget: a rendezvous that finds a partner hello already in the folder and never gets an answer behind it fails well inside the timeout, naming the file rather than blaming your partner. That is the shape a previous run killed outright leaves, which is worth setting up against on a schedule - see [Directory exclusivity](EXCHANGE_REFERENCE.md#directory-exclusivity) for the recovery and for why `peer_id` is recommended for unattended runs.
 
+### Progress while a long run works
+
+The matching step encrypts and compares every value under your linkage keys, and on a large dataset one of those operations runs for minutes with nothing sent or received meanwhile. Two things report on it:
+
+- **One line per completed operation**, on every run: each operation that takes at least a second logs a line when it finishes, stating the values it covered, how long it took and the rate it reached. It is a log line like any other, so it follows `--log-file` into the file and a quieter `--log-level` drops it - the log a scheduled run leaves behind holds the same figures without a line per second.
+- **One line redrawn each second** while an operation runs, naming it, how many values it covers and how long it has been running, dropped when the operation ends. It is shown only when all of these hold: stderr is a terminal, the run was given no `--log-file`, `TERM` is not `dumb`, and the run is at the default `--log-level info` without `-v`. A quieter level asked for less than this, and a `-v` or `--log-level debug`/`trace` run reports the detail line by line already.
+
+To turn the redrawn line off - reading through a screen reader, or on a terminal that prints the cursor escapes rather than acting on them - give `--log-file` or set `TERM=dumb`. The completion lines are unaffected either way.
+
+Under count-only terms (`psi-c`), a line's figure is the values the round masks, not the matches it finds: the count the run reports is at most that figure.
+
+Neither line states a percentage. The encryption runs as a single call into the PSI library, which reports nothing until it returns, so the count a line holds is the whole operation's and the rate is measured once it is done.
+
 ### Machine-readable event stream
 
 `--event-stream` emits a machine-readable event stream for a supervising process (an orchestrator, a job runner, a test harness) that spawns psilink and needs structured progress and outcome events rather than parsed log lines. It is available on every exchange-running command - the zero-setup exchange, `psilink exchange`, and the online `psilink invite`/`accept` - and is off by default; it has no effect on an offline `invite`/`accept`, which runs no exchange, except an [acceptance that runs the exchange itself](#accepting-and-running-a-webrtc-exchange): given an `INPUT_FILE`, that offline-form accept emits the stream exactly as the online form does.

@@ -756,6 +756,13 @@ export async function runOnlineBootstrap(params: {
   output: string | undefined;
   verbosity: number;
   loggerName: string;
+  /**
+   * The `--log-file` path this command's diagnostics were redirected to, or
+   * `undefined` when they go to stderr. Threaded to runProtocol, whose PSI
+   * progress display draws its live line only on a terminal it shares with
+   * them.
+   */
+  logFile?: string;
   recordOutput?: RecordOutput;
   /**
    * `--event-stream`: emit the opt-in NDJSON machine-interface stream on fd 3
@@ -947,6 +954,7 @@ export async function runOnlineBootstrap(params: {
       output: params.output,
       verbosity: params.verbosity,
       loggerName: params.loggerName,
+      logFile: params.logFile,
       recordOutput: params.recordOutput,
       // Persist the configuration exactly at acceptance: runProtocol invokes this
       // once, after the rotated token is saved to the key file and before the

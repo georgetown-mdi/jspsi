@@ -28,6 +28,12 @@ export {
   isPeerWaitTimeout,
 } from "./errors";
 export { PSIParticipant, ProcessState } from "./psi/participant";
+export type {
+  PsiOperation,
+  PsiProgress,
+  PsiProgressReporter,
+  PsiProgressState,
+} from "./psi/participant";
 export { loadPsiBackend } from "./psi/psiBackend";
 export type { PsiBackendOptions, PsiBackendSelection } from "./psi/psiBackend";
 export { InProcessPsiEngine } from "./psi/psiEngine";

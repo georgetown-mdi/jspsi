@@ -34,6 +34,7 @@ import {
 } from "./utils/sanitizeErrorForDisplay.js";
 import type { CSVRow } from "./file.js";
 import { PSIParticipant } from "./psi/participant.js";
+import type { PsiProgressReporter } from "./psi/participant.js";
 import type { PsiEngine, PsiEngineMode } from "./psi/psiEngine.js";
 import {
   exchangeTerms,
@@ -1741,6 +1742,17 @@ export interface RunExchangeOptions {
    * returned by {@link describeExchangeStages}.
    */
   onStage?: (id: string) => void;
+  /**
+   * Called as each PSI crypto operation starts and settles, with the element
+   * count it covers and, once it settles, how long it ran. A front end renders
+   * a live progress display from it: the operations are the ones a long round
+   * spends its minutes inside, and a single one of them cannot report partial
+   * progress, since the masking runs inside one blocking library call.
+   *
+   * Every figure is a count or a duration, never a value from either party's
+   * data, and none of it goes on the wire.
+   */
+  onPsiProgress?: PsiProgressReporter;
   /** Called for each non-fatal warning produced during terms exchange. */
   onWarning?: (msg: string) => void;
   /**
@@ -2263,6 +2275,7 @@ export async function runExchange(
       { role: psiRole, verbose: verbosity },
       elementBounds,
       engine,
+      options.onPsiProgress,
     );
     if (countOnly)
       // One round over one key, resolving to the intersection size and nothing that

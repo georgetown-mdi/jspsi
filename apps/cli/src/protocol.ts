@@ -51,10 +51,16 @@ import { persistPartnerFingerprint } from "./config";
 import { buildRotatedKeyFile, saveKeyFile } from "./keyFile";
 import { preflightKeyFilePath } from "./keyFilePreflight";
 import { loadCliPsiBackend } from "./psiBackend";
+import {
+  createPsiProgressDisplay,
+  terminalPsiStatusLine,
+  type PsiProgressDisplay,
+} from "./psiProgressDisplay";
 import { createPsiEngine } from "./psiWorkerHost";
 import { writeExchangeRecord, type RecordOutput } from "./recordFile";
 import { writeDualSignedRecord, type ReceiptOutput } from "./receiptFile";
 import { writeOutput } from "./util/dataIo";
+import { runBeforeEachLogLine } from "./util/logging";
 import { logRuntimeEnv } from "./util/runtimeEnv";
 import {
   PERSISTENCE_LOSS_EXIT_CODE,
@@ -509,6 +515,7 @@ async function runExchangeStage(params: {
   signing: SigningPersist | null;
   recordOutput: RecordOutput | undefined;
   stageTimer: { open: (id: string) => void; close: () => void };
+  psiProgress: PsiProgressDisplay;
   onRunPhase: () => void;
   log: ReturnType<typeof getLogger>;
   emit: (fn: (e: EventStreamEmitter) => void) => void;
@@ -525,6 +532,7 @@ async function runExchangeStage(params: {
     signing,
     recordOutput,
     stageTimer,
+    psiProgress,
     onRunPhase,
     log,
     emit,
@@ -603,6 +611,10 @@ async function runExchangeStage(params: {
       // webrtc, so this is also a no-op there.
       observedHostKey:
         run.secure !== undefined ? build.fileSync?.observedHostKey : undefined,
+      // Each crypto operation's element count and duration, rendered as the
+      // phase's live progress. Counts and durations only -- no value from
+      // either party's data reaches the display.
+      onPsiProgress: (progress) => psiProgress.report(progress),
       onStage: (id: string) => {
         const label = stageLabels[id] ?? id;
         // The label derives from linkage-key names the partner may have
@@ -1798,6 +1810,13 @@ export interface RunProtocolOptions {
   verbosity: number;
   /** The name of the logger this run's diagnostics are written through. */
   loggerName: string;
+  /**
+   * The `--log-file` path this run's diagnostics were redirected to (the value
+   * the caller handed `configureLogging`), or `undefined` when they go to
+   * stderr. Read only by the PSI progress display, which draws its live line on
+   * a terminal whose diagnostics it shares and nowhere else.
+   */
+  logFile?: string;
   /** Where to write the exchange record; omit to skip recording. */
   recordOutput?: RecordOutput;
   /** This party's zero-setup `--save` intent. Meaningful only with `auth: null`. */
@@ -1888,6 +1907,7 @@ export async function runProtocol(
     output,
     verbosity,
     loggerName,
+    logFile,
     recordOutput,
     saveIntent,
     onAuthenticated,
@@ -1931,6 +1951,16 @@ export async function runProtocol(
   const build: PreparedTransport = {};
 
   const stageTimer = createStageTimer(emit);
+
+  // The PSI phase's progress display: a live line on the terminal while one
+  // crypto operation runs, and one logged line per operation that completes.
+  // Closed by doCleanup -- an interrupt included -- so no half-drawn line is
+  // left on the terminal the run's last message goes to.
+  const psiProgress = createPsiProgressDisplay({
+    statusLine: terminalPsiStatusLine({ verbosity, logFile }),
+    clearBeforeLogLine: runBeforeEachLogLine,
+    milestone: (line) => log.info(line),
+  });
 
   // The one operational-counter summary, emitted immediately before each
   // terminal event so the terminal event stays last on the stream. recordsProcessed
@@ -2006,6 +2036,7 @@ export async function runProtocol(
   async function doCleanup() {
     if (cleaned) return;
     cleaned = true;
+    psiProgress.close();
     await closeRunLayers({ build, run, log });
     logTransportCounters(build.client, log);
     process.off("SIGINT", onSigint);
@@ -2054,6 +2085,10 @@ export async function runProtocol(
     // Synchronous too, and before the cleanup it cannot substitute for: an
     // in-flight rendezvous tears itself down on this rather than on doCleanup.
     interrupted.abort();
+    // Before the first line of the interrupt: the live progress line holds the
+    // cursor mid-row, so dropping it here is what puts the lines below on rows
+    // of their own. doCleanup closes it again, idempotently.
+    psiProgress.close();
     try {
       log.info("caught SIGINT, exiting");
       logRotationStateOnInterrupt("the exchange was interrupted");
@@ -2071,6 +2106,8 @@ export async function runProtocol(
     // catch block sees it as soon as the cleanup-induced failure propagates.
     run.signalReceived = "SIGTERM";
     interrupted.abort();
+    // The live line is dropped before the first interrupt line, as in onSigint.
+    psiProgress.close();
     try {
       log.info("caught SIGTERM, exiting");
       logRotationStateOnInterrupt("the exchange was interrupted");
@@ -2165,6 +2202,7 @@ export async function runProtocol(
       signing,
       recordOutput,
       stageTimer,
+      psiProgress,
       onRunPhase: () => {
         terminalPhase = "run";
       },
