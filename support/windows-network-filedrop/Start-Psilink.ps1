@@ -653,6 +653,30 @@ function Confirm-ShareTarget {
     return @{ Accepted = $true; Server = $suggestion.Server; Share = $suggestion.Share }
 }
 
+function Get-CorrectedShareTarget {
+    <#  A resolved folder as the server and share confirmed above leave it, with
+        the full path rebuilt from them. A pair of folders is compared by that
+        full path, and a folder that is a share root is named after the share --
+        so a leg left at the path the operator typed would hide a pair that two
+        corrections put on one real folder, and would name a folder after a
+        namespace the partner cannot reach.
+
+        A folder on this PC has no share to correct and is returned as it is. #>
+    param($Resolved, [string] $Server, [string] $Share)
+
+    if ($Resolved.Kind -ne 'Network') { return $Resolved }
+
+    $corrected = [hashtable] $Resolved.Clone()
+    $corrected.Server = $Server
+    $corrected.Share = $Share
+    $corrected.Unc = "\\$Server\$Share"
+    $corrected.Full = $corrected.Unc
+    if ($corrected.SubPath) {
+        $corrected.Full = "$($corrected.Unc)\$($corrected.SubPath.Replace('/', '\'))"
+    }
+    return $corrected
+}
+
 function New-RendezvousShareMount {
     <#  Make one network-share volume and check every folder reached through it.
         $SubPath is what the volume mounts; each leg is a folder within it, and
@@ -760,6 +784,35 @@ function Test-LocalRendezvousFolder {
     Show-Head "Checking $Label"
     return (Invoke-DoctorLoop -EngineArgs @('--volume', "${Path}:/rz") `
             -BatteryArgs @('doctor', 'mount', '/rz'))
+}
+
+function Show-VolumeRemoval {
+    <#  The share password the volumes made by this run hold, and the command
+        that removes them. Nothing here removes a volume, so every run that
+        made one names it on the way out: the console's closing screen, and an
+        exit where a later folder failed with an earlier folder's volume already
+        made.
+
+        Prints nothing for a run that made none. #>
+    param([string[]] $VolumeNames = @())
+
+    if (@($VolumeNames).Count -eq 0) { return }
+
+    $volumeList = $VolumeNames -join ' '
+    $storedLine = "Docker stored the share password in cleartext in the volume's"
+    if (@($VolumeNames).Count -gt 1) {
+        $storedLine = "Docker stored the share password in cleartext in each volume's"
+    }
+    Write-Host ''
+    Show-Alert $storedLine
+    Show-Note "metadata: '$script:PsilinkEngine volume inspect $volumeList' shows it"
+    Show-Note 'to anyone who can run Docker on this PC. When you are finished:'
+    Show-Info ''
+    Show-Info "    $script:PsilinkEngine volume rm $volumeList"
+    Show-Info ''
+    Show-Info 'That removes what it names but not every trace of the password, so'
+    Show-Info 'retire or rotate the account when the exchanges are done. The'
+    Show-Info 'passwords page, "Ending the exposure", says why.'
 }
 
 # ==========================================================================
@@ -1386,6 +1439,18 @@ if ($sharedMount.Shared) {
         (Join-SharePath -Parent $sharedMount.SubPath -Child $sharedMount.OutboundLeg))
     if (-not $target.Accepted) { exit 1 }
 
+    # One confirmation answers for both folders, so both move to the share it
+    # named: a folder that is a share root takes its name from that share, and
+    # the pair is checked again below against the paths the file server opens.
+    $rendezvousResolved = Get-CorrectedShareTarget -Resolved $rendezvousResolved `
+        -Server $target.Server -Share $target.Share
+    $outboundResolved = Get-CorrectedShareTarget -Resolved $outboundResolved `
+        -Server $target.Server -Share $target.Share
+    $rendezvousFolderName = Get-RendezvousFolderName -Share $rendezvousResolved.Share `
+        -SubPath $rendezvousResolved.SubPath
+    $outboundFolderName = Get-RendezvousFolderName -Share $outboundResolved.Share `
+        -SubPath $outboundResolved.SubPath
+
     $mounted = New-RendezvousShareMount -VolumeName $VolumeName `
         -Server $target.Server -Share $target.Share -SubPath $sharedMount.SubPath `
         -Legs @(@{ Label = 'the folder your partner writes into'; Path = $sharedMount.InboundLeg },
@@ -1413,23 +1478,40 @@ if ($sharedMount.Shared) {
         if ($leg.Resolved.Kind -eq 'Network') {
             $target = Confirm-ShareTarget -Server $leg.Resolved.Server -Share $leg.Resolved.Share `
                 -SubPaths @($leg.Resolved.SubPath)
-            if (-not $target.Accepted) { exit 1 }
+            if (-not $target.Accepted) {
+                Show-VolumeRemoval -VolumeNames $volumesMade
+                exit 1
+            }
 
             # From the share as resolved, and after any correction above: the
             # drive letter or namespace path the operator typed is theirs alone,
             # and a volume is mounted by server and share rather than by that
-            # path.
-            $correctedName = Get-RendezvousFolderName -Share $target.Share -SubPath $leg.Resolved.SubPath
-            if ($leg.Outbound) { $outboundFolderName = $correctedName } else { $rendezvousFolderName = $correctedName }
+            # path. The corrected leg replaces the parse of what was typed,
+            # so the pair check below compares the folders the file server
+            # opens.
+            $corrected = Get-CorrectedShareTarget -Resolved $leg.Resolved `
+                -Server $target.Server -Share $target.Share
+            $correctedName = Get-RendezvousFolderName -Share $corrected.Share -SubPath $corrected.SubPath
+            if ($leg.Outbound) {
+                $outboundResolved = $corrected
+                $outboundFolderName = $correctedName
+            } else {
+                $rendezvousResolved = $corrected
+                $rendezvousFolderName = $correctedName
+            }
 
             $mounted = New-RendezvousShareMount -VolumeName $leg.Volume `
-                -Server $target.Server -Share $target.Share -SubPath $leg.Resolved.SubPath `
+                -Server $corrected.Server -Share $corrected.Share -SubPath $corrected.SubPath `
                 -Legs @(@{ Label = $leg.Label; Path = '' })
-            if (-not $mounted) { exit 1 }
+            if (-not $mounted) {
+                Show-VolumeRemoval -VolumeNames $volumesMade
+                exit 1
+            }
 
             $volumesMade += $leg.Volume
             $mount = $leg.Volume
         } elseif (-not (Test-LocalRendezvousFolder -Path $leg.Path -Label $leg.Label)) {
+            Show-VolumeRemoval -VolumeNames $volumesMade
             exit 1
         }
         if ($leg.Outbound) { $outboundMount = $mount } else { $rendezvousMount = $mount }
@@ -1446,6 +1528,7 @@ if ($splitRendezvous) {
         -InboundName $rendezvousFolderName -OutboundName $outboundFolderName
     if (-not $pairVerdict.Usable) {
         Show-PairRefusal -Verdict $pairVerdict
+        Show-VolumeRemoval -VolumeNames $volumesMade
         exit 1
     }
 }
@@ -1476,6 +1559,7 @@ if ($started.ExitCode -ne 0) {
     Show-Fail 'The console container would not start.'
     Write-Host ''
     Write-Host $started.Output
+    Show-VolumeRemoval -VolumeNames $volumesMade
     exit 1
 }
 
@@ -1503,20 +1587,4 @@ try {
 }
 Write-Host ''
 Write-Host 'The console has stopped.'
-if ($volumesMade.Count -gt 0) {
-    $volumeList = $volumesMade -join ' '
-    $storedLine = "Docker stored the share password in cleartext in the volume's"
-    if ($volumesMade.Count -gt 1) {
-        $storedLine = "Docker stored the share password in cleartext in each volume's"
-    }
-    Write-Host ''
-    Show-Alert $storedLine
-    Show-Note "metadata: '$script:PsilinkEngine volume inspect $volumeList' shows it"
-    Show-Note 'to anyone who can run Docker on this PC. When you are finished:'
-    Show-Info ''
-    Show-Info "    $script:PsilinkEngine volume rm $volumeList"
-    Show-Info ''
-    Show-Info 'That removes what it names but not every trace of the password, so'
-    Show-Info 'retire or rotate the account when the exchanges are done. The'
-    Show-Info 'passwords page, "Ending the exposure", says why.'
-}
+Show-VolumeRemoval -VolumeNames $volumesMade

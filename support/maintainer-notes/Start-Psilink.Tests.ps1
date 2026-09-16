@@ -712,6 +712,102 @@ Describe 'The pair of folders an exchange over two folders needs' {
     }
 }
 
+Describe 'A folder as the correction from the DFS tab leaves it' {
+    It 'rebuilds the full path from the server and share confirmed' {
+        $corrected = Get-CorrectedShareTarget -Resolved (
+            Resolve-DropPath -Raw '\\namespace\dfs\clinic-study\from-clinic') `
+            -Server 'fs-04' -Share 'exchange'
+
+        $corrected.Server | Should -Be 'fs-04'
+        $corrected.Share | Should -Be 'exchange'
+        $corrected.Unc | Should -Be '\\fs-04\exchange'
+        $corrected.SubPath | Should -Be 'clinic-study/from-clinic'
+        $corrected.Full | Should -Be '\\fs-04\exchange\clinic-study\from-clinic'
+    }
+
+    It 'gives a folder on this PC back as it stands' {
+        $local = Get-CorrectedShareTarget -Resolved @{ Kind = 'Local'; LocalPath = 'C:\drops\to-clinic' } `
+            -Server 'fs-04' -Share 'exchange'
+
+        $local.Kind | Should -Be 'Local'
+        $local.LocalPath | Should -Be 'C:\drops\to-clinic'
+    }
+
+    It 'names a folder that is a share root after the share it was corrected to' {
+        # The name the console mints into the invitation: a folder that IS the
+        # share root takes the share's name, so a leg left at the namespace
+        # would give the partner a name for a share that holds nothing of
+        # theirs.
+        $corrected = Get-CorrectedShareTarget -Resolved (Resolve-DropPath -Raw '\\namespace\from-clinic') `
+            -Server 'fs-04' -Share 'exchange'
+
+        Get-RendezvousFolderName -Share $corrected.Share -SubPath $corrected.SubPath |
+            Should -Be 'exchange'
+    }
+
+    It 'refuses a pair the corrections put on one real folder' {
+        # Two paths that named two folders, and one folder behind both: the
+        # check before the console starts is held against the corrected paths,
+        # or it passes a console that refuses every exchange.
+        $before = Test-RendezvousPair -InboundPath '\\namespace\from-clinic' `
+            -OutboundPath '\\fs-04\exchange' -InboundName 'from-clinic' -OutboundName 'exchange'
+        $before.Usable | Should -BeTrue -Because 'the paths as typed name two folders'
+
+        $inbound = Get-CorrectedShareTarget -Resolved (Resolve-DropPath -Raw '\\namespace\from-clinic') `
+            -Server 'fs-04' -Share 'exchange'
+        $outbound = Get-CorrectedShareTarget -Resolved (Resolve-DropPath -Raw '\\fs-04\exchange') `
+            -Server 'fs-04' -Share 'exchange'
+        $verdict = Test-RendezvousPair `
+            -InboundPath (Get-ComparableFolderPath -Resolved $inbound) `
+            -OutboundPath (Get-ComparableFolderPath -Resolved $outbound) `
+            -InboundName (Get-RendezvousFolderName -Share $inbound.Share -SubPath $inbound.SubPath) `
+            -OutboundName (Get-RendezvousFolderName -Share $outbound.Share -SubPath $outbound.SubPath)
+
+        $verdict.Usable | Should -BeFalse
+        $verdict.Reason | Should -Match 'same folder'
+    }
+
+    It 'refuses a pair a correction puts one inside the other' {
+        $inbound = Get-CorrectedShareTarget -Resolved (
+            Resolve-DropPath -Raw '\\namespace\dfs\from-clinic') -Server 'fs-04' -Share 'exchange'
+        $outbound = Resolve-DropPath -Raw '\\fs-04\exchange'
+        $verdict = Test-RendezvousPair `
+            -InboundPath (Get-ComparableFolderPath -Resolved $inbound) `
+            -OutboundPath (Get-ComparableFolderPath -Resolved $outbound) `
+            -InboundName (Get-RendezvousFolderName -Share $inbound.Share -SubPath $inbound.SubPath) `
+            -OutboundName (Get-RendezvousFolderName -Share $outbound.Share -SubPath $outbound.SubPath)
+
+        $verdict.Usable | Should -BeFalse
+        $verdict.Reason | Should -Match 'inside the other'
+    }
+}
+
+Describe 'The volumes a run made, named on the way out' {
+    It 'names every volume and the command that removes them' {
+        $records = Show-VolumeRemoval -VolumeNames @('psilink-sync', 'psilink-sync-outbound') 6>&1
+        $text = @($records | ForEach-Object { [string] $_ }) -join ' '
+
+        $text | Should -Match 'cleartext in each volume''s'
+        $text | Should -Match 'volume inspect psilink-sync psilink-sync-outbound'
+        $text | Should -Match 'volume rm psilink-sync psilink-sync-outbound'
+    }
+
+    It 'reads one volume in the singular' {
+        $records = Show-VolumeRemoval -VolumeNames @('psilink-sync') 6>&1
+        $text = @($records | ForEach-Object { [string] $_ }) -join ' '
+
+        $text | Should -Match 'cleartext in the volume''s'
+        $text | Should -Match 'volume rm psilink-sync'
+    }
+
+    It 'prints nothing for a run that made none' {
+        $records = Show-VolumeRemoval -VolumeNames @() 6>&1
+        $text = @($records | ForEach-Object { [string] $_ }) -join ''
+
+        $text | Should -BeNullOrEmpty
+    }
+}
+
 Describe 'The name the launcher gives a folder on this PC' {
     It 'names a folder by its own last segment' {
         Get-LocalFolderName -Path 'C:\Users\dana\Egnyte\agency-a-agency-b' |
@@ -785,10 +881,11 @@ Describe 'The launcher flow, driven against a stub engine' {
         $script:SplitStub = Join-Path $script:FlowRoot 'split-stub'
         $script:LocalStub = Join-Path $script:FlowRoot 'local-stub'
         $script:RefusalStub = Join-Path $script:FlowRoot 'refusal-stub'
+        $script:TwoVolumeStub = Join-Path $script:FlowRoot 'two-volume-stub'
         $script:LocalInbound = Join-Path $script:FlowRoot 'from-clinic'
         $script:LocalOutbound = Join-Path $script:FlowRoot 'to-clinic'
         foreach ($directory in @($script:FlowRoot, $script:FlowBin, $script:FlowStub, $script:FlowData,
-                $script:SplitStub, $script:LocalStub, $script:RefusalStub,
+                $script:SplitStub, $script:LocalStub, $script:RefusalStub, $script:TwoVolumeStub,
                 $script:LocalInbound, $script:LocalOutbound)) {
             New-Item -ItemType Directory -Path $directory -Force | Out-Null
         }
@@ -1180,5 +1277,39 @@ Describe 'The launcher flow, driven against a stub engine' {
 
         $served = @($calls -split '\r?\n' | Where-Object { $_ -like '*serve*' }) -join ' :: '
         $served | Should -BeLike '*JOB_RENDEZVOUS_NAME=agency-a-agency-b*' -Because $shape
+    }
+
+    It 'names the volume already made when a later folder is refused' {
+        # Two folders on two shares take a volume each, and the first is made
+        # before the second is confirmed. A run that stops at the second has
+        # left a volume holding the share password, so what the closing screen
+        # would have said is said on the way out instead.
+        $volumeName = 'psilinkci-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+        $run = Invoke-LauncherFlow -Launcher $script:FlowLauncher -StubDir $script:TwoVolumeStub `
+            -Arguments @(
+                '-DataRoot', "`"$script:FlowData`"",
+                '-RendezvousDir', '\\psilink-ci-fs\exchange\from-clinic',
+                '-RendezvousOutboundDir', '\\psilink-ci-fs\outbound\to-clinic',
+                '-VolumeName', $volumeName,
+                '-Port', $script:FlowPort,
+                '-NoBrowser') `
+            -InputLines @('', 'n', '', '', '')
+
+        $calls = [string] $run.Calls
+        $output = [string] $run.Output
+        $shape = Get-FlowShape -Run $run
+
+        $run.TimedOut | Should -BeFalse -Because $shape
+        $run.Exit | Should -Be 1 -Because $shape
+        # Where the run stopped: the second folder's server and share were not
+        # confirmed, and neither route out of that reaches a second volume.
+        $output | Should -BeLike '*DFS tab*' -Because $shape
+        @($calls -split '\r?\n' | Where-Object { $_ -like '*volume create*' }).Count |
+            Should -Be 1 -Because $shape
+        $calls | Should -Not -BeLike '*serve*' -Because $shape
+
+        $output | Should -BeLike '*cleartext*' -Because $shape
+        $output | Should -BeLike "*volume rm $volumeName*" -Because $shape
+        $output | Should -Not -BeLike "*$volumeName-outbound*" -Because $shape
     }
 }
