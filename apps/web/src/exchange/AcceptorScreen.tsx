@@ -106,24 +106,25 @@ import {
 } from "./acceptorModel";
 import { APPLIANCE_FILE_ASSURANCE, FILE_ASSURANCE_LINE } from "./fileAssurance";
 import {
+  MANAGE_OFFER_IDLE,
+  buildManagedDeposit,
+  webrtcLocatorFromEndpoint,
+} from "./manageOfferModel";
+import {
   acceptorCleaningAttention,
   acceptorColumnsEditorState,
   acceptorInitialColumnsState,
   acceptorLaunchPayload,
   acceptorVerdict,
 } from "./acceptorColumnsModel";
-import {
-  buildManagedDeposit,
-  webrtcLocatorFromEndpoint,
-} from "./manageOfferModel";
 import { useBeforeUnloadPrompt, useUnloadGuard } from "./useUnloadGuard";
 import { AcceptorCleaningStep } from "./AcceptorCleaningStep";
 import { AcceptorColumnsStep } from "./AcceptorColumnsStep";
 import { AcceptorExchangeSection } from "./AcceptorExchangeSection";
 import { WorkShell } from "./WorkShell";
 
-import { MANAGE_OFFER_IDLE, ManageExchangeOffer } from "./ManageExchangeOffer";
 import { Ledger } from "./Ledger";
+import { ManageExchangeOffer } from "./ManageExchangeOffer";
 import { RecoveredExchangePanel } from "./RecoveredExchangePanel";
 import { TopBar } from "./TopBar";
 import { acceptorTimelineSteps } from "./exchangeRun";
@@ -156,13 +157,12 @@ import type { AcceptorStep } from "./acceptorModel";
 import type { AlertContent } from "@components/csvIntake";
 import type { CoverageInput } from "@components/useNonEmptyRates";
 
+import type { ManageOfferChoices, ManageOfferState } from "./manageOfferModel";
 import type { ColumnSamples } from "@psi/columnSamples";
 import type { ConnectionTuningDraft } from "@console/connectionTuningModel";
 import type { ExchangeFilesDraft } from "@console/exchangeFilesModel";
 import type { FieldStepOverride } from "@psi/standardizationAuthoring";
 import type { FileRejection } from "@mantine/dropzone";
-import type { ManageOfferChoices } from "./manageOfferModel";
-import type { ManageOfferState } from "./ManageExchangeOffer";
 import type { RailStep } from "@psi/rail";
 import type { ReceiptsDraft } from "@psi/receiptsModel";
 import type { RunDiagnosticsDraft } from "@psi/runDiagnosticsModel";

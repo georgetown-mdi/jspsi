@@ -5,9 +5,10 @@
  * this party's exchange-file document, the deposited secret, this party's `side`,
  * and the optional max-age policy -- from what each completion surface already
  * holds, and it derives the operator-facing copy (the label cap and the max-age
- * cadence line). No React, no IndexedDB: the deposit itself (through
- * {@link createManagedExchange}) and the offer's UI state live in the components,
- * so the composition and the decline discipline are unit-testable in Node.
+ * cadence line). It also holds the offer's progress value, which the host screen
+ * keeps and the panel renders. No React, no IndexedDB: the deposit itself runs in
+ * the components (through {@link createManagedExchange}), so the composition, the
+ * progress value, and the decline discipline are unit-testable in Node.
  *
  * Deposit shape and composition rules are normative in
  * docs/spec/MANAGED_EXCHANGE_RECORD.md: the record persists this party's whole
@@ -44,6 +45,28 @@ import type {
   ManagedExchangeSide,
   NewManagedExchange,
 } from "@psi/managed/managedExchangeRecord";
+import type { AlertContent } from "@components/csvIntake";
+
+/** The deposit's progress, driven by the host that owns the store write: `idle`
+ * before the operator commits, `depositing` while the write is in flight,
+ * `deposited` once the record lands, and `error` when the write failed. */
+export type ManageOfferStatus = "idle" | "depositing" | "deposited" | "error";
+
+/**
+ * The offer's whole host-held state: the deposit's progress and, for an `error`,
+ * what it was about when a column name explains it. One value rather than two,
+ * so a reset cannot clear the progress and leave the refusal standing -- which
+ * would disable the deposit with nothing on screen to explain it. A refusal is
+ * representable only beside `error`, so no assignment can pair one with a
+ * progress the operator would then be unable to explain.
+ */
+export type ManageOfferState =
+  | { status: Exclude<ManageOfferStatus, "error">; refusal?: undefined }
+  | { status: "error"; refusal?: AlertContent };
+
+/** The offer's state before any deposit, and the value every path that abandons
+ * or restarts an exchange resets to. */
+export const MANAGE_OFFER_IDLE: ManageOfferState = { status: "idle" };
 
 /**
  * Build the credential-free {@link WebRTCExchangeLocator} the managed record's

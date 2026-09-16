@@ -24,29 +24,8 @@ import {
   maxAgeDaysError,
 } from "./manageOfferModel";
 
+import type { ManageOfferChoices, ManageOfferStatus } from "./manageOfferModel";
 import type { AlertContent } from "@components/csvIntake";
-import type { ManageOfferChoices } from "./manageOfferModel";
-
-/** The deposit's progress, driven by the host that owns the store write: `idle`
- * before the operator commits, `depositing` while the write is in flight,
- * `deposited` once the record lands, and `error` when the write failed. */
-export type ManageOfferStatus = "idle" | "depositing" | "deposited" | "error";
-
-/**
- * The offer's whole host-held state: the deposit's progress and, for an `error`,
- * what it was about when a column name explains it. One value rather than two,
- * so a reset cannot clear the progress and leave the refusal standing -- which
- * would disable the deposit with nothing on screen to explain it. A refusal is
- * representable only beside `error`, so no assignment can pair one with a
- * progress the operator would then be unable to explain.
- */
-export type ManageOfferState =
-  | { status: Exclude<ManageOfferStatus, "error">; refusal?: undefined }
-  | { status: "error"; refusal?: AlertContent };
-
-/** The offer's state before any deposit, and the value every path that abandons
- * or restarts an exchange resets to. */
-export const MANAGE_OFFER_IDLE: ManageOfferState = { status: "idle" };
 
 /** Whether this browser can open the managed store, probed once on mount:
  * `undefined` while the probe is in flight, then the settled answer. The offer
