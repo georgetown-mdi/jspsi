@@ -53,9 +53,10 @@ interface ManagedFailureConfirmation {
    * text, interpolating only this record's own local fields. */
   message: string;
   /** The label for the "the partner confirmed a real failure on their side" gate
-   * option, which routes to fast re-invite. Short: the three asks it stands for
-   * are in the message above it, and the panel introduces both options together,
-   * so the button names the reply rather than restating them. */
+   * option, which routes to fast re-invite. It names the attestation the operator
+   * is making -- a failure on the partner's own side, not a reply -- since this
+   * option is the one that clears the condition and re-invites on the channel the
+   * message went out on. The three asks behind it are in that message. */
   confirmedOption: string;
   /** The label for the "something does not add up" gate option, which routes to the
    * compromise response. */
@@ -115,7 +116,7 @@ export function composeManagedFailureConfirmation(
 ): ManagedFailureConfirmation {
   return {
     message: composeConfirmationMessage(record),
-    confirmedOption: "My partner confirmed",
+    confirmedOption: "Partner confirmed their own failure",
     doesNotAddUpOption: "Something does not add up",
   };
 }

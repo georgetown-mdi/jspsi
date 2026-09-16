@@ -36,10 +36,16 @@ import type { NewManagedExchange } from "@psi/managed/managedExchangeRecord";
 
 const linkageTerms = getDefaultLinkageTerms("County Health Dept");
 
-// The stubbed run's script for one test, reset per test: how many runs it has served
-// and whether the first of them is the rotation persist failure rather than a
-// no-show.
-const driver = vi.hoisted(() => ({ runs: 0, persistFailsFirstRun: false }));
+// The stubbed run's script for one test, reset per test: how many runs it has served,
+// whether the first of them is the rotation persist failure rather than a no-show,
+// and the lapsed instant to fail every run with instead (the bound the pre-connection
+// check reads, whose own recovery is the re-invite).
+const driver = vi.hoisted(
+  (): { runs: number; persistFailsFirstRun: boolean; lapsedAt?: string } => ({
+    runs: 0,
+    persistFailsFirstRun: false,
+  }),
+);
 
 vi.mock("@tanstack/react-router", async () =>
   (await import("./moduleMocks")).reactRouterMock(),
@@ -58,12 +64,18 @@ vi.mock("@psi/transport/rendezvous", async () =>
 vi.mock("@psi/managed/managedRunDriver", async () => {
   const { PartnerNoShowError } =
     await import("@psi/transport/waitForConnection");
+  const { ManagedExchangeExpiredError } =
+    await import("@psi/managed/managedExpiry");
   const rotate = await import("@psi/managed/managedRunRotate");
   const store = await import("@psi/managed/managedExchangeStore");
   return {
     runManagedExchangeInBrowser: async (config: { record: { id: string } }) => {
       driver.runs += 1;
       const at = Date.now();
+      // The lapse is read before any connection, so the run stamps no bookkeeping
+      // of its own -- the record already holds the lapse.
+      if (driver.lapsedAt !== undefined)
+        throw new ManagedExchangeExpiredError(driver.lapsedAt);
       if (driver.persistFailsFirstRun && driver.runs === 1) {
         await store.recordManagedExchangeLastRun(
           config.record.id,
@@ -131,6 +143,7 @@ async function runUntilItNoShows(): Promise<string> {
 beforeEach(async () => {
   driver.runs = 0;
   driver.persistFailsFirstRun = false;
+  driver.lapsedAt = undefined;
   await clearManagedExchanges();
 });
 
@@ -247,7 +260,7 @@ describe("a standing condition at the next visit", () => {
       .toBeInTheDocument();
 
     const confirmed = page.getByRole("button", {
-      name: "My partner confirmed",
+      name: "Partner confirmed their own failure",
     });
     await expect.element(confirmed).toBeInTheDocument();
     await confirmed.click();
@@ -320,5 +333,50 @@ describe("a cleared standing condition beside this visit's own failure", () => {
     // at all: without this the assertion above would pass against a failure that
     // offers the re-invite itself.
     expect(app.container.textContent).toContain("not a fault on this device");
+  });
+});
+
+describe("a standing condition beside a live failure of another tier", () => {
+  test("leaves the re-invite to the live failure rather than offering a second", async () => {
+    // A lapsed bound over a standing persist failure: two states, one recovery
+    // between them -- a single fresh invitation minted from this record. The
+    // condition keeps its own words and its clearance; the offer is the live
+    // failure's, so the operator has one button to press rather than two
+    // identical ones whose failed mint would alert twice.
+    driver.lapsedAt = "2026-07-01T00:00:00.000Z";
+    const created = await createManagedExchange(
+      newExchange({ inputFileHandle: await inputHandle() }),
+    );
+    const failedAt = Date.now() - 60_000;
+    await recordManagedExchangeLastRun(
+      created.id,
+      failedRun(failedAt, "failed", "storage"),
+      failedAt,
+    );
+
+    app.render(createElement(ManagedRunSurface, { id: created.id }));
+    const runButton = page.getByRole("button", { name: "Run exchange" });
+    await expect.element(runButton).toBeEnabled();
+    await runButton.click();
+    await expect
+      .element(page.getByText("This exchange's stored secret has lapsed"))
+      .toBeInTheDocument();
+    await flushPendingUpdates();
+
+    await expect
+      .element(
+        page.getByText("A run could not save this exchange's new secret"),
+      )
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByRole("button", { name: STANDING_CONDITION_CLEAR_LABEL }),
+      )
+      .toBeInTheDocument();
+    expect(
+      page
+        .getByRole("button", { name: "Create a fresh invitation" })
+        .elements(),
+    ).toHaveLength(1);
   });
 });

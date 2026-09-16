@@ -28,20 +28,24 @@ import {
   ManagedInputError,
   managedInputFailureKind,
 } from "@psi/managed/managedInputGuard";
+import {
+  persistManagedExchangeRotation,
+  recordManagedExchangeLastRun,
+} from "@psi/managed/managedExchangeStore";
 import { ManagedExchangeLockUnavailableError } from "@psi/managed/managedExchangeLock";
 import { PartnerNoShowError } from "@psi/transport/waitForConnection";
 import { RotationPersistError } from "@psi/managed/managedRunRotate";
 import { parseManagedLocalState } from "@psi/managed/managedLocalStateShape";
-import { recordManagedExchangeLastRun } from "@psi/managed/managedExchangeStore";
 
 import type { ManagedExchangeRecord } from "@psi/managed/managedExchangeRecord";
 
 // The pure orchestration of a re-run, tested in Node for the parts that do NOT
 // touch the platform (the pre-connection expiry short-circuit, which never reaches
 // the lock, and the benign-outcome classification); the full launch-from-record path
-// is exercised against real Chromium in test/browser/managedRun.test.ts. One ordering
-// claim -- the phase boundary reported to the caller's failure classification --
-// needs the run driven end to end here, against stubbed Web Locks and store writes.
+// is exercised against real Chromium in test/browser/managedRun.test.ts. Two claims
+// need the run driven end to end here, against stubbed Web Locks and store writes:
+// the phase boundary reported to the caller's failure classification, and the store
+// writes a run whose partner never arrives makes.
 
 vi.mock("@psi/managed/managedExchangeStore", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -86,6 +90,7 @@ function stubGrantingWebLocks(): void {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.mocked(recordManagedExchangeLastRun).mockClear();
+  vi.mocked(persistManagedExchangeRotation).mockClear();
   handedOff.state = undefined;
   handedOff.unreadable = undefined;
 });
@@ -233,6 +238,42 @@ describe("runManagedRerun: the phase boundary reported to the caller", () => {
     ).rejects.toBeInstanceOf(PartnerNoShowError);
 
     expect(boundaryReported).toBe(false);
+  });
+});
+
+describe("runManagedRerun: a partner who never arrives", () => {
+  test("never reaches the rotation write, so the stored secret stands", async () => {
+    // The invariant the carried-forward standing condition leans on: a condition
+    // is cleared by a rotation write or the operator's own act, and a no-show
+    // raises before the handshake yields a rotated secret. The rotation persist is
+    // the only writer of `sharedSecret` and `expires`, so a run that never calls it
+    // leaves both as the store holds them; the no-show stamp is its whole write.
+    stubGrantingWebLocks();
+    const at = Date.parse("2026-07-14T12:00:00.000Z");
+
+    await expect(
+      runManagedRerun(
+        record(),
+        {
+          acquireInput: () => Promise.resolve("rows"),
+          handshake: () =>
+            Promise.reject(new PartnerNoShowError("nobody arrived")),
+          dataExchange: () => {
+            throw new Error("the data exchange must not run on a no-show");
+          },
+        },
+        { now: () => at },
+      ),
+    ).rejects.toBeInstanceOf(PartnerNoShowError);
+
+    expect(persistManagedExchangeRotation).not.toHaveBeenCalled();
+    expect(vi.mocked(recordManagedExchangeLastRun).mock.calls).toEqual([
+      [
+        "record-under-test",
+        { at: new Date(at).toISOString(), outcome: "missed" },
+        at,
+      ],
+    ]);
   });
 });
 

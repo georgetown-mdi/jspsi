@@ -702,6 +702,18 @@ export function ManagedRunSurface({ id }: { id: string }) {
     (standingSettled ||
       (standingView !== undefined && standingView.tier !== failure?.kind));
 
+  // Whether the live failure is already offering the re-invite -- directly, or past
+  // the confirmation gate, which ends on the same offer. Both mint from this record,
+  // so the standing section drops its own copy of the offer and keeps its status and
+  // its clear control: one control for the act, not two identical buttons whose
+  // failed mint alerts twice.
+  const failureOffersReinvite =
+    failure !== undefined &&
+    (managedRunReinvites(failure) ||
+      (failure.recovery === "confirm" &&
+        confirmationGated &&
+        !compromiseResponse));
+
   // Persist an in-place edit to the local fields (label, max-token-age policy)
   // through the single-transaction store path, then adopt the returned record so
   // the surface reflects the edit -- including the conservatively re-derived
@@ -1001,6 +1013,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
                 clearFailed={clearStandingFailed}
                 reinviting={reinviting}
                 reinviteFailed={reinviteFailed && reinviteSource === "recovery"}
+                reinviteOffered={failureOffersReinvite}
                 onReinvite={() => reinviteNow("recovery")}
                 onClear={clearStanding}
                 onResolve={resolveStanding}
@@ -1185,6 +1198,8 @@ function FailureRecovery({
  *
  * Once cleared, the section keeps its place and shows the re-invite: settling a
  * condition is not the same act as re-establishing the secret it was raised over.
+ * Where the live failure above is already offering that re-invite, the offer is
+ * left to it -- one control for the act, whichever state asked for it.
  */
 function StandingConditionSection({
   record,
@@ -1195,6 +1210,7 @@ function StandingConditionSection({
   clearFailed,
   reinviting,
   reinviteFailed,
+  reinviteOffered,
   onReinvite,
   onClear,
   onResolve,
@@ -1210,12 +1226,16 @@ function StandingConditionSection({
   clearFailed: boolean;
   reinviting: boolean;
   reinviteFailed: boolean;
+  /** Whether the live failure above is already offering the re-invite. It mints
+   * from the same record, so this section shows its status and its clearance
+   * without a second copy of the offer. */
+  reinviteOffered: boolean;
   onReinvite: () => void;
   onClear: () => void;
   onResolve: (outcome: Parameters<typeof routeConfirmationReply>[0]) => void;
 }) {
   if (settled)
-    return (
+    return reinviteOffered ? null : (
       <ReinviteRecovery
         record={record}
         reinviting={reinviting}
@@ -1245,12 +1265,14 @@ function StandingConditionSection({
         <ConfirmationPanel record={record} onResolve={onResolve} />
       ) : (
         <>
-          <ReinviteRecovery
-            record={record}
-            reinviting={reinviting}
-            reinviteFailed={reinviteFailed}
-            onReinvite={onReinvite}
-          />
+          {!reinviteOffered && (
+            <ReinviteRecovery
+              record={record}
+              reinviting={reinviting}
+              reinviteFailed={reinviteFailed}
+              onReinvite={onReinvite}
+            />
+          )}
           {clearFailed && (
             <Alert color="red" title="Could not clear this" mt="sm">
               Nothing changed here; try again.

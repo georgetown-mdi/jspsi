@@ -1267,21 +1267,6 @@ describe("the standing condition across the bookkeeping writes", () => {
     expect(after.standingCondition).toEqual(standing);
   });
 
-  test("a no-show rotates nothing, so it cannot clear a rotation-derived marker", () => {
-    // The invariant the carry-forward leans on. A clear runs off a rotation write
-    // or the operator's own act, and this write reaches neither: the secret, the
-    // bound, and the condition all come through a no-show untouched.
-    const record = withCondition();
-    const after = applyManagedExchangeLastRun(
-      record,
-      { at: laterAt, outcome: "missed" },
-      Date.parse(laterAt),
-    );
-    expect(after.sharedSecret).toBe(record.sharedSecret);
-    expect(after.expires).toBe(record.expires);
-    expect(after.standingCondition).toEqual(standing);
-  });
-
   test("a successful run advances the stamp and does not settle the condition", () => {
     const after = applyManagedExchangeLastRun(
       withCondition(),

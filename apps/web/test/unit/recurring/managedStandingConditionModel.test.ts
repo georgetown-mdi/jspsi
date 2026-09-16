@@ -140,9 +140,14 @@ describe("the gate the confirmation clearance presents", () => {
     );
   });
 
-  test("its option labels are short enough to sit on a button", () => {
+  test("its confirming label states the attestation, not that a reply arrived", () => {
+    // The click this label sits on clears the condition and puts a fresh secret on
+    // the out-of-band channel, so the label has to name what the operator is
+    // attesting to: a real failure on the partner's own side.
     const confirmation = composeManagedFailureConfirmation(record());
-    expect(confirmation.confirmedOption.length).toBeLessThanOrEqual(30);
-    expect(confirmation.doesNotAddUpOption.length).toBeLessThanOrEqual(30);
+    expect(confirmation.confirmedOption).toBe(
+      "Partner confirmed their own failure",
+    );
+    expect(confirmation.doesNotAddUpOption).toBe("Something does not add up");
   });
 });
