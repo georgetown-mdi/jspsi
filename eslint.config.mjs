@@ -175,12 +175,12 @@ const noDisplayableAsErrorArgument = ERROR_TEXT_POSITIONS.map((position) => ({
 // apps/cli/src names a path it took from the command line or from the
 // operator's configuration: an identifier or property ENDING in Path, File,
 // Dir, Directory or Folder (with or without a trailing s, or one of those
-// words alone), and one OPENING with path, file, dir, directory or folder
-// before a capital or the end of the name, which reaches pathValue, fileName
-// and filename. A name outside both -- target, output, destination -- is not
-// reached, so what this holds is the shape it can recognize and not every
-// operator path (docs/spec/CHANNEL_SECURITY.md, display-sanitization escape
-// format).
+// words alone), and one OPENING with path, file, dir, directory or folder,
+// followed by s, name or names or nothing, and then a capital or the end of
+// the name, which reaches pathValue, fileName, filename and dirPath. A name
+// outside both -- target, output, destination -- is not reached, so what this
+// holds is the shape it can recognize and not every operator path
+// (docs/spec/CHANNEL_SECURITY.md, display-sanitization escape format).
 //
 // The name says nothing about WHO CHOSE the bytes, so a value a partner or a
 // server named -- a remote listing's entry, a path out of an invitation -- is
@@ -194,6 +194,14 @@ const UNMARKED_OPERATOR_PATH = [
   `MemberExpression[property.name=${OPERATOR_PATH_NAME}]`,
 ].join(", ");
 
+// The CLI's terminal prompts, which this ban treats as sinks beside the
+// console and logger calls OPERATOR_DISPLAY_SINK names: a question and a
+// prompt-stream line reach the operator's terminal the same way a console
+// line does (apps/cli/src/util/prompt.ts). Matched as a bare call, which is
+// how every apps/cli/src call site reaches them.
+const OPERATOR_PROMPT_SINK =
+  "CallExpression[callee.name=/^(writePromptLine|promptConfirm|promptFreeText)$/]";
+
 // Both altitudes, matched where the raw name sits DIRECTLY in the position --
 // the same shape the two bans above rest on. Marking wraps the name in
 // operatorSuppliedText(...), which puts a CallExpression in the position and
@@ -205,9 +213,10 @@ const noUnmarkedOperatorPath = [
     (position) =>
       `:matches(${ERROR_TEXT_COMPOSITION}) ${position}:matches(${UNMARKED_OPERATOR_PATH})`,
   ),
-  ...SINK_VALUE_POSITIONS.map(
-    (position) =>
-      `${OPERATOR_DISPLAY_SINK} ${position}:matches(${UNMARKED_OPERATOR_PATH})`,
+  ...SINK_VALUE_POSITIONS.flatMap((position) =>
+    [OPERATOR_DISPLAY_SINK, OPERATOR_PROMPT_SINK].map(
+      (sink) => `${sink} ${position}:matches(${UNMARKED_OPERATOR_PATH})`,
+    ),
   ),
 ].map((selector) => ({ selector, message: UNMARKED_OPERATOR_PATH_MESSAGE }));
 
@@ -263,10 +272,19 @@ const weriftStaticLoadBan = [
   'ExportAllDeclaration[source.value=/^werift(\\/.*)?$/][exportKind!="type"]',
 ].map((selector) => ({ selector, message: WERIFT_STATIC_LOAD_MESSAGE }));
 
-// What every apps/cli/src file is held to. Factored out because flat config
-// REPLACES a rule's options rather than merging them, so the narrower block
-// below -- the same tree minus the files whose operator paths are not marked
-// yet -- has to re-carry these beside its own entry.
+// What every apps/cli/src file is held to, the re-export shim included.
+// Factored out because flat config REPLACES a rule's options rather than
+// merging them, so each of the narrower blocks below -- the tree minus the
+// files whose operator paths are not marked yet, and the shim's own block --
+// has to re-carry these beside its own entries.
+const cliSourceDisplayRestrictedSyntax = [
+  ...weriftStaticLoadBan,
+  noBareRootLoglevelEmit,
+  ...noRawErrorAtDisplaySink,
+  ...noDisplayableAsErrorArgument,
+];
+
+// The above plus the raw sensitive-parse ban, which the shim is outside of.
 const cliSourceRestrictedSyntax = [
   {
     selector:
@@ -274,10 +292,7 @@ const cliSourceRestrictedSyntax = [
     message:
       "Parse operator/credential files through apps/cli/src/sensitiveFile.ts (parseSensitiveYaml / editSensitiveYamlDocument); raw YAML.parse leaks source into errors and stderr. Non-sensitive parse: eslint-disable-next-line with a one-line justification.",
   },
-  ...weriftStaticLoadBan,
-  noBareRootLoglevelEmit,
-  ...noRawErrorAtDisplaySink,
-  ...noDisplayableAsErrorArgument,
+  ...cliSourceDisplayRestrictedSyntax,
 ];
 
 export default tseslint.config(
@@ -369,9 +384,11 @@ export default tseslint.config(
     // deferred-alias toString) and stderr (YAML's non-fatal warnings). Routing
     // through the chokepoint closes every channel in one place; banning the raw
     // calls here stops a new reader silently reopening any of them. The CLI's
-    // re-export shim is exempt (it owns no raw calls but mirrors the boundary), as
-    // are tests. A genuinely non-sensitive parse (e.g. parsing a command's JSON
-    // output) opts out with an eslint-disable-next-line carrying a one-line why.
+    // re-export shim is exempt from this whole block (it owns no raw calls but
+    // mirrors the boundary), so the display and operator-path bans it IS held to
+    // are re-carried in its own block below; tests are exempt too. A genuinely
+    // non-sensitive parse (e.g. parsing a command's JSON output) opts out with
+    // an eslint-disable-next-line carrying a one-line why.
     files: ["apps/cli/src/**/*.ts"],
     ignores: ["apps/cli/src/sensitiveFile.ts"],
     // Fail CI on a stray or rule-silencing disable so the ban cannot be quietly
@@ -414,13 +431,28 @@ export default tseslint.config(
     // converted. It re-carries the block above's entries because flat config
     // replaces a rule's options rather than merging them, and it exempts by
     // ignoring a named file rather than by listing the ones it covers, so a
-    // source added later is held to it without an edit here.
-    files: ["apps/cli/src/**/*.ts"],
-    ignores: [...UNMARKED_OPERATOR_PATH_FILES],
+    // source added later is held to it without an edit here. The re-export shim
+    // is ignored here and takes its own block below, which holds it to this ban
+    // without the raw-parse ban it is exempt from.
+    files: ["apps/cli/src/**/*.{ts,tsx,mts}"],
+    ignores: ["apps/cli/src/sensitiveFile.ts", ...UNMARKED_OPERATOR_PATH_FILES],
     rules: {
       "no-restricted-syntax": [
         "error",
         ...cliSourceRestrictedSyntax,
+        ...noUnmarkedOperatorPath,
+      ],
+    },
+  },
+  {
+    // The re-export shim, held to every ban the block above carries except the
+    // raw sensitive-parse one: the two blocks above both ignore it, so this is
+    // where its entries are stated.
+    files: ["apps/cli/src/sensitiveFile.ts"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        ...cliSourceDisplayRestrictedSyntax,
         ...noUnmarkedOperatorPath,
       ],
     },

@@ -114,6 +114,14 @@ const BANNED = [
     "deps.log().warn(`at ${configPath}`);",
   ],
   [
+    "a path in a terminal question",
+    "void promptConfirm(`Overwrite ${configFile}?`);",
+  ],
+  [
+    "a path on a prompt-stream line",
+    "writePromptLine(`writing ${recordFile}`);",
+  ],
+  [
     "a name opening with path rather than ending in it",
     "throw new Error(`could not read ${pathValue}`);",
   ],
@@ -143,6 +151,10 @@ const ALLOWED = [
     "log.warn(`${redactAndRenderOperatorSuppliedText(operatorSuppliedText(configPath))} is unreadable`);",
   ],
   [
+    "a marked path in a terminal question",
+    "void promptConfirm(`Overwrite ${redactAndRenderOperatorSuppliedText(operatorSuppliedText(configFile))}?`);",
+  ],
+  [
     "a value whose name names no path",
     "throw new Error(`could not read ${detail}`);",
   ],
@@ -168,6 +180,7 @@ const ALLOWED = [
 
 const PREAMBLE = `
 declare const configPath: string;
+declare const configFile: string;
 declare const keyFile: string;
 declare const inputDir: string;
 declare const recordFile: string;
@@ -193,6 +206,8 @@ declare function messageWithOperatorText(
 ): { text: string };
 declare function keepOperatorSuppliedText<E>(error: E, message: unknown): E;
 declare function redactAndRenderOperatorSuppliedText(value: unknown): string;
+declare function promptConfirm(question: string): Promise<boolean>;
+declare function writePromptLine(line: string): void;
 declare class UsageError extends Error {}
 export function fixture(): void {
 `;
