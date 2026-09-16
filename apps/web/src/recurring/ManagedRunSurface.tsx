@@ -636,6 +636,14 @@ export function ManagedRunSurface({ id }: { id: string }) {
       .finally(() => setReinviting(false));
   }
 
+  // A compromise response holds the whole recovery region, whichever of the two gates
+  // the operator answered: a fresh invitation on the channel that just failed would
+  // hand the new secret to whoever is interfering, so neither gate is offered under
+  // one and neither the live failure nor the standing condition offers a mint while
+  // it stands. Its alert renders once -- at the gate that raised it, or in the live
+  // failure's place where a later run lands on the state that gate was raised over.
+  const compromiseActive = compromiseResponse || standingCompromise;
+
   // The two-outcome gate: a confirmed real partner-side failure proceeds to re-invite;
   // anything that does not add up routes to the compromise response (no quiet
   // re-invite on the possibly-compromised channel). The inviter side mints the fresh
@@ -644,6 +652,9 @@ export function ManagedRunSurface({ id }: { id: string }) {
   function resolveConfirmation(
     outcome: Parameters<typeof routeConfirmationReply>[0],
   ) {
+    // No reply mints while a compromise response stands, including one raised at the
+    // standing condition's gate: that channel is the one the operator flagged.
+    if (compromiseActive) return;
     if (routeConfirmationReply(outcome) === "compromise-response") {
       setCompromiseResponse(true);
       return;
@@ -689,10 +700,10 @@ export function ManagedRunSurface({ id }: { id: string }) {
 
   // The standing condition as the page would render it, and whether it renders at
   // all. A live run's own failure already speaks for this run, and where it landed
-  // on the state the condition resolves to it holds that recovery too -- so the
-  // section stands down rather than putting a second re-invite beside the first.
-  // It returns as soon as the live state is something else, and at the next visit.
-  // Once cleared it holds its place whatever this visit's run then does.
+  // on the state the condition resolves to it holds that state's recovery and the
+  // compromise response answered here -- so the section stands down rather than
+  // putting a second copy beside the first. It returns as soon as the live state is
+  // something else, and at the next visit; once cleared it holds its place.
   const standingView =
     record !== undefined
       ? managedStandingConditionView(record, localState)
@@ -701,13 +712,6 @@ export function ManagedRunSurface({ id }: { id: string }) {
     reinvite === undefined &&
     (standingSettled ||
       (standingView !== undefined && standingView.tier !== failure?.kind));
-
-  // A compromise response holds the whole recovery region, whichever of the two
-  // gates the operator answered: a fresh invitation on the channel that just failed
-  // would hand the new secret to whoever is interfering, so neither the live failure
-  // nor the standing condition offers one while it stands. The alert itself renders
-  // at the gate that raised it.
-  const compromiseActive = compromiseResponse || standingCompromise;
 
   // Whether the live failure is already offering the re-invite -- directly, or past
   // the confirmation gate, which ends on the same offer. Both mint from this record,
@@ -996,7 +1000,6 @@ export function ManagedRunSurface({ id }: { id: string }) {
                     failure={failure}
                     record={record}
                     confirmationGated={confirmationGated}
-                    compromiseResponse={compromiseResponse}
                     compromiseActive={compromiseActive}
                     reinviting={reinviting}
                     // The failed alert renders only at the site that triggered the
@@ -1126,15 +1129,15 @@ export function ManagedRunSurface({ id }: { id: string }) {
 
 /** The recovery affordance a classified failure offers, below its alert: fast
  * re-invite for the re-invite tiers, the out-of-band confirmation and two-outcome gate
- * for the unexplained tier, and nothing extra for a retry/wait state (the run button
- * and the input picker are the recovery there). Thin over the pure model: the copy and
+ * for the unexplained tier, the compromise response in place of that gate once one
+ * stands, and nothing extra for a retry/wait state (the run button and the input
+ * picker are the recovery there). Thin over the pure model: the copy and
  * the routing are the model's; this renders the buttons. A composed re-invite renders
  * above this (the {@link ReinvitePanel}), so this never handles the minted artifacts. */
 function FailureRecovery({
   failure,
   record,
   confirmationGated,
-  compromiseResponse,
   compromiseActive,
   reinviting,
   reinviteFailed,
@@ -1144,11 +1147,10 @@ function FailureRecovery({
   failure: ManagedRunFailureAlert;
   record: ManagedExchangeRecord;
   confirmationGated: boolean;
-  /** Whether this gate's "does not add up" leg was taken: the compromise alert
-   * renders at the gate that raised it. */
-  compromiseResponse: boolean;
   /** Whether a compromise response stands on this page at all -- this gate's or the
-   * standing condition's. No re-invite offer renders under one. */
+   * standing condition's. No gate is offered and no re-invite offer renders under
+   * one, and the alert takes the unexplained tier's slot here: the standing section
+   * stands down whenever the condition's tier is the live failure's own. */
   compromiseActive: boolean;
   reinviting: boolean;
   reinviteFailed: boolean;
@@ -1158,7 +1160,10 @@ function FailureRecovery({
   ) => void;
 }) {
   if (failure.recovery === "confirm") {
-    if (compromiseResponse)
+    // The response stands in the gate's place, this gate's own or the standing
+    // condition's: a reply that does not add up has already been given, and a later
+    // run landing on the same state does not put the question again.
+    if (compromiseActive)
       return (
         <Alert color="red" title={COMPROMISE_RESPONSE_TITLE} mb="md">
           <span style={{ whiteSpace: "pre-line" }}>
@@ -1170,7 +1175,7 @@ function FailureRecovery({
     // re-invite -- the same panel a direct re-invite tier shows (which mints for the
     // inviter and names asking the partner for the acceptor, with a retry on failure).
     if (confirmationGated)
-      return compromiseActive ? null : (
+      return (
         <ReinviteRecovery
           record={record}
           reinviting={reinviting}
@@ -1237,7 +1242,8 @@ function StandingConditionSection({
   /** Whether the operator has cleared the condition on this visit. */
   settled: boolean;
   /** Whether this gate's "does not add up" leg was taken: the compromise alert
-   * renders at the gate that raised it. */
+   * renders here, unless this section has stood down for a live failure of the
+   * condition's own tier, which renders the alert in its place. */
   compromise: boolean;
   /** Whether a compromise response stands on this page at all -- this gate's or the
    * live failure's. No re-invite offer renders under one. */

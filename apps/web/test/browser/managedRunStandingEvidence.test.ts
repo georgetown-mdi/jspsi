@@ -431,6 +431,68 @@ describe("a compromise response the operator has reached", () => {
     );
   });
 
+  test("holds the recovery region when a later run fails the same way", async () => {
+    // The standing gate is answered "something does not add up", and the next run
+    // fails closed the same way the condition was raised over. The section stands
+    // down for a live failure of its own tier, so the response has to hold the
+    // region from the live failure's place: the question the operator answered is
+    // not put again, and nothing there can mint on the channel they flagged.
+    const created = await createManagedExchange(
+      newExchange({ inputFileHandle: await inputHandle() }),
+    );
+    const failedAt = Date.now() - 120_000;
+    await recordManagedExchangeLastRun(
+      created.id,
+      failedRun(failedAt, "failed", "auth"),
+      failedAt,
+    );
+    const secretBefore = (await getManagedExchange(created.id))?.sharedSecret;
+
+    app.render(createElement(ManagedRunSurface, { id: created.id }));
+    const doesNotAddUp = page.getByRole("button", {
+      name: "Something does not add up",
+    });
+    await expect.element(doesNotAddUp).toBeInTheDocument();
+    await doesNotAddUp.click();
+    await expect
+      .element(page.getByText(COMPROMISE_RESPONSE_TITLE))
+      .toBeInTheDocument();
+
+    driver.handshakeFailsClosed = true;
+    const runButton = page.getByRole("button", { name: "Run exchange" });
+    await expect.element(runButton).toBeEnabled();
+    await runButton.click();
+    await expect
+      .element(
+        page.getByText(
+          "This run failed and needs you to check with your partner",
+        ),
+      )
+      .toBeInTheDocument();
+    await flushPendingUpdates();
+
+    expect(page.getByText(COMPROMISE_RESPONSE_TITLE).elements()).toHaveLength(
+      1,
+    );
+    expect(
+      page
+        .getByRole("button", { name: "Partner confirmed their own failure" })
+        .elements(),
+    ).toHaveLength(0);
+    expect(doesNotAddUp.elements()).toHaveLength(0);
+    expect(
+      page
+        .getByRole("button", { name: "Create a fresh invitation" })
+        .elements(),
+    ).toHaveLength(0);
+
+    // Nothing rotated and nothing settled: the stored secret is the one the
+    // flagged channel was using, and the condition still stands.
+    const stored = await getManagedExchange(created.id);
+    expect(stored?.sharedSecret).toBe(secretBefore);
+    expect(stored?.standingCondition).not.toEqual(NO_STANDING_CONDITION);
+  });
+
   test("leaves a settled condition no re-invite to offer under it", async () => {
     // The other way round: the condition was cleared earlier in this visit, so the
     // section below holds the re-invite on its own, and this visit's run then lands
