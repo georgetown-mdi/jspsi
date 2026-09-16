@@ -6,14 +6,19 @@ import {
   clipToRenderedCost,
   clipToRenderedCostKeepingEnd,
   controlCharacterMarker,
+  operatorDisplayMarker,
   renderedDisplayCost,
+  renderOperatorSuppliedText,
   replaceControlCharactersForDisplay,
+  replaceUnrenderableForOperatorDisplay,
   trimPartialControlCharacterMarker,
   trimPartialControlCharacterMarkerAtStart,
   DISPLAY_TRUNCATION_MARKER,
   DEFAULT_MAX_DISPLAY_LENGTH,
 } from "../../src/utils/sanitizeForDisplay";
 import { redactPrivateKeyMaterial } from "../../src/utils/sanitizeErrorForDisplay";
+import { operatorSuppliedText } from "../../src/utils/operatorSuppliedText";
+import { loneSurrogateIndex } from "../../src/utils/wellFormedString";
 
 describe("sanitizeForDisplay", () => {
   test("passes an ordinary ASCII value through unchanged", () => {
@@ -259,6 +264,95 @@ describe("replaceControlCharactersForDisplay", () => {
       expect(
         redactPrivateKeyMaterial(replaceControlCharactersForDisplay(text)),
       ).toBe(redactedFirst);
+    }
+  });
+});
+
+describe("what an operator-supplied render replaces beyond the control class", () => {
+  const LINE_SEPARATORS = ["\u2028", "\u2029"];
+  const LONE_SURROGATES = ["\ud800", "\udbff", "\udc00", "\udfff"];
+
+  test("replaces the line separators and lone surrogates", () => {
+    // Neither class is `\p{Cc}`, and both reach a sink the control class is
+    // replaced for: a reader that breaks a line on U+2028, and a string a
+    // lone surrogate leaves non-well-formed.
+    for (const character of [...LINE_SEPARATORS, ...LONE_SURROGATES])
+      expect(replaceUnrenderableForOperatorDisplay(character)).toBe(
+        operatorDisplayMarker(character.codePointAt(0)!),
+      );
+  });
+
+  test("replaces the control class exactly as the control treatment does", () => {
+    for (const character of CONTROL_CHARACTERS)
+      expect(replaceUnrenderableForOperatorDisplay(character)).toBe(
+        replaceControlCharactersForDisplay(character),
+      );
+  });
+
+  test("leaves a path, an accent, a confusable and an astral pair as typed", () => {
+    for (const untouched of [
+      "C:\\Users\\opérateur\\entrée.csv",
+      "\u0430",
+      "\u202e",
+      "\u{1f600}",
+    ])
+      expect(replaceUnrenderableForOperatorDisplay(untouched)).toBe(untouched);
+  });
+
+  test("replaces exactly the units the package reads as unpaired", () => {
+    // The class the replacement matches and the one the package reads as
+    // non-well-formed are the same set, so what a render leaves standing is
+    // what the canonical encoder would have taken.
+    for (const value of [
+      "plain",
+      "\u{1f600}",
+      "a\ud83db",
+      "a\udc00b",
+      "tail\ud83d",
+      "C:\\data\\in.csv",
+    ])
+      expect(replaceUnrenderableForOperatorDisplay(value) === value).toBe(
+        loneSurrogateIndex(value) === -1,
+      );
+  });
+
+  test("the marker is printable ASCII the escape passes through", () => {
+    for (const character of [...LINE_SEPARATORS, ...LONE_SURROGATES]) {
+      const marker = operatorDisplayMarker(character.codePointAt(0)!);
+      expect(sanitizeForDisplay(marker)).toBe(marker);
+      expect(marker).not.toContain("\\");
+    }
+  });
+
+  test("the marker is defined over that class and nothing wider", () => {
+    for (const outside of ["a".codePointAt(0)!, 0x0a, 0x2027, 0x1f600])
+      expect(() => operatorDisplayMarker(outside)).toThrow(RangeError);
+  });
+
+  test("a cut inside the wider marker backs off to before it", () => {
+    // The marker for a code point outside the control class is six characters
+    // where that class's is four, and the render's budget is measured in
+    // single ones: a cut landing between them would show a fragment that is
+    // neither the path's bytes nor the marker.
+    const LEAD = "x".repeat(20);
+    const TAIL = "y".repeat(10);
+    const value = operatorSuppliedText(`${LEAD}\u2028${TAIL}`);
+    const marker = operatorDisplayMarker(0x2028);
+    const fragments = Array.from(
+      { length: marker.length - 1 },
+      (_unused, index) => marker.slice(0, index + 1),
+    );
+
+    for (
+      let maxLength = LEAD.length;
+      maxLength <= LEAD.length + marker.length;
+      maxLength += 1
+    ) {
+      const rendered = renderOperatorSuppliedText(value, { maxLength });
+      expect(rendered.endsWith(DISPLAY_TRUNCATION_MARKER)).toBe(true);
+      const kept = rendered.slice(0, -DISPLAY_TRUNCATION_MARKER.length);
+      for (const fragment of fragments)
+        expect(kept.endsWith(fragment)).toBe(false);
     }
   });
 });

@@ -7,6 +7,7 @@ import {
   computeCertificateFingerprint,
   generateSigningIdentity,
   getLogger,
+  sanitizeErrorForDisplay,
 } from "@psilink/core";
 import * as signingIdentityFile from "../../src/signingIdentityFile";
 import {
@@ -184,6 +185,48 @@ test.skipIf(process.platform === "win32").each([
     } finally {
       warn.mockRestore();
     }
+  },
+);
+
+test.skipIf(process.platform === "win32")(
+  "the refusal names a backslashed path as the operator typed it",
+  async () => {
+    // The path is the operator's own, so the display sink renders it as given
+    // while the fragment beside it keeps the escape. Off Windows a backslash is
+    // a legal filename character, so one file name stands in for the separator.
+    const identityPath = path.join(dir, "C:\\psilink\\signing-identity.json");
+    fs.writeFileSync(identityPath, '{"version":"nonsense\\u001b[2K"}');
+
+    const err = await loadSigningIdentity(identityPath).then(
+      () => undefined,
+      (thrown: unknown) => thrown,
+    );
+
+    const rendered = sanitizeErrorForDisplay(err);
+    expect(rendered).toContain("C:\\psilink\\signing-identity.json");
+    expect(rendered).not.toContain("\u001b");
+  },
+);
+
+test.runIf(process.platform === "win32")(
+  "the refusal names a Windows path as the operator typed it",
+  async () => {
+    // The separators here are real ones, which the escape would double on their
+    // way to the operator.
+    const identityPath = path.join(dir, "psilink", "signing-identity.json");
+    fs.mkdirSync(path.dirname(identityPath), { recursive: true });
+    fs.writeFileSync(identityPath, '{"version":"nonsense\\u001b[2K"}');
+
+    const err = await loadSigningIdentity(identityPath).then(
+      () => undefined,
+      (thrown: unknown) => thrown,
+    );
+
+    const rendered = sanitizeErrorForDisplay(err);
+    expect(identityPath).toContain("\\");
+    expect(rendered).toContain(identityPath);
+    expect(rendered).not.toContain(identityPath.replaceAll("\\", "\\\\"));
+    expect(rendered).not.toContain("\u001b");
   },
 );
 

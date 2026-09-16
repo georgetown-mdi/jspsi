@@ -154,6 +154,7 @@ export type { CanonicalValue } from "./utils/canonical";
 export { loneSurrogateIndex } from "./utils/wellFormedString";
 export {
   sanitizeForDisplay,
+  renderOperatorSuppliedText,
   displayText,
   renderedDisplayCost,
   boundRawFragmentForFit,
@@ -176,11 +177,26 @@ export {
   renderedDisplayCostKeepingLineBreaks,
   redactPrivateKeyMaterial,
   redactAndSanitizeForDisplay,
+  redactAndRenderOperatorSuppliedText,
   createPrivateKeyStreamRedactor,
   holdsPrivateKeyMaterial,
   MAX_ERROR_CAUSE_DEPTH,
 } from "./utils/sanitizeErrorForDisplay";
 export type { PrivateKeyStreamRedactor } from "./utils/sanitizeErrorForDisplay";
+// The operator-origin mark and the partition it carries to the error
+// renderer: a fragment the operator supplied reaches them as they typed it,
+// while every span nobody marked keeps the escape.
+export {
+  operatorSuppliedText,
+  messageWithOperatorText,
+  keepOperatorSuppliedText,
+  operatorSuppliedSpans,
+} from "./utils/operatorSuppliedText";
+export type {
+  OperatorSuppliedText,
+  MessageWithOperatorText,
+  DisplaySpan,
+} from "./utils/operatorSuppliedText";
 // The partner-origin brand and its ONE elimination. A consumer outside core
 // brands at its own decode chokepoint -- the read that takes bytes off a stream
 // somebody else fills -- and has no other way to put those bytes in a message.

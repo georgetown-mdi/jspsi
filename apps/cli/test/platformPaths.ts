@@ -35,7 +35,9 @@ export function platformFileUrl(posixPath: string): URL {
  *
  * An assertion that a message names a path compares against this rather than
  * the path itself: the raw form is what the operator typed, the escaped form
- * is what the message shows.
+ * is what the message shows. A message the composition site marks as the
+ * operator's own is the exception -- that sink renders the path as they typed
+ * it, so its assertion takes the path itself.
  *
  * @internal test-only helper
  */

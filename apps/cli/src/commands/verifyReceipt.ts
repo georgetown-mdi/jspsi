@@ -17,6 +17,8 @@ import {
   reconstructCommittedData,
   recordAlterationIsTheOnlyExplanation,
   recordedVersionMatches,
+  operatorSuppliedText,
+  redactAndRenderOperatorSuppliedText,
   reproductionMismatchCauses,
   sanitizeErrorForDisplay,
   sanitizeForDisplay,
@@ -450,17 +452,20 @@ function termsWord(
   return `not checked (pass ${termsRemediation(supplied)})`;
 }
 
-// The note a config defining no linkage_terms earns: it names a path the operator
-// supplied, so it is escaped at this display sink.
+// The note a config defining no linkage_terms earns: it names a path the
+// operator supplied, so this sink renders that path as they typed it.
 function configTermsNote(
   supplied: SuppliedVerificationInputs,
 ): string | undefined {
   if (supplied.configFile === undefined || supplied.localTerms)
     return undefined;
   if (supplied.noteConfigTerms === false) return undefined;
+  const configFile = redactAndRenderOperatorSuppliedText(
+    operatorSuppliedText(supplied.configFile),
+  );
   return (
-    `  note: ${sanitizeForDisplay(`config file ${supplied.configFile}`)} ` +
-    "defines no linkage_terms, so it supplied no terms for this check"
+    `  note: config file ${configFile} defines no linkage_terms, ` +
+    "so it supplied no terms for this check"
   );
 }
 
