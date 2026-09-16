@@ -284,8 +284,10 @@ export type InviterScreenAction =
   | { type: "mint-failed"; alert: AlertContent }
   | { type: "mint-finished" }
   /** The terms were sealed and routed to the save surface, which mints the code
-   * and the config file together rather than minting here. */
-  | { type: "save-routed" }
+   * and the config file together rather than minting here. Carries the editor
+   * the seal bound to, the same way invitation-minted does, so this case never
+   * has to read state.editor to know what it sealed. */
+  | { type: "save-routed"; editor: InviterEditor }
   /** The operator left a finalized exchange for a fresh one: the seal lifts with
    * every input intact and the minted artifacts are discarded. */
   | { type: "started-over" }
@@ -452,8 +454,7 @@ export function inviterScreenReducer(
     case "save-routed":
       return {
         ...state,
-        editor:
-          state.editor === undefined ? undefined : sealEditor(state.editor),
+        editor: sealEditor(action.editor),
         savedExchange: undefined,
         saveAlert: undefined,
       };

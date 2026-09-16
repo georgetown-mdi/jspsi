@@ -24,6 +24,7 @@ import type {
 import type { AcquiredCsv } from "@psi/inviterEditor";
 import type { AlertContent } from "@components/csvIntake";
 import type { GeneratedInvitation } from "@psi/invitation";
+import type { ProfiledJobInput } from "@psi/jobClient/workInputClient";
 
 // Headers chosen from inferMetadata's exact-match alias table, as the inviter
 // model's own fixture is: four linkage types, one identifier, and one
@@ -309,7 +310,12 @@ describe("whether the mint may proceed", () => {
       type: "save-failed",
       alert: ALERT,
     });
-    const state = inviterScreenReducer(seeded, { type: "save-routed" });
+    if (seeded.editor === undefined)
+      throw new Error("the fixture read no file");
+    const state = inviterScreenReducer(seeded, {
+      type: "save-routed",
+      editor: seeded.editor,
+    });
     expect(state.editor?.sealed).toBe(true);
     expect(state.invitation).toBeUndefined();
     expect(state.savedExchange).toBeUndefined();
@@ -350,6 +356,47 @@ describe("whether the mint may proceed", () => {
     expect(
       inviterScreenReducer(minting, { type: "mint-finished" }).minting,
     ).toBe(false);
+  });
+});
+
+describe("the console's mounted-file commit", () => {
+  const PROFILE: ProfiledJobInput = {
+    name: csv.fileName,
+    sizeBytes: csv.sizeBytes,
+    modifiedAt: 1_700_000_000_000,
+    rowCount: csv.rowCount,
+    columns: csv.columns,
+    sanitizedColumnPositions: [],
+    columnSamples: new Map(),
+  };
+
+  // The screen builds a fresh alert object per refusal rather than sharing one
+  // constant, so YourFileSection's identity-keyed focus effect re-fires on a
+  // second consecutive refusal (a shared reference would not).
+  function freshUnmatchableAlert(): AlertContent {
+    return {
+      title: "This file cannot be matched",
+      message: "None of the matching keys can be built from this file.",
+    };
+  }
+
+  test("two consecutive refusals do not share an alert reference", () => {
+    const first = inviterScreenReducer(INVITER_SCREEN_INITIAL, {
+      type: "console-file-seeded",
+      source: PROFILE,
+      acquired: csv,
+      editor: editorFromCsv("Dana Okafor", csv),
+      alert: freshUnmatchableAlert(),
+    });
+    const second = inviterScreenReducer(first, {
+      type: "console-file-seeded",
+      source: PROFILE,
+      acquired: csv,
+      editor: editorFromCsv("Dana Okafor", csv),
+      alert: freshUnmatchableAlert(),
+    });
+    expect(first.intakeAlert).toEqual(second.intakeAlert);
+    expect(first.intakeAlert).not.toBe(second.intakeAlert);
   });
 });
 
