@@ -2,6 +2,8 @@ import type { Argv, Arguments } from "yargs";
 import fs from "node:fs";
 
 import {
+  messageWithOperatorText,
+  operatorSuppliedText,
   parseExchangeSpec,
   rawDecodeErrorDescription,
   getLogger,
@@ -347,7 +349,7 @@ export function loadConfig(options: ExchangeOptions): {
   }
   const rawConfig = parseSensitiveYaml(
     source,
-    `config file ${options.configFile}`,
+    messageWithOperatorText`config file ${operatorSuppliedText(options.configFile)}`,
   );
 
   // Warn about and strip the runtime-injected fields from the top-level

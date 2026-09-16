@@ -2,6 +2,11 @@ import YAML, { type Document } from "yaml";
 
 import { UsageError } from "./errors.js";
 import { parseBoundedJson } from "./utils/boundedJson.js";
+import {
+  keepOperatorSuppliedText,
+  messageWithOperatorText,
+  type MessageWithOperatorText,
+} from "./utils/operatorSuppliedText.js";
 
 // The single chokepoint for parsing documents that may hold secrets: the
 // operator's psilink.yaml (inline SFTP credentials -- server.password /
@@ -63,9 +68,30 @@ import { parseBoundedJson } from "./utils/boundedJson.js";
  */
 const SAFE_YAML_OPTIONS = { logLevel: "error", maxAliasCount: 100 } as const;
 
+/**
+ * The path-only descriptor a caller names the document by, such as
+ * `` `config file ${path}` ``.
+ *
+ * A caller that knows the path is the OPERATOR's own composes the label with
+ * {@link ./utils/operatorSuppliedText.messageWithOperatorText} instead of as a
+ * string, so the failure below renders that path as the operator typed it
+ * rather than escaping its separators. A plain string keeps the escape, which
+ * is what a label naming no operator path -- the web app's fixed document
+ * names -- asks for.
+ */
+export type SensitiveFileLabel = string | MessageWithOperatorText;
+
 /** Reason appended after the caller's path-only label; never the parser message. */
-function yamlParseFailure(fileLabel: string): UsageError {
-  return new UsageError(`${fileLabel} could not be parsed as YAML`);
+function labelledFailure(
+  fileLabel: SensitiveFileLabel,
+  reason: string,
+): UsageError {
+  const message = messageWithOperatorText`${fileLabel} ${reason}`;
+  return keepOperatorSuppliedText(new UsageError(message.text), message);
+}
+
+function yamlParseFailure(fileLabel: SensitiveFileLabel): UsageError {
+  return labelledFailure(fileLabel, "could not be parsed as YAML");
 }
 
 /**
@@ -74,7 +100,10 @@ function yamlParseFailure(fileLabel: string): UsageError {
  * builds from the path), never the parser's source-bearing message. `fileLabel`
  * is a path-only descriptor such as `` `config file ${path}` ``.
  */
-export function parseSensitiveYaml(source: string, fileLabel: string): unknown {
+export function parseSensitiveYaml(
+  source: string,
+  fileLabel: SensitiveFileLabel,
+): unknown {
   try {
     return YAML.parse(source, SAFE_YAML_OPTIONS);
   } catch {
@@ -97,7 +126,7 @@ export function parseSensitiveYaml(source: string, fileLabel: string): unknown {
  */
 export function editSensitiveYamlDocument(
   source: string,
-  fileLabel: string,
+  fileLabel: SensitiveFileLabel,
   edit: (doc: Document) => void,
 ): string {
   let doc: Document;
@@ -111,7 +140,7 @@ export function editSensitiveYamlDocument(
   try {
     return doc.toString();
   } catch {
-    throw new UsageError(`${fileLabel} could not be serialized as YAML`);
+    throw labelledFailure(fileLabel, "could not be serialized as YAML");
   }
 }
 
@@ -126,10 +155,13 @@ export function editSensitiveYamlDocument(
  * the bound's byte-free error and `JSON.parse`'s source-bearing one are caught
  * here and replaced with the path-only failure.
  */
-export function parseSensitiveJson(source: string, fileLabel: string): unknown {
+export function parseSensitiveJson(
+  source: string,
+  fileLabel: SensitiveFileLabel,
+): unknown {
   try {
     return parseBoundedJson(source);
   } catch {
-    throw new UsageError(`${fileLabel} could not be parsed as JSON`);
+    throw labelledFailure(fileLabel, "could not be parsed as JSON");
   }
 }

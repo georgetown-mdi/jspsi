@@ -5185,3 +5185,121 @@ test("the record persistExpectedPartnerDeduplicate writes marks a reused config"
     throw new Error(`expected the config to load, got ${result.status}`);
   expect(result.source.linkageTermsStanding).toBe("accepted-with-partner");
 });
+
+// --- the operator's own path in a refusal ------------------------------------
+
+// The config reader's refusals name the path the operator typed. The display
+// sink escapes a literal backslash to keep its own \xHH tokens unambiguous,
+// which would hand a Windows operator a path they cannot copy back into a
+// command, so these sites mark the path as theirs and the sink renders it as
+// given. The fragments beside it stay escaped.
+
+/** What `run` threw, or `undefined` for a call that returned. */
+function refusalFrom(run: () => unknown): unknown {
+  try {
+    run();
+  } catch (thrown: unknown) {
+    return thrown;
+  }
+  return undefined;
+}
+
+test.skipIf(process.platform === "win32")(
+  "a refusal names a backslashed path as the operator typed it",
+  () => {
+    // Off Windows a backslash is a legal filename character, so one file name
+    // stands in for the separator.
+    const configPath = path.join(dir, "C:\\psilink\\psilink.yaml");
+    fs.writeFileSync(configPath, "linkage_terms: 3\n");
+
+    const err = refusalFrom(() => readConfigLinkageSource(configPath));
+
+    expect(err).toBeInstanceOf(UsageError);
+    const rendered = sanitizeErrorForDisplay(err);
+    expect(rendered).toContain("C:\\psilink\\psilink.yaml");
+    expect(rendered).not.toContain("C:\\\\psilink\\\\psilink.yaml");
+  },
+);
+
+test.runIf(process.platform === "win32")(
+  "a refusal names a Windows path as the operator typed it",
+  () => {
+    const configPath = path.join(dir, "psilink", "psilink.yaml");
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    fs.writeFileSync(configPath, "linkage_terms: 3\n");
+
+    const err = refusalFrom(() => readConfigLinkageSource(configPath));
+
+    const rendered = sanitizeErrorForDisplay(err);
+    expect(configPath).toContain("\\");
+    expect(rendered).toContain(configPath);
+    expect(rendered).not.toContain(configPath.replaceAll("\\", "\\\\"));
+  },
+);
+
+test("a refusal escapes the value it quotes out of the document", () => {
+  // The mark states who chose the bytes, per fragment: the path is the
+  // operator's, and the channel quoted beside it is text nobody marked, which
+  // keeps the escape every unmarked fragment takes.
+  const configPath = path.join(dir, "psilink.yaml");
+  fs.writeFileSync(configPath, "connection:\n  channel: 'file\\drop'\n");
+
+  const err = refusalFrom(() =>
+    persistHostKeyFingerprint(configPath, `sha256:${"a".repeat(43)}`),
+  );
+
+  expect(sanitizeErrorForDisplay(err)).toContain('"file\\\\drop"');
+});
+
+test("the sensitive-parse failure names the path as the operator typed it", () => {
+  // The label the chokepoint reports is composed through the mark too, so an
+  // unparseable config names its path the way a refusal does.
+  const configPath = path.join(dir, "C:\\psilink\\broken.yaml");
+  fs.writeFileSync(configPath, "a:\n\tb: 1\n");
+
+  const err = refusalFrom(() => readConfigLinkageSource(configPath));
+
+  expect((err as Error).message).toBe(
+    `config file ${configPath} could not be parsed as YAML`,
+  );
+  const rendered = sanitizeErrorForDisplay(err);
+  expect(rendered).toContain(configPath);
+  expect(rendered).not.toContain(configPath.replaceAll("\\", "\\\\"));
+});
+
+test.skipIf(process.platform === "win32")(
+  "the unrecordable-pin refusal names the configuration path as typed",
+  () => {
+    const configDir = fs.mkdtempSync(path.join(dir, "readonly-"));
+    const configPath = path.join(configDir, "C:\\psilink\\psilink.yaml");
+    fs.chmodSync(configDir, 0o500);
+    try {
+      const err = refusalFrom(() =>
+        assertPartnerFingerprintRecordable({ mode: "certificate" }, configPath),
+      );
+
+      expect(err).toBeInstanceOf(OperatorConfigError);
+      const rendered = sanitizeErrorForDisplay(err);
+      expect(rendered).toContain(configPath);
+      expect(rendered).not.toContain(configPath.replaceAll("\\", "\\\\"));
+    } finally {
+      fs.chmodSync(configDir, 0o700);
+    }
+  },
+);
+
+test("the citation-drift warning names the config path as the operator typed it", () => {
+  const configPath = "C:\\psilink\\psilink.yaml";
+  const warnings: string[] = [];
+  warnOnLinkageRuleSetCitationDrift(
+    withReorderedKeys(getDefaultLinkageTerms("Agency A")),
+    configPath,
+    { warn: (message: string) => warnings.push(message) },
+    "held-alone",
+    "decline-to-reuse",
+  );
+
+  expect(warnings).toHaveLength(1);
+  expect(warnings[0]).toContain(`${configPath}: linkage_terms`);
+  expect(warnings[0]).not.toContain(configPath.replaceAll("\\", "\\\\"));
+});

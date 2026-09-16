@@ -3,6 +3,11 @@ import YAML from "yaml";
 
 import { UsageError } from "../src/errors";
 import {
+  messageWithOperatorText,
+  operatorSuppliedText,
+} from "../src/utils/operatorSuppliedText";
+import { sanitizeErrorForDisplay } from "../src/utils/sanitizeErrorForDisplay";
+import {
   parseSensitiveYaml,
   editSensitiveYamlDocument,
   parseSensitiveJson,
@@ -99,4 +104,60 @@ test("the warning channel really leaks by default (guards the suppression test)"
   expect(spy).toHaveBeenCalled();
   const allArgs = spy.mock.calls.flat().map(String).join(" ");
   expect(allArgs).toContain(SECRET);
+});
+
+// The label route's other half: which side of the fragment boundary the path
+// inside a label falls on. A label composed as a plain string is text nobody
+// marked and keeps the escape; one composed through the mark names a path the
+// OPERATOR chose and renders as they typed it.
+const WINDOWS_CONFIG_PATH = "C:\\psilink\\psilink.yaml";
+const markedLabel = messageWithOperatorText`config file ${operatorSuppliedText(
+  WINDOWS_CONFIG_PATH,
+)}`;
+
+test("a marked label renders the operator's path as they typed it", () => {
+  let caught: unknown;
+  try {
+    parseSensitiveJson(`${SECRET} not json`, markedLabel);
+  } catch (err) {
+    caught = err;
+  }
+  expect(caught).toBeInstanceOf(UsageError);
+  expect((caught as Error).message).toBe(
+    `config file ${WINDOWS_CONFIG_PATH} could not be parsed as JSON`,
+  );
+  const rendered = sanitizeErrorForDisplay(caught);
+  expect(rendered).toContain(WINDOWS_CONFIG_PATH);
+  expect(rendered).not.toContain(WINDOWS_CONFIG_PATH.replaceAll("\\", "\\\\"));
+  expect(rendered).not.toContain(SECRET);
+});
+
+test("a string label keeps the escape, as every unmarked fragment does", () => {
+  let caught: unknown;
+  try {
+    parseSensitiveJson(
+      `${SECRET} not json`,
+      `config file ${WINDOWS_CONFIG_PATH}`,
+    );
+  } catch (err) {
+    caught = err;
+  }
+  const rendered = sanitizeErrorForDisplay(caught);
+  expect(rendered).toContain(WINDOWS_CONFIG_PATH.replaceAll("\\", "\\\\"));
+  expect(rendered).not.toContain(SECRET);
+});
+
+test("a marked label leaves a control character unrenderable", () => {
+  // The mark states who chose the bytes, not that they are safe to emit: an ESC
+  // opening an ANSI sequence still reaches the operator as a printable marker.
+  const message = messageWithOperatorText`config file ${operatorSuppliedText(
+    "C:\\psilink\\\u001b[2Kyaml",
+  )}`;
+  let caught: unknown;
+  try {
+    parseSensitiveJson("not json", message);
+  } catch (err) {
+    caught = err;
+  }
+  expect(sanitizeErrorForDisplay(caught)).not.toContain("\u001b");
 });

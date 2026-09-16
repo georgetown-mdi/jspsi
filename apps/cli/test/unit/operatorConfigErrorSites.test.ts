@@ -45,7 +45,11 @@ import { describe, expect, test } from "vitest";
 //   between the use site and the module binds the name itself, which makes the
 //   value opaque again and so a recorded interpolation. A CALL is recorded as
 //   written and NOT followed: its text depends on its arguments, so the verdict
-//   below covers what the callee composes.
+//   below covers what the callee composes. Two shapes are the exception,
+//   because both leave the text they hold unchanged: `operatorSuppliedText(x)`
+//   records `x`, the mark stating who chose the bytes rather than altering
+//   them, and a read of `.text` off a local the site bound to a
+//   `messageWithOperatorText` template records that template's own spans.
 //
 // Where the reach errs it errs toward reporting: an expression it cannot reduce
 // to fixed text is recorded rather than ignored, so answering a spurious entry
@@ -717,6 +721,44 @@ function isShadowed(node: ts.Node, name: string): boolean {
   return false;
 }
 
+/**
+ * The `messageWithOperatorText` template a local `const` in an enclosing scope
+ * binds `name` to, for a site that composes its message through the mark and
+ * hands the Error the message's `.text`
+ * (packages/core/src/utils/operatorSuppliedText.ts). Undefined for every other
+ * binding, which leaves the read opaque and so a recorded interpolation.
+ */
+function composedMessageTemplate(
+  node: ts.Node,
+  name: string,
+): ts.TaggedTemplateExpression | undefined {
+  for (
+    let scope: ts.Node | undefined = node.parent;
+    scope !== undefined;
+    scope = scope.parent
+  ) {
+    if (!ts.isBlock(scope) && !ts.isSourceFile(scope)) continue;
+    for (const statement of scope.statements) {
+      if (!ts.isVariableStatement(statement)) continue;
+      for (const declaration of statement.declarationList.declarations) {
+        if (
+          !ts.isIdentifier(declaration.name) ||
+          declaration.name.text !== name ||
+          declaration.initializer === undefined
+        )
+          continue;
+        const initializer = declaration.initializer;
+        return ts.isTaggedTemplateExpression(initializer) &&
+          ts.isIdentifier(initializer.tag) &&
+          initializer.tag.text === "messageWithOperatorText"
+          ? initializer
+          : undefined;
+      }
+    }
+  }
+  return undefined;
+}
+
 /** Every non-literal expression `expr` contributes to the message text. */
 function collectInterpolations(
   expr: ts.Expression,
@@ -734,6 +776,31 @@ function collectInterpolations(
     for (const span of expr.templateSpans)
       collectInterpolations(span.expression, source, resolved, found);
     return;
+  }
+  // The mark states who chose the bytes and leaves them as they are, so the
+  // value inside it is the interpolation this ledger judges.
+  if (
+    ts.isCallExpression(expr) &&
+    ts.isIdentifier(expr.expression) &&
+    expr.expression.text === "operatorSuppliedText" &&
+    expr.arguments.length === 1
+  ) {
+    collectInterpolations(expr.arguments[0]!, source, resolved, found);
+    return;
+  }
+  // `message.text` off a local the site composed with messageWithOperatorText:
+  // the text the Error takes is that template's, so the template's spans are
+  // what the message interpolates.
+  if (
+    ts.isPropertyAccessExpression(expr) &&
+    expr.name.text === "text" &&
+    ts.isIdentifier(expr.expression)
+  ) {
+    const template = composedMessageTemplate(expr, expr.expression.text);
+    if (template !== undefined) {
+      collectInterpolations(template.template, source, resolved, found);
+      return;
+    }
   }
   if (
     ts.isBinaryExpression(expr) &&
@@ -989,6 +1056,38 @@ export function guard(count: number): void {
     ).toStrictEqual([
       ["fixture/sites.ts :: guard #1", []],
       ["fixture/sites.ts :: guard #2", ["count"]],
+    ]);
+  });
+
+  test("a marked message records the spans behind its text", () => {
+    const scan = fixtureScan({
+      "fixture/errors.ts": FIXTURE_ERRORS,
+      "fixture/marked.ts": `
+import { OperatorConfigError } from "./errors.js";
+declare const messageWithOperatorText: (
+  fixed: TemplateStringsArray,
+  ...values: unknown[]
+) => { text: string };
+declare const operatorSuppliedText: (value: string) => unknown;
+declare const keepOperatorSuppliedText: <E>(error: E, message: unknown) => E;
+export function marked(configPath: string, detail: string): never {
+  const message = messageWithOperatorText\`at \${operatorSuppliedText(configPath)}: \${detail}\`;
+  throw keepOperatorSuppliedText(new OperatorConfigError(message.text), message);
+}
+export function boundElsewhere(configPath: string): never {
+  const message = { text: \`at \${configPath}\` };
+  throw new OperatorConfigError(message.text);
+}
+`,
+    });
+    const sites = keyed(
+      foundSites(scan, memberDeclarations(scan, FIXTURE_ROOT)),
+    );
+    expect(
+      sites.map(([siteKey, site]) => [siteKey, site.interpolates]),
+    ).toStrictEqual([
+      ["fixture/marked.ts :: marked #1", ["configPath", "detail"]],
+      ["fixture/marked.ts :: boundElsewhere #1", ["message.text"]],
     ]);
   });
 

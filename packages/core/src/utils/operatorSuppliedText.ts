@@ -72,13 +72,21 @@ export interface MessageWithOperatorText {
  * value is the one span rendered as given. A `number` is printable ASCII and
  * takes the escape like any unmarked value, which leaves it unchanged.
  *
+ * An already-composed {@link MessageWithOperatorText} interpolates as its own
+ * spans rather than as text, so a message built around a label another call
+ * site partitioned -- the file label the sensitive-parse chokepoint reports
+ * ({@link ../sensitiveFile.SensitiveFileLabel}) -- keeps the origin that site
+ * stated instead of flattening it back to an escaped string.
+ *
  * The result is inert: it holds text and spans and reaches the operator only
  * through {@link keepOperatorSuppliedText}, which is what puts the partition
  * where the renderer reads it.
  */
 export function messageWithOperatorText(
   fixedSpans: TemplateStringsArray,
-  ...values: ReadonlyArray<OperatorSuppliedText | string | number>
+  ...values: ReadonlyArray<
+    OperatorSuppliedText | MessageWithOperatorText | string | number
+  >
 ): MessageWithOperatorText {
   const spans: DisplaySpan[] = [];
   const push = (text: string, operatorSupplied: boolean): void => {
@@ -87,11 +95,44 @@ export function messageWithOperatorText(
   push(fixedSpans[0]!, false);
   for (let index = 0; index < values.length; index += 1) {
     const value = values[index]!;
-    const supplied = operatorSuppliedValue(value);
-    push(supplied ?? String(value), supplied !== undefined);
+    const composed = composedSpans(value);
+    if (composed !== undefined) {
+      for (const span of composed) push(span.text, span.operatorSupplied);
+    } else {
+      const supplied = operatorSuppliedValue(value);
+      push(supplied ?? String(value), supplied !== undefined);
+    }
     push(fixedSpans[index + 1]!, false);
   }
   return { text: spans.map((span) => span.text).join(""), spans };
+}
+
+/**
+ * The spans of an interpolated value that is itself a composed message, or
+ * `undefined` for every other value, which is then interpolated as text.
+ *
+ * Read by shape, so a message built by another copy of this module
+ * interpolates the same way -- and checked the way
+ * {@link operatorSuppliedSpans} checks the mark it reads off an error: every
+ * span well-formed, and the spans joining back to the message's own `text`. A
+ * value of any other shape is not a composed message, whatever it spells, so
+ * it takes the escape rather than the origins it claims.
+ */
+function composedSpans(value: unknown): ReadonlyArray<DisplaySpan> | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const { text, spans } = value as Partial<MessageWithOperatorText>;
+  if (typeof text !== "string" || !Array.isArray(spans)) return undefined;
+  const checked: DisplaySpan[] = [];
+  for (const span of spans as unknown[]) {
+    if (typeof span !== "object" || span === null) return undefined;
+    const { text: spanText, operatorSupplied } = span as Partial<DisplaySpan>;
+    if (typeof spanText !== "string" || typeof operatorSupplied !== "boolean")
+      return undefined;
+    checked.push({ text: spanText, operatorSupplied });
+  }
+  return checked.map((span) => span.text).join("") === text
+    ? checked
+    : undefined;
 }
 
 /**

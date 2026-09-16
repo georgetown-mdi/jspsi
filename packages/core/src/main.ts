@@ -694,3 +694,4 @@ export {
   editSensitiveYamlDocument,
   parseSensitiveJson,
 } from "./sensitiveFile";
+export type { SensitiveFileLabel } from "./sensitiveFile";

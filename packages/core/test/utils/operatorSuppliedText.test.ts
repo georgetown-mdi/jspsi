@@ -44,6 +44,52 @@ describe("a message partitioned by origin", () => {
     );
   });
 
+  it("keeps the origins of a message composed into another message", () => {
+    // A label one call site partitioned -- the file label the sensitive-parse
+    // chokepoint reports -- interpolates as its own spans, so the path inside
+    // it stays the operator's rather than flattening to escaped text.
+    const label = messageWithOperatorText`config file ${operatorSuppliedText(
+      WINDOWS_PATH,
+    )}`;
+    const message = messageWithOperatorText`${label} could not be parsed as YAML`;
+
+    expect(message.text).toBe(
+      `config file ${WINDOWS_PATH} could not be parsed as YAML`,
+    );
+    expect(
+      sanitizeErrorForDisplay(
+        keepOperatorSuppliedText(new Error(message.text), message),
+      ),
+    ).toBe(`config file ${WINDOWS_PATH} could not be parsed as YAML`);
+  });
+
+  it("escapes a nested message's unmarked spans", () => {
+    const label = messageWithOperatorText`entry ${"share\\inbox"}`;
+    const message = messageWithOperatorText`${label} is unreadable`;
+
+    expect(
+      sanitizeErrorForDisplay(
+        keepOperatorSuppliedText(new Error(message.text), message),
+      ),
+    ).toBe("entry share\\\\inbox is unreadable");
+  });
+
+  it("escapes a value shaped like a composed message whose spans do not join", () => {
+    // The nested read is checked the way the mark on an error is: spans that
+    // do not describe their own text are not a partition, so the value takes
+    // the escape rather than the origins it claims.
+    const forged = {
+      text: WINDOWS_PATH,
+      spans: [{ text: "something else", operatorSupplied: true }],
+    };
+    const message = messageWithOperatorText`could not read ${forged}`;
+
+    expect(message.spans).toStrictEqual([
+      { text: "could not read ", operatorSupplied: false },
+      { text: "[object Object]", operatorSupplied: false },
+    ]);
+  });
+
   it("escapes the same path on a message nobody marked", () => {
     const rendered = sanitizeErrorForDisplay(
       new Error(`could not read ${WINDOWS_PATH}`),

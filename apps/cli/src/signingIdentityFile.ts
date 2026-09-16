@@ -50,7 +50,10 @@ function readIdentityDocument(
   // holds the private key whether or not this process could make sense of it.
   warnIfFileOverPermissive(identityPath, "signing private key");
   return {
-    document: parseSensitiveJson(source, `signing identity at ${identityPath}`),
+    document: parseSensitiveJson(
+      source,
+      messageWithOperatorText`signing identity at ${operatorSuppliedText(identityPath)}`,
+    ),
   };
 }
 

@@ -164,6 +164,74 @@ const noDisplayableAsErrorArgument = ERROR_TEXT_POSITIONS.map((position) => ({
     "Do not compose an already-escaped Displayable into an Error: an Error is not a display sink, so sanitizeErrorForDisplay escapes the whole rendered chain once where it is shown and this fragment reaches the operator escaped twice, every literal backslash doubled again. Compose the raw string instead (rawDecodeErrorDescription beside describeDecodeError; the unescaped value elsewhere). An error text no display boundary ever renders: eslint-disable-next-line with a one-line justification.",
 }));
 
+// The same boundary read from the operator's side: a CLI message that names
+// the OPERATOR's own path composes it through the mark, so the display sink
+// shows the path as they typed it instead of escaping every separator and
+// handing back a path they cannot copy into a command
+// (packages/core/src/utils/operatorSuppliedText.ts).
+//
+// A path is recognized by NAME, which is the only origin evidence text alone
+// holds -- this config runs no TypeScript program: an identifier or a property
+// whose name ends in Path, File, Dir, Directory or Folder, or is one of those
+// words on its own, which is how apps/cli/src names a path it took from the
+// command line or from the operator's configuration. The name says nothing
+// about WHO CHOSE the bytes, so a value a partner or a server named -- a remote
+// listing's entry, a path out of an invitation -- is a match this rule is wrong
+// about, and it takes the same one-line eslint-disable every other ban here
+// does; the mark states origin and this only asks that the site state it.
+const OPERATOR_PATH_NAME =
+  "/([a-z](Path|File|Dir|Directory|Folder)s?|^(path|file|dir|directory|folder)s?)$/";
+const UNMARKED_OPERATOR_PATH = [
+  `Identifier[name=${OPERATOR_PATH_NAME}]`,
+  `MemberExpression[property.name=${OPERATOR_PATH_NAME}]`,
+].join(", ");
+
+// Both altitudes, matched where the raw name sits DIRECTLY in the position --
+// the same shape the two bans above rest on. Marking wraps the name in
+// operatorSuppliedText(...), which puts a CallExpression in the position and
+// moves the name one level deeper, where this does not look.
+const UNMARKED_OPERATOR_PATH_MESSAGE =
+  "Mark an operator's own path where the message composes it: operatorSuppliedText(path) inside messageWithOperatorText`...`, kept on the error with keepOperatorSuppliedText, or redactAndRenderOperatorSuppliedText(operatorSuppliedText(path)) at a log, console, or prompt sink. Composed raw, the display escape doubles every separator and the operator cannot copy the path back into a command. A path a partner or a server chose, which keeps the escape: eslint-disable-next-line with a one-line justification.";
+const noUnmarkedOperatorPath = [
+  ...ERROR_TEXT_POSITIONS.map(
+    (position) =>
+      `:matches(${ERROR_TEXT_COMPOSITION}) ${position}:matches(${UNMARKED_OPERATOR_PATH})`,
+  ),
+  ...SINK_VALUE_POSITIONS.map(
+    (position) =>
+      `${OPERATOR_DISPLAY_SINK} ${position}:matches(${UNMARKED_OPERATOR_PATH})`,
+  ),
+].map((selector) => ({ selector, message: UNMARKED_OPERATOR_PATH_MESSAGE }));
+
+/**
+ * The CLI sources still composing an operator path unmarked, exempt from the
+ * ban above until their sinks are converted. Every file NOT listed here is
+ * held to it, new files included.
+ *
+ * Pinned by scripts/eslint-unmarked-operator-path-ban.test.mjs, which fails on
+ * a listed file the ban reports nothing on: an entry kept past its sweep
+ * exempts the file from a rule it already satisfies.
+ */
+export const UNMARKED_OPERATOR_PATH_FILES = [
+  "apps/cli/src/commands/accept.ts",
+  "apps/cli/src/commands/exchange.ts",
+  "apps/cli/src/commands/fingerprint.ts",
+  "apps/cli/src/commands/init.ts",
+  "apps/cli/src/commands/invite.ts",
+  "apps/cli/src/commands/provision.ts",
+  "apps/cli/src/commands/verifyReceipt.ts",
+  "apps/cli/src/commands/zeroSetup.ts",
+  "apps/cli/src/connection/frameSizeGuard.ts",
+  "apps/cli/src/connection/listingGuard.ts",
+  "apps/cli/src/connection/sftpAdapterWarnings.ts",
+  "apps/cli/src/connection/sftpLivenessGuard.ts",
+  "apps/cli/src/onlineBootstrap.ts",
+  "apps/cli/src/outboundPayloadConsent.ts",
+  "apps/cli/src/protocol.ts",
+  "apps/cli/src/receiptFile.ts",
+  "apps/cli/src/recordFile.ts",
+];
+
 // werift is loaded at the point of use (the deferred import in
 // apps/cli/src/connection/webrtc/weriftPeer.ts), never statically: the CLI
 // bundles to one CommonJS file whose external requires all run at startup, so
@@ -186,6 +254,23 @@ const weriftStaticLoadBan = [
   'ExportNamedDeclaration[source.value=/^werift(\\/.*)?$/][exportKind!="type"]:has(ExportSpecifier[exportKind!="type"])',
   'ExportAllDeclaration[source.value=/^werift(\\/.*)?$/][exportKind!="type"]',
 ].map((selector) => ({ selector, message: WERIFT_STATIC_LOAD_MESSAGE }));
+
+// What every apps/cli/src file is held to. Factored out because flat config
+// REPLACES a rule's options rather than merging them, so the narrower block
+// below -- the same tree minus the files whose operator paths are not marked
+// yet -- has to re-carry these beside its own entry.
+const cliSourceRestrictedSyntax = [
+  {
+    selector:
+      "CallExpression[callee.object.name='YAML'][callee.property.name=/^(parse|parseDocument|parseAllDocuments)$/]",
+    message:
+      "Parse operator/credential files through apps/cli/src/sensitiveFile.ts (parseSensitiveYaml / editSensitiveYamlDocument); raw YAML.parse leaks source into errors and stderr. Non-sensitive parse: eslint-disable-next-line with a one-line justification.",
+  },
+  ...weriftStaticLoadBan,
+  noBareRootLoglevelEmit,
+  ...noRawErrorAtDisplaySink,
+  ...noDisplayableAsErrorArgument,
+];
 
 export default tseslint.config(
   {
@@ -285,19 +370,7 @@ export default tseslint.config(
     // turned off on a genuinely sensitive parse (a bare `eslint .` only warns).
     linterOptions: { reportUnusedDisableDirectives: "error" },
     rules: {
-      "no-restricted-syntax": [
-        "error",
-        {
-          selector:
-            "CallExpression[callee.object.name='YAML'][callee.property.name=/^(parse|parseDocument|parseAllDocuments)$/]",
-          message:
-            "Parse operator/credential files through apps/cli/src/sensitiveFile.ts (parseSensitiveYaml / editSensitiveYamlDocument); raw YAML.parse leaks source into errors and stderr. Non-sensitive parse: eslint-disable-next-line with a one-line justification.",
-        },
-        ...weriftStaticLoadBan,
-        noBareRootLoglevelEmit,
-        ...noRawErrorAtDisplaySink,
-        ...noDisplayableAsErrorArgument,
-      ],
+      "no-restricted-syntax": ["error", ...cliSourceRestrictedSyntax],
       // Close the named-import bypass (`import { parse } from "yaml"`); the
       // chokepoint imports the YAML default, so this never hits legitimate code.
       "no-restricted-imports": [
@@ -325,6 +398,22 @@ export default tseslint.config(
           message:
             "Parse credential files through apps/cli/src/sensitiveFile.ts (parseSensitiveJson); raw JSON.parse can echo a leading span of the source. Non-sensitive parse: eslint-disable-next-line with a one-line justification.",
         },
+      ],
+    },
+  },
+  {
+    // The unmarked-operator-path ban, over the CLI sources whose sinks are
+    // converted. It re-carries the block above's entries because flat config
+    // replaces a rule's options rather than merging them, and it exempts by
+    // ignoring a named file rather than by listing the ones it covers, so a
+    // source added later is held to it without an edit here.
+    files: ["apps/cli/src/**/*.ts"],
+    ignores: ["apps/cli/src/sensitiveFile.ts", ...UNMARKED_OPERATOR_PATH_FILES],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        ...cliSourceRestrictedSyntax,
+        ...noUnmarkedOperatorPath,
       ],
     },
   },

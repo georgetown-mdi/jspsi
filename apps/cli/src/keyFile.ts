@@ -73,7 +73,10 @@ export function loadKeyFile(
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     throw err;
   }
-  const raw = parseSensitiveJson(source, `key file at ${keyFilePath}`);
+  const raw = parseSensitiveJson(
+    source,
+    messageWithOperatorText`key file at ${operatorSuppliedText(keyFilePath)}`,
+  );
   const result = KeyFileSchema.parse(raw);
   if (opts.warnOnPermissive !== false)
     warnIfFileOverPermissive(keyFilePath, "shared secret");

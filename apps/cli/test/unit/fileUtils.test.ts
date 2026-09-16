@@ -1706,3 +1706,68 @@ describe("expandTilde", () => {
     expect(expandTilde(undefined)).toBeUndefined();
   });
 });
+
+// --- the operator's own path in a warning or refusal -------------------------
+
+// The permission and access-list warnings, and the refusal to overwrite, name
+// the path the operator handed in. The display escape doubles a literal
+// backslash to keep its own \xHH tokens unambiguous, which would hand a Windows
+// operator a path they cannot copy back into a command, so these sites mark the
+// path as theirs and it renders as given.
+
+describe("an operator's own path in a warning", () => {
+  // A backslashed path: real separators on Windows, and one file name spelling
+  // them off it, where a backslash is a legal filename character.
+  const backslashedPath = (): string =>
+    process.platform === "win32"
+      ? path.join(dir, "psilink", "secret")
+      : path.join(dir, "C:\\psilink\\secret");
+
+  const doubled = (value: string): string => value.replaceAll("\\", "\\\\");
+
+  test("the POSIX mode warning names the path as the operator typed it", () => {
+    const p = backslashedPath();
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, "x");
+    fs.chmodSync(p, 0o644);
+
+    const warnings = captureWarnings(getLogger("file-utils"));
+    withPlatform("linux", () => warnIfFileOverPermissive(p, "shared secret"));
+
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain(p);
+    expect(warnings[0]).not.toContain(doubled(p));
+  });
+
+  test("the access-list warning names the path as the operator typed it", () => {
+    const p = backslashedPath();
+    const warnings = captureWarnings(getLogger("file-utils"));
+    answerAclCommands({
+      powershell: aclListing([[GUESTS_SID, READ_RIGHTS, ALLOW]]),
+    });
+    withPlatform("win32", () => warnIfFileOverPermissive(p, "shared secret"));
+
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain(p);
+    expect(warnings[0]).not.toContain(doubled(p));
+  });
+
+  test("the unreadable-access-list warning names the path as typed", () => {
+    const p = backslashedPath();
+    const warnings = captureWarnings(getLogger("file-utils"));
+    answerAclCommands({ powershell: UNSPAWNABLE, icacls: UNSPAWNABLE });
+    withPlatform("win32", () => warnIfFileOverPermissive(p, "shared secret"));
+
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain(`icacls "${p}"`);
+    expect(warnings[0]).not.toContain(doubled(p));
+  });
+
+  test("a refusal to overwrite names the destination as typed", () => {
+    const p = backslashedPath();
+    const rendered = sanitizeErrorForDisplay(new FileExistsError(p));
+
+    expect(rendered).toContain(p);
+    expect(rendered).not.toContain(doubled(p));
+  });
+});
