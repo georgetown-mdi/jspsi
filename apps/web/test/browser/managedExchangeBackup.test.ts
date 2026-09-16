@@ -834,6 +834,34 @@ describe("a record this build cannot parse is skipped, not fatal to the import",
     expect(await unreadableIds()).toEqual([handedOff.id]);
   });
 
+  test("a skipped record holding no secret field at all installs fresh", async () => {
+    // The same limit reached the other way: an app upgrade can leave a record with
+    // no `sharedSecret` field rather than an unreadable one, and an absent field
+    // matches no artifact either, so the refusal does not fire.
+    const handedOff = await createManagedExchange(newExchange());
+    const bytes = serializeManagedExchangeArtifact(
+      encodeManagedExchangeArtifact(handedOff),
+    );
+    expect(
+      await spendManagedExchangeIfCurrent(
+        handedOff.id,
+        handedOff.sharedSecret,
+        "2026-07-14T13:00:00.000Z",
+        "command-line",
+      ),
+    ).toBe("spent");
+    const withoutSecret: Record<string, unknown> = { ...handedOff };
+    delete withoutSecret.sharedSecret;
+    expect("sharedSecret" in withoutSecret).toBe(false);
+    await plantUnreadable(handedOff.id, withoutSecret);
+
+    const { record: installed } = await importManagedExchange(bytes);
+
+    expect(installed.id).not.toBe(handedOff.id);
+    expect(installed.sharedSecret).toBe(handedOff.sharedSecret);
+    expect(await unreadableIds()).toEqual([handedOff.id]);
+  });
+
   test("a skipped migration-spent record installs fresh beside the husk", async () => {
     // A revive rewrites the whole record, which needs a record this build can parse,
     // so the migration's artifact installs fresh and the husk stays for the operator
@@ -856,6 +884,75 @@ describe("a record this build cannot parse is skipped, not fatal to the import",
     expect(installed.id).not.toBe(source.id);
     expect(installed.sharedSecret).toBe(source.sharedSecret);
     expect(await unreadableIds()).toEqual([source.id]);
+  });
+
+  test("a parseable migration-spent record is revived beside an invalid one", async () => {
+    // The recovery the skip is for: the artifact's own migration-spent record parses,
+    // so it is revived in place -- same id, and the input handle and output-folder
+    // grant it already held -- while the invalid record beside it is skipped and left
+    // for the operator to discard.
+    const root = await navigator.storage.getDirectory();
+    const inputFile = await root.getFileHandle("revived-input.csv", {
+      create: true,
+    });
+    const outputFolder = await root.getDirectoryHandle("revived-results", {
+      create: true,
+    });
+    const source = await createManagedExchange(
+      newExchange({
+        inputFileHandle: inputFile,
+        outputDirectoryHandle: outputFolder,
+      }),
+    );
+    const bytes = serializeManagedExchangeArtifact(
+      encodeManagedExchangeArtifact(source),
+    );
+    expect(
+      await spendManagedExchangeIfCurrent(
+        source.id,
+        source.sharedSecret,
+        "2026-07-14T13:00:00.000Z",
+      ),
+    ).toBe("spent");
+    await plantUnreadable("zzz-bad-record", {
+      ...source,
+      sharedSecret: generateSharedSecret(),
+    });
+    // Precondition: the attended list read rejects wholesale, so this is the state
+    // the read-failed recovery surface renders from.
+    await expect(listManagedExchanges()).rejects.toThrow();
+
+    const { record: revived, missingGrants } =
+      await importManagedExchange(bytes);
+
+    expect(revived.id).toBe(source.id);
+    expect(revived.sharedSecret).toBe(source.sharedSecret);
+    expect(await revived.inputFileHandle?.isSameEntry(inputFile)).toBe(true);
+    expect(await revived.outputDirectoryHandle?.isSameEntry(outputFolder)).toBe(
+      true,
+    );
+    // The artifact states its source held both grants, so the empty report below is
+    // the revive keeping them rather than the markers being absent.
+    expect(importManagedExchangeArtifact(bytes).heldGrants).toEqual([
+      "input-file",
+      "output-folder",
+    ]);
+    // Both grants are still here, so the import asks for neither of them again.
+    expect(missingGrants).toEqual([]);
+    // The spend is cleared and the revive stamped its import evidence.
+    const local = await getManagedLocalState(source.id);
+    expect(local?.spent).toBeUndefined();
+    expect(local?.imported?.importedAt).toEqual(expect.any(String));
+    // One readable row, the revived one: no duplicate installed beside it.
+    const readableIds = (await listManagedExchangesDiagnostic()).flatMap(
+      (entry) => (entry.kind === "readable" ? [entry.essentials.id] : []),
+    );
+    expect(readableIds).toEqual([source.id]);
+    // The invalid record is left in place and still reported.
+    expect(await unreadableIds()).toEqual(["zzz-bad-record"]);
+
+    await root.removeEntry("revived-input.csv");
+    await root.removeEntry("revived-results", { recursive: true });
   });
 });
 
