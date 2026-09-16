@@ -113,6 +113,15 @@ const BANNED = [
     "a path in a logger reached through a field",
     "deps.log().warn(`at ${configPath}`);",
   ],
+  [
+    "a name opening with path rather than ending in it",
+    "throw new Error(`could not read ${pathValue}`);",
+  ],
+  [
+    "a name opening with file before a capital",
+    "throw new Error(`could not read ${fileName}`);",
+  ],
+  ["an all-lowercase filename", "log.warn(`${filename} is unreadable`);"],
 ];
 
 const ALLOWED = [
@@ -134,6 +143,12 @@ const ALLOWED = [
     "readFileSync(configPath);",
   ],
   ["a path stored rather than shown", "const kept = { source: configPath };"],
+  [
+    // What the name-based recognition does not reach, pinned so the spec
+    // paragraph stating the miss cannot drift from the selector.
+    "a path under a name the pattern does not reach",
+    "throw new Error(`could not read ${target} to ${destination}`);",
+  ],
 ];
 
 const PREAMBLE = `
@@ -142,6 +157,11 @@ declare const keyFile: string;
 declare const inputDir: string;
 declare const recordFile: string;
 declare const detail: string;
+declare const pathValue: string;
+declare const fileName: string;
+declare const filename: string;
+declare const target: string;
+declare const destination: string;
 declare const missing: boolean;
 declare const options: { configFile: string };
 declare const log: { warn(text: string): void };

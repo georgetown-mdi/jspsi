@@ -171,16 +171,23 @@ const noDisplayableAsErrorArgument = ERROR_TEXT_POSITIONS.map((position) => ({
 // (packages/core/src/utils/operatorSuppliedText.ts).
 //
 // A path is recognized by NAME, which is the only origin evidence text alone
-// holds -- this config runs no TypeScript program: an identifier or a property
-// whose name ends in Path, File, Dir, Directory or Folder, or is one of those
-// words on its own, which is how apps/cli/src names a path it took from the
-// command line or from the operator's configuration. The name says nothing
-// about WHO CHOSE the bytes, so a value a partner or a server named -- a remote
-// listing's entry, a path out of an invitation -- is a match this rule is wrong
-// about, and it takes the same one-line eslint-disable every other ban here
-// does; the mark states origin and this only asks that the site state it.
+// holds -- this config runs no TypeScript program. Two shapes, both how
+// apps/cli/src names a path it took from the command line or from the
+// operator's configuration: an identifier or property ENDING in Path, File,
+// Dir, Directory or Folder (plural or not, or one of those words alone), and
+// one OPENING with path, file, dir, directory or folder before a capital or
+// the end of the name, which reaches pathValue, fileName and filename. A name
+// outside both -- target, output, destination -- is not reached, so what this
+// holds is the shape it can recognize and not every operator path
+// (docs/spec/CHANNEL_SECURITY.md, display-sanitization escape format).
+//
+// The name says nothing about WHO CHOSE the bytes, so a value a partner or a
+// server named -- a remote listing's entry, a path out of an invitation -- is
+// a match this rule is wrong about, and it takes the same one-line
+// eslint-disable every other ban here does; the mark states origin and this
+// only asks that the site state it.
 const OPERATOR_PATH_NAME =
-  "/([a-z](Path|File|Dir|Directory|Folder)s?|^(path|file|dir|directory|folder)s?)$/";
+  "/([a-z](Path|File|Dir|Directory|Folder)s?$|^(path|file|dir|directory|folder)(s|name|names)?([A-Z]|$))/";
 const UNMARKED_OPERATOR_PATH = [
   `Identifier[name=${OPERATOR_PATH_NAME}]`,
   `MemberExpression[property.name=${OPERATOR_PATH_NAME}]`,
