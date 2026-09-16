@@ -882,10 +882,16 @@ Describe 'The launcher flow, driven against a stub engine' {
         $script:LocalStub = Join-Path $script:FlowRoot 'local-stub'
         $script:RefusalStub = Join-Path $script:FlowRoot 'refusal-stub'
         $script:TwoVolumeStub = Join-Path $script:FlowRoot 'two-volume-stub'
+        $script:MountFailStub = Join-Path $script:FlowRoot 'mount-fail-stub'
+        # A second stub engine, on a PATH entry of its own: the stub below
+        # answers every battery the same way, and one case needs the checks
+        # over a volume to fail while the ones before it pass.
+        $script:MountFailBin = Join-Path $script:FlowRoot 'mount-fail-bin'
         $script:LocalInbound = Join-Path $script:FlowRoot 'from-clinic'
         $script:LocalOutbound = Join-Path $script:FlowRoot 'to-clinic'
         foreach ($directory in @($script:FlowRoot, $script:FlowBin, $script:FlowStub, $script:FlowData,
                 $script:SplitStub, $script:LocalStub, $script:RefusalStub, $script:TwoVolumeStub,
+                $script:MountFailStub, $script:MountFailBin,
                 $script:LocalInbound, $script:LocalOutbound)) {
             New-Item -ItemType Directory -Path $directory -Force | Out-Null
         }
@@ -894,20 +900,25 @@ Describe 'The launcher flow, driven against a stub engine' {
         function Invoke-LauncherFlow {
             <#  One launcher run against the stub engine: the stub first on PATH
                 and nothing else that could answer behind it, so a runner with a
-                real engine installed is never reached. Returns the run with the
-                stub's call log read back on it. #>
+                real engine installed is never reached. $BinDir names which stub
+                engine answers, and defaults to the one that blocks nothing.
+                Returns the run with the stub's call log read back on it. #>
             param(
                 [Parameter(Mandatory = $true)][string] $Launcher,
                 [Parameter(Mandatory = $true)][string] $StubDir,
+                [string] $BinDir = '',
                 [string[]] $Arguments = @(),
                 [string[]] $InputLines = @(),
                 [int] $TimeoutSeconds = 150
             )
 
+            $engineDir = $BinDir
+            if (-not $engineDir) { $engineDir = $script:FlowBin }
+
             $originalPath = $env:PATH
             $originalStubDir = $env:PSILINK_STUB_DIR
             try {
-                $env:PATH = @($script:FlowBin,
+                $env:PATH = @($engineDir,
                     (Join-Path $env:SystemRoot 'System32'),
                     $env:SystemRoot,
                     (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0')) -join ';'
@@ -952,6 +963,22 @@ Describe 'The launcher flow, driven against a stub engine' {
             'echo %* >> "%PSILINK_STUB_DIR%\calls.log"',
             'echo %* | findstr /c:"doctor" >nul',
             'if not errorlevel 1 echo {"version":1,"mode":"mount","overall":"ok","checks":[]}',
+            'exit /b 0')
+
+        # The same engine, except that the checks over a volume fail: the
+        # share answers over the network and the volume is made, and only the
+        # battery run through it says no. A fatal verdict rather than one to
+        # retry, so the run stops where it is rather than prompting.
+        Set-Content -LiteralPath (Join-Path $script:MountFailBin 'docker.cmd') -Encoding Ascii -Value @(
+            '@echo off',
+            'echo %* >> "%PSILINK_STUB_DIR%\calls.log"',
+            'echo %* | findstr /c:"doctor mount" >nul',
+            'if not errorlevel 1 goto :mount',
+            'echo %* | findstr /c:"doctor" >nul',
+            'if not errorlevel 1 echo {"version":1,"mode":"probe","overall":"ok","checks":[]}',
+            'exit /b 0',
+            ':mount',
+            'echo {"version":1,"mode":"mount","overall":"fatal","checks":[]}',
             'exit /b 0')
 
         # The launcher refuses to run unstamped, so the copy under test carries
@@ -1311,5 +1338,42 @@ Describe 'The launcher flow, driven against a stub engine' {
         $output | Should -BeLike '*cleartext*' -Because $shape
         $output | Should -BeLike "*volume rm $volumeName*" -Because $shape
         $output | Should -Not -BeLike "*$volumeName-outbound*" -Because $shape
+    }
+
+    It 'names the volume it made when the checks over it fail' {
+        # The volume is made before the folders are checked through it, so a
+        # failure there leaves one behind holding the share password. Nothing
+        # here removes it, so the run names it on the way out rather than
+        # leaving the operator a volume they were never told about.
+        $volumeName = 'psilinkci-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+        $run = Invoke-LauncherFlow -Launcher $script:FlowLauncher -StubDir $script:MountFailStub `
+            -BinDir $script:MountFailBin `
+            -Arguments @(
+                '-DataRoot', "`"$script:FlowData`"",
+                '-RendezvousDir', '\\psilink-ci-server\exchange\clinic-study\from-clinic',
+                '-RendezvousOutboundDir', '\\psilink-ci-server\exchange\clinic-study\to-clinic',
+                '-VolumeName', $volumeName,
+                '-Port', $script:FlowPort,
+                '-NoBrowser') `
+            -InputLines @('', '') -TimeoutSeconds 90
+
+        $calls = [string] $run.Calls
+        $output = [string] $run.Output
+        $shape = Get-FlowShape -Run $run
+
+        $run.TimedOut | Should -BeFalse -Because $shape
+        $run.Exit | Should -Be 1 -Because $shape
+
+        # Where the run stopped: the volume was made, and the first folder
+        # checked through it is what failed.
+        @($calls -split '\r?\n' | Where-Object { $_ -like '*volume create*' }).Count |
+            Should -Be 1 -Because $shape
+        $checked = @($calls -split '\r?\n' | Where-Object { $_ -like '*doctor mount*' })
+        $checked.Count | Should -Be 1 -Because $shape
+        $checked[0] | Should -BeLike '*doctor mount /rz/from-clinic*' -Because $shape
+        $calls | Should -Not -BeLike '*serve*' -Because $shape
+
+        $output | Should -BeLike '*cleartext*' -Because $shape
+        $output | Should -BeLike "*volume rm $volumeName*" -Because $shape
     }
 }

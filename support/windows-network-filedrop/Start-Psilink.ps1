@@ -694,7 +694,10 @@ function New-RendezvousShareMount {
         drift. This function cannot be reached without that dot-source, because
         classifying a folder as a network path is the setup script's own work.
 
-        Returns $true when every folder passed. #>
+        Returns @{ Mounted; VolumeName }: whether every folder passed, and the
+        volume this made, or an empty name when it made none. A volume outlives
+        a check that fails after it and holds the share password, so the name
+        is reported either way and the caller names it on the way out. #>
     param(
         [Parameter(Mandatory = $true)][string] $VolumeName,
         [Parameter(Mandatory = $true)][string] $Server,
@@ -705,7 +708,7 @@ function New-RendezvousShareMount {
 
     Show-Head 'Credentials for the file server'
     $credential = Read-ShareCredential
-    if (-not $credential) { return $false }
+    if (-not $credential) { return @{ Mounted = $false; VolumeName = '' } }
     $plainPass = $credential.Password
     $token = [Guid]::NewGuid().ToString('N')
 
@@ -730,7 +733,7 @@ function New-RendezvousShareMount {
             Show-Head "Checking $($leg.Label) from inside a container"
             $env:SMB_PATH = Join-SharePath -Parent $SubPath -Child $leg.Path
             if (-not (Invoke-DoctorLoop -EngineArgs $probeEnvArgs -BatteryArgs @('doctor', 'probe'))) {
-                return $false
+                return @{ Mounted = $false; VolumeName = '' }
             }
         }
 
@@ -746,7 +749,7 @@ function New-RendezvousShareMount {
             -Server $Server -Share $Share -SubPath $SubPath `
             -Username $credential.Username -Password $plainPass -Domain $credential.Domain `
             -Engine $script:PsilinkEngine
-        if (-not $volumeMade) { return $false }
+        if (-not $volumeMade) { return @{ Mounted = $false; VolumeName = '' } }
 
         foreach ($leg in $Legs) {
             Show-Head "Checking the volume over $($leg.Label)"
@@ -756,7 +759,7 @@ function New-RendezvousShareMount {
             if ($leg.Path) { $legSuffix = "/$($leg.Path)" }
             if (-not (Invoke-DoctorLoop -EngineArgs @('--env', 'SMB_MARKER', '--env', 'SMB_TOKEN',
                         '--volume', "${VolumeName}:/rz") -BatteryArgs @('doctor', 'mount', "/rz$legSuffix"))) {
-                return $false
+                return @{ Mounted = $false; VolumeName = $VolumeName }
             }
         }
     } finally {
@@ -767,7 +770,7 @@ function New-RendezvousShareMount {
         $plainPass = $null
         $credential = $null
     }
-    return $true
+    return @{ Mounted = $true; VolumeName = $VolumeName }
 }
 
 function Test-LocalRendezvousFolder {
@@ -1451,13 +1454,16 @@ if ($sharedMount.Shared) {
     $outboundFolderName = Get-RendezvousFolderName -Share $outboundResolved.Share `
         -SubPath $outboundResolved.SubPath
 
-    $mounted = New-RendezvousShareMount -VolumeName $VolumeName `
+    $mountAttempt = New-RendezvousShareMount -VolumeName $VolumeName `
         -Server $target.Server -Share $target.Share -SubPath $sharedMount.SubPath `
         -Legs @(@{ Label = 'the folder your partner writes into'; Path = $sharedMount.InboundLeg },
         @{ Label = 'the folder you write into'; Path = $sharedMount.OutboundLeg })
-    if (-not $mounted) { exit 1 }
+    if ($mountAttempt.VolumeName) { $volumesMade += $mountAttempt.VolumeName }
+    if (-not $mountAttempt.Mounted) {
+        Show-VolumeRemoval -VolumeNames $volumesMade
+        exit 1
+    }
 
-    $volumesMade += $VolumeName
     $rendezvousMount = $VolumeName
     $inboundLeg = $sharedMount.InboundLeg
     $outboundLeg = $sharedMount.OutboundLeg
@@ -1500,15 +1506,15 @@ if ($sharedMount.Shared) {
                 $rendezvousFolderName = $correctedName
             }
 
-            $mounted = New-RendezvousShareMount -VolumeName $leg.Volume `
+            $mountAttempt = New-RendezvousShareMount -VolumeName $leg.Volume `
                 -Server $corrected.Server -Share $corrected.Share -SubPath $corrected.SubPath `
                 -Legs @(@{ Label = $leg.Label; Path = '' })
-            if (-not $mounted) {
+            if ($mountAttempt.VolumeName) { $volumesMade += $mountAttempt.VolumeName }
+            if (-not $mountAttempt.Mounted) {
                 Show-VolumeRemoval -VolumeNames $volumesMade
                 exit 1
             }
 
-            $volumesMade += $leg.Volume
             $mount = $leg.Volume
         } elseif (-not (Test-LocalRendezvousFolder -Path $leg.Path -Label $leg.Label)) {
             Show-VolumeRemoval -VolumeNames $volumesMade
