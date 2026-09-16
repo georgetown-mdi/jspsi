@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useReducer, useRef } from "react";
 
 import { Alert, VisuallyHidden } from "@mantine/core";
 import { IconAlertCircle } from "@tabler/icons-react";
@@ -45,12 +45,6 @@ import { CONSOLE_COVERAGE_PENDING_LABEL } from "@components/FieldCoverage";
 import { triggerBlobDownload } from "@components/blobDownload";
 import { unlinkableFileAlert } from "@components/UnlinkableFileAlert";
 
-import { RECEIPTS_DEFAULT, receiptsIntentFields } from "@psi/receiptsModel";
-import {
-  RUN_DIAGNOSTICS_DEFAULT,
-  runDiagnosticsAfterRetarget,
-  runDiagnosticsIntentFields,
-} from "@psi/runDiagnosticsModel";
 import {
   demotionNotice,
   editorFromCsv,
@@ -64,7 +58,6 @@ import {
   editorWithFieldInput,
   editorWithFieldRemoved,
   editorWithFieldSteps,
-  editorWithIdentity,
   editorWithImportedTerms,
   editorWithIncludeOwnColumns,
   editorWithKeyEnabled,
@@ -76,9 +69,9 @@ import {
   editorWithRecommendedCleaning,
   editorWithTransport,
   resetToRecommended,
-  sealEditor,
-  unsealEditor,
 } from "@psi/inviterEditor";
+import { receiptsIntentFields } from "@psi/receiptsModel";
+import { runDiagnosticsIntentFields } from "@psi/runDiagnosticsModel";
 
 import {
   cleaningCoverageProblems,
@@ -99,11 +92,9 @@ import {
 
 import {
   CONFIG_EXCHANGE_FILES,
-  EXCHANGE_FILES_DEFAULT,
   exchangeFilesOptions,
 } from "@console/exchangeFilesModel";
 import {
-  CONNECTION_TUNING_DEFAULT,
   FILEDROP_CONNECTION_TUNING,
   SFTP_CONNECTION_TUNING,
   withConnectionTuning,
@@ -120,7 +111,18 @@ import {
 import { consoleAcquiredCsv } from "@console/consoleAcquiredCsv";
 
 import {
-  EMPTY_SAVE_FIELDS,
+  INVITER_SCREEN_INITIAL,
+  INVITER_SPINE_ORDER,
+  inviterScreenReducer,
+  isInviterSpineStep,
+} from "./inviterScreenModel";
+import { acceptKitFileName, buildAcceptKit } from "./acceptKit";
+import {
+  buildManagedDeposit,
+  webrtcLocatorFromEndpoint,
+} from "./manageOfferModel";
+import { downloadSampleCsvs, sampleInviterFile } from "./sampleData";
+import {
   endpointRequestFor,
   exchangeFileInputFor,
   exchangeFileName,
@@ -129,21 +131,15 @@ import {
   saveRailNote,
   saveTrustFooter,
 } from "./saveExchangeModel";
-import { acceptKitFileName, buildAcceptKit } from "./acceptKit";
-import {
-  buildManagedDeposit,
-  webrtcLocatorFromEndpoint,
-} from "./manageOfferModel";
-import { downloadSampleCsvs, sampleInviterFile } from "./sampleData";
 import { useBeforeUnloadPrompt, useUnloadGuard } from "./useUnloadGuard";
 import { AgreementTab } from "./AgreementTab";
 import { WorkShell } from "./WorkShell";
 
-import { MANAGE_OFFER_IDLE, ManageExchangeOffer } from "./ManageExchangeOffer";
 import { CleaningTab } from "./CleaningTab";
 import { InviterExchangeSection } from "./InviterExchangeSection";
 import { KeysTab } from "./KeysTab";
 import { Ledger } from "./Ledger";
+import { ManageExchangeOffer } from "./ManageExchangeOffer";
 import { MatchingSharingSection } from "./MatchingSharingSection";
 import { Problems } from "./Problems";
 import { RecoveredExchangePanel } from "./RecoveredExchangePanel";
@@ -156,36 +152,24 @@ import { timelineSteps } from "./exchangeRun";
 import { useInviterExchange } from "./useInviterExchange";
 import { useStepHistory } from "./useStepHistory";
 
-import type { AcceptKitEndpoint, AcceptKitExchange } from "./acceptKit";
 import type { AcquiredCsv, InviterEditor } from "@psi/inviterEditor";
+import type { AcceptKitEndpoint } from "./acceptKit";
 import type { RailStep } from "@psi/rail";
 
-import type { CliTransport, SaveExchangeFields } from "./saveExchangeModel";
 import type {
   ConnectionEndpointRequest,
-  GeneratedInvitation,
   InvitationFileFailure,
 } from "@psi/invitation";
-import type {
-  JobInputSource,
-  SftpConnectionInfo,
-} from "@psi/jobClient/serverJobExchangeDriver";
-import type {
-  JobRendezvousConfig,
-  ProfiledJobInput,
-} from "@psi/jobClient/workInputClient";
 import type { AlertContent } from "@components/csvIntake";
+import type { CliTransport } from "./saveExchangeModel";
 import type { CoverageInput } from "@components/useNonEmptyRates";
+import type { JobInputSource } from "@psi/jobClient/serverJobExchangeDriver";
+import type { ProfiledJobInput } from "@psi/jobClient/workInputClient";
 
 import type { ColumnSamples } from "@psi/columnSamples";
-import type { ConnectionTuningDraft } from "@console/connectionTuningModel";
 import type { DisclosureChoice } from "@psi/metadataEditing";
-import type { ExchangeFilesDraft } from "@console/exchangeFilesModel";
+import type { InviterSpineStep } from "./inviterScreenModel";
 import type { ManageOfferChoices } from "./manageOfferModel";
-import type { ManageOfferState } from "./ManageExchangeOffer";
-import type { ReceiptsDraft } from "@psi/receiptsModel";
-import type { RunDiagnosticsDraft } from "@psi/runDiagnosticsModel";
-import type { SavedExchange } from "./SaveExchangeSection";
 import type { Section } from "./stepRestore";
 import type { SftpConnectionProjection } from "@jobs/jobManager";
 
@@ -195,8 +179,6 @@ import type {
   Standardization,
   TransformRefusal,
 } from "@psilink/core";
-
-type SpineStep = "file" | "columns" | "review";
 
 /** Stable empty inputs for {@link useNonEmptyRates} before a file is acquired,
  * so the hook's controller is not rebuilt every render on a fresh `[]` identity
@@ -214,13 +196,20 @@ const EMPTY_COVERAGE_INPUT: CoverageInput = {
 };
 const EMPTY_COLUMN_SAMPLES: ColumnSamples = new Map();
 
-const SPINE_LABELS: Record<SpineStep, string> = {
+const SPINE_LABELS: Record<InviterSpineStep, string> = {
   file: "Your file",
   columns: "Matching & sharing",
   review: "Review & create",
 };
 
-const SPINE_ORDER: ReadonlyArray<SpineStep> = ["file", "columns", "review"];
+/** The file step's refusal for a file no matching key can be built from, shared by
+ * the browser read and the console's mounted-file commit so the two intakes refuse
+ * an unmatchable file in the same words. */
+const UNMATCHABLE_FILE_ALERT: AlertContent = {
+  title: "This file cannot be matched",
+  message:
+    "None of the matching keys can be built from this file's columns. Matching needs columns like name, date of birth, Social Security number, ZIP code, phone, or email.",
+};
 
 /**
  * The alert for a mint that refused this file. The mint re-parses the retained file
@@ -282,10 +271,6 @@ function transformRefusalAlert(refusal: TransformRefusal): AlertContent {
   }
 }
 
-function isSpineStep(section: Section): section is SpineStep {
-  return (SPINE_ORDER as ReadonlyArray<Section>).includes(section);
-}
-
 // Exhaustive over Section (the Record keying enforces it), so a history entry
 // restored by Back/Forward is admitted only when it names a live section -- a
 // stale entry from before a deploy renamed a section is ignored rather than
@@ -316,90 +301,49 @@ const SAMPLE_INVITER_NAME = "Sample County Health Dept";
  * flows through the shared draft model, so the Customize facts and the
  * disclosure ledger track live. Step 3 is the review-and-create step,
  * `ReviewCreateSection`.
+ *
+ * Its whole state lives in one reducer ({@link inviterScreenReducer}); this
+ * component holds the I/O -- the parse, the mint, the save, and the console's
+ * fetches -- and reports each outcome to it as an action.
  */
 export function InviterScreen() {
-  const [name, setName] = useState("");
-  const [section, setSection] = useState<Section>("file");
-  const [lastSpineStep, setLastSpineStep] = useState<SpineStep>("file");
-  const [acquired, setAcquired] = useState<AcquiredCsv>();
-  // The console profile behind the acquired shape: the console reads the file, so
-  // the browser holds only the profile (name, size, mtime, columns, samples, date
-  // format). It backs the mint (columns), the run (the mounted-file reference), the
-  // coverage sweep, and the preview samples. Undefined on the hosted build, which
-  // reads the file in the browser instead.
-  const [consoleSource, setConsoleSource] = useState<ProfiledJobInput>();
-  const [sourceFile, setSourceFile] = useState<File>();
-  // The File System Access handle a drop attached to the selected file, where the
-  // platform yielded one; captured so a managed deposit can persist a reusable
-  // pointer to the input without a second picker dialog. Absent for a
-  // click-selected file, a browser without the API, and the in-memory sample.
-  const [sourceHandle, setSourceHandle] = useState<FileSystemFileHandle>();
-  const [editor, setEditor] = useState<InviterEditor>();
-  const [intakeAlert, setIntakeAlert] = useState<AlertContent>();
-  // The boundary's column-name sanitation, held apart from intakeAlert: it is an
-  // advisory about the file just read, not a refusal, and both can apply at once.
-  const [sanitizedNotice, setSanitizedNotice] = useState<AlertContent>();
-  const [reading, setReading] = useState(false);
-  const [announcement, setAnnouncement] = useState("");
-  const [invitation, setInvitation] = useState<GeneratedInvitation>();
-  // The current invitation as the mint fixed it for the partner's accept kit: the
-  // token's own locator and the run's retain-mode choice, so the sheet cannot
-  // describe a regime the authoring controls moved to after the mint. Set only
-  // where an invitation is minted for a partner who accepts from the command line
-  // (a console sftp/filedrop run); undefined for a WebRTC exchange and for the
-  // hosted build, whose CLI transports route to the save surface and mint nothing
-  // here.
-  const [acceptKitExchange, setAcceptKitExchange] =
-    useState<AcceptKitExchange>();
-  const [minting, setMinting] = useState(false);
-  const [createAlert, setCreateAlert] = useState<AlertContent>();
-  const [expertMode, setExpertMode] = useState(false);
-  const [editorAnnouncement, setEditorAnnouncement] = useState("");
-  const [saveFields, setSaveFields] =
-    useState<SaveExchangeFields>(EMPTY_SAVE_FIELDS);
-  const [savedExchange, setSavedExchange] = useState<SavedExchange>();
-  const [saving, setSaving] = useState(false);
-  const [saveAlert, setSaveAlert] = useState<AlertContent>();
-  // The console's effective SFTP connection, fetched once on a console build and
-  // updated when the operator authors or clears one. Undefined before it resolves;
-  // its `connection` is null when none is authored, else the credential-free
-  // locator. `sftpConfigured` (below) gates the SFTP transport, and the locator is
-  // authored into an sftp invitation's endpoint.
-  const [sftpInfo, setSftpInfo] = useState<SftpConnectionInfo>();
-  // The operator's deliberate choice to run SFTP through their own command-line
-  // tool (save-a-file) instead of authoring a connection here. Reset on a new file.
-  const [sftpSaveFilePreferred, setSftpSaveFilePreferred] = useState(false);
-  // The console's rendezvous mount, fetched once on a console build. Undefined before
-  // it resolves; `configured` gates the filedrop transport (offered iff a directory is
-  // mounted), `locator` is the advisory locator minted into a filedrop invitation, and
-  // `folderName` is the shared folder's own name, present only where the console has
-  // one to show as the folder's name.
-  const [rendezvous, setRendezvous] = useState<JobRendezvousConfig>();
-  // The operator's file-handling choices for a console server-job run (retain mode
-  // and the toggles that travel with it). Held here, beside the transport, because
-  // the review step authors them and the run hook consumes them.
-  const [exchangeFiles, setExchangeFiles] = useState<ExchangeFilesDraft>(
-    EXCHANGE_FILES_DEFAULT,
+  const [screenState, dispatch] = useReducer(
+    inviterScreenReducer,
+    INVITER_SCREEN_INITIAL,
   );
-  // The operator's connection-tuning choices for the same run (polling, timeouts,
-  // the retry budget, and the SFTP session mode), held beside the file-handling
-  // draft for the same reasons.
-  const [connectionTuning, setConnectionTuning] =
-    useState<ConnectionTuningDraft>(CONNECTION_TUNING_DEFAULT);
-  // The operator's per-run diagnostic and recovery choices for the same run, held
-  // beside the two drafts above for the same reasons.
-  const [runDiagnostics, setRunDiagnostics] = useState<RunDiagnosticsDraft>(
-    RUN_DIAGNOSTICS_DEFAULT,
-  );
-  // The operator's receipt-signing and retention choices for the same run, held
-  // beside the three drafts above for the same reasons.
-  const [receipts, setReceipts] = useState<ReceiptsDraft>(RECEIPTS_DEFAULT);
-  const [demoActive, setDemoActive] = useState(false);
-  // The offer's progress and, for a failed deposit, what it was about when a
-  // column name explains it. Held as one value so no reset can leave a refusal
-  // standing over an idle offer.
-  const [manageOffer, setManageOffer] =
-    useState<ManageOfferState>(MANAGE_OFFER_IDLE);
+  const {
+    acceptKitExchange,
+    acquired,
+    announcement,
+    connectionTuning,
+    consoleSource,
+    createAlert,
+    demoActive,
+    editor,
+    editorAnnouncement,
+    exchangeFiles,
+    expertMode,
+    intakeAlert,
+    invitation,
+    lastSpineStep,
+    manageOffer,
+    minting,
+    name,
+    reading,
+    receipts,
+    rendezvous,
+    runDiagnostics,
+    sanitizedNotice,
+    saveAlert,
+    saveFields,
+    savedExchange,
+    saving,
+    section,
+    sftpInfo,
+    sftpSaveFilePreferred,
+    sourceFile,
+    sourceHandle,
+  } = screenState;
 
   // Fetch the console's authored SFTP connection once on a console build; one
   // fetch per console serves the session, and the default transport reads its
@@ -411,7 +355,7 @@ export function InviterScreen() {
     if (!isConsoleBuild() || sftpInfo !== undefined) return;
     let cancelled = false;
     void fetchSftpConnection().then((info) => {
-      if (!cancelled) setSftpInfo(info);
+      if (!cancelled) dispatch({ type: "console-sftp-resolved", info });
     });
     return () => {
       cancelled = true;
@@ -426,7 +370,7 @@ export function InviterScreen() {
     if (!isConsoleBuild() || rendezvous !== undefined) return;
     let cancelled = false;
     void fetchJobRendezvous().then((config) => {
-      if (!cancelled) setRendezvous(config);
+      if (!cancelled) dispatch({ type: "console-rendezvous-resolved", config });
     });
     return () => {
       cancelled = true;
@@ -561,15 +505,13 @@ export function InviterScreen() {
   // exchange; the browser holds only the locator. A freshly authored server is a
   // different rendezvous directory, so any sweep confirmation is re-asked.
   function authorSftpConnection(connection: SftpConnectionProjection) {
-    setSftpInfo({ connection });
-    setSftpSaveFilePreferred(false);
-    setRunDiagnostics(runDiagnosticsAfterRetarget);
+    dispatch({ type: "sftp-connection-authored", connection });
   }
 
   // Clear the authored connection: forget it on the console and locally, so the
   // card returns to the authoring empty state.
   function clearSftpConnection() {
-    setSftpInfo({ connection: null });
+    dispatch({ type: "sftp-connection-cleared" });
     void deleteSftpConnection();
   }
 
@@ -582,13 +524,7 @@ export function InviterScreen() {
     // and DELETE, which also frees the console's single slot for the fresh
     // create. A no-op on a browser run.
     abandonRun();
-    setEditor((current) =>
-      current === undefined ? current : unsealEditor(current),
-    );
-    setInvitation(undefined);
-    setAcceptKitExchange(undefined);
-    setSavedExchange(undefined);
-    setManageOffer(MANAGE_OFFER_IDLE);
+    dispatch({ type: "started-over" });
     goTo("review");
   }
 
@@ -602,7 +538,7 @@ export function InviterScreen() {
   // Manage, so there is no discard path here.
   async function manageExchange(choices: ManageOfferChoices) {
     if (invitation === undefined || editor === undefined) return;
-    setManageOffer({ status: "depositing" });
+    dispatch({ type: "manage-offer-started" });
     try {
       const connection = webrtcLocatorFromEndpoint(
         webrtcEndpointFromLocation(invitationLocation()),
@@ -637,7 +573,7 @@ export function InviterScreen() {
           Date.now(),
         ),
       );
-      setManageOffer({ status: "deposited" });
+      dispatch({ type: "manage-offer-deposited" });
     } catch (error) {
       console.error(
         "managed exchange deposit failed:",
@@ -650,11 +586,12 @@ export function InviterScreen() {
       // what the refused parse read; a failure no column explains leaves the
       // generic copy standing.
       const refused = refusedColumnNames(invitation.metadata);
-      setManageOffer({
-        status: "error",
-        ...(refused.length > 0
-          ? { refusal: savedExchangeColumnRefusalAlert(refused) }
-          : {}),
+      dispatch({
+        type: "manage-offer-failed",
+        refusal:
+          refused.length > 0
+            ? savedExchangeColumnRefusalAlert(refused)
+            : undefined,
       });
     }
   }
@@ -671,8 +608,7 @@ export function InviterScreen() {
       hasInvitation: invitation !== undefined,
       isCliTransport: isCliTransport(transport),
     });
-    if (isSpineStep(settled)) setLastSpineStep(settled);
-    setSection(settled);
+    dispatch({ type: "section-shown", section: settled });
     return settled;
   }
 
@@ -710,16 +646,12 @@ export function InviterScreen() {
 
   function goTo(next: Section) {
     if (next === section) return;
-    if (isSpineStep(next)) setLastSpineStep(next);
-    setSection(next);
+    dispatch({ type: "section-shown", section: next });
     pushStep(next);
   }
 
-  // Non-announcing edits clear the live region, so a stale notice never lingers
-  // and a repeated identical notice re-announces.
   function applyEditor(next: InviterEditor) {
-    setEditor(next);
-    setEditorAnnouncement("");
+    dispatch({ type: "editor-applied", editor: next });
   }
 
   // A parse may still be in flight when the surface unmounts or a newer file
@@ -774,37 +706,16 @@ export function InviterScreen() {
     mounted.current = true;
   }, [section]);
 
-  // A failed read discards any prior read as well: the file card, the
-  // recommended-terms callout, and the Continue gate all vouch for
-  // `acquired`/`editor`, so leaving them set would present the previous file
-  // as the one the operator just dropped.
-  function discardRead(alert: AlertContent) {
-    setSanitizedNotice(undefined);
-    setAcquired(undefined);
-    setConsoleSource(undefined);
-    setSourceFile(undefined);
-    setSourceHandle(undefined);
-    setEditor(undefined);
-    setDemoActive(false);
-    setIntakeAlert(alert);
-  }
-
   async function readFile(file: File, seed?: { name: string }) {
     const id = ++parseId.current;
     parseAbort.current?.abort();
     const controller = new AbortController();
     parseAbort.current = controller;
-    // A real drop clears the sample marker; the sample seed sets it. Editing the
-    // sample's terms never re-reads, so the marker survives edits.
-    setDemoActive(seed !== undefined);
     // The sample seed has its own inviter name so step 1 lands complete; a
-    // real drop keeps whatever the operator typed. Applied before the read so
+    // real drop keeps whatever the operator typed. Read before the dispatch so
     // the derived editor's identity and the name field agree.
     const identity = seed?.name ?? name;
-    if (seed !== undefined) setName(seed.name);
-    setReading(true);
-    setIntakeAlert(undefined);
-    setSanitizedNotice(undefined);
+    dispatch({ type: "read-started", seedName: seed?.name });
     try {
       const result = await loadCSVFileOffMainThread(file, {
         signal: controller.signal,
@@ -813,16 +724,18 @@ export function InviterScreen() {
       const columns = result.meta.fields ?? [];
       const stripped = result.meta.sanitizedColumnPositions;
       const emptyPositions = emptyColumnPositions(columns);
+      // The refusal names the columns the removal left unnamed, the notice
+      // every position the read changed; both apply to the same read.
+      const notice =
+        stripped.length > 0 ? sanitizedColumnsAlert(stripped) : undefined;
       if (emptyPositions.length > 0) {
-        // Set after discardRead clears it: the refusal names the columns the
-        // removal left unnamed, the notice every position the read changed.
-        discardRead(unnameableColumnsAlert(emptyPositions, stripped));
-        if (stripped.length > 0)
-          setSanitizedNotice(sanitizedColumnsAlert(stripped));
+        dispatch({
+          type: "read-discarded",
+          alert: unnameableColumnsAlert(emptyPositions, stripped),
+          notice,
+        });
         return;
       }
-      if (stripped.length > 0)
-        setSanitizedNotice(sanitizedColumnsAlert(stripped));
       const csv: AcquiredCsv = {
         fileName: file.name,
         sizeBytes: file.size,
@@ -831,27 +744,27 @@ export function InviterScreen() {
         rowCount: result.data.length,
       };
       const seeded = editorFromCsv(identity, csv);
-      setAcquired(csv);
-      setSourceFile(file);
-      setSourceHandle(capturedInputHandle(file));
-      setEditor(seeded);
-      // A fresh file re-seeds the terms and resets the transport to browser;
-      // any exchange file saved for the prior read no longer describes them.
-      setSavedExchange(undefined);
-      if (seeded.draft.keys.length === 0)
-        setIntakeAlert({
-          title: "This file cannot be matched",
-          message:
-            "None of the matching keys can be built from this file's columns. Matching needs columns like name, date of birth, Social Security number, ZIP code, phone, or email.",
-        });
+      dispatch({
+        type: "file-acquired",
+        acquired: csv,
+        file,
+        handle: capturedInputHandle(file),
+        editor: seeded,
+        notice,
+        alert:
+          seeded.draft.keys.length === 0 ? UNMATCHABLE_FILE_ALERT : undefined,
+      });
     } catch (error) {
       if (id !== parseId.current) return;
-      discardRead({
-        title: "The file could not be read",
-        message: sanitizeErrorForDisplay(error),
+      dispatch({
+        type: "read-discarded",
+        alert: {
+          title: "The file could not be read",
+          message: sanitizeErrorForDisplay(error),
+        },
       });
     } finally {
-      if (id === parseId.current) setReading(false);
+      if (id === parseId.current) dispatch({ type: "read-finished" });
     }
   }
 
@@ -864,15 +777,16 @@ export function InviterScreen() {
   function commitConsoleFile(profile: ProfiledJobInput) {
     const stripped = profile.sanitizedColumnPositions;
     const emptyPositions = emptyColumnPositions(profile.columns);
+    const notice =
+      stripped.length > 0 ? sanitizedColumnsAlert(stripped) : undefined;
     if (emptyPositions.length > 0) {
-      discardRead(unnameableColumnsAlert(emptyPositions, stripped));
-      if (stripped.length > 0)
-        setSanitizedNotice(sanitizedColumnsAlert(stripped));
+      dispatch({
+        type: "read-discarded",
+        alert: unnameableColumnsAlert(emptyPositions, stripped),
+        notice,
+      });
       return;
     }
-    setSanitizedNotice(
-      stripped.length > 0 ? sanitizedColumnsAlert(stripped) : undefined,
-    );
     const csv = consoleAcquiredCsv({
       fileName: profile.name,
       sizeBytes: profile.sizeBytes,
@@ -880,23 +794,18 @@ export function InviterScreen() {
       rowCount: profile.rowCount,
       dateInputFormat: profile.dateInputFormat,
     });
-    const reseed = () => {
+    const reseed = (reseedAnnouncement?: string) => {
       const seeded = editorFromCsv(name, csv);
-      setConsoleSource(profile);
-      setAcquired(csv);
-      setEditor(seeded);
-      // A fresh file re-seeds the terms and resets the transport to the default; any
-      // exchange file saved for the prior file no longer describes them.
-      setSavedExchange(undefined);
-      setIntakeAlert(
-        seeded.draft.keys.length === 0
-          ? {
-              title: "This file cannot be matched",
-              message:
-                "None of the matching keys can be built from this file's columns. Matching needs columns like name, date of birth, Social Security number, ZIP code, phone, or email.",
-            }
-          : undefined,
-      );
+      dispatch({
+        type: "console-file-seeded",
+        source: profile,
+        acquired: csv,
+        editor: seeded,
+        notice,
+        alert:
+          seeded.draft.keys.length === 0 ? UNMATCHABLE_FILE_ALERT : undefined,
+        announcement: reseedAnnouncement,
+      });
     };
     if (
       editor !== undefined &&
@@ -910,17 +819,18 @@ export function InviterScreen() {
           (column, index) => column === profile.columns[index],
         );
       if (columnsUnchanged) {
-        setConsoleSource(profile);
-        setAcquired(csv);
-        setEditor(editorReprofiled(editor, csv));
-        setSavedExchange(undefined);
-        setEditorAnnouncement(
-          "Re-profiled with the file's current contents; your customizations are unchanged.",
-        );
+        dispatch({
+          type: "console-file-reprofiled",
+          source: profile,
+          acquired: csv,
+          editor: editorReprofiled(editor, csv),
+          notice,
+          announcement:
+            "Re-profiled with the file's current contents; your customizations are unchanged.",
+        });
         return;
       }
-      reseed();
-      setEditorAnnouncement(
+      reseed(
         "The file's columns changed, so your customizations were reset to the defaults.",
       );
       return;
@@ -943,36 +853,23 @@ export function InviterScreen() {
   function clearSample() {
     parseId.current += 1;
     parseAbort.current?.abort();
-    setName("");
-    setAcquired(undefined);
-    setConsoleSource(undefined);
-    setSourceFile(undefined);
-    setSourceHandle(undefined);
-    setEditor(undefined);
-    setIntakeAlert(undefined);
-    setSanitizedNotice(undefined);
-    setReading(false);
-    setDemoActive(false);
-    setSavedExchange(undefined);
-    setInvitation(undefined);
-    setAcceptKitExchange(undefined);
-    setManageOffer(MANAGE_OFFER_IDLE);
+    dispatch({ type: "sample-cleared" });
     goTo("file");
   }
 
   function updateName(next: string) {
-    setName(next);
-    setEditor((current) =>
-      current === undefined ? current : editorWithIdentity(current, next),
-    );
+    dispatch({ type: "name-changed", name: next });
   }
 
   function applyColumnEdit(result: {
     editor: InviterEditor;
     demotedIdentifiers: Array<string>;
   }) {
-    setEditor(result.editor);
-    setAnnouncement(demotionNotice(result.demotedIdentifiers));
+    dispatch({
+      type: "column-edited",
+      editor: result.editor,
+      announcement: demotionNotice(result.demotedIdentifiers),
+    });
   }
 
   // The mint's input source, build-aware: the retained browser File on the hosted
@@ -1007,9 +904,7 @@ export function InviterScreen() {
     // console) instead mints here and routes to the live run, exactly as the
     // browser path does.
     if (chosenRunMode === "save-file") {
-      setEditor(sealEditor(editor));
-      setSavedExchange(undefined);
-      setSaveAlert(undefined);
+      dispatch({ type: "save-routed" });
       goTo("save");
       return;
     }
@@ -1075,8 +970,7 @@ export function InviterScreen() {
       retainsFiles:
         connectionEndpoint !== undefined && runOptions?.retainFiles === true,
     });
-    setMinting(true);
-    setCreateAlert(undefined);
+    dispatch({ type: "mint-started" });
     try {
       const minted = await generateInvitation({
         inviterName: editor.draft.identity,
@@ -1090,23 +984,24 @@ export function InviterScreen() {
         ...(connectionEndpoint !== undefined ? { connectionEndpoint } : {}),
         retainsFiles: declaresRetainedFiles,
       });
-      setEditor(sealEditor(editor));
-      setInvitation(minted);
       // The bilateral file-handling choices are captured beside the locator:
       // the lockless rendezvous from the options block the run itself holds
       // rather than from the raw toggles -- retain mode's implication of it
       // included -- and retain mode from the value the token declares, so the
       // sheet cannot state a mode the partner's invitation does not.
-      setAcceptKitExchange(
-        kitEndpoint === undefined
-          ? undefined
-          : {
-              endpoint: kitEndpoint,
-              retainFiles: declaresRetainedFiles,
-              locklessRendezvous: runOptions?.locklessRendezvous === true,
-            },
-      );
-      setManageOffer(MANAGE_OFFER_IDLE);
+      dispatch({
+        type: "invitation-minted",
+        editor,
+        invitation: minted,
+        acceptKitExchange:
+          kitEndpoint === undefined
+            ? undefined
+            : {
+                endpoint: kitEndpoint,
+                retainFiles: declaresRetainedFiles,
+                locklessRendezvous: runOptions?.locklessRendezvous === true,
+              },
+      });
       goTo("share");
     } catch (error) {
       if (error instanceof InvitationFileError) {
@@ -1114,7 +1009,10 @@ export function InviterScreen() {
         // user-actionable ways step 1 gates on (the file changed on disk, or
         // its satisfiability shifted with the edited terms); show the same
         // shared alerts rather than a generic failure.
-        setCreateAlert(invitationFileAlert(error.failure));
+        dispatch({
+          type: "mint-failed",
+          alert: invitationFileAlert(error.failure),
+        });
       } else {
         // The tag is read after the class test rather than before it: the read
         // walks `.cause` links, and an accessor that throws there propagates
@@ -1124,7 +1022,10 @@ export function InviterScreen() {
           // A document the transform check refused: the operator holds the
           // terms and the remedy is an edit, so retrying the same click cannot
           // clear it.
-          setCreateAlert(transformRefusalAlert(transformRefusal));
+          dispatch({
+            type: "mint-failed",
+            alert: transformRefusalAlert(transformRefusal),
+          });
         } else {
           // Internal and non-user-actionable: a fixed message avoids echoing
           // internals into a secret-bearing flow, the default log states only
@@ -1137,15 +1038,18 @@ export function InviterScreen() {
           whenDiagnostic(() =>
             console.error("invitation creation failed (detail):", error),
           );
-          setCreateAlert({
-            title: "Could not create the invitation",
-            message:
-              "Something went wrong while creating the invitation. Your terms are unchanged - try again.",
+          dispatch({
+            type: "mint-failed",
+            alert: {
+              title: "Could not create the invitation",
+              message:
+                "Something went wrong while creating the invitation. Your terms are unchanged - try again.",
+            },
           });
         }
       }
     } finally {
-      setMinting(false);
+      dispatch({ type: "mint-finished" });
     }
   }
 
@@ -1163,8 +1067,7 @@ export function InviterScreen() {
     if (saveExchangeError(cliTransport, saveFields) !== undefined) return;
     const validation = reviewValidation(editor);
     if (!validation.canGenerate || validation.terms === undefined) return;
-    setSaving(true);
-    setSaveAlert(undefined);
+    dispatch({ type: "save-started" });
     try {
       const minted = await generateInvitation({
         inviterName: editor.draft.identity,
@@ -1185,16 +1088,25 @@ export function InviterScreen() {
       );
       const fileName = exchangeFileName(new Date());
       triggerBlobDownload(fileName, yaml, "application/yaml");
-      setSavedExchange({ invitation: minted, fileName });
+      dispatch({
+        type: "exchange-file-saved",
+        saved: { invitation: minted, fileName },
+      });
     } catch (error) {
       if (error instanceof InvitationFileError) {
-        setSaveAlert(invitationFileAlert(error.failure));
+        dispatch({
+          type: "save-failed",
+          alert: invitationFileAlert(error.failure),
+        });
       } else {
         // The tag is read after the class test here too, for the reason the
         // create click's handler states.
         const transformRefusal = transformRefusalIn(error);
         if (transformRefusal !== undefined) {
-          setSaveAlert(transformRefusalAlert(transformRefusal));
+          dispatch({
+            type: "save-failed",
+            alert: transformRefusalAlert(transformRefusal),
+          });
         } else {
           // Internal and non-user-actionable (a schema/encoding fault): a fixed
           // message keeps internals out of a secret-bearing flow, the default
@@ -1206,15 +1118,18 @@ export function InviterScreen() {
           whenDiagnostic(() =>
             console.error("exchange file save failed (detail):", error),
           );
-          setSaveAlert({
-            title: "Could not save the exchange file",
-            message:
-              "Something went wrong while saving. Your terms are unchanged - try again.",
+          dispatch({
+            type: "save-failed",
+            alert: {
+              title: "Could not save the exchange file",
+              message:
+                "Something went wrong while saving. Your terms are unchanged - try again.",
+            },
           });
         }
       }
     } finally {
-      setSaving(false);
+      dispatch({ type: "save-finished" });
     }
   }
 
@@ -1241,14 +1156,14 @@ export function InviterScreen() {
   // came from stays navigable like any completed step. The share and save
   // sections have their own rails, so neither is a Customize tab.
   const inTab =
-    !isSpineStep(section) && section !== "share" && section !== "save";
-  const currentPosition = SPINE_ORDER.indexOf(
-    isSpineStep(section) ? section : lastSpineStep,
+    !isInviterSpineStep(section) && section !== "share" && section !== "save";
+  const currentPosition = INVITER_SPINE_ORDER.indexOf(
+    isInviterSpineStep(section) ? section : lastSpineStep,
   );
   const steps: Array<RailStep> =
     section === "share"
       ? timelineSteps(run)
-      : SPINE_ORDER.map((step, position) => {
+      : INVITER_SPINE_ORDER.map((step, position) => {
           const state =
             !inTab && step === section
               ? "current"
@@ -1442,33 +1357,54 @@ export function InviterScreen() {
                 sftpSaveFilePreferred={sftpSaveFilePreferred}
                 rendezvous={rendezvous}
                 exchangeFiles={exchangeFiles}
-                onExchangeFiles={setExchangeFiles}
+                onExchangeFiles={(draft) =>
+                  dispatch({ type: "exchange-files-chosen", draft })
+                }
                 connectionTuning={connectionTuning}
-                onConnectionTuning={setConnectionTuning}
+                onConnectionTuning={(draft) =>
+                  dispatch({ type: "connection-tuning-chosen", draft })
+                }
                 runDiagnostics={runDiagnostics}
-                onRunDiagnostics={setRunDiagnostics}
+                onRunDiagnostics={(draft) =>
+                  dispatch({ type: "run-diagnostics-chosen", draft })
+                }
                 receipts={receipts}
-                onReceipts={setReceipts}
+                onReceipts={(draft) =>
+                  dispatch({ type: "receipts-chosen", draft })
+                }
                 onLifetime={(seconds) =>
                   applyEditor(editorWithLifetime(editor, seconds))
                 }
                 onDirection={(direction) =>
                   applyEditor(editorWithOutputDirection(editor, direction))
                 }
-                onTransport={(next) => {
-                  applyEditor(editorWithTransport(editor, next));
-                  // A different transport is a different rendezvous directory,
-                  // so any sweep confirmation is re-asked.
-                  setRunDiagnostics(runDiagnosticsAfterRetarget);
-                }}
+                onTransport={(next) =>
+                  dispatch({
+                    type: "transport-chosen",
+                    editor: editorWithTransport(editor, next),
+                  })
+                }
                 onAuthorConnection={authorSftpConnection}
                 onClearConnection={clearSftpConnection}
-                onUseCliForSftp={() => setSftpSaveFilePreferred(true)}
-                onRunHereForSftp={() => setSftpSaveFilePreferred(false)}
-                onReset={() => {
-                  setEditor(resetToRecommended(editor, acquired));
-                  setEditorAnnouncement("Reset to the default settings.");
-                }}
+                onUseCliForSftp={() =>
+                  dispatch({
+                    type: "sftp-save-file-preferred",
+                    preferred: true,
+                  })
+                }
+                onRunHereForSftp={() =>
+                  dispatch({
+                    type: "sftp-save-file-preferred",
+                    preferred: false,
+                  })
+                }
+                onReset={() =>
+                  dispatch({
+                    type: "editor-replaced",
+                    editor: resetToRecommended(editor, acquired),
+                    announcement: "Reset to the default settings.",
+                  })
+                }
                 onCreate={() => void createInvitation()}
                 onNavigate={goTo}
               />
@@ -1509,10 +1445,13 @@ export function InviterScreen() {
               onFieldRemoved={(output) =>
                 applyEditor(editorWithFieldRemoved(editor, output))
               }
-              onResetCleaning={() => {
-                setEditor(editorWithRecommendedCleaning(editor, acquired));
-                setEditorAnnouncement("Cleaning reset to the default steps.");
-              }}
+              onResetCleaning={() =>
+                dispatch({
+                  type: "editor-replaced",
+                  editor: editorWithRecommendedCleaning(editor, acquired),
+                  announcement: "Cleaning reset to the default steps.",
+                })
+              }
               cleaningError={reviewValidation(editor).errors.standardization}
               coveragePendingLabel={
                 consoleSource !== undefined
@@ -1529,19 +1468,21 @@ export function InviterScreen() {
               editor={editor}
               csv={acquired}
               expertMode={expertMode}
-              onExpertMode={setExpertMode}
+              onExpertMode={(on) =>
+                dispatch({ type: "expert-mode-chosen", expertMode: on })
+              }
               onKeyEnabled={(index, enabled) =>
                 applyEditor(editorWithKeyEnabled(editor, index, enabled))
               }
               onKeyMoved={(index, offset) => {
                 const moved = editorWithKeyMoved(editor, index, offset);
-                setEditor(moved);
-                if (moved !== editor) {
-                  const key = moved.draft.keys[index + offset];
-                  setEditorAnnouncement(
-                    `Moved ${sanitizeForDisplay(key.key.name)} to position ${index + offset + 1} of ${moved.draft.keys.length}. Keys earlier in the list match first.`,
-                  );
-                }
+                if (moved === editor) return;
+                const key = moved.draft.keys[index + offset];
+                dispatch({
+                  type: "editor-replaced",
+                  editor: moved,
+                  announcement: `Moved ${sanitizeForDisplay(key.key.name)} to position ${index + offset + 1} of ${moved.draft.keys.length}. Keys earlier in the list match first.`,
+                });
               }}
               onAuthoredDraft={(draft) =>
                 applyEditor(editorWithAuthoredDraft(editor, draft))
@@ -1555,14 +1496,18 @@ export function InviterScreen() {
               onDeduplicate={(deduplicate) =>
                 applyEditor(editorWithDeduplicate(editor, deduplicate))
               }
-              onImport={(terms) => {
-                setEditor(editorWithImportedTerms(editor, acquired, terms));
-                setEditorAnnouncement(
-                  "Imported. Review the loaded terms before creating.",
-                );
-              }}
+              onImport={(terms) =>
+                dispatch({
+                  type: "editor-replaced",
+                  editor: editorWithImportedTerms(editor, acquired, terms),
+                  announcement:
+                    "Imported. Review the loaded terms before creating.",
+                })
+              }
               keysError={reviewValidation(editor).errors.keys}
-              announce={setEditorAnnouncement}
+              announce={(message) =>
+                dispatch({ type: "editor-announced", announcement: message })
+              }
               onBack={() => goTo("review")}
             />
           )}
@@ -1621,7 +1566,9 @@ export function InviterScreen() {
             saved={savedExchange}
             saving={saving}
             alert={saveAlert}
-            onFields={setSaveFields}
+            onFields={(fields) =>
+              dispatch({ type: "save-fields-changed", fields })
+            }
             onSave={() => void saveExchangeFile()}
             onBack={() => goTo("review")}
           />
