@@ -154,6 +154,11 @@ export const CHECKS = [
       "apps/web/vite.config.ts and its import graph load under the strip-only type stripping Vite's native config loader and a plain node import use.",
   },
   {
+    script: "check:web-config-image-load",
+    description:
+      "apps/web/vite.config.ts loads from the file subset the Dockerfile builder stage copies, so the image build resolves no module the image does not have.",
+  },
+  {
     script: "check:nitro-websocket-unset",
     description:
       "Nitro's experimental.websocket stays off, so nothing attaches a second upgrade listener beside the signaling route.",

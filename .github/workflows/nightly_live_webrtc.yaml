@@ -50,7 +50,7 @@ jobs:
     # `psilink` process, workloads that can wedge in ways the leg's own
     # timeouts do not all catch. The leg itself measures well under a minute
     # once provisioned; the rest of this budget is the browser provisioning
-    # below and its own 20-minute bound.
+    # below and its own 22-minute bound.
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
@@ -105,9 +105,40 @@ jobs:
       # 1.60 (earlier versions hang extracting the browser archive,
       # microsoft/playwright#40724) -- the lockfile pins >= 1.61, so do not
       # downgrade.
+      #
+      # An upstream that trickles rather than falls silent -- the apt mirror the
+      # timeouts above cannot catch, or the browser CDN -- stalls this command
+      # instead of failing it, so each attempt bounds the whole command and a
+      # stalled attempt is retried here. This job runs unattended overnight, so
+      # a provisioning stall that a human rerun would clear otherwise costs a
+      # night of coverage. The bounds are eb_build_and_test.yaml's, measured
+      # against the same command: two attempts at 10m each, plus timeout's 30s
+      # kill-after grace and the 15s backoff between them, total 21m15s inside
+      # timeout-minutes, so the per-attempt bound is what fires and names the
+      # failure.
       - name: Install Playwright Chromium
-        timeout-minutes: 20
-        run: npx playwright install --with-deps chromium
+        timeout-minutes: 22
+        run: |
+          attempts=2
+          attempt_timeout=10m
+          for attempt in $(seq 1 "$attempts"); do
+            status=0
+            timeout --kill-after=30s "$attempt_timeout" npx playwright install --with-deps chromium || status=$?
+            if [ "$status" -eq 0 ]; then
+              exit 0
+            fi
+            if [ "$status" -eq 124 ]; then
+              outcome="hit the $attempt_timeout bound"
+            else
+              outcome="failed with exit status $status"
+            fi
+            echo "::warning::Playwright provisioning attempt $attempt $outcome"
+            if [ "$attempt" -lt "$attempts" ]; then
+              sleep 15
+            fi
+          done
+          echo "::error::Playwright provisioning failed on all $attempts attempts; the last one $outcome"
+          exit "$status"
       - name: Save the Playwright browser build
         if: steps.browser-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6

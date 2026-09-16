@@ -7,7 +7,7 @@ import { cliEntry, pairsFromResultCsv } from "../interop/cliParty.ts";
 import { LEG_ENVIRONMENT_FAILURE } from "./legTypes.ts";
 import { trackChild } from "./childProcess.ts";
 
-import type { LiveLegCliOutcome } from "./legTypes.ts";
+import type { LiveLegCliOutcome, MatchedPair } from "./legTypes.ts";
 
 /**
  * The `psilink invite` party of the live WebRTC leg: the real command-line
@@ -81,6 +81,32 @@ function loggedAt(output: string, fragment: string): number | null {
   const stamp = line?.match(/^\[([^\]]+)\]/)?.[1];
   const parsed = stamp === undefined ? Number.NaN : Date.parse(stamp);
   return Number.isNaN(parsed) ? null : parsed;
+}
+
+/**
+ * The matched pairs the CLI party's result file holds, or null when it wrote
+ * none.
+ *
+ * Read only from a run that exited 0 within its deadline: a killed or failing
+ * run can leave a truncated file, and the parse error that file raises would be
+ * the first thing the leg reported about the run, ahead of the kill or the exit
+ * status that explains it. A file that will not parse after a clean exit is
+ * raised with the run's own output beside it, which is what diagnoses it.
+ */
+function readPairs(
+  resultPath: string,
+  output: string,
+): Array<MatchedPair> | null {
+  if (!existsSync(resultPath)) return null;
+  try {
+    return pairsFromResultCsv(resultPath);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `the CLI party exited 0, but its result file at ${resultPath} did not ` +
+        `parse: ${reason}\n${output}`,
+    );
+  }
 }
 
 /**
@@ -205,10 +231,11 @@ export async function startCliInviter(brokerUrl: string): Promise<CliInviter> {
     outcome: async () => {
       const { exitCode, endedAt } = await ended;
       const closingAt = loggedAt(output, CLOSING_CONNECTION_LINE);
+      const ranToCompletion = !killedOnDeadline && exitCode === 0;
       return {
         exitCode,
         killedOnDeadline,
-        pairs: existsSync(outputPath) ? pairsFromResultCsv(outputPath) : null,
+        pairs: ranToCompletion ? readPairs(outputPath, output) : null,
         closeWaitMs: closingAt === null ? null : endedAt - closingAt,
         output,
       };

@@ -245,7 +245,7 @@ test("the standalone broker answers on an origin of its own (environment precond
     started.readinessBody,
     "the port answered, but not with the standalone broker's own readiness " +
       "body; something other than that broker is behind it",
-  ).toBe("ready\n");
+  ).toBe(started.expectedReadinessBody);
   expect(started.brokerOrigin).not.toBe(window.location.origin);
   expect(started.invitation).toMatch(/^[A-Za-z0-9_-]+$/);
 });

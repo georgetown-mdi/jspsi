@@ -1,6 +1,7 @@
 /// <reference types="vitest/config" />
 import fs from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { defineConfig } from "vite";
 import logLibrary from "loglevel";
@@ -13,12 +14,31 @@ import { ConfigManager } from "./src/utils/serverConfig.ts";
 
 import { registerServer } from "./src/httpServer.ts";
 
-import { liveWebrtcLegCommands } from "./test/liveWebrtc/legCommands.ts";
-
+// A type-only import, erased before either config loader resolves anything.
+import type * as liveWebrtcLeg from "./test/liveWebrtc/legCommands.ts";
 import type { Plugin, PreviewServer, ViteDevServer } from "vite";
 
 const configManager = new ConfigManager();
 const config = await configManager.load({ dotenv: true });
+
+// Set by a vitest run, and by nothing a dev server or a build does.
+const underVitest = !!process.env.VITEST;
+
+// The Node half of the live CLI-to-browser WebRTC leg, registered as browser
+// commands on the `live-webrtc` project below. It lives in the test tree, which
+// the image's builder stage does not copy (Dockerfile), and the config loader
+// BUNDLES this file: every literal specifier in it is resolved, a dynamic
+// import's included, taken branch or not. Building the path at runtime leaves
+// the loader nothing to resolve (scripts/check-web-config-image-load.mjs).
+const liveWebrtcLegCommands = underVitest
+  ? (
+      (await import(
+        pathToFileURL(
+          path.resolve(import.meta.dirname, "test/liveWebrtc/legCommands.ts"),
+        ).href
+      )) as typeof liveWebrtcLeg
+    ).liveWebrtcLegCommands
+  : {};
 
 logLibrary.setDefaultLevel(config.LOG_LEVEL);
 
@@ -134,10 +154,6 @@ async function warmPeerSignaling(port: number): Promise<void> {
 }
 
 export default defineConfig((_configEnv) => {
-  // Vitest evaluates this config but starts no dev/preview server, so the server
-  // snagger plugins below have no httpServer to capture (the hook would just warn
-  // "http server is undefined"). Skip them under test.
-  const underVitest = !!process.env.VITEST;
   return {
     server: {
       host: "127.0.0.1",
@@ -348,6 +364,9 @@ export default defineConfig((_configEnv) => {
       }),
       nitroV2Plugin({ preset: "node-server" }),
       viteReact(),
+      // Vitest evaluates this config but starts no dev/preview server, so the
+      // server snagger plugins here have no httpServer to capture (the hook
+      // would just warn "http server is undefined"). Skip them under test.
       ...(underVitest
         ? []
         : [

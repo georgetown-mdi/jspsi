@@ -38,6 +38,16 @@ export interface LiveLegStart {
    * precondition names the vendored broker rather than whatever else might hold
    * the port. */
   readinessBody: string;
+  /**
+   * What the vendored broker declares that endpoint answers
+   * (`READINESS_BODY`), which the body above is held against.
+   *
+   * It crosses from the Node half rather than being imported by the browser
+   * half: the module declaring it reaches `node:path` at module scope, which
+   * the browser runner externalizes into a stub that throws on the first
+   * access.
+   */
+  expectedReadinessBody: string;
   /** The identity the CLI party declared, which the browser peer must read back
    * off the agreed terms. */
   cliIdentity: string;

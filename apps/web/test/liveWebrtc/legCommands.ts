@@ -1,3 +1,5 @@
+import { READINESS_BODY } from "@psilink/peerjs-broker/standaloneOptions";
+
 import { CLI_IDENTITY, startCliInviter } from "./cliPeer.ts";
 import { startStandaloneBroker } from "./standaloneBroker.ts";
 
@@ -42,6 +44,7 @@ async function startLeg(): Promise<LiveLegStart> {
     invitation: inviter.invitation,
     brokerOrigin: `http://127.0.0.1:${broker.port}`,
     readinessBody: broker.readinessBody,
+    expectedReadinessBody: READINESS_BODY,
     cliIdentity: CLI_IDENTITY,
   };
 }
