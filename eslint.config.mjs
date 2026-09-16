@@ -187,7 +187,7 @@ const noDisplayableAsErrorArgument = ERROR_TEXT_POSITIONS.map((position) => ({
 // eslint-disable every other ban here does; the mark states origin and this
 // only asks that the site state it.
 const OPERATOR_PATH_NAME =
-  "/([a-z](Path|File|Dir|Directory|Folder)s?$|^(path|file|dir|directory|folder)(s|name|names)?([A-Z]|$))/";
+  "/((Path|File|Dir|Directory|Folder)s?$|^(path|file|dir|directory|folder)(s|name|names)?([A-Z]|$))/";
 const UNMARKED_OPERATOR_PATH = [
   `Identifier[name=${OPERATOR_PATH_NAME}]`,
   `MemberExpression[property.name=${OPERATOR_PATH_NAME}]`,

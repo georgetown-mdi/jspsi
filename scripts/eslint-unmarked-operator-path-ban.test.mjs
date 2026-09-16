@@ -122,6 +122,14 @@ const BANNED = [
     "throw new Error(`could not read ${fileName}`);",
   ],
   ["an all-lowercase filename", "log.warn(`${filename} is unreadable`);"],
+  [
+    "a name ending in File behind an initialism",
+    "throw new Error(`could not read ${CSVFile}`);",
+  ],
+  [
+    "a name ending in Path behind an initialism",
+    "log.warn(`${ACLPath} is unreadable`);",
+  ],
 ];
 
 const ALLOWED = [
@@ -149,6 +157,13 @@ const ALLOWED = [
     "a path under a name the pattern does not reach",
     "throw new Error(`could not read ${target} to ${destination}`);",
   ],
+  [
+    // The suffix is matched with its capital, so a lowercase word closing a
+    // longer name is outside both shapes -- only a name OPENING with the word
+    // reaches the ban in lowercase.
+    "an all-lowercase name ending in file rather than opening with it",
+    "throw new Error(`could not read ${keyfile}`);",
+  ],
 ];
 
 const PREAMBLE = `
@@ -160,6 +175,9 @@ declare const detail: string;
 declare const pathValue: string;
 declare const fileName: string;
 declare const filename: string;
+declare const CSVFile: string;
+declare const ACLPath: string;
+declare const keyfile: string;
 declare const target: string;
 declare const destination: string;
 declare const missing: boolean;

@@ -5362,6 +5362,47 @@ const CONFIG_REFUSALS: ReadonlyArray<
     (configPath) => persistPartnerFingerprint(configPath, PIN_FINGERPRINT),
     "escaped",
   ],
+  [
+    "a disclosed-columns write to a configuration that cannot be parsed",
+    (configPath) => {
+      fs.writeFileSync(configPath, UNPARSEABLE_YAML);
+      persistDisclosedPayloadColumns(configPath, ["notes"]);
+    },
+  ],
+  [
+    "an expected-columns write to a configuration that cannot be parsed",
+    (configPath) => {
+      fs.writeFileSync(configPath, UNPARSEABLE_YAML);
+      persistExpectedPayloadColumns(configPath, ["notes"]);
+    },
+  ],
+  [
+    "an outbound-consent write to a configuration that cannot be parsed",
+    (configPath) => {
+      fs.writeFileSync(configPath, UNPARSEABLE_YAML);
+      persistOutboundPayloadConsent(configPath, {
+        status: "confirmed",
+        columns: ["notes"],
+      });
+    },
+  ],
+  [
+    "an expected-deduplicate write to a configuration that cannot be parsed",
+    (configPath) => {
+      fs.writeFileSync(configPath, UNPARSEABLE_YAML);
+      persistExpectedPartnerDeduplicate(configPath, true);
+    },
+  ],
+  [
+    "a host-key pin whose connection.server holds a scalar",
+    (configPath) => {
+      fs.writeFileSync(
+        configPath,
+        "connection:\n  channel: sftp\n  server: 3\n",
+      );
+      persistHostKeyFingerprint(configPath, PIN_FINGERPRINT);
+    },
+  ],
 ];
 
 for (const [label, run, unmarkedCopy] of CONFIG_REFUSALS) {
