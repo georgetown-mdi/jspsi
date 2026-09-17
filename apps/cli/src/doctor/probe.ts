@@ -11,7 +11,7 @@ import type { CommandResult, CommandRunner } from "./runner";
 import { nodeCommandRunner } from "./runner";
 import type { SmbProbeInput } from "./smbEnvironment";
 import type { DoctorCheckRecord, DoctorReport } from "./verdict";
-import { fail, ok, skipped, warn } from "./verdict";
+import { fail, ok, skipped, SKIPPED_BY_FAILURE_MEANING, warn } from "./verdict";
 
 // The userspace half of the file-drop checks: what the exchange needs, asked of
 // the server over TCP with smbclient, with nothing mounted. `doctor mount` is
@@ -49,6 +49,25 @@ export const PROBE_CHECK_IDS = [
   "delete",
   "marker",
 ] as const;
+
+/**
+ * What each check asks, in the words a check that did not run names itself by.
+ * A run that stopped early costs the operator the checks below the failure, and
+ * the report says which they were rather than repeating one sentence per id.
+ */
+const PROBE_CHECK_NAMES: Record<(typeof PROBE_CHECK_IDS)[number], string> = {
+  name_resolution: "finding the server by name",
+  tcp_445: "reaching the server on port 445",
+  smbclient_available: "finding smbclient in this image",
+  authentication: "signing in to the server",
+  share_open: "opening the share",
+  subdirectory: "opening the folder inside the share",
+  free_space: "reading the free space on the share",
+  write: "creating a file",
+  rename: "renaming a file",
+  delete: "deleting a file",
+  marker: "leaving the cross-check file for `psilink doctor mount`",
+};
 
 /** The external effects the probe performs, injectable for unit tests. */
 export interface ProbeDeps {
@@ -206,24 +225,18 @@ function listArgs(input: SmbProbeInput, authFile: string): string[] {
 
 /**
  * Append a `skipped` record for every id the run never reached, so the reported
- * check list is the full ordered set whatever stopped it.
+ * check list is the full ordered set whatever stopped it. Each names the check
+ * it stands for; the reason they share is stated once where they are rendered.
  */
-function padSkipped(
-  checks: DoctorCheckRecord[],
-  ids: readonly string[],
-): DoctorCheckRecord[] {
+function padSkipped(checks: DoctorCheckRecord[]): DoctorCheckRecord[] {
   const seen = new Set(checks.map((check) => check.id));
   return [
     ...checks,
-    ...ids
-      .filter((id) => !seen.has(id))
-      .map((id) =>
-        skipped(id, "not run: an earlier check did not pass.", {
-          meaning:
-            "an earlier check failed and the remaining checks did not run, " +
-            "so nothing was established about this one.",
-        }),
-      ),
+    ...PROBE_CHECK_IDS.filter((id) => !seen.has(id)).map((id) =>
+      skipped(id, `${PROBE_CHECK_NAMES[id]} -- not run.`, {
+        meaning: SKIPPED_BY_FAILURE_MEANING,
+      }),
+    ),
   ];
 }
 
@@ -263,7 +276,9 @@ function authenticationCheck(
         status,
         "the username, password, or domain is wrong. This is the one status " +
           "that really does mean bad credentials.",
-        "if this is a domain account, set SMB_DOMAIN. If the folder opens in " +
+        "if this is a domain account, give its domain -- answer the setup " +
+          "script's Domain prompt, or set SMB_DOMAIN if you are running this " +
+          "image yourself. If the folder opens in " +
           "File Explorer WITHOUT ever asking for a password, Windows is signing " +
           "you in with Kerberos and there may be no password that works here; " +
           "see the troubleshooting page, 'The share never asks for a password'. " +
@@ -471,7 +486,7 @@ export async function runProbe(
   const checks: DoctorCheckRecord[] = [];
   const finish = (): DoctorReport => ({
     mode: "probe",
-    checks: padSkipped(checks, PROBE_CHECK_IDS),
+    checks: padSkipped(checks),
   });
 
   if (IPV4_LITERAL.test(input.server)) {

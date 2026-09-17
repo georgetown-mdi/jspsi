@@ -90,6 +90,10 @@ $ErrorActionPreference = 'Stop'
 # volume test compares it rather than merely finding the file.
 $MarkerName = 'psilink-setup-check.tmp'
 
+# The drive letters whose mapping has been announced, so that resolving several
+# folders on one letter says where it goes once.
+$script:AnnouncedDriveLetters = @()
+
 function Write-Head {
     param([string] $Text)
     Write-Host ''
@@ -102,6 +106,26 @@ function Write-Bad  { param([string] $T) Write-Host "  FAIL  $T" -ForegroundColo
 function Write-Warn { param([string] $T) Write-Host "  WARN  $T" -ForegroundColor Yellow }
 function Write-Note { param([string] $T) Write-Host "        $T" -ForegroundColor Yellow }
 function Write-Info { param([string] $T) Write-Host "        $T" }
+
+function Split-TextToWidth {
+    <#  Text as lines that fit the block Write-Note and Write-Info indent to.
+        The script's own messages are written to that width by hand; a reason
+        worked out while the script runs can be any length, and without this it
+        reaches the window as one line that wraps wherever the window ends. #>
+    param([string] $Text, [int] $Width = 66)
+
+    $lines = @()
+    $line = ''
+    foreach ($word in @($Text -split '\s+' | Where-Object { $_ })) {
+        if (-not $line) { $line = $word }
+        elseif (($line.Length + 1 + $word.Length) -gt $Width) {
+            $lines += $line
+            $line = $word
+        } else { $line = "$line $word" }
+    }
+    if ($line) { $lines += $line }
+    return , $lines
+}
 
 function Hide-Secret {
     <#  Removes the password from text about to be shown or pasted into a
@@ -133,6 +157,12 @@ function Invoke-Docker {
         docker, which then reads the volume spec as the image name and fails
         with "invalid reference format".
 
+        Each redirected stderr line arrives as an ErrorRecord, whose ToString()
+        answers with the exception's type name when the line is empty -- so a
+        blank line in a container's output would reach the window as
+        "System.Management.Automation.RemoteException". The message is read off
+        the record instead, which keeps a blank line blank.
+
         A name that is not a command on this PC is answered here rather than
         called: calling one raises CommandNotFoundException, which the relaxed
         preference does not soften and nothing here catches, so a run would end
@@ -160,7 +190,10 @@ function Invoke-Docker {
     $previous = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        $lines = & $Engine @DockerArgs 2>&1 | ForEach-Object { "$_" }
+        $lines = & $Engine @DockerArgs 2>&1 | ForEach-Object {
+            if ($_ -is [System.Management.Automation.ErrorRecord]) { [string] $_.Exception.Message }
+            else { "$_" }
+        }
         return @{ Ran = $true; Output = ($lines -join [Environment]::NewLine); ExitCode = $LASTEXITCODE }
     }
     finally { $ErrorActionPreference = $previous }
@@ -533,6 +566,11 @@ function Resolve-DropPath {
         Kind = Local | Network | Unknown, plus Server/Share/SubPath when
         Kind is Network.
 
+        An Unknown carries a Reason, and RetypingWillNotHelp where entering a
+        different path is not the answer to it -- the elevated window, whose
+        remedy is to close the window. A caller printing the reason leaves its
+        own "enter it as a drive letter or network path" advice off that one.
+
         There is deliberately no attempt to work out the file server behind a
         DFS namespace. Reading the SMB connection list needs Administrator
         rights, an elevated window cannot see the mapped drives this function
@@ -550,7 +588,7 @@ function Resolve-DropPath {
     # matching a share name as "anything but a backslash" otherwise swallows
     # //server/share/sub whole and reports the entire tail as the share.
     $p = $Raw.Trim().Trim('"').Replace('/', '\').TrimEnd('\')
-    if (-not $p) { return @{ Kind = 'Unknown'; Reason = 'empty path' } }
+    if (-not $p) { return @{ Kind = 'Unknown'; Reason = 'Empty path' } }
 
     # --- the \\?\ and \\.\ device prefixes --------------------------------
     if ($p -match '^\\\\[\?\.]\\UNC\\(.*)$') { $p = "\\$($Matches[1])" }
@@ -573,16 +611,23 @@ function Resolve-DropPath {
             # this session cannot see. Neither is a local folder.
             if (Test-Elevated) {
                 return @{ Kind = 'Unknown'
-                          Reason = "this window is running as Administrator, and an elevated session cannot see the drive letters you mapped as yourself -- ${letter}: is invisible here even if File Explorer shows it. Close this window, open PowerShell normally, and run the script again. If you were told to elevate in order to resolve a DFS path, you no longer need to: see the troubleshooting page, 'Reading the real path from Windows'" }
+                          RetypingWillNotHelp = $true
+                          Reason = "This window is running as Administrator, and an elevated session cannot see the drive letters you mapped as yourself -- ${letter}: is invisible here even if File Explorer shows it. Close this window, open PowerShell normally, and run the script again. If you were told to elevate in order to resolve a DFS path, you no longer need to: see the troubleshooting page, 'Reading the real path from Windows'" }
             }
             if ($kind -eq 'Network') {
                 return @{ Kind = 'Unknown'
                           Reason = "${letter}: is a network drive but Windows will not say what it maps to. Run 'net use' in this window and pass the answer with -Server and -Share" }
             }
             return @{ Kind = 'Unknown'
-                      Reason = "there is no ${letter}: drive on this PC. If it is a network drive that is not connected right now, open it in File Explorer first, then run the script again" }
+                      Reason = "There is no ${letter}: drive on this PC. If it is a network drive that is not connected right now, open it in File Explorer first, then run the script again" }
         }
-        Write-Good "${letter}: is mapped to $unc"
+        # Once per letter: the launcher resolves a path per folder, and a pair
+        # of folders on one drive would otherwise announce the same mapping
+        # twice.
+        if ($script:AnnouncedDriveLetters -notcontains $letter.ToUpperInvariant()) {
+            $script:AnnouncedDriveLetters += $letter.ToUpperInvariant()
+            Write-Good "${letter}: is mapped to $unc"
+        }
         $p = if ($rest) { "$unc\$rest" } else { $unc }
     }
 
@@ -605,7 +650,7 @@ function Resolve-DropPath {
     # --- plain local path -------------------------------------------------
     if ($p -match '^[A-Za-z]:') { return @{ Kind = 'Local'; LocalPath = $p } }
 
-    return @{ Kind = 'Unknown'; Reason = "could not interpret '$Raw'" }
+    return @{ Kind = 'Unknown'; Reason = "Could not interpret '$Raw'" }
 }
 
 function Get-RendezvousFolderName {
@@ -796,12 +841,14 @@ if (-not $explicitTarget) {
             exit 0
         }
         'Unknown' {
-            Write-Bad "Could not use that path."
+            Write-Bad 'Could not use that path.'
             Write-Host ''
-            Write-Note "$($resolved.Reason)."
-            Write-Info ''
-            Write-Info 'Enter it as a drive letter path (Z:\Exchange) or a network path'
-            Write-Info '(\\server\share\folder). Copy it from the Explorer address bar.'
+            foreach ($line in (Split-TextToWidth -Text "$($resolved.Reason).")) { Write-Note $line }
+            if (-not $resolved.RetypingWillNotHelp) {
+                Write-Info ''
+                Write-Info 'Enter it as a drive letter path (Z:\Exchange) or a network path'
+                Write-Info '(\\server\share\folder). Copy it from the Explorer address bar.'
+            }
             exit 1
         }
     }

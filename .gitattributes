@@ -24,6 +24,14 @@
 # run-time strip to fall back on, so the stored bytes are the whole of it.
 /support/windows-network-filedrop/start-psilink.sh -text
 
+# The image entrypoints are copied into the image from the checkout the build
+# runs in, and `sh` does not treat a carriage return as whitespace: a checkout
+# under Git for Windows' core.autocrlf=true default would otherwise build an
+# image whose entrypoint fails on its own shebang line. Neither has a run-time
+# strip to fall back on, so the stored bytes are the whole of it.
+/docker-entrypoint.sh -text
+/docker-entrypoint-fips.sh -text
+
 # nightly_platform.yaml's Windows leg checks out with Git for Windows'
 # core.autocrlf=true default, which would rewrite this sidecar's LF to CRLF; the
 # shared setup action's "Verify vendored native tarball integrity" step then

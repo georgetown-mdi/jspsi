@@ -126,6 +126,15 @@ export function skipped(
 }
 
 /**
+ * The reason every check a failure stopped the run before reaching carries.
+ * One string for all of them: each record keeps a `meaning` of its own in the
+ * JSON verdict, while the human rendering prints the shared one once.
+ */
+export const SKIPPED_BY_FAILURE_MEANING =
+  "an earlier check failed and stopped the run, so nothing was established " +
+  "either way about what did not run.";
+
+/**
  * Exit code per overall verdict, the closed set a caller may see from a run
  * that produced a verdict. Below 125 -- Docker's own reserved range -- and
  * following BSD `sysexits` for the two nonzero values. A usage error is not
@@ -259,14 +268,35 @@ function labelOf(check: DoctorCheckRecord): string {
   return "OK";
 }
 
+/**
+ * Whether the check after this one is skipped for the same stated reason. One
+ * failure leaves every check after it skipped, and each of them carries that
+ * reason in the JSON verdict; printing it under every one of them buries the
+ * check names between repetitions of a single sentence. The human rendering
+ * prints it once, under the last check of the run that shares it.
+ */
+function sharesMeaningWithNext(
+  checks: DoctorCheckRecord[],
+  index: number,
+): boolean {
+  const check = checks[index];
+  const next = checks[index + 1];
+  if (check === undefined || next === undefined) return false;
+  if (check.status !== "skipped" || next.status !== "skipped") return false;
+  return check.meaning === next.meaning;
+}
+
 /** Render the human-readable check lines, in check order. */
 export function verdictLines(report: DoctorReport): string[] {
   const lines: string[] = [];
-  for (const check of report.checks) {
+  for (const [index, check] of report.checks.entries()) {
     lines.push(`${labelOf(check)}: ${check.summary}`);
     if (check.detail !== undefined)
       for (const line of clampDetail(check.detail)) lines.push(`      ${line}`);
-    if (check.meaning !== undefined)
+    if (
+      check.meaning !== undefined &&
+      !sharesMeaningWithNext(report.checks, index)
+    )
       lines.push(...wrapLabelled("MEANING: ", check.meaning));
     if (check.action !== undefined)
       lines.push(...wrapLabelled("ACTION:  ", check.action));
