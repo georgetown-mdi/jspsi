@@ -28,15 +28,17 @@ import { logOnlineBootstrapOutcome } from "../../src/onlineBootstrap";
 import { confirmOutboundPayloadConsent } from "../../src/outboundPayloadConsent";
 import { writeDualSignedRecord } from "../../src/receiptFile";
 import { writeExchangeRecord } from "../../src/recordFile";
+import { openInputSource } from "../../src/util/dataIo";
 import { promptConfirm } from "../../src/util/prompt";
 import { captureStdio } from "../loggingTestSupport";
 import { ttyStream, withStdin } from "../stdinStream";
 
 // Every message the record and receipt writers, the outbound-payload
-// confirmation and the online-bootstrap summary compose about the OPERATOR's
-// own path marks that path, so the display sink shows it as they typed it
-// instead of escaping every separator and handing back a path they cannot copy
-// into a command (packages/core/src/utils/operatorSuppliedText.ts).
+// confirmation, the online-bootstrap summary and the CSV input reader compose
+// about the OPERATOR's own path marks that path, so the display sink shows it
+// as they typed it instead of escaping every separator and handing back a path
+// they cannot copy into a command
+// (packages/core/src/utils/operatorSuppliedText.ts).
 //
 // Each case below drives one converted sink and reads what it produced: the
 // marked spans on the error for a refusal, the rendered line for a log sink.
@@ -309,6 +311,17 @@ const REFUSALS: readonly SinkCase<RefusalOutcome>[] = [
       return {
         filePath,
         thrown: await raised(() => confirmYes(filePath, log)),
+      };
+    },
+  },
+  {
+    name: "input CSV: a positional naming a file that is not there",
+    says: ["does not exist"],
+    drive: async () => {
+      const filePath = backslashedPath("records.csv");
+      return {
+        filePath,
+        thrown: await raised(() => openInputSource(filePath)),
       };
     },
   },
