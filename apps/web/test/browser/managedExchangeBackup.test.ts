@@ -1209,6 +1209,8 @@ describe("taking a command-line hand-off back", () => {
   // runs have moved past the stored one, drops the refusal a run recorded against
   // the hand-off, and writes nothing at all otherwise.
 
+  const retakenAt = "2026-07-14T14:00:00.000Z";
+
   async function handedOff() {
     const record = await createManagedExchange(newExchange({ schedule }));
     await markManagedExchangeBackedUp(record.id, "2026-07-14T12:00:00.000Z");
@@ -1227,7 +1229,7 @@ describe("taking a command-line hand-off back", () => {
     // before the hand-off still holds the current secret.
     const record = await handedOff();
 
-    const outcome = await retakeHandedOffManagedExchange(record.id);
+    const outcome = await retakeHandedOffManagedExchange(record.id, retakenAt);
 
     expect(outcome).toEqual({ kind: "retaken", record });
     expect(await getManagedExchange(record.id)).toEqual(record);
@@ -1245,7 +1247,11 @@ describe("taking a command-line hand-off back", () => {
       expires: "2026-10-01T00:00:00.000Z",
     };
 
-    const outcome = await retakeHandedOffManagedExchange(record.id, key);
+    const outcome = await retakeHandedOffManagedExchange(
+      record.id,
+      retakenAt,
+      key,
+    );
 
     const stored = await getManagedExchange(record.id);
     expect(outcome).toEqual({ kind: "retaken", record: stored });
@@ -1256,9 +1262,11 @@ describe("taking a command-line hand-off back", () => {
     expect(stored?.exchangeFile).toEqual(record.exchangeFile);
     expect(stored?.schedule).toEqual(schedule);
     // The secret advanced, so the backup taken before it attests bytes the
-    // partnership has moved past: the marker goes the way every rotation sends it,
-    // and the spent state with it.
-    expect(await getManagedLocalState(record.id)).toBeUndefined();
+    // partnership has moved past: that marker goes the way every rotation sends it,
+    // and the spent state with it. What the file installed stands as an import.
+    expect(await getManagedLocalState(record.id)).toEqual({
+      imported: { importedAt: retakenAt },
+    });
   });
 
   test("a run holding the run+rotate lock refuses the re-take, writing nothing", async () => {
@@ -1281,7 +1289,9 @@ describe("taking a command-line hand-off back", () => {
     await holding;
 
     try {
-      expect(await retakeHandedOffManagedExchange(record.id)).toEqual({
+      expect(
+        await retakeHandedOffManagedExchange(record.id, retakenAt),
+      ).toEqual({
         kind: "run-in-flight",
       });
       expect((await getManagedLocalState(record.id))?.spent).toEqual({
@@ -1296,9 +1306,9 @@ describe("taking a command-line hand-off back", () => {
     }
 
     // The refusal consumed nothing: the same copy comes back once the lock is free.
-    expect((await retakeHandedOffManagedExchange(record.id)).kind).toBe(
-      "retaken",
-    );
+    expect(
+      (await retakeHandedOffManagedExchange(record.id, retakenAt)).kind,
+    ).toBe("retaken");
   });
 
   test("a migration-spent copy is not this route's to take back", async () => {
@@ -1312,7 +1322,7 @@ describe("taking a command-line hand-off back", () => {
       "2026-07-14T13:00:00.000Z",
     );
 
-    expect(await retakeHandedOffManagedExchange(record.id)).toEqual({
+    expect(await retakeHandedOffManagedExchange(record.id, retakenAt)).toEqual({
       kind: "not-handed-off",
     });
     expect(await getManagedLocalState(record.id)).toEqual({
@@ -1322,14 +1332,14 @@ describe("taking a command-line hand-off back", () => {
 
   test("a live record has nothing to take back, and a deleted one is gone", async () => {
     const live = await createManagedExchange(newExchange());
-    expect(await retakeHandedOffManagedExchange(live.id)).toEqual({
+    expect(await retakeHandedOffManagedExchange(live.id, retakenAt)).toEqual({
       kind: "not-handed-off",
     });
     expect(await getManagedExchange(live.id)).toEqual(live);
 
     const record = await handedOff();
     await deleteManagedExchange(record.id);
-    expect(await retakeHandedOffManagedExchange(record.id)).toEqual({
+    expect(await retakeHandedOffManagedExchange(record.id, retakenAt)).toEqual({
       kind: "gone",
     });
     expect(await getManagedLocalState(record.id)).toBeUndefined();
@@ -1347,7 +1357,7 @@ describe("taking a command-line hand-off back", () => {
       Date.now(),
     );
 
-    const outcome = await retakeHandedOffManagedExchange(record.id);
+    const outcome = await retakeHandedOffManagedExchange(record.id, retakenAt);
 
     expect(outcome.kind).toBe("retaken");
     const [stored, local] = [
@@ -1365,11 +1375,35 @@ describe("taking a command-line hand-off back", () => {
     const failure = failedRun(Date.now(), "failed", "auth");
     await recordManagedExchangeLastRun(record.id, failure, Date.now());
 
-    const outcome = await retakeHandedOffManagedExchange(record.id);
+    const outcome = await retakeHandedOffManagedExchange(record.id, retakenAt);
 
     expect(outcome.kind).toBe("retaken");
     const stored = await getManagedExchange(record.id);
     expect(stored?.lastRun).toEqual(failure);
+  });
+
+  test("an auth failure after a key-file take-back tiers as imported", async () => {
+    // Nothing here can tell a current key file from a stale one or another
+    // exchange's, so the mistake this route admits reaches the operator as the
+    // imported tier's re-invite rather than the attack checklist.
+    const record = await handedOff();
+
+    await retakeHandedOffManagedExchange(record.id, retakenAt, {
+      sharedSecret: generateSharedSecret(),
+    });
+    await recordManagedExchangeLastRun(
+      record.id,
+      failedRun(Date.now(), "failed", "auth"),
+      Date.now(),
+    );
+
+    const [stored, local] = [
+      await getManagedExchange(record.id),
+      await getManagedLocalState(record.id),
+    ];
+    expect(deriveManagedFailureTier(stored!, local, Date.now())).toBe(
+      "imported",
+    );
   });
 
   test("a key the record schema rejects leaves the record exactly as it was", async () => {
@@ -1379,7 +1413,7 @@ describe("taking a command-line hand-off back", () => {
     const record = await handedOff();
 
     await expect(
-      retakeHandedOffManagedExchange(record.id, {
+      retakeHandedOffManagedExchange(record.id, retakenAt, {
         sharedSecret: "not-a-shared-secret",
       }),
     ).rejects.toThrow();

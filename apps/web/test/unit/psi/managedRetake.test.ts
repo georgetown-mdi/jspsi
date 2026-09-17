@@ -15,11 +15,15 @@ import type { ManagedRetakeOutcome } from "@psi/managed/managedExchangeStore";
 // test/browser/managedExchangeBackup.test.ts.
 
 const secret = generateSharedSecret();
+const at = "2026-09-01T09:00:00.000Z";
 
 function deps(
   outcome: ManagedRetakeOutcome = { kind: "not-handed-off" },
 ): ManagedRetakeDeps & { retake: ReturnType<typeof vi.fn> } {
-  return { retake: vi.fn().mockResolvedValue(outcome) };
+  return {
+    retake: vi.fn().mockResolvedValue(outcome),
+    now: () => new Date(at),
+  };
 }
 
 describe("the key file the take-back reads", () => {
@@ -84,14 +88,18 @@ describe("a take-back the store accepts", () => {
       JSON.stringify({ sharedSecret: secret, expires }),
       boundaries,
     );
-    expect(boundaries.retake).toHaveBeenCalledWith("exchange-1", {
+    expect(boundaries.retake).toHaveBeenCalledWith("exchange-1", at, {
       sharedSecret: secret,
       expires,
     });
 
     const withoutFile = deps();
     await retakeManagedExchange("exchange-1", undefined, withoutFile);
-    expect(withoutFile.retake).toHaveBeenCalledWith("exchange-1", undefined);
+    expect(withoutFile.retake).toHaveBeenCalledWith(
+      "exchange-1",
+      at,
+      undefined,
+    );
   });
 
   test("reports the store's own outcome unchanged", async () => {

@@ -54,7 +54,8 @@ export type ManagedSpendOutcome =
   "spent" | "run-in-flight" | "superseded" | "gone";
 
 /** This device's import marker for a record: stamped when the record was installed
- * or revived from a backup artifact. It is the evidence the desync tiering reads to
+ * or revived from a backup artifact, or when a take-back installed a secret from a
+ * command-line key file. It is the evidence the desync tiering reads to
  * tell an import-since-last-success apart from an unexplained handshake failure: a
  * restored copy can hold a secret the partnership has rotated past, so a handshake
  * failure after an import newer than the last success is the benign import/restore
@@ -62,7 +63,8 @@ export type ManagedSpendOutcome =
  * epoch -- and a local sibling by design: it is this device's own restore history,
  * meaningless to an imported copy, so it must never enter the export artifact. */
 export interface ManagedImportMarker {
-  /** ISO 8601 UTC instant the record was installed or revived from a backup. */
+  /** ISO 8601 UTC instant the record was installed, revived, or taken back with a
+   * key file. */
   importedAt: string;
 }
 

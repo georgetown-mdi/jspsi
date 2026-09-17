@@ -1150,7 +1150,9 @@ record, in a separate origin-local store keyed by the record `id`, and are
   the backup marker's:
   - **Import stamps it.** A fresh install and a revive-in-place both stamp
     `importedAt` (alongside the backup marker) as of the import instant, so a
-    restored record holds the evidence from the moment it lands.
+    restored record holds the evidence from the moment it lands. A [take-back that
+    installs a key file's secret](#taking-a-command-line-hand-off-back) stamps it
+    too, clearing the backup marker rather than stamping it.
   - **Rotation clears it.** The persist-before-success rotation write clears the
     import marker in the **same** transaction that advances the secret. A rotation is
     driven by a completed handshake, which proves the two parties held the same
@@ -1229,11 +1231,19 @@ accepts.
   spanning the record and sibling stores, so a rotation lands fully before or fully
   after it.
 - **A key that advances the secret is applied as a rotation** -- the same
-  field-scoped write a run's own rotation takes -- and **clears the backup and
-  import markers** in that same transaction, the rule every secret advance here
-  follows -- so a failure the import marker explained tiers on the record's own
-  evidence from then on, as it does after any other rotation. A re-take needing no
-  key leaves those markers where they stand.
+  field-scoped write a run's own rotation takes -- and **clears the backup marker**
+  in that same transaction: the secret has advanced, so no earlier export of this
+  exchange holds it. Whether it advances is decided on `sharedSecret` alone, so a
+  file holding the stored secret with a different `expires` applies nothing, which a
+  hand-edited file is the only way to reach.
+- **A key file's install is recorded as an import**, stamping the
+  [import marker](#the-backup-marker-the-spent-state-and-the-import-marker-local-siblings-never-in-the-artifact)
+  in that same transaction. Nothing here can tell this exchange's current key file
+  from a stale one or another exchange's, so the likeliest mistake the re-take admits
+  is a secret the partner does not share: an `auth` failure at the next run therefore
+  tiers as **imported**, whose recovery is the re-invite, until a run succeeds and
+  the rotation clears the marker. A re-take needing no key leaves both markers where
+  they stand.
 - **The hand-off's own refusal is consumed.** A `lastRun` recording the
   `handed-off` refusal -- a run that came due while this copy was spent -- is
   dropped in the same transaction, with or without a key: the take-back ends the
