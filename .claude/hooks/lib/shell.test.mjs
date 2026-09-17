@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   git,
+  leadingCdDestination,
   splitPipelines,
   splitSegments,
   splitStages,
@@ -152,6 +153,55 @@ describe("tokenizeRaw", () => {
         tokenize(segment).length,
       );
     }
+  });
+});
+
+describe("leadingCdDestination", () => {
+  const FROM = "/repo/.claude/worktrees/agent-a";
+
+  it("resolves a one-argument cd against the directory of the call", () => {
+    expect(leadingCdDestination("cd /tmp/tree && npm test", FROM)).toBe(
+      "/tmp/tree",
+    );
+    expect(leadingCdDestination("cd ../agent-b", FROM)).toBe(
+      "/repo/.claude/worktrees/agent-b",
+    );
+    expect(leadingCdDestination("cd -- 'packages/core'", FROM)).toBe(
+      `${FROM}/packages/core`,
+    );
+  });
+
+  it("substitutes the two-argument form into the pathname", () => {
+    expect(leadingCdDestination("cd agent-a agent-b", FROM)).toBe(
+      "/repo/.claude/worktrees/agent-b",
+    );
+    expect(leadingCdDestination("cd a b", FROM)).toBe(
+      "/repo/.clbude/worktrees/agent-a",
+    );
+  });
+
+  it("reads only a cd standing first in the command", () => {
+    expect(leadingCdDestination("npm test && cd /tmp/tree", FROM)).toBeNull();
+    expect(leadingCdDestination("echo cd /tmp/tree", FROM)).toBeNull();
+    expect(leadingCdDestination("(cd /tmp/tree && npm test)", FROM)).toBeNull();
+  });
+
+  // The one-argument form resolves whatever text it is given, so a caller sees a
+  // path the shell would never visit rather than a lie about where it went.
+  it("expands nothing in a one-argument target", () => {
+    expect(leadingCdDestination("cd $TREE", FROM)).toBe(`${FROM}/$TREE`);
+    expect(leadingCdDestination("cd ~/tree", FROM)).toBe(`${FROM}/~/tree`);
+  });
+
+  it("gives up on a destination it cannot compute", () => {
+    expect(leadingCdDestination("cd", FROM)).toBeNull();
+    expect(leadingCdDestination("cd -", FROM)).toBeNull();
+    expect(leadingCdDestination("cd -2", FROM)).toBeNull();
+    expect(leadingCdDestination("cd +1", FROM)).toBeNull();
+    expect(leadingCdDestination("cd agent-a ~/b", FROM)).toBeNull();
+    expect(leadingCdDestination("cd absent agent-b", FROM)).toBeNull();
+    expect(leadingCdDestination("cd one two three", FROM)).toBeNull();
+    expect(leadingCdDestination("cd /repo relative", FROM)).toBeNull();
   });
 });
 
