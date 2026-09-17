@@ -295,6 +295,7 @@ export type AcceptorScreenAction =
   | {
       type: "file-accepted";
       name: string;
+      deduplicate: boolean;
       positions: Array<number>;
       file: File;
       handle?: FileSystemFileHandle;
@@ -441,7 +442,7 @@ export function acceptorScreenReducer(
         ...state,
         sanitizedColumnPositions: action.positions,
         committedName: action.name,
-        committedDeduplicate: state.acceptorDeduplicate,
+        committedDeduplicate: action.deduplicate,
         acceptedFile: action.file,
         sourceHandle: action.handle,
         acquired: action.acquired,

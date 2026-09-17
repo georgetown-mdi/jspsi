@@ -560,6 +560,10 @@ export function AcceptorScreen() {
     // submit that reaches this handler meets exactly what the step shows.
     if (pairRefusal !== undefined) return;
     const name = acceptorConsentName({ consented, name: acceptorName });
+    // Read beside `name`, before the parse below can await: the checkbox stays
+    // enabled while a parse is in flight, so a value read after the await could
+    // differ from what was on screen at consent time.
+    const deduplicate = acceptorDeduplicate;
     // The shape of the name the run would adopt, re-checked here for the same
     // reason the consent gate is: the disabled state alone is not the refusal.
     const nameProblem = acceptorNameProblem(acceptorName);
@@ -630,6 +634,7 @@ export function AcceptorScreen() {
       dispatch({
         type: "file-accepted",
         name,
+        deduplicate,
         positions: stripped,
         file,
         handle: capturedInputHandle(file),

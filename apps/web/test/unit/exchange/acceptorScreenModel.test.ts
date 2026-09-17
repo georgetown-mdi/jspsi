@@ -105,6 +105,7 @@ function accepted(
   const start = acceptorScreenReducer(ACCEPTOR_SCREEN_INITIAL, {
     type: "file-accepted",
     name: "Sam Rivera",
+    deduplicate: false,
     positions: [],
     file: new File(["first_name\nAnn\n"], csv.fileName, { type: "text/csv" }),
     acquired: csv,
@@ -347,6 +348,38 @@ describe("whether the launch may proceed", () => {
     });
     expect(moved.acceptorDeduplicate).toBe(true);
     expect(moved.committedDeduplicate).toBe(false);
+  });
+
+  test("the parse commits the cardinality the action carries, not the live control", () => {
+    const movedBeforeParse = acceptorScreenReducer(ACCEPTOR_SCREEN_INITIAL, {
+      type: "deduplicate-chosen",
+      deduplicate: true,
+    });
+    const settledFalse = acceptorScreenReducer(movedBeforeParse, {
+      type: "file-accepted",
+      name: "Sam Rivera",
+      deduplicate: false,
+      positions: [],
+      file: new File(["first_name\nAnn\n"], csv.fileName, {
+        type: "text/csv",
+      }),
+      acquired: csv,
+    });
+    expect(settledFalse.acceptorDeduplicate).toBe(true);
+    expect(settledFalse.committedDeduplicate).toBe(false);
+
+    const settledTrue = acceptorScreenReducer(ACCEPTOR_SCREEN_INITIAL, {
+      type: "file-accepted",
+      name: "Sam Rivera",
+      deduplicate: true,
+      positions: [],
+      file: new File(["first_name\nAnn\n"], csv.fileName, {
+        type: "text/csv",
+      }),
+      acquired: csv,
+    });
+    expect(settledTrue.acceptorDeduplicate).toBe(false);
+    expect(settledTrue.committedDeduplicate).toBe(true);
   });
 
   test("a launch presents the cardinality the gate committed, not the control", () => {
