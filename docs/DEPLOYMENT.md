@@ -88,6 +88,12 @@ The same reference curates the TLS posture of the terminator it ships. The reaso
 
 The forward secrecy above is a property of the TLS hop to this terminator; the PSI exchange's own end-to-end protections do not depend on it.
 
+#### Log retention on the instance
+
+The Elastic Beanstalk platform rotates the nginx logs and the application's stdout and stderr on size alone, so a log that fills slowly keeps its rotated copies for an unbounded time. The reference bounds that: `apps/web/deploy/aws_eb/.platform/hooks/postdeploy/bound_log_retention.sh` rewrites the rotation directives of the platform's logrotate fragments on each deployment to add a daily trigger, a kept-copy count and a maximum age, and leaves the log paths and the rest of each fragment alone. The window is the `RETENTION_DAYS` constant at the top of that script, and the same script is deployed twice, once for an application deployment and once for a configuration-only one.
+
+These are the instance's own disk copies. A deployment that streams the same logs to a log service sets the window there as well, and the two have to agree.
+
 ## Diagnosing web connection failures
 
 By default the web client logs PeerJS connection activity at errors-only, so a normal exchange prints no connection-diagnostic detail to the browser console. This is deliberate: PeerJS's warning-level logs interpolate the remote peer id, and a web exchange's peer ids are rendezvous addresses derived from the invitation secret, which the app keeps out of its logs (see [SECURITY_DESIGN.md](SECURITY_DESIGN.md#channel-security)).
