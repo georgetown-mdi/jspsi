@@ -1429,8 +1429,8 @@ function DisclosureAccountingView({
  * build cannot read -- since the second still holds bytes. A note this build
  * cannot read states that a run is missing without naming it, since the fact and
  * the record are separate things at rest. A flagged run -- the one this
- * browser could store nothing about -- names the run history as where that run
- * is recorded.
+ * browser could store nothing about -- names the two places the run may still be
+ * stated, since neither is certain to name it.
  *
  * Nothing is offered for a read that never reached the store: it is the
  * accounting's own storage, whose read states that condition and offers the
@@ -1530,8 +1530,14 @@ function UnrecordedRunAlert({ onShown }: { onShown: () => void }) {
         At least one run of this exchange disclosed your payload, and this
         browser&apos;s storage would take neither its record nor a note of which
         run it was. The accounting below has no entry for it, and there is
-        nothing left to add: check this exchange&apos;s run history above for
-        the run, and record the disclosure in your own compliance material.
+        nothing left to add: record the disclosure in your own compliance
+        material.
+      </p>
+      <p>
+        The run history above keeps only the most recent run, so the run this is
+        about may not be named there. The other place to look is this
+        browser&apos;s diagnostic log, where the run reported the failure as it
+        happened, for as long as this browser keeps that log.
       </p>
       <p>
         The run&apos;s record could not be stored. If this browser is low on

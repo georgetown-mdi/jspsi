@@ -1560,6 +1560,25 @@ bounds hold the value small for, and a flag is refused rather than displacing on
 already stored, since an earlier exchange's unrecorded run is no less true than a
 later one's.
 
+**Where a write is exclusive, and two cases nothing reaches.** Every write of the
+fallback value -- a flag, one exchange's clear, and the clear of all of them --
+holds one origin-wide Web Locks name across its read of the value and its write
+back, so a second context cannot write between the two and have what it wrote
+dropped. Where the context reaches no lock manager at all the write runs
+unlocked, and a flag another context wrote in that window is lost. Two further
+cases the code admits and nothing reaches today:
+
+- A fallback value stored under another version is read as absent and
+  **overwritten** by the next flag write, where a note this build cannot read
+  instead fails the write and leaves those bytes untouched. The two differ
+  because the note holds the runs themselves and the fallback holds ids alone.
+  Version 1 is the only version of the value that has been written, so there is
+  no other-version value to lose.
+- Filing prunes note entries by the binding nonces it appended rather than by the
+  entries it took them from, so two entries sharing one nonce would both go for
+  one append. The merge that writes an entry refuses one whose nonce a stored
+  entry already holds, so no write the app makes produces that pair.
+
 ## The parked results of a scheduled run
 
 A run with nobody present builds the same results file an attended run builds and
