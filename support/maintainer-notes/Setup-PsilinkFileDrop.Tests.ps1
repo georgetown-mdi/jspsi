@@ -497,9 +497,15 @@ Describe 'Split-TextToWidth' {
         $lines[0] | Should -Be $path
     }
 
-    It 'answers nothing for text that holds no word' {
-        @(Split-TextToWidth -Text '').Count | Should -Be 0
-        @(Split-TextToWidth -Text '   ').Count | Should -Be 0
+    It 'gives its caller no line to print for text that holds no word' {
+        # Read as the callers read it: each of them prints what it is given a
+        # line at a time, and a reason that came to nothing prints nothing
+        # rather than an empty line.
+        $printed = @()
+        foreach ($line in (Split-TextToWidth -Text '')) { $printed += $line }
+        foreach ($line in (Split-TextToWidth -Text '   ')) { $printed += $line }
+
+        $printed.Count | Should -Be 0
     }
 }
 
