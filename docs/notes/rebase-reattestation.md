@@ -1,8 +1,8 @@
 # Re-attesting a review across a rebase
 
-_Status: decided on the maintainer's ruling and built, as a fourth mechanical
-re-attestation path beside the three in `.claude/commands/assess-review.md`
-(Step 4). The three existing paths are unchanged, and so is the rule that a
+_Status: decided on the maintainer's ruling and built, as a mechanical
+re-attestation path beside the others in `.claude/commands/assess-review.md`
+(Step 4). The paths already there are unchanged, and so is the rule that a
 base-sync merge takes a full round. See [docs/notes/README.md](README.md)._
 
 ## The problem
@@ -10,7 +10,7 @@ base-sync merge takes a full round. See [docs/notes/README.md](README.md)._
 A review round attests the commit it read, and the pull-request checklist line
 names that sha. A branch that then falls behind a code-moving `staging` commit
 has to move: it is rebased, its head changes, and the attestation goes stale.
-Under the three existing paths that head takes a full standing-contract role
+Under the paths that preceded it that head takes a full standing-contract role
 round -- 150-250k tokens each -- even where the rebase changed nothing the
 branch itself authored and the conflicts it resolved were markdown and comment
 wording.
@@ -49,8 +49,8 @@ path unverifiable, which fails the run.
 ## Why a rebase is admitted where a base sync is not
 
 A rebase composes the branch with staging content no round has read, exactly as
-a base-sync merge does. That argument is what keeps a base sync outside all
-four paths, and the exception has to answer it rather than route around it.
+a base-sync merge does. That argument is what keeps a base sync outside every
+mechanical path, and the exception has to answer it rather than route around it.
 
 The difference is that the branch's own effective diff survives a rebase as a
 comparable object, and a merge's does not:

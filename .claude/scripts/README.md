@@ -19,9 +19,11 @@ push:
   `block-nonconforming-squash-message.mjs` guard take both from here rather than
   restate them
 - `verify-nonexecutable-delta.mjs`, which decides whether a review attestation
-  survives a moved head, and `verify-rebase-invariance.mjs`, which decides the
-  same question for a head moved by a rebase. `lib/gitFixture.mjs` holds the
-  throwaway repositories both suites drive real git through
+  survives a moved head; `verify-rebase-invariance.mjs`, which decides the same
+  question for a head moved by a rebase; and `verify-additive-test-delta.mjs`,
+  which decides it for a head that only added lines to test files.
+  `lib/gitFixture.mjs` holds the throwaway repositories the suites drive real git
+  through
 - `measure-pr-checks.mjs`, which measures the wall clock a pull request pays for
   its checks and names the critical path that gates the merge. It makes several
   hundred GitHub API calls, so it is asked for explicitly:
