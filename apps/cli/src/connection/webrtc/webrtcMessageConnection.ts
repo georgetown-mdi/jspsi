@@ -51,13 +51,8 @@ import type { RTCDataChannel } from "werift";
  *   final-frame loss the delivery contract in docs/COMMUNICATION.md ("Message
  *   delivery and teardown") exists to prevent.
  *
- *   The channel's own close is what the wait ends on, either way round. A
- *   browser peer takes its receipt from the channel closing rather than from
- *   anything psilink sends it, so every clean close here -- the one this side
- *   asks for and the one it answers -- closes the data channel and lets that
- *   close complete before the peer connection goes. The sentinel handed to the
- *   wire is not that confirmation: a peer connection torn down behind it
- *   reaches the partner as nothing at all.
+ *   Either half of a clean close then closes the data channel and waits for
+ *   that close to complete; the why is on `closeChannel`.
  */
 
 /**
@@ -158,6 +153,12 @@ async function drainOutbound(
 /**
  * Close the data channel and wait for that close to complete -- the peer having
  * answered the stream reset, which is what takes the channel to `closed`.
+ *
+ * That wait is the delivery confirmation a browser partner gives: PeerJS takes
+ * its receipt from the channel closing, never from anything sent back to it,
+ * and handing the sentinel to the wire is not the peer having it. Both halves
+ * of a clean close wait here, the one this side asks for and the one it
+ * answers; an error teardown does not, the link being unusable already.
  *
  * Returns early once the peer connection is no longer up: a peer that has gone
  * answers nothing, so waiting on it would spend the whole ceiling.
@@ -290,14 +291,8 @@ export function webRtcMessageConnection(
               SENTINEL_HANDOFF_TIMEOUT_MS,
             );
           }
-          // The channel's own close is the last thing a clean close puts on the
-          // wire, whichever half of that close this side took. It is the whole
-          // of the delivery signal a browser partner gets -- PeerJS takes a
-          // receipt off its channel closing, never off anything sent back to it
-          // -- and waiting for it to complete is what confirms the peer has
-          // everything ahead of it, the sentinel included; handing the sentinel
-          // to the wire does not. An error teardown skips it, since the link is
-          // already unusable.
+          // Phase three: the channel's own close, which is the delivery
+          // signal a browser partner reads (see `closeChannel`).
           const cleanClose = closeOptions?.flush === true || peerCloseRead;
           if (cleanClose && channel.readyState === "open")
             await closeChannel(channel, session, channelCloseTimeoutMs);

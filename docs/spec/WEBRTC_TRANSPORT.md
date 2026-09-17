@@ -499,6 +499,7 @@ condition holds.
 | Parked receive | 1 h | Peer silence on an open channel; it bounds the peer's single-threaded PSI compute, which sends no keepalive while it runs |
 | Close drain | 5 min | The clean close's wait above -- the CLI's acknowledgement drain, the web's wait for the peer's close -- sized from the largest admissible frame and the measured send rate |
 | Sentinel hand-off | 2 s | Getting the close sentinel itself onto the wire |
+| Channel close | 2 s | The data channel's own close completing on a clean close -- the peer answering the stream reset; reaching it closes the session anyway |
 | ICE statistics | 2 s | Collecting the candidate report a failure or an open channel is described by; expiring costs the description, not the outcome |
 | Signaling certificate check | 5 s | The handshake that answers whether a `wss://` socket that failed before registering failed on its certificate; a socket that drops after registering is not asked about, having completed that handshake already, and neither is one on a run configured for an environment proxy, whose dial the handshake does not follow |
 
