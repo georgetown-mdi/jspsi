@@ -103,15 +103,19 @@ export function compareVersions(a, b) {
 
 /**
  * The version a suggested ledger records under: the declared one when the ledger
- * holds no entry for it, the next minor when its entry has moved -- so the
- * printed block is never the in-place rewrite of a recorded pin. Which component
- * a real change deserves is the author's call; this only keeps the suggestion
- * off a version that already means something.
+ * holds no entry for it, otherwise the first free minor above it -- so the
+ * printed block is never the in-place rewrite of a recorded pin. One name may
+ * carry several declared versions, so the minor above a moved one can itself be
+ * recorded, and a suggestion landing there would rewrite that pin. Which
+ * component a real change deserves is the author's call; this only keeps the
+ * suggestion off a version that already means something.
  */
 export function suggestionVersion(entry, version) {
   if (entry[version] === undefined) return version;
   const [major, minor] = parseVersion(version);
-  return `${major}.${minor + 1}.0`;
+  let next = minor + 1;
+  while (entry[`${major}.${next}.0`] !== undefined) next += 1;
+  return `${major}.${next}.0`;
 }
 
 /**
@@ -121,7 +125,11 @@ export function suggestionVersion(entry, version) {
  * ledger's entries by set name. `kind` is `record` (no pin is recorded and
  * printing one is the remedy), `moved` (a recorded version's content has
  * moved), or `ledger` (the ledger's own shape is wrong, which no printed pin
- * repairs).
+ * repairs). A `record` or `moved` violation also carries the `version` and
+ * `digest` of the declared set it is about: one name may carry several declared
+ * versions, so the name alone does not say which content a remedy records. For
+ * the same reason a recorded pin is read against the newest version its name
+ * declares, and once rather than once per entry sharing that name.
  */
 export function pinViolations({ sets, pins }) {
   const violations = [];
@@ -136,25 +144,38 @@ export function pinViolations({ sets, pins }) {
     });
   }
 
+  const newest = new Map();
+  for (const set of sets) {
+    const held = newest.get(set.name);
+    if (held === undefined || compareVersions(set.version, held.version) > 0) {
+      newest.set(set.name, set);
+    }
+  }
+
+  const readLedger = new Set();
   for (const set of sets) {
     const entry = pins[set.name] ?? {};
     const recorded = Object.keys(entry);
 
-    for (const version of recorded) {
-      if (parseVersion(version) === undefined) {
-        violations.push({
-          kind: "ledger",
-          set: set.name,
-          message: `${PINS_FILE} records a pin for ${set.name} under "${version}", which is not a version. A ledger key is the \`major.minor.patch\` ${set.declarations.version} carries, and a pin is looked up by exactly that string, so a key in any other shape records content nothing is held to.`,
-        });
-        continue;
-      }
-      if (compareVersions(version, set.version) > 0) {
-        violations.push({
-          kind: "ledger",
-          set: set.name,
-          message: `${PINS_FILE} records a pin for ${set.name} ${version}, above the ${set.version} ${set.declarations.version} declares: a pin names a version the tree shipped, so nothing should be recorded ahead of the source.`,
-        });
+    if (!readLedger.has(set.name)) {
+      readLedger.add(set.name);
+      const latest = newest.get(set.name);
+      for (const version of recorded) {
+        if (parseVersion(version) === undefined) {
+          violations.push({
+            kind: "ledger",
+            set: set.name,
+            message: `${PINS_FILE} records a pin for ${set.name} under "${version}", which is not a version. A ledger key is the \`major.minor.patch\` ${latest.declarations.version} carries, and a pin is looked up by exactly that string, so a key in any other shape records content nothing is held to.`,
+          });
+          continue;
+        }
+        if (compareVersions(version, latest.version) > 0) {
+          violations.push({
+            kind: "ledger",
+            set: set.name,
+            message: `${PINS_FILE} records a pin for ${set.name} ${version}, above the ${latest.version} ${latest.declarations.version} declares: a pin names a version the tree shipped, so nothing should be recorded ahead of the source.`,
+          });
+        }
       }
     }
 
@@ -167,6 +188,8 @@ export function pinViolations({ sets, pins }) {
       violations.push({
         kind: "record",
         set: set.name,
+        version: set.version,
+        digest: set.digest,
         message:
           highest === undefined
             ? `${PINS_FILE} records no pin for ${set.name}. Record the pin below; it is the content ${set.name} ${set.version} names, and every later edit to ${set.declarations.content} takes a bump with its own pin beside it (${NOTE_SECTION}).`
@@ -176,6 +199,8 @@ export function pinViolations({ sets, pins }) {
       violations.push({
         kind: "moved",
         set: set.name,
+        version: set.version,
+        digest: set.digest,
         message: `${set.declarations.content} has moved under ${set.name} ${set.version} (recorded ${pinned}, tree ${set.digest}). The recorded validation attaches to a name and a version together, so an edit to a built-in set takes a bump: raise ${set.declarations.version} in ${RULE_SET_SOURCE} and record the new pin beside the earlier ones, or leave the content where it is (${NOTE_SECTION}).`,
       });
     }
@@ -184,15 +209,31 @@ export function pinViolations({ sets, pins }) {
   return violations;
 }
 
-/** The ledger the tree implies, with each named set's pin added under `versions`. */
-export function suggestedLedger(pins, sets, versions) {
+/**
+ * The pins a failing run offers to record, as `{name, version, digest}` per
+ * violation a printed pin remedies. Each one is taken from the violation's own
+ * declared set rather than looked up by name, and is resolved against the pins
+ * the earlier suggestions claim as well as the ledger's, so two violated
+ * versions of one name are recorded as the two entries they are.
+ */
+export function suggestedPins(pins, violations) {
+  const suggestions = [];
+  const claimed = {};
+  for (const { kind, set, version, digest } of violations) {
+    if (kind !== "record" && kind !== "moved") continue;
+    const entry = { ...pins[set], ...claimed[set] };
+    const suggested = suggestionVersion(entry, version);
+    claimed[set] = { ...claimed[set], [suggested]: digest };
+    suggestions.push({ name: set, version: suggested, digest });
+  }
+  return suggestions;
+}
+
+/** The ledger the tree implies, with each of `suggestions` added to it. */
+export function suggestedLedger(pins, suggestions) {
   const suggested = { ...pins };
-  for (const set of sets) {
-    if (versions[set.name] === undefined) continue;
-    suggested[set.name] = {
-      ...(pins[set.name] ?? {}),
-      [versions[set.name]]: set.digest,
-    };
+  for (const { name, version, digest } of suggestions) {
+    suggested[name] = { ...suggested[name], [version]: digest };
   }
   return `${JSON.stringify({ pins: suggested }, null, 2)}\n`;
 }
@@ -302,17 +343,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   if (report.violations.length > 0) {
     console.error("Built-in rule set version check failed:\n");
     for (const { message } of report.violations) console.error("  " + message);
-    const versions = {};
-    for (const { kind, set } of report.violations) {
-      if (kind !== "record" && kind !== "moved") continue;
-      versions[set] = suggestionVersion(
-        report.pins[set] ?? {},
-        report.sets.find((entry) => entry.name === set).version,
-      );
-    }
-    if (Object.keys(versions).length > 0) {
+    const suggestions = suggestedPins(report.pins, report.violations);
+    if (suggestions.length > 0) {
       console.error(`\nThe ledger ${PINS_FILE} would carry:\n`);
-      console.error(suggestedLedger(report.pins, report.sets, versions));
+      console.error(suggestedLedger(report.pins, suggestions));
       console.error(
         report.violations.some(({ kind }) => kind === "moved")
           ? `Where the block records a version the source does not yet declare, that is the bump: raise it in ${RULE_SET_SOURCE} to match. Then write the block, run \`npm run format\`, and leave every already-recorded entry as it stands -- an entry rewritten in place records a version that never shipped that content (${NOTE_SECTION}).`
