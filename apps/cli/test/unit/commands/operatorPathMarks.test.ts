@@ -40,9 +40,11 @@ import {
 } from "../../../src/commands/exchange";
 import {
   handler as fingerprintHandler,
+  readConfigHints,
   resolveSigningIdentity,
 } from "../../../src/commands/fingerprint";
 import {
+  buildTemplateData,
   decideOverwrite,
   handler as initHandler,
 } from "../../../src/commands/init";
@@ -477,6 +479,43 @@ const REFUSALS: readonly SinkCase<RefusalOutcome>[] = [
       return {
         filePath,
         thrown: await raised(() => readConfigSigningBlock(filePath, true)),
+      };
+    },
+  },
+  {
+    name: "fingerprint: a named config file that does not exist",
+    says: ["config file", "does not exist"],
+    drive: async () => {
+      const filePath = backslashedPath("psilink.yaml");
+      return {
+        filePath,
+        thrown: await raised(() => readConfigHints(filePath, true)),
+      };
+    },
+  },
+  {
+    name: "fingerprint: a config file that cannot be read",
+    says: ["config file", "could not be read"],
+    drive: async () => {
+      const filePath = backslashedPath("psilink.yaml");
+      fs.mkdirSync(filePath);
+      return {
+        filePath,
+        thrown: await raised(() => readConfigHints(filePath, true)),
+      };
+    },
+  },
+  {
+    name: "init: an input file it could not read",
+    says: ["could not read input file"],
+    drive: async () => {
+      // A directory at the path: the read fails past the existence check that
+      // would otherwise refuse first, and the errno quotes no path of its own.
+      const filePath = backslashedPath("input.csv");
+      fs.mkdirSync(filePath);
+      return {
+        filePath,
+        thrown: await raised(() => buildTemplateData(filePath, "Test Party")),
       };
     },
   },
@@ -966,6 +1005,22 @@ async function writeSignedRecord(filePath: string): Promise<void> {
   );
 }
 
+/** Verify a dual-signed record against a config naming `identityFile`. */
+async function verifyReceiptWithConfiguredIdentity(
+  identityFile: string,
+): Promise<string[]> {
+  const configFile = path.join(dir, "psilink.yaml");
+  fs.writeFileSync(
+    configFile,
+    YAML.stringify({ signing: { identity_file: identityFile } }),
+  );
+  const record = path.join(dir, "receipt.json");
+  await writeSignedRecord(record);
+  return await stderrLinesOf(() =>
+    verifyReceiptHandler(argvOf({ record, "config-file": configFile })),
+  );
+}
+
 const MORE_COMMAND_LINES: readonly SinkCase<LineOutcome>[] = [
   {
     name: "fingerprint: an identity file created and removed under it",
@@ -1246,6 +1301,42 @@ const MORE_COMMAND_LINES: readonly SinkCase<LineOutcome>[] = [
     },
   },
   {
+    name: "verify-receipt: an --identity-file that does not exist",
+    says: ["signing identity file", "does not exist"],
+    drive: async () => {
+      const filePath = backslashedPath("identity.json");
+      const record = path.join(dir, "receipt.json");
+      await writeSignedRecord(record);
+      const lines = await stderrLinesOf(() =>
+        verifyReceiptHandler(argvOf({ record, "identity-file": filePath })),
+      );
+      return { filePath, lines };
+    },
+  },
+  {
+    name: "verify-receipt: a configured signing identity that does not exist",
+    says: ["named by the configuration's signing.identity_file", "anchors no"],
+    drive: async () => {
+      const filePath = backslashedPath("identity.json");
+      return {
+        filePath,
+        lines: await verifyReceiptWithConfiguredIdentity(filePath),
+      };
+    },
+  },
+  {
+    name: "verify-receipt: a configured signing identity it could not read",
+    says: ["could not be read, so it anchors"],
+    drive: async () => {
+      const filePath = backslashedPath("identity.json");
+      fs.writeFileSync(filePath, "{ not json");
+      return {
+        filePath,
+        lines: await verifyReceiptWithConfiguredIdentity(filePath),
+      };
+    },
+  },
+  {
     name: "verify-receipt: a dual-signed record named beside --signed-record",
     says: ["is already a dual-signed record"],
     drive: async () => {
@@ -1283,6 +1374,54 @@ const MORE_COMMAND_LINES: readonly SinkCase<LineOutcome>[] = [
 for (const { name, says, drive, relaysPathAgain } of MORE_COMMAND_LINES)
   test(`${name} names the path as the operator typed it`, async () => {
     expectPathAsTyped(await drive(), says, relaysPathAgain);
+  });
+
+// --- a marker in the path, at a log sink -------------------------------------
+
+// The two warnings about the configured signing identity compose the path ahead
+// of the guidance that tells the operator what it cost them, and the log sink's
+// private-key strip fails closed from a BEGIN marker to the end of the argument
+// it is redacting. Marking the path redacts it where it is composed, so a
+// marker the operator spelled in their own path is confined to the path and the
+// guidance behind it still arrives.
+
+const DANGLING_MARKER = "-----BEGIN OPENSSH PRIVATE KEY-----";
+const REDACTED = "[redacted private key]";
+
+const MARKER_IN_PATH: readonly SinkCase<LineOutcome>[] = [
+  {
+    name: "verify-receipt: a configured signing identity that does not exist",
+    says: ["named by the configuration's signing.identity_file"],
+    drive: async () => {
+      const filePath = backslashedPath(`${DANGLING_MARKER}identity.json`);
+      return {
+        filePath,
+        lines: await verifyReceiptWithConfiguredIdentity(filePath),
+      };
+    },
+  },
+  {
+    name: "verify-receipt: a configured signing identity it could not read",
+    says: ["could not be read, so it anchors"],
+    drive: async () => {
+      const filePath = backslashedPath(`${DANGLING_MARKER}identity.json`);
+      fs.writeFileSync(filePath, "{ not json");
+      return {
+        filePath,
+        lines: await verifyReceiptWithConfiguredIdentity(filePath),
+      };
+    },
+  },
+];
+
+for (const { name, says, drive } of MARKER_IN_PATH)
+  test(`${name} keeps its guidance behind a marker in the path`, async () => {
+    const { lines } = await drive();
+    const text = lines.join("\n");
+
+    expect(text).toContain(REDACTED);
+    expect(text).not.toContain("OPENSSH");
+    for (const phrase of says) expect(text).toContain(phrase);
   });
 
 const INIT_WRITE_FAILURES: readonly SinkCase<LineOutcome>[] = [
