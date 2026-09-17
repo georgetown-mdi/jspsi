@@ -38,6 +38,7 @@ import {
   UNREADABLE_IMPORT_REASON,
   importFailureReason,
 } from "./managedImportFailure";
+import { BetweenVisitNotifications } from "./BetweenVisitNotifications";
 import { loadSavedExchanges } from "./savedExchangesLoad";
 import { managedImportGrantNotice } from "./managedImportGrantNotice";
 import { recoveryRows } from "./savedExchangesRecovery";
@@ -235,6 +236,7 @@ function SavedExchangesList({
           </li>
         ))}
       </ul>
+      <BetweenVisitNotifications />
       <p>
         <Button component={Link} to="/exchange" variant="default">
           Set up a recurring exchange

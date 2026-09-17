@@ -23,6 +23,12 @@
  *
  * `now` is injected rather than read, matching the clock discipline of the managed
  * modules, so every derivation is a pure function of its inputs.
+ *
+ * The coordination state repeated misses earn is defined in
+ * {@link ../psi/managed/managedRepeatedMiss.ts} and passed through here: the
+ * unattended runner's between-visit notification escalates on the same count and
+ * says the same thing, and it sits below the product directories where it cannot
+ * import a screen's model.
  */
 
 import {
@@ -44,13 +50,12 @@ import type {
   ManagedExchangeSchedule,
 } from "@psi/managed/managedExchangeRecord";
 
-/**
- * The consecutive-miss count at which a surface escalates from naming the last
- * run's outcome to the coordination prompt. Normative value and the reasoning
- * behind it: docs/spec/MANAGED_EXCHANGE_RECORD.md, the `consecutiveMisses` row,
- * and docs/MANAGED_EXCHANGE.md, "Retry and repeated misses".
- */
-export const REPEATED_MISS_ESCALATION = 2;
+export {
+  REPEATED_MISS_ESCALATION,
+  REPEATED_MISS_TITLE,
+  repeatedMissCoordination,
+} from "@psi/managed/managedRepeatedMiss";
+export type { RepeatedMissCoordination } from "@psi/managed/managedRepeatedMiss";
 
 /** Where the recurrence stands at an instant: a window open right now, or the
  * next one ahead. Both hold their instants phrased in the operator's local
@@ -142,44 +147,6 @@ export function scheduleCadenceLine(schedule: ManagedExchangeSchedule): string {
       ? "every day"
       : `every ${schedule.intervalDays} days`;
   return `A run window opens ${every} and stays open ${lifetimeNoun(schedule.windowSeconds)}.`;
-}
-
-/** The escalated coordination state, phrased for both surfaces: the list's quiet
- * line and the detail view's prompt. */
-export interface RepeatedMissCoordination {
-  /** The consecutive-miss count the record holds, at or above
-   * {@link REPEATED_MISS_ESCALATION}. */
-  misses: number;
-  /** The list's one-line form: the state and both checks, deferring the rest to
-   * the exchange's own surface. */
-  line: string;
-  /** The detail view's coordination prompt. */
-  prompt: string;
-}
-
-/** The title over the detail view's coordination prompt. It names the state, not
- * a fault: which side was absent is exactly what the record cannot know. */
-export const REPEATED_MISS_TITLE = "Runs are not happening on schedule";
-
-/**
- * The coordination state a run of missed windows earns, or `undefined` below
- * the escalation threshold (a single miss demands nothing beyond the last
- * run's own outcome). Both phrasings name BOTH checks, the partner and this
- * device's own clock, since a drifted clock produces exactly this pattern;
- * neither offers to pause anything -- the agreed cadence stands
- * (docs/MANAGED_EXCHANGE.md, "Repeated misses surface, they do not
- * auto-pause").
- */
-export function repeatedMissCoordination(
-  schedule: ManagedExchangeSchedule,
-): RepeatedMissCoordination | undefined {
-  const misses = schedule.consecutiveMisses;
-  if (misses < REPEATED_MISS_ESCALATION) return undefined;
-  return {
-    misses,
-    line: `${misses} scheduled runs in a row have not happened; check with your partner, and check this device's clock.`,
-    prompt: `${misses} scheduled runs in a row have not happened. Ask your partner whether they are still running this exchange, and check this device's clock -- if it is wrong, your run window and theirs never overlap. Nothing has been paused: the schedule stands, and the count resets after a successful run.`,
-  };
 }
 
 /**

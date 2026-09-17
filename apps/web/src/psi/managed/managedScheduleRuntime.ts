@@ -30,6 +30,13 @@
  * for weeks would accumulate them -- so the written file or the parked copy is
  * what the operator returns to. The record pair is neither written nor parked:
  * the run's disclosure record is already in the accounting.
+ *
+ * WHAT A WAKE TELLS THE OPERATOR: each wake's entries are read for the
+ * between-visit notification ({@link ./betweenVisitNotice.ts}), off the
+ * bookkeeping the window just wrote rather than any status of its own. The
+ * fire-once memory is this runtime's, held across its wakes beside the in-flight
+ * registry, so a relaunched runtime can raise a standing state's notice once
+ * more and holds it from there.
  */
 
 import { getLogger } from "@psilink/core";
@@ -57,6 +64,12 @@ import {
 } from "./managedOutputDirectory";
 
 import {
+  betweenVisitNotificationsArmed,
+  showBetweenVisitNotice,
+} from "./betweenVisitNotifier";
+import { betweenVisitNotice } from "./betweenVisitNotice";
+
+import {
   listReadableManagedExchanges,
   persistManagedExchangeScheduleAdvance,
 } from "./managedExchangeStore";
@@ -69,8 +82,13 @@ import type { ParkedResultsFallback, ParkedRunResults } from "../parkedResults";
 
 import type { PairTableFactors } from "../resultSizeProjection";
 
-import type { ManagedExchangeRecord } from "./managedExchangeRecord";
+import type {
+  ManagedExchangeReadableRecords,
+  ManagedExchangeRecord,
+} from "./managedExchangeRecord";
+import type { BetweenVisitNotice } from "./betweenVisitNotice";
 import type { ManagedExchangeRunResult } from "./managedExchangeRun";
+import type { ManagedLocalState } from "./managedLocalStateShape";
 
 import type {
   ManagedScheduleAttempt,
@@ -130,6 +148,28 @@ export interface ManagedScheduleRuntimeOptions {
   /** Overrides the platform boundary. Defaults to the store, the clock, and the
    * browser run driver. */
   seams?: ManagedScheduleTickSeams;
+  /** Overrides the between-visit notification boundary. Defaults to the store,
+   * the clock, and the browser's own notification API. */
+  notices?: BetweenVisitNoticeSeams;
+}
+
+/** The platform boundaries the between-visit notification runs on: the two store
+ * reads that hold what a window left behind, the clock, the operator's opt-in,
+ * and the platform call that shows a notice. Injected so each moment's copy and
+ * its fire-once discipline are testable without a store or a browser. */
+export interface BetweenVisitNoticeSeams {
+  /** The instant the notices are derived at. */
+  now: () => number;
+  /** Every stored managed exchange this build can read, as of after the tick's
+   * own bookkeeping write. */
+  listRecords: () => Promise<ManagedExchangeReadableRecords>;
+  /** Each record's local sibling state, which holds the backup marker. */
+  listLocalState: () => Promise<Map<string, ManagedLocalState>>;
+  /** Whether a notice raised now would be shown at all. */
+  armed: () => boolean;
+  /** Show one notice. Never rejects: a platform that refuses one leaves the
+   * state for the next in-app visit. */
+  show: (notice: BetweenVisitNotice) => Promise<void>;
 }
 
 /**
@@ -155,11 +195,15 @@ export function startManagedScheduleRuntime(
   if (signal.aborted) return;
   const tick = options.tick ?? tickManagedSchedules;
   const seams = options.seams ?? browserScheduleTickSeams(signal);
+  const notices = options.notices ?? browserBetweenVisitNoticeSeams();
   const inFlight = new Set<string>();
+  const announced = new Map<string, string>();
   const wake = async (): Promise<void> => {
     if (signal.aborted) return;
     try {
-      reportTick(await tick(seams, inFlight));
+      const entries = await tick(seams, inFlight);
+      reportTick(entries);
+      await raiseBetweenVisitNotices(entries, announced, notices);
     } catch (error) {
       log.error("scheduled managed exchange tick failed:", error);
     }
@@ -194,6 +238,82 @@ export function browserScheduleTickSeams(
     stopped: () => signal.aborted,
     runAttempt: (attempt) => runUnattendedAttempt(attempt, signal),
   };
+}
+
+/** The between-visit notification's platform boundary: the store reads, the
+ * clock, the operator's opt-in, and the browser's notification API. */
+export function browserBetweenVisitNoticeSeams(): BetweenVisitNoticeSeams {
+  return {
+    now: () => Date.now(),
+    listRecords: listReadableManagedExchanges,
+    listLocalState: listManagedLocalState,
+    armed: betweenVisitNotificationsArmed,
+    show: showBetweenVisitNotice,
+  };
+}
+
+/**
+ * Tell the operator what this wake's windows left behind, one notification per
+ * record at most.
+ *
+ * Only a window whose bookkeeping LANDED is reported: a write that failed leaves
+ * the stored record holding none of what just happened, and a notice read off it
+ * would name the state before the window rather than after it.
+ *
+ * `announced` is the fire-once memory, the last tag shown for each record. A
+ * notice repeating it is not shown -- which is what holds a standing state to one
+ * notification however many windows meet it -- and a record with nothing to say
+ * drops its entry, so the state that follows a quiet window is announced afresh.
+ *
+ * Never rejects: a store read that fails or a platform that refuses a notice
+ * costs the operator earliness and nothing else, since every state is still
+ * reported at the next in-app visit.
+ */
+export async function raiseBetweenVisitNotices(
+  entries: ReadonlyArray<ManagedScheduleTickEntry>,
+  announced: Map<string, string>,
+  seams: BetweenVisitNoticeSeams,
+): Promise<void> {
+  const reported = entries.filter(
+    (entry) =>
+      entry.skipped !== "bookkeeping-failed" &&
+      (entry.disposition !== undefined || entry.caughtUpMisses > 0),
+  );
+  if (reported.length === 0 || !seams.armed()) return;
+  try {
+    const [{ records }, localState] = await Promise.all([
+      seams.listRecords(),
+      seams.listLocalState(),
+    ]);
+    const stored = new Map(records.map((record) => [record.id, record]));
+    const now = seams.now();
+    for (const entry of reported) {
+      const record = stored.get(entry.id);
+      if (record === undefined) continue;
+      const notice = betweenVisitNotice({
+        record,
+        local: localState.get(entry.id),
+        caughtUpMisses: entry.caughtUpMisses,
+        ...(entry.disposition !== undefined
+          ? { disposition: entry.disposition }
+          : {}),
+        now,
+      });
+      if (notice === undefined) {
+        announced.delete(entry.id);
+        continue;
+      }
+      if (announced.get(entry.id) === notice.tag) continue;
+      announced.set(entry.id, notice.tag);
+      await seams.show(notice);
+    }
+  } catch (error) {
+    log.warn(
+      "scheduled managed exchange notifications were not raised for this wake; " +
+        "every state still reaches the next visit:",
+      error,
+    );
+  }
 }
 
 /**

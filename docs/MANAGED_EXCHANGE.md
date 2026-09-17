@@ -21,11 +21,12 @@ directive syntax; those live in the spec tier.
 
 > **Status.** The record, its rotating secret at rest, the recurring-exchange
 > surfaces, the attended one-action re-run, the installable offline app shell,
-> schedule entry, and the scheduled window runner are built: an installed app
-> runtime runs a due exchange unattended at its agreed window. The
-> between-visit OS notification is not built, so every state reaches the
-> operator at their next in-app visit rather than sooner. Persisting a rotating
-> secret at rest reverses the one-shot exchange's discard (see
+> schedule entry, the scheduled window runner, and the between-visit OS
+> notification are built: an installed app runtime runs a due exchange
+> unattended at its agreed window, and tells the operator what it left behind
+> once they have turned notifications on. Every state reaches the next in-app
+> visit whether or not they have. Persisting a rotating secret at rest reverses
+> the one-shot exchange's discard (see
 > [SECURITY_DESIGN.md](SECURITY_DESIGN.md#recurring-web-exchanges-single-use-vs-managed)),
 > so work here stays gated on security review.
 
@@ -500,12 +501,11 @@ screen hands the results over as it always has.
 Between visits the operator is not watching the app, so the "this ran / this
 needs you" surface is an **OS-level notification** from the installed app -- the
 platform's own notification, shown from the same app runtime that executes the
-runs, the concept that reaches an operator who is not looking at a browser tab.
-It is a concept-level surface here, not a wire or storage design: it reads the
-same run bookkeeping the next-visit surfaces read and says the same things, just
-sooner.
+runs, the one surface that reaches an operator who is not looking at a browser
+tab. It introduces no status of its own: it reads the same run bookkeeping the
+next-visit surfaces read and says the same things, just sooner.
 
-Four moments are worth a notification, and each maps to a state the design
+Five moments are worth a notification, and each maps to a state the design
 already defines:
 
 - **This ran, and your backup is now stale.** An unattended run rotates the
@@ -552,11 +552,33 @@ Everything else stays quiet, and nothing repeats: each notification fires once
 at its state's transition, and a condition already reported is held by the
 in-app state rather than re-announced at every subsequent wake (the in-app
 surfaces follow the same discipline; see [Moment-anchored backup
-surfaces](#moment-anchored-backup-surfaces)).
+surfaces](#moment-anchored-backup-surfaces)). What holds a condition to one
+notification is the runtime's own memory of what it last said about each
+exchange, so a runtime relaunched while a state stands can say it once more.
 
-Because the notification is a concept over states the record already holds, a
-platform without OS notifications loses only the *sooner* prompt: every one of
-these states is still reported accurately at the operator's next in-app visit.
+Because the notification reports states the record already holds, a platform
+without OS notifications loses only the *sooner* prompt: every one of these
+states is still reported accurately at the operator's next in-app visit.
+
+#### Turning notifications on
+
+**The operator asks, and the app never asks first.** The permission prompt
+follows a press of "Notify me between visits", offered with the recurring
+exchanges the notifications would be about -- a prompt at first load is refused
+once by an operator who has no idea yet what it is for, and a browser that has
+been refused cannot be asked again. The control is shown only in the installed
+app runtime, the only one that runs a schedule with nobody present.
+
+**Every refusal degrades to the next visit.** A denied permission, a prompt
+dismissed without an answer, a browser with no notification API, and an operator
+who never turns it on all leave the same behaviour: nothing is shown between
+visits, nothing in the app claims otherwise, and every state is reported at the
+next in-app visit. A denial is reported where the control was, naming the
+browser settings that are the only way back, since the app cannot ask again.
+
+Turning it off is the same control. The choice is remembered in this browser,
+beside nothing else: it is a device preference, not part of an exchange, so it
+does not travel in an export and a second device decides for itself.
 
 ## The second run, end to end
 

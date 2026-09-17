@@ -1619,6 +1619,25 @@ Deleting a managed exchange deletes its parked results in the same one-step
 delete (see [Deleting a managed
 exchange](../MANAGED_EXCHANGE.md#deleting-a-managed-exchange)).
 
+## The between-visit notification opt-in
+
+The operator's opt-in to OS notifications about scheduled runs (see
+[MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md#the-between-visit-notification)) is
+a **device preference**, not record state. It is stored in origin-local
+`localStorage` under `psilink-between-visit-notifications`, holding the literal
+`on` and nothing else; any other value, an absent key, and storage that refuses
+the read alike mean not opted in. It **MUST NOT** enter the record, a local
+sibling keyed by record `id`, or the export artifact: it says nothing about an
+exchange, and a device that imports one decides for itself.
+
+What a notification says is derived at the moment it is raised, from the
+bookkeeping the window just wrote -- `lastRun`, the schedule's
+`consecutiveMisses`, the standing condition, and the backup marker. No status of
+its own is persisted: whether a state has already been announced is held **only**
+in the running app runtime, so a relaunched runtime can raise a standing state's
+notification once more and no stored field can disagree with the bookkeeping the
+next visit reads.
+
 ## See also
 
 - [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md) - the managed exchange lifecycle: who it serves, the automation goal and platform envelope, durability contract, single-owner invariant, desync story, eviction survival, and the moment-anchored backup surfaces
