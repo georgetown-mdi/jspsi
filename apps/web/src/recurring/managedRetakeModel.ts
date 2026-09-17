@@ -6,8 +6,9 @@
  * The action is attested, because the operator is the only one who knows the two
  * things the browser cannot see: whether the scheduled run on the other machine has
  * been stopped, and whether it has run since the hand-off. So the confirmation
- * states what taking it back does, what must already be true, and which file
- * answers the second question -- and declining writes nothing.
+ * states what taking it back does, what must already be true, which file answers
+ * the second question, and what choosing the wrong one costs -- and declining
+ * writes nothing.
  *
  * The refusals are held apart on what the operator does next, as the hand-off's own
  * are ({@link ./managedHandoffGate.ts}): wait out a run, nothing at all, or look
@@ -32,13 +33,22 @@ export const RETAKE_LEAD =
   "running it, each run changes the shared secret and the other one stops " +
   "being able to connect to your partner.";
 
-/** Which file to choose, and why. Every command-line run writes the secret it
- * rotated to back into `.psilink.key`, so that file is where the partnership's
- * current secret is after a run there. */
+/** Which file to choose, why, and what the wrong one costs. Every command-line run
+ * writes the secret it rotated to back into `.psilink.key`, so that file is where
+ * the partnership's current secret is after a run there. The file holds nothing
+ * naming the exchange it belongs to, so nothing here can tell this exchange's key
+ * file from another exchange's or from a stale copy of it, and whichever is chosen
+ * replaces the only secret this browser holds. The confirmation states that cost
+ * and where the right file is; it does not refuse the operator's choice. */
 export const RETAKE_KEY_FILE_NOTE =
   "If that machine has run this exchange since you handed it off, choose the " +
   ".psilink.key file you saved there -- each run changes the shared secret and " +
-  "writes it to that file, so it holds the one your partner expects.";
+  "writes it to that file, so it holds the one your partner expects. Take it " +
+  "from the folder holding this exchange's psilink.yaml: every exchange's key " +
+  "file has that same name, and the one you choose replaces the only copy of " +
+  "the secret this browser has for this exchange. Another exchange's file, or " +
+  "an older copy of this one, leaves this exchange unable to connect to your " +
+  "partner, and the way back is a fresh invitation they have to accept again.";
 
 /** The case needing no file, and the way out when the file cannot be produced. The
  * fresh invitation is the recovery a secret this browser cannot match always has. */

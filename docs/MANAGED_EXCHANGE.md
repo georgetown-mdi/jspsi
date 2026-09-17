@@ -1060,7 +1060,11 @@ because two things have to be true and only the operator knows them:
   that file holds the secret the partner expects and this browser's stored one does
   not. The confirmation asks for that file; choose the `.psilink.key` from the
   machine that was running the exchange and this browser picks the exchange back up
-  where the command line left it.
+  where the command line left it. Take it from the folder holding that exchange's
+  `psilink.yaml`: every exchange's key file has that same name, and the file chosen
+  replaces the only copy of the secret this browser has, so another exchange's file
+  or an older copy of this one leaves the exchange unable to connect and a fresh
+  invitation the only way back.
 
 Where nothing has run there since the hand-off, no file is needed: the secret
 stored here is still the partnership's. Where the file cannot be got at all, take

@@ -1206,7 +1206,8 @@ describe("what the handed-off import refusal is scoped to", () => {
 describe("taking a command-line hand-off back", () => {
   // The attested route out of the spent state. The store step is what these pin:
   // it clears the spent state, reads the key file's secret in where the scheduled
-  // runs have moved past the stored one, and writes nothing at all otherwise.
+  // runs have moved past the stored one, drops the refusal a run recorded against
+  // the hand-off, and writes nothing at all otherwise.
 
   async function handedOff() {
     const record = await createManagedExchange(newExchange({ schedule }));
@@ -1332,6 +1333,43 @@ describe("taking a command-line hand-off back", () => {
       kind: "gone",
     });
     expect(await getManagedLocalState(record.id)).toBeUndefined();
+  });
+
+  test("the refusal a run recorded against the hand-off is dropped", async () => {
+    // A run that came due while the copy was handed off refused and recorded it.
+    // The take-back ends the state that entry describes, so leaving it stored
+    // would tier the record that runs here again as handed off, and the saved
+    // list would say so beside a row that now runs.
+    const record = await handedOff();
+    await recordManagedExchangeLastRun(
+      record.id,
+      failedRun(Date.now(), "failed", "handed-off"),
+      Date.now(),
+    );
+
+    const outcome = await retakeHandedOffManagedExchange(record.id);
+
+    expect(outcome.kind).toBe("retaken");
+    const [stored, local] = [
+      await getManagedExchange(record.id),
+      await getManagedLocalState(record.id),
+    ];
+    expect(stored?.lastRun).toBeUndefined();
+    expect(deriveManagedFailureTier(stored!, local, Date.now())).toBe("none");
+  });
+
+  test("a failure of the runs before the hand-off is kept", async () => {
+    // Real run history: the exchange failed closed here before it was ever handed
+    // off, and the take-back is not the answer to that.
+    const record = await handedOff();
+    const failure = failedRun(Date.now(), "failed", "auth");
+    await recordManagedExchangeLastRun(record.id, failure, Date.now());
+
+    const outcome = await retakeHandedOffManagedExchange(record.id);
+
+    expect(outcome.kind).toBe("retaken");
+    const stored = await getManagedExchange(record.id);
+    expect(stored?.lastRun).toEqual(failure);
   });
 
   test("a key the record schema rejects leaves the record exactly as it was", async () => {

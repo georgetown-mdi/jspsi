@@ -707,6 +707,27 @@ export function applyManagedExchangeReinviteRotation(
   return parseManagedExchangeRecord(next);
 }
 
+/**
+ * Drop a `lastRun` recording the `handed-off` refusal -- a run that found this
+ * device's copy spent ({@link ./managedExchangeRun.ts}) -- producing a validated
+ * new record. The entry records a state a take-back ends, and left in place it
+ * tiers the record that runs here again as handed off (see
+ * {@link ./managedFailureTiers.ts}). Any other entry is run history and is kept,
+ * as is a record holding none: both come back unchanged, the same object. The
+ * refusal raises no standing condition ({@link standingConditionFrom}), so there
+ * is none to answer with it. The input record is not mutated.
+ *
+ * @throws {ZodError} if the stored record is invalid.
+ */
+export function clearHandedOffLastRun(
+  record: ManagedExchangeRecord,
+): ManagedExchangeRecord {
+  if (record.lastRun?.failureKind !== "handed-off") return record;
+  const next: ManagedExchangeRecord = { ...record };
+  delete next.lastRun;
+  return parseManagedExchangeRecord(next);
+}
+
 /** Apply a `lastRun` bookkeeping entry to a record, producing a validated new
  * record with only `lastRun` changed. The document and the secret remain
  * untouched. Separate from a rotation write so the run outcome is recorded

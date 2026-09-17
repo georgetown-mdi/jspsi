@@ -1207,6 +1207,17 @@ through the sensitive-JSON chokepoint and the strict key-pair schema, and only a
 validated pair reaches the store. A file that is not a key file leaves the record
 spent and the store untouched.
 
+**What the check cannot cover.** A `.psilink.key` holds the secret and its bound
+and nothing naming the exchange it belongs to, so no check here tells this
+exchange's key file from another exchange's or from a stale copy of the same one --
+every exchange's file has that one name. Any schema-valid file whose secret differs
+from the stored one is therefore installed over it, and the record then holds a
+secret the partner does not share, recoverable only by a fresh invitation. The
+confirmation states that cost and where the right file is (the folder holding this
+exchange's `psilink.yaml` on the machine it was handed to); the operator's reading
+of it is the only check there is, and the re-take refuses no file the schema
+accepts.
+
 **The write rules.**
 
 - **A run in flight excludes it**, on the [run+rotate
@@ -1220,14 +1231,21 @@ spent and the store untouched.
 - **A key that advances the secret is applied as a rotation** -- the same
   field-scoped write a run's own rotation takes -- and **clears the backup and
   import markers** in that same transaction, the rule every secret advance here
-  follows. A re-take needing no key does not write the record at all, and leaves
-  those markers where they stand.
+  follows -- so a failure the import marker explained tiers on the record's own
+  evidence from then on, as it does after any other rotation. A re-take needing no
+  key leaves those markers where they stand.
+- **The hand-off's own refusal is consumed.** A `lastRun` recording the
+  `handed-off` refusal -- a run that came due while this copy was spent -- is
+  dropped in the same transaction, with or without a key: the take-back ends the
+  state that entry records, and left in place it tiers a record running here again
+  as handed off. Every other `lastRun` is kept, being run history the take-back
+  does not answer.
 - **Only a `handoff: "command-line"` spend is taken back.** A migration spend's
   recovery is the revive-in-place its own artifact performs, and a live record has
   nothing to take back; both are reported, and neither is written to.
 - **Nothing else about the record moves.** The agreed terms, the label, the
-  schedule, the platform handles, and the `lastRun` bookkeeping are untouched: the
-  exchange that comes back is the one that was handed off.
+  schedule, and the platform handles are untouched: the exchange that comes back is
+  the one that was handed off.
 
 ## The accounting of disclosures
 

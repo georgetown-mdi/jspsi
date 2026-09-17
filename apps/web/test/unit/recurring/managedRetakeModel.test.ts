@@ -26,6 +26,20 @@ describe("what the confirmation asks the operator to attest", () => {
     expect(RETAKE_KEY_FILE_NOTE).toMatch(/each run changes the shared secret/);
   });
 
+  test("states what the wrong key file costs, and where the right one is", () => {
+    // Nothing in a key file names the exchange it belongs to, so the operator is
+    // the only check on which one is chosen: the copy has to say that the choice
+    // replaces the stored secret, what that leaves behind, and where to take the
+    // file from.
+    expect(RETAKE_KEY_FILE_NOTE).toMatch(/psilink\.yaml/);
+    expect(RETAKE_KEY_FILE_NOTE).toMatch(/same name/);
+    expect(RETAKE_KEY_FILE_NOTE).toMatch(
+      /replaces the only copy of the secret/,
+    );
+    expect(RETAKE_KEY_FILE_NOTE).toMatch(/unable to connect/);
+    expect(RETAKE_KEY_FILE_NOTE).toMatch(/fresh invitation/);
+  });
+
   test("states the case needing no file, and the way out when it cannot be had", () => {
     expect(RETAKE_NO_KEY_FILE_NOTE).toMatch(/not need the file/);
     expect(RETAKE_NO_KEY_FILE_NOTE).toMatch(/fresh invitation/);

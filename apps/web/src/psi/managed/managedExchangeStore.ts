@@ -29,6 +29,7 @@ import {
   applyManagedExchangeScheduleAdvance,
   applyManagedExchangeStandingConditionCleared,
   buildManagedExchangeRecord,
+  clearHandedOffLastRun,
   diagnoseManagedExchangeRecord,
   parseManagedExchangeRecord,
   partitionReadableManagedExchanges,
@@ -820,6 +821,10 @@ export type ManagedRetakeOutcome =
  * own rotation takes, and clears the backup and import markers with it: the secret
  * has advanced, so any earlier export of this exchange no longer holds it.
  *
+ * A `lastRun` recording the `handed-off` refusal is dropped in the same
+ * transaction, with or without a key ({@link clearHandedOffLastRun}); every other
+ * entry stays, as does everything else about the record.
+ *
  * @throws {ZodError} if the stored record or sibling entry is invalid, or the key
  *   produces an invalid record; the transaction aborts and nothing is written.
  */
@@ -840,7 +845,7 @@ export async function retakeHandedOffManagedExchange(
 
 /** The re-take itself, run under the record's run+rotate lock: the cross-store
  * transaction that reads the hand-off, applies the key file's secret where it has
- * advanced, and clears the spent state. */
+ * advanced, drops the hand-off's own run refusal, and clears the spent state. */
 async function retakeSpentCopy(
   id: string,
   key: ManagedExchangeKeyFields | undefined,
@@ -875,13 +880,14 @@ async function retakeSpentCopy(
           const stored = parseManagedExchangeRecord(read.result);
           const advanced =
             key !== undefined && key.sharedSecret !== stored.sharedSecret;
-          const retaken = advanced
+          const rotated = advanced
             ? applyManagedExchangeRotation(stored, {
                 sharedSecret: key.sharedSecret,
                 expires: key.expires ?? null,
               })
             : stored;
-          if (advanced) records.put(retaken);
+          const retaken = clearHandedOffLastRun(rotated);
+          if (retaken !== stored) records.put(retaken);
           clearSpentOnLocalStore(local, id, current, advanced);
           outcome = { kind: "retaken", record: retaken };
         } catch (error) {
