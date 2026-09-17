@@ -772,6 +772,8 @@ Neither mode changes anything on the share beyond its own working files: the pro
 
 By default each check prints a line on stderr -- `OK:`, `WARN:`, `FAIL:`, or `SKIP:` -- with `MEANING:` and `ACTION:` lines under anything that needs one, closing with a summary line. Those lines print plain, with no timestamp, level, or command name ahead of them, so they read in a narrow console and can be passed on to whoever is helping you exactly as written; `--log-file` captures them like any other output, and `--log-level` still governs them (`silent` prints none, leaving the exit code as the whole answer). A `WARN:` does not stop an exchange; it names something worth knowing before you run one, such as a share that works only with `--lockless-rendezvous` or one nearly out of space. Read the `ACTION:` lines, change what they name, and run the command again.
 
+A failure stops the run, and every check after it prints a `SKIP:` line naming what it would have asked. Those all have the same reason, so it prints once, under the last of them.
+
 `--json` prints the verdict as one line of JSON on stdout instead of those check lines, for a script or a setup launcher to consume. Either way the run's exit code states the verdict, so a caller that parses nothing still learns whether anything blocks an exchange (see [Exit codes](#exit-codes)). The full contract -- every field, the schema version and the rule for reading it, the status and verdict vocabularies, both modes' fixed check lists, and the exit-code mapping -- is in [docs/spec/CLI_DOCTOR.md](spec/CLI_DOCTOR.md).
 
 ## Signing identity fingerprint

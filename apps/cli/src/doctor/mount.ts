@@ -3,7 +3,7 @@ import path from "node:path";
 
 import type { SmbMountInput } from "./smbEnvironment";
 import type { DoctorCheckRecord, DoctorReport } from "./verdict";
-import { fail, ok, skipped, warn } from "./verdict";
+import { fail, ok, skipped, SKIPPED_BY_FAILURE_MEANING, warn } from "./verdict";
 
 // The kernel half of the file-drop checks: the operations psilink's rendezvous
 // is built on, run over the real mount rather than over smbclient, which refuses
@@ -23,6 +23,19 @@ export const MOUNT_CHECK_IDS = [
   "exclusive_create",
   "rename_onto_existing",
 ] as const;
+
+/**
+ * What each check asks, in the words a check that did not run names itself by.
+ * A run that stopped early costs the operator the checks below the failure, and
+ * the report says which they were rather than repeating one sentence per id.
+ */
+const MOUNT_CHECK_NAMES: Record<(typeof MOUNT_CHECK_IDS)[number], string> = {
+  mount_readable: "reading the mounted folder",
+  marker: "matching the file the network checks left behind",
+  write_rename: "writing a file and renaming it into place",
+  exclusive_create: "refusing to create a file twice",
+  rename_onto_existing: "renaming onto an existing file",
+};
 
 /** Working names the checks create and remove inside the mounted folder. */
 const WRITE_NAME = ".psilink-w.tmp";
@@ -68,15 +81,18 @@ function errorCode(err: unknown): string {
   return (err as NodeJS.ErrnoException).code ?? "unknown error";
 }
 
+/**
+ * Append a `skipped` record for every id the run never reached. Each names the
+ * check it stands for; the reason they share is stated once where they are
+ * rendered.
+ */
 function padSkipped(checks: DoctorCheckRecord[]): DoctorCheckRecord[] {
   const seen = new Set(checks.map((check) => check.id));
   return [
     ...checks,
     ...MOUNT_CHECK_IDS.filter((id) => !seen.has(id)).map((id) =>
-      skipped(id, "not run: an earlier check did not pass.", {
-        meaning:
-          "an earlier check failed and the remaining checks did not run, " +
-          "so nothing was established about this one.",
+      skipped(id, `${MOUNT_CHECK_NAMES[id]} -- not run.`, {
+        meaning: SKIPPED_BY_FAILURE_MEANING,
       }),
     ),
   ];

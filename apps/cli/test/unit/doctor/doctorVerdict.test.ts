@@ -298,6 +298,61 @@ describe("the human rendering", () => {
     expect(lines).toContain("SKIP: not run.");
   });
 
+  test("a run of skips sharing one reason states it once, under the last", () => {
+    const shared = "an earlier check failed and stopped the run.";
+    const lines = verdictLines(
+      report([
+        {
+          id: "a",
+          status: "fail",
+          summary: "broken.",
+          meaning: "m",
+          action: "act",
+        },
+        {
+          id: "b",
+          status: "skipped",
+          summary: "writing -- not run.",
+          meaning: shared,
+        },
+        {
+          id: "c",
+          status: "skipped",
+          summary: "renaming -- not run.",
+          meaning: shared,
+        },
+        {
+          id: "d",
+          status: "skipped",
+          summary: "deleting -- not run.",
+          meaning: shared,
+        },
+      ]),
+    );
+    expect(lines).toContain("SKIP: writing -- not run.");
+    expect(lines).toContain("SKIP: renaming -- not run.");
+    expect(lines).toContain("SKIP: deleting -- not run.");
+    // Under the last of the run, so the names read as one list rather than
+    // one sentence apiece.
+    expect(lines.filter((line) => line.startsWith("MEANING: "))).toHaveLength(
+      2,
+    );
+    expect(lines.indexOf(`MEANING: ${shared}`)).toBe(
+      lines.indexOf("SKIP: deleting -- not run.") + 1,
+    );
+  });
+
+  test("skips that do not share a reason each keep their own", () => {
+    const lines = verdictLines(
+      report([
+        { id: "a", status: "skipped", summary: "one.", meaning: "first." },
+        { id: "b", status: "skipped", summary: "two.", meaning: "second." },
+      ]),
+    );
+    expect(lines).toContain("MEANING: first.");
+    expect(lines).toContain("MEANING: second.");
+  });
+
   test("closes with a verdict line naming what to do next", () => {
     expect(
       verdictLines(report([{ id: "a", status: "ok", summary: "" }])).at(-1),

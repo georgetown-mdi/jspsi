@@ -54,9 +54,10 @@ moved the whole battery into the image.
 
 ## State
 
-**The CIFS volume pins `uid=1000,gid=1000`, and that is unverified against a
-real share, 6 August 2026.** The published image runs as an unprivileged
-account rather than as root, so the mount's own ownership decides whether an
+**The CIFS volume pins `uid=1000,gid=1000`, and that mapping is measured
+against a native Windows server, 17 September 2026.** The published image runs
+as an unprivileged account rather than as root, so the mount's own ownership
+decides whether an
 exchange can write to the share at all. A server without CIFS Unix extensions
 -- every native Windows SMB server -- sends no ownership for the client to map,
 and `cifs.ko` then presents the whole tree as uid 0 mode 0755/0644 and enforces
@@ -67,8 +68,15 @@ by-hand copies of the command in `by-hand.md` and `troubleshooting.md`.
 check off wholesale; mapping the ownership is the narrower of the two and is
 what these carry.
 
-This is read off the documented mount-option semantics, not measured. CI does
-mount CIFS -- `cli_build_and_test.yaml`'s `smb-doctor` job mounts a local-driver
+A volume created with those options over Windows Server 2025 took create,
+rename, exclusive create and rename-onto-existing from the image's unprivileged
+account, by all three routes that make one: the PowerShell setup script with the
+published image, the launcher with an image built from staging, and the Command
+Prompt script's own volume check. The 17 September 2026 pass below is that
+measurement and holds its detail.
+
+CI still does not reach it. CI does mount
+CIFS -- `cli_build_and_test.yaml`'s `smb-doctor` job mounts a local-driver
 `type=cifs` Docker volume and, separately, a kernel `mount -t cifs`, both against
 the Samba rig it stands up -- but neither leg measures this mapping. Both name
 `uid=$(id -u)`, the runner's own account rather than 1000; the volume leg runs
@@ -81,9 +89,9 @@ below reached "the volume mounts and psilink can write to it" while the image
 still ran as root, where the DAC override made the mapping irrelevant. That is
 why a working share passed before and why it is not evidence now.
 
-What settles it is a Windows-host pass of the kind recorded below: run either
-script through part 4 against a real share and read that same verdict. Both
-scripts' probes are the measurement -- `psilink doctor mount` for the PowerShell
+Re-measuring it takes the shape that pass took: run either script through part
+4 against a real share and read that same verdict. Both scripts' probes are the
+measurement -- `psilink doctor mount` for the PowerShell
 one, `cmd_psilink-volcheck.sh` for the Command Prompt one -- and both run inside
 the published image, so their write is uid 1000's write and a wrong mapping
 fails them rather than passing silently. Worth doing against a native Windows
@@ -304,12 +312,12 @@ unmeasured is the same as everywhere else here: Windows, a real share, and the
 `.cmd` path's own batch flow around the helpers it pipes in. Detail:
 [docs/spec/CONTAINER_IMAGES.md](../../docs/spec/CONTAINER_IMAGES.md).
 
-Still unexecuted anywhere: the folder picker and its typed fallback, the DFS
-offer, the constrained-language branch, the credential prompt itself, and every
-path that needs a real engine or a real share. A first real-Windows pass should
-start with the picker in a session whose language mode really is constrained,
-which is the one branch chosen from documentation rather than measurement, and
-with the DFS offer.
+The folder picker, its typed fallback, the credential prompt itself and the
+paths that need a real engine and a real share were executed by the 17 September
+2026 pass below. Still unexecuted anywhere: the DFS offer, and the
+constrained-language branch, which is the one chosen from documentation rather
+than measurement -- the picker in a session whose language mode really is
+constrained is where the next pass should start.
 
 The launcher's CIFS volume options are the setup script's -- since 5 August 2026
 literally, through `New-ShareVolume`, which the launcher calls with `-Engine`
@@ -332,25 +340,20 @@ switched to Windows containers to reach -- only the `{{.Server.Os}}` parse it
 keys on is confirmed, against a `linux` engine. The launcher asks the same
 question of docker alone, for the same reason.
 
-Unverified on Windows since that pass, the whole delta: the branch that
-reports a volume which mounted and then refused the write, split out of the
-"could not be mounted" verdict it used to share; and, since 5 August 2026, both
-`docker run` calls that used to carry a here-string -- the argument vectors that
-invoke `doctor probe` and `doctor mount`, the exit codes the script branches on,
-and the collected-then-printed output that replaced the streamed probe. It is
-PowerShell that the Windows run never executed. Everything else changed since is
-either container-side -- the checks themselves, now the image's and covered by
-its own CI leg -- or the CRLF strip, which that run made itself and which went
-with the here-strings. The write-refusal branch is reached only on a path that
-has already failed, so the cost of it being wrong is a wrong message rather than
-a wrong outcome; the doctor calls are on the happy path, so a wrong argument
-vector there stops every run. The image fetch the capability gate makes when
-the copy on the PC carries no doctor is unverified there as well -- the pull
-itself, and the second ask that either carries the run on or reaches the same
-refusal -- though the Pester stub engines drive both of its directions.
-Reaching it on Windows takes a local copy older than the checks, tagged as the
-floating tag the script asks for. The next Windows pass should start with a
-working share, which is what exercises them.
+Both `docker run` calls that replaced the here-strings -- the argument vectors
+that invoke `doctor probe` and `doctor mount`, the exit codes the script
+branches on, and the collected-then-printed output -- were executed by the 17
+September 2026 pass below, on the happy path and on a wrong password.
+
+Two branches past them are still unverified on Windows. The branch that reports
+a volume which mounted and then refused the write, split out of the "could not
+be mounted" verdict it used to share, is reached only after a failure, so the
+cost of it being wrong is a wrong message rather than a wrong outcome. And the
+image fetch the capability gate makes when the copy on the PC carries no doctor
+-- the pull itself, and the second ask that either carries the run on or reaches
+the same refusal -- is driven in both directions by the Pester stub engines and
+by nothing on Windows; reaching it there takes a local copy older than the
+checks, tagged as the floating tag the script asks for.
 
 A later pass ran the script in the form it had on 30 July 2026, from Windows
 against the same
@@ -470,6 +473,165 @@ here, but they were driven against the branch's copies rather than staging's:
 - **No DFS namespace, and no SMB-served mapped drive letter.** Neither was
   reachable in this rig, for the reasons given above and below. Both reached CI
   on 5 August 2026, for the resolution functions only; see the State section.
+
+## Verification pass on staging, 17 September 2026
+
+Run from two lab VMs against staging
+`f4271a0d8f50abbf4755cf4fd30b9e8ffb873220`, from a checkout with
+`core.autocrlf=false`. Ten runs: four of `Setup-PsilinkFileDrop.ps1`, five of
+`Start-Psilink.ps1`, one of `cmd_Setup-PsilinkFileDrop.cmd`. Seven were typed at
+the workstation's RDP session; three were scheduled tasks inside that same
+session, two of them answering their prompts through a stand-in `Read-Host` and
+one on standard input. An SSH logon cannot stand in for that session: `Z:` shows
+as Unavailable there, Credential Manager is empty, and the share returns Access
+denied.
+
+### The rig
+
+- **Workstation:** Windows 11 Pro 25H2 26200.9457, Windows PowerShell
+  5.1.26100.9444, Docker Desktop 4.91.0 (Engine 29.8.0). The operator account
+  was a standard user.
+- **File server:** Windows Server 2025 Standard Evaluation (Server Core), 26100,
+  SMB left at its defaults -- SMB1 off, signing not required, no encryption --
+  serving one share to a local account. A native Windows server rather than the
+  Samba rig earlier passes used, which is what makes the ownership measurement
+  below mean anything: Samba can be made to serve the Unix extensions a Windows
+  server never does, and a rig that does masks the case the mount options exist
+  for.
+- **Published image**, which the setup scripts pull: `vdorie/psi-link:latest` =
+  `sha256:1ac76a1f3db719e9e1b35985ee8f6c817a8147da0ae1a82e6ac79c008566fb90`,
+  built 2026-08-16, `User: node`, `id` inside it `uid=1000(node) gid=1000(node)`.
+- **Staging image**, which the launcher ran:
+  `sha256:8be152ca016f43ed081bd99c33d56ed0195b59b80c084f99ffb16e9cf42916a8`
+  (manifest list), built on the workstation from that staging sha and pushed to
+  a registry running on it.
+
+The launcher did not run a release copy, because there is none to take: the
+release list is empty, and the published `latest` predates split-pair support,
+so its console bundle has no `JOB_RENDEZVOUS_OUTBOUND_DIR` and cannot serve a
+pair. The copy under test therefore had both its repository line and its digest
+line rewritten by hand; a release rewrites the digest line alone, so the
+repository half of that stamp is still unexercised.
+
+### The ownership mapping holds
+
+A volume created with `username=...,uid=1000,gid=1000` over that server took
+every operation psilink's rendezvous needs, from the image's unprivileged
+account, by all three routes that make one:
+
+- `Setup-PsilinkFileDrop.ps1` with the published image: `doctor mount` reported
+  the mount readable, the marker agreed, a file written and renamed into place,
+  a second exclusive create refused, and a rename onto an existing file.
+- `Start-Psilink.ps1` with the staging image: every volume check returned
+  "Nothing here blocks an exchange" -- over a volume on a share subfolder, one
+  on a folder within it, and one on a second share.
+- `cmd_Setup-PsilinkFileDrop.cmd`: "The volume mounts and psilink can write to
+  it." and "Exclusive create and rename behave the way psilink needs.", over a
+  volume it created with the same options.
+
+That is the measurement the State section above stands on.
+
+### What else held
+
+- **The PowerShell setup script** passed from a mapped drive and from a UNC
+  path, with and without a `Tee-Object` log pipe, and replaced an earlier run's
+  volume without asking. A wrong password failed correctly:
+  `NT_STATUS_LOGON_FAILURE`, its MEANING and ACTION, `NOT READY YET`, and the
+  earlier run's volume left alone. An elevated window refused the mapped drive,
+  as it must.
+- **The launcher** passed for one shared folder chosen in the folder picker, for
+  a pair on one share (one volume over the folder holding both, four checks, and
+  the console reporting retain mode), and for a pair on two shares of one server
+  (two volumes, and the console's rendezvous endpoint reporting the split with a
+  folder name per leg). It refused a nested pair and a pair naming one folder
+  twice, both in part 1 before any prompt, with exit 1 and no volume. Over
+  `ssh -t`, where no picker can open, each folder prompt fell back to a typed
+  path and took it.
+- **The Command Prompt script** passed end to end, exit 0, with all six network
+  checks and all three volume results.
+- **The credential prompts were typed at a real console**, the masked
+  `-AsSecureString` entry included, in seven of the ten runs. Earlier passes had
+  only the `Read-Host` shim.
+
+### The findings
+
+Eleven, none of them a wrong outcome for a working share. Ten are fixed on this
+branch:
+
+- **A stray `System.Management.Automation.RemoteException` line** printed once
+  per battery, just before the verdict. Windows PowerShell wraps each redirected
+  stderr line as an `ErrorRecord`, whose `ToString()` answers with the exception
+  type's name when the line is empty -- and the checks print a blank line before
+  their summary. `Invoke-Docker` reads the message off the record instead.
+- **The `LOGON_FAILURE` ACTION named `SMB_DOMAIN` alone**, which is the variable
+  an operator running the image by hand sets and not the Domain prompt these
+  scripts ask. The doctor text names both routes in one sentence.
+- **Seven identical `SKIP: not run: an earlier check did not pass.` blocks**
+  after a failure, each repeating the same MEANING and none naming its check.
+  Each skipped check names what it would have asked, and the shared MEANING
+  prints once, under the last of them.
+- **The elevated-window refusal contradicted itself**: it printed its own remedy
+  (close the window, open PowerShell normally) and then the generic "Enter it as
+  a drive letter path ...", which is what the operator had just done. That tail
+  is suppressed for a reason retyping cannot answer, and the reason is wrapped
+  and sentence-cased like the rest of the script's text.
+- **A pair on two shares of one server asked for the credentials twice.** The
+  second share asks whether to use the first answer again rather than reusing
+  it silently, so a pair reached by two accounts is still given both. The
+  answer is dropped once the volumes are made, and on every exit within that
+  section as well.
+- **`Z: is mapped to \\server\share` printed once per folder** where both
+  folders were on `Z:`. Once per drive letter now.
+- **Answering no at the launcher's share confirmation led away from the
+  launcher**, to `Setup-PsilinkFileDrop.ps1 -Server ... -Share ...`, which makes
+  a volume and stops rather than opening a console; and it opened "Windows would
+  not say what is behind that path" where Windows had just said it. It points at
+  `-RendezvousDir` with the path read off the DFS tab instead, and says what the
+  connection list did not hold.
+- **The Command Prompt script's printed console command had no
+  `JOB_RENDEZVOUS_NAME`**, so a console started from it would name the shared
+  folder after the mount point in invitations and accept kits. It carries the
+  folder name the PowerShell script's line does.
+- **`.gitattributes` had no rule for the image entrypoints**, so a checkout with
+  Git's `core.autocrlf=true` default on Windows would build an image whose
+  entrypoint fails on its own shebang line. Both are `-text` now. Not driven:
+  this pass built from an `autocrlf=false` checkout, where neither file had a
+  carriage return.
+- **Two launcher answers were read too loosely.** An unrecognised answer at a
+  `[y/N]` prompt was taken as the default rather than asked again, and the "One
+  folder for all of it..." explanation printed even where `-DataRoot` made the
+  question moot. The prompt asks again, and the explanation prints with the
+  question.
+
+The eleventh is not a code change and is not fixed here: **no operator can get a
+launcher that runs today.** The README sends them to a release for
+`Start-Psilink.ps1`, a copy from anywhere else refuses to run, and there are no
+releases; the published `latest` also predates split-pair support, so no
+published image can serve a partner whose accept kit routes them to the
+launcher. Cutting a release resolves both, and that is the maintainer's call.
+
+### What this pass does not cover
+
+- A DFS namespace and the DFS offer, and constrained language mode -- both the
+  picker branch and the preflight. Both were out of scope for it.
+- An administrator elevating their own session. The elevated run reached its
+  window through UAC's credential prompt as a second account, the operator being
+  a standard user.
+- The Command Prompt script typed at a real console: its run was fed on standard
+  input.
+- The staging image's failure text. The `LOGON_FAILURE` and SKIP wording above
+  was read from the published image only.
+- The setup script's image fetch when the local copy carries no `doctor`.
+- A release copy of either launcher, since there is none.
+- Any exchange. Only the checks wrote to the share, and no two-party run was
+  made.
+- Docker Desktop in Windows containers mode, and podman.
+
+The findings above are fixed against reading rather than against a Windows
+console: nothing in this container runs Windows PowerShell or `cmd`, so the next
+pass should re-read the four screens they change -- the elevated-window refusal,
+a failed battery's SKIP block, a pair on two shares of one server, and the
+Command Prompt script's closing console command.
 
 ## Decisions worth not relitigating
 

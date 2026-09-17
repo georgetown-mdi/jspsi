@@ -601,6 +601,29 @@ describe("every skipped record explains itself", () => {
         }
     expect(skips).toBeGreaterThan(0);
   });
+
+  test("a check a failure stopped the run before names itself", async () => {
+    const report = await runProbe(
+      INPUT,
+      deps((args) =>
+        commandOf(args)?.startsWith("rename ") === true
+          ? { code: 1, output: "NT_STATUS_ACCESS_DENIED renaming files" }
+          : healthyReply(args),
+      ),
+    );
+    const padded = report.checks.filter(
+      (check) =>
+        check.status === "skipped" && check.summary.endsWith("not run."),
+    );
+    expect(padded.map((check) => check.id)).toEqual(["delete", "marker"]);
+    // A summary of its own per check, so the run reports what the failure
+    // cost rather than one sentence repeated.
+    expect(new Set(padded.map((check) => check.summary)).size).toBe(
+      padded.length,
+    );
+    expect(checkById(report, "delete").summary).toContain("deleting a file");
+    expect(new Set(padded.map((check) => check.meaning)).size).toBe(1);
+  });
 });
 
 describe("local cleanup does not depend on the remote", () => {

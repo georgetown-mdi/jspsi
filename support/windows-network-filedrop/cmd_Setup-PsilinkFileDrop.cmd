@@ -501,9 +501,10 @@ call :note "pass --lockless-rendezvous at the end of the command line."
 call :info ""
 call :info "See the troubleshooting page, 'Synced folders'."
 echo(
+call :folder_name
 echo There is also a browser console, on one line:
 echo(
-echo   docker run --rm -p 127.0.0.1:3000:3000 --env JOB_DATA_ROOT=/data --env JOB_RENDEZVOUS_DIR=/sync -v "C:\path\to\your\work:/data" -v "%VOLUME_NAME%:/sync" vdorie/psi-link:latest serve
+echo   docker run --rm -p 127.0.0.1:3000:3000 --env JOB_DATA_ROOT=/data --env JOB_RENDEZVOUS_DIR=/sync --env "JOB_RENDEZVOUS_NAME=%FOLDER_NAME%" -v "C:\path\to\your\work:/data" -v "%VOLUME_NAME%:/sync" vdorie/psi-link:latest serve
 echo(
 call :info "then open http://127.0.0.1:3000"
 call :info ""
@@ -852,6 +853,45 @@ if /i "%DIALECT%"=="NT1" (
   call :note "troubleshooting page has the request, under 'What to ask your"
   call :note "IT department for'."
 )
+exit /b 0
+
+:folder_name
+rem The name the console mints into the invitation for the folder shared with
+rem the partner: the last segment of the subfolder, or the share itself when the
+rem folder is the share root. It travels beside the mount because what the
+rem container is shown is the mount point this script picked, which is a name no
+rem partner could match.
+rem
+rem The tail is cut at each slash by expanding the variable against itself
+rem rather than read with "for /f" tokens: a line with no second token leaves
+rem that token variable unexpanded rather than empty, so the loop would end on a
+rem literal instead of on the last segment. The same hazard is why every
+rem trailing separator comes off first and why an empty cut ends the loop: a
+rem tail cut down to nothing leaves the variable unset, and the expansion after
+rem that one is read as literal text rather than as a name.
+set "FOLDER_NAME=%SHARE%"
+if not defined SUBPATH exit /b 0
+set "FOLDER_TAIL=%SUBPATH%"
+:folder_name_trim
+if not defined FOLDER_TAIL goto folder_name_done
+if "%FOLDER_TAIL:~-1%"=="/" (
+  set "FOLDER_TAIL=%FOLDER_TAIL:~0,-1%"
+  goto folder_name_trim
+)
+rem A dot on both sides of the comparison, so that the backslash is not the
+rem character before a closing quote.
+if "%FOLDER_TAIL:~-1%."=="\." (
+  set "FOLDER_TAIL=%FOLDER_TAIL:~0,-1%"
+  goto folder_name_trim
+)
+:folder_name_next
+set "FOLDER_STRIPPED=%FOLDER_TAIL:*/=%"
+if "%FOLDER_STRIPPED%"=="%FOLDER_TAIL%" goto folder_name_done
+if not defined FOLDER_STRIPPED goto folder_name_done
+set "FOLDER_TAIL=%FOLDER_STRIPPED%"
+goto folder_name_next
+:folder_name_done
+if defined FOLDER_TAIL set "FOLDER_NAME=%FOLDER_TAIL%"
 exit /b 0
 
 :trim_slashes

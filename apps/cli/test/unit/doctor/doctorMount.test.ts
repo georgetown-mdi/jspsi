@@ -268,6 +268,32 @@ describe("every skipped record explains itself", () => {
         }
     expect(skips).toBeGreaterThan(0);
   });
+
+  test("a check a failure stopped the run before names itself", () => {
+    const report = runMountChecks(
+      path.join(os.tmpdir(), "psilink-no-such-dir"),
+      INPUT,
+    );
+    const padded = report.checks.filter(
+      (check) =>
+        check.status === "skipped" && check.summary.endsWith("not run."),
+    );
+    expect(padded.map((check) => check.id)).toEqual([
+      "marker",
+      "write_rename",
+      "exclusive_create",
+      "rename_onto_existing",
+    ]);
+    // A summary of its own per check, so the run reports what the failure
+    // cost rather than one sentence repeated.
+    expect(new Set(padded.map((check) => check.summary)).size).toBe(
+      padded.length,
+    );
+    expect(checkById(report, "write_rename").summary).toContain(
+      "renaming it into place",
+    );
+    expect(new Set(padded.map((check) => check.meaning)).size).toBe(1);
+  });
 });
 
 describe("the marker token must match exactly", () => {
