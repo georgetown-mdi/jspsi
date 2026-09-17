@@ -8,6 +8,7 @@ import {
   DEFAULT_LINKAGE_KEY_SET_VERSION,
   DEFAULT_LINKAGE_RULE_SET,
   checkLinkageRuleSetCitation,
+  findBuiltInLinkageRuleSet,
   getDefaultLinkageTerms,
   isDrawnFromLinkageRuleSet,
   linkageRuleSetReferenceFor,
@@ -202,6 +203,81 @@ describe("resolveLinkageRuleSetCitation", () => {
     expect(
       resolveLinkageRuleSetCitation(secondRuleSet.reference),
     ).toStrictEqual({ linkageFields: undefined, linkageKeys: undefined });
+  });
+});
+
+describe("findBuiltInLinkageRuleSet", () => {
+  const registry = [DEFAULT_LINKAGE_RULE_SET, secondRuleSet];
+
+  test("answers the set a reference names whole", () => {
+    expect(
+      findBuiltInLinkageRuleSet(DEFAULT_LINKAGE_RULE_SET.reference, registry),
+    ).toBe(DEFAULT_LINKAGE_RULE_SET);
+    expect(findBuiltInLinkageRuleSet(secondRuleSet.reference, registry)).toBe(
+      secondRuleSet,
+    );
+  });
+
+  test("answers nothing for a name no entry declares", () => {
+    expect(
+      findBuiltInLinkageRuleSet(
+        {
+          fieldSet: { name: "nobody-pii", version: "1.0.0" },
+          keySet: { name: "nobody-keys", version: "1.0.0" },
+        },
+        registry,
+      ),
+    ).toBeUndefined();
+  });
+
+  test("matches each half on its name AND version", () => {
+    expect(
+      findBuiltInLinkageRuleSet(
+        {
+          fieldSet: DEFAULT_LINKAGE_RULE_SET.reference.fieldSet,
+          keySet: {
+            name: DEFAULT_LINKAGE_RULE_SET.reference.keySet.name,
+            version: "9.9.9",
+          },
+        },
+        registry,
+      ),
+    ).toBeUndefined();
+  });
+
+  test("answers nothing where the two halves name two sets", () => {
+    // A choice takes one set's fields, keys, and citation together, so halves
+    // spanning two entries select neither -- where a CITATION of the same two
+    // halves resolves each half on its own.
+    expect(
+      findBuiltInLinkageRuleSet(
+        {
+          fieldSet: DEFAULT_LINKAGE_RULE_SET.reference.fieldSet,
+          keySet: secondRuleSet.reference.keySet,
+        },
+        registry,
+      ),
+    ).toBeUndefined();
+  });
+
+  test("looks a reference up in this build's own sets by default", () => {
+    expect(findBuiltInLinkageRuleSet(DEFAULT_LINKAGE_RULE_SET.reference)).toBe(
+      DEFAULT_LINKAGE_RULE_SET,
+    );
+    expect(findBuiltInLinkageRuleSet(secondRuleSet.reference)).toBeUndefined();
+  });
+
+  test("hands the terms builder the set a name chose", () => {
+    const chosen = findBuiltInLinkageRuleSet(
+      DEFAULT_LINKAGE_RULE_SET.reference,
+      registry,
+    );
+    if (chosen === undefined) {
+      throw new Error("the built-in set resolved to nothing");
+    }
+    expect(JSON.stringify(linkageTermsFromRuleSet(chosen, "Party A"))).toBe(
+      JSON.stringify(getDefaultLinkageTerms("Party A")),
+    );
   });
 });
 

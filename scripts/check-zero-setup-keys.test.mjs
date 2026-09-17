@@ -12,10 +12,7 @@ import { fileURLToPath } from "node:url";
 
 import { afterAll, describe, expect, it } from "vitest";
 
-import {
-  FIELD_SET_DECLARATIONS,
-  KEY_SET_DECLARATIONS,
-} from "./lib/builtInRuleSets.mjs";
+import { REGISTRY_DECLARATION } from "./lib/builtInRuleSets.mjs";
 import {
   NOTE_SECTION,
   RULE_SET_SOURCE,
@@ -70,25 +67,60 @@ const KEYS = [
   },
 ];
 
-const sets = ({ fields = FIELDS, keys = KEYS } = {}) => ({
-  fieldSet: { name: "baseline-pii", version: "1.0.0", content: fields },
-  keySet: { name: "hmis-keys", version: "1.0.0", content: keys },
-});
+/** The registry entries the check reads, as its reader hands them over. */
+const sets = ({ fields = FIELDS, keys = KEYS, second } = {}) => [
+  {
+    declaration: "DEFAULT_LINKAGE_RULE_SET",
+    fieldSet: { name: "baseline-pii", version: "1.0.0", content: fields },
+    keySet: { name: "hmis-keys", version: "1.0.0", content: keys },
+  },
+  ...(second === undefined ? [] : [second]),
+];
 
-/** A tree holding only what the check reads: the two declared sets. */
-function fixtureTree({ fields = FIELDS, keys = KEYS, source } = {}) {
+/** One rule set as the source declares it: its declarations, and the
+ * composition the reader follows from the registry. */
+const ruleSetSource = ({ prefix, fieldSetName, fields, keySetName, keys }) => `
+export const ${prefix}_FIELD_SET_NAME = "${fieldSetName}";
+export const ${prefix}_FIELD_SET_VERSION = "1.0.0";
+const ${prefix}_FIELDS = ${JSON.stringify(fields, null, 2)};
+export const ${prefix}_KEY_SET_NAME = "${keySetName}";
+export const ${prefix}_KEY_SET_VERSION = "1.0.0";
+const ${prefix}_KEYS = ${JSON.stringify(keys, null, 2)};
+export const ${prefix}_RULE_SET = Object.freeze({
+  reference: Object.freeze({
+    fieldSet: {
+      name: ${prefix}_FIELD_SET_NAME,
+      version: ${prefix}_FIELD_SET_VERSION,
+    },
+    keySet: { name: ${prefix}_KEY_SET_NAME, version: ${prefix}_KEY_SET_VERSION },
+  }),
+  linkageFields: frozenThroughContents(${prefix}_FIELDS),
+  linkageKeys: frozenThroughContents(${prefix}_KEYS),
+});
+`;
+
+/** A tree holding only what the check reads: the registry and its sets. */
+function fixtureTree({ fields = FIELDS, keys = KEYS, second, source } = {}) {
   const root = mkdtempSync(resolve(tmpdir(), "psilink-zero-setup-keys-"));
   temporaryRoots.push(root);
   mkdirSync(resolve(root, dirname(RULE_SET_SOURCE)), { recursive: true });
+  const entries = [
+    {
+      prefix: "DEFAULT_LINKAGE",
+      fieldSetName: "baseline-pii",
+      fields,
+      keySetName: "hmis-keys",
+      keys,
+    },
+    ...(second === undefined ? [] : [second]),
+  ];
   writeFileSync(
     resolve(root, RULE_SET_SOURCE),
     source ??
-      `export const ${FIELD_SET_DECLARATIONS.name} = "baseline-pii";
-export const ${FIELD_SET_DECLARATIONS.version} = "1.0.0";
-const ${FIELD_SET_DECLARATIONS.content} = ${JSON.stringify(fields, null, 2)};
-export const ${KEY_SET_DECLARATIONS.name} = "hmis-keys";
-export const ${KEY_SET_DECLARATIONS.version} = "1.0.0";
-const ${KEY_SET_DECLARATIONS.content} = ${JSON.stringify(keys, null, 2)};
+      `${entries.map(ruleSetSource).join("")}
+export const ${REGISTRY_DECLARATION} = Object.freeze([${entries
+        .map((entry) => `${entry.prefix}_RULE_SET`)
+        .join(", ")}]);
 `,
   );
   return root;
@@ -159,8 +191,37 @@ describe("the property it holds", () => {
     ).toEqual([]);
   });
 
+  it("holds every set the registry declares, each against its own fields", () => {
+    const violations = keyFieldViolations(
+      sets({
+        second: {
+          declaration: "COUNTY_RULE_SET",
+          fieldSet: {
+            name: "county-pii",
+            version: "1.0.0",
+            content: [{ name: "ssn", type: "ssn" }],
+          },
+          keySet: {
+            name: "county-keys",
+            version: "1.0.0",
+            content: [
+              {
+                name: "SSN + DOB",
+                elements: [{ field: "ssn" }, { field: "date_of_birth" }],
+              },
+            ],
+          },
+        },
+      }),
+    );
+    expect(violations).toHaveLength(1);
+    expect(violations[0].kind).toBe("outside");
+    expect(violations[0].message).toContain("county-keys");
+    expect(violations[0].message).toContain("county-pii does not declare");
+  });
+
   it("states the substrate the property rests on", () => {
-    expect(substrateReport(sets())).toEqual([
+    expect(substrateReport({ ruleSets: sets() })).toEqual([
       "  baseline-pii  ssn -- type ssn",
       "  baseline-pii  last_name -- type last_name",
       "  baseline-pii  date_of_birth -- type date_of_birth",
@@ -192,20 +253,40 @@ describe("the check driven end to end", () => {
     expect(stderr).toContain("`phone_number`");
   });
 
+  it("fails a second registry set whose key leaves its own field set", () => {
+    const root = fixtureTree({
+      second: {
+        prefix: "COUNTY",
+        fieldSetName: "county-pii",
+        fields: [{ name: "ssn", type: "ssn" }],
+        keySetName: "county-keys",
+        keys: [{ name: "EMAIL", elements: [{ field: "email_address" }] }],
+      },
+    });
+    const { status, stderr } = runCheck(root);
+    expect(status).toBe(1);
+    expect(stderr).toContain("`email_address`");
+    expect(stderr).toContain("county-pii does not declare");
+  });
+
   it("fails a set it cannot read rather than reading it as empty", () => {
     const root = fixtureTree({
-      source: `export const ${FIELD_SET_DECLARATIONS.name} = "baseline-pii";
-export const ${FIELD_SET_DECLARATIONS.version} = "1.0.0";
-const ${FIELD_SET_DECLARATIONS.content} = [{ name: "ssn", type: "ssn" }];
-export const ${KEY_SET_DECLARATIONS.name} = "hmis-keys";
-export const ${KEY_SET_DECLARATIONS.version} = "1.0.0";
-const ${KEY_SET_DECLARATIONS.content} = buildDefaultKeys();
+      source: `const DEFAULT_LINKAGE_KEYS = buildDefaultKeys();
+export const DEFAULT_LINKAGE_RULE_SET = Object.freeze({
+  reference: Object.freeze({
+    fieldSet: { name: "baseline-pii", version: "1.0.0" },
+    keySet: { name: "hmis-keys", version: "1.0.0" },
+  }),
+  linkageFields: [{ name: "ssn", type: "ssn" }],
+  linkageKeys: frozenThroughContents(DEFAULT_LINKAGE_KEYS),
+});
+export const ${REGISTRY_DECLARATION} = Object.freeze([DEFAULT_LINKAGE_RULE_SET]);
 `,
     });
     const { status, stderr } = runCheck(root);
     expect(status).toBe(1);
     expect(stderr).toContain("could not run");
-    expect(stderr).toContain(KEY_SET_DECLARATIONS.content);
+    expect(stderr).toContain("DEFAULT_LINKAGE_KEYS");
     expect(inspect(root).violations).toEqual([]);
   });
 
