@@ -57,9 +57,9 @@ import type { ManagedLocalState } from "./managedLocalStateShape";
  *   every later run refuses the same way while that entry cannot be read).
  * - `"storage"` -- a rotation the last run could not persist (recovery: re-invite; a
  *   one-sided persist failure may have desynced the two parties).
- * - `"imported"` -- a restore-from-backup or migration import since the last
- *   successful run (recovery: re-invite; a restored copy can hold a secret the
- *   partnership has rotated past).
+ * - `"imported"` -- a restore-from-backup, migration import, or key-file take-back
+ *   since the last successful run (recovery: re-invite; a restored copy can hold a
+ *   secret the partnership has rotated past).
  * - `"transport"` -- a connection or data-exchange drop that is not a failed-closed
  *   handshake (recovery: retry; a temporary connection problem, not a trust failure).
  * - `"unexplained"` -- a handshake that failed closed (`auth`) with no recorded
@@ -82,12 +82,13 @@ export type ManagedFailureTier =
   | "none";
 
 /**
- * Whether a record was restored from a backup and has not successfully run since --
- * the `imported` sibling marker's meaning. The marker is stamped at install/revive
- * and cleared on the first rotation after an import (a completed handshake proves the
- * parties held the same secret), so its mere presence is the "import since the last
- * success" evidence the desync tiering reads -- no timestamp comparison is needed,
- * because a success would have consumed it.
+ * Whether a record's secret came from a backup or a key file and has not succeeded
+ * since -- the `imported` sibling marker's meaning. It is stamped at install/revive
+ * and by a take-back that installs a secret from a command-line key file, and cleared
+ * on the first rotation after one (a completed handshake proves the parties held the
+ * same secret), so its mere presence is the "import since the last success" evidence
+ * the desync tiering reads -- no timestamp comparison is needed, because a success
+ * would have consumed it.
  */
 export function importedSinceLastSuccess(
   local: ManagedLocalState | undefined,

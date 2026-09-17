@@ -167,7 +167,7 @@ describe("savedExchangeRow", () => {
       local,
       NOW,
     );
-    expect(row.status).toMatch(/restored from a backup/i);
+    expect(row.status).toMatch(/restored from a backup or a key file/i);
     expect(row.status).not.toMatch(/attack|tamper|desync/i);
   });
 
@@ -447,6 +447,8 @@ describe("savedExchangeRow: a standing condition", () => {
       restored,
       NOW,
     );
-    expect(row.status).toBe("Restored from a backup; re-invite to reconnect");
+    expect(row.status).toBe(
+      "Restored from a backup or a key file; re-invite to reconnect",
+    );
   });
 });

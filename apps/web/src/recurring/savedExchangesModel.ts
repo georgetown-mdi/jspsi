@@ -123,7 +123,7 @@ function tierStatus(tier: ManagedFailureTier, at: string): string {
     case "storage":
       return `Last run could not be saved (${at}); re-invite to reconnect`;
     case "imported":
-      return "Restored from a backup; re-invite to reconnect";
+      return "Restored from a backup or a key file; re-invite to reconnect";
     case "unexplained":
       return `Last run failed (${at}); check with your partner`;
     case "transport":
@@ -150,7 +150,7 @@ function standingStatus(tier: ManagedStandingTier, at: string): string {
     case "storage":
       return `A run could not save this exchange's secret (${at}); re-invite to reconnect`;
     case "imported":
-      return "Restored from a backup; re-invite to reconnect";
+      return "Restored from a backup or a key file; re-invite to reconnect";
     case "unexplained":
       return `A run failed and is unexplained (${at}); check with your partner`;
   }

@@ -995,9 +995,10 @@ record, in a separate origin-local store keyed by the record `id`, and are
   on, which nothing short of a re-invite recovers, and no run makes that decision on
   the operator's behalf: the refusal is the whole response, with no override on the
   run path. Taking a handed-off exchange back is a deliberate act on that record's
-  own surface, and remains future work (see the import refusal's stated limit
-  below). A spend confirmed after a surface loaded, or between two attempts at one
-  scheduled window, therefore stops the runs that follow it.
+  own surface (see [Taking a command-line hand-off
+  back](#taking-a-command-line-hand-off-back)). A spend confirmed after a surface
+  loaded, or between two attempts at one scheduled window, therefore stops the runs
+  that follow it.
 
   The spend is **operator-attested, not dispatch-anchored**: a download dispatch
   (`anchor.click()`) gives no landing signal, so a cancelled or failed save must not
@@ -1070,12 +1071,13 @@ record, in a separate origin-local store keyed by the record `id`, and are
   even when a migration-spent record holds that secret too, and the refusal names the
   handed-off record. Where it fires, the refusal names the stored record and the
   recovery that record actually has -- the exchange runs from the files the
-  hand-off saved, and bringing it back to this browser is a re-invite. A stated
-  limit bounds the surface. The import affordance renders only beside an empty
-  or unreadable listing, and a handed-off record keeps the listing non-empty, so
-  a store whose records all read offers no import for the refusal to be met at.
-  The guard binds at the store's import path, and a fully supported surface for
-  meeting it (an explicit re-take on the spent record) remains future work.
+  hand-off saved, and bringing it back to this browser is the re-take on that
+  record's own surface, which the refusal names by the words on its control. The
+  guard binds at the store's import path, and the surface an operator meets it at
+  is not the surface offering the re-take: the import affordance renders only
+  beside an empty or unreadable listing, and a handed-off record keeps the listing
+  non-empty, so a store whose records all read offers no import for the refusal to
+  be met at.
 
   **The reconciliation parses each stored record on its own.** An entry this
   build cannot parse is **skipped** rather than failing the import: an invalid
@@ -1148,7 +1150,9 @@ record, in a separate origin-local store keyed by the record `id`, and are
   the backup marker's:
   - **Import stamps it.** A fresh install and a revive-in-place both stamp
     `importedAt` (alongside the backup marker) as of the import instant, so a
-    restored record holds the evidence from the moment it lands.
+    restored record holds the evidence from the moment it lands. A [take-back that
+    installs a key file's secret](#taking-a-command-line-hand-off-back) stamps it
+    too, clearing the backup marker rather than stamping it.
   - **Rotation clears it.** The persist-before-success rotation write clears the
     import marker in the **same** transaction that advances the secret. A rotation is
     driven by a completed handshake, which proves the two parties held the same
@@ -1171,6 +1175,87 @@ exporter reads
 only the record. Deleting a managed exchange removes the record and its sibling
 state together (see [Deleting a managed
 exchange](../MANAGED_EXCHANGE.md#deleting-a-managed-exchange)).
+
+### Taking a command-line hand-off back
+
+A copy spent under `handoff: "command-line"` comes back to this browser through an
+explicit **re-take** on that record's own surface. It is the only route from that
+spent state to a running one: the import refuses the artifact (above), and the
+surface showing the spent state is where the operator already is.
+
+**The operator attests; the browser checks what it can.** Two facts decide a
+re-take and neither is readable here -- whether the scheduled command-line run has
+been stopped, and whether it has run since the hand-off. So the action is offered
+behind a confirmation stating both, and a declined confirmation writes nothing.
+Nothing here prevents a second live copy any more than the import refusal does: the
+re-take makes taking one a deliberate, stated act rather than an accidental one,
+which is all operator cooperation can be (see [Single-owner
+invariant](#single-owner-invariant)).
+
+**The secret comes from the key file, not from a fresh invitation.** The hand-off
+wrote this exchange's own secret into `.psilink.key` with no re-invite, so the
+take-back needs none either. Each command-line run rotates the secret and writes
+the rotated one back to that file, which decides what a re-take needs:
+
+- **Runs have happened there.** The operator chooses that `.psilink.key`, and the
+  re-take reads its `sharedSecret` and `expires` into the record.
+- **None has.** The stored secret is still the partnership's, and no file is needed.
+- **The file cannot be produced.** The exchange is taken back without it, and the
+  [fast re-invite](../MANAGED_EXCHANGE.md#recovery-fast-re-invite) is the recovery
+  -- the one any secret this browser cannot match already has.
+
+The file is untrusted structured input: it is capped before it is read, then parsed
+through the sensitive-JSON chokepoint and the strict key-pair schema, and only a
+validated pair reaches the store. A file that is not a key file leaves the record
+spent and the store untouched.
+
+**What the check cannot cover.** A `.psilink.key` holds the secret and its bound
+and nothing naming the exchange it belongs to, so no check here tells this
+exchange's key file from another exchange's or from a stale copy of the same one --
+every exchange's file has that one name. Any schema-valid file whose secret differs
+from the stored one is therefore installed over it, and the record then holds a
+secret the partner does not share, recoverable only by a fresh invitation. The
+confirmation states that cost and where the right file is (the folder holding this
+exchange's `psilink.yaml` on the machine it was handed to); the operator's reading
+of it is the only check there is, and the re-take refuses no file the schema
+accepts.
+
+**The write rules.**
+
+- **A run in flight excludes it**, on the [run+rotate
+  lock](#the-secret-is-a-linear-resource) taken with `ifAvailable`, exactly as the
+  spend is excluded: the run re-reads the spent state as its first act inside that
+  lock, and the re-take is a write against that state. A run holding the lock is
+  reported rather than waited out.
+- **The read, the key application, and the spent-state clear are one transaction**
+  spanning the record and sibling stores, so a rotation lands fully before or fully
+  after it.
+- **A key that advances the secret is applied as a rotation** -- the same
+  field-scoped write a run's own rotation takes -- and **clears the backup marker**
+  in that same transaction: the secret has advanced, so no earlier export of this
+  exchange holds it. Whether it advances is decided on `sharedSecret` alone, so a
+  file holding the stored secret with a different `expires` applies nothing, which a
+  hand-edited file is the only way to reach.
+- **A key file's install is recorded as an import**, stamping the
+  [import marker](#the-backup-marker-the-spent-state-and-the-import-marker-local-siblings-never-in-the-artifact)
+  in that same transaction. Nothing here can tell this exchange's current key file
+  from a stale one or another exchange's, so the likeliest mistake the re-take admits
+  is a secret the partner does not share: an `auth` failure at the next run therefore
+  tiers as **imported**, whose recovery is the re-invite, until a run succeeds and
+  the rotation clears the marker. A re-take needing no key leaves both markers where
+  they stand.
+- **The hand-off's own refusal is consumed.** A `lastRun` recording the
+  `handed-off` refusal -- a run that came due while this copy was spent -- is
+  dropped in the same transaction, with or without a key: the take-back ends the
+  state that entry records, and left in place it tiers a record running here again
+  as handed off. Every other `lastRun` is kept, being run history the take-back
+  does not answer.
+- **Only a `handoff: "command-line"` spend is taken back.** A migration spend's
+  recovery is the revive-in-place its own artifact performs, and a live record has
+  nothing to take back; both are reported, and neither is written to.
+- **Nothing else about the record moves.** The agreed terms, the label, the
+  schedule, and the platform handles are untouched: the exchange that comes back is
+  the one that was handed off.
 
 ## The accounting of disclosures
 

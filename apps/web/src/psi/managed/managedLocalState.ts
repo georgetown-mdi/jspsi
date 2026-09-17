@@ -16,8 +16,10 @@
  *   cryptography; see docs/MANAGED_EXCHANGE.md, "Export/import is migration, not
  *   sync"). It is the one sibling marker this module does not write: a spend is
  *   only ever taken together with the record read that finds the hand-off still
- *   current, so its single writer is the cross-store step in
- *   {@link ./managedExchangeStore.ts} (`spendManagedExchangeIfCurrent`).
+ *   current, and a re-take together with the record it hands the exchange back to,
+ *   so its writers are the cross-store steps in
+ *   {@link ./managedExchangeStore.ts} (`spendManagedExchangeIfCurrent` and
+ *   `retakeHandedOffManagedExchange`).
  *
  * This is the thin IndexedDB layer over the sibling store the records database also
  * holds ({@link MANAGED_EXCHANGE_LOCAL_STORE_NAME}); the state's shape and its

@@ -63,6 +63,7 @@ import {
 } from "./managedExchangeRecord";
 
 import type {
+  ManagedExchangeKeyFields,
   ManagedExchangeLastRun,
   ManagedExchangeRecord,
   ManagedExchangeSchedule,
@@ -79,17 +80,6 @@ export const MANAGED_EXCHANGE_ARTIFACT_MIME = "application/json";
  * applied before {@link parseSensitiveJson}'s own bounded parse. Mirrors the
  * linkage-terms import's fixed pre-parse cap. */
 export const MAX_ARTIFACT_IMPORT_BYTES = 1_000_000;
-
-/** The `.psilink.key` pair the artifact holds: the current shared secret and,
- * when a bound is in force, the `expires` instant it lapses at. This is exactly the
- * key file's own shape, so the secret half of the artifact maps onto a valid
- * `.psilink.key`. */
-export interface ManagedExchangeArtifactKey {
-  /** The current rotated shared secret (base64url, 43 chars / 32 bytes). */
-  sharedSecret: string;
-  /** The instant after which the secret must not be used; absent means no bound. */
-  expires?: string;
-}
 
 /** The browser-only fields the artifact holds alongside the two CLI halves --
  * the fields the CLI's config-plus-key pair does not have. Cleanly separable and
@@ -138,8 +128,8 @@ interface ManagedExchangeArtifact {
   /** The exchange-file document embedded as a valid `psilink.yaml` (snake_case
    * YAML). The CLI half of the record. */
   exchangeDocument: string;
-  /** The `.psilink.key` pair (see {@link ManagedExchangeArtifactKey}). */
-  key: ManagedExchangeArtifactKey;
+  /** The `.psilink.key` pair (see {@link ManagedExchangeKeyFields}). */
+  key: ManagedExchangeKeyFields;
   /** The browser-only fields (see {@link ManagedExchangeArtifactLocal}). */
   local: ManagedExchangeArtifactLocal;
 }
@@ -166,7 +156,7 @@ export function serializeExchangeDocument(exchangeFile: ExchangeSpec): string {
  */
 export function keyFileFieldsFromRecord(
   record: ManagedExchangeRecord,
-): ManagedExchangeArtifactKey {
+): ManagedExchangeKeyFields {
   return {
     sharedSecret: record.sharedSecret,
     ...(record.expires !== undefined ? { expires: record.expires } : {}),

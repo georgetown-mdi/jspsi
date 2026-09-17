@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { Alert, Button, CopyButton, FileButton, Loader } from "@mantine/core";
+import {
+  Alert,
+  Button,
+  CopyButton,
+  FileButton,
+  Loader,
+  Modal,
+} from "@mantine/core";
 import { Link, useNavigate } from "@tanstack/react-router";
 
 import { describeResolvedMatching } from "@psilink/core";
@@ -41,6 +48,11 @@ import {
   fileUnfiledDisclosures,
   readUnfiledDisclosures,
 } from "@psi/unfiledDisclosureStore";
+
+import {
+  MAX_KEY_FILE_IMPORT_BYTES,
+  retakeManagedExchange,
+} from "@psi/managed/managedRetake";
 
 import { MANAGED_EXCHANGE_ARTIFACT_MIME } from "@psi/managed/managedExchangeArtifact";
 import { canReinviteFromRecord } from "@psi/managed/managedReinvite";
@@ -88,6 +100,15 @@ import {
   supersededHandoffReason,
 } from "./managedHandoffGate";
 import {
+  RETAKE_ACTION_LABEL,
+  RETAKE_CONFIRM_LABEL,
+  RETAKE_KEY_FILE_NOTE,
+  RETAKE_LEAD,
+  RETAKE_NO_KEY_FILE_NOTE,
+  RETAKE_STORE_FAILED,
+  managedRetakeRefusal,
+} from "./managedRetakeModel";
+import {
   STANDING_CONDITION_CLEAR_LABEL,
   managedStandingConditionView,
 } from "./managedStandingConditionModel";
@@ -114,6 +135,7 @@ import type { DisclosureAccountingRead } from "@psi/disclosureAccountingStore";
 import type { ManagedBackupMarker } from "@psi/managed/managedBackupState";
 import type { ManagedInputSource } from "@psi/managed/managedInputHandle";
 import type { ManagedReinvite } from "@psi/managed/managedReinvite";
+import type { ManagedRetakeRefusal } from "./managedRetakeModel";
 import type { ManagedRunFailureAlert } from "./managedRunLaunchModel";
 import type { ManagedStandingConditionView } from "./managedStandingConditionModel";
 import type { ParkedResultsRead } from "@psi/parkedResultsStore";
@@ -153,6 +175,9 @@ export function ManagedRunSurface({ id }: { id: string }) {
   // hand-off refused, rather than by a load that found it standing: only then does
   // the spent surface owe the operator an account of that run.
   const [spentByRefusedRun, setSpentByRefusedRun] = useState(false);
+  // Bumped to load the record and its sibling state again, after a re-take has
+  // cleared the spent state this surface loaded under.
+  const [recordReads, setRecordReads] = useState(0);
   const [backupMarker, setBackupMarker] = useState<ManagedBackupMarker>();
   // The local sibling state as the load read it, for the standing condition's own
   // section: the import marker is what tells a restored copy's stale secret from a
@@ -308,7 +333,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
       abortRef.current?.abort();
       abortRef.current = undefined;
     };
-  }, [id]);
+  }, [id, recordReads]);
 
   // The accounting of disclosures is read on its own, never folded into the record
   // load above: an unreadable accounting must not present the exchange as
@@ -860,6 +885,17 @@ export function ManagedRunSurface({ id }: { id: string }) {
     setParkedResultsReads((reads) => reads + 1);
   }
 
+  // Load the record and its sibling state again after a re-take has cleared the
+  // spent state, so what the surface shows is what the store holds rather than the
+  // re-take's own answer: the load is the one place the run affordance, the backup
+  // state, and the standing condition are derived.
+  function readRecordAgain(): void {
+    setSpent(undefined);
+    setSpentByRefusedRun(false);
+    setLoadFailure(undefined);
+    setRecordReads((reads) => reads + 1);
+  }
+
   // Remove everything this exchange's scheduled runs left in this browser, then
   // read the store again: what the section shows afterwards is what the store
   // holds, not an assumption that the delete took. A rejection reaches the
@@ -899,6 +935,8 @@ export function ManagedRunSurface({ id }: { id: string }) {
             parkedResultsRead={parkedResultsRead}
             onRetryParkedResultsRead={retryParkedResultsRead}
             onClearParkedResults={clearParked}
+            id={id}
+            onRetaken={readRecordAgain}
           />
         ) : record === undefined ? (
           <>
@@ -1688,6 +1726,8 @@ function SpentSurface({
   parkedResultsRead,
   onRetryParkedResultsRead,
   onClearParkedResults,
+  id,
+  onRetaken,
 }: {
   spent: ManagedSpentState | undefined;
   refusedRun?: boolean;
@@ -1699,6 +1739,10 @@ function SpentSurface({
   /** Remove what earlier runs left here. A spent copy runs nothing more, so this
    * is the only thing short of the retention that removes them. */
   onClearParkedResults: () => Promise<void>;
+  /** The record the re-take acts on. */
+  id: string;
+  /** Read this exchange again, once a re-take has made it live. */
+  onRetaken: () => void;
 }) {
   const refused = refusedRun ? (
     <p className={styles.small}>{MANAGED_RUN_HANDED_OFF_ATTESTATION}</p>
@@ -1741,6 +1785,7 @@ function SpentSurface({
         Those two files are this exchange&apos;s backup of record. Keep them
         somewhere only you can read.
       </p>
+      <RetakeControl id={id} onRetaken={onRetaken} />
       {parked}
       <SavedExchangesFoot />
     </>
@@ -1754,6 +1799,116 @@ function SpentSurface({
       {refused}
       {parked}
       <SavedExchangesFoot />
+    </>
+  );
+}
+
+/**
+ * The re-take on a copy handed to the command line: the one route back from the
+ * spent state to a running exchange, and the only one the import refusal points at
+ * (see {@link ./managedHandoffGate.ts}).
+ *
+ * Behind a confirmation, because the browser cannot see either thing the operator
+ * has to have settled: that the scheduled run on the other machine is stopped, and
+ * whether it has run since the hand-off -- which decides whether the `.psilink.key`
+ * from that machine is needed. Declining writes nothing and leaves the copy spent.
+ *
+ * The key file is optional at the confirmation rather than required, since the
+ * stored secret is still the partnership's where nothing has run there. A file the
+ * parse will not take, and a re-take the store refused, both keep the confirmation
+ * open with what happened beside it: nothing reads as a take-back that did not
+ * happen.
+ */
+function RetakeControl({
+  id,
+  onRetaken,
+}: {
+  id: string;
+  onRetaken: () => void;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const [keyFile, setKeyFile] = useState<File | null>(null);
+  const [retaking, setRetaking] = useState(false);
+  const [refusal, setRefusal] = useState<ManagedRetakeRefusal>();
+
+  function confirmRetake() {
+    setRetaking(true);
+    setRefusal(undefined);
+    void (async () => {
+      try {
+        // Capped before the read, as the artifact import is: the key file holds one
+        // secret and one instant, so an over-cap file is the wrong file rather than
+        // one to read into memory ahead of the bounded parse.
+        if (keyFile !== null && keyFile.size > MAX_KEY_FILE_IMPORT_BYTES) {
+          setRefusal(managedRetakeRefusal("unreadable-key-file"));
+          return;
+        }
+        const source = keyFile === null ? undefined : await keyFile.text();
+        const result = await retakeManagedExchange(id, source);
+        if (result.kind === "retaken") {
+          setConfirming(false);
+          onRetaken();
+          return;
+        }
+        setRefusal(managedRetakeRefusal(result.kind));
+      } catch {
+        setRefusal(RETAKE_STORE_FAILED);
+      } finally {
+        setRetaking(false);
+      }
+    })();
+  }
+
+  return (
+    <>
+      <div className={styles.savedRowActions} style={{ marginTop: "1rem" }}>
+        <Button
+          variant="default"
+          onClick={() => {
+            setRefusal(undefined);
+            setKeyFile(null);
+            setConfirming(true);
+          }}
+        >
+          {RETAKE_ACTION_LABEL}
+        </Button>
+      </div>
+      <Modal
+        opened={confirming}
+        onClose={() => setConfirming(false)}
+        title={RETAKE_ACTION_LABEL}
+        centered
+        transitionProps={{ duration: 0 }}
+      >
+        <p>{RETAKE_LEAD}</p>
+        <p className={styles.small}>{RETAKE_KEY_FILE_NOTE}</p>
+        <p className={`${styles.small} ${styles.sub}`}>
+          {RETAKE_NO_KEY_FILE_NOTE}
+        </p>
+        <FileButton accept="application/json,.key" onChange={setKeyFile}>
+          {(props) => (
+            <Button variant="default" {...props}>
+              Choose the .psilink.key file
+            </Button>
+          )}
+        </FileButton>
+        {keyFile !== null && (
+          <p className={`${styles.small} ${styles.mono}`}>{keyFile.name}</p>
+        )}
+        {refusal !== undefined && (
+          <Alert color="yellow" title={refusal.title} mt="sm" mb="sm">
+            {refusal.reason}
+          </Alert>
+        )}
+        <div className={styles.savedRowActions} style={{ marginTop: "1rem" }}>
+          <Button variant="default" onClick={() => setConfirming(false)}>
+            Cancel
+          </Button>
+          <Button variant="light" loading={retaking} onClick={confirmRetake}>
+            {RETAKE_CONFIRM_LABEL}
+          </Button>
+        </div>
+      </Modal>
     </>
   );
 }
