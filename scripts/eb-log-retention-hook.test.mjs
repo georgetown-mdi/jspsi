@@ -45,11 +45,11 @@ const FRAGMENTS = [
 // value over cannot pass on the hook's own default.
 const FIXTURE_SIZE = "25M";
 
-const fixture = (logPath, olddir) =>
+const fixture = (logPath, olddir, size = FIXTURE_SIZE) =>
   [
     `${logPath} {`,
     "    su root root",
-    `    size ${FIXTURE_SIZE}`,
+    ...(size === null ? [] : [`    size ${size}`]),
     "    missingok",
     "    rotate 4",
     "    compress",
@@ -61,6 +61,14 @@ const fixture = (logPath, olddir) =>
   ].join("\n");
 
 const read = (relative) => readFileSync(resolve(repoRoot, relative), "utf8");
+
+const blocksByLogPath = (fragment) =>
+  new Map(
+    [...fragment.matchAll(/^(\S+) \{$([\s\S]*?)^\}$/gm)].map((block) => [
+      block[1],
+      block[2],
+    ]),
+  );
 
 const hookSource = read(HOOK_TREES[0]);
 const retentionDays = Number(
@@ -213,18 +221,37 @@ describe("the EB log-retention hook", () => {
     expect(result.stderr).toContain(conf);
   });
 
-  it("bounds each block of a fragment that rotates several logs", () => {
+  it("bounds each block of a fragment that rotates several logs by its own size", () => {
+    // Each block of a fragment keeps the size trigger the platform gave that
+    // block, and a block the platform wrote without one is given none.
     const conf = confDir();
     writeFileSync(
       join(conf, FRAGMENTS[0]),
       [
-        fixture("/var/log/nginx/access.log", "/var/log/nginx/rotated"),
-        fixture("/var/log/nginx/error.log", "/var/log/nginx/rotated"),
+        fixture("/var/log/nginx/access.log", "/var/log/nginx/rotated", "10M"),
+        fixture("/var/log/nginx/error.log", "/var/log/nginx/rotated", "500M"),
+        fixture("/var/log/nginx/other.log", "/var/log/nginx/rotated", null),
       ].join("\n"),
     );
     expect(runHook(conf).status).toBe(0);
-    const bounded = readFileSync(join(conf, FRAGMENTS[0]), "utf8");
-    expect(bounded.match(/^ *daily$/gm)).toHaveLength(2);
-    expect(bounded.match(/^ *maxage \d+$/gm)).toHaveLength(2);
+    const bounded = blocksByLogPath(
+      readFileSync(join(conf, FRAGMENTS[0]), "utf8"),
+    );
+    expect([...bounded.keys()]).toEqual([
+      "/var/log/nginx/access.log",
+      "/var/log/nginx/error.log",
+      "/var/log/nginx/other.log",
+    ]);
+    expect(bounded.get("/var/log/nginx/access.log")).toMatch(
+      /^ *maxsize 10M$/m,
+    );
+    expect(bounded.get("/var/log/nginx/error.log")).toMatch(
+      /^ *maxsize 500M$/m,
+    );
+    expect(bounded.get("/var/log/nginx/other.log")).not.toMatch(/^ *maxsize /m);
+    for (const block of bounded.values()) {
+      expect(block).toMatch(/^ *daily$/m);
+      expect(block).toMatch(/^ *maxage \d+$/m);
+    }
   });
 });

@@ -11,9 +11,8 @@ set -euo pipefail
 # (the log paths, `olddir`, `compress`, `copytruncate`) through unchanged.
 #
 # The fragments exist only on the instance, so the rewritten fragment is
-# checked there, by the platform's own logrotate, before it is installed: a
-# result logrotate rejects fails the deployment instead of leaving the
-# instance with a rotation that no longer runs.
+# checked there, by the platform's own logrotate, before it is installed: when
+# logrotate rejects it the hook fails the deployment rather than installing it.
 #
 # An application deployment and a configuration-only deployment run separate
 # hook trees, so this script is deployed twice, byte-identical, as
@@ -42,6 +41,8 @@ fragments=(
 # The directives this script owns. Everything outside this set belongs to the
 # platform and has to survive the rewrite untouched.
 managed='^[[:space:]]*(hourly|daily|weekly|monthly|yearly|size|minsize|maxsize|rotate|maxage)([[:space:]]|$)'
+size_prefix='^[[:space:]]*(max)?size[[:space:]]+'
+size_only="${size_prefix}[0-9]+[kKmMgG]?[[:space:]]*\$"
 
 find_fragment() {
     local name="$1" dir
@@ -55,22 +56,27 @@ find_fragment() {
 }
 
 bound_fragment() {
-    local fragment="$1" size rewritten state
-    size=$(
-        sed -n -E \
-            -e 's/^[[:space:]]*(max)?size[[:space:]]+([0-9]+[kKmMgG]?)[[:space:]]*$/\2/p' \
-            "$fragment" | tail -n 1
-    )
+    local fragment="$1" rewritten state
     rewritten=$(mktemp)
-    awk -v managed="$managed" -v size="$size" -v rotated="$ROTATED_DAYS" '
+    # Each block has its own size trigger, so the directives go in at the
+    # block's closing brace, once that block's own size has been read.
+    awk -v managed="$managed" -v size_prefix="$size_prefix" \
+        -v size_only="$size_only" -v rotated="$ROTATED_DAYS" '
+        /\{[[:space:]]*$/ && !in_block { in_block = 1; size = "" }
+        in_block && $0 ~ size_only {
+            size = $0
+            sub(size_prefix, "", size)
+            sub(/[[:space:]]*$/, "", size)
+        }
         $0 ~ managed { next }
-        { print }
-        /\{[[:space:]]*$/ {
+        in_block && /^[[:space:]]*\}[[:space:]]*$/ {
             print "    daily"
             if (size != "") print "    maxsize " size
             print "    rotate " rotated
             print "    maxage " rotated
+            in_block = 0
         }
+        { print }
     ' "$fragment" >"$rewritten"
 
     if ! diff -q \
