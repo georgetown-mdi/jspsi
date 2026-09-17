@@ -195,8 +195,9 @@ const noDisplayableAsErrorArgument = ERROR_TEXT_POSITIONS.map((position) => ({
 // and identityFileArg; one OPENING with path, file, dir, directory or folder,
 // followed by s, name or names or nothing, and then a capital or the end of
 // the name, which reaches pathValue, fileName, filename and dirPath; and the
-// bare words target, input, targets and inputs, which a positional argument
-// takes its name from. A name outside all three -- output, destination,
+// bare words target and input, with or without a trailing s and with or
+// without a trailing Arg or Args, which a positional or flag argument takes
+// its name from. A name outside all three -- output, destination,
 // source -- is not reached, so what this holds is the shape it can recognize
 // and not every operator path (docs/spec/CHANNEL_SECURITY.md,
 // display-sanitization escape format).
@@ -207,7 +208,7 @@ const noDisplayableAsErrorArgument = ERROR_TEXT_POSITIONS.map((position) => ({
 // eslint-disable every other ban here does; the mark states origin and this
 // only asks that the site state it.
 const OPERATOR_PATH_NAME =
-  "/((Path|File|Dir|Directory|Folder)s?(Args?)?$|^(path|file|dir|directory|folder)(s|name|names)?([A-Z]|$)|^(target|input)s?$)/";
+  "/((Path|File|Dir|Directory|Folder)s?(Args?)?$|^(path|file|dir|directory|folder)(s|name|names)?([A-Z]|$)|^(target|input)s?(Args?)?$)/";
 const UNMARKED_OPERATOR_PATH = [
   `Identifier[name=${OPERATOR_PATH_NAME}]`,
   `MemberExpression[property.name=${OPERATOR_PATH_NAME}]`,

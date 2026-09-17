@@ -132,6 +132,14 @@ const BANNED = [
     "throw new Error(`could not write ${target}`);",
   ],
   ["a positional named input", "log.warn(`${input} is unreadable`);"],
+  [
+    "a generic word under the name of the flag argument it came from",
+    "throw new Error(`could not read ${inputArg}`);",
+  ],
+  [
+    "a plural generic flag-argument name",
+    "log.warn(`${targetArgs} are unreadable`);",
+  ],
 ];
 
 const ALLOWED = [
@@ -197,6 +205,8 @@ declare const ACLPath: string;
 declare const keyfile: string;
 declare const target: string;
 declare const input: string;
+declare const inputArg: string;
+declare const targetArgs: readonly string[];
 declare const identityFileArg: string;
 declare const configFileArgs: readonly string[];
 declare const signedRecordArg: string;

@@ -18,6 +18,11 @@ import { createOwnerOnlyWriteStream } from "../fileUtils";
  * consumes: `process.stdin` when `input` is `-`, otherwise the file at
  * `input`, opened with `fs.createReadStream` after confirming it exists.
  *
+ * The not-found error names `input` as the operator's own text, so it renders
+ * as they typed it rather than escaped, and every caller must pass a path that
+ * came from argv or from the operator's configuration. A partner- or
+ * server-delivered string passed here would reach the display unescaped.
+ *
  * Thrown errors hold an `exitCode` for the caller to forward to
  * `process.exit`: a missing file throws with `exitCode: 69`.
  *
