@@ -5,8 +5,9 @@
 // compliance, and privacy reviewers: the container "makes no other network
 // connection" beyond the SFTP server or shared directory the operator
 // configures; the hosted web application has "no analytics or third-party
-// tracking scripts, and no third-party content delivery" and "makes no request
-// to any host other than the supporting services named below"; and the project
+// tracking scripts, and no script, style, or font loaded from a third-party
+// host" and "makes no request to any host other than the supporting services
+// named below"; and the project
 // runs no license check, update ping, usage analytics, or telemetry. Prose
 // cannot hold those claims true -- a font CDN, an error-reporting SDK, an
 // analytics snippet, or a version-check ping is one import away, and the
@@ -674,7 +675,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     );
     for (const v of violations) console.error("  " + v);
     console.error(
-      "\nA new host reached from shipped source falsifies PRIVACY.md, which is written for agency security reviewers: no analytics or third-party tracking scripts, no third-party content delivery, no update ping, no telemetry.",
+      "\nA new host reached from shipped source falsifies PRIVACY.md, which is written for agency security reviewers: no analytics or third-party tracking scripts, no script, style, or font from a third-party host, no update ping, no telemetry.",
     );
     console.error(
       "If the literal is egress the document does not disclose, it is the document that has to change, not this list. If it does not contradict the document -- because it names no host anything contacts (a namespace identifier, a document link the operator clicks, a base URL only handed to a parser), or because the host it names is already in PRIVACY.md's supporting-services table -- add it to ALLOWLIST in scripts/check-egress-claims.mjs with the one-line reason why.",
