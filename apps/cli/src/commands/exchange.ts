@@ -2,8 +2,10 @@ import type { Argv, Arguments } from "yargs";
 import fs from "node:fs";
 
 import {
+  keepOperatorSuppliedText,
   messageWithOperatorText,
   operatorSuppliedText,
+  redactAndRenderOperatorSuppliedText,
   parseExchangeSpec,
   rawDecodeErrorDescription,
   getLogger,
@@ -310,12 +312,39 @@ export function warnAndStripInjectedAuthFields(
     // to accept or strip, the same treatment any other config key gets.
     if (hint === undefined) continue;
     log.warn(
-      `${configFile}: authentication.${key} is set and will be ignored; ` +
-        hint,
+      `${redactAndRenderOperatorSuppliedText(
+        operatorSuppliedText(configFile),
+      )}: authentication.${key} is set and will be ignored; ` + hint,
     );
     delete rawAuth[key];
   }
 }
+
+/** What {@link loadConfig} states behind a key-file path with no file at it. */
+const MISSING_KEY_FILE_REMEDY =
+  " does not exist. Create one with 'psilink invite' (generate an " +
+  "invitation) or 'psilink accept' (accept a partner's invitation); both " +
+  "write a .psilink.key.";
+
+/** What {@link loadConfig} states behind an expired secret's key-file path. */
+const EXPIRED_SECRET_REMEDY =
+  " and cannot be used; no exchange was attempted. Both parties must " +
+  "re-invite to establish a new shared secret: remove the expired key file " +
+  "on both sides, then one party runs 'psilink invite' (the offline form, " +
+  "with no URL) and the other runs 'psilink accept INVITATION " +
+  "[INPUT_FILE]'. Each side's configuration is reused; only the key file is " +
+  "recreated.";
+
+/** What {@link resolveSigningPersist} states ahead of the identity path. */
+const MISSING_SIGNING_IDENTITY_PREAMBLE =
+  "signing is configured (mode: certificate) but no signing identity was " +
+  "found at ";
+
+/** What {@link resolveSigningPersist} states behind the identity path. */
+const MISSING_SIGNING_IDENTITY_REMEDY =
+  ", the path signing.identity_file names; create it there with 'psilink " +
+  "fingerprint --identity-file <that path>', or point signing.identity_file " +
+  "at the file you already hold";
 
 /** @internal exported for testing */
 export function loadConfig(options: ExchangeOptions): {
@@ -334,18 +363,19 @@ export function loadConfig(options: ExchangeOptions): {
   try {
     source = fs.readFileSync(options.configFile, "utf8");
   } catch (err: unknown) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT")
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      const message = messageWithOperatorText`config file ${operatorSuppliedText(
+        options.configFile,
+      )} does not exist; to create one, run 'psilink invite URL ...' first`;
       throw Object.assign(
-        new Error(
-          `config file ${options.configFile} does not exist; ` +
-            "to create one, run 'psilink invite URL ...' first",
-        ),
+        keepOperatorSuppliedText(new Error(message.text), message),
         { code: "ENOENT" },
       );
-    throw new UsageError(
-      `config file ${options.configFile} could not be read: ` +
-        (err instanceof Error ? err.message : String(err)),
-    );
+    }
+    const message = messageWithOperatorText`config file ${operatorSuppliedText(
+      options.configFile,
+    )} could not be read: ${err instanceof Error ? err.message : String(err)}`;
+    throw keepOperatorSuppliedText(new UsageError(message.text), message);
   }
   const rawConfig = parseSensitiveYaml(
     source,
@@ -370,10 +400,10 @@ export function loadConfig(options: ExchangeOptions): {
   } catch (err) {
     // Well-formed YAML that fails schema validation is still invalid caller
     // configuration (exit 64), not a transport failure.
-    throw new UsageError(
-      `config file ${options.configFile} is not a valid exchange spec: ` +
-        rawDecodeErrorDescription(err),
-    );
+    const message = messageWithOperatorText`config file ${operatorSuppliedText(
+      options.configFile,
+    )} is not a valid exchange spec: ${rawDecodeErrorDescription(err)}`;
+    throw keepOperatorSuppliedText(new UsageError(message.text), message);
   }
 
   // Resolve @-file references in the supported credential/opaque fields after
@@ -389,7 +419,12 @@ export function loadConfig(options: ExchangeOptions): {
     authentication: specAuth,
     ...exchangeDataSpec
   } = resolvedSpec;
-  log.info("loaded exchange spec from", options.configFile);
+  log.info(
+    "loaded exchange spec from",
+    redactAndRenderOperatorSuppliedText(
+      operatorSuppliedText(options.configFile),
+    ),
+  );
 
   warnOnLinkageRuleSetCitationDrift(
     exchangeDataSpec.linkageTerms,
@@ -504,20 +539,19 @@ export function loadConfig(options: ExchangeOptions): {
     // A schema failure (a raw ZodError, naming the field not its value) or an
     // errno is reclassified here.
     if (err instanceof UsageError) throw err;
-    throw new UsageError(
-      `key file at ${options.keyFile} is malformed: ` +
-        (err instanceof Error ? err.message : String(err)),
-    );
+    const message = messageWithOperatorText`key file at ${operatorSuppliedText(
+      options.keyFile,
+    )} is malformed: ${err instanceof Error ? err.message : String(err)}`;
+    throw keepOperatorSuppliedText(new UsageError(message.text), message);
   }
-  if (keyData === undefined)
-    // A missing key file is a configuration problem (exit 64), consistent with
-    // the missing-config case above.
-    throw new UsageError(
-      `key file ${options.keyFile} does not exist. ` +
-        "Create one with 'psilink invite' (generate an invitation) or " +
-        "'psilink accept' (accept a partner's invitation); both write a " +
-        ".psilink.key.",
-    );
+  // A missing key file is a configuration problem (exit 64), consistent with
+  // the missing-config case above.
+  if (keyData === undefined) {
+    const message = messageWithOperatorText`key file ${operatorSuppliedText(
+      options.keyFile,
+    )}${MISSING_KEY_FILE_REMEDY}`;
+    throw keepOperatorSuppliedText(new UsageError(message.text), message);
+  }
   // Hard stop on an already-expired token before any dataset prep, connection, or
   // PAKE handshake. The `expires` in the key file is authoritative regardless of
   // token_max_age_days -- it may be an invitation token's short lifetime or a
@@ -532,15 +566,10 @@ export function loadConfig(options: ExchangeOptions): {
     // TypeScript does not narrow it across the call; the fallback keeps the
     // message a definite string rather than risk rendering "undefined".
     const expiredAt = keyData.expires ?? "(unknown)";
-    throw new UsageError(
-      `the shared secret in ${options.keyFile} expired at ${expiredAt} ` +
-        "and cannot be used; no exchange was attempted. Both parties must " +
-        "re-invite to establish a new shared secret: remove the expired key " +
-        "file on both sides, then one party runs 'psilink invite' (the offline " +
-        "form, with no URL) and the other runs 'psilink accept INVITATION " +
-        "[INPUT_FILE]'. Each side's configuration is reused; only the key file " +
-        "is recreated.",
-    );
+    const message = messageWithOperatorText`the shared secret in ${operatorSuppliedText(
+      options.keyFile,
+    )} expired at ${expiredAt}${EXPIRED_SECRET_REMEDY}`;
+    throw keepOperatorSuppliedText(new UsageError(message.text), message);
   }
   const authPersist: AuthPersist = {
     // Operator-policy fields parsed from the YAML `authentication` block (today,
@@ -911,13 +940,12 @@ export async function resolveSigningPersist(
   // is bounded only by a min(1), while the composed message truncates at the
   // display boundary, so a second copy of a long path would spend the remedy's
   // headroom on prose the operator has already read.
-  if (identity === undefined)
-    throw new UsageError(
-      `signing is configured (mode: certificate) but no signing identity was ` +
-        `found at ${identityPath}, the path signing.identity_file names; ` +
-        `create it there with 'psilink fingerprint --identity-file <that ` +
-        `path>', or point signing.identity_file at the file you already hold`,
-    );
+  if (identity === undefined) {
+    const message = messageWithOperatorText`${MISSING_SIGNING_IDENTITY_PREAMBLE}${operatorSuppliedText(
+      identityPath,
+    )}${MISSING_SIGNING_IDENTITY_REMEDY}`;
+    throw keepOperatorSuppliedText(new UsageError(message.text), message);
+  }
   assertIdentityMatchesAgreedTerms(identity.certificate, termsIdentity);
   return {
     identity,

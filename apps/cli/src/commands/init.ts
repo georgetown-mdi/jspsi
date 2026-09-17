@@ -3,6 +3,10 @@ import type { Argv, Arguments } from "yargs";
 import {
   getDefaultLinkageTerms,
   inferDateInputFormatFromSource,
+  keepOperatorSuppliedText,
+  messageWithOperatorText,
+  operatorSuppliedText,
+  redactAndRenderOperatorSuppliedText,
   UsageError,
 } from "@psilink/core";
 
@@ -112,10 +116,19 @@ export async function handler(argv: Arguments): Promise<void> {
       // resolves by refusing `-`.
       const decision = await decideOverwrite(configFile, {
         interactive,
-        confirm: () => promptConfirm(`Overwrite ${configFile}?`),
+        confirm: () =>
+          promptConfirm(
+            `Overwrite ${redactAndRenderOperatorSuppliedText(
+              operatorSuppliedText(configFile),
+            )}?`,
+          ),
       });
       if (decision === "skip") {
-        log.info(`left the existing file at ${configFile} unchanged.`);
+        log.info(
+          `left the existing file at ${redactAndRenderOperatorSuppliedText(
+            operatorSuppliedText(configFile),
+          )} unchanged.`,
+        );
         return;
       }
 
@@ -150,19 +163,25 @@ export async function handler(argv: Arguments): Promise<void> {
         // operator-fixable problem -- classify a write failure as a usage error
         // (exit 64) rather than letting runOrExit's transport-failure default (69)
         // misclassify it.
-        if (err instanceof FileExistsError)
-          throw new UsageError(
-            `a file appeared at ${configFile} after the overwrite check; ` +
-              "refusing to overwrite it unprompted. Re-run to decide.",
+        if (err instanceof FileExistsError) {
+          const appeared = messageWithOperatorText`a file appeared at ${operatorSuppliedText(
+            configFile,
+          )} after the overwrite check; refusing to overwrite it unprompted. Re-run to decide.`;
+          throw keepOperatorSuppliedText(
+            new UsageError(appeared.text),
+            appeared,
           );
-        throw new UsageError(
-          `could not write ${configFile}: ` +
-            (err instanceof Error ? err.message : String(err)),
-        );
+        }
+        const message = messageWithOperatorText`could not write ${operatorSuppliedText(
+          configFile,
+        )}: ${err instanceof Error ? err.message : String(err)}`;
+        throw keepOperatorSuppliedText(new UsageError(message.text), message);
       }
 
       log.info(
-        `wrote a configuration template to ${configFile}. No key file was ` +
+        `wrote a configuration template to ${redactAndRenderOperatorSuppliedText(
+          operatorSuppliedText(configFile),
+        )}. No key file was ` +
           "created and no exchange was run. Edit the file -- at least the " +
           "connection block and the identity -- then run 'psilink invite' or " +
           "'psilink accept' to set up an exchange.",
@@ -250,6 +269,11 @@ export async function buildTemplateData(
   });
 }
 
+/** What {@link decideOverwrite} states behind the occupied path. */
+const UNCONFIRMED_OVERWRITE_REMEDY =
+  "; refusing to overwrite it without an interactive confirmation. Delete " +
+  "it, or pass --config-file to write the template elsewhere.";
+
 /**
  * Decide what `init` should do about the output path. Returns `"create"` when
  * the path is free (the caller then writes exclusively, so a file that appears
@@ -271,11 +295,11 @@ export async function decideOverwrite(
   // false yet a write would follow it, the same fail-closed reasoning the
   // provisioning conflict gate uses.
   if (detectFileConflicts([configPath]).length === 0) return "create";
-  if (!opts.interactive)
-    throw new UsageError(
-      `a file already exists at ${configPath}; refusing to overwrite it ` +
-        "without an interactive confirmation. Delete it, or pass --config-file " +
-        "to write the template elsewhere.",
-    );
+  if (!opts.interactive) {
+    const message = messageWithOperatorText`a file already exists at ${operatorSuppliedText(
+      configPath,
+    )}${UNCONFIRMED_OVERWRITE_REMEDY}`;
+    throw keepOperatorSuppliedText(new UsageError(message.text), message);
+  }
   return (await opts.confirm()) ? "overwrite" : "skip";
 }

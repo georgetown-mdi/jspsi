@@ -1,6 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
-import { causeChainSome, UsageError } from "@psilink/core";
+import {
+  causeChainSome,
+  keepOperatorSuppliedText,
+  messageWithOperatorText,
+  operatorSuppliedText,
+  UsageError,
+} from "@psilink/core";
 import type { ExchangeSpec } from "@psilink/core";
 
 import { DEFAULT_CONFIG_PATH, saveConfig } from "../config";
@@ -117,6 +123,12 @@ export function provisionLeftConfigOnDisk(error: unknown): boolean {
   return causeChainSome(error, (link) => failuresLeavingConfigOnDisk.has(link));
 }
 
+/** What {@link provisionConfigAndKey} states behind a reused config's path. */
+const REUSED_CONFIG_REMOVED_REMEDY =
+  " no longer exists; it was reconciled for reuse but has since been " +
+  "removed. Re-run the command so a fresh configuration is written, or " +
+  "restore the file.";
+
 /**
  * Provision a config and key pair, refusing to clobber existing files.
  * Re-runs the conflict gate (safe to call even if the caller skipped
@@ -166,12 +178,12 @@ export function provisionConfigAndKey(
     // written yet, so aborting here leaves no residue. Mirrors the online
     // hook's pre-write re-gate; the same-path guard already ran in
     // throwIfConflicts above.
-    if (detectFileConflicts([resolved.configPath]).length === 0)
-      throw new UsageError(
-        `the configuration file at ${resolved.configPath} no longer exists; ` +
-          "it was reconciled for reuse but has since been removed. Re-run the " +
-          "command so a fresh configuration is written, or restore the file.",
-      );
+    if (detectFileConflicts([resolved.configPath]).length === 0) {
+      const message = messageWithOperatorText`the configuration file at ${operatorSuppliedText(
+        resolved.configPath,
+      )}${REUSED_CONFIG_REMOVED_REMEDY}`;
+      throw keepOperatorSuppliedText(new UsageError(message.text), message);
+    }
   } else {
     saveConfig(resolved.configPath, spec);
   }
