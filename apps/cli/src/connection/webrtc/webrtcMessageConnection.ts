@@ -50,6 +50,9 @@ import type { RTCDataChannel } from "werift";
  *   `weriftPeer.ts`), which is the peer having the bytes. This is the
  *   final-frame loss the delivery contract in docs/COMMUNICATION.md ("Message
  *   delivery and teardown") exists to prevent.
+ *
+ *   Either half of a clean close then closes the data channel and waits for
+ *   that close to complete; the why is on `closeChannel`.
  */
 
 /**
@@ -98,9 +101,19 @@ const CLOSE_FLUSH_POLL_INTERVAL_MS = 10;
  */
 const SENTINEL_HANDOFF_TIMEOUT_MS = 2_000;
 
+/**
+ * Ceiling on the data channel's own close completing once this side has asked
+ * for it. That close is an SCTP stream reset the peer answers, so it costs a
+ * round trip -- tens of milliseconds against a browser peer on a loopback link
+ * -- and this bounds a peer that stops answering rather than sizing the normal
+ * case.
+ */
+const CHANNEL_CLOSE_TIMEOUT_MS = 2_000;
+
 export interface WebRtcMessageConnectionOptions {
   inactivityTimeoutMs?: number;
   closeFlushTimeoutMs?: number;
+  channelCloseTimeoutMs?: number;
   /** Per-bound overrides for the inbound reassembler; tests only. */
   inboundBounds?: ConstructorParameters<typeof BoundedInboundFrames>[0];
 }
@@ -138,6 +151,37 @@ async function drainOutbound(
 }
 
 /**
+ * Close the data channel and wait for that close to complete -- the peer having
+ * answered the stream reset, which is what takes the channel to `closed`.
+ *
+ * That wait is the delivery confirmation a browser partner gives: PeerJS takes
+ * its receipt from the channel closing, never from anything sent back to it,
+ * and handing the sentinel to the wire is not the peer having it. Both halves
+ * of a clean close wait here, the one this side asks for and the one it
+ * answers; an error teardown does not, the link being unusable already.
+ *
+ * Returns early once the peer connection is no longer up: a peer that has gone
+ * answers nothing, so waiting on it would spend the whole ceiling.
+ */
+async function closeChannel(
+  channel: RTCDataChannel,
+  session: Pick<WebRtcPeerSession, "isConnected">,
+  timeoutMs: number,
+): Promise<void> {
+  channel.close();
+  const deadline = Date.now() + timeoutMs;
+  while (
+    channel.readyState !== "closed" &&
+    session.isConnected() &&
+    Date.now() < deadline
+  ) {
+    await new Promise((resolve) =>
+      setTimeout(resolve, CLOSE_FLUSH_POLL_INTERVAL_MS),
+    );
+  }
+}
+
+/**
  * Wrap an open data channel as a {@link MessageConnection}. The inbound handler
  * is attached synchronously here, before anything else can run, so a frame the
  * peer sends the instant the channel opens is queued rather than dropped.
@@ -152,11 +196,14 @@ export function webRtcMessageConnection(
   const { channel } = session;
   const closeFlushTimeoutMs =
     options?.closeFlushTimeoutMs ?? DEFAULT_CLOSE_FLUSH_TIMEOUT_MS;
+  const channelCloseTimeoutMs =
+    options?.channelCloseTimeoutMs ?? CHANNEL_CLOSE_TIMEOUT_MS;
 
   return new QueuedMessageConnection(
     (controls) => {
       const encoder = new PeerJsFrameEncoder();
       const bounds = new BoundedInboundFrames(options?.inboundBounds);
+      let peerCloseRead = false;
 
       channel.onmessage = ({ data }) => {
         let outcome;
@@ -168,6 +215,7 @@ export function webRtcMessageConnection(
         }
         if (outcome.kind === "pending") return;
         if (outcome.kind === "close") {
+          peerCloseRead = true;
           // The peer's in-band clean close. `finish` rather than `fail`: the
           // sentinel travels the same ordered channel behind every frame the
           // peer already sent, so a final frame may still be queued here and
@@ -243,6 +291,11 @@ export function webRtcMessageConnection(
               SENTINEL_HANDOFF_TIMEOUT_MS,
             );
           }
+          // Phase three: the channel's own close, which is the delivery
+          // signal a browser partner reads (see `closeChannel`).
+          const cleanClose = closeOptions?.flush === true || peerCloseRead;
+          if (cleanClose && channel.readyState === "open")
+            await closeChannel(channel, session, channelCloseTimeoutMs);
           await session.close();
         },
         // No `setInboundFrameCap`: this transport bounds its inbound path with

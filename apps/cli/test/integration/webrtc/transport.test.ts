@@ -18,6 +18,7 @@ import {
 } from "../../../src/connection/webrtc/weriftPeer";
 import {
   PEERJS_CHUNK_MTU,
+  packCloseSentinel,
   packValue,
 } from "../../../src/connection/webrtc/peerjsWire";
 import { startBrokerProcess } from "../../signaling/brokerProcess";
@@ -529,6 +530,56 @@ test("an over-cap inbound frame fails the connection closed", async () => {
   expect(refusal).toBeInstanceOf(ConnectionError);
   expect(refusal?.kind).toBe("protocol");
   expect(refusal?.message).toContain("4096");
+}, 120_000);
+
+test("a peer that reads the in-band close closes the channel behind it", async () => {
+  // What a browser partner is waiting on: PeerJS reads delivery off its own
+  // channel closing, so answering the sentinel by tearing the peer connection
+  // down would leave that partner waiting out ICE instead. Driven from a raw
+  // session, so the close observed here is the reader's own.
+  const common = partyOptions(generateSharedSecret());
+  const [watcher, reader] = await Promise.all([
+    openWebRtcPeerSession({ ...common, role: "inviter" }),
+    openWebRtcMessageConnection({ ...common, role: "acceptor" }),
+  ]);
+  openConnections.push(reader);
+  try {
+    watcher.channel.send(Buffer.from(packCloseSentinel()));
+    const half = await reader.receive().then(
+      () => undefined,
+      (err: unknown) => err as ConnectionError,
+    );
+    expect(half?.kind).toBe("transport");
+
+    await vi.waitFor(() => expect(watcher.channel.readyState).toBe("closed"), {
+      timeout: 10_000,
+    });
+  } finally {
+    await watcher.close();
+  }
+}, 120_000);
+
+test("a clean close of this side's own closes the channel too", async () => {
+  // The other half of the same signal. Handing the sentinel to the wire is not
+  // the peer having it -- a peer connection torn down behind it reaches the
+  // partner as neither a sentinel nor a close -- so the channel's own close is
+  // what the partner ends its wait on.
+  const common = partyOptions(generateSharedSecret());
+  const [watcher, closer] = await Promise.all([
+    openWebRtcPeerSession({ ...common, role: "inviter" }),
+    openWebRtcMessageConnection({ ...common, role: "acceptor" }),
+  ]);
+  openConnections.push(closer);
+  try {
+    await closer.send({ tag: "final" });
+    await closer.close();
+
+    await vi.waitFor(() => expect(watcher.channel.readyState).toBe("closed"), {
+      timeout: 10_000,
+    });
+  } finally {
+    await watcher.close();
+  }
 }, 120_000);
 
 test("closing after the partner has vanished still returns, on the flush ceiling", async () => {

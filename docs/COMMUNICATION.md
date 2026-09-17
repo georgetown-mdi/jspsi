@@ -158,7 +158,7 @@ The second way is a delivering close: the send only buffers locally, so a messag
 Both WebRTC implementations therefore wait for evidence the peer has the frame before the close resolves:
 
 - the browser waits for the peer's own close of the data channel, which the peer performs on reading the close signal behind every frame;
-- a CLI process, which cannot lean on the peer's teardown at all, waits for the peer to acknowledge the data and only then tears down;
+- a CLI process, which cannot lean on the peer's teardown at all, waits for the peer to acknowledge the data, then closes the data channel and waits for that close to complete before tearing down - the browser reads its own receipt off that close;
 - neither may wait on the channel's buffered-byte counter reaching zero: that counter is not a delivery signal, and closing on it loses frames (see [WEBRTC_TRANSPORT.md](spec/WEBRTC_TRANSPORT.md#the-clean-close), which specifies both).
 
 The WebRTC case is the one that looks like a race when reviewed in isolation: the last operation a party performs is a non-blocking send immediately followed by a close, which appears to drop the frame. It does not, provided the close delivers - so a clean WebRTC close must not be shortcut into an abrupt connection teardown that bypasses it. The file-based channels have a different hazard: because the sender is responsible for deleting its own files, a send-then-immediately-close can delete the terminal file before the receiver polls. The drain in close() is what closes that gap.

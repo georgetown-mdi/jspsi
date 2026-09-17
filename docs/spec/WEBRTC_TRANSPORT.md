@@ -243,8 +243,25 @@ acknowledgement and then tears down:
 1. Wait until the peer has acknowledged every byte already handed to the
    channel, then
 2. send the sentinel, wait until it has been transmitted (not acknowledged -- a
-   peer closes on reading it and stops acknowledging at exactly that point), and
-   only then tear down.
+   peer closes on reading it and stops acknowledging at exactly that point),
+   then
+3. close the data channel, wait for that close to complete, and only then tear
+   down.
+
+Step 3 is what the partner's own wait ends on, and it runs on both halves of a
+clean close -- the one this side asks for and the one it answers on reading the
+peer's sentinel. The channel's close is the whole of the delivery signal a
+browser partner gets: PeerJS takes a receipt off its channel closing, never off
+anything sent back to it. A peer connection torn down under a still-open channel
+reaches that partner as no close at all -- and as no sentinel either, since
+handing the sentinel to the wire is not the peer having it -- leaving it to wait
+out ICE. Waiting for the channel's close to complete is the confirmation that
+everything ahead of it arrived. The wait is bounded, and it ends early when the
+peer connection is already no longer up -- which covers a partner detected as
+gone before the close began. It is not the usual reading of a partner that
+vanishes: werift leaves the `connected` state about thirty seconds after a peer
+disappears, so a partner lost during the teardown itself costs the whole
+ceiling.
 
 The condition in step 1 is the SCTP association's send and unacknowledged queues
 both being empty. It is not the channel's `bufferedAmount`: that
@@ -287,6 +304,19 @@ receipt, the same behavior staging had before this discrimination existed; the
 close remains no proof of delivery. So the no-live-peer exit is taken for a
 channel that starts closing on a link already gone with no peer close in hand; a
 link the peer's own close ended is the peer's receipt.
+
+A CLI partner reaches the same reading by the other route. It closes the data
+channel rather than ending the link through signaling, so the channel starts
+closing on a link that is still up and that PeerJS has not ended -- a live link
+with no teardown of this side's behind it, which the reading takes as the peer's
+close. Both routes are measured: the browser pair in
+`apps/web/test/browser/webrtcCloseDelivery.test.ts`, and the CLI-to-browser pair
+by the live leg.
+
+A partner that closes FIRST leaves no wait to take at all: PeerJS ends the
+connection on reading the sentinel, so this side's own close finds it already
+ended and starts no drain. That is silence rather than an exit -- the operator
+is told nothing, which is what the peer's close means here too.
 
 A completed `close` arriving with no `closing` before it is still read as the
 peer's, because a link state read after a close has completed no longer says
@@ -358,30 +388,32 @@ The two waits above are specified against what each stack exposes, not against a
 duration. What they cost when a CLI party and a browser party close the same
 healthy exchange is measured by the live leg
 ([docs/TESTING.md](../TESTING.md#live-webrtc-leg)), which prints both numbers on
-every run and gates on neither. A tracked limit, in other words: the numbers are
-here to be read across runs, and any bound drawn from them is a later decision
-taken against the spread rather than against one measurement.
+every run. The leg gates on the browser party's exit, read against which party
+closed first, rather than on either duration, and holds that party's wait under a ceiling set between the two
+outcomes it separates: a wait the partner's close ends costs milliseconds, and
+one left to end on ICE giving up costs 15 s or more. The durations stay a
+tracked limit -- read across runs, with any tighter bound a later decision taken
+against the spread rather than against one measurement.
 
 | Side | What it waits for | Measured |
 | ---- | ----------------- | -------- |
-| The CLI party | The peer's acknowledgement of every frame, then the sentinel onto the wire | under 50 ms |
-| The browser party | The peer to close the data channel | 15-18 s, ending on the no-live-peer exit rather than on the peer's close |
+| The CLI party | The data channel's own close completing, once the peer has the frames ahead of it | under 100 ms |
+| The browser party | The peer to close the data channel | under 50 ms, ending on the peer's close |
 
-Conditions, over four runs: two parties on one machine over a loopback host
+Conditions, over ten runs: two parties on one machine over a loopback host
 candidate, six records between them, Chromium against the shipped CLI
-transport, in the development container. A wide-area link and a real dataset
-move the CLI's number with the data still unacknowledged; they do not move the
-browser's, which is not a function of the data.
+transport, in the development container. The browser party usually reaches its
+close first here, so the CLI party's number is usually the half that answers a
+sentinel; the half that sends one adds the drain to acknowledgement and the
+sentinel ahead of the same channel close, and moves with the data still
+unacknowledged on a wide-area link and a real dataset. Neither moves the browser
+party's number, which is not a function of the data. Both are round-trip waits
+between two processes on one machine, so both rise with load on it -- a
+contended container has put either several times higher.
 
-The browser's number is the asymmetry: a CLI party tears its session down as
-soon as the sentinel has been handed to the wire, and the browser peer's wait
-does not end on a close of the peer's. It ends on the no-live-peer exit, once
-ICE gives up on a peer that has stopped answering. So a completed
-CLI-to-browser exchange spends about sixteen seconds in the drain and raises
-the browser operator's "the connection closed before the partner could confirm"
-notice, on a run whose result is already correct and already on screen. Neither
-the result nor the CLI party's copy is in doubt: the exchange completed on both
-sides, and it is the close signal alone that is absent.
+So a completed CLI-to-browser exchange leaves the browser operator no notice
+about a partner who may not have taken the final frame: the CLI party's close
+either ends the wait or precedes it, and neither is a doubt.
 
 ## ICE
 
@@ -471,6 +503,7 @@ condition holds.
 | Parked receive | 1 h | Peer silence on an open channel; it bounds the peer's single-threaded PSI compute, which sends no keepalive while it runs |
 | Close drain | 5 min | The clean close's wait above -- the CLI's acknowledgement drain, the web's wait for the peer's close -- sized from the largest admissible frame and the measured send rate |
 | Sentinel hand-off | 2 s | Getting the close sentinel itself onto the wire |
+| Channel close | 2 s | The data channel's own close completing on a clean close -- the peer answering the stream reset. A partner that goes during the teardown spends it whole, ICE being slower than this to call the link dead; reaching it closes the session anyway |
 | ICE statistics | 2 s | Collecting the candidate report a failure or an open channel is described by; expiring costs the description, not the outcome |
 | Signaling certificate check | 5 s | The handshake that answers whether a `wss://` socket that failed before registering failed on its certificate; a socket that drops after registering is not asked about, having completed that handshake already, and neither is one on a run configured for an environment proxy, whose dial the handshake does not follow |
 

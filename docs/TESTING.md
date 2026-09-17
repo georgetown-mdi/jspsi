@@ -474,11 +474,17 @@ a failed assertion on an association table, on the identity read off the agreed
 terms, or on the close outcome. A browser that will not launch fails the vitest
 session before any test runs, which is distinct from both.
 
-The leg also measures what each side's clean close waits, and asserts no bound
-on either number: they are recorded as a tracked limit in
-[docs/spec/WEBRTC_TRANSPORT.md](spec/WEBRTC_TRANSPORT.md#the-clean-close), to be
-read across runs before anything gates on them. Each run prints them on one
-`[live-webrtc]` line.
+The leg also measures what each side's clean close waits, printing both numbers
+on one `[live-webrtc]` line. It asserts the browser party's exit against the
+ordering the run took, which it reads off the connection the moment before that
+party closes: where the browser party closes first the CLI party's close has to
+end the wait, and where the CLI party closes first that close has to be already
+read, leaving no wait to take. Either way it holds the browser party's wait
+under a ceiling set between those endings and the one they replace, which costs
+15 s or more. The
+durations themselves stay a tracked limit recorded in
+[docs/spec/WEBRTC_TRANSPORT.md](spec/WEBRTC_TRANSPORT.md#the-clean-close), read
+across runs before anything tighter gates on them.
 
 ## What a run did not cover
 
