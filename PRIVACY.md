@@ -1,7 +1,7 @@
 ---
 title: "Privacy Statement"
 review_owner: "psilink maintainers"
-last_reviewed: "2026-09-05"
+last_reviewed: "2026-09-17"
 ---
 
 # Privacy statement
@@ -42,7 +42,11 @@ This is the deployment supported for production use.
 - **What the project operates,** because this deployment runs on project-controlled infrastructure, and what it can therefore observe:
   - **Web server request logs** for serving the application: client IP address, timestamp, requested path, and user agent. These record that a browser loaded the application, not anything about an exchange.
   - **The bundled peer-coordination server**, which brokers the browser-to-browser connection: the derived rendezvous identifiers, connection timing, and client IP address. It relays opaque setup messages only and never sees data-channel content (see [docs/SECURITY_DESIGN.md](docs/SECURITY_DESIGN.md#channel-security)).
-- **What it does not do:** no accounts, no cookies, no analytics or third-party tracking scripts, and no third-party content delivery. The application makes no request to any host other than the supporting services named below.
+- **One third party sits in front of that infrastructure.** The hosted deployment is served through Cloudflare, which terminates the public TLS session and re-encrypts the leg to the project's own terminator. Cloudflare holds a request log of everything it forwards -- the same delivery metadata as above -- under its own retention rather than the project's.
+- **How long the project keeps those logs: 90 days**, verified 2026-09-17 by reading the retention setting recorded for the deployed environments and by the deployment run that installed the on-instance bound. Two mechanisms hold that window, and it covers what they reach rather than every log the deployment produces:
+  - **Under the window:** the web server request log and the coordination server's process output. The instance's own copies are rotated daily under a 90-day maximum age (see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md#log-retention-on-the-instance)), and the copies streamed to CloudWatch Logs expire under that log group's 90-day retention. The process's standard-error stream is not streamed, so the rotation alone bounds it.
+  - **On a different clock, and not claimed under the window:** the health agent's log, which sits in its own namespace under a 7-day retention; the Elastic Beanstalk deployment logs in the deployment bucket, which hold build and deploy output rather than request lines or client addresses and carry no expiry rule; and Cloudflare's request logs, kept under Cloudflare's retention.
+- **What it does not do:** no accounts, no cookies, no analytics or third-party tracking scripts, and no script, style, or font loaded from a third-party host. The application makes no request to any host other than the supporting services named below.
 - **What it stores stays on your device.** A managed (recurring) exchange keeps its record -- the partnership label, the agreed column shape, the rendezvous locator, the schedule, the run outcomes, and the rotating shared secret -- in browser storage. None of it is sent to a server. Deleting the managed exchange removes it (see [docs/MANAGED_EXCHANGE.md](docs/MANAGED_EXCHANGE.md#deleting-a-managed-exchange)). The at-rest threat model for that stored secret is in [docs/SECURITY_DESIGN.md](docs/SECURITY_DESIGN.md#hosted-at-rest-threat-model-for-managed-exchanges).
 
 ## What supporting services can observe
