@@ -11,13 +11,10 @@
 // `env -C <tree> <command>` and `git -C <tree> <args>` scope the call and leave
 // the session where it stands, which is what the refusal names.
 //
-// What it refuses: a command whose FIRST token is `cd` and whose destination
-// lies inside a single worktree under a `.claude/worktrees/` root. zsh's `cd`
-// has two forms and this reads both. `cd <target>` moves to the target,
-// resolved against the directory of the call. `cd <old> <new>` moves to the
-// directory of the call with the first occurrence of <old> in its pathname
-// replaced by <new> -- a literal substring substitution, not a path-component
-// one -- which reaches a sibling worktree without naming it: from
+// What it refuses: a command whose FIRST token is `cd` and whose destination --
+// either of zsh's two `cd` forms, resolved in lib/shell.mjs -- lies inside a
+// single worktree under a `.claude/worktrees/` root. The two-argument form
+// reaches a sibling worktree without naming it: from
 // `.claude/worktrees/agent-a`, `cd a b` lands in `.claude/worktrees/agent-b`.
 //
 // What it allows by design:
@@ -38,20 +35,11 @@
 // unexpected failure here falls through to exit 0 (fail open) so a bug in this
 // hook can never wedge every Bash command.
 
-import { isAbsolute, resolve } from "node:path";
+import { resolve } from "node:path";
 
 import { commandOf, eventCwd, eventForTools } from "./lib/event.mjs";
-import { splitPipelines, splitStages, tokenize } from "./lib/shell.mjs";
+import { leadingCdDestination } from "./lib/shell.mjs";
 import { isInside, worktreeContext } from "./lib/worktrees.mjs";
-
-// Options `cd` takes in front of its target. A lone `-` is not one of them: it
-// names the previous directory, which this hook cannot resolve.
-const CD_OPTIONS = /^(?:--|-[A-Za-z]+)$/;
-
-// A `$` or a `~` this hook does not expand. The two-argument form substitutes
-// an argument's exact text into a pathname, so an unexpanded one would compute
-// a destination the shell never visits.
-const UNEXPANDED = /[$~]/;
 
 function block(tree) {
   process.stderr.write(
@@ -63,28 +51,6 @@ function block(tree) {
       "for a git question about that tree.\n",
   );
   process.exit(2);
-}
-
-/**
- * The directory a command's leading `cd` moves to, from the resolved directory
- * `from` of the call, or null when the command does not open with a `cd`, that
- * `cd` names no target (a bare `cd`, which goes home), it holds more arguments
- * than either form takes (which zsh refuses), or its destination cannot be
- * computed here.
- */
-function leadingCdDestination(command, from) {
-  const leading = splitStages(splitPipelines(command)[0])[0];
-  const tokens = tokenize(leading ?? "");
-  if (tokens[0] !== "cd") return null;
-  const args = tokens.slice(1).filter((token) => !CD_OPTIONS.test(token));
-  if (args.length === 1) return resolve(from, args[0]);
-  if (args.length !== 2) return null;
-
-  const [old, replacement] = args;
-  if (args.some((arg) => UNEXPANDED.test(arg))) return null;
-  if (!from.includes(old)) return null;
-  const destination = from.replace(old, () => replacement);
-  return isAbsolute(destination) ? resolve(destination) : null;
 }
 
 function main() {

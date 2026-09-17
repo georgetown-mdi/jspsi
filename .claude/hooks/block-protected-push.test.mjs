@@ -1,7 +1,7 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -28,9 +28,12 @@ function verdict(command) {
 }
 
 // A throwaway repo on `branch`, optionally with an upstream resolving @{push} to
-// `origin/<pushTarget>` -- built with plumbing so nothing contacts a network.
-function makeRepo({ branch, pushTarget }) {
-  const dir = mkdtempSync(join(tmpdir(), "protected-push-"));
+// `origin/<pushTarget>` -- built with plumbing so nothing contacts a network. It
+// lands at `at` when the caller needs a known path, and in a fresh temporary
+// directory otherwise.
+function makeRepo({ branch, pushTarget, at }) {
+  const dir = at ?? mkdtempSync(join(tmpdir(), "protected-push-"));
+  mkdirSync(dir, { recursive: true });
   const git = (...args) =>
     execFileSync("git", args, { cwd: dir, encoding: "utf8" });
   git("init", "-q", "-b", branch);
@@ -184,6 +187,108 @@ describe("block-protected-push hook", () => {
       tool_name: "Bash",
       tool_input: { command: "git push" },
       cwd: dir,
+    });
+    expect(status).toBe(2);
+    expect(stderr).toContain("no resolvable upstream");
+  });
+
+  it("allows a bare push whose redirected tree is on a feature branch", () => {
+    const standing = makeRepo({ branch: "staging" });
+    const target = makeRepo({ branch: "feature", pushTarget: "feature" });
+    dirs.push(standing, target);
+    for (const command of [
+      `git -C ${target} push`,
+      `cd ${target} && git push`,
+    ]) {
+      const { status, stderr } = runHook({
+        tool_name: "Bash",
+        tool_input: { command },
+        cwd: standing,
+      });
+      expect(status, `${command}: ${stderr}`).toBe(0);
+    }
+  });
+
+  it("blocks a bare push whose redirected tree is on a protected branch", () => {
+    const standing = makeRepo({ branch: "feature", pushTarget: "feature" });
+    const target = makeRepo({ branch: "staging" });
+    dirs.push(standing, target);
+    for (const command of [
+      `git -C ${target} push`,
+      `cd ${target} && git push`,
+    ]) {
+      const { status, stderr } = runHook({
+        tool_name: "Bash",
+        tool_input: { command },
+        cwd: standing,
+      });
+      expect(status, command).toBe(2);
+      expect(stderr).toContain("protected branch 'staging'");
+    }
+  });
+
+  // zsh's `cd <old> <new>` substitutes into the pathname of the directory the
+  // call stands in, reaching a sibling tree without naming it.
+  it("reads the substituting form of a leading cd", () => {
+    const parent = mkdtempSync(join(tmpdir(), "protected-push-"));
+    dirs.push(parent);
+    const standing = join(parent, "staging-tree");
+    makeRepo({ branch: "staging", at: standing });
+    makeRepo({
+      branch: "feature",
+      pushTarget: "feature",
+      at: join(parent, "feature-tree"),
+    });
+    const { status, stderr } = runHook({
+      tool_name: "Bash",
+      tool_input: { command: "cd staging feature && git push" },
+      cwd: standing,
+    });
+    expect(status, stderr).toBe(0);
+  });
+
+  // Real git applies each `-C` from where the one before it landed, and an empty
+  // one stays put. Both are measured here rather than modelled, along with git
+  // refusing the attached `-C=<path>` spelling the hook skips -- a push written
+  // that way never reaches a branch at all.
+  it("chains -C redirects the way git does", () => {
+    const standing = makeRepo({ branch: "staging" });
+    const target = makeRepo({ branch: "feature", pushTarget: "feature" });
+    dirs.push(standing, target);
+    const branchOf = (args) =>
+      execFileSync("git", [...args, "branch", "--show-current"], {
+        cwd: standing,
+        encoding: "utf8",
+      }).trim();
+
+    const chained = ["-C", dirname(target), "-C", basename(target)];
+    expect(branchOf(chained)).toBe("feature");
+    expect(branchOf(["-C", ""])).toBe("staging");
+
+    const push = (args) =>
+      runHook({
+        tool_name: "Bash",
+        tool_input: { command: `git ${args.join(" ")} push` },
+        cwd: standing,
+      });
+    expect(push(chained).status).toBe(0);
+    expect(push(["-C", "''"]).status).toBe(2);
+
+    const attached = spawnSync(
+      "git",
+      [`-C=${target}`, "branch", "--show-current"],
+      { cwd: standing, encoding: "utf8" },
+    );
+    expect(attached.status).not.toBe(0);
+  });
+
+  it("keeps the bare-push refusal when the redirected tree is unreadable", () => {
+    const standing = makeRepo({ branch: "feature", pushTarget: "feature" });
+    dirs.push(standing);
+    const { status, stderr } = runHook({
+      tool_name: "Bash",
+      tool_input: { command: `git -C ${join(standing, "gone")} push` },
+      cwd: standing,
     });
     expect(status).toBe(2);
     expect(stderr).toContain("no resolvable upstream");

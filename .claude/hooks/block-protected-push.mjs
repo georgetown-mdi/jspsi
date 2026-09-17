@@ -10,6 +10,14 @@
 // unattended agent instant local feedback instead of a wasted network round-trip
 // the server would reject anyway -- it is defense-in-depth, not the wall.
 //
+// Which tree it asks: a push naming no refspec resolves against a branch, so the
+// verdict depends on where the push runs. That is not always the directory the
+// call was recorded from -- `git -C <tree> push` and a leading `cd <tree>` both
+// send it elsewhere, and a session standing on staging pushes a feature branch
+// that way. Both redirects are read here, the `cd` through the same resolver
+// block-worktree-cd.mjs uses; a redirect neither form covers, and a tree git
+// cannot answer for, leave the bare push refused as before.
+//
 // Why a hook and not an `ask` rule: the container runs in bypassPermissions mode,
 // which skips `ask` prompts (and an `ask` would stall an unattended agent anyway).
 // PreToolUse hooks run in every permission mode, including bypass, so the gate
@@ -18,8 +26,15 @@
 // in this hook can never wedge every Bash command -- branch protection catches a
 // push this hook misses.
 
+import { resolve } from "node:path";
+
 import { commandOf, eventCwd, eventForTools } from "./lib/event.mjs";
-import { git, splitSegments, tokenize } from "./lib/shell.mjs";
+import {
+  git,
+  leadingCdDestination,
+  splitSegments,
+  tokenize,
+} from "./lib/shell.mjs";
 
 const PROTECTED = new Set(["staging", "main"]);
 
@@ -41,10 +56,11 @@ const VALUE_GLOBALS = new Set([
   "--namespace",
 ]);
 
-// If this segment invokes `git push`, return the argument list after `push`;
-// otherwise null. Requires git to be the command word (after leading env
-// assignments and simple wrappers) so `echo git push ...` is not mistaken for one.
-function gitPushArgs(tokens) {
+// If this segment invokes `git push`, return the `-C` redirects it holds and
+// the argument list after `push`; otherwise null. Requires git to be the command
+// word (after leading env assignments and simple wrappers) so `echo git push ...`
+// is not mistaken for one.
+function gitPushInvocation(tokens) {
   let i = 0;
   while (i < tokens.length) {
     const t = tokens[i];
@@ -62,11 +78,13 @@ function gitPushArgs(tokens) {
   if (!cmd) return null;
   if (cmd.replace(/^.*\//, "") !== "git") return null;
   i++;
+  const chdirs = [];
   while (i < tokens.length && tokens[i].startsWith("-")) {
+    if (tokens[i] === "-C" && i + 1 < tokens.length) chdirs.push(tokens[i + 1]);
     i += VALUE_GLOBALS.has(tokens[i]) ? 2 : 1;
   }
   if (tokens[i] !== "push") return null;
-  return tokens.slice(i + 1);
+  return { chdirs, args: tokens.slice(i + 1) };
 }
 
 // Destination branch names targeted by an explicit refspec, or null when the push
@@ -104,6 +122,15 @@ function explicitDestinations(args) {
   });
 }
 
+// The working tree a `git push` runs in: each `-C` applied from where the one
+// before it landed, starting at the directory the command already stands in.
+// Real git chains its `-C` redirects that way -- `-C a -C b` lands in `a/b`, and
+// `-C ''` stays put -- measured against real git in the test beside this file,
+// which also covers git rejecting the attached `-C=<path>` spelling this skips.
+function pushTree(standing, chdirs) {
+  return chdirs.reduce((dir, next) => resolve(dir, next), standing);
+}
+
 // Decide whether a bare `git push` (no refspec) would land on a protected branch.
 function barePushVerdict(cwd) {
   const current = git(["symbolic-ref", "--quiet", "--short", "HEAD"], { cwd });
@@ -132,11 +159,13 @@ function main() {
   if (event === null) process.exit(0); // unreadable, or another tool
   const command = commandOf(event);
   if (command === null || !command.includes("push")) process.exit(0);
-  const cwd = eventCwd(event) ?? process.cwd();
+  const cwd = resolve(eventCwd(event) ?? process.cwd());
+  const standing = leadingCdDestination(command, cwd) ?? cwd;
 
   for (const segment of splitSegments(command)) {
-    const args = gitPushArgs(tokenize(segment));
-    if (!args) continue;
+    const invocation = gitPushInvocation(tokenize(segment));
+    if (invocation === null) continue;
+    const { args } = invocation;
     // --all / --mirror push (or mirror) every ref, including staging and main, and
     // hold no refspec to inspect -- so they would otherwise fall through to
     // barePushVerdict and be allowed from a feature branch. Refuse them outright; a
@@ -148,7 +177,7 @@ function main() {
     }
     const dests = explicitDestinations(args);
     if (dests === null) {
-      const verdict = barePushVerdict(cwd);
+      const verdict = barePushVerdict(pushTree(standing, invocation.chdirs));
       if (verdict) block(verdict);
       continue;
     }
