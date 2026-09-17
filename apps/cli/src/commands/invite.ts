@@ -391,7 +391,9 @@ export async function validateInvite(params: {
     );
     if (detectFileConflicts([options.keyFile]).length > 0)
       log.warn(
-        `a key file already exists at ${options.keyFile}; it will be ` +
+        `a key file already exists at ${redactAndRenderOperatorSuppliedText(
+          operatorSuppliedText(options.keyFile),
+        )}; it will be ` +
           "overwritten by the rotated token if the partner accepts. Delete it " +
           "or pass --key-file if reusing that secret was not intended.",
       );
@@ -648,7 +650,9 @@ export async function validateInvite(params: {
         `--linkage-strategy ${linkageStrategy} has no effect when the linkage ` +
           "terms come from an existing configuration file; the file's " +
           `linkage_strategy (${configTerms.linkageStrategy}) is used instead. ` +
-          `Edit linkage_strategy in ${options.configFile} to change it.`,
+          `Edit linkage_strategy in ${redactAndRenderOperatorSuppliedText(
+            operatorSuppliedText(options.configFile),
+          )} to change it.`,
       );
     // The identity is one of those terms, so it is governed by the same rule:
     // the config supplies the label this invitation is minted under, and a flag
@@ -693,7 +697,9 @@ export async function validateInvite(params: {
       // passed an input expecting it to define the terms reads the refusal it can
       // raise against the right source.
       log.info(
-        `a configuration file at ${options.configFile} is present; deriving ` +
+        `a configuration file at ${redactAndRenderOperatorSuppliedText(
+          operatorSuppliedText(options.configFile),
+        )} is present; deriving ` +
           "the invitation's linkage terms from it and checking the input file " +
           "against those terms (the input does not redefine them). Pass " +
           "--config-file pointing at a new path to infer terms from the input " +
@@ -719,8 +725,9 @@ export async function validateInvite(params: {
       );
     } else {
       log.info(
-        `a configuration file at ${options.configFile} is present; deriving ` +
-          "the invitation's linkage terms from it.",
+        `a configuration file at ${redactAndRenderOperatorSuppliedText(
+          operatorSuppliedText(options.configFile),
+        )} is present; deriving ` + "the invitation's linkage terms from it.",
       );
     }
 
@@ -1068,13 +1075,19 @@ export async function handler(argv: Arguments): Promise<void> {
 
         printInvitation(ready.invitation, undefined);
         log.info(
-          `derived the invitation's linkage terms from ${ready.configPath} and ` +
-            `wrote the key file to ${keyPath} (the invitation expires at ` +
+          `derived the invitation's linkage terms from ${redactAndRenderOperatorSuppliedText(
+            operatorSuppliedText(ready.configPath),
+          )} and ` +
+            `wrote the key file to ${redactAndRenderOperatorSuppliedText(
+              operatorSuppliedText(keyPath),
+            )} (the invitation expires at ` +
             `${ready.expires}). Keep the key file private.`,
         );
         log.info(offlineAbandonNotice(keyPath));
         log.info(
-          `ensure the connection block in ${ready.configPath} is filled in ` +
+          `ensure the connection block in ${redactAndRenderOperatorSuppliedText(
+            operatorSuppliedText(ready.configPath),
+          )} is filled in ` +
             `before running 'psilink exchange'. ${CONNECTION_BLOCK_NOTICE}`,
         );
         return;
@@ -1089,13 +1102,18 @@ export async function handler(argv: Arguments): Promise<void> {
 
       printInvitation(ready.invitation, undefined);
       log.info(
-        `wrote config to ${configPath} and key file to ${keyPath} (the ` +
+        `wrote config to ${redactAndRenderOperatorSuppliedText(
+          operatorSuppliedText(configPath),
+        )} and key file to ${redactAndRenderOperatorSuppliedText(
+          operatorSuppliedText(keyPath),
+        )} (the ` +
           `invitation expires at ${ready.expires}). Keep the key file private.`,
       );
       log.info(offlineAbandonNotice(keyPath));
       log.info(
-        `fill in the connection block in ${configPath} before running ` +
-          `'psilink exchange'. ${CONNECTION_BLOCK_NOTICE}`,
+        `fill in the connection block in ${redactAndRenderOperatorSuppliedText(
+          operatorSuppliedText(configPath),
+        )} before running ` + `'psilink exchange'. ${CONNECTION_BLOCK_NOTICE}`,
       );
     });
   } finally {
@@ -1248,7 +1266,9 @@ export function onlineWaitInvalidationNotice(
 export function offlineAbandonNotice(keyPath: string): string {
   return (
     "To withdraw this invitation before it expires, delete the key file " +
-    `(${keyPath}); without it the invitation can no longer complete a ` +
+    `(${redactAndRenderOperatorSuppliedText(
+      operatorSuppliedText(keyPath),
+    )}); without it the invitation can no longer complete a ` +
     "handshake. Delete only the key file -- leaving any configuration file in " +
     "place keeps an existing recurring exchange undisturbed."
   );

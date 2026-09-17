@@ -8,12 +8,14 @@ import {
   generateSigningIdentity,
   getLogger,
   holdsPrivateKeyMaterial,
+  keepOperatorSuppliedText,
   MAX_TEXT_LENGTH,
   messageWithOperatorText,
   operatorSuppliedText,
   PRIVATE_KEY_IDENTITY_MESSAGE,
   reasonTermsCannotStateIdentity,
   redactAndDisplayPartyIdentity,
+  redactAndRenderOperatorSuppliedText,
   sanitizeErrorForDisplay,
   serializeCertificate,
   TEXT_CONTROL_CHAR_MESSAGE,
@@ -277,7 +279,9 @@ export async function resolveSigningIdentity(
   } catch (err) {
     if (!input.force) throw err;
     input.log.warn(
-      `the existing signing identity at ${input.identityPath} could not be ` +
+      `the existing signing identity at ${redactAndRenderOperatorSuppliedText(
+        operatorSuppliedText(input.identityPath),
+      )} could not be ` +
         `read (${sanitizeErrorForDisplay(err)}); --force ` +
         "regenerates it.",
     );
@@ -362,12 +366,12 @@ export async function resolveSigningIdentity(
         }
         // The winner's file disappeared between our failed create and our read,
         // so the path is free again; retry unless the flap persists.
-        if (attempt >= MAX_CREATE_ATTEMPTS)
-          throw new UsageError(
-            `the signing identity file at ${input.identityPath} is being ` +
-              "created and removed concurrently; re-run the command once the " +
-              "conflicting process has finished.",
-          );
+        if (attempt >= MAX_CREATE_ATTEMPTS) {
+          const message = messageWithOperatorText`the signing identity file at ${operatorSuppliedText(
+            input.identityPath,
+          )} is being created and removed concurrently; re-run the command once the conflicting process has finished.`;
+          throw keepOperatorSuppliedText(new UsageError(message.text), message);
+        }
       }
     }
   }
@@ -388,7 +392,11 @@ function report(
   fingerprint: string,
 ): void {
   const cert = identity.certificate;
-  log.info(`${action} signing identity (${cert.algorithm}) at ${identityPath}`);
+  log.info(
+    `${action} signing identity (${cert.algorithm}) at ${redactAndRenderOperatorSuppliedText(
+      operatorSuppliedText(identityPath),
+    )}`,
+  );
   log.info(`  Identity: ${cert.identity}`);
   // The regeneration warning is a diagnostic, so it goes to stderr via log.warn
   // (not an ungated write): it obeys --log-level like every other warning, so a
@@ -415,6 +423,11 @@ function report(
   // terminal it follows the "Share the fingerprint" instruction pointing at it.
   console.log(fingerprint);
 }
+
+/** What the export refusal states behind the path it was asked to write. */
+const EXPORT_OVER_IDENTITY_REMEDY =
+  " is the signing identity file itself; refusing to overwrite the private " +
+  "key with the public certificate. Choose a different path for the export.";
 
 export async function handler(argv: Arguments): Promise<void> {
   // This command resolves and applies the log level before the logger exists, so
@@ -485,20 +498,20 @@ export async function handler(argv: Arguments): Promise<void> {
       // writeFileAtomic finishes with rename(), and renaming onto a symlink path
       // replaces the link itself, leaving the real target intact, so that variant
       // is non-destructive even when the lexical check misses it.
-      if (path.resolve(exportPath) === path.resolve(identityPath))
-        throw new UsageError(
-          `--export-certificate path ${exportPath} is the signing identity ` +
-            "file itself; refusing to overwrite the private key with the " +
-            "public certificate. Choose a different path for the export.",
-        );
+      if (path.resolve(exportPath) === path.resolve(identityPath)) {
+        const message = messageWithOperatorText`--export-certificate path ${operatorSuppliedText(
+          exportPath,
+        )}${EXPORT_OVER_IDENTITY_REMEDY}`;
+        throw keepOperatorSuppliedText(new UsageError(message.text), message);
+      }
       try {
         // Public, shareable artifact: world-readable and atomic, NOT owner-only.
         writeFileAtomic(exportPath, serializeCertificate(identity.certificate));
       } catch (err) {
-        throw new UsageError(
-          `could not write certificate to ${exportPath}: ` +
-            (err instanceof Error ? err.message : String(err)),
-        );
+        const message = messageWithOperatorText`could not write certificate to ${operatorSuppliedText(
+          exportPath,
+        )}: ${err instanceof Error ? err.message : String(err)}`;
+        throw keepOperatorSuppliedText(new UsageError(message.text), message);
       }
     }
 

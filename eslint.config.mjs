@@ -231,14 +231,6 @@ const noUnmarkedOperatorPath = [
  * exempts the file from a rule it already satisfies.
  */
 export const UNMARKED_OPERATOR_PATH_FILES = [
-  "apps/cli/src/commands/accept.ts",
-  "apps/cli/src/commands/exchange.ts",
-  "apps/cli/src/commands/fingerprint.ts",
-  "apps/cli/src/commands/init.ts",
-  "apps/cli/src/commands/invite.ts",
-  "apps/cli/src/commands/provision.ts",
-  "apps/cli/src/commands/verifyReceipt.ts",
-  "apps/cli/src/commands/zeroSetup.ts",
   "apps/cli/src/connection/frameSizeGuard.ts",
   "apps/cli/src/connection/listingGuard.ts",
   "apps/cli/src/connection/sftpAdapterWarnings.ts",

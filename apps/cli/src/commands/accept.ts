@@ -9,6 +9,8 @@ import {
   disclosedColumnNames,
   getLogger,
   parseExchangeSpec,
+  keepOperatorSuppliedText,
+  messageWithOperatorText,
   rawDecodeErrorDescription,
   operatorSuppliedText,
   redactAndRenderOperatorSuppliedText,
@@ -770,6 +772,17 @@ function reconciliationSources(comparesConnectionUrl: boolean): {
     : { against: "the invitation", retryWith: "the same invitation" };
 }
 
+/** What both {@link readExistingAcceptConfig} refusals state ahead of the path. */
+const EXISTING_CONFIG_PREAMBLE = "a configuration file already exists at ";
+
+/**
+ * What both {@link readExistingAcceptConfig} refusals state behind what they
+ * could not do with the file, ahead of the sources to retry with.
+ */
+const RECONCILE_RETRY_REMEDY =
+  " Fix or remove it, or pass --config-file to write elsewhere, then retry " +
+  "with";
+
 /**
  * The configuration already at `configPath`, parsed, or `undefined` where no
  * file is there. Throws a {@link UsageError} naming the path and what to do
@@ -802,22 +815,20 @@ function readExistingAcceptConfig(
       `a configuration file at ${configPath}`,
     );
   } catch {
-    throw new UsageError(
-      `a configuration file already exists at ${configPath} but is not valid ` +
-        `YAML, so it cannot be compared against ${against}. Fix or remove it, ` +
-        `or pass --config-file to write elsewhere, then retry with ${retryWith}.`,
-    );
+    const message = messageWithOperatorText`${EXISTING_CONFIG_PREAMBLE}${operatorSuppliedText(
+      configPath,
+    )} but is not valid YAML, so it cannot be compared against ${against}.${RECONCILE_RETRY_REMEDY} ${retryWith}.`;
+    throw keepOperatorSuppliedText(new UsageError(message.text), message);
   }
   try {
     return parseExchangeSpec(parsed);
   } catch (err) {
-    throw new UsageError(
-      `a configuration file already exists at ${configPath} but could not be ` +
-        `parsed to compare against ${against}: ` +
-        rawDecodeErrorDescription(err) +
-        `. Fix or remove it, or pass --config-file to write elsewhere, then ` +
-        `retry with ${retryWith}.`,
-    );
+    const message = messageWithOperatorText`${EXISTING_CONFIG_PREAMBLE}${operatorSuppliedText(
+      configPath,
+    )} but could not be parsed to compare against ${against}: ${rawDecodeErrorDescription(
+      err,
+    )}.${RECONCILE_RETRY_REMEDY} ${retryWith}.`;
+    throw keepOperatorSuppliedText(new UsageError(message.text), message);
   }
 }
 
@@ -909,7 +920,9 @@ function reconcileAcceptConfig(params: {
   if (conn.warnings.length > 0)
     log.warn(
       `the connection details you specified differ from the saved ` +
-        `configuration at ${configPath}; they apply to this exchange only and ` +
+        `configuration at ${redactAndRenderOperatorSuppliedText(
+          operatorSuppliedText(configPath),
+        )}; they apply to this exchange only and ` +
         `the saved config is left unchanged:\n` +
         conn.warnings.map((w) => `  - ${w}`).join("\n"),
     );
@@ -929,7 +942,9 @@ function reconcileAcceptConfig(params: {
     log.warn(
       `this invitation declares no disclosed columns, so accepting it clears ` +
         `the list of columns you previously agreed to receive, recorded in ` +
-        `${configPath}. That list holds the partner's payload to ` +
+        `${redactAndRenderOperatorSuppliedText(
+          operatorSuppliedText(configPath),
+        )}. That list holds the partner's payload to ` +
         (recordedLockIn.length === 0
           ? "no columns at all (a strict receive-nothing consent)."
           : "exactly these columns:\n" +
@@ -943,9 +958,13 @@ function reconcileAcceptConfig(params: {
 
   log.info(
     conn.warnings.length === 0
-      ? `the existing configuration at ${configPath} matches ${against}; ` +
+      ? `the existing configuration at ${redactAndRenderOperatorSuppliedText(
+          operatorSuppliedText(configPath),
+        )} matches ${against}; ` +
           "it will be reused with its connection and linkage settings unchanged."
-      : `the existing configuration at ${configPath} will be reused with its ` +
+      : `the existing configuration at ${redactAndRenderOperatorSuppliedText(
+          operatorSuppliedText(configPath),
+        )} will be reused with its ` +
           "connection and linkage settings unchanged; the connection " +
           "differences above apply to this exchange only.",
   );
@@ -1285,7 +1304,9 @@ export async function handler(argv: Arguments): Promise<void> {
         // delete the record from a config that still transmits.
         persistOutboundPayloadConsent(configPath, reuseOutboundPayloadConsent);
         log.info(
-          `reused the existing configuration at ${configPath}; it already matches ` +
+          `reused the existing configuration at ${redactAndRenderOperatorSuppliedText(
+            operatorSuppliedText(configPath),
+          )}; it already matches ` +
             "the invitation, so the connection and linkage settings are unchanged.",
         );
       } else if (ready.seeded && ready.connection.channel === "webrtc")
@@ -1293,22 +1314,32 @@ export async function handler(argv: Arguments): Promise<void> {
         // whole locator and the channel authenticates from the shared secret, so
         // there is no credential for the operator to add before running it.
         log.info(
-          `wrote config to ${configPath}, seeding the connection block from the ` +
+          `wrote config to ${redactAndRenderOperatorSuppliedText(
+            operatorSuppliedText(configPath),
+          )}, seeding the connection block from the ` +
             "invitation's endpoint; it needs no credentials of your own. Run " +
             "'psilink exchange' with your input file to conduct the exchange.",
         );
       else if (ready.seeded)
         log.info(
-          `wrote config to ${configPath}, seeding the connection block from the ` +
+          `wrote config to ${redactAndRenderOperatorSuppliedText(
+            operatorSuppliedText(configPath),
+          )}, seeding the connection block from the ` +
             "invitation's endpoint; review it and add your own credentials " +
             `before running 'psilink exchange'. ${CONNECTION_BLOCK_NOTICE}`,
         );
       else
         log.info(
-          `wrote config to ${configPath}; fill in the connection block before ` +
+          `wrote config to ${redactAndRenderOperatorSuppliedText(
+            operatorSuppliedText(configPath),
+          )}; fill in the connection block before ` +
             `running 'psilink exchange'. ${CONNECTION_BLOCK_NOTICE}`,
         );
-      log.info(`wrote key file to ${keyPath}. Keep it private.`);
+      log.info(
+        `wrote key file to ${redactAndRenderOperatorSuppliedText(
+          operatorSuppliedText(keyPath),
+        )}. Keep it private.`,
+      );
     });
   } finally {
     // Restore the loglevel factory (and close the log-file descriptor, for the

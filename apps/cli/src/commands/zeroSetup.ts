@@ -4,7 +4,9 @@ import fs from "node:fs";
 import {
   assertDeduplicateImplemented,
   getLogger,
+  operatorSuppliedText,
   prepareForExchange,
+  redactAndRenderOperatorSuppliedText,
   sanitizeErrorForDisplay,
   UsageError,
 } from "@psilink/core";
@@ -411,7 +413,11 @@ export function finalizeBootstrap(params: {
       );
       log.info(
         `established a shared secret with your partner; wrote config to ` +
-          `${configPath} and key file to ${keyPath}. Keep the key file ` +
+          `${redactAndRenderOperatorSuppliedText(
+            operatorSuppliedText(configPath),
+          )} and key file to ${redactAndRenderOperatorSuppliedText(
+            operatorSuppliedText(keyPath),
+          )}. Keep the key file ` +
           `private. Run 'psilink exchange' for future exchanges with this ` +
           `partner.`,
       );
@@ -435,7 +441,9 @@ export function finalizeBootstrap(params: {
     saveConfig(configFile, spec);
     log.info(
       `your partner did not also choose to save, so no shared secret was ` +
-        `established. Wrote config to ${configFile} (no key file). To set up ` +
+        `established. Wrote config to ${redactAndRenderOperatorSuppliedText(
+          operatorSuppliedText(configFile),
+        )} (no key file). To set up ` +
         `a recurring exchange, run 'psilink invite' and share the invitation ` +
         `with your partner.`,
     );

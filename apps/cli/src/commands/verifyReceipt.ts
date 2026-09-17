@@ -17,6 +17,7 @@ import {
   reconstructCommittedData,
   recordAlterationIsTheOnlyExplanation,
   recordedVersionMatches,
+  keepOperatorSuppliedText,
   messageWithOperatorText,
   operatorSuppliedText,
   redactAndRenderOperatorSuppliedText,
@@ -174,10 +175,10 @@ function readTextFile(pathValue: string, kind: string): string {
   try {
     return fs.readFileSync(expandTilde(pathValue), "utf8");
   } catch (err: unknown) {
-    throw new UsageError(
-      `${kind} file ${pathValue} could not be read: ` +
-        (err instanceof Error ? err.message : String(err)),
-    );
+    const message = messageWithOperatorText`${kind} file ${operatorSuppliedText(
+      pathValue,
+    )} could not be read: ${err instanceof Error ? err.message : String(err)}`;
+    throw keepOperatorSuppliedText(new UsageError(message.text), message);
   }
 }
 
@@ -222,12 +223,12 @@ function assertRecognizedVersion(
 ): void {
   if (!recordedVersionMatches(raw, expected)) {
     const version = recordedVersionValue(raw);
-    throw new UsageError(
-      `${kind} file ${pathValue} has an unrecognized version ` +
-        `(${typeof version === "string" ? version : "missing"}); this build ` +
-        `recognizes ${expected}` +
-        otherReceiptFormatRemedy(version),
-    );
+    const message = messageWithOperatorText`${kind} file ${operatorSuppliedText(
+      pathValue,
+    )} has an unrecognized version (${
+      typeof version === "string" ? version : "missing"
+    }); this build recognizes ${expected}${otherReceiptFormatRemedy(version)}`;
+    throw keepOperatorSuppliedText(new UsageError(message.text), message);
   }
 }
 
@@ -245,10 +246,10 @@ function parseRecord(raw: unknown, pathValue: string): ExchangeRecord {
   try {
     return parseExchangeRecord(raw);
   } catch (err) {
-    throw new UsageError(
-      `record file ${pathValue} is not a valid exchange record: ` +
-        firstIssue(err),
-    );
+    const message = messageWithOperatorText`record file ${operatorSuppliedText(
+      pathValue,
+    )} is not a valid exchange record: ${firstIssue(err)}`;
+    throw keepOperatorSuppliedText(new UsageError(message.text), message);
   }
 }
 
@@ -259,10 +260,10 @@ function parseSignedRecord(raw: unknown, pathValue: string): DualSignedRecord {
     // refused here rather than at the first signature check.
     return parseDualSignedRecord(raw);
   } catch (err) {
-    throw new UsageError(
-      `signed-record file ${pathValue} is not a valid dual-signed record: ` +
-        firstIssue(err),
-    );
+    const message = messageWithOperatorText`signed-record file ${operatorSuppliedText(
+      pathValue,
+    )} is not a valid dual-signed record: ${firstIssue(err)}`;
+    throw keepOperatorSuppliedText(new UsageError(message.text), message);
   }
 }
 
@@ -291,6 +292,9 @@ export type VerifiableArtifact =
   | { kind: "record"; record: ExchangeRecord }
   | { kind: "signed"; signed: DualSignedRecord };
 
+/** What the version refusal states behind the dual-signed record's version. */
+const DUAL_SIGNED_VERSION_NOTE = " (a dual-signed record)";
+
 /**
  * Read the positional artifact, dispatching on its format `version`: the
  * self-attested exchange record, or the dual-signed record an auditor may hold on
@@ -304,13 +308,14 @@ export function readVerifiableArtifact(pathValue: string): VerifiableArtifact {
   if (recordedVersionMatches(raw, SIGNED_RECEIPT_VERSION))
     return { kind: "signed", signed: parseSignedRecord(raw, pathValue) };
   const version = recordedVersionValue(raw);
-  throw new UsageError(
-    `record file ${pathValue} has an unrecognized version ` +
-      `(${typeof version === "string" ? version : "missing"}); this build ` +
-      `recognizes ${EXCHANGE_RECORD_VERSION} (an exchange record) and ` +
-      `${SIGNED_RECEIPT_VERSION} (a dual-signed record)` +
-      otherReceiptFormatRemedy(version),
-  );
+  const message = messageWithOperatorText`record file ${operatorSuppliedText(
+    pathValue,
+  )} has an unrecognized version (${
+    typeof version === "string" ? version : "missing"
+  }); this build recognizes ${EXCHANGE_RECORD_VERSION} (an exchange record) and ${SIGNED_RECEIPT_VERSION}${DUAL_SIGNED_VERSION_NOTE}${otherReceiptFormatRemedy(
+    version,
+  )}`;
+  throw keepOperatorSuppliedText(new UsageError(message.text), message);
 }
 
 /** @internal exported for testing */
@@ -325,9 +330,10 @@ export function readVerificationKeysFile(pathValue: string): VerificationKeys {
   try {
     return parseVerificationKeys(raw);
   } catch (err) {
-    throw new UsageError(
-      `verification-keys file ${pathValue} is not valid: ` + firstIssue(err),
-    );
+    const message = messageWithOperatorText`verification-keys file ${operatorSuppliedText(
+      pathValue,
+    )} is not valid: ${firstIssue(err)}`;
+    throw keepOperatorSuppliedText(new UsageError(message.text), message);
   }
 }
 
@@ -791,8 +797,12 @@ function configFileTerms(
 ): LinkageTerms | undefined {
   if (configFile === undefined) return undefined;
   const source = readConfigLinkageSource(expandTilde(configFile));
-  if (source.status === "no-config-file")
-    throw new UsageError(`config file ${configFile} does not exist`);
+  if (source.status === "no-config-file") {
+    const message = messageWithOperatorText`config file ${operatorSuppliedText(
+      configFile,
+    )} does not exist`;
+    throw keepOperatorSuppliedText(new UsageError(message.text), message);
+  }
   if (source.status === "no-linkage-terms") return undefined;
   warnOnLinkageRuleSetCitationDrift(
     source.source.linkageTerms,
@@ -817,16 +827,18 @@ function partnerTermsFrom(
 ): LinkageTerms | undefined {
   if (partnerTermsFile === undefined) return undefined;
   const source = readConfigLinkageSource(expandTilde(partnerTermsFile));
-  if (source.status === "no-config-file")
-    throw new UsageError(
-      `partner-terms file ${partnerTermsFile} does not exist`,
-    );
-  if (source.status === "no-linkage-terms")
-    throw new UsageError(
-      `partner-terms file ${partnerTermsFile} defines no linkage_terms; pass ` +
-        "the partner's exported linkage terms, or a configuration file that " +
-        "defines them",
-    );
+  if (source.status === "no-config-file") {
+    const message = messageWithOperatorText`partner-terms file ${operatorSuppliedText(
+      partnerTermsFile,
+    )} does not exist`;
+    throw keepOperatorSuppliedText(new UsageError(message.text), message);
+  }
+  if (source.status === "no-linkage-terms") {
+    const message = messageWithOperatorText`partner-terms file ${operatorSuppliedText(
+      partnerTermsFile,
+    )} defines no linkage_terms; pass the partner's exported linkage terms, or a configuration file that defines them`;
+    throw keepOperatorSuppliedText(new UsageError(message.text), message);
+  }
   return source.source.linkageTerms;
 }
 
@@ -864,14 +876,18 @@ export function readConfigSigningBlock(
     text = fs.readFileSync(target, "utf8");
   } catch (err: unknown) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-      if (explicit)
-        throw new UsageError(`config file ${configFile} does not exist`);
+      if (explicit) {
+        const missing = messageWithOperatorText`config file ${operatorSuppliedText(
+          configFile,
+        )} does not exist`;
+        throw keepOperatorSuppliedText(new UsageError(missing.text), missing);
+      }
       return undefined;
     }
-    throw new UsageError(
-      `config file ${configFile} could not be read: ` +
-        (err instanceof Error ? err.message : String(err)),
-    );
+    const message = messageWithOperatorText`config file ${operatorSuppliedText(
+      configFile,
+    )} could not be read: ${err instanceof Error ? err.message : String(err)}`;
+    throw keepOperatorSuppliedText(new UsageError(message.text), message);
   }
   // A YAML parse can echo source bytes (an inline connection credential), so it
   // routes through the sensitive-file chokepoint, which reports path-only.
@@ -885,6 +901,12 @@ export function readConfigSigningBlock(
     fields: (root["signing"] ?? {}) as Record<string, unknown>,
   };
 }
+
+/** What {@link pinnedFingerprintFrom} states behind the config path. */
+const MALFORMED_PARTNER_PIN_REMEDY =
+  " has a signing.partner_fingerprint that is not a certificate fingerprint " +
+  "(an unpadded base64url SHA-256 digest, 43 characters); obtain it from " +
+  "your partner via 'psilink fingerprint'";
 
 /**
  * `signing.partner_fingerprint` from the config's signing block. A malformed
@@ -901,13 +923,12 @@ export function pinnedFingerprintFrom(
     signing.fields["partner_fingerprint"] ??
     signing.fields["partnerFingerprint"];
   if (pinned === undefined) return undefined;
-  if (typeof pinned !== "string" || !FINGERPRINT_REGEX.test(pinned))
-    throw new UsageError(
-      `config file ${signing.configFile} has a signing.partner_fingerprint ` +
-        "that is not a certificate fingerprint (an unpadded base64url SHA-256 " +
-        "digest, 43 characters); obtain it from your partner via " +
-        "'psilink fingerprint'",
-    );
+  if (typeof pinned !== "string" || !FINGERPRINT_REGEX.test(pinned)) {
+    const message = messageWithOperatorText`config file ${operatorSuppliedText(
+      signing.configFile,
+    )}${MALFORMED_PARTNER_PIN_REMEDY}`;
+    throw keepOperatorSuppliedText(new UsageError(message.text), message);
+  }
   return pinned;
 }
 
@@ -1047,6 +1068,17 @@ async function chosenLocalIdentity(
   return await foundLocalIdentity(configured, log);
 }
 
+/** What the --signed-record refusal states behind the record path. */
+const SIGNED_RECORD_FLAG_REMEDY =
+  " is already a dual-signed record, so --signed-record has nothing to add; " +
+  "name the exchange record instead to verify both";
+
+/** What the commitment-flag refusal states behind the record path. */
+const COMMITMENT_FLAGS_REMEDY =
+  " is a dual-signed record, which commits to no data: an input file, a " +
+  "result file, and --keys apply to the exchange record, which must be " +
+  "named as the positional to be verified";
+
 export async function handler(argv: Arguments): Promise<void> {
   const logLevel = parseOrExit(() => logLevelFlag(argv));
   const { log, close: closeLogging } = parseOrExit(() =>
@@ -1089,17 +1121,18 @@ export async function handler(argv: Arguments): Promise<void> {
     // A dual-signed record holds no commitments and no terms, so the options
     // that only apply to an exchange record are refused rather than ignored.
     if (artifact.kind === "signed") {
-      if (signedRecordArg !== undefined)
-        throw new UsageError(
-          `${recordPath} is already a dual-signed record, so --signed-record ` +
-            "has nothing to add; name the exchange record instead to verify both",
-        );
-      if (inputFile !== undefined || keysArg !== undefined)
-        throw new UsageError(
-          `${recordPath} is a dual-signed record, which commits to no data: ` +
-            "an input file, a result file, and --keys apply to the exchange " +
-            "record, which must be named as the positional to be verified",
-        );
+      if (signedRecordArg !== undefined) {
+        const message = messageWithOperatorText`${operatorSuppliedText(
+          recordPath,
+        )}${SIGNED_RECORD_FLAG_REMEDY}`;
+        throw keepOperatorSuppliedText(new UsageError(message.text), message);
+      }
+      if (inputFile !== undefined || keysArg !== undefined) {
+        const message = messageWithOperatorText`${operatorSuppliedText(
+          recordPath,
+        )}${COMMITMENT_FLAGS_REMEDY}`;
+        throw keepOperatorSuppliedText(new UsageError(message.text), message);
+      }
     }
 
     const localTerms = configFileTerms(configFile, log);
