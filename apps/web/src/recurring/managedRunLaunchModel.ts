@@ -13,6 +13,12 @@
 import { sanitizeErrorForDisplay } from "@psilink/core";
 
 import {
+  CONSENT_FAILURE_TITLE,
+  INPUT_FAILURE_TITLE,
+  TERMS_SHORTFALL_FAILURE_TITLE,
+  UNEXPLAINED_FAILURE_TITLE,
+} from "@psi/managed/managedFailureCopy";
+import {
   ManagedExchangeExpiredError,
   benignRerunOutcome,
 } from "@psi/managed/managedRun";
@@ -27,6 +33,13 @@ import { dateTimeLabel } from "@psi/formatting";
 import type { ManagedExchangeRecord } from "@psi/managed/managedExchangeRecord";
 import type { ManagedFailureTier } from "@psi/managed/managedFailureTiers";
 import type { ManagedLocalState } from "@psi/managed/managedLocalState";
+
+export {
+  CONSENT_FAILURE_TITLE,
+  INPUT_FAILURE_TITLE,
+  TERMS_SHORTFALL_FAILURE_TITLE,
+  UNEXPLAINED_FAILURE_TITLE,
+} from "@psi/managed/managedFailureCopy";
 
 /** The recovery affordance a surface state offers: drives what the host renders
  * below the alert, and through {@link managedRunRetryable} whether the
@@ -211,7 +224,7 @@ const MISSED_FAILURE: ManagedRunFailureAlert = {
  * partner-influenced detail (the unsatisfied field names) is never echoed. */
 const INPUT_FAILURE: ManagedRunFailureAlert = {
   kind: "input",
-  title: "Your input file could not be used",
+  title: INPUT_FAILURE_TITLE,
   message:
     "The input file for this run is missing, could not be read, or does not " +
     "have the columns this exchange needs. Check that the file is in place " +
@@ -229,7 +242,7 @@ const INPUT_FAILURE: ManagedRunFailureAlert = {
  * classified here rather than through the input state's re-pick. */
 const TERMS_SHORTFALL_FAILURE: ManagedRunFailureAlert = {
   kind: "terms-shortfall",
-  title: "Your input file cannot match on everything this exchange agreed to",
+  title: TERMS_SHORTFALL_FAILURE_TITLE,
   message:
     "The run stopped before connecting because your input file cannot supply " +
     "every linkage key this exchange agreed to match on, and nothing left this " +
@@ -249,7 +262,7 @@ const TERMS_SHORTFALL_FAILURE: ManagedRunFailureAlert = {
  * identically. */
 const CONSENT_FAILURE: ManagedRunFailureAlert = {
   kind: "consent",
-  title: "What this run would send is not what this exchange agreed to send",
+  title: CONSENT_FAILURE_TITLE,
   message:
     "The columns your input file would send to your partner for matched " +
     "records are not the ones this exchange agreed to send, so it stopped " +
@@ -314,7 +327,7 @@ const TRANSPORT_FAILURE: ManagedRunFailureAlert = {
  * the surface shows above them. */
 const UNEXPLAINED_FAILURE: ManagedRunFailureAlert = {
   kind: "unexplained",
-  title: "This run failed and needs you to check with your partner",
+  title: UNEXPLAINED_FAILURE_TITLE,
   message:
     "This run connected but could not verify your partner, and nothing on this " +
     "device explains why. This can be an ordinary problem on your partner's " +
