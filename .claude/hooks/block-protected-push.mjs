@@ -56,7 +56,7 @@ const VALUE_GLOBALS = new Set([
   "--namespace",
 ]);
 
-// If this segment invokes `git push`, return the `-C` redirects it carries and
+// If this segment invokes `git push`, return the `-C` redirects it holds and
 // the argument list after `push`; otherwise null. Requires git to be the command
 // word (after leading env assignments and simple wrappers) so `echo git push ...`
 // is not mistaken for one.
