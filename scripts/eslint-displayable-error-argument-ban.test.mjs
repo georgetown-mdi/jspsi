@@ -132,6 +132,13 @@ const BANNED = [
     'fittedCauseLink("at: ", redactAndSanitizeForDisplay(name));',
   ],
   [
+    // A prompt is a display sink, but the composition inside the call is still
+    // error text: the sink it is written to does not make the second escape
+    // the rendered chain applies go away.
+    "an escaped fragment in a cause link written to a prompt",
+    'writePromptLine(fittedCauseLink("at: ", sanitizeForDisplay(name)));',
+  ],
+  [
     "an escaped party identity interpolated into an Error",
     "throw new Error(`from ${displayPartyIdentity(identity)}`);",
   ],
@@ -159,6 +166,13 @@ const ALLOWED = [
     "console.error(sanitizeForDisplay(name));",
   ],
   [
+    // The prompt sinks escape nothing themselves, so the escape belongs at the
+    // call site exactly as it does at a console line; this is where an escaped
+    // value is supposed to end up (apps/cli/src/util/prompt.ts).
+    "an escaped fragment in a terminal question",
+    "void promptConfirm(`overwrite ${sanitizeForDisplay(name)}?`);",
+  ],
+  [
     "an escaped fragment in a display field",
     "render({ label: sanitizeForDisplay(name) });",
   ],
@@ -184,6 +198,8 @@ declare function chainDetailCauses(
 ): unknown;
 declare function fittedCauseLink(label: string, fragment: string): string;
 declare function render(field: { label: string }): void;
+declare function promptConfirm(question: string): Promise<boolean>;
+declare function writePromptLine(line: string): void;
 declare class UsageError extends Error {}
 declare const core: { sanitizeForDisplay(value: string): string };
 export function fixture(): void {

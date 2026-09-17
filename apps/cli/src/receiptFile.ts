@@ -1,5 +1,7 @@
 import {
   getLogger,
+  operatorSuppliedText,
+  redactAndRenderOperatorSuppliedText,
   sanitizeErrorForDisplay,
   serializeDualSignedRecord,
 } from "@psilink/core";
@@ -83,7 +85,9 @@ export function writeDualSignedRecord(
     log.info(
       "wrote dual-signed exchange record (both parties' signatures and " +
         `certificates over the agreed terms and data commitments) to ` +
-        `${receiptFilePath}`,
+        redactAndRenderOperatorSuppliedText(
+          operatorSuppliedText(receiptFilePath),
+        ),
     );
     return undefined;
   } catch (err) {

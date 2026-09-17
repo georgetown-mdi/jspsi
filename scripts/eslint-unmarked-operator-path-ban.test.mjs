@@ -1,10 +1,9 @@
-import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ESLint } from "eslint";
 import { beforeAll, describe, expect, it } from "vitest";
 
-import repoConfig, { UNMARKED_OPERATOR_PATH_FILES } from "../eslint.config.mjs";
+import repoConfig from "../eslint.config.mjs";
 import { withoutTypeAwareLayer } from "./eslint-strip-type-aware-layer.mjs";
 
 // Coverage of the unmarked-operator-path ban in the repo-root
@@ -20,10 +19,9 @@ import { withoutTypeAwareLayer } from "./eslint-strip-type-aware-layer.mjs";
 // with the type-aware layer stripped off so what this reports rests on the text
 // it hands in and no lint here waits on a TypeScript program.
 //
-// The second half holds the exemption list. It names the CLI sources whose
-// sinks are not converted yet, and an entry left on it past its sweep would
-// exempt a file from a rule it already satisfies -- so every listed file is
-// linted with the exemption lifted and has to still report.
+// Every CLI source is held to the ban: the sensitive-file re-export shim takes
+// its own config block for the raw-parse exemption it needs, and no source is
+// exempt from this ban.
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..");
@@ -33,26 +31,6 @@ const eslint = new ESLint({
   cwd: repoRoot,
   overrideConfigFile: true,
   baseConfig,
-});
-
-// The same config with the exemption lifted, for reading what a listed file
-// would report once it joins the ban.
-const eslintWithoutExemptions = new ESLint({
-  cwd: repoRoot,
-  overrideConfigFile: true,
-  baseConfig: baseConfig.map((block) =>
-    Array.isArray(block.ignores) &&
-    block.ignores.some((pattern) =>
-      UNMARKED_OPERATOR_PATH_FILES.includes(pattern),
-    )
-      ? {
-          ...block,
-          ignores: block.ignores.filter(
-            (pattern) => !UNMARKED_OPERATOR_PATH_FILES.includes(pattern),
-          ),
-        }
-      : block,
-  ),
 });
 
 const BAN_MESSAGE_PREFIX = "Mark an operator's own path where the message";
@@ -75,9 +53,8 @@ async function banHits(filePath, source) {
   return banMessages(result.messages);
 }
 
-// A guarded path the ban covers and no exemption names, and one it exempts.
+// A guarded path the ban covers.
 const COVERED_FILE = resolve(repoRoot, "apps/cli/src/banFixture.ts");
-const EXEMPT_FILE = resolve(repoRoot, UNMARKED_OPERATOR_PATH_FILES[0]);
 
 // Loading the typescript-eslint parser for the first time is the expensive part
 // of a lintText call, independent of the text it is given; a beforeAll absorbs
@@ -120,6 +97,10 @@ const BANNED = [
   [
     "a path on a prompt-stream line",
     "writePromptLine(`writing ${recordFile}`);",
+  ],
+  [
+    "a path in a free-text question",
+    "void promptFreeText(`where should ${configFile} be written?`);",
   ],
   [
     "a name opening with path rather than ending in it",
@@ -207,6 +188,7 @@ declare function messageWithOperatorText(
 declare function keepOperatorSuppliedText<E>(error: E, message: unknown): E;
 declare function redactAndRenderOperatorSuppliedText(value: unknown): string;
 declare function promptConfirm(question: string): Promise<boolean>;
+declare function promptFreeText(question: string): Promise<string>;
 declare function writePromptLine(line: string): void;
 declare class UsageError extends Error {}
 export function fixture(): void {
@@ -242,39 +224,36 @@ describe("the unmarked-operator-path ban", () => {
     ).toHaveLength(0);
   });
 
-  it("exempts a listed source", async () => {
+  it("holds the sensitive-file re-export shim, which the raw-parse ban spares", async () => {
     expect(
       await banHits(
-        EXEMPT_FILE,
+        resolve(repoRoot, "apps/cli/src/sensitiveFile.ts"),
         fixture("throw new Error(`could not read ${configPath}`);"),
       ),
-    ).toHaveLength(0);
-  });
-});
-
-describe("the exemption list", () => {
-  it("names only files that exist", () => {
-    expect(
-      UNMARKED_OPERATOR_PATH_FILES.filter(
-        (file) => !existsSync(resolve(repoRoot, file)),
-      ),
-    ).toEqual([]);
+    ).not.toHaveLength(0);
   });
 
-  it(
-    "holds no file the ban would already pass",
-    async () => {
-      const results = await eslintWithoutExemptions.lintFiles(
-        UNMARKED_OPERATOR_PATH_FILES.map((file) => resolve(repoRoot, file)),
+  // A disable kept past the site it excused leaves a sink exempt from a rule it
+  // already satisfies, and `eslint .` only warns about one, so the blocks
+  // carrying this ban raise it to an error. Driven rather than read off the
+  // config: what a test of the setting alone would pin is the spelling.
+  for (const [label, filePath] of [
+    ["a guarded CLI source", COVERED_FILE],
+    ["the re-export shim", resolve(repoRoot, "apps/cli/src/sensitiveFile.ts")],
+  ]) {
+    it(`fails on an unused disable in ${label}`, async () => {
+      const [result] = await eslint.lintText(
+        fixture(
+          "// eslint-disable-next-line no-restricted-syntax -- nothing to excuse.\n" +
+            "  readFileSync(configPath);",
+        ),
+        { filePath },
       );
-      const clean = results
-        .filter((result) => banMessages(result.messages).length === 0)
-        .map((result) => result.filePath.slice(repoRoot.length + 1));
-      expect(
-        clean,
-        "these sources mark every operator path they name: drop them from UNMARKED_OPERATOR_PATH_FILES so the ban holds them",
-      ).toEqual([]);
-    },
-    LINTER_WARM_UP_TIMEOUT_MS,
-  );
+      const unused = result.messages.filter((message) =>
+        message.message.startsWith("Unused eslint-disable directive"),
+      );
+      expect(unused).toHaveLength(1);
+      expect(unused[0].severity).toBe(2);
+    });
+  }
 });

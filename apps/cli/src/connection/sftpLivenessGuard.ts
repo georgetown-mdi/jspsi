@@ -68,6 +68,7 @@ export function transportOperationStalledError(
     {
       details: [
         fittedCauseLink(`how the ${operation} stalled: `, detail),
+        // eslint-disable-next-line no-restricted-syntax -- this path is peer-controlled, as the header states, so it keeps the escape.
         fittedCauseLink(`stalled ${operation} path: `, path),
         ...(serverReported === undefined
           ? []

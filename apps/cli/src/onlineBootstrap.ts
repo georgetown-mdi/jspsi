@@ -10,10 +10,14 @@ import {
   getDefaultStandardization,
   columnValues,
   inferDateFormat,
+  keepOperatorSuppliedText,
   LinkageStrategySchema,
   MAX_PAYLOAD_ENTRIES,
+  messageWithOperatorText,
+  operatorSuppliedText,
   PLACEHOLDER_SFTP_HOST,
   PLACEHOLDER_SSH_USERNAME,
+  redactAndRenderOperatorSuppliedText,
   safeParseConnectionConfig,
   sanitizeErrorForDisplay,
   UsageError,
@@ -701,6 +705,16 @@ export function observedReceivedColumnsForSave(
 // --- Online exchange ---------------------------------------------------------
 
 /**
+ * What {@link runOnlineBootstrap}'s acceptance hook states behind the config
+ * path a file appeared at.
+ */
+const CONFIG_APPEARED_LATE_REMEDY =
+  ": a file appeared there after the initial conflict check. The exchange " +
+  "completed and the rotated key was saved; move or remove that file (or " +
+  "pass --config-file), then rerun 'psilink exchange' to recover without " +
+  "re-inviting.";
+
+/**
  * Run the connect -> key exchange -> exchange path shared by online invite
  * and online accept, persisting the config at the moment the handshake
  * succeeds. `runProtocol` opens the connection, completes the handshake with
@@ -1080,14 +1094,12 @@ export async function runOnlineBootstrap(params: {
         // handshake has already succeeded and the rotated key is saved, so this
         // throw becomes a non-fatal configWriteError (caught by runProtocol's
         // hook handling) rather than aborting the completed exchange.
-        if (detectFileConflicts([params.configPath]).length > 0)
-          throw new UsageError(
-            `refusing to overwrite ${params.configPath}: a file appeared there ` +
-              "after the initial conflict check. The exchange completed and the " +
-              "rotated key was saved; move or remove that file (or pass " +
-              "--config-file), then rerun 'psilink exchange' to recover without " +
-              "re-inviting.",
-          );
+        if (detectFileConflicts([params.configPath]).length > 0) {
+          const message = messageWithOperatorText`refusing to overwrite ${operatorSuppliedText(
+            params.configPath,
+          )}${CONFIG_APPEARED_LATE_REMEDY}`;
+          throw keepOperatorSuppliedText(new UsageError(message.text), message);
+        }
         saveConfig(params.configPath, {
           connection: params.connection,
           ...params.dataSpec,
@@ -1212,8 +1224,12 @@ export async function runOnlineBootstrap(params: {
     // saved").
     if (configWritten || (params.reuseExistingConfig && keyPersisted))
       getLogger(params.loggerName).error(
-        `the configuration at ${params.configPath} and the rotated key at ` +
-          `${params.keyPath} are on disk; retry with 'psilink exchange' to ` +
+        `the configuration at ${redactAndRenderOperatorSuppliedText(
+          operatorSuppliedText(params.configPath),
+        )} and the rotated key at ` +
+          `${redactAndRenderOperatorSuppliedText(
+            operatorSuppliedText(params.keyPath),
+          )} are on disk; retry with 'psilink exchange' to ` +
           `recover without re-inviting.`,
       );
     throw err;
@@ -1253,24 +1269,39 @@ export function logOnlineBootstrapOutcome(
     // the error branch below.
     log.info(
       `exchange complete; reused the existing configuration at ` +
-        `${params.configFile} and saved the rotated key to ${params.keyFile}. ` +
+        `${redactAndRenderOperatorSuppliedText(
+          operatorSuppliedText(params.configFile),
+        )} and saved the rotated key to ${redactAndRenderOperatorSuppliedText(
+          operatorSuppliedText(params.keyFile),
+        )}. ` +
         `Keep the key file private.`,
     );
     return;
   }
   if (params.configWriteError === undefined) {
     log.info(
-      `exchange complete; saved config to ${params.configFile} and the ` +
-        `rotated key to ${params.keyFile}. Keep the key file private.`,
+      `exchange complete; saved config to ${redactAndRenderOperatorSuppliedText(
+        operatorSuppliedText(params.configFile),
+      )} and the ` +
+        `rotated key to ${redactAndRenderOperatorSuppliedText(
+          operatorSuppliedText(params.keyFile),
+        )}. Keep the key file private.`,
     );
     return;
   }
+  // Both sentences below name the same path, and it is the operator's own, so
+  // it renders once as they typed it rather than escaped per mention.
+  const configFileDisplay = redactAndRenderOperatorSuppliedText(
+    operatorSuppliedText(params.configFile),
+  );
   log.error(
-    `exchange complete and the rotated key was saved to ${params.keyFile}, ` +
-      `but the configuration could not be written to ${params.configFile} ` +
+    `exchange complete and the rotated key was saved to ${redactAndRenderOperatorSuppliedText(
+      operatorSuppliedText(params.keyFile),
+    )}, ` +
+      `but the configuration could not be written to ${configFileDisplay} ` +
       `(its cause was logged when the write failed). The rotated key is saved, ` +
-      `so you do not need to re-invite: recreate ${params.configFile} to match ` +
-      `your connection and linkage settings before running a recurring ` +
+      `so you do not need to re-invite: recreate ${configFileDisplay} to ` +
+      `match your connection and linkage settings before running a recurring ` +
       `'psilink exchange'. Keep the key file private.`,
   );
 }

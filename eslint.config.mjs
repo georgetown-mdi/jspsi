@@ -40,6 +40,18 @@ const OPERATOR_DISPLAY_SINK =
   ].join(", ") +
   ")";
 
+// The CLI's terminal prompts, operator-facing sinks beside the console and
+// logger calls above: a question and a prompt-stream line reach the operator's
+// terminal the same way a console line does, escaped by the call site because
+// neither escapes what it is handed (apps/cli/src/util/prompt.ts). Matched as a
+// bare call, which is how every apps/cli/src call site reaches them.
+const OPERATOR_PROMPT_SINK =
+  "CallExpression[callee.name=/^(writePromptLine|promptConfirm|promptFreeText)$/]";
+
+// Every sink the display bans below reach: what a diagnostic is emitted
+// through, and what a question is asked on, which take the same escape.
+const OPERATOR_FACING_SINKS = [OPERATOR_DISPLAY_SINK, OPERATOR_PROMPT_SINK];
+
 // The three ways a raw error reaches display text: reading `.message` off it,
 // coercing it (String(err), `${err}`, or handing the value straight to the
 // sink), and the two message accessors -- core's exported `errorMessage` and the
@@ -88,11 +100,14 @@ const SINK_VALUE_POSITIONS = [
 // reaches the terminal without passing through any call this can see; the CLI
 // integration console sentinel is the backstop for that half, and it is
 // best-effort (see its module header).
-const noRawErrorAtDisplaySink = SINK_VALUE_POSITIONS.map((position) => ({
-  selector: `${OPERATOR_DISPLAY_SINK} ${position}:matches(${RAW_ERROR_RENDER})`,
-  message:
-    "Do not render a raw error at an operator-facing sink: pass it through sanitizeErrorForDisplay(err) (an error instance, cause chain included) or sanitizeForDisplay(text) (a single string fragment). A partner- or server-controlled error message reaches the terminal and any --log-file verbatim otherwise, carrying ANSI, CR/LF, bidi and confusable bytes. A value that is provably not error text: eslint-disable-next-line with a one-line justification.",
-}));
+const RAW_ERROR_AT_SINK_MESSAGE =
+  "Do not render a raw error at an operator-facing sink: pass it through sanitizeErrorForDisplay(err) (an error instance, cause chain included) or sanitizeForDisplay(text) (a single string fragment). A partner- or server-controlled error message reaches the terminal and any --log-file verbatim otherwise, carrying ANSI, CR/LF, bidi and confusable bytes. A value that is provably not error text: eslint-disable-next-line with a one-line justification.";
+const noRawErrorAtDisplaySink = SINK_VALUE_POSITIONS.flatMap((position) =>
+  OPERATOR_FACING_SINKS.map((sink) => ({
+    selector: `${sink} ${position}:matches(${RAW_ERROR_RENDER})`,
+    message: RAW_ERROR_AT_SINK_MESSAGE,
+  })),
+);
 
 // The other half of the single-altitude escaping rule the sink ban above holds:
 // the composition side. A Displayable is a string that has already crossed the
@@ -195,14 +210,6 @@ const UNMARKED_OPERATOR_PATH = [
   `MemberExpression[property.name=${OPERATOR_PATH_NAME}]`,
 ].join(", ");
 
-// The CLI's terminal prompts, which this ban treats as sinks beside the
-// console and logger calls OPERATOR_DISPLAY_SINK names: a question and a
-// prompt-stream line reach the operator's terminal the same way a console
-// line does (apps/cli/src/util/prompt.ts). Matched as a bare call, which is
-// how every apps/cli/src call site reaches them.
-const OPERATOR_PROMPT_SINK =
-  "CallExpression[callee.name=/^(writePromptLine|promptConfirm|promptFreeText)$/]";
-
 // Both altitudes, matched where the raw name sits DIRECTLY in the position --
 // the same shape the two bans above rest on. Marking wraps the name in
 // operatorSuppliedText(...), which puts a CallExpression in the position and
@@ -215,32 +222,11 @@ const noUnmarkedOperatorPath = [
       `:matches(${ERROR_TEXT_COMPOSITION}) ${position}:matches(${UNMARKED_OPERATOR_PATH})`,
   ),
   ...SINK_VALUE_POSITIONS.flatMap((position) =>
-    [OPERATOR_DISPLAY_SINK, OPERATOR_PROMPT_SINK].map(
+    OPERATOR_FACING_SINKS.map(
       (sink) => `${sink} ${position}:matches(${UNMARKED_OPERATOR_PATH})`,
     ),
   ),
 ].map((selector) => ({ selector, message: UNMARKED_OPERATOR_PATH_MESSAGE }));
-
-/**
- * The CLI sources still composing an operator path unmarked, exempt from the
- * ban above until their sinks are converted. Every file NOT listed here is
- * held to it, new files included.
- *
- * Pinned by scripts/eslint-unmarked-operator-path-ban.test.mjs, which fails on
- * a listed file the ban reports nothing on: an entry kept past its sweep
- * exempts the file from a rule it already satisfies.
- */
-export const UNMARKED_OPERATOR_PATH_FILES = [
-  "apps/cli/src/connection/frameSizeGuard.ts",
-  "apps/cli/src/connection/listingGuard.ts",
-  "apps/cli/src/connection/sftpAdapterWarnings.ts",
-  "apps/cli/src/connection/sftpLivenessGuard.ts",
-  "apps/cli/src/onlineBootstrap.ts",
-  "apps/cli/src/outboundPayloadConsent.ts",
-  "apps/cli/src/protocol.ts",
-  "apps/cli/src/receiptFile.ts",
-  "apps/cli/src/recordFile.ts",
-];
 
 // werift is loaded at the point of use (the deferred import in
 // apps/cli/src/connection/webrtc/weriftPeer.ts), never statically: the CLI
@@ -381,8 +367,10 @@ export default tseslint.config(
     // mirrors the boundary), so the display and operator-path bans it IS held to
     // are re-carried in its own block below; tests are exempt too. A genuinely
     // non-sensitive parse (e.g. parsing a command's JSON output) opts out with
-    // an eslint-disable-next-line carrying a one-line why.
-    files: ["apps/cli/src/**/*.ts"],
+    // an eslint-disable-next-line carrying a one-line why. The glob is the one
+    // the operator-path block below carries, so a source spelling either ESM
+    // extension is held to both bans rather than to one of them.
+    files: ["apps/cli/src/**/*.{ts,tsx,mts}"],
     ignores: ["apps/cli/src/sensitiveFile.ts"],
     // Fail CI on a stray or rule-silencing disable so the ban cannot be quietly
     // turned off on a genuinely sensitive parse (a bare `eslint .` only warns).
@@ -420,15 +408,19 @@ export default tseslint.config(
     },
   },
   {
-    // The unmarked-operator-path ban, over the CLI sources whose sinks are
-    // converted. It re-carries the block above's entries because flat config
-    // replaces a rule's options rather than merging them, and it exempts by
-    // ignoring a named file rather than by listing the ones it covers, so a
-    // source added later is held to it without an edit here. The re-export shim
-    // is ignored here and takes its own block below, which holds it to this ban
+    // The unmarked-operator-path ban, over every CLI source: it re-carries the
+    // block above's entries because flat config replaces a rule's options
+    // rather than merging them, and it names no file it covers, so a source
+    // added later is held to it without an edit here. The re-export shim is
+    // ignored here and takes its own block below, which holds it to this ban
     // without the raw-parse ban it is exempt from.
     files: ["apps/cli/src/**/*.{ts,tsx,mts}"],
-    ignores: ["apps/cli/src/sensitiveFile.ts", ...UNMARKED_OPERATOR_PATH_FILES],
+    ignores: ["apps/cli/src/sensitiveFile.ts"],
+    // Every block carrying this ban carries the setting too, so a file one of
+    // them matches and another ignores still fails on a stray or rule-silencing
+    // disable -- one left past the site it excused would exempt a sink from a
+    // rule it already satisfies, and a bare `eslint .` only warns.
+    linterOptions: { reportUnusedDisableDirectives: "error" },
     rules: {
       "no-restricted-syntax": [
         "error",
@@ -442,6 +434,9 @@ export default tseslint.config(
     // raw sensitive-parse one: the two blocks above both ignore it, so this is
     // where its entries are stated.
     files: ["apps/cli/src/sensitiveFile.ts"],
+    // The block that carries this setting for the rest of apps/cli/src ignores
+    // the shim, so it is restated here rather than inherited.
+    linterOptions: { reportUnusedDisableDirectives: "error" },
     rules: {
       "no-restricted-syntax": [
         "error",

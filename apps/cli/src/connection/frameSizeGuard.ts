@@ -41,6 +41,7 @@ export function frameSizeExceededError(
         `${maxBytes} bytes`;
   return new FrameSizeExceededError(
     `an inbound file ${detail}; refusing to read it into memory`,
+    // eslint-disable-next-line no-restricted-syntax -- the inbound file is named by the peer or the server, not by the operator, so it keeps the escape.
     { details: [fittedCauseLink(INBOUND_FILE_LINK_LABEL, path)] },
   );
 }

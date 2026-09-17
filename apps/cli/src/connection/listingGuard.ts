@@ -48,6 +48,7 @@ const DIRECTORY_LINK_LABEL = "directory: ";
  * "Display sanitization escape format".
  */
 function directoryLink(dirPath: string): string {
+  // eslint-disable-next-line no-restricted-syntax -- an offline-accept config seeds this directory from the partner's invitation, so it keeps the escape.
   return fittedCauseLink(DIRECTORY_LINK_LABEL, dirPath);
 }
 
