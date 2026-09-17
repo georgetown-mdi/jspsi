@@ -984,6 +984,14 @@
   }
 }
 
+.psiProgress {
+  text-align: center;
+  margin: -6px 0 12px 0;
+  font-size: 14.5px;
+  color: var(--app-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
 .stageHistory {
   list-style: none;
   margin: 0.8rem 0 0 0;

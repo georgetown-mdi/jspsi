@@ -37,6 +37,7 @@ import type {
   ExchangeResult,
   MessageConnection,
   PreparedExchange,
+  PsiProgress,
   ResolvedRunShape,
   RunExchangeOptions,
 } from "@psilink/core";
@@ -1079,5 +1080,85 @@ describe("runExchangeLifecycle", () => {
       [describeResolvedRunShape(shape).cardinalityNotice],
     ]);
     expect(s.onResolvedMatching.mock.calls).toEqual([[matchingOf(shape)]]);
+  });
+});
+
+describe("the PSI progress reporter", () => {
+  function acquireStub(): Acquire {
+    const { mc } = makeFakeMc();
+    mockedOpen.mockResolvedValue(mc);
+    const { acquired } = makeResources();
+    return () => Promise.resolve(acquired);
+  }
+
+  test("reaches runExchange and reports through the owner's sink", async () => {
+    const acquire = acquireStub();
+    const s = seams();
+    const onPsiProgress = vi.fn();
+    const report: PsiProgress = {
+      operation: "createServerSetup",
+      elements: 1204,
+      state: "started",
+    };
+    mockedRunExchange.mockImplementation((_mc, _role, _prepared, options) => {
+      options.onPsiProgress?.(report);
+      return Promise.resolve(STUB_EXCHANGE_RESULT);
+    });
+
+    await runExchangeLifecycle({
+      acquire,
+      exchangeRole: "initiator",
+      signal: new AbortController().signal,
+      ...s,
+      onPsiProgress,
+    });
+
+    expect(onPsiProgress.mock.calls).toEqual([[report]]);
+  });
+
+  test("is left off the call for an owner that shows no progress", async () => {
+    // Core composes no report at all for a run that hands it no reporter, so an
+    // owner with nothing to show must not be given one anyway.
+    const acquire = acquireStub();
+
+    await runExchangeLifecycle({
+      acquire,
+      exchangeRole: "initiator",
+      signal: new AbortController().signal,
+      ...seams(),
+    });
+
+    expect(mockedRunExchange.mock.calls[0][3]).not.toHaveProperty(
+      "onPsiProgress",
+    );
+  });
+
+  test("drops a report that lands after the run was aborted", async () => {
+    // Every owner-driven callback no-ops once the signal aborts, so a report
+    // arriving from a settling operation cannot set state on an unmounted
+    // screen.
+    const acquire = acquireStub();
+    const controller = new AbortController();
+    const onPsiProgress = vi.fn();
+    mockedRunExchange.mockImplementation((_mc, _role, _prepared, options) => {
+      controller.abort();
+      options.onPsiProgress?.({
+        operation: "createServerSetup",
+        elements: 1204,
+        state: "failed",
+        durationMs: 12,
+      });
+      return Promise.resolve(STUB_EXCHANGE_RESULT);
+    });
+
+    await runExchangeLifecycle({
+      acquire,
+      exchangeRole: "initiator",
+      signal: controller.signal,
+      ...seams(),
+      onPsiProgress,
+    });
+
+    expect(onPsiProgress).not.toHaveBeenCalled();
   });
 });

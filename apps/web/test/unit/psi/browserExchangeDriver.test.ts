@@ -73,6 +73,27 @@ describe("createBrowserExchangeDriver", () => {
     });
   });
 
+  test("forwards the progress slot, and omits it for a consumer without one", async () => {
+    // The live progress line is the only thing that moves through the minutes a
+    // PSI operation runs, so a driver that forwarded every other event would
+    // leave the screen static with nothing failing.
+    const onPsiProgress = vi.fn();
+
+    await createBrowserExchangeDriver(driverConfig()).run(
+      driverEvents({ onPsiProgress }),
+    );
+
+    expect(mockedRunLifecycle).toHaveBeenCalledWith(
+      expect.objectContaining({ onPsiProgress }),
+    );
+
+    await createBrowserExchangeDriver(driverConfig()).run(driverEvents());
+
+    expect(mockedRunLifecycle).toHaveBeenLastCalledWith(
+      expect.objectContaining({ onPsiProgress: undefined }),
+    );
+  });
+
   test("runs for a consumer that offers no warning surface", async () => {
     // onWarning is optional on the contract; a consumer without one leaves the
     // lifecycle nothing to raise a notice through rather than a hole to trip on.

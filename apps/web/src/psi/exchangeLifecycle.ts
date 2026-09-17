@@ -22,6 +22,7 @@ import type {
   MessageConnection,
   PreparedExchange,
   ProcessState,
+  PsiProgress,
   ResolvedMatching,
 } from "@psilink/core";
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
@@ -318,6 +319,11 @@ interface RunExchangeLifecycleOptions<
    * goes to its own slot and the owner states it as run status. Optional: an
    * owner that states nothing before completion omits it. */
   onResolvedMatching?: (matching: ResolvedMatching) => void;
+  /** Where each PSI crypto operation stands, reported as it starts and again as
+   * it settles, for an owner showing a live progress line through the minutes
+   * one of them can run. Optional, and omitting it costs nothing: core composes
+   * no report at all for a run that passes no reporter. */
+  onPsiProgress?: (progress: PsiProgress) => void;
 }
 
 /**
@@ -363,6 +369,7 @@ export async function runExchangeLifecycle<
     onError,
     onWarning,
     onResolvedMatching,
+    onPsiProgress,
   } = options;
 
   // Every owner-driven React callback is a no-op once the signal aborts, so an
@@ -400,6 +407,9 @@ export async function runExchangeLifecycle<
   const emitRunNotice = ifLive((message: string) => onWarning?.(message));
   const emitResolvedMatching = ifLive((matching: ResolvedMatching) =>
     onResolvedMatching?.(matching),
+  );
+  const emitPsiProgress = ifLive((progress: PsiProgress) =>
+    onPsiProgress?.(progress),
   );
 
   let acquired: AcquiredExchange;
@@ -559,6 +569,11 @@ export async function runExchangeLifecycle<
         for (const notice of [cardinalityNotice, pairTableAdvisory])
           if (notice !== undefined) emitRunNotice(notice);
       },
+      // Passed only where the owner takes it: core composes no report for a run
+      // that hands it no reporter.
+      ...(onPsiProgress !== undefined
+        ? { onPsiProgress: emitPsiProgress }
+        : {}),
     });
     // The privacy-sensitive exchange has succeeded here. A failure building the
     // local results file is an "output" failure, never an "exchange" one, so the

@@ -1,13 +1,37 @@
+import { useEffect, useState } from "react";
+
 import styles from "@styles/app.module.css";
 
 import {
   currentStageLabel,
   progressPercent,
+  psiProgressLabel,
   stageIsKnown,
   timeOfDayLabel,
 } from "./exchangeRun";
 
 import type { ExchangeRun } from "./exchangeRun";
+
+/** How often the running operation's elapsed figure is redrawn. A second is the
+ * resolution the figure itself is stated at, so a shorter interval would redraw
+ * the same text. */
+const PSI_ELAPSED_TICK_MS = 1000;
+
+/** The clock the running operation's elapsed figure is read against: a fresh
+ * reading each second while an operation runs, and no timer at all when none
+ * does. Re-read at the start of each operation so the first line a long one
+ * draws is its own elapsed time rather than the previous one's. */
+function useElapsedClock(run: ExchangeRun): Date {
+  const startedAtMs = run.psiOperation?.startedAt.getTime();
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    if (startedAtMs === undefined) return;
+    setNow(new Date());
+    const timer = setInterval(() => setNow(new Date()), PSI_ELAPSED_TICK_MS);
+    return () => clearInterval(timer);
+  }, [startedAtMs]);
+  return now;
+}
 
 /**
  * The run's status panel: the live stage label, the protocol progress bar, and
@@ -30,6 +54,8 @@ export function StatusPanel({
 }) {
   const percent = progressPercent(run);
   const lastVisit = run.visits[run.visits.length - 1];
+  const elapsedClock = useElapsedClock(run);
+  const progress = psiProgressLabel(run, elapsedClock);
   // runExchange emits stage ids from the same prepared exchange the tree was built
   // from, or from the single-pass set the run model labels, so anything else is a
   // desync bug. This is a development-only signal, not a guarantee: a production
@@ -55,6 +81,13 @@ export function StatusPanel({
           {currentStageLabel(run)}
         </span>
       </p>
+      {progress !== undefined && !done && !halted && (
+        // Outside the live region above: this line restates its figures every
+        // second, and a region announcing it would talk over everything else a
+        // screen reader is reading. The stage label it sits under is announced,
+        // and it is read on demand like any other text.
+        <p className={styles.psiProgress}>{progress}</p>
+      )}
       <div
         className={
           done

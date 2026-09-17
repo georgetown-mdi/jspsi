@@ -2,9 +2,9 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { ProcessState } from "@psilink/core";
 
+import { initialRun, psiProgressLabel } from "@exchange/exchangeRun";
 import { JobApiRequestError } from "@psi/jobClient/serverJobExchangeDriver";
 import { buildRunEvents } from "@exchange/runEvents";
-import { initialRun } from "@exchange/exchangeRun";
 
 import type {
   JobApiClient,
@@ -139,6 +139,34 @@ describe("buildRunEvents", () => {
     expect(state.run.stages.map((stage) => stage.id)).toEqual(["one", "two"]);
     expect(state.run.stageId).toBe("two");
     expect(state.run.failed).toBe(false);
+  });
+
+  test("folds each PSI progress report onto the run model", () => {
+    // The reporter is called from the exchange's own call path, so the
+    // callback's whole job is to fold the report into the state the status
+    // panel renders from, opening the line on a start and closing it on a
+    // settle.
+    const { state, events } = seat();
+
+    events.onPsiProgress?.({
+      operation: "createServerSetup",
+      elements: 1204,
+      state: "started",
+    });
+    const openedAt = state.run.psiOperation?.startedAt;
+    expect(openedAt).toBeInstanceOf(Date);
+    expect(
+      psiProgressLabel(state.run, new Date((openedAt?.getTime() ?? 0) + 4000)),
+    ).toBe("Encrypting your data: 1,204 values, 4s elapsed");
+
+    events.onPsiProgress?.({
+      operation: "createServerSetup",
+      elements: 1204,
+      state: "finished",
+      durationMs: 4000,
+    });
+
+    expect(psiProgressLabel(state.run, new Date())).toBeUndefined();
   });
 
   test("a result sets the outputs and finishes the run", () => {

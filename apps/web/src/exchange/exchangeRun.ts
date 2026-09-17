@@ -7,6 +7,8 @@ import {
 
 import type {
   PreparedExchange,
+  PsiOperation,
+  PsiProgress,
   ResolvedMatching,
   SinglePassStageId,
 } from "@psilink/core";
@@ -119,6 +121,22 @@ export interface ExchangeRun {
    * console-conducted run takes the pair off its terminal result instead, where
    * it reaches the completion panel through the run's outputs. */
   matching?: ResolvedMatching;
+  /** The PSI crypto operation running right now, set from the in-browser
+   * driver's progress reports. Unset whenever none is -- before the first
+   * report, between two operations, and once the run ends -- which is what
+   * leaves the status panel showing its stage label alone. A console-conducted
+   * run reports none, so it shows that static state throughout. */
+  psiOperation?: RunningPsiOperation;
+}
+
+/** The figures a live PSI progress line states: which operation is running, how
+ * many encrypted values it covers, and when this browser saw it start. The
+ * elapsed figure is derived at render against the clock rather than stored, so
+ * it ticks without a state write per second. */
+export interface RunningPsiOperation {
+  operation: PsiOperation;
+  elements: number;
+  startedAt: Date;
 }
 
 export function initialRun(seat: ExchangeSeat = "inviter"): ExchangeRun {
@@ -150,18 +168,37 @@ function closedVisits(visits: Array<StageVisit>, at: Date): Array<StageVisit> {
  * history row states the run is under way rather than rendering empty. */
 const UNNAMED_STAGE_LABEL = "Working";
 
+/** The four phrases a stage row and a PSI progress line both name a step by, so
+ * the two surfaces cannot drift into two names for one step. */
+const ENCRYPTING_OWN_DATA_LABEL = "Encrypting your data";
+const ENCRYPTING_PARTNER_DATA_LABEL = "Encrypting your partner's data";
+const FINDING_MATCHES_LABEL = "Finding matches";
+const COUNTING_SHARED_VALUES_LABEL = "Counting shared values";
+
 /** Display labels for the stage events single-pass linkage emits mid-run. A
  * single-pass stage tree enumerates the protocol-confirmation step alone --
  * which encrypt and match stages a party emits follows the role the handshake
  * resolves -- so those rows take their label from here instead of the tree. */
 const SINGLE_PASS_STAGE_LABELS = new Map<string, string>(
   Object.entries({
-    [SINGLE_PASS_STAGE_IDS.encryptingOwnData]: "Encrypting your data",
+    [SINGLE_PASS_STAGE_IDS.encryptingOwnData]: ENCRYPTING_OWN_DATA_LABEL,
     [SINGLE_PASS_STAGE_IDS.encryptingPartnerData]:
-      "Encrypting your partner's data",
-    [SINGLE_PASS_STAGE_IDS.identifyingSharedValues]: "Finding matches",
+      ENCRYPTING_PARTNER_DATA_LABEL,
+    [SINGLE_PASS_STAGE_IDS.identifyingSharedValues]: FINDING_MATCHES_LABEL,
   } satisfies Record<SinglePassStageId, string>),
 );
+
+/** What each PSI crypto operation is called on the progress line. The two
+ * operations that mask this party's own set are one step to the operator --
+ * which of them runs follows the role the handshake resolved -- so they share a
+ * phrase. */
+const PSI_OPERATION_LABELS: Record<PsiOperation, string> = {
+  createServerSetup: ENCRYPTING_OWN_DATA_LABEL,
+  createClientRequest: ENCRYPTING_OWN_DATA_LABEL,
+  processClientRequest: ENCRYPTING_PARTNER_DATA_LABEL,
+  computeAssociationTable: FINDING_MATCHES_LABEL,
+  computeIntersectionCardinality: COUNTING_SHARED_VALUES_LABEL,
+};
 
 /** The label a stage event shows in the status panel and the run history: the
  * stage tree's, then the single-pass label, then the id itself. */
@@ -210,7 +247,7 @@ export function runWithStage(
  * recorded for the completion header. */
 export function runWithCompletion(run: ExchangeRun, at: Date): ExchangeRun {
   return {
-    ...run,
+    ...withoutPsiOperation(run),
     stageId: DONE_STAGE_ID,
     visits: [
       ...closedVisits(run.visits, at),
@@ -229,10 +266,38 @@ export function runWithMatching(
   return { ...run, matching };
 }
 
-/** Mark the run failed: the timeline and history freeze where they stand and
- * the status panel stops presenting the open stage as in flight. */
+/** Take one PSI progress report: a `started` report opens the live line on that
+ * operation, and a `finished` or `failed` one closes it. Returns the run
+ * unchanged where nothing moves, so a settle report with no line open costs no
+ * re-render. */
+export function runWithPsiProgress(
+  run: ExchangeRun,
+  progress: PsiProgress,
+  at: Date,
+): ExchangeRun {
+  if (progress.state !== "started")
+    return run.psiOperation === undefined ? run : withoutPsiOperation(run);
+  return {
+    ...run,
+    psiOperation: {
+      operation: progress.operation,
+      elements: progress.elements,
+      startedAt: at,
+    },
+  };
+}
+
+function withoutPsiOperation(run: ExchangeRun): ExchangeRun {
+  const { psiOperation: _closed, ...rest } = run;
+  return rest;
+}
+
+/** Mark the run failed: the timeline and history freeze where they stand, the
+ * status panel stops presenting the open stage as in flight, and the live PSI
+ * line closes -- a run that failed inside an operation, or was cut short of the
+ * report settling it, has none running. */
 export function runWithFailure(run: ExchangeRun): ExchangeRun {
-  return { ...run, failed: true };
+  return { ...withoutPsiOperation(run), failed: true };
 }
 
 /** One step of the five-step protocol timeline the top bar shows after create. */
@@ -321,6 +386,46 @@ export function progressPercent(run: ExchangeRun): number {
  * the stage tree when the visit was recorded. */
 export function currentStageLabel(run: ExchangeRun): string {
   return run.visits[run.visits.length - 1].label;
+}
+
+/** `count` with the unit the operator reads it in, grouped in threes so a
+ * millions figure stays readable. */
+function valueCountLabel(count: number): string {
+  const grouped = new Intl.NumberFormat("en-US").format(Math.trunc(count));
+  return `${grouped} ${count === 1 ? "value" : "values"}`;
+}
+
+/** `elapsedMs` as the largest two units that hold it -- `42s`, `1m 12s`,
+ * `2h 05m` -- so a multi-hour operation's figure stays as short as a
+ * multi-second one's. */
+function elapsedLabel(elapsedMs: number): string {
+  const totalSeconds = Math.max(0, Math.floor(elapsedMs / 1000));
+  const seconds = totalSeconds % 60;
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  if (totalMinutes === 0) return `${seconds}s`;
+  const minutes = totalMinutes % 60;
+  const hours = Math.floor(totalMinutes / 60);
+  if (hours === 0) return `${minutes}m ${seconds}s`;
+  return `${hours}h ${String(minutes).padStart(2, "0")}m`;
+}
+
+/** The status panel's live PSI line as of `now`: how many values the running
+ * operation covers and how long it has run, preceded by the operation's own
+ * name where the stage label above does not already state it. Undefined when no
+ * operation is running, which is what leaves the stage label standing alone. */
+export function psiProgressLabel(
+  run: ExchangeRun,
+  now: Date,
+): string | undefined {
+  const running = run.psiOperation;
+  if (running === undefined) return undefined;
+  const figures =
+    `${valueCountLabel(running.elements)}, ` +
+    `${elapsedLabel(now.getTime() - running.startedAt.getTime())} elapsed`;
+  const operationLabel = PSI_OPERATION_LABELS[running.operation];
+  return operationLabel === currentStageLabel(run)
+    ? figures
+    : `${operationLabel}: ${figures}`;
 }
 
 /** A history row's completion time, e.g. `2:43 PM`. */

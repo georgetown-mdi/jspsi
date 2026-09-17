@@ -16,8 +16,10 @@ import {
   currentStageLabel,
   initialRun,
   progressPercent,
+  psiProgressLabel,
   runWithCompletion,
   runWithFailure,
+  runWithPsiProgress,
   runWithStage,
   runWithStages,
   stageIsKnown,
@@ -26,8 +28,12 @@ import {
   timelineSteps,
 } from "@exchange/exchangeRun";
 
+import type {
+  PreparedExchange,
+  PsiOperation,
+  PsiProgress,
+} from "@psilink/core";
 import type { ExchangeRun } from "@exchange/exchangeRun";
-import type { PreparedExchange } from "@psilink/core";
 
 // stagesFor and describeExchangeStages beneath it read only the linkage terms
 // off the prepared exchange, so a terms-only stand-in exercises the real
@@ -489,5 +495,171 @@ describe("single-pass stage labels", () => {
       true,
     );
     expect(stageIsKnown(run, "surprise stage")).toBe(false);
+  });
+});
+
+describe("PSI progress", () => {
+  const startedAt = new Date(2026, 6, 8, 14, 30, 0);
+  const secondsLater = (seconds: number) =>
+    new Date(startedAt.getTime() + seconds * 1000);
+
+  function started(operation: PsiOperation, elements: number): PsiProgress {
+    return { operation, elements, state: "started" };
+  }
+
+  function running(
+    stageId: string,
+    operation: PsiOperation,
+    elements: number,
+  ): ExchangeRun {
+    const seeded = runWithStages(
+      initialRun(),
+      stagesFor(preparedWith("single-pass", 3)),
+    );
+    return runWithPsiProgress(
+      runWithStage(seeded, stageId, startedAt),
+      started(operation, elements),
+      startedAt,
+    );
+  }
+
+  test("no line before the first report", () => {
+    expect(psiProgressLabel(initialRun(), startedAt)).toBeUndefined();
+  });
+
+  test("a started report states the count and the elapsed time", () => {
+    const run = running(
+      SINGLE_PASS_STAGE_IDS.encryptingOwnData,
+      "createServerSetup",
+      1204,
+    );
+    expect(psiProgressLabel(run, secondsLater(4))).toBe(
+      "1,204 values, 4s elapsed",
+    );
+  });
+
+  test("the elapsed figure follows the clock, not a second report", () => {
+    const run = running(
+      SINGLE_PASS_STAGE_IDS.identifyingSharedValues,
+      "computeAssociationTable",
+      2,
+    );
+    expect(psiProgressLabel(run, secondsLater(72))).toBe(
+      "2 values, 1m 12s elapsed",
+    );
+    expect(psiProgressLabel(run, secondsLater(7500))).toBe(
+      "2 values, 2h 05m elapsed",
+    );
+  });
+
+  test("one value is stated in the singular", () => {
+    const run = running(
+      SINGLE_PASS_STAGE_IDS.encryptingOwnData,
+      "createClientRequest",
+      1,
+    );
+    expect(psiProgressLabel(run, secondsLater(1))).toBe("1 value, 1s elapsed");
+  });
+
+  test("the operation is named where the stage label does not state it", () => {
+    // The cascade's stage rows are numbered by linkage key, so which step of the
+    // round is running is the progress line's to say.
+    const seeded = runWithStages(
+      initialRun(),
+      stagesFor(preparedWith("cascade", 3)),
+    );
+    const run = runWithPsiProgress(
+      runWithStage(seeded, "stage 2 / 3", startedAt),
+      started("processClientRequest", 40),
+      startedAt,
+    );
+    expect(psiProgressLabel(run, secondsLater(9))).toBe(
+      "Encrypting your partner's data: 40 values, 9s elapsed",
+    );
+  });
+
+  test("a count-only round names the operation the stage rows never do", () => {
+    const seeded = runWithStages(
+      initialRun(),
+      stagesFor(preparedWith("cascade", 1)),
+    );
+    const run = runWithPsiProgress(
+      runWithStage(seeded, "stage 1 / 1", startedAt),
+      started("computeIntersectionCardinality", 500),
+      startedAt,
+    );
+    expect(psiProgressLabel(run, secondsLater(3))).toBe(
+      "Counting shared values: 500 values, 3s elapsed",
+    );
+  });
+
+  test("a settled report closes the line", () => {
+    const run = running(
+      SINGLE_PASS_STAGE_IDS.encryptingOwnData,
+      "createServerSetup",
+      1204,
+    );
+    for (const state of ["finished", "failed"] as const) {
+      const settled = runWithPsiProgress(
+        run,
+        {
+          operation: "createServerSetup",
+          elements: 1204,
+          state,
+          durationMs: 4,
+        },
+        secondsLater(4),
+      );
+      expect(psiProgressLabel(settled, secondsLater(5))).toBeUndefined();
+    }
+  });
+
+  test("a settle report with no line open leaves the run untouched", () => {
+    const run = initialRun();
+    expect(
+      runWithPsiProgress(
+        run,
+        {
+          operation: "createServerSetup",
+          elements: 1204,
+          state: "finished",
+          durationMs: 4,
+        },
+        startedAt,
+      ),
+    ).toBe(run);
+  });
+
+  test("completion and failure both close the line", () => {
+    const run = running(
+      SINGLE_PASS_STAGE_IDS.encryptingOwnData,
+      "createServerSetup",
+      1204,
+    );
+    expect(
+      psiProgressLabel(
+        runWithCompletion(run, secondsLater(6)),
+        secondsLater(7),
+      ),
+    ).toBeUndefined();
+    expect(
+      psiProgressLabel(runWithFailure(run), secondsLater(7)),
+    ).toBeUndefined();
+  });
+
+  test("a second operation restarts the elapsed figure", () => {
+    const first = running(
+      SINGLE_PASS_STAGE_IDS.encryptingOwnData,
+      "createServerSetup",
+      1204,
+    );
+    const second = runWithPsiProgress(
+      first,
+      started("processClientRequest", 990),
+      secondsLater(30),
+    );
+    expect(psiProgressLabel(second, secondsLater(32))).toBe(
+      "Encrypting your partner's data: 990 values, 2s elapsed",
+    );
   });
 });
