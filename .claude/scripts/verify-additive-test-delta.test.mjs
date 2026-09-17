@@ -144,6 +144,7 @@ describe("inserted-line content", () => {
       '  vi.stubEnv("PSILINK_ALLOW", "1");',
       "  vi.useFakeTimers();",
       "  expect.extend({ toBeSafe: () => ({ pass: true }) });",
+      'import { vi as v } from "vitest";\nv.spyOn(process, "exit");',
     ]) {
       expect(insertionRefusal([line])).toMatch(/test double/);
     }

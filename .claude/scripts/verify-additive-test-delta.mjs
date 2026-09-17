@@ -114,7 +114,7 @@ const REFUSED_INSERTIONS = [
   {
     name: "a test double reaching past the statement that holds it",
     pattern:
-      /\b(vi|jest)\.(mock|doMock|unmock|doUnmock|hoisted|spyOn|stubGlobal|stubEnv|useFakeTimers|setSystemTime|setConfig)\s*\(|\bexpect\.extend\s*\(/,
+      /\b[A-Za-z_$][\w$]*\.(mock|doMock|unmock|doUnmock|hoisted|spyOn|stubGlobal|stubEnv|useFakeTimers|setSystemTime|setConfig)\s*\(|\bexpect\.extend\s*\(/,
     sample: 'vi.mock("../src/guard");',
   },
 ];
