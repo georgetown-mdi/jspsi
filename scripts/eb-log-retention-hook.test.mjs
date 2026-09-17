@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -22,10 +22,13 @@ import { describeHookTreeParity } from "./lib/hookTreeParity.mjs";
 // those fragments and leaves the rest of each one alone.
 //
 // What it cannot reach: the platform's own fragments, which exist only on the
-// instance, and logrotate itself, which is not installed in the development
-// container. The fixtures below are shaped like the fragments an instance was
-// read to hold, not captured from one, and the hook asks the instance's own
-// logrotate to parse its result before installing it.
+// instance. The fixtures below are shaped like the fragments an instance was
+// read to hold, not captured from one. Every path a fixture names -- the logs
+// it rotates, its `olddir`, the user its `su` names -- resolves under the
+// test's own temporary tree or to the user running the test, so the hook's
+// logrotate check reads a config logrotate can act on wherever logrotate is
+// installed; where it is not, the hook reports that it installed the rewrite
+// unchecked.
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..");
@@ -47,10 +50,15 @@ const FRAGMENTS = [
 // value over cannot pass on the hook's own default.
 const FIXTURE_SIZE = "25M";
 
+// The platform's fragments name root; the fixtures name the user the test
+// runs as, which is the user the hook's logrotate check runs as here.
+const id = (flag) => execFileSync("id", [flag], { encoding: "utf8" }).trim();
+const SU = `${id("-un")} ${id("-gn")}`;
+
 const fixture = (logPath, olddir, size = FIXTURE_SIZE) =>
   [
     `${logPath} {`,
-    "    su root root",
+    `    su ${SU}`,
     ...(size === null ? [] : [`    size ${size}`]),
     "    missingok",
     "    rotate 4",
@@ -80,28 +88,47 @@ const rotatedDays = retentionDays - 1;
 
 const tmpDirs = [];
 
-const confDir = () => {
-  const dir = mkdtempSync(join(tmpdir(), "eb-logrotate-"));
-  tmpDirs.push(dir);
-  const conf = join(dir, "conf");
-  mkdirSync(conf);
-  writeFileSync(
-    join(conf, FRAGMENTS[0]),
-    fixture("/var/log/nginx/*", "/var/log/nginx/rotated"),
-  );
+// A fixture instance: the fragment directory the hook is pointed at, the logs
+// those fragments rotate, and the directory the rotated copies go to.
+const fixtureTree = () => {
+  const root = mkdtempSync(join(tmpdir(), "eb-logrotate-"));
+  tmpDirs.push(root);
+  const conf = join(root, "conf");
+  const logs = join(root, "log");
+  const olddir = join(logs, "rotated");
+  const nginxDir = join(logs, "nginx");
+  for (const dir of [conf, logs, olddir, nginxDir]) {
+    mkdirSync(dir);
+  }
+  const log = (relative) => {
+    const path = join(logs, relative);
+    writeFileSync(path, "a line the service wrote\n");
+    return path;
+  };
+  const tree = { conf, olddir, log, nginxGlob: join(nginxDir, "*") };
+  log("nginx/access.log");
+  writeFileSync(join(conf, FRAGMENTS[0]), fixture(tree.nginxGlob, olddir));
   writeFileSync(
     join(conf, FRAGMENTS[1]),
-    fixture("/var/log/web.stdout.log", "/var/log/rotated"),
+    fixture(log("web.stdout.log"), olddir),
   );
   writeFileSync(
     join(conf, FRAGMENTS[2]),
-    fixture("/var/log/web.stderr.log", "/var/log/rotated"),
+    fixture(log("web.stderr.log"), olddir),
   );
-  return conf;
+  return tree;
 };
 
 const runHook = (conf) =>
   spawnSync(BASH, [HOOK, conf], { encoding: "utf8", cwd: repoRoot });
+
+// The hook reports what it refused on stderr, and its logrotate check relays
+// logrotate's own complaint there, so a failed run says why it failed.
+const runHookExpectingSuccess = (conf) => {
+  const result = runHook(conf);
+  expect(result.status, `the hook failed with:\n${result.stderr}`).toBe(0);
+  return result;
+};
 
 afterEach(() => {
   while (tmpDirs.length > 0) {
@@ -113,9 +140,8 @@ describeHookTreeParity("the EB log-retention hook's two copies", HOOK_TREES);
 
 describe("the EB log-retention hook", () => {
   it("bounds every fragment it is responsible for by time", () => {
-    const conf = confDir();
-    const result = runHook(conf);
-    expect(result.status).toBe(0);
+    const { conf } = fixtureTree();
+    runHookExpectingSuccess(conf);
     for (const name of FRAGMENTS) {
       const bounded = readFileSync(join(conf, name), "utf8");
       expect(bounded).toMatch(/^ *daily$/m);
@@ -127,8 +153,8 @@ describe("the EB log-retention hook", () => {
     // The live log holds a day of records before the daily rotation moves
     // them, so the oldest record of the last kept copy is the window old.
     expect(retentionDays).toBeGreaterThan(1);
-    const conf = confDir();
-    expect(runHook(conf).status).toBe(0);
+    const { conf } = fixtureTree();
+    runHookExpectingSuccess(conf);
     for (const name of FRAGMENTS) {
       const bounded = readFileSync(join(conf, name), "utf8");
       expect(bounded).toMatch(new RegExp(`^ *rotate ${rotatedDays}$`, "m"));
@@ -139,8 +165,8 @@ describe("the EB log-retention hook", () => {
   it("carries the platform's size trigger over as a maximum size", () => {
     // Dropping it would let one burst of traffic fill a day's copy without
     // bound; leaving it as `size` would keep rotation size-triggered only.
-    const conf = confDir();
-    expect(runHook(conf).status).toBe(0);
+    const { conf } = fixtureTree();
+    runHookExpectingSuccess(conf);
     for (const name of FRAGMENTS) {
       const bounded = readFileSync(join(conf, name), "utf8");
       expect(bounded).toMatch(new RegExp(`^ *maxsize ${FIXTURE_SIZE}$`, "m"));
@@ -149,17 +175,17 @@ describe("the EB log-retention hook", () => {
   });
 
   it("leaves the directives it does not own as the platform wrote them", () => {
-    const conf = confDir();
-    expect(runHook(conf).status).toBe(0);
+    const { conf, olddir, nginxGlob } = fixtureTree();
+    runHookExpectingSuccess(conf);
     const bounded = readFileSync(join(conf, FRAGMENTS[0]), "utf8");
     expect(bounded.split("\n")).toEqual(
       expect.arrayContaining([
-        "/var/log/nginx/* {",
-        "    su root root",
+        `${nginxGlob} {`,
+        `    su ${SU}`,
         "    missingok",
         "    compress",
         "    notifempty",
-        "    olddir /var/log/nginx/rotated",
+        `    olddir ${olddir}`,
         "    copytruncate",
         "}",
       ]),
@@ -169,11 +195,12 @@ describe("the EB log-retention hook", () => {
   it("leaves a minsize floor where the platform wrote it", () => {
     // minsize holds a floor under rotation rather than triggering it, so the
     // hook's daily trigger replaces neither it nor its position in the block.
-    const conf = confDir();
+    const { conf, log } = fixtureTree();
+    const access = log("nginx/access.log");
     writeFileSync(
       join(conf, FRAGMENTS[0]),
       [
-        "/var/log/nginx/access.log {",
+        `${access} {`,
         "    minsize 1M",
         "    size 10M",
         "    copytruncate",
@@ -181,9 +208,9 @@ describe("the EB log-retention hook", () => {
         "",
       ].join("\n"),
     );
-    expect(runHook(conf).status).toBe(0);
+    runHookExpectingSuccess(conf);
     expect(readFileSync(join(conf, FRAGMENTS[0]), "utf8").split("\n")).toEqual([
-      "/var/log/nginx/access.log {",
+      `${access} {`,
       "    minsize 1M",
       "    copytruncate",
       "    daily",
@@ -198,31 +225,33 @@ describe("the EB log-retention hook", () => {
   it("bounds a block whose braces hold trailing spaces or a comment", () => {
     // A closing brace the rewrite does not recognize strips the block's
     // rotation directives and puts none back.
-    const conf = confDir();
+    const { conf, log } = fixtureTree();
+    const access = log("nginx/access.log");
+    const error = log("nginx/error.log");
     writeFileSync(
       join(conf, FRAGMENTS[0]),
       [
-        "/var/log/nginx/access.log {",
+        `${access} {`,
         "    size 10M # bursts",
         "    copytruncate",
         "} # the platform's own note",
-        "/var/log/nginx/error.log {",
+        `${error} {`,
         "    size 20M",
         "    copytruncate",
         "}   ",
         "",
       ].join("\n"),
     );
-    expect(runHook(conf).status).toBe(0);
+    runHookExpectingSuccess(conf);
     expect(readFileSync(join(conf, FRAGMENTS[0]), "utf8").split("\n")).toEqual([
-      "/var/log/nginx/access.log {",
+      `${access} {`,
       "    copytruncate",
       "    daily",
       "    maxsize 10M",
       `    rotate ${rotatedDays}`,
       `    maxage ${rotatedDays}`,
       "} # the platform's own note",
-      "/var/log/nginx/error.log {",
+      `${error} {`,
       "    copytruncate",
       "    daily",
       "    maxsize 20M",
@@ -236,12 +265,12 @@ describe("the EB log-retention hook", () => {
   it("leaves an already-bounded fragment untouched", () => {
     // It runs on every deployment, and a rewrite that never settles would
     // rewrite the platform's file each time.
-    const conf = confDir();
-    expect(runHook(conf).status).toBe(0);
+    const { conf } = fixtureTree();
+    runHookExpectingSuccess(conf);
     const first = FRAGMENTS.map((name) =>
       readFileSync(join(conf, name), "utf8"),
     );
-    expect(runHook(conf).status).toBe(0);
+    runHookExpectingSuccess(conf);
     const second = FRAGMENTS.map((name) =>
       readFileSync(join(conf, name), "utf8"),
     );
@@ -251,7 +280,7 @@ describe("the EB log-retention hook", () => {
   it("fails the deployment when a fragment it bounds is not there", () => {
     // A platform that renames or drops a fragment leaves that log rotating
     // on size alone, which is the state this hook exists to end.
-    const conf = confDir();
+    const { conf } = fixtureTree();
     rmSync(join(conf, FRAGMENTS[1]));
     const result = runHook(conf);
     expect(result.status).toBe(1);
@@ -262,9 +291,10 @@ describe("the EB log-retention hook", () => {
   it("fails the deployment rather than install a block without the bound", () => {
     // Whatever shape defeats the rewrite -- here a block the fragment never
     // closes -- the result is not installed and the deployment stops.
-    const conf = confDir();
+    const { conf, log } = fixtureTree();
+    const stdoutLog = log("web.stdout.log");
     const unclosed = [
-      "/var/log/web.stdout.log {",
+      `${stdoutLog} {`,
       "    size 25M",
       "    copytruncate",
       "",
@@ -273,38 +303,33 @@ describe("the EB log-retention hook", () => {
     const result = runHook(conf);
     expect(result.status).toBe(1);
     expect(result.stderr).toContain(FRAGMENTS[1]);
-    expect(result.stderr).toContain("/var/log/web.stdout.log {");
+    expect(result.stderr).toContain(`${stdoutLog} {`);
     expect(readFileSync(join(conf, FRAGMENTS[1]), "utf8")).toBe(unclosed);
   });
 
   it("bounds each block of a fragment that rotates several logs by its own size", () => {
     // Each block of a fragment keeps the size trigger the platform gave that
     // block, and a block the platform wrote without one is given none.
-    const conf = confDir();
+    const { conf, olddir, log } = fixtureTree();
+    const access = log("nginx/access.log");
+    const error = log("nginx/error.log");
+    const other = log("nginx/other.log");
     writeFileSync(
       join(conf, FRAGMENTS[0]),
       [
-        fixture("/var/log/nginx/access.log", "/var/log/nginx/rotated", "10M"),
-        fixture("/var/log/nginx/error.log", "/var/log/nginx/rotated", "500M"),
-        fixture("/var/log/nginx/other.log", "/var/log/nginx/rotated", null),
+        fixture(access, olddir, "10M"),
+        fixture(error, olddir, "500M"),
+        fixture(other, olddir, null),
       ].join("\n"),
     );
-    expect(runHook(conf).status).toBe(0);
+    runHookExpectingSuccess(conf);
     const bounded = blocksByLogPath(
       readFileSync(join(conf, FRAGMENTS[0]), "utf8"),
     );
-    expect([...bounded.keys()]).toEqual([
-      "/var/log/nginx/access.log",
-      "/var/log/nginx/error.log",
-      "/var/log/nginx/other.log",
-    ]);
-    expect(bounded.get("/var/log/nginx/access.log")).toMatch(
-      /^ *maxsize 10M$/m,
-    );
-    expect(bounded.get("/var/log/nginx/error.log")).toMatch(
-      /^ *maxsize 500M$/m,
-    );
-    expect(bounded.get("/var/log/nginx/other.log")).not.toMatch(/^ *maxsize /m);
+    expect([...bounded.keys()]).toEqual([access, error, other]);
+    expect(bounded.get(access)).toMatch(/^ *maxsize 10M$/m);
+    expect(bounded.get(error)).toMatch(/^ *maxsize 500M$/m);
+    expect(bounded.get(other)).not.toMatch(/^ *maxsize /m);
     for (const block of bounded.values()) {
       expect(block).toMatch(/^ *daily$/m);
       expect(block).toMatch(/^ *maxage \d+$/m);

@@ -146,7 +146,7 @@ check_bounded() {
 }
 
 bound_fragment() {
-    local fragment="$1" rewritten state
+    local fragment="$1" rewritten state_dir
     rewritten=$(mktemp)
     # Each block has its own size trigger, so the directives go in at the
     # block's closing brace, once that block's own size has been read.
@@ -184,13 +184,17 @@ bound_fragment() {
     fi
 
     if command -v logrotate >/dev/null 2>&1; then
-        state=$(mktemp)
-        if ! logrotate --debug --state "$state" "$rewritten" >/dev/null; then
+        # logrotate reads the state file it is given before it reads the
+        # config, and the question here is about the rewrite alone, so it
+        # gets a path of its own that nothing has created.
+        state_dir=$(mktemp -d)
+        if ! logrotate --debug --state "$state_dir/state" "$rewritten" >/dev/null; then
             echo "Log retention: logrotate rejected the bounded $fragment; leaving it alone" >&2
-            rm -f "$rewritten" "$state"
+            rm -rf "$state_dir"
+            rm -f "$rewritten"
             exit 1
         fi
-        rm -f "$state"
+        rm -rf "$state_dir"
     else
         echo "Log retention: no logrotate on this host, installing $fragment without checking it" >&2
     fi
