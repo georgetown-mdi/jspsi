@@ -66,9 +66,9 @@ import type {
 } from "@psilink/core";
 import type {
   ManagedExchangeFileComposition,
+  ManagedExchangeKeyFields,
   ManagedExchangeRecord,
 } from "./managedExchangeRecord";
-import type { ManagedExchangeArtifactKey } from "./managedExchangeArtifact";
 
 /** The config file name `psilink exchange` reads at its default config path
  * (`DEFAULT_CONFIG_PATH`, `apps/cli/src/config.ts`), so a run in the folder
@@ -355,7 +355,7 @@ function composeCronExportDocument(
  * write (`saveKeyFile`, `apps/cli/src/keyFile.ts`) so the exported file is
  * byte-shaped like one the CLI wrote itself.
  */
-function serializeKeyFile(fields: ManagedExchangeArtifactKey): string {
+function serializeKeyFile(fields: ManagedExchangeKeyFields): string {
   return `${JSON.stringify(fields, null, 2)}\n`;
 }
 

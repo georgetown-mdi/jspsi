@@ -17,6 +17,7 @@ import {
   persistManagedExchangeRotation,
   readRecordAndMarkBackedUp,
   recordManagedExchangeLastRun,
+  retakeHandedOffManagedExchange,
   spendManagedExchangeIfCurrent,
 } from "@psi/managed/managedExchangeStore";
 import {
@@ -1128,6 +1129,227 @@ describe("a local-state entry this build cannot parse is skipped too", () => {
       name: "ManagedImportHandedOffError",
       handoff: "command-line",
       label: "Riverbend quarterly",
+    });
+  });
+});
+
+describe("what the handed-off import refusal is scoped to", () => {
+  // Both of the refusal's conditions are the operator's to remove, and neither is
+  // prevented: it is an operator-cooperation property, not a cryptographic one
+  // (docs/spec/MANAGED_EXCHANGE_RECORD.md). These pin what each removal leaves in
+  // the store, which is what the re-take's attestation exists to be better than.
+
+  test("an artifact behind the record's rotation matches nothing and installs fresh", async () => {
+    const source = await createManagedExchange(newExchange());
+    const bytes = serializeManagedExchangeArtifact(
+      encodeManagedExchangeArtifact(source),
+    );
+    // A run rotated the secret before the hand-off, so the artifact holds a secret
+    // no stored record has: nothing for the refusal to match on.
+    const rotated = await persistManagedExchangeRotation(source.id, {
+      sharedSecret: generateSharedSecret(),
+      expires: null,
+    });
+    await spendManagedExchangeIfCurrent(
+      source.id,
+      rotated.sharedSecret,
+      "2026-07-14T13:00:00.000Z",
+      "command-line",
+    );
+
+    const { record: installed } = await importManagedExchange(bytes);
+
+    // A second live row beside the handed-off husk, holding the older secret.
+    expect(installed.id).not.toBe(source.id);
+    expect(installed.sharedSecret).toBe(source.sharedSecret);
+    expect((await listManagedExchanges()).map((r) => r.id).sort()).toEqual(
+      [source.id, installed.id].sort(),
+    );
+    // The handed-off record is untouched by the import that landed beside it.
+    expect(await getManagedExchange(source.id)).toEqual(rotated);
+    expect(await getManagedLocalState(source.id)).toEqual({
+      spent: { spentAt: "2026-07-14T13:00:00.000Z", handoff: "command-line" },
+    });
+  });
+
+  test("deleting the handed-off record removes the match, and a later import installs", async () => {
+    const source = await createManagedExchange(newExchange());
+    const bytes = serializeManagedExchangeArtifact(
+      encodeManagedExchangeArtifact(source),
+    );
+    await spendManagedExchangeIfCurrent(
+      source.id,
+      source.sharedSecret,
+      "2026-07-14T13:00:00.000Z",
+      "command-line",
+    );
+    await expect(importManagedExchange(bytes)).rejects.toMatchObject({
+      name: "ManagedImportHandedOffError",
+    });
+
+    await deleteManagedExchange(source.id);
+    const { record: installed } = await importManagedExchange(bytes);
+
+    // The delete took the record the refusal was made against, so the same bytes
+    // install a live copy of a secret the command line still holds.
+    expect(installed.id).not.toBe(source.id);
+    expect(installed.sharedSecret).toBe(source.sharedSecret);
+    expect((await listManagedExchanges()).map((r) => r.id)).toEqual([
+      installed.id,
+    ]);
+    const local = await getManagedLocalState(installed.id);
+    expect(local?.spent).toBeUndefined();
+    expect(local?.imported?.importedAt).toEqual(expect.any(String));
+  });
+});
+
+describe("taking a command-line hand-off back", () => {
+  // The attested route out of the spent state. The store step is what these pin:
+  // it clears the spent state, reads the key file's secret in where the scheduled
+  // runs have moved past the stored one, and writes nothing at all otherwise.
+
+  async function handedOff() {
+    const record = await createManagedExchange(newExchange({ schedule }));
+    await markManagedExchangeBackedUp(record.id, "2026-07-14T12:00:00.000Z");
+    await spendManagedExchangeIfCurrent(
+      record.id,
+      record.sharedSecret,
+      "2026-07-14T13:00:00.000Z",
+      "command-line",
+    );
+    return record;
+  }
+
+  test("a re-take with no key file makes the record live, changing nothing else", async () => {
+    // The case the ruling settles with "no cron run happened": the stored secret
+    // is still the partnership's, so nothing is read in and the backup taken
+    // before the hand-off still holds the current secret.
+    const record = await handedOff();
+
+    const outcome = await retakeHandedOffManagedExchange(record.id);
+
+    expect(outcome).toEqual({ kind: "retaken", record });
+    expect(await getManagedExchange(record.id)).toEqual(record);
+    expect(await getManagedLocalState(record.id)).toEqual({
+      backup: { backedUpAt: "2026-07-14T12:00:00.000Z" },
+    });
+  });
+
+  test("the key file's rotated secret is read in, and stales the backup with it", async () => {
+    // The scheduled runs on the other machine rotated the secret and wrote it back
+    // to the key file, so the stored one is behind the partnership's.
+    const record = await handedOff();
+    const key = {
+      sharedSecret: generateSharedSecret(),
+      expires: "2026-10-01T00:00:00.000Z",
+    };
+
+    const outcome = await retakeHandedOffManagedExchange(record.id, key);
+
+    const stored = await getManagedExchange(record.id);
+    expect(outcome).toEqual({ kind: "retaken", record: stored });
+    expect(stored?.sharedSecret).toBe(key.sharedSecret);
+    expect(stored?.expires).toBe(key.expires);
+    // Only the secret half moved: the terms, the label and the schedule are the
+    // record's own, and no re-invite happened.
+    expect(stored?.exchangeFile).toEqual(record.exchangeFile);
+    expect(stored?.schedule).toEqual(schedule);
+    // The secret advanced, so the backup taken before it attests bytes the
+    // partnership has moved past: the marker goes the way every rotation sends it,
+    // and the spent state with it.
+    expect(await getManagedLocalState(record.id)).toBeUndefined();
+  });
+
+  test("a run holding the run+rotate lock refuses the re-take, writing nothing", async () => {
+    // The run re-reads the spent state as its first act inside that lock, so a
+    // re-take landing beside it would decide against state the run is about to
+    // read. Excluded on the lock, exactly as the hand-off spend is.
+    const record = await handedOff();
+    let granted!: () => void;
+    const holding = new Promise<void>((resolve) => {
+      granted = resolve;
+    });
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const run = withManagedExchangeLock(record.id, async () => {
+      granted();
+      await released;
+    });
+    await holding;
+
+    try {
+      expect(await retakeHandedOffManagedExchange(record.id)).toEqual({
+        kind: "run-in-flight",
+      });
+      expect((await getManagedLocalState(record.id))?.spent).toEqual({
+        spentAt: "2026-07-14T13:00:00.000Z",
+        handoff: "command-line",
+      });
+    } finally {
+      // Released even if the assertions throw, so a failing test cannot strand the
+      // exclusive lock for the rest of the page's life.
+      release();
+      await run;
+    }
+
+    // The refusal consumed nothing: the same copy comes back once the lock is free.
+    expect((await retakeHandedOffManagedExchange(record.id)).kind).toBe(
+      "retaken",
+    );
+  });
+
+  test("a migration-spent copy is not this route's to take back", async () => {
+    // Its recovery is importing its own artifact back, which revives it in place;
+    // clearing its spent state here would leave the device it was migrated to
+    // running beside a live copy here.
+    const record = await createManagedExchange(newExchange());
+    await spendManagedExchangeIfCurrent(
+      record.id,
+      record.sharedSecret,
+      "2026-07-14T13:00:00.000Z",
+    );
+
+    expect(await retakeHandedOffManagedExchange(record.id)).toEqual({
+      kind: "not-handed-off",
+    });
+    expect(await getManagedLocalState(record.id)).toEqual({
+      spent: { spentAt: "2026-07-14T13:00:00.000Z" },
+    });
+  });
+
+  test("a live record has nothing to take back, and a deleted one is gone", async () => {
+    const live = await createManagedExchange(newExchange());
+    expect(await retakeHandedOffManagedExchange(live.id)).toEqual({
+      kind: "not-handed-off",
+    });
+    expect(await getManagedExchange(live.id)).toEqual(live);
+
+    const record = await handedOff();
+    await deleteManagedExchange(record.id);
+    expect(await retakeHandedOffManagedExchange(record.id)).toEqual({
+      kind: "gone",
+    });
+    expect(await getManagedLocalState(record.id)).toBeUndefined();
+  });
+
+  test("a key the record schema rejects leaves the record exactly as it was", async () => {
+    // The write is field-scoped and re-validated, so a malformed secret aborts the
+    // whole cross-store transaction: the record keeps its own secret and stays
+    // spent, rather than half-taken-back.
+    const record = await handedOff();
+
+    await expect(
+      retakeHandedOffManagedExchange(record.id, {
+        sharedSecret: "not-a-shared-secret",
+      }),
+    ).rejects.toThrow();
+
+    expect(await getManagedExchange(record.id)).toEqual(record);
+    expect(await getManagedLocalState(record.id)).toEqual({
+      backup: { backedUpAt: "2026-07-14T12:00:00.000Z" },
+      spent: { spentAt: "2026-07-14T13:00:00.000Z", handoff: "command-line" },
     });
   });
 });

@@ -38,6 +38,7 @@ import { parseManagedLocalState } from "./managedLocalStateShape";
 
 import type {
   ManagedExchangeDiagnosticEssentials,
+  ManagedExchangeKeyFields,
   ManagedExchangeLastRun,
   ManagedExchangeLocalEdits,
   ManagedExchangeReadableRecords,
@@ -47,6 +48,7 @@ import type {
   NewManagedExchange,
 } from "./managedExchangeRecord";
 import type {
+  ManagedLocalState,
   ManagedSpendOutcome,
   ManagedSpentHandoff,
   ManagedSpentState,
@@ -776,6 +778,152 @@ function markSpentOnLocalStore(
     }),
     id,
   );
+}
+
+/**
+ * How a re-take of a command-line hand-off ended. `"retaken"` is the one outcome
+ * that writes: the spent state is cleared, and the `record` it holds is the one
+ * that runs here from then on. The refusals write nothing and are held apart
+ * because what the operator does next differs:
+ *
+ * - `"run-in-flight"` -- a run of this record holds the run+rotate lock. That run
+ *   re-reads the spent state as its first act, so a re-take landing beside it would
+ *   decide against state the run is about to read; it is refused until the run ends.
+ * - `"gone"` -- no record is stored under that id, so there is nothing here to take
+ *   back.
+ * - `"not-handed-off"` -- the stored record is not spent under a command-line
+ *   hand-off: it is live already, or it was spent by the device migration, whose
+ *   recovery is importing its own artifact back.
+ */
+export type ManagedRetakeOutcome =
+  | { kind: "retaken"; record: ManagedExchangeRecord }
+  | { kind: "run-in-flight" }
+  | { kind: "gone" }
+  | { kind: "not-handed-off" };
+
+/**
+ * Take a copy handed off to the command line back: clear the spent state so the
+ * record runs in this browser again, reading `key` -- the `.psilink.key` the
+ * command-line run holds -- into the record when it has moved past the stored
+ * secret.
+ *
+ * A run in flight excludes the re-take exactly as it excludes the hand-off spend:
+ * this step takes the record's run+rotate lock ({@link ./managedExchangeLock.ts})
+ * with `ifAvailable`, and a run holding it is reported as `"run-in-flight"` rather
+ * than waited out -- the run re-reads the spent state as its first act inside that
+ * lock, and the re-take is a write against exactly that state.
+ *
+ * `key` is omitted where the scheduled command-line run has not run since the
+ * hand-off, in which case the stored secret is still the partnership's and nothing
+ * needs reading in. A `key` whose secret has moved past the stored one is applied
+ * through {@link applyManagedExchangeRotation}, the same field-scoped write a run's
+ * own rotation takes, and clears the backup and import markers with it: the secret
+ * has advanced, so any earlier export of this exchange no longer holds it.
+ *
+ * @throws {ZodError} if the stored record or sibling entry is invalid, or the key
+ *   produces an invalid record; the transaction aborts and nothing is written.
+ */
+export async function retakeHandedOffManagedExchange(
+  id: string,
+  key?: ManagedExchangeKeyFields,
+): Promise<ManagedRetakeOutcome> {
+  try {
+    return await withManagedExchangeLock(id, () => retakeSpentCopy(id, key), {
+      ifAvailable: true,
+    });
+  } catch (error) {
+    if (error instanceof ManagedExchangeLockUnavailableError)
+      return { kind: "run-in-flight" };
+    throw error;
+  }
+}
+
+/** The re-take itself, run under the record's run+rotate lock: the cross-store
+ * transaction that reads the hand-off, applies the key file's secret where it has
+ * advanced, and clears the spent state. */
+async function retakeSpentCopy(
+  id: string,
+  key: ManagedExchangeKeyFields | undefined,
+): Promise<ManagedRetakeOutcome> {
+  const db = await openManagedExchangeDatabase();
+  try {
+    return await new Promise<ManagedRetakeOutcome>((resolve, reject) => {
+      const transaction = db.transaction(
+        [MANAGED_EXCHANGE_STORE_NAME, MANAGED_EXCHANGE_LOCAL_STORE_NAME],
+        "readwrite",
+        { durability: "strict" },
+      );
+      const records = transaction.objectStore(MANAGED_EXCHANGE_STORE_NAME);
+      const local = transaction.objectStore(MANAGED_EXCHANGE_LOCAL_STORE_NAME);
+      const read = records.get(id);
+      const readLocal = local.get(id);
+      let outcome: ManagedRetakeOutcome = { kind: "not-handed-off" };
+      let failure: unknown;
+      const applyWhenReady = () => {
+        if (read.readyState !== "done" || readLocal.readyState !== "done")
+          return;
+        try {
+          if (read.result === undefined) {
+            outcome = { kind: "gone" };
+            return;
+          }
+          const current =
+            readLocal.result === undefined
+              ? undefined
+              : parseManagedLocalState(readLocal.result);
+          if (current?.spent?.handoff !== "command-line") return;
+          const stored = parseManagedExchangeRecord(read.result);
+          const advanced =
+            key !== undefined && key.sharedSecret !== stored.sharedSecret;
+          const retaken = advanced
+            ? applyManagedExchangeRotation(stored, {
+                sharedSecret: key.sharedSecret,
+                expires: key.expires ?? null,
+              })
+            : stored;
+          if (advanced) records.put(retaken);
+          clearSpentOnLocalStore(local, id, current, advanced);
+          outcome = { kind: "retaken", record: retaken };
+        } catch (error) {
+          failure = error;
+          transaction.abort();
+        }
+      };
+      read.onsuccess = applyWhenReady;
+      readLocal.onsuccess = applyWhenReady;
+      transaction.oncomplete = () => resolve(outcome);
+      transaction.onerror = () => reject(failure ?? transaction.error);
+      transaction.onabort = () => reject(failure ?? transaction.error);
+    });
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Drop the spent state from a record's sibling entry, on an already-open local-state
+ * object store inside a live transaction, and the backup and import markers with it
+ * where the re-take advanced the secret -- the rule every secret advance in this
+ * store follows, so no marker outlives the secret it was stamped for. Deletes the
+ * whole entry rather than leaving an empty one behind.
+ */
+function clearSpentOnLocalStore(
+  store: IDBObjectStore,
+  id: string,
+  current: ManagedLocalState,
+  advanced: boolean,
+): void {
+  const kept: ManagedLocalState = advanced
+    ? {}
+    : {
+        ...(current.backup !== undefined ? { backup: current.backup } : {}),
+        ...(current.imported !== undefined
+          ? { imported: current.imported }
+          : {}),
+      };
+  if (kept.backup === undefined && kept.imported === undefined)
+    store.delete(id);
+  else store.put(parseManagedLocalState(kept), id);
 }
 
 /**

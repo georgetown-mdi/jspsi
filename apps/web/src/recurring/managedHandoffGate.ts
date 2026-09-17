@@ -113,6 +113,11 @@ export const HANDED_OFF_IMPORT_TITLE = "That exchange was handed off";
  * installing a second live copy beside the handed-off one. Keyed by the hand-off,
  * because what the operator has instead is whatever that hand-off saved -- a route
  * added later must say its own recovery here rather than inherit this one.
+ *
+ * The command-line route's recovery is the re-take on the handed-off exchange's own
+ * surface ({@link ./managedRetakeModel.ts}), named by the words of its control: the
+ * import affordance renders only beside an empty or unreadable listing, so an
+ * operator meeting this refusal is not on the screen that offers it.
  */
 const HANDED_OFF_IMPORT_REASON: Record<
   ManagedSpentHandoff,
@@ -123,7 +128,8 @@ const HANDED_OFF_IMPORT_REASON: Record<
     "psilink.yaml and .psilink.key you saved, on the machine you saved them to, " +
     "and that machine is its one owner. A backup file taken before the hand-off " +
     "would run a copy you gave away, so nothing was imported. To run this " +
-    "exchange in this browser again, create a fresh invitation for your partner.",
+    'exchange in this browser again, open it from the list and choose "Take ' +
+    'this exchange back".',
 };
 
 /**

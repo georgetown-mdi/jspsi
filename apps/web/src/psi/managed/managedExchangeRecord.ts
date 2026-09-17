@@ -351,15 +351,26 @@ const persistedExchangeFileSchema = ExchangeSpecSchema.refine(
 );
 
 /**
- * The `.psilink.key` field shape the record's secret half maps onto: a
- * `sharedSecret` matching {@link SHARED_SECRET_REGEX} and, when a bound is in
- * force, an ISO 8601 `expires`. Reused by the export/import artifact so the
- * artifact's key half validates against the exact key-file shape rather than a
- * looser copy, keeping the CLI-separability commitment a single source of truth.
- * Strict, so a reader rejects an unknown key on the pair rather than silently
- * accepting it.
+ * The `.psilink.key` field pair: the current shared secret and, when a bound is in
+ * force, the `expires` instant it lapses at. The export/import artifact's key half
+ * and the command-line export's key file are both this shape, so a record's secret
+ * half maps onto a valid `.psilink.key` and one read back maps onto a record.
  */
-export const keyFileFieldsSchema = z
+export interface ManagedExchangeKeyFields {
+  /** The current rotated shared secret (base64url, 43 chars / 32 bytes). */
+  sharedSecret: string;
+  /** The instant after which the secret must not be used; absent means no bound. */
+  expires?: string;
+}
+
+/**
+ * The key pair's validator: a `sharedSecret` matching {@link SHARED_SECRET_REGEX}
+ * and an optional ISO 8601 `expires`. Shared by every reader of the pair so none
+ * validates against a looser copy, keeping the CLI-separability commitment a single
+ * source of truth. Strict, so a reader rejects an unknown key on the pair rather
+ * than silently accepting it.
+ */
+export const keyFileFieldsSchema: ZodType<ManagedExchangeKeyFields> = z
   .object({
     sharedSecret: z.string().regex(SHARED_SECRET_REGEX),
     expires: z.iso.datetime().optional(),

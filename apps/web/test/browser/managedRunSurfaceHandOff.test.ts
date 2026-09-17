@@ -10,6 +10,11 @@ import { createElement } from "react";
 import "@mantine/core/styles.css";
 
 import {
+  RETAKE_ACTION_LABEL,
+  RETAKE_CONFIRM_LABEL,
+  RETAKE_LEAD,
+} from "@recurring/managedRetakeModel";
+import {
   clearManagedExchanges,
   createManagedExchange,
   getManagedExchange,
@@ -18,6 +23,7 @@ import {
 import { MANAGED_RUN_HANDED_OFF_ATTESTATION } from "@recurring/managedRunLaunchModel";
 import { ManagedRunSurface } from "@recurring/ManagedRunSurface";
 import { composeManagedExchangeFile } from "@psi/managed/managedExchangeRecord";
+import { getManagedLocalState } from "@psi/managed/managedLocalState";
 
 import { createAppMount } from "./renderApp";
 
@@ -139,6 +145,68 @@ describe("the hand-off confirm states what does not travel", () => {
     await expect
       .element(page.getByText("export the accounting as CSV", { exact: false }))
       .toBeInTheDocument();
+  });
+});
+
+describe("the re-take on a spent copy's own surface", () => {
+  // The route back the import refusal points at, reachable while the listing is
+  // non-empty -- which is exactly where the import affordance is not. The store
+  // step behind it is covered against the real store in
+  // managedExchangeBackup.test.ts; what is pinned here is that the operator can
+  // reach it, that declining writes nothing, and that confirming leaves them on a
+  // surface that runs.
+  async function handedOffSurface() {
+    const created = await createManagedExchange(
+      newExchange({ inputFileHandle: await inputHandle() }),
+    );
+    expect(
+      await spendManagedExchangeIfCurrent(
+        created.id,
+        created.sharedSecret,
+        "2026-07-14T09:00:00.000Z",
+        "command-line",
+      ),
+    ).toBe("spent");
+    app.render(createElement(ManagedRunSurface, { id: created.id }));
+    await expect
+      .element(page.getByText("This exchange was handed off", { exact: true }))
+      .toBeInTheDocument();
+    return created;
+  }
+
+  test("declining the confirmation leaves the copy spent and writes nothing", async () => {
+    const created = await handedOffSurface();
+
+    await page.getByRole("button", { name: RETAKE_ACTION_LABEL }).click();
+    // The confirmation states what must already be true before this browser takes
+    // the exchange over again.
+    await expect.element(page.getByText(RETAKE_LEAD)).toBeInTheDocument();
+    await page.getByRole("button", { name: "Cancel" }).click();
+
+    await expect
+      .element(page.getByText("This exchange was handed off", { exact: true }))
+      .toBeInTheDocument();
+    expect((await getManagedLocalState(created.id))?.spent).toEqual({
+      spentAt: "2026-07-14T09:00:00.000Z",
+      handoff: "command-line",
+    });
+  });
+
+  test("confirming it leaves the operator on a surface that runs", async () => {
+    const created = await handedOffSurface();
+
+    await page.getByRole("button", { name: RETAKE_ACTION_LABEL }).click();
+    await page.getByRole("button", { name: RETAKE_CONFIRM_LABEL }).click();
+
+    // The surface reads the store again rather than standing on the re-take's own
+    // answer, so what it shows is the live record the store holds.
+    await expect
+      .element(page.getByRole("button", { name: "Run exchange" }))
+      .toBeEnabled();
+    expect(await getManagedLocalState(created.id)).toBeUndefined();
+    expect((await getManagedExchange(created.id))?.sharedSecret).toBe(
+      created.sharedSecret,
+    );
   });
 });
 

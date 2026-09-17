@@ -21,6 +21,7 @@ import {
   encodeManagedExchangeArtifact,
   serializeManagedExchangeArtifact,
 } from "@psi/managed/managedExchangeArtifact";
+import { RETAKE_ACTION_LABEL } from "@recurring/managedRetakeModel";
 import { composeManagedExchangeFile } from "@psi/managed/managedExchangeRecord";
 
 import { createAppMount } from "./renderApp";
@@ -164,9 +165,7 @@ describe("importing a backup of an exchange handed off from here", () => {
       .toBeInTheDocument();
     await expect
       .element(
-        page.getByText("create a fresh invitation for your partner", {
-          exact: false,
-        }),
+        page.getByText(`choose "${RETAKE_ACTION_LABEL}"`, { exact: false }),
       )
       .toBeInTheDocument();
     // The file was read and understood, so the unreadable-file copy would be wrong.

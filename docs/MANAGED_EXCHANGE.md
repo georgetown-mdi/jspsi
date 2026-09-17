@@ -993,9 +993,8 @@ copy this browser gave away or leave that copy live beside the spent one, and on
 owner holds a recurring exchange's secret. Where an import is offered at all --
 the list's empty and could-not-read states are the only surfaces holding one --
 the refusal names the exchange and what it has instead: it runs on the machine
-holding those two files from then on, and bringing it back to this browser means
-a fresh invitation. Alongside a healthy listing there is no import to refuse, so
-in practice the fresh invitation is the recovery an operator reaches for.
+holding those two files from then on, and the way back to this browser is the
+take-back on that exchange's own page, below.
 
 Those two conditions bound it, and an import outside them installs an ordinary
 fresh exchange:
@@ -1042,6 +1041,39 @@ so where it offers them, so the two kinds of export are told apart before either
 downloaded. An operator who declines the hand-off and keeps running here still needs
 an ordinary backup; one who confirms it has handed the exchange over, and the two
 files are its backup of record from then on.
+
+### Taking it back from the command line
+
+An exchange handed to the command line can be brought back. The scheduled job was
+abandoned, the machine is going away, or the operator simply wants to run it here
+again: the handed-off exchange's own page offers **Take this exchange back**, and
+it is the only way back -- an old backup file is refused, for the reasons above.
+
+Taking it back is one deliberate step with a confirmation, not a quiet reversal,
+because two things have to be true and only the operator knows them:
+
+- **The scheduled run there is stopped.** If both keep running, each run changes
+  the shared secret and whichever copy rotates second leaves the other unable to
+  connect to the partner.
+- **Whether it has run there since the hand-off.** Every command-line run changes
+  the shared secret and writes the new one back into `.psilink.key`, so after a run
+  that file holds the secret the partner expects and this browser's stored one does
+  not. The confirmation asks for that file; choose the `.psilink.key` from the
+  machine that was running the exchange and this browser picks the exchange back up
+  where the command line left it.
+
+Where nothing has run there since the hand-off, no file is needed: the secret
+stored here is still the partnership's. Where the file cannot be got at all, take
+the exchange back without it and create a fresh invitation for the partner from the
+same page -- the recovery for any secret this browser cannot match ([Recovery: fast
+re-invite](#recovery-fast-re-invite)).
+
+Declining the confirmation writes nothing: the exchange stays handed off, and the
+files on the other machine stay its backup of record. The exchange comes back as
+it was -- same terms, same label, same schedule, same accounting of disclosures --
+because none of that ever left this browser. The schedule is the one thing to
+settle by hand: the cron entry or scheduled task that was meeting the agreed window
+is no longer the one meeting it, so remove it there.
 
 ## Desync detection and recovery
 
