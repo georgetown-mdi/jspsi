@@ -4,7 +4,12 @@
 
 import fs from "node:fs";
 
-import { UsageError } from "@psilink/core";
+import {
+  keepOperatorSuppliedText,
+  messageWithOperatorText,
+  operatorSuppliedText,
+  UsageError,
+} from "@psilink/core";
 
 import { createOwnerOnlyWriteStream } from "../fileUtils";
 
@@ -12,6 +17,11 @@ import { createOwnerOnlyWriteStream } from "../fileUtils";
  * Resolve a CSV input positional to the readable stream core's `loadCSVFile`
  * consumes: `process.stdin` when `input` is `-`, otherwise the file at
  * `input`, opened with `fs.createReadStream` after confirming it exists.
+ *
+ * The not-found error names `input` as the operator's own text, so it renders
+ * as they typed it rather than escaped, and every caller must pass a path that
+ * came from argv or from the operator's configuration. A partner- or
+ * server-delivered string passed here would reach the display unescaped.
  *
  * Thrown errors hold an `exitCode` for the caller to forward to
  * `process.exit`: a missing file throws with `exitCode: 69`.
@@ -52,8 +62,13 @@ export function openInputSource(
       );
     return process.stdin;
   }
-  if (!fs.existsSync(input))
-    throw Object.assign(new Error(`${input} does not exist`), { exitCode: 69 });
+  if (!fs.existsSync(input)) {
+    const message = messageWithOperatorText`${operatorSuppliedText(input)} does not exist`;
+    throw Object.assign(
+      keepOperatorSuppliedText(new Error(message.text), message),
+      { exitCode: 69 },
+    );
+  }
   return fs.createReadStream(input);
 }
 
