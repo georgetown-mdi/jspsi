@@ -222,7 +222,7 @@ export async function noteUnfiledDisclosureRun(
     return "noted";
   } catch (error) {
     log.error("noting an unfiled disclosure in the store failed:", error);
-    return flagUnfiledExchange(id) ? "flagged" : "nowhere";
+    return (await flagUnfiledExchange(id)) ? "flagged" : "nowhere";
   }
 }
 

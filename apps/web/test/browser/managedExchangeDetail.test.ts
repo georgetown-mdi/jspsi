@@ -3333,7 +3333,7 @@ describe("a run whose record never reached the accounting", () => {
     ).toBeNull();
   });
 
-  test("a run this browser could record nowhere names the run history", async () => {
+  test("a run this browser could record nowhere names where to look", async () => {
     const onUnrecordedRunFlagShown = vi.fn();
 
     renderUnfiled(
@@ -3351,12 +3351,15 @@ describe("a run whose record never reached the accounting", () => {
         ),
       )
       .toBeInTheDocument();
+    // The run history may not name the run the flag stands for, so the alert
+    // names the other place it is stated rather than that one alone.
     await expect
       .element(
-        page.getByText("check this exchange's run history above", {
-          exact: false,
-        }),
+        page.getByText("keeps only the most recent run", { exact: false }),
       )
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("diagnostic log", { exact: false }))
       .toBeInTheDocument();
     // The alert reports that it has been shown, which is what drops the flag:
     // the fact is kept until an operator has read it.

@@ -132,9 +132,9 @@ function captureRefusedNoteReport(id: string) {
   const failure = vi
     .spyOn(getLogger("unfiledDisclosureStore"), "error")
     .mockImplementation(() => {});
-  onTestFinished(() => {
+  onTestFinished(async () => {
     failure.mockRestore();
-    clearUnfiledExchangeFlag(id);
+    await clearUnfiledExchangeFlag(id);
   });
   return failure;
 }
@@ -339,7 +339,7 @@ describe("deleting the exchange", () => {
 
   test("takes the fallback flag with it", async () => {
     const created = await createManagedExchange(newExchange());
-    expect(flagUnfiledExchange(created.id)).toBe(true);
+    expect(await flagUnfiledExchange(created.id)).toBe(true);
 
     await deleteManagedExchange(created.id);
 
@@ -354,8 +354,8 @@ describe("clearing every exchange", () => {
   test("leaves no flag behind", async () => {
     const first = await createManagedExchange(newExchange());
     const second = await createManagedExchange(newExchange());
-    expect(flagUnfiledExchange(first.id)).toBe(true);
-    expect(flagUnfiledExchange(second.id)).toBe(true);
+    expect(await flagUnfiledExchange(first.id)).toBe(true);
+    expect(await flagUnfiledExchange(second.id)).toBe(true);
 
     await clearManagedExchanges();
 

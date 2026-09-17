@@ -1501,9 +1501,19 @@ the records again.
 
 Occasionally this browser can store nothing at all -- it is out of space, or its
 database will not open -- and then even the note cannot be written. The page says
-at least one run of this exchange could not be recorded and points you at the
-run history; that run cannot be added to the accounting afterwards. Free space
-on the device so the next run can file its record.
+at least one run of this exchange could not be recorded; that run cannot be added
+to the accounting afterwards. Free space on the device so the next run can file
+its record.
+
+The marker names the exchange and nothing else, so finding which run it stands
+for takes two places, neither of them certain. The run history keeps only the
+most recent run, so a marker written for an earlier one is not named there. The
+run also reported the failure to the browser's diagnostic log as it happened --
+the developer-tools console, whose detail
+[DEPLOYMENT.md](DEPLOYMENT.md#diagnosing-web-connection-failures) describes --
+and that log holds it for as long as the browser keeps it. Where neither names
+the run, the exchange's schedule and the accounting's own entries bound when it
+happened; record the disclosure in your own compliance material either way.
 
 That last-resort marker has a limit of its own: it holds at most 20 exchanges and
 stays small on purpose, because a browser out of space is what it is written
@@ -1512,8 +1522,8 @@ and no page can tell you the run happened -- so treat a browser that has run out
 of space as the thing to fix, not a state to keep exchanging through. A marker is
 shown once, on the exchange's page, and is cleared once that page has shown
 it, whether or not anyone was there to read it. An exchange page left open
-unattended can clear the marker that way, so check the exchange's run history
-if in doubt.
+unattended can clear the marker that way, so check both places above if in
+doubt.
 
 ### When an app upgrade leaves an accounting unreadable
 

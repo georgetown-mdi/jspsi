@@ -1466,7 +1466,7 @@ export async function deleteManagedExchange(id: string): Promise<void> {
       transaction.onerror = () => reject(transaction.error);
       transaction.onabort = () => reject(transaction.error);
     });
-    clearUnfiledExchangeFlag(id);
+    await clearUnfiledExchangeFlag(id);
   } finally {
     db.close();
   }
@@ -1502,7 +1502,7 @@ export async function clearManagedExchanges(): Promise<void> {
       transaction.onerror = () => reject(transaction.error);
       transaction.onabort = () => reject(transaction.error);
     });
-    clearUnfiledExchangeFlags();
+    await clearUnfiledExchangeFlags();
   } finally {
     db.close();
   }

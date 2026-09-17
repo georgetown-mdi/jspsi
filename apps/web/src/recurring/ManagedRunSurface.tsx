@@ -847,7 +847,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
   // so the alert's mount effect runs once rather than on every render of the
   // section around it.
   const dropUnrecordedRunFlag = useCallback(() => {
-    clearUnfiledExchangeFlag(id);
+    void clearUnfiledExchangeFlag(id);
   }, [id]);
 
   // File the records the unfiled-run note retained, then read both again so the

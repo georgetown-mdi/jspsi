@@ -103,7 +103,7 @@ describe("a flagged exchange whose page shows the operator nothing", () => {
   test("keeps its flag across a visit that cannot find it", async () => {
     const created = await createManagedExchange(newExchange());
     await deleteManagedExchange(created.id);
-    expect(flagUnfiledExchange(created.id)).toBe(true);
+    expect(await flagUnfiledExchange(created.id)).toBe(true);
 
     app.render(createElement(ManagedRunSurface, { id: created.id }));
     await expect
@@ -114,13 +114,13 @@ describe("a flagged exchange whose page shows the operator nothing", () => {
     // Nothing on this screen states the run, so dropping the flag here would
     // destroy the only trace of a disclosure unseen.
     expect(unfiledExchangeFlagged(created.id)).toBe(true);
-    clearUnfiledExchangeFlag(created.id);
+    await clearUnfiledExchangeFlag(created.id);
   });
 
   test("keeps its flag across a visit that cannot load it", async () => {
     const created = await createManagedExchange(newExchange());
     await seedUnloadable(created);
-    expect(flagUnfiledExchange(created.id)).toBe(true);
+    expect(await flagUnfiledExchange(created.id)).toBe(true);
 
     app.render(createElement(ManagedRunSurface, { id: created.id }));
     await expect
@@ -131,7 +131,7 @@ describe("a flagged exchange whose page shows the operator nothing", () => {
     await flushPendingUpdates();
 
     expect(unfiledExchangeFlagged(created.id)).toBe(true);
-    clearUnfiledExchangeFlag(created.id);
+    await clearUnfiledExchangeFlag(created.id);
   });
 
   test("keeps its flag across a visit to a spent copy", async () => {
@@ -144,7 +144,7 @@ describe("a flagged exchange whose page shows the operator nothing", () => {
         "command-line",
       ),
     ).toBe("spent");
-    expect(flagUnfiledExchange(created.id)).toBe(true);
+    expect(await flagUnfiledExchange(created.id)).toBe(true);
 
     app.render(createElement(ManagedRunSurface, { id: created.id }));
     await expect
@@ -155,14 +155,14 @@ describe("a flagged exchange whose page shows the operator nothing", () => {
     await flushPendingUpdates();
 
     expect(unfiledExchangeFlagged(created.id)).toBe(true);
-    clearUnfiledExchangeFlag(created.id);
+    await clearUnfiledExchangeFlag(created.id);
   });
 });
 
 describe("a flagged exchange whose page states the run", () => {
   test("drops the flag once the alert has rendered", async () => {
     const created = await createManagedExchange(newExchange());
-    expect(flagUnfiledExchange(created.id)).toBe(true);
+    expect(await flagUnfiledExchange(created.id)).toBe(true);
 
     app.render(createElement(ManagedRunSurface, { id: created.id }));
     await expect
