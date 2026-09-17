@@ -312,6 +312,28 @@ the fact rather than pointing at a service invocation. That cost was accepted
 against the reasons above, of which the first is the one that would have to
 change for the balance to shift.
 
+## Post-quantum horizon
+
+Neither the migrated curve nor the retained schedule is post-quantum. P-256
+ECDH falls to a cryptanalytically relevant quantum computer, and NIST IR 8547
+(draft) contemplates deprecating classical elliptic-curve key establishment
+around 2030 and disallowing it by 2035 -- dates recorded here from a secondary
+reading, advisory until they are read against the publication the way the
+certificates above were. What the retained schedule does buy is a bound on
+harvest-now-decrypt-later: the pre-shared secret is mixed into the chaining key
+alongside the ECDH output, so a recorded transcript stays confidential against
+an adversary who solves the Diffie-Hellman but never held the secret -- the
+converse of the limit recorded above, where forward secrecy covers a secret
+that leaks later. The industry migration path is a hybrid exchange, classical
+ECDH alongside ML-KEM. Taking it is a wire-format change and the owner's
+decision: the protocol-version tag changes, and peers on different tags fail
+closed rather than negotiate, as they do across the X25519-to-P-256 migration
+([PROTOCOL.md](../spec/PROTOCOL.md#p-256-authenticated-key-exchange)). Two
+things reopen the question: an agency requirement for post-quantum or hybrid
+key establishment, or hybrid support maturing in both platforms'
+`crypto.subtle`, since reasons 1 and 5 above bind whatever primitive replaces
+this one.
+
 ## Open questions
 
 Two questions the documents could not decide. Both are recorded as open rather
