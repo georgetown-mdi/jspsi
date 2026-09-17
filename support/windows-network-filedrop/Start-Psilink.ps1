@@ -763,7 +763,9 @@ function New-RendezvousShareMount {
 
     $credential = $null
     if ($script:PsilinkShareCredential -and $script:PsilinkShareCredentialServer -eq $Server) {
-        if (Read-YesNo -Prompt "Use the same credentials for \\$Server\$Share? [Y/n]" -DefaultYes) {
+        # $($Share) rather than $Share: the question mark is read as part of
+        # the variable name, which leaves the share out of the question.
+        if (Read-YesNo -Prompt "Use the same credentials for \\$Server\$($Share)? [Y/n]" -DefaultYes) {
             $credential = $script:PsilinkShareCredential
         }
     }
