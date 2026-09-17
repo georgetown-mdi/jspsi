@@ -25,9 +25,13 @@ import { parseStoredInstant } from "./managedExchangeRecord";
 import { readManagedFailure } from "./managedFailureTiers";
 
 import {
+  CONSENT_FAILURE_TITLE,
+  INPUT_FAILURE_TITLE,
   REPEATED_MISS_TITLE,
+  TERMS_SHORTFALL_FAILURE_TITLE,
+  UNEXPLAINED_FAILURE_TITLE,
   repeatedMissCoordination,
-} from "./managedRepeatedMiss";
+} from "./managedFailureCopy";
 
 import type { ManagedExchangeRecord } from "./managedExchangeRecord";
 import type { ManagedFailureTier } from "./managedFailureTiers";
@@ -76,21 +80,22 @@ export interface BetweenVisitNoticeInput {
   now: number;
 }
 
-/** The title over each moment. The four failure titles are the words the next
- * visit's own alert holds for that tier, which betweenVisitNotice.test.ts holds
- * them equal to; the completed-run and missed-window titles are this surface's
- * own, the next visit having no alert for either. */
+/** The title over each moment. The four failure titles are the same constants
+ * the next visit's own alert holds its title to
+ * ({@link ../../recurring/managedRunLaunchModel.ts}), which
+ * betweenVisitNotice.test.ts holds this surface's titles equal to; the
+ * completed-run and missed-window titles are this surface's own, the next
+ * visit having no alert for either. */
 const NOTICE_TITLES: Record<
   Exclude<BetweenVisitNoticeKind, "repeated-misses">,
   string
 > = {
   backup: "A scheduled run finished; back up this exchange",
   missed: "A scheduled run did not happen",
-  input: "Your input file could not be used",
-  "terms-shortfall":
-    "Your input file cannot match on everything this exchange agreed to",
-  consent: "What this run would send is not what this exchange agreed to send",
-  unexplained: "This run failed and needs you to check with your partner",
+  input: INPUT_FAILURE_TITLE,
+  "terms-shortfall": TERMS_SHORTFALL_FAILURE_TITLE,
+  consent: CONSENT_FAILURE_TITLE,
+  unexplained: UNEXPLAINED_FAILURE_TITLE,
 };
 
 /** The failure tiers that earn a notice, each blocking every later window until
@@ -109,27 +114,46 @@ const NOTIFIED_FAILURE_TIERS: ReadonlySet<ManagedFailureTier> = new Set([
  * failures that block every later window, then the misses -- so a window that
  * failed for a reason the operator must answer says that rather than counting
  * another quiet miss beside it.
+ *
+ * The switch is exhaustive over `disposition` (including `undefined`, for a
+ * wake that occupied no window) with a `default` narrowed to `never`: a new
+ * disposition fails to compile here rather than falling through this surface
+ * silently. `"desynced"` routes through the same failure path as `"failed"` --
+ * no runtime call site constructs it today (a rotation desync surfaces as an
+ * auth-kind `"failed"` run), but the type admits it, so this surface must too.
  */
 export function betweenVisitNotice(
   input: BetweenVisitNoticeInput,
 ): BetweenVisitNotice | undefined {
   const { record, local, disposition, caughtUpMisses, now } = input;
   const name = exchangeName(record.label);
-  if (disposition === "succeeded") {
-    if (deriveManagedBackupState(local?.backup).kind === "backed-up")
-      return undefined;
-    return {
-      kind: "backup",
-      title: NOTICE_TITLES.backup,
-      body:
-        `${name} just ran, and its secret changed, so the backup you hold no ` +
-        `longer restores it. Open this app and back up this exchange.`,
-      tag: noticeTag(record.id, `backup:${record.lastRun?.at ?? ""}`),
-    };
-  }
-  if (disposition === "failed") {
-    const notice = failureNotice(record, local, now, name);
-    if (notice !== undefined) return notice;
+  switch (disposition) {
+    case "succeeded": {
+      if (deriveManagedBackupState(local?.backup).kind === "backed-up")
+        return undefined;
+      return {
+        kind: "backup",
+        title: NOTICE_TITLES.backup,
+        body:
+          `${name} just ran, and its secret changed, so the backup you hold ` +
+          `no longer restores it. Open this app and back up this exchange.`,
+        tag: noticeTag(record.id, `backup:${record.lastRun?.at ?? ""}`),
+      };
+    }
+    case "failed":
+    case "desynced": {
+      const notice = failureNotice(record, local, now, name);
+      if (notice !== undefined) return notice;
+      break;
+    }
+    case "missed":
+    case "unattempted":
+    case undefined:
+      break;
+    default: {
+      const unreachable: never = disposition;
+      return unreachable;
+    }
   }
   if (disposition !== "missed" && caughtUpMisses === 0) return undefined;
   return missNotice(record, name);

@@ -6,7 +6,7 @@ import {
   NO_STANDING_CONDITION,
   composeManagedExchangeFile,
 } from "@psi/managed/managedExchangeRecord";
-import { REPEATED_MISS_TITLE } from "@psi/managed/managedRepeatedMiss";
+import { REPEATED_MISS_TITLE } from "@psi/managed/managedFailureCopy";
 import { betweenVisitNotice } from "@psi/managed/betweenVisitNotice";
 
 import { managedRunTierFailure } from "@recurring/managedRunLaunchModel";
@@ -252,6 +252,19 @@ describe("betweenVisitNotice: the failures that need the operator", () => {
         now: NOW,
       }),
     ).toBeUndefined();
+  });
+
+  test("a desynced window reports the same notice as a failed one", () => {
+    const forDisposition = (disposition: "failed" | "desynced") =>
+      betweenVisitNotice({
+        record: record({ lastRun: failed("auth") }),
+        local: undefined,
+        caughtUpMisses: 0,
+        disposition,
+        now: NOW,
+      });
+
+    expect(forDisposition("desynced")).toEqual(forDisposition("failed"));
   });
 });
 

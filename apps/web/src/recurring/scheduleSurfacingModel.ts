@@ -25,7 +25,7 @@
  * modules, so every derivation is a pure function of its inputs.
  *
  * The coordination state repeated misses earn is defined in
- * {@link ../psi/managed/managedRepeatedMiss.ts} and passed through here: the
+ * {@link ../psi/managed/managedFailureCopy.ts} and passed through here: the
  * unattended runner's between-visit notification escalates on the same count and
  * says the same thing, and it sits below the product directories where it cannot
  * import a screen's model.
@@ -54,8 +54,8 @@ export {
   REPEATED_MISS_ESCALATION,
   REPEATED_MISS_TITLE,
   repeatedMissCoordination,
-} from "@psi/managed/managedRepeatedMiss";
-export type { RepeatedMissCoordination } from "@psi/managed/managedRepeatedMiss";
+} from "@psi/managed/managedFailureCopy";
+export type { RepeatedMissCoordination } from "@psi/managed/managedFailureCopy";
 
 /** Where the recurrence stands at an instant: a window open right now, or the
  * next one ahead. Both hold their instants phrased in the operator's local

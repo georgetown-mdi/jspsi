@@ -1,13 +1,18 @@
 /**
- * The coordination state a run of missed windows earns: the threshold, the title,
- * and the two phrasings every surface that reports repeated misses holds.
+ * Notification copy shared between the next-visit alert and the unattended
+ * runner's between-visit notification: the repeated-miss coordination state
+ * (threshold, title, and the two phrasings every surface that reports repeated
+ * misses holds), and the title over each recorded failure tier.
  *
  * It sits below the product directories because two readers need it and they are
  * in different layers: the saved-exchanges list and the per-exchange detail view
- * read it through {@link ../../recurring/scheduleSurfacingModel.ts}, and the
- * unattended runner's between-visit notification reads it directly
- * ({@link ./betweenVisitNotice.ts}). One definition is what keeps the notification
- * and the next visit escalating on the same count and saying the same thing.
+ * read the repeated-miss state through
+ * {@link ../../recurring/scheduleSurfacingModel.ts}, the next-visit alert reads
+ * the failure titles through {@link ../../recurring/managedRunLaunchModel.ts},
+ * and the unattended runner's between-visit notification
+ * ({@link ./betweenVisitNotice.ts}) reads both directly -- `psi/` cannot import
+ * `recurring/`. One definition of each is what keeps the notification and the
+ * next visit saying the same thing.
  *
  * Pure: the record's `consecutiveMisses` is read verbatim, and nothing here
  * advances or anticipates a write the runner has not made.
@@ -60,3 +65,18 @@ export function repeatedMissCoordination(
     prompt: `${misses} scheduled runs in a row have not happened. Ask your partner whether they are still running this exchange, and check this device's clock -- if it is wrong, your run window and theirs never overlap. Nothing has been paused: the schedule stands, and the count resets after a successful run.`,
   };
 }
+
+/** The title over the benign input failure tier. */
+export const INPUT_FAILURE_TITLE = "Your input file could not be used";
+
+/** The title over the benign linkage-shortfall failure tier. */
+export const TERMS_SHORTFALL_FAILURE_TITLE =
+  "Your input file cannot match on everything this exchange agreed to";
+
+/** The title over the benign disclosure-refusal failure tier. */
+export const CONSENT_FAILURE_TITLE =
+  "What this run would send is not what this exchange agreed to send";
+
+/** The title over the Tier-2 unexplained failure tier. */
+export const UNEXPLAINED_FAILURE_TITLE =
+  "This run failed and needs you to check with your partner";
