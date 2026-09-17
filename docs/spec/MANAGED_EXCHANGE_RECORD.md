@@ -1095,6 +1095,28 @@ record, in a separate origin-local store keyed by the record `id`, and are
   unreadable too matches nothing and the import installs fresh, the bound the
   refusal already has against a record rotated or deleted past the artifact.
 
+  **Each sibling entry is parsed on its own too**, on the same terms and for the
+  same reason: one local-state entry this build cannot parse must not block an
+  import for a different exchange either. A record whose sibling entry does not
+  parse takes no part in the reconciliation at all -- neither revived nor counted
+  a match -- unless it holds the artifact's `sharedSecret`, in which case the
+  import is **refused**. The `handoff` is recorded in that sibling, so an
+  unreadable one leaves no way to tell a handed-off record from a
+  migration-spent or a live one, and the refusal is the one answer that neither
+  runs a copy a hand-off may hold nor installs a second live copy beside it. It
+  names **no hand-off route**, none having been read, and names the record's
+  label only where the record itself parses; where it does not, the secret
+  comparison reads the raw value under the bound stated just above. A
+  handed-off refusal that did read its sibling determines the import ahead of
+  this one, naming the route it read.
+
+  This refusal has a surface to be met at for the reason the one above is
+  bounded away from it: the attended list read joins the sibling state and
+  rejects wholesale on the same unreadable entry, so the store showing the
+  import affordance is the read-failed one. The refusal names the store rather
+  than the file, the file being intact, and the discard it offers is the
+  delete-by-key that surface's recovery listing already provides.
+
   **The refusal is scoped to this store's state at import**, and both of its
   conditions are the operator's to remove: the handed-off record must still be in
   this store, and its `sharedSecret` must still equal the artifact's. An artifact

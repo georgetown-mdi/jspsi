@@ -1,8 +1,9 @@
 /**
  * The reasons the managed hand-offs give when they will not move this browser's copy
  * of the shared secret: the one that holds a confirmation back before it spends the
- * copy, the two an attempted confirmation is refused with, and the one an import
- * meets afterwards, when the copy is already gone.
+ * copy, the two an attempted confirmation is refused with, and the two an import
+ * meets afterwards -- when the copy is already gone, and when this browser cannot
+ * read whether it is.
  *
  * The device migration's "I saved the file" and the command-line export's "I saved
  * both files" each hand that copy to a new owner. A run rotates the secret at its
@@ -136,5 +137,33 @@ export function handedOffImportReason(
 ): string {
   return HANDED_OFF_IMPORT_REASON[handoff](
     label === "" ? "That exchange" : `"${label}"`,
+  );
+}
+
+/** The heading the unreadable-custody refusal is shown under, at the import
+ * affordance. It names this browser's stored copy, the thing that could not be read,
+ * in the words the run's own unreadable-custody refusal uses
+ * (`managedRunLaunchModel.ts`): the backup file is fine, so a heading about the file
+ * would send the operator after the wrong fault. */
+export const CUSTODY_UNREADABLE_IMPORT_TITLE =
+  "Part of that exchange's stored copy could not be read";
+
+/**
+ * The refusal an import meets when this browser still holds the exchange but cannot
+ * read the note it keeps beside it, which is where a hand-off is recorded: a
+ * hand-off can be neither confirmed nor ruled out, so the import is refused and no
+ * route is named, none having been read. Only the operator knows whether they handed
+ * the exchange off, so the reason gives them what to do either way -- and the delete
+ * it offers is the one the read-failed listing on that page already provides.
+ */
+export function custodyUnreadableImportReason(label: string): string {
+  const named = label === "" ? "that exchange" : `"${label}"`;
+  return (
+    `This browser could not read the note it keeps beside ${named} -- the one ` +
+    "recording whether this copy was handed off somewhere else -- so nothing " +
+    "was imported. If you handed this exchange off, it runs from the files you " +
+    "saved then and there is nothing here to import. If you did not, delete " +
+    "that exchange from the list on this page, then import the backup file " +
+    "again."
   );
 }

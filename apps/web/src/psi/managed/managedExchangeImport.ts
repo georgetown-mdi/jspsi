@@ -31,6 +31,12 @@
  * across a spent husk and a live row beside it. The refusal names the record the store
  * still holds so the surface can say which exchange it is and what recovery it has.
  *
+ * A match whose sibling local-state entry this build cannot parse is refused on the
+ * same reasoning ({@link ManagedImportCustodyUnreadableError}). The hand-off is recorded
+ * in that sibling, so an unreadable one leaves no way to tell a handed-off record
+ * from a migration-spent or a live one, and the refusal is the one answer that gives
+ * nothing away. It names the exchange but no hand-off route, none having been read.
+ *
  * Every import reports which of the source's device-local grants this browser does
  * not hold. The artifact has no field for a File System Access handle, only a marker
  * saying the source had one, so a fresh install holds neither the input file nor the
@@ -83,12 +89,35 @@ export class ManagedImportHandedOffError extends Error {
   }
 }
 
+/**
+ * Raised when an import is refused because the artifact's secret matches a record
+ * whose sibling local-state entry this build cannot parse: the sibling is where a
+ * hand-off is recorded, so whether this device gave the copy away cannot be read,
+ * and the import refuses rather than reviving a copy a hand-off may hold or
+ * installing a second live one beside it. Nothing is written, and no hand-off route
+ * is named, none having been read. Holds the stored record's operator label (empty
+ * where that record does not parse either) so the surface can name the exchange.
+ */
+export class ManagedImportCustodyUnreadableError extends Error {
+  /** The stored record's operator label; empty where it could not be read. */
+  readonly label: string;
+
+  constructor(label: string) {
+    super(
+      "this browser's stored state for the artifact's managed exchange could not be read, so importing it back is refused",
+    );
+    this.name = "ManagedImportCustodyUnreadableError";
+    this.label = label;
+  }
+}
+
 /** The platform boundaries the import drives, injected so the flow is testable. */
 export interface ManagedImportDeps {
   /** Reconcile the reconstructed artifact against the spent records: revive a
    * migration-spent secret-match in place (keeping its id and input handle, clearing
    * spent, marking imported and backed-up as of the same instant), report the
-   * hand-off that refuses the import, or report no match at all. */
+   * hand-off that refuses the import, report a sibling state it could not read
+   * (which refuses on its own terms), or report no match at all. */
   reviveSpent: (
     reconstructed: ManagedExchangeRecord,
     at: string,
@@ -167,6 +196,9 @@ function grantsMissingHere(
  *   is not parseable YAML.
  * @throws {ManagedImportHandedOffError} if the artifact's secret matches a record
  *   handed off from this device; nothing is written.
+ * @throws {ManagedImportCustodyUnreadableError} if the artifact's secret matches a
+ *   record whose sibling state could not be read, leaving a hand-off unreadable;
+ *   nothing is written.
  * @throws {ZodError} if the artifact or the reconstructed record is invalid, or the
  *   install itself fails.
  */
@@ -185,6 +217,8 @@ export async function importManagedExchange(
     };
   if (reconciled.kind === "handed-off")
     throw new ManagedImportHandedOffError(reconciled.handoff, reconciled.label);
+  if (reconciled.kind === "custody-unreadable")
+    throw new ManagedImportCustodyUnreadableError(reconciled.label);
   const installed = await deps.install(reconstructed);
   try {
     await deps.markImported(installed.id, at);

@@ -2,6 +2,7 @@ import { describe, expect, test, vi } from "vitest";
 import { generateSharedSecret, getDefaultLinkageTerms } from "@psilink/core";
 
 import {
+  ManagedImportCustodyUnreadableError,
   ManagedImportHandedOffError,
   importManagedExchange,
 } from "@psi/managed/managedExchangeImport";
@@ -21,7 +22,8 @@ import type { ManagedReviveOutcome } from "@psi/managed/managedExchangeStore";
 // The import take-over, tested in Node with injected dependencies: a valid
 // artifact installs one owner and marks it imported-and-backed-up; a
 // migration-spent secret-match is revived in place; a match handed off by a
-// route of its own refuses the import outright; a malformed or tampered file
+// route of its own refuses the import outright, as does one whose sibling state
+// the reconciliation could not read; a malformed or tampered file
 // is rejected before any install, so the store is left untouched. Each import
 // also reports which of the source's device-local grants the imported record
 // does not hold. The store-backed install (real IndexedDB) is the browser suite's.
@@ -178,6 +180,28 @@ describe("importManagedExchange", () => {
       handoff: "command-line",
       label: "Riverbend quarterly",
     });
+    expect(deps.installed).toHaveLength(0);
+    expect(deps.markImported).not.toHaveBeenCalled();
+  });
+
+  test("a match whose saved state could not be read refuses, installing nothing", async () => {
+    // The sibling entry is where a hand-off is recorded, so a reconciliation that
+    // could not read it can say neither that the copy is still this browser's nor
+    // that it is gone. It refuses rather than reviving a copy a hand-off may hold or
+    // installing a second live one, and it names the exchange but no route.
+    const deps = recordingDeps({
+      kind: "custody-unreadable",
+      label: "Riverbend quarterly",
+    });
+    await expect(importManagedExchange(goodBytes(), deps)).rejects.toThrow(
+      ManagedImportCustodyUnreadableError,
+    );
+    await expect(
+      importManagedExchange(goodBytes(), deps),
+    ).rejects.toMatchObject({ label: "Riverbend quarterly" });
+    await expect(
+      importManagedExchange(goodBytes(), deps),
+    ).rejects.not.toHaveProperty("handoff");
     expect(deps.installed).toHaveLength(0);
     expect(deps.markImported).not.toHaveBeenCalled();
   });
