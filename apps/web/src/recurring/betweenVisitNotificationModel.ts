@@ -56,7 +56,11 @@ export function betweenVisitNotificationDisplay(
     note:
       "Scheduled runs happen while you are away, and what each one leaves is " +
       "here the next time you open this app. Turn on notifications to hear " +
-      "sooner about a run that finished, needs you, or did not happen.",
+      "sooner about a run that finished, needs you, or did not happen. A " +
+      "notification names the exchange by its label and shows the next " +
+      "window's time and how many windows it has missed in a row; your " +
+      "operating system may show it on a locked screen or mirror it to your " +
+      "other devices.",
     action: { label: "Notify me between visits", turnsOn: true },
   };
 }

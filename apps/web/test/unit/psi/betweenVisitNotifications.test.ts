@@ -268,4 +268,27 @@ describe("raiseBetweenVisitNotices: what it does not report", () => {
     ).resolves.toBeUndefined();
     expect(boundary.shown).toEqual([]);
   });
+
+  test("a seam that throws checking armed costs the notice and nothing else", async () => {
+    vi.spyOn(getLogger("managedScheduleRuntime"), "warn").mockImplementation(
+      () => {},
+    );
+    const boundary = notifier();
+    boundary.store(record({ lastRun: { at: RUN_AT, outcome: "succeeded" } }));
+    const seams: BetweenVisitNoticeSeams = {
+      ...boundary.seams,
+      armed: () => {
+        throw new Error("the permission check failed");
+      },
+    };
+
+    await expect(
+      raiseBetweenVisitNotices(
+        [entry({ disposition: "succeeded" })],
+        announced,
+        seams,
+      ),
+    ).resolves.toBeUndefined();
+    expect(boundary.shown).toEqual([]);
+  });
 });

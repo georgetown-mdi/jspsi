@@ -274,13 +274,13 @@ export async function raiseBetweenVisitNotices(
   announced: Map<string, string>,
   seams: BetweenVisitNoticeSeams,
 ): Promise<void> {
-  const reported = entries.filter(
-    (entry) =>
-      entry.skipped !== "bookkeeping-failed" &&
-      (entry.disposition !== undefined || entry.caughtUpMisses > 0),
-  );
-  if (reported.length === 0 || !seams.armed()) return;
   try {
+    const reported = entries.filter(
+      (entry) =>
+        entry.skipped !== "bookkeeping-failed" &&
+        (entry.disposition !== undefined || entry.caughtUpMisses > 0),
+    );
+    if (reported.length === 0 || !seams.armed()) return;
     const [{ records }, localState] = await Promise.all([
       seams.listRecords(),
       seams.listLocalState(),

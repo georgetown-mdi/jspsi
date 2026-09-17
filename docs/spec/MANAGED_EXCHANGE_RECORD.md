@@ -1638,6 +1638,11 @@ in the running app runtime, so a relaunched runtime can raise a standing state's
 notification once more and no stored field can disagree with the bookkeeping the
 next visit reads.
 
+An absent Notification API, a refused permission, and a failing show each
+produce no notification and no error; an installed runtime with no
+service-worker registration shows the notice through the page's own
+`Notification` constructor instead.
+
 ## See also
 
 - [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md) - the managed exchange lifecycle: who it serves, the automation goal and platform envelope, durability contract, single-owner invariant, desync story, eviction survival, and the moment-anchored backup surfaces

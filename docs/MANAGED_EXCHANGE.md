@@ -567,7 +567,8 @@ follows a press of "Notify me between visits", offered with the recurring
 exchanges the notifications would be about -- a prompt at first load is refused
 once by an operator who has no idea yet what it is for, and a browser that has
 been refused cannot be asked again. The control is shown only in the installed
-app runtime, the only one that runs a schedule with nobody present.
+app runtime, the only one that runs a schedule with nobody present. Once on,
+each notification names the exchange by its operator-set label.
 
 **Every refusal degrades to the next visit.** A denied permission, a prompt
 dismissed without an answer, a browser with no notification API, and an operator
