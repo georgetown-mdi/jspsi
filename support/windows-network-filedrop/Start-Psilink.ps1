@@ -87,8 +87,9 @@ $PsilinkMarkerName = 'psilink-setup-check.tmp'
 $script:PsilinkEngine = ''
 
 # The share credential this run has already been given, and the server it was
-# given for. A pair of folders on two shares of one server takes one answer
-# rather than the same one twice; it is dropped once the volumes are made.
+# given for. A second share on that server offers this answer rather than
+# asking for the same one twice, and Clear-ShareCredential drops both at every
+# way out of the volumes below.
 $script:PsilinkShareCredential = $null
 $script:PsilinkShareCredentialServer = ''
 
@@ -717,6 +718,14 @@ function Get-CorrectedShareTarget {
     return $corrected
 }
 
+function Clear-ShareCredential {
+    <#  Drop the share credential this run was given and the server it was
+        given for. Nothing past the volumes reaches a file server. #>
+
+    $script:PsilinkShareCredential = $null
+    $script:PsilinkShareCredentialServer = ''
+}
+
 function New-RendezvousShareMount {
     <#  Make one network-share volume and check every folder reached through it.
         $SubPath is what the volume mounts; each leg is a folder within it, and
@@ -734,9 +743,11 @@ function New-RendezvousShareMount {
         drift. This function cannot be reached without that dot-source, because
         classifying a folder as a network path is the setup script's own work.
 
-        The credential is asked for once per server: a pair of folders on two
-        shares of one server is one account's to reach, so asking per volume
-        takes the same answer twice. A pair on two servers is asked for each.
+        A second share on a server this run already has an answer for asks
+        whether to use it again, and yes is the default: one account usually
+        reaches both. Two shares reached by different accounts take a second
+        answer here rather than a second run. A pair on two servers is asked
+        for each.
 
         Returns @{ Mounted; VolumeName }: whether every folder passed, and the
         volume this made, or an empty name when it made none. A volume outlives
@@ -750,10 +761,13 @@ function New-RendezvousShareMount {
         [Parameter(Mandatory = $true)][hashtable[]] $Legs
     )
 
+    $credential = $null
     if ($script:PsilinkShareCredential -and $script:PsilinkShareCredentialServer -eq $Server) {
-        $credential = $script:PsilinkShareCredential
-        Show-Ok "Using the same credentials for \\$Server\$Share"
-    } else {
+        if (Read-YesNo -Prompt "Use the same credentials for \\$Server\$Share? [Y/n]" -DefaultYes) {
+            $credential = $script:PsilinkShareCredential
+        }
+    }
+    if (-not $credential) {
         Show-Head 'Credentials for the file server'
         $credential = Read-ShareCredential
         if (-not $credential) { return @{ Mounted = $false; VolumeName = '' } }
@@ -1483,100 +1497,106 @@ if ($rendezvousResolved.Kind -eq 'Network' -or $outboundResolved.Kind -eq 'Netwo
     Show-Head 'Part 2: the rendezvous folder'
 }
 
-if ($sharedMount.Shared) {
-    # One share holds both folders, so one volume reaches both and the two are
-    # passed to the console as paths within it.
-    $target = Confirm-ShareTarget -Server $sharedMount.Server -Share $sharedMount.Share `
-        -SubPaths @((Join-SharePath -Parent $sharedMount.SubPath -Child $sharedMount.InboundLeg),
-        (Join-SharePath -Parent $sharedMount.SubPath -Child $sharedMount.OutboundLeg))
-    if (-not $target.Accepted) { exit 1 }
+# The answer the volumes are made from is held no longer than they take.
+# Each exit below drops it before exiting as well, so the drop does not
+# depend on how this script was invoked.
+try {
+    if ($sharedMount.Shared) {
+        # One share holds both folders, so one volume reaches both and the two are
+        # passed to the console as paths within it.
+        $target = Confirm-ShareTarget -Server $sharedMount.Server -Share $sharedMount.Share `
+            -SubPaths @((Join-SharePath -Parent $sharedMount.SubPath -Child $sharedMount.InboundLeg),
+            (Join-SharePath -Parent $sharedMount.SubPath -Child $sharedMount.OutboundLeg))
+        if (-not $target.Accepted) { Clear-ShareCredential; exit 1 }
 
-    # One confirmation answers for both folders, so both move to the share it
-    # named: a folder that is a share root takes its name from that share, and
-    # the pair is checked again below against the paths the file server opens.
-    $rendezvousResolved = Get-CorrectedShareTarget -Resolved $rendezvousResolved `
-        -Server $target.Server -Share $target.Share
-    $outboundResolved = Get-CorrectedShareTarget -Resolved $outboundResolved `
-        -Server $target.Server -Share $target.Share
-    $rendezvousFolderName = Get-RendezvousFolderName -Share $rendezvousResolved.Share `
-        -SubPath $rendezvousResolved.SubPath
-    $outboundFolderName = Get-RendezvousFolderName -Share $outboundResolved.Share `
-        -SubPath $outboundResolved.SubPath
+        # One confirmation answers for both folders, so both move to the share it
+        # named: a folder that is a share root takes its name from that share, and
+        # the pair is checked again below against the paths the file server opens.
+        $rendezvousResolved = Get-CorrectedShareTarget -Resolved $rendezvousResolved `
+            -Server $target.Server -Share $target.Share
+        $outboundResolved = Get-CorrectedShareTarget -Resolved $outboundResolved `
+            -Server $target.Server -Share $target.Share
+        $rendezvousFolderName = Get-RendezvousFolderName -Share $rendezvousResolved.Share `
+            -SubPath $rendezvousResolved.SubPath
+        $outboundFolderName = Get-RendezvousFolderName -Share $outboundResolved.Share `
+            -SubPath $outboundResolved.SubPath
 
-    $mountAttempt = New-RendezvousShareMount -VolumeName $VolumeName `
-        -Server $target.Server -Share $target.Share -SubPath $sharedMount.SubPath `
-        -Legs @(@{ Label = 'the folder your partner writes into'; Path = $sharedMount.InboundLeg },
-        @{ Label = 'the folder you write into'; Path = $sharedMount.OutboundLeg })
-    if ($mountAttempt.VolumeName) { $volumesMade += $mountAttempt.VolumeName }
-    if (-not $mountAttempt.Mounted) {
-        Show-VolumeRemoval -VolumeNames $volumesMade
-        exit 1
-    }
-
-    $rendezvousMount = $VolumeName
-    $inboundLeg = $sharedMount.InboundLeg
-    $outboundLeg = $sharedMount.OutboundLeg
-} else {
-    $inboundLabel = 'the shared folder'
-    if ($splitRendezvous) { $inboundLabel = 'the folder your partner writes into' }
-    $legs = @(@{ Resolved = $rendezvousResolved; Path = $rendezvousPath
-            Volume = $VolumeName; Label = $inboundLabel; Outbound = $false })
-    if ($splitRendezvous) {
-        # The second volume's name is derived rather than asked for, so that
-        # -VolumeName names every volume one launch makes.
-        $legs += @{ Resolved = $outboundResolved; Path = $RendezvousOutboundDir
-            Volume = "$VolumeName-outbound"; Label = 'the folder you write into'; Outbound = $true }
-    }
-
-    foreach ($leg in $legs) {
-        $mount = $leg.Path
-        if ($leg.Resolved.Kind -eq 'Network') {
-            $target = Confirm-ShareTarget -Server $leg.Resolved.Server -Share $leg.Resolved.Share `
-                -SubPaths @($leg.Resolved.SubPath)
-            if (-not $target.Accepted) {
-                Show-VolumeRemoval -VolumeNames $volumesMade
-                exit 1
-            }
-
-            # From the share as resolved, and after any correction above: the
-            # drive letter or namespace path the operator typed is theirs alone,
-            # and a volume is mounted by server and share rather than by that
-            # path. The corrected leg replaces the parse of what was typed,
-            # so the pair check below compares the folders the file server
-            # opens.
-            $corrected = Get-CorrectedShareTarget -Resolved $leg.Resolved `
-                -Server $target.Server -Share $target.Share
-            $correctedName = Get-RendezvousFolderName -Share $corrected.Share -SubPath $corrected.SubPath
-            if ($leg.Outbound) {
-                $outboundResolved = $corrected
-                $outboundFolderName = $correctedName
-            } else {
-                $rendezvousResolved = $corrected
-                $rendezvousFolderName = $correctedName
-            }
-
-            $mountAttempt = New-RendezvousShareMount -VolumeName $leg.Volume `
-                -Server $corrected.Server -Share $corrected.Share -SubPath $corrected.SubPath `
-                -Legs @(@{ Label = $leg.Label; Path = '' })
-            if ($mountAttempt.VolumeName) { $volumesMade += $mountAttempt.VolumeName }
-            if (-not $mountAttempt.Mounted) {
-                Show-VolumeRemoval -VolumeNames $volumesMade
-                exit 1
-            }
-
-            $mount = $leg.Volume
-        } elseif (-not (Test-LocalRendezvousFolder -Path $leg.Path -Label $leg.Label)) {
+        $mountAttempt = New-RendezvousShareMount -VolumeName $VolumeName `
+            -Server $target.Server -Share $target.Share -SubPath $sharedMount.SubPath `
+            -Legs @(@{ Label = 'the folder your partner writes into'; Path = $sharedMount.InboundLeg },
+            @{ Label = 'the folder you write into'; Path = $sharedMount.OutboundLeg })
+        if ($mountAttempt.VolumeName) { $volumesMade += $mountAttempt.VolumeName }
+        if (-not $mountAttempt.Mounted) {
             Show-VolumeRemoval -VolumeNames $volumesMade
+            Clear-ShareCredential
             exit 1
         }
-        if ($leg.Outbound) { $outboundMount = $mount } else { $rendezvousMount = $mount }
-    }
-}
 
-# Nothing below reaches a file server, so the answer the volumes were made from
-# is not held any longer than they took.
-$script:PsilinkShareCredential = $null
-$script:PsilinkShareCredentialServer = ''
+        $rendezvousMount = $VolumeName
+        $inboundLeg = $sharedMount.InboundLeg
+        $outboundLeg = $sharedMount.OutboundLeg
+    } else {
+        $inboundLabel = 'the shared folder'
+        if ($splitRendezvous) { $inboundLabel = 'the folder your partner writes into' }
+        $legs = @(@{ Resolved = $rendezvousResolved; Path = $rendezvousPath
+                Volume = $VolumeName; Label = $inboundLabel; Outbound = $false })
+        if ($splitRendezvous) {
+            # The second volume's name is derived rather than asked for, so that
+            # -VolumeName names every volume one launch makes.
+            $legs += @{ Resolved = $outboundResolved; Path = $RendezvousOutboundDir
+                Volume = "$VolumeName-outbound"; Label = 'the folder you write into'; Outbound = $true }
+        }
+
+        foreach ($leg in $legs) {
+            $mount = $leg.Path
+            if ($leg.Resolved.Kind -eq 'Network') {
+                $target = Confirm-ShareTarget -Server $leg.Resolved.Server -Share $leg.Resolved.Share `
+                    -SubPaths @($leg.Resolved.SubPath)
+                if (-not $target.Accepted) {
+                    Show-VolumeRemoval -VolumeNames $volumesMade
+                    Clear-ShareCredential
+                    exit 1
+                }
+
+                # From the share as resolved, and after any correction above: the
+                # drive letter or namespace path the operator typed is theirs alone,
+                # and a volume is mounted by server and share rather than by that
+                # path. The corrected leg replaces the parse of what was typed,
+                # so the pair check below compares the folders the file server
+                # opens.
+                $corrected = Get-CorrectedShareTarget -Resolved $leg.Resolved `
+                    -Server $target.Server -Share $target.Share
+                $correctedName = Get-RendezvousFolderName -Share $corrected.Share -SubPath $corrected.SubPath
+                if ($leg.Outbound) {
+                    $outboundResolved = $corrected
+                    $outboundFolderName = $correctedName
+                } else {
+                    $rendezvousResolved = $corrected
+                    $rendezvousFolderName = $correctedName
+                }
+
+                $mountAttempt = New-RendezvousShareMount -VolumeName $leg.Volume `
+                    -Server $corrected.Server -Share $corrected.Share -SubPath $corrected.SubPath `
+                    -Legs @(@{ Label = $leg.Label; Path = '' })
+                if ($mountAttempt.VolumeName) { $volumesMade += $mountAttempt.VolumeName }
+                if (-not $mountAttempt.Mounted) {
+                    Show-VolumeRemoval -VolumeNames $volumesMade
+                    Clear-ShareCredential
+                    exit 1
+                }
+
+                $mount = $leg.Volume
+            } elseif (-not (Test-LocalRendezvousFolder -Path $leg.Path -Label $leg.Label)) {
+                Show-VolumeRemoval -VolumeNames $volumesMade
+                Clear-ShareCredential
+                exit 1
+            }
+            if ($leg.Outbound) { $outboundMount = $mount } else { $rendezvousMount = $mount }
+        }
+    }
+} finally {
+    Clear-ShareCredential
+}
 
 # A correction from the DFS tab settles which share a folder is really on, and a
 # folder that is a share root takes its name from it, so the pair is held to the

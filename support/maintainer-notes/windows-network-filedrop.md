@@ -576,8 +576,10 @@ branch:
   is suppressed for a reason retyping cannot answer, and the reason is wrapped
   and sentence-cased like the rest of the script's text.
 - **A pair on two shares of one server asked for the credentials twice.** The
-  answer is reused per server, with one line saying so, and dropped once the
-  volumes are made.
+  second share asks whether to use the first answer again rather than reusing
+  it silently, so a pair reached by two accounts is still given both. The
+  answer is dropped once the volumes are made, and on every exit within that
+  section as well.
 - **`Z: is mapped to \\server\share` printed once per folder** where both
   folders were on `Z:`. Once per drive letter now.
 - **Answering no at the launcher's share confirmation led away from the

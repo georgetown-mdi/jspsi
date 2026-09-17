@@ -708,6 +708,8 @@ Describe 'The credential a pair of folders on one server takes' {
         $script:PsilinkShareCredential = $null
         $script:PsilinkShareCredentialServer = ''
         $script:CredentialAsks = 0
+        $script:ReusePrompts = @()
+        $script:VolumeUsers = @()
         $script:PsilinkEngine = 'docker'
     }
 
@@ -716,10 +718,17 @@ Describe 'The credential a pair of folders on one server takes' {
         # password prompt reads the console rather than a redirect, and the
         # volume and the batteries reach the engine. What each is asked to do
         # is driven by the flow cases below against a stub engine; the
-        # bookkeeping around them is what these two cases are for.
+        # bookkeeping around them is what the cases here are for.
         function Read-ShareCredential {
             $script:CredentialAsks++
             return @{ Username = 'psilinkci'; Domain = ''; Password = 'hunter2' }
+        }
+        # As an empty answer is read: the question the second share asks
+        # defaults to the answer already given.
+        function Read-YesNo {
+            param([string] $Prompt, [switch] $DefaultYes)
+            $script:ReusePrompts += $Prompt
+            return [bool] $DefaultYes
         }
         function New-ShareVolume { return $true }
         function Invoke-DoctorLoop { return $true }
@@ -732,8 +741,44 @@ Describe 'The credential a pair of folders on one server takes' {
 
         $script:CredentialAsks | Should -Be 1 -Because $said
         @([regex]::Matches($said, 'Credentials for the file server')).Count | Should -Be 1 -Because $said
-        # The second share is told whose answer it is being reached with.
-        $said | Should -BeLike '*Using the same credentials for \\fs-04\outbound*' -Because $said
+        # The second share names the share it is asking about, so the
+        # operator can tell which one the answer would be used for.
+        @($script:ReusePrompts).Count | Should -Be 1 -Because $said
+        $script:ReusePrompts[0] | Should -Be 'Use the same credentials for \\fs-04\outbound? [Y/n]' -Because $said
+        $script:PsilinkShareCredentialServer | Should -Be 'fs-04' -Because $said
+    }
+
+    It 'asks again when the operator declines reuse' {
+        # Two shares of one server reached by different accounts: the
+        # question is how the second account is given, and the answer the
+        # volume is made from is the one just typed.
+        function Read-ShareCredential {
+            $script:CredentialAsks++
+            return @{ Username = ('psilinkci' + $script:CredentialAsks); Domain = ''; Password = 'hunter2' }
+        }
+        function Read-YesNo {
+            param([string] $Prompt, [switch] $DefaultYes)
+            $script:ReusePrompts += $Prompt
+            return $false
+        }
+        function New-ShareVolume {
+            param($VolumeName, $Server, $Share, $SubPath, $Username, $Password, $Domain, $Engine)
+            $script:VolumeUsers += $Username
+            return $true
+        }
+        function Invoke-DoctorLoop { return $true }
+
+        $inbound = New-RendezvousShareMount -VolumeName 'psilinkci-in' -Server 'fs-04' -Share 'exchange' `
+            -Legs @(@{ Label = 'the folder your partner writes into'; Path = 'from-clinic' }) 6>&1
+        $outbound = New-RendezvousShareMount -VolumeName 'psilinkci-out' -Server 'fs-04' -Share 'outbound' `
+            -Legs @(@{ Label = 'the folder you write into'; Path = 'to-clinic' }) 6>&1
+        $said = @(@($inbound) + @($outbound) | ForEach-Object { [string] $_ }) -join ' '
+
+        $script:CredentialAsks | Should -Be 2 -Because $said
+        @([regex]::Matches($said, 'Credentials for the file server')).Count | Should -Be 2 -Because $said
+        @($script:ReusePrompts).Count | Should -Be 1 -Because $said
+        (@($script:VolumeUsers) -join ' ') | Should -Be 'psilinkci1 psilinkci2' -Because $said
+        $script:PsilinkShareCredential.Username | Should -Be 'psilinkci2' -Because $said
         $script:PsilinkShareCredentialServer | Should -Be 'fs-04' -Because $said
     }
 
@@ -741,6 +786,13 @@ Describe 'The credential a pair of folders on one server takes' {
         function Read-ShareCredential {
             $script:CredentialAsks++
             return @{ Username = 'psilinkci'; Domain = ''; Password = 'hunter2' }
+        }
+        # Defined here as well as asserted below: a branch that reached it
+        # would otherwise read the console, which this session has none of.
+        function Read-YesNo {
+            param([string] $Prompt, [switch] $DefaultYes)
+            $script:ReusePrompts += $Prompt
+            return $false
         }
         function New-ShareVolume { return $true }
         function Invoke-DoctorLoop { return $true }
@@ -752,8 +804,22 @@ Describe 'The credential a pair of folders on one server takes' {
         $said = @(@($inbound) + @($outbound) | ForEach-Object { [string] $_ }) -join ' '
 
         $script:CredentialAsks | Should -Be 2 -Because $said
-        $said | Should -Not -BeLike '*Using the same credentials*' -Because $said
+        @($script:ReusePrompts).Count | Should -Be 0 -Because $said
         $script:PsilinkShareCredentialServer | Should -Be 'fs-09' -Because $said
+    }
+
+    It 'drops both halves of the answer' {
+        # The flow's own drop -- the finally around Part 2 and the call
+        # before each exit within it -- runs in a child process whose script
+        # scope no case here can read, so what is held here is that the drop
+        # clears both the credential and the server it was given for.
+        $script:PsilinkShareCredential = @{ Username = 'psilinkci'; Domain = ''; Password = 'hunter2' }
+        $script:PsilinkShareCredentialServer = 'fs-04'
+
+        Clear-ShareCredential
+
+        $script:PsilinkShareCredential | Should -BeNullOrEmpty
+        $script:PsilinkShareCredentialServer | Should -BeNullOrEmpty
     }
 
     AfterAll {
