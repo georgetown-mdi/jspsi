@@ -268,23 +268,39 @@ test("a CLI peer and a browser peer resolve the same intersection", async () => 
   expect(cliOutcome.pairs).toEqual(CLI_PAIRS);
 }, 420_000);
 
+/**
+ * The ceiling this leg holds the browser party's wait under. Sized between the
+ * two outcomes it separates rather than around the measurement: a wait that
+ * ends on the CLI party's close costs milliseconds, while a wait left to end on
+ * ICE giving up on that party costs 15 s or more. Anything under this is the
+ * former, and a regression to the latter cannot pass.
+ */
+const BROWSER_CLOSE_WAIT_CEILING_MS = 5_000;
+
 test("each side's clean-close wait is measured and recorded", () => {
   if (browserOutcome === undefined || cliOutcome === undefined)
     throw new Error("the exchange did not run, so there is nothing to measure");
 
-  // No bound is asserted on either number. They are a tracked limit recorded in
-  // docs/spec/WEBRTC_TRANSPORT.md ("The clean close"), to be read across nightly
-  // runs before anything gates on them.
+  // The numbers themselves stay a tracked limit recorded in
+  // docs/spec/WEBRTC_TRANSPORT.md ("The clean close"), read across nightly runs;
+  // what is asserted below is the exit each wait takes, not a duration drawn
+  // from one measurement.
   console.log(
     `[live-webrtc] close wait: browser ${browserOutcome.closeWaitMs}ms ` +
       `(${String(browserOutcome.closeOutcome)}), CLI ` +
       `${String(cliOutcome.closeWaitMs)}ms`,
   );
-  // Both numbers have to be a wait that happened: an undefined browser outcome
-  // means the flushing close was never taken (the channel was not open), and a
-  // null CLI number means that party never reached a close at all.
-  expect(browserOutcome.closeOutcome).toBeDefined();
-  expect(browserOutcome.closeWaitMs).toBeGreaterThanOrEqual(0);
+  // The two endings a correct exchange leaves the browser party with.
+  // `peer-closed` is the CLI party's close arriving while the wait stands, the
+  // one exit that is a delivery signal; `undefined` is that close already read
+  // when this side reached its own, which leaves no wait to take and is PeerJS
+  // ending the connection on the sentinel. Every other exit raises the
+  // operator's doubt notice on a run whose result is correct.
+  expect([undefined, "peer-closed"]).toContain(browserOutcome.closeOutcome);
+  expect(browserOutcome.closeWaitMs).toBeLessThan(
+    BROWSER_CLOSE_WAIT_CEILING_MS,
+  );
+  // A null CLI number means that party never reached a close at all.
   expect(cliOutcome.closeWaitMs).not.toBeNull();
 });
 

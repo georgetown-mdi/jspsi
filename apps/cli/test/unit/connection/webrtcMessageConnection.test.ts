@@ -30,10 +30,21 @@ class FakeChannel {
   onerror: ((event: { error: unknown }) => void) | undefined;
   /** Set to make `send` throw, standing in for a channel that went mid-write. */
   sendThrows = false;
+  /** Whether the peer answers this side's close, which is what completes it.
+   * Cleared to stand in for a peer that reads the close and never answers. */
+  closeAnswered = true;
+  /** What the teardown did, in order, so the channel's close can be told to
+   * have happened before the session's. */
+  readonly teardown: Array<string> = [];
 
   send(data: Buffer): void {
     if (this.sendThrows) throw new Error("channel is gone");
     this.sent.push(new Uint8Array(data));
+  }
+
+  close(): void {
+    this.teardown.push("channel");
+    this.readyState = this.closeAnswered ? "closed" : "closing";
   }
 
   /** Push one datagram at the binding, as the real channel's onmessage would. */
@@ -50,6 +61,7 @@ interface Harness {
   disconnect: () => void;
   setAcknowledged: (value: boolean) => void;
   setTransmitted: (value: boolean) => void;
+  setConnected: (value: boolean) => void;
 }
 
 function harness(): Harness {
@@ -57,10 +69,11 @@ function harness(): Harness {
   let closeCount = 0;
   let acknowledged = true;
   let transmitted = true;
+  let connected = true;
   let onLost: (() => void) | undefined;
   const session: WebRtcPeerSession = {
     channel: channel as unknown as RTCDataChannel,
-    isConnected: () => true,
+    isConnected: () => connected,
     outboundAcknowledged: () => acknowledged,
     outboundTransmitted: () => transmitted,
     onDisconnected: (handler) => {
@@ -68,6 +81,7 @@ function harness(): Harness {
     },
     close: () => {
       closeCount += 1;
+      channel.teardown.push("session");
       return Promise.resolve();
     },
   };
@@ -82,7 +96,17 @@ function harness(): Harness {
     setTransmitted: (value) => {
       transmitted = value;
     },
+    setConnected: (value) => {
+      connected = value;
+    },
   };
+}
+
+/** Let the teardown a terminal inbound frame starts run to completion: it is
+ * begun from the inbound handler and not awaited by the caller who reads the
+ * error. */
+async function settleTeardown(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 20));
 }
 
 /** Read the frames a fake channel was sent back through the inbound path. */
@@ -283,6 +307,81 @@ test("a close on an already-closed channel skips the flush entirely", async () =
   await connection.close();
   expect(Date.now() - started).toBeLessThan(1_000);
   expect(channel.sent).toHaveLength(0);
+  expect(closed()).toBe(1);
+});
+
+test("the peer's in-band close is answered by closing the channel", async () => {
+  // A browser peer reads delivery off its channel closing, so a CLI peer that
+  // read the sentinel and went straight to the peer connection would leave that
+  // partner waiting for ICE to give up on it.
+  const { channel, session, closed } = harness();
+  const connection = webRtcMessageConnection(session);
+  channel.deliver(packCloseSentinel());
+  await expect(connection.receive()).rejects.toThrow(ConnectionError);
+  await settleTeardown();
+
+  expect(channel.teardown).toEqual(["channel", "session"]);
+  expect(channel.readyState).toBe("closed");
+  expect(closed()).toBe(1);
+});
+
+test("answering the peer's close still returns when it never completes", async () => {
+  const { channel, session, closed } = harness();
+  const connection = webRtcMessageConnection(session, {
+    channelCloseTimeoutMs: 80,
+  });
+  channel.closeAnswered = false;
+  const started = Date.now();
+  channel.deliver(packCloseSentinel());
+  await expect(connection.receive()).rejects.toThrow(ConnectionError);
+  await new Promise((resolve) => setTimeout(resolve, 200));
+
+  expect(Date.now() - started).toBeGreaterThanOrEqual(80);
+  expect(channel.teardown).toEqual(["channel", "session"]);
+  expect(closed()).toBe(1);
+});
+
+test("a peer that has gone is not waited on to answer the close", async () => {
+  const { channel, session, closed, setConnected } = harness();
+  const connection = webRtcMessageConnection(session, {
+    channelCloseTimeoutMs: 10_000,
+  });
+  channel.closeAnswered = false;
+  setConnected(false);
+  const started = Date.now();
+  channel.deliver(packCloseSentinel());
+  await expect(connection.receive()).rejects.toThrow(ConnectionError);
+  await settleTeardown();
+
+  expect(channel.teardown).toEqual(["channel", "session"]);
+  expect(Date.now() - started).toBeLessThan(1_000);
+  expect(closed()).toBe(1);
+});
+
+test("a close of this side's own closes the channel behind the sentinel", async () => {
+  // Handing the sentinel to the wire is not the peer having it: the channel's
+  // own close is, and it is what the partner's wait ends on.
+  const { channel, session, closed } = harness();
+  const connection = webRtcMessageConnection(session);
+  await connection.send({ step: "last" });
+  await connection.close();
+
+  expect(decodeSent(channel)).toEqual([
+    { step: "last" },
+    { __closeSentinel: true },
+  ]);
+  expect(channel.teardown).toEqual(["channel", "session"]);
+  expect(closed()).toBe(1);
+});
+
+test("an error teardown closes no channel ahead of the session", async () => {
+  const { channel, session, closed } = harness();
+  const connection = webRtcMessageConnection(session);
+  channel.onerror?.({ error: new Error("channel failed") });
+  await expect(connection.receive()).rejects.toThrow(ConnectionError);
+  await settleTeardown();
+
+  expect(channel.teardown).toEqual(["session"]);
   expect(closed()).toBe(1);
 });
 
