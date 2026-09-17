@@ -1035,12 +1035,18 @@ export async function persistManagedExchangeOutputDirectory(
  *   take back. Nothing was written; the caller refuses the import, naming the record
  *   the store still holds. The `label` is empty where the refusing record is one
  *   this build cannot parse, which leaves its own fields untrusted.
+ * - `"custody-unreadable"` -- a record holding the artifact's secret has a sibling
+ *   entry this build cannot parse, so whether a hand-off spent it cannot be read.
+ *   Nothing was written; the caller refuses the import without naming a hand-off
+ *   route, none having been read. The `label` is empty where the record itself does
+ *   not parse either.
  * - `"no-match"` -- no spent record holds the artifact's secret, so the caller
  *   installs a fresh record.
  */
 export type ManagedReviveOutcome =
   | { kind: "revived"; record: ManagedExchangeRecord }
   | { kind: "handed-off"; handoff: ManagedSpentHandoff; label: string }
+  | { kind: "custody-unreadable"; label: string }
   | { kind: "no-match" };
 
 /**
@@ -1080,8 +1086,16 @@ export type ManagedReviveOutcome =
  * artifact matching a migration-spent entry this build cannot parse installs fresh
  * beside it.
  *
- * @throws {ZodError} if a sibling entry is invalid, or the revived record is
- *   invalid.
+ * Each sibling entry is parsed on its own too, on the same terms and for the same
+ * reason. A record whose sibling this build cannot parse takes no part in the
+ * reconciliation unless it holds the artifact's secret, in which case the outcome is
+ * `"custody-unreadable"`: the sibling is where a hand-off is recorded, so an unreadable
+ * one leaves no way to tell a handed-off record from a migration-spent or a live
+ * one, and the conservative answer is the refusal rather than a revive or a second
+ * live copy. Its secret is read off the raw value where the record does not parse
+ * either, with the bound that read already has.
+ *
+ * @throws {ZodError} if the revived record is invalid.
  */
 export async function reviveSpentManagedExchange(
   reconstructed: ManagedExchangeRecord,
@@ -1113,12 +1127,17 @@ export async function reviveSpentManagedExchange(
           return;
         try {
           const spentStates = new Map<string, ManagedSpentState>();
+          const unreadableSiblings = new Set<string>();
           const keys = readKeys.result;
           const values = readValues.result;
           for (let index = 0; index < keys.length; index += 1) {
-            const { spent } = parseManagedLocalState(values[index]);
-            if (spent !== undefined)
-              spentStates.set(String(keys[index]), spent);
+            const key = String(keys[index]);
+            try {
+              const { spent } = parseManagedLocalState(values[index]);
+              if (spent !== undefined) spentStates.set(key, spent);
+            } catch {
+              unreadableSiblings.add(key);
+            }
           }
           const recordKeys = readRecordKeys.result;
           const rawRecords = readRecords.result;
@@ -1126,12 +1145,22 @@ export async function reviveSpentManagedExchange(
           let handedOff:
             { label: string; handoff: ManagedSpentHandoff } | undefined;
           let handedOffUnreadable: ManagedSpentHandoff | undefined;
+          let custodyUnreadable: string | undefined;
           for (let index = 0; index < rawRecords.length; index += 1) {
             const raw = rawRecords[index];
             // The store key, not the value's own `id`, which a failed parse leaves
             // untrusted; for a record that parses the two are the same field.
-            const spent = spentStates.get(String(recordKeys[index]));
+            const key = String(recordKeys[index]);
+            const spent = spentStates.get(key);
             const parsed = safeParseManagedExchangeRecord(raw);
+            if (unreadableSiblings.has(key)) {
+              const secret = parsed.success
+                ? parsed.data.sharedSecret
+                : storedSharedSecret(raw);
+              if (secret === reconstructed.sharedSecret)
+                custodyUnreadable ??= parsed.success ? parsed.data.label : "";
+              continue;
+            }
             if (!parsed.success) {
               if (
                 spent?.handoff !== undefined &&
@@ -1164,6 +1193,10 @@ export async function reviveSpentManagedExchange(
               handoff: handedOffUnreadable,
               label: "",
             };
+            return;
+          }
+          if (custodyUnreadable !== undefined) {
+            outcome = { kind: "custody-unreadable", label: custodyUnreadable };
             return;
           }
           if (match === undefined) return;
@@ -1204,12 +1237,13 @@ export async function reviveSpentManagedExchange(
 /**
  * The `sharedSecret` a stored value holds as a string, read off the raw value
  * without the record schema, or `undefined` where the field is absent or of another
- * type. Read for ONE decision: whether an entry {@link reviveSpentManagedExchange}
- * could not parse is the handed-off record an import must be refused on, which is
- * the only comparison a skipped entry takes part in. A best-effort check rather than
- * a guarantee: an entry whose secret field is unreadable too matches nothing and
- * installs fresh, the same bound the refusal already has against a record rotated or
- * deleted past the artifact (docs/spec/MANAGED_EXCHANGE_RECORD.md).
+ * type. Read only to decide whether an entry {@link reviveSpentManagedExchange}
+ * could not parse is one an import must be refused on -- its sibling's hand-off, or
+ * a sibling this build cannot parse either -- which is the only comparison a skipped
+ * entry takes part in. A best-effort check rather than a guarantee: an entry whose
+ * secret field is unreadable too matches nothing and installs fresh, the same bound
+ * the refusal already has against a record rotated or deleted past the artifact
+ * (docs/spec/MANAGED_EXCHANGE_RECORD.md).
  */
 function storedSharedSecret(raw: unknown): string | undefined {
   if (typeof raw !== "object" || raw === null || !("sharedSecret" in raw))

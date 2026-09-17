@@ -11,6 +11,7 @@ import {
 import { Link, useNavigate } from "@tanstack/react-router";
 
 import {
+  ManagedImportCustodyUnreadableError,
   ManagedImportHandedOffError,
   importManagedExchange,
 } from "@psi/managed/managedExchangeImport";
@@ -30,7 +31,9 @@ import { AppPage } from "@components/AppPage";
 import styles from "@styles/app.module.css";
 
 import {
+  CUSTODY_UNREADABLE_IMPORT_TITLE,
   HANDED_OFF_IMPORT_TITLE,
+  custodyUnreadableImportReason,
   handedOffImportReason,
 } from "./managedHandoffGate";
 import {
@@ -561,6 +564,38 @@ function RecoveryListing({ reload }: { reload: () => void }) {
   );
 }
 
+/** What the import affordance shows when nothing was imported: the alert's color,
+ * its heading, and the reason under it. */
+interface ImportFailureAlert {
+  color: "red" | "yellow";
+  title: string;
+  reason: string;
+}
+
+/** Which alert an import failure is shown as. The two refusals the store raises are
+ * about an exchange this browser holds rather than about the file, so each names the
+ * exchange under its own heading; everything else is the file's own failure and is
+ * shown as one. */
+function importFailureAlert(error: unknown): ImportFailureAlert {
+  if (error instanceof ManagedImportHandedOffError)
+    return {
+      color: "yellow",
+      title: HANDED_OFF_IMPORT_TITLE,
+      reason: handedOffImportReason(error.handoff, error.label),
+    };
+  if (error instanceof ManagedImportCustodyUnreadableError)
+    return {
+      color: "yellow",
+      title: CUSTODY_UNREADABLE_IMPORT_TITLE,
+      reason: custodyUnreadableImportReason(error.label),
+    };
+  return {
+    color: "red",
+    title: IMPORT_FAILURE_TITLE,
+    reason: importFailureReason(error),
+  };
+}
+
 /** The standing restore-from-backup import affordance, shared by the empty state and the
  * read-failed surface so both render one markup. A successful import puts the operator
  * on the imported exchange's run surface, so it is a way forward even when the list read
@@ -574,7 +609,10 @@ function RecoveryListing({ reload }: { reload: () => void }) {
  * An import the store refuses because its exchange was handed off from this browser is
  * not the unreadable-file failure and does not read as one: the file is fine and the
  * exchange is still here, running somewhere else, so that refusal names the exchange
- * and the recovery it actually has ({@link handedOffImportReason}).
+ * and the recovery it actually has ({@link handedOffImportReason}). One refused
+ * because this browser could not read what it saved beside the exchange reads the
+ * same way and for the same reason, naming the store rather than the file
+ * ({@link custodyUnreadableImportReason}).
  *
  * An import that could not bring the source's input file or output folder stops here
  * with that notice and a button onward, rather than taking the operator straight to
@@ -583,9 +621,7 @@ function RecoveryListing({ reload }: { reload: () => void }) {
  * to say goes straight through. */
 function RestoreFromBackup() {
   const navigate = useNavigate();
-  const [importFailure, setImportFailure] = useState<
-    { kind: "refused"; reason: string } | { kind: "handed-off"; reason: string }
-  >();
+  const [importFailure, setImportFailure] = useState<ImportFailureAlert>();
   const [grantNotice, setGrantNotice] = useState<{
     id: string;
     notice: ManagedImportGrantNotice;
@@ -599,7 +635,11 @@ function RestoreFromBackup() {
     // an over-cap file is refused with the unreadable-file copy rather than read into
     // memory ahead of the bounded parse.
     if (file.size > MAX_ARTIFACT_IMPORT_BYTES) {
-      setImportFailure({ kind: "refused", reason: UNREADABLE_IMPORT_REASON });
+      setImportFailure({
+        color: "red",
+        title: IMPORT_FAILURE_TITLE,
+        reason: UNREADABLE_IMPORT_REASON,
+      });
       return;
     }
     void (async () => {
@@ -616,14 +656,7 @@ function RestoreFromBackup() {
         }
         await navigate({ to: "/saved/$id", params: { id: record.id } });
       } catch (error) {
-        setImportFailure(
-          error instanceof ManagedImportHandedOffError
-            ? {
-                kind: "handed-off",
-                reason: handedOffImportReason(error.handoff, error.label),
-              }
-            : { kind: "refused", reason: importFailureReason(error) },
-        );
+        setImportFailure(importFailureAlert(error));
       }
     })();
   }
@@ -656,16 +689,10 @@ function RestoreFromBackup() {
           </Button>
         </Alert>
       )}
-      {importFailure?.kind === "handed-off" ? (
-        <Alert color="yellow" title={HANDED_OFF_IMPORT_TITLE} mb="sm">
+      {importFailure !== undefined && (
+        <Alert color={importFailure.color} title={importFailure.title} mb="sm">
           {importFailure.reason}
         </Alert>
-      ) : (
-        importFailure !== undefined && (
-          <Alert color="red" title={IMPORT_FAILURE_TITLE} mb="sm">
-            {importFailure.reason}
-          </Alert>
-        )
       )}
       <FileButton accept="application/json,.json" onChange={onFile}>
         {(props) => (
