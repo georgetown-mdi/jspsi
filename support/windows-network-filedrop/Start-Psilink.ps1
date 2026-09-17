@@ -119,7 +119,13 @@ function Read-YesNo {
         otherwise carry the run on into a volume holding a share password.
 
         -DefaultYes is where an empty answer goes, which is the letter the
-        prompt capitalises. #>
+        prompt capitalises.
+
+        Carried here rather than borrowed from Setup-PsilinkFileDrop.ps1's
+        Read-YesNoAnswer, as Get-LocalFolderName below is: the questions this
+        answers are asked on the path a run keeps when that script cannot be
+        loaded at all -- a constrained language mode, or no copy of it beside
+        this one. The suite pins the two to the same answers. #>
     param(
         [Parameter(Mandatory = $true)][string] $Prompt,
         [switch] $DefaultYes

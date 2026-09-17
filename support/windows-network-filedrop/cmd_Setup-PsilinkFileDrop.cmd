@@ -865,13 +865,29 @@ rem
 rem The tail is cut at each slash by expanding the variable against itself
 rem rather than read with "for /f" tokens: a line with no second token leaves
 rem that token variable unexpanded rather than empty, so the loop would end on a
-rem literal instead of on the last segment.
+rem literal instead of on the last segment. The same hazard is why every
+rem trailing separator comes off first and why an empty cut ends the loop: a
+rem tail cut down to nothing leaves the variable unset, and the expansion after
+rem that one is read as literal text rather than as a name.
 set "FOLDER_NAME=%SHARE%"
 if not defined SUBPATH exit /b 0
 set "FOLDER_TAIL=%SUBPATH%"
+:folder_name_trim
+if not defined FOLDER_TAIL goto folder_name_done
+if "%FOLDER_TAIL:~-1%"=="/" (
+  set "FOLDER_TAIL=%FOLDER_TAIL:~0,-1%"
+  goto folder_name_trim
+)
+rem A dot on both sides of the comparison, so that the backslash is not the
+rem character before a closing quote.
+if "%FOLDER_TAIL:~-1%."=="\." (
+  set "FOLDER_TAIL=%FOLDER_TAIL:~0,-1%"
+  goto folder_name_trim
+)
 :folder_name_next
 set "FOLDER_STRIPPED=%FOLDER_TAIL:*/=%"
 if "%FOLDER_STRIPPED%"=="%FOLDER_TAIL%" goto folder_name_done
+if not defined FOLDER_STRIPPED goto folder_name_done
 set "FOLDER_TAIL=%FOLDER_STRIPPED%"
 goto folder_name_next
 :folder_name_done

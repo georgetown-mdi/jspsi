@@ -85,13 +85,18 @@ BeforeAll {
             down; a temporary file rather than the console for standard input,
             so that a guard which failed and let the flow reach a prompt ends
             the run rather than blocking it. The timeout is the backstop for
-            anything else that waits. #>
-        param([string[]] $Arguments, [int] $TimeoutSeconds = 120)
+            anything else that waits. -InputLines fills that file for a run
+            that is meant to reach the prompts; a run given none still ends at
+            the first one it reaches. #>
+        param([string[]] $Arguments, [string[]] $InputLines = @(), [int] $TimeoutSeconds = 120)
 
         $outFile = [IO.Path]::GetTempFileName()
         $errFile = [IO.Path]::GetTempFileName()
         $inFile = [IO.Path]::GetTempFileName()
         try {
+            if (@($InputLines).Count -gt 0) {
+                Set-Content -LiteralPath $inFile -Value $InputLines -Encoding Ascii
+            }
             $process = Start-Process -FilePath (Join-Path $PSHOME 'powershell.exe') `
                 -ArgumentList $Arguments -NoNewWindow -PassThru `
                 -RedirectStandardInput $inFile `
@@ -325,6 +330,38 @@ Describe 'Drive-kind classification' {
     }
 }
 
+Describe 'The reason a path could not be used' {
+    It 'says retyping will not help in an elevated window' {
+        # Test-Elevated answers for the window the run is in, and this suite
+        # cannot put its own run in an elevated one: it stands in for that one
+        # question, and the reason the answer selects is what is read back.
+        function Test-Elevated { return $true }
+        $letter = Find-FreeDriveLetter
+        $letter | Should -Not -BeNullOrEmpty -Because 'the reason needs a letter nothing holds'
+
+        $resolved = Resolve-DropPath -Raw "${letter}:\Exchange"
+
+        $resolved.Kind | Should -Be 'Unknown'
+        $resolved.RetypingWillNotHelp | Should -BeTrue
+        # Every reason is printed as a sentence of its own, so every reason
+        # starts as one. Matched with the case held, which -Match would not.
+        $resolved.Reason | Should -MatchExactly '^This window is running as Administrator'
+    }
+
+    It 'leaves the flag off a reason that a different path would answer' {
+        function Test-Elevated { return $false }
+        $letter = Find-FreeDriveLetter
+        $letter | Should -Not -BeNullOrEmpty
+
+        $absent = Resolve-DropPath -Raw "${letter}:\Exchange"
+
+        $absent.RetypingWillNotHelp | Should -BeNullOrEmpty
+        $absent.Reason | Should -MatchExactly "^There is no ${letter}: drive"
+        (Resolve-DropPath -Raw 'the exchange folder').Reason | Should -MatchExactly '^Could not interpret'
+        (Resolve-DropPath -Raw '').Reason | Should -MatchExactly '^Empty path'
+    }
+}
+
 Describe 'The shared folder name the console is told' {
     It 'names a folder on this PC by its own last segment' {
         Get-RendezvousFolderName -Path 'C:\Users\dana\Egnyte\agency-a-agency-b' |
@@ -436,6 +473,36 @@ Describe 'The dialect map' {
     }
 }
 
+Describe 'Split-TextToWidth' {
+    It 'wraps at the width and splits no word' {
+        $text = 'There is no Z: drive on this PC. If it is a network drive that is ' +
+            'not connected right now, open it in File Explorer first, then run the script again.'
+
+        $lines = Split-TextToWidth -Text $text -Width 40
+
+        (@($lines).Count -gt 1) | Should -BeTrue
+        foreach ($line in $lines) { ($line.Length -le 40) | Should -BeTrue -Because $line }
+        # Nothing added and nothing lost: the wrap is where the spaces already were.
+        ($lines -join ' ') | Should -Be $text
+    }
+
+    It 'gives a word longer than the width a line of its own rather than breaking it' {
+        # A share path is one word and can be longer than the block it is
+        # printed in. Broken across two lines it is no longer a path the
+        # operator can copy.
+        $path = '\\fs-04.agency.gov\exchange$\clinic-study\from-clinic'
+
+        $lines = Split-TextToWidth -Text "$path is gone" -Width 20
+
+        $lines[0] | Should -Be $path
+    }
+
+    It 'answers nothing for text that holds no word' {
+        @(Split-TextToWidth -Text '').Count | Should -Be 0
+        @(Split-TextToWidth -Text '   ').Count | Should -Be 0
+    }
+}
+
 Describe 'Hide-Secret' {
     It 'removes every occurrence of the password' {
         $masked = Hide-Secret -Text 'o=username=bob,password=hunter2,domain=x hunter2' -Secret 'hunter2'
@@ -469,6 +536,17 @@ Describe 'Invoke-Docker' {
             'echo answered on stdout',
             'echo grumbled on stderr 1>&2',
             'exit /b 3')
+
+        # The same, with a blank line ahead of the message: a container's own
+        # output has them, and each redirected line reaches the wrapper as an
+        # error record whose ToString() answers with a type name when the line
+        # it holds is empty.
+        $script:BlankLineEngine = Join-Path $script:EngineStubRoot 'blankline.cmd'
+        Set-Content -LiteralPath $script:BlankLineEngine -Encoding Ascii -Value @(
+            '@echo off',
+            '>&2 echo(',
+            '>&2 echo could not mount the share',
+            'exit /b 1')
     }
 
     AfterAll {
@@ -509,6 +587,18 @@ Describe 'Invoke-Docker' {
         $result.ExitCode | Should -Be 3
         $result.Output | Should -Match 'answered on stdout'
         $result.Output | Should -Match 'grumbled on stderr'
+    }
+
+    It 'reads a blank stderr line as a blank line and a message as itself' {
+        $ErrorActionPreference = 'Stop'
+
+        $result = Invoke-Docker -Engine $script:BlankLineEngine -DockerArgs @('ignored')
+
+        $result.Ran | Should -Be $true
+        $result.Output | Should -Match 'could not mount the share'
+        # What the operator is shown in place of the blank line without the
+        # message being read off the record.
+        $result.Output | Should -Not -Match 'RemoteException'
     }
 
     It 'would end the run on a redirected stderr line without the relaxed preference' {
@@ -713,7 +803,7 @@ Describe 'The image capability check' {
     }
 }
 
-Describe 'The image capability check inside the setup flow' {
+Describe 'The setup flow, driven against a stub engine' {
     BeforeAll {
         # Whole engines, each named so the flow's own `docker` calls reach it
         # through the PATH. Each answers preflight normally and then serves one
@@ -815,6 +905,21 @@ Describe 'The image capability check inside the setup flow' {
         # no container" an assertion rather than a reading of the flow.
         Set-Content -LiteralPath (Join-Path $script:NoRunEngineRoot 'docker.cmd') -Encoding Ascii -Value ($engineHead + $engineTail)
 
+        # The setup script with the elevation question answered, for the one
+        # reason an elevated window gets: this suite cannot put a run in such a
+        # window, and the answer decides which reason the flow prints. Injected
+        # above the guard line so that it replaces the script's own definition,
+        # which is where the launcher's flow suite puts its credential answer.
+        $script:ElevatedSetupScript = Join-Path $script:CapableEngineRoot 'Setup-PsilinkFileDrop.ps1'
+        $setupSource = Get-Content -Raw -LiteralPath $setupScript
+        $guardLine = "if (`$LoadFunctionsOnly) { return }"
+        $answeredElevation = @(
+            'function Test-Elevated { return $true }',
+            '') -join [Environment]::NewLine
+        $patchedSetup = $setupSource.Replace($guardLine, $answeredElevation + $guardLine)
+        if ($patchedSetup -eq $setupSource) { throw 'the setup script no longer carries the guard line this suite patches' }
+        [IO.File]::WriteAllText($script:ElevatedSetupScript, $patchedSetup)
+
         function Invoke-SetupWithEngine {
             <#  Run the setup flow with one of the stub engines ahead of a
                 minimal PATH, and return the run beside the calls the engine
@@ -824,11 +929,13 @@ Describe 'The image capability check inside the setup flow' {
 
                 -TimeoutSeconds is a backstop for a run that ends on its own and
                 the whole of the wait for one that cannot, so a case judging the
-                second asks for a shorter one than the default. #>
+                second asks for a shorter one than the default. -InputLines
+                answers the prompts a run reaches. #>
             param(
                 [Parameter(Mandatory = $true)][string] $EngineRoot,
                 [Parameter(Mandatory = $true)][string] $SetupScript,
                 [string[]] $ScriptArguments = @(),
+                [string[]] $InputLines = @(),
                 [int] $TimeoutSeconds = 120
             )
 
@@ -845,7 +952,7 @@ Describe 'The image capability check inside the setup flow' {
                 ) -join ';'
                 $run = Start-PowerShellChild -Arguments (@(
                     '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$SetupScript`"") +
-                    $ScriptArguments) -TimeoutSeconds $TimeoutSeconds
+                    $ScriptArguments) -InputLines $InputLines -TimeoutSeconds $TimeoutSeconds
             } finally {
                 $env:PATH = $originalPath
                 if ($null -eq $originalLog) { Remove-Item env:PSILINK_STUB_LOG -ErrorAction SilentlyContinue }
@@ -1035,6 +1142,60 @@ Describe 'The image capability check inside the setup flow' {
         # end this run instead of waiting, and fails here.
         $run.TimedOut | Should -BeTrue -Because $shape
     }
+
+    It 'puts the confirmation again for an answer that is neither yes nor no' {
+        # Everything below this prompt depends on the three values it
+        # confirms, and an answer that is neither yes nor no settles nothing
+        # about them. A reserved TLD for the server, for the reason the
+        # stale-image case above gives: the flow asks Windows whether it can
+        # reach the path on the way down.
+        $run = Invoke-SetupWithEngine -EngineRoot $script:CapableEngineRoot -SetupScript $setupScript `
+            -ScriptArguments @('-DropPath', '\\fs-04.invalid\exchange\psilink') `
+            -InputLines @('B', 'n') -TimeoutSeconds 60
+        $output = [string] $run.Output
+        $shape = "timedout=$($run.TimedOut) exit=$($run.Exit) tail=" +
+            (($output.Substring([Math]::Max(0, $output.Length - 200))) -replace '\s+', ' ')
+
+        $run.TimedOut | Should -BeFalse -Because $shape
+        $run.Exit | Should -Be 0 -Because $shape
+        $output | Should -Match 'Answer y or n' -Because $shape
+        # Where the answer after it took the run: the no it was, rather than the
+        # yes that reading only the first answer would have made of it.
+        $output | Should -Match 'Run the script again with the real values' -Because $shape
+    }
+
+    It 'leaves the retype advice off a reason that retyping would not answer' {
+        # An elevated window cannot see the drive letters the operator mapped as
+        # themselves, and no path they could type instead would be found either:
+        # the remedy is to close the window, which the advice would talk over.
+        $letter = Find-FreeDriveLetter
+        $letter | Should -Not -BeNullOrEmpty -Because 'the reason needs a letter nothing holds'
+
+        $run = Invoke-SetupWithEngine -EngineRoot $script:CapableEngineRoot `
+            -SetupScript $script:ElevatedSetupScript `
+            -ScriptArguments @('-DropPath', "${letter}:\Exchange") -TimeoutSeconds 60
+        $output = [string] $run.Output
+        $shape = "timedout=$($run.TimedOut) exit=$($run.Exit) tail=" +
+            (($output.Substring([Math]::Max(0, $output.Length - 200))) -replace '\s+', ' ')
+
+        $run.TimedOut | Should -BeFalse -Because $shape
+        $run.Exit | Should -Be 1 -Because $shape
+        $output | Should -Match 'running as Administrator' -Because $shape
+        $output | Should -Not -Match 'Enter it as a drive letter path' -Because $shape
+    }
+
+    It 'keeps the retype advice for a reason that a different path would answer' {
+        $run = Invoke-SetupWithEngine -EngineRoot $script:CapableEngineRoot -SetupScript $setupScript `
+            -ScriptArguments @('-DropPath', 'the exchange folder') -TimeoutSeconds 60
+        $output = [string] $run.Output
+        $shape = "timedout=$($run.TimedOut) exit=$($run.Exit) tail=" +
+            (($output.Substring([Math]::Max(0, $output.Length - 200))) -replace '\s+', ' ')
+
+        $run.TimedOut | Should -BeFalse -Because $shape
+        $run.Exit | Should -Be 1 -Because $shape
+        $output | Should -Match 'Could not interpret' -Because $shape
+        $output | Should -Match 'Enter it as a drive letter path' -Because $shape
+    }
 }
 
 Describe 'Resolution over a live SMB rig' {
@@ -1213,6 +1374,21 @@ Describe 'Resolution over a live SMB rig' {
         # reach it is why the script asks the operator to confirm what it worked
         # out, and why a DFS path is the case it names when it asks.
         $resolved.Share | Should -Not -Be $dataShareName
+    }
+
+    It 'says where a mapped letter goes once, however many paths resolve on it' {
+        # The launcher resolves a path per folder, and a pair of folders on one
+        # mapped drive would otherwise be told the same mapping twice. The
+        # letters already announced are what the run remembers by, so the count
+        # starts from the state a run starts in.
+        $mappedLetter | Should -Not -BeNullOrEmpty -Because 'the rig has to map a letter before this can be asked'
+        $script:AnnouncedDriveLetters = @()
+
+        $first = Resolve-DropPath -Raw "${mappedLetter}:\$subFolder" 6>&1
+        $second = Resolve-DropPath -Raw "${mappedLetter}:\" 6>&1
+        $said = @(@($first) + @($second) | ForEach-Object { [string] $_ }) -join ' '
+
+        @([regex]::Matches($said, 'is mapped to')).Count | Should -Be 1 -Because $said
     }
 
     It 'reads the UNC root back out of net use for a mapped letter' {

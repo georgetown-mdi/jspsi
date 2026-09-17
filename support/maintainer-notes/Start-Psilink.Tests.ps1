@@ -257,6 +257,90 @@ Describe 'Show-FromContainer' {
     }
 }
 
+Describe 'Read-YesNo' {
+    It 'takes the answers it knows, whatever their case' {
+        # A child run rather than this session: every answer has to come from a
+        # prompt, which is the thing under test. That a redirected standard
+        # input answers one is held by a case in the flow suite below.
+        $command = ". '$launcherScript' -LoadFunctionsOnly; " +
+            "`$said = @(); " +
+            "foreach (`$n in 1..8) { `$said += [string] (Read-YesNo -Prompt 'q' -DefaultYes) }; " +
+            "'SAID:' + (`$said -join ',')"
+        $run = Start-LauncherChild -Arguments @(
+            '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', $command) `
+            -InputLines @('y', 'Y', 'yes', 'YES', 'n', 'N', 'no', ' No ')
+
+        $stdout = ([string] $run.Output).Trim()
+        $shape = "timedout=$($run.TimedOut) exit=$($run.Exit) out=$($stdout -replace '\s+', ' ')"
+        $run.TimedOut | Should -BeFalse -Because $shape
+        $stdout | Should -Match 'SAID:True,True,True,True,False,False,False,False' -Because $shape
+    }
+
+    It 'takes a blank answer as the default the prompt capitalises' {
+        $command = ". '$launcherScript' -LoadFunctionsOnly; " +
+            "'SAID:' + [string] (Read-YesNo -Prompt 'q' -DefaultYes) + " +
+            "',' + [string] (Read-YesNo -Prompt 'q')"
+        $run = Start-LauncherChild -Arguments @(
+            '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', $command) `
+            -InputLines @('', '   ')
+
+        $stdout = ([string] $run.Output).Trim()
+        $shape = "timedout=$($run.TimedOut) exit=$($run.Exit) out=$($stdout -replace '\s+', ' ')"
+        $run.TimedOut | Should -BeFalse -Because $shape
+        $stdout | Should -Match 'SAID:True,False' -Because $shape
+    }
+
+    It 'puts the question again until the answer is one it knows' {
+        # The whole reason this reader exists: a word meaning no, and a
+        # keystroke meaning nothing, are neither of them the default.
+        $command = ". '$launcherScript' -LoadFunctionsOnly; " +
+            "'SAID:' + [string] (Read-YesNo -Prompt 'q' -DefaultYes)"
+        $run = Start-LauncherChild -Arguments @(
+            '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', $command) `
+            -InputLines @('B', 'maybe', 'n')
+
+        $stdout = ([string] $run.Output).Trim()
+        $shape = "timedout=$($run.TimedOut) exit=$($run.Exit) out=$($stdout -replace '\s+', ' ')"
+        $run.TimedOut | Should -BeFalse -Because $shape
+        $stdout | Should -Match 'SAID:False' -Because $shape
+        # Once per answer it could not read.
+        @([regex]::Matches($stdout, 'Answer y or n')).Count | Should -Be 2 -Because $shape
+    }
+
+    It 'answers as the setup script''s reader does, over every answer' {
+        # The launcher asks its questions with a reader of its own so that a run
+        # which could not load the setup script can still ask one, and this is
+        # what holds that copy to Read-YesNoAnswer, the rule it copies: an edit
+        # to either that the other did not get fails here.
+        $answers = @('', '   ', 'y', 'Y', 'yes', 'YES', ' y ', 'n', 'N', 'no', 'NO', ' n ')
+        $command = ". '$launcherScript' -LoadFunctionsOnly; " +
+            ". '$setupScriptForLauncher' -LoadFunctionsOnly; " +
+            "`$said = @(); " +
+            "foreach (`$n in 1..$($answers.Count)) { `$said += " +
+            "([string] (Read-YesNo -Prompt 'q' -DefaultYes) + '/' + " +
+            "[string] (Read-YesNoAnswer -Prompt 'q' -DefaultYes)) }; " +
+            "'SAID:' + (`$said -join ',')"
+        # Each answer twice: one reader is asked, then the other, and the pair
+        # is what the case compares.
+        $lines = @()
+        foreach ($answer in $answers) { $lines += $answer; $lines += $answer }
+        $run = Start-LauncherChild -Arguments @(
+            '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', $command) -InputLines $lines
+
+        $stdout = ([string] $run.Output).Trim()
+        $shape = "timedout=$($run.TimedOut) exit=$($run.Exit) out=$($stdout -replace '\s+', ' ')"
+        $run.TimedOut | Should -BeFalse -Because $shape
+        $said = ''
+        if ($stdout -match 'SAID:(\S+)') { $said = $Matches[1] }
+        $said | Should -Not -BeNullOrEmpty -Because $shape
+        @($said -split ',').Count | Should -Be $answers.Count -Because $shape
+        foreach ($pair in ($said -split ',')) {
+            $halves = $pair -split '/'
+            $halves[0] | Should -Be $halves[1] -Because "[$pair] $shape"
+        }
+    }
+}
+
 Describe 'Select-DoctorChecks' {
     BeforeAll {
         $script:Verdict = Read-DoctorVerdict -Json (
@@ -614,6 +698,69 @@ Describe 'The mount a pair of folders shares' {
         (Resolve-SharedShareMount -Inbound $network -Outbound $local).Shared | Should -BeFalse
         (Resolve-SharedShareMount -Inbound $local -Outbound $network).Shared | Should -BeFalse
         (Resolve-SharedShareMount -Inbound $local -Outbound $local).Shared | Should -BeFalse
+    }
+}
+
+Describe 'The credential a pair of folders on one server takes' {
+    BeforeEach {
+        # What a run starts from, so that no case here reads what another left:
+        # the flow drops both once the volumes are made.
+        $script:PsilinkShareCredential = $null
+        $script:PsilinkShareCredentialServer = ''
+        $script:CredentialAsks = 0
+        $script:PsilinkEngine = 'docker'
+    }
+
+    It 'asks once for two shares of one server' {
+        # The three things this function reaches that no session here can: the
+        # password prompt reads the console rather than a redirect, and the
+        # volume and the batteries reach the engine. What each is asked to do
+        # is driven by the flow cases below against a stub engine; the
+        # bookkeeping around them is what these two cases are for.
+        function Read-ShareCredential {
+            $script:CredentialAsks++
+            return @{ Username = 'psilinkci'; Domain = ''; Password = 'hunter2' }
+        }
+        function New-ShareVolume { return $true }
+        function Invoke-DoctorLoop { return $true }
+
+        $inbound = New-RendezvousShareMount -VolumeName 'psilinkci-in' -Server 'fs-04' -Share 'exchange' `
+            -Legs @(@{ Label = 'the folder your partner writes into'; Path = 'from-clinic' }) 6>&1
+        $outbound = New-RendezvousShareMount -VolumeName 'psilinkci-out' -Server 'fs-04' -Share 'outbound' `
+            -Legs @(@{ Label = 'the folder you write into'; Path = 'to-clinic' }) 6>&1
+        $said = @(@($inbound) + @($outbound) | ForEach-Object { [string] $_ }) -join ' '
+
+        $script:CredentialAsks | Should -Be 1 -Because $said
+        @([regex]::Matches($said, 'Credentials for the file server')).Count | Should -Be 1 -Because $said
+        # The second share is told whose answer it is being reached with.
+        $said | Should -BeLike '*Using the same credentials for \\fs-04\outbound*' -Because $said
+        $script:PsilinkShareCredentialServer | Should -Be 'fs-04' -Because $said
+    }
+
+    It 'asks for each of two servers' {
+        function Read-ShareCredential {
+            $script:CredentialAsks++
+            return @{ Username = 'psilinkci'; Domain = ''; Password = 'hunter2' }
+        }
+        function New-ShareVolume { return $true }
+        function Invoke-DoctorLoop { return $true }
+
+        $inbound = New-RendezvousShareMount -VolumeName 'psilinkci-in' -Server 'fs-04' -Share 'exchange' `
+            -Legs @(@{ Label = 'the folder your partner writes into'; Path = 'from-clinic' }) 6>&1
+        $outbound = New-RendezvousShareMount -VolumeName 'psilinkci-out' -Server 'fs-09' -Share 'exchange' `
+            -Legs @(@{ Label = 'the folder you write into'; Path = 'to-clinic' }) 6>&1
+        $said = @(@($inbound) + @($outbound) | ForEach-Object { [string] $_ }) -join ' '
+
+        $script:CredentialAsks | Should -Be 2 -Because $said
+        $said | Should -Not -BeLike '*Using the same credentials*' -Because $said
+        $script:PsilinkShareCredentialServer | Should -Be 'fs-09' -Because $said
+    }
+
+    AfterAll {
+        # Left as the session found it: no engine, and no answer held for one.
+        $script:PsilinkEngine = ''
+        $script:PsilinkShareCredential = $null
+        $script:PsilinkShareCredentialServer = ''
     }
 }
 
@@ -1318,6 +1465,29 @@ Describe 'The launcher flow, driven against a stub engine' {
 
         $served = @(Get-ConsoleCalls -Calls $calls) -join ' :: '
         $served | Should -BeLike '*JOB_RENDEZVOUS_NAME=agency-a-agency-b*' -Because $shape
+    }
+
+    It 'explains nothing about folder layout when -DataRoot named the folder' {
+        # -DataRoot is the answer that question asks for, so the explanation
+        # ahead of it has nothing left to explain. The folder named here does
+        # not exist, which ends the run just below the branch -- far enough to
+        # read what it printed, and short of anything that starts a container.
+        $missing = Join-Path $script:FlowRoot 'no-such-working-folder'
+        $run = Invoke-LauncherFlow -Launcher $script:FlowLauncher -StubDir $script:RefusalStub `
+            -Arguments @(
+                '-DataRoot', "`"$missing`"",
+                '-Port', $script:FlowPort,
+                '-NoBrowser') `
+            -TimeoutSeconds 60
+
+        $output = [string] $run.Output
+        $shape = Get-FlowShape -Run $run
+
+        $run.TimedOut | Should -BeFalse -Because $shape
+        $run.Exit | Should -Be 1 -Because $shape
+        $output | Should -BeLike '*There is no folder at*' -Because $shape
+        $output | Should -Not -BeLike '*One folder for all of it*' -Because $shape
+        $output | Should -Not -BeLike '*Use one folder for everything*' -Because $shape
     }
 
     It 'names the volume already made when a later folder is refused' {

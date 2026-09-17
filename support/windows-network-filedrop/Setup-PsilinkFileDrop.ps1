@@ -107,6 +107,32 @@ function Write-Warn { param([string] $T) Write-Host "  WARN  $T" -ForegroundColo
 function Write-Note { param([string] $T) Write-Host "        $T" -ForegroundColor Yellow }
 function Write-Info { param([string] $T) Write-Host "        $T" }
 
+function Read-YesNoAnswer {
+    <#  A yes-or-no question. An answer the question does not recognise is put
+        again rather than taken as the default: a typed word meaning no would
+        otherwise be read as a yes and carry the run on.
+
+        -DefaultYes is where an empty answer goes, which is the letter the
+        prompt capitalises.
+
+        Named apart from Start-Psilink.ps1's Read-YesNo, which that script keeps
+        a copy of for the runs where this one cannot be loaded at all -- a
+        constrained language mode, or no copy of it beside the launcher. The
+        suite pins the two to the same answers. #>
+    param(
+        [Parameter(Mandatory = $true)][string] $Prompt,
+        [switch] $DefaultYes
+    )
+
+    while ($true) {
+        $answer = Read-Host $Prompt
+        if (-not $answer -or -not $answer.Trim()) { return [bool] $DefaultYes }
+        if ($answer -match '^\s*(y|yes)\s*$') { return $true }
+        if ($answer -match '^\s*(n|no)\s*$') { return $false }
+        Write-Note 'Answer y or n.'
+    }
+}
+
 function Split-TextToWidth {
     <#  Text as lines that fit the block Write-Note and Write-Info indent to.
         The script's own messages are written to that width by hand; a reason
@@ -889,8 +915,7 @@ if (-not $explicitTarget -and -not $SkipConfirm) {
     Write-Host 'different. Windows will tell you -- open the folder in Explorer,'
     Write-Host 'right-click, Properties, and read the DFS tab if there is one.'
     Write-Host ''
-    $answer = Read-Host 'Are those correct? [Y/n]'
-    if ($answer -and $answer -notmatch '^\s*(y|yes)\s*$') {
+    if (-not (Read-YesNoAnswer -Prompt 'Are those correct? [Y/n]' -DefaultYes)) {
         Write-Host ''
         Write-Note 'Run the script again with the real values:'
         Write-Info ''
