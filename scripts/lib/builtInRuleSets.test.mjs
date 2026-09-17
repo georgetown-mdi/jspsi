@@ -173,6 +173,32 @@ describe("the registry it follows", () => {
     ).toContain("holds no rule set");
   });
 
+  it("refuses a freezing call given more than the one value it returns", () => {
+    const inlineEntry = readRuleSets(
+      source({ registry: '[Object.freeze(DEFAULT_RULE_SET, "extra")]' }),
+    );
+    expect(inlineEntry.ruleSets).toEqual([]);
+    expect(inlineEntry.unreadable).toEqual([
+      {
+        declaration: `${REGISTRY_DECLARATION}[0]`,
+        reason: expect.stringContaining("called with 2 arguments"),
+      },
+    ]);
+
+    const namedEntry = readRuleSets(
+      source().replace(
+        "export const DEFAULT_RULE_SET: BuiltInLinkageRuleSet = Object.freeze({",
+        'export const DEFAULT_RULE_SET: BuiltInLinkageRuleSet = Object.freeze("extra", {',
+      ),
+    );
+    expect(namedEntry.unreadable).toEqual([
+      {
+        declaration: "DEFAULT_RULE_SET",
+        reason: expect.stringContaining("called with 2 arguments"),
+      },
+    ]);
+  });
+
   it("refuses a source declaring no registry at all", () => {
     const withoutRegistry = ruleSetBlock();
     expect(readRuleSets(withoutRegistry).unreadable).toEqual([

@@ -98,10 +98,33 @@ function unwrap(node) {
   return node;
 }
 
-/** The top-level declaration `node` names, or undefined where it is not a
- * bare identifier. */
+/** {@link unwrap} with a failure attributed to `declaration` where the caller
+ * knows one. */
+function unwrapIn(node, declaration) {
+  try {
+    return unwrap(node);
+  } catch (error) {
+    if (error instanceof UnreadableDeclaration) {
+      error.declaration ??= declaration;
+    }
+    throw error;
+  }
+}
+
+/**
+ * The top-level declaration `node` names, or undefined where it is not a bare
+ * identifier or cannot be unwrapped at all. This is how a reason is given a
+ * name inside a `catch`, so it reports no name rather than raising a second
+ * failure over the one being handled.
+ */
 function declarationName(node) {
-  const bare = unwrap(node);
+  let bare;
+  try {
+    bare = unwrap(node);
+  } catch (error) {
+    if (error instanceof UnreadableDeclaration) return undefined;
+    throw error;
+  }
   return ts.isIdentifier(bare) ? bare.text : undefined;
 }
 
@@ -249,7 +272,7 @@ function objectAt(node, constants, where) {
     if (initializer === null) {
       throw new UnreadableDeclaration("it has no initializer", name);
     }
-    bare = unwrap(initializer);
+    bare = unwrapIn(initializer, name);
   }
   if (!ts.isObjectLiteralExpression(bare)) {
     throw new UnreadableDeclaration(
