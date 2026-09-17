@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useReducer, useRef } from "react";
 
 import { Alert, Button, Checkbox, Text, TextInput } from "@mantine/core";
 import { Dropzone } from "@mantine/dropzone";
@@ -41,17 +41,13 @@ import {
 import { CONSOLE_COVERAGE_PENDING_LABEL } from "@components/FieldCoverage";
 import { InvitationTerms } from "@components/InvitationTerms";
 import { MAX_CSV_FILE_BYTES } from "@components/csvIntake";
-import { setColumnTypeForMatching } from "@psi/metadataEditing";
 
 import {
-  RECEIPTS_DEFAULT,
   receiptsIntentFields,
   receiptsProblems,
   signingIdentityDivergence,
 } from "@psi/receiptsModel";
 import {
-  RUN_DIAGNOSTICS_DEFAULT,
-  runDiagnosticsAfterRetarget,
   runDiagnosticsIntentFields,
   runDiagnosticsProblems,
 } from "@psi/runDiagnosticsModel";
@@ -62,12 +58,10 @@ import { ledgerOutcomeOf } from "@psi/ledger";
 
 import {
   CONFIG_EXCHANGE_FILES,
-  EXCHANGE_FILES_DEFAULT,
   exchangeFilesOptions,
   exchangeFilesProblems,
 } from "@console/exchangeFilesModel";
 import {
-  CONNECTION_TUNING_DEFAULT,
   FILEDROP_CONNECTION_TUNING,
   SFTP_CONNECTION_TUNING,
   connectionTuningProblems,
@@ -104,19 +98,21 @@ import {
   acceptorTransportNote,
   invitingPartyName,
 } from "./acceptorModel";
-import { APPLIANCE_FILE_ASSURANCE, FILE_ASSURANCE_LINE } from "./fileAssurance";
 import {
-  MANAGE_OFFER_IDLE,
-  buildManagedDeposit,
-  webrtcLocatorFromEndpoint,
-} from "./manageOfferModel";
+  ACCEPTOR_SCREEN_INITIAL,
+  acceptorScreenReducer,
+} from "./acceptorScreenModel";
+import { APPLIANCE_FILE_ASSURANCE, FILE_ASSURANCE_LINE } from "./fileAssurance";
 import {
   acceptorCleaningAttention,
   acceptorColumnsEditorState,
-  acceptorInitialColumnsState,
   acceptorLaunchPayload,
   acceptorVerdict,
 } from "./acceptorColumnsModel";
+import {
+  buildManagedDeposit,
+  webrtcLocatorFromEndpoint,
+} from "./manageOfferModel";
 import { useBeforeUnloadPrompt, useUnloadGuard } from "./useUnloadGuard";
 import { AcceptorCleaningStep } from "./AcceptorCleaningStep";
 import { AcceptorColumnsStep } from "./AcceptorColumnsStep";
@@ -133,40 +129,25 @@ import { useAcceptorExchange } from "./useAcceptorExchange";
 import { useStepHistory } from "./useStepHistory";
 
 import type {
-  AcceptableInvitation,
-  AcceptorDataEdits,
-} from "@psi/acceptInvitation";
-import type {
-  AcceptorAcquiredCsv,
-  AcceptorColumnsState,
-} from "./acceptorColumnsModel";
+  AcceptorColumnsSection,
+  FieldErrors,
+} from "./acceptorScreenModel";
 import type {
   CSVRow,
-  Displayable,
   Metadata,
   SemanticType,
   Standardization,
   StandardizationStep,
 } from "@psilink/core";
-import type {
-  JobRendezvousConfig,
-  ProfiledJobInput,
-} from "@psi/jobClient/workInputClient";
 import type { AcceptorLaunchSource } from "./useAcceptorExchange";
 import type { AcceptorStep } from "./acceptorModel";
-import type { AlertContent } from "@components/csvIntake";
 import type { CoverageInput } from "@components/useNonEmptyRates";
+import type { ProfiledJobInput } from "@psi/jobClient/workInputClient";
 
-import type { ManageOfferChoices, ManageOfferState } from "./manageOfferModel";
 import type { ColumnSamples } from "@psi/columnSamples";
-import type { ConnectionTuningDraft } from "@console/connectionTuningModel";
-import type { ExchangeFilesDraft } from "@console/exchangeFilesModel";
-import type { FieldStepOverride } from "@psi/standardizationAuthoring";
 import type { FileRejection } from "@mantine/dropzone";
+import type { ManageOfferChoices } from "./manageOfferModel";
 import type { RailStep } from "@psi/rail";
-import type { ReceiptsDraft } from "@psi/receiptsModel";
-import type { RunDiagnosticsDraft } from "@psi/runDiagnosticsModel";
-import type { SftpConnectionInfo } from "@psi/jobClient/serverJobExchangeDriver";
 import type { SftpConnectionProjection } from "@jobs/jobManager";
 import type { SftpEndpointLocator } from "@console/sftpConnectionForm";
 
@@ -187,11 +168,6 @@ const EMPTY_COVERAGE_INPUT: CoverageInput = {
 };
 const EMPTY_COLUMN_SAMPLES: ColumnSamples = new Map();
 
-/** The columns-step sub-section: the main confirm surface, or the Cleaning tab the
- * Customize menu navigates to (mirroring how InviterScreen mounts its
- * CleaningTab). Only meaningful while {@link AcceptorStep} is `columns`. */
-type AcceptorColumnsSection = "columns" | "cleaning";
-
 // Exhaustive over AcceptorStep (the Record keying enforces it): the steps a
 // history entry restored by Back/Forward is allowed to name.
 const ACCEPTOR_STEP_SET: Record<AcceptorStep, true> = {
@@ -203,41 +179,6 @@ const ACCEPTOR_STEP_SET: Record<AcceptorStep, true> = {
 
 function isAcceptorStep(value: string): value is AcceptorStep {
   return value in ACCEPTOR_STEP_SET;
-}
-
-/** The exchange the acceptor launched: the assembled per-party edits and this
- * party's own side of the matching cardinality. Drives the acceptor's run
- * surface ({@link AcceptorExchangeSection}); the run hook keys on the derived
- * launch object, so a fresh launch restarts the run.
- *
- * `deduplicate` is the value the consent gate committed, carried here for the
- * same reason the committed name is: the run presents the terms it holds, and
- * the managed-exchange deposit records them, so neither may drift with a later
- * edit to the control. */
-interface AcceptorLaunched {
-  edits: AcceptorDataEdits;
-  deduplicate: boolean;
-}
-
-/** The async decode's outcome: pending while it runs, an error message on a bad
- * or expired invitation, or the validated invitation ready to review.
- *
- * The message is rendered straight into a React text node, which neutralizes
- * HTML markup but not terminal-control, bidi-override or zero-width bytes, so
- * this render is its display sink. Declaring it `Displayable` rather than
- * `string` makes filling it from a raw partner-controlled description a compile
- * error (`describeDecodeError` returns the brand; `rawDecodeErrorDescription`,
- * which the CLI composes into an error for its own sink to escape, does not). */
-type DecodeState =
-  | { status: "pending" }
-  | { status: "error"; message: Displayable }
-  | { status: "ready"; invitation: AcceptableInvitation };
-
-/** A titled inline error rendered beside a consent-step field when a submit slips
- * past the disabled gate and fails the handler re-check. */
-interface FieldErrors {
-  name?: string;
-  file?: boolean;
 }
 
 /**
@@ -255,100 +196,46 @@ interface FieldErrors {
  * step, and {@link acceptorConsentName} (the shared `commitAcceptance` gate)
  * governs the consent step's submit BOTH as its disabled state and as a re-check
  * inside the handler.
+ *
+ * Its whole state lives in one reducer ({@link acceptorScreenReducer}); this
+ * component holds the I/O -- the decode, the parse, the launch, and the
+ * console's fetches -- and reports each outcome to it as an action.
  */
 export function AcceptorScreen() {
   const consoleBuild = isConsoleBuild();
-  const [decode, setDecode] = useState<DecodeState>({ status: "pending" });
-  const [step, setStep] = useState<AcceptorStep>("review");
-  // The columns-step sub-section: the confirm surface, or the Cleaning tab the
-  // Customize menu navigates to. Only meaningful while `step` is `columns`.
-  const [columnsSection, setColumnsSection] =
-    useState<AcceptorColumnsSection>("columns");
-  // The consent gate's two inputs; the file is held as an unparsed handle until
-  // "Accept and continue" fires and passes the gate.
-  const [consented, setConsented] = useState(false);
-  // The operator's file-handling choices for an accept the console conducts.
-  // Authored on the confirm-columns step, beside the connection, and consumed by
-  // the launch.
-  const [exchangeFiles, setExchangeFiles] = useState<ExchangeFilesDraft>(
-    EXCHANGE_FILES_DEFAULT,
+  const [screenState, dispatch] = useReducer(
+    acceptorScreenReducer,
+    ACCEPTOR_SCREEN_INITIAL,
   );
-  // The operator's connection-tuning choices for the same accept, authored and
-  // consumed alongside the file-handling draft.
-  const [connectionTuning, setConnectionTuning] =
-    useState<ConnectionTuningDraft>(CONNECTION_TUNING_DEFAULT);
-  const [receipts, setReceipts] = useState<ReceiptsDraft>(RECEIPTS_DEFAULT);
-  // The operator's per-run diagnostic and recovery choices for the same run, held
-  // beside the two drafts above for the same reasons.
-  const [runDiagnostics, setRunDiagnostics] = useState<RunDiagnosticsDraft>(
-    RUN_DIAGNOSTICS_DEFAULT,
-  );
-  // This party's own side of the matching cardinality, authored on the terms
-  // review step beside what the invitation declares for the inviting party's.
-  // It starts closed -- the value an acceptance derives with no control at all.
-  const [acceptorDeduplicate, setAcceptorDeduplicate] = useState(false);
-  const [acceptorName, setAcceptorName] = useState("");
-  // The name recorded in the exchange record, committed through the consent gate
-  // at "Accept and continue" and fixed thereafter -- the run adopts the terms
-  // under this identity, so it must not drift with a later edit to the input.
-  const [committedName, setCommittedName] = useState("");
-  // This party's own deduplicate value as the same gate committed it, and the
-  // only one the run presents: the consent surface states what the pair
-  // discloses, so a value the operator sets after passing that gate reaches the
-  // run only by passing it again (the columns step holds the launch while the
-  // two disagree).
-  const [committedDeduplicate, setCommittedDeduplicate] = useState(false);
-  const [file, setFile] = useState<File>();
-  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
-  const [rejectionMessage, setRejectionMessage] = useState<string>();
-  const [parseAlert, setParseAlert] = useState<AlertContent>();
-  const [parsing, setParsing] = useState(false);
-  // The acceptor's own parsed CSV, stored on a passing parse (not discarded) so the
-  // columns step and its verdict derive from it; and the layered column-step editor
-  // state (metadata + override layers), seeded once from the acquired columns.
-  const [acquired, setAcquired] = useState<AcceptorAcquiredCsv>();
-  // The 1-based positions the parse stripped control characters from, held
-  // beside the acquired file so the confirm-columns step states what was removed
-  // on the screen where the names are read and marked.
-  const [sanitizedColumnPositions, setSanitizedColumnPositions] = useState<
-    Array<number>
-  >([]);
-  // The original file whose parse produced `acquired`, captured at the same commit
-  // so the server-job path submits the exact bytes the browser path parsed (no
-  // re-serialization of rawRows). Fixed alongside `acquired` and the committed name.
-  const [acceptedFile, setAcceptedFile] = useState<File>();
-  // The File System Access handle the committed file's selection yielded, where
-  // the platform gave one (a drop on Chromium in a secure context); captured so a
-  // managed deposit can persist a reusable pointer to the input without a second
-  // picker dialog. Absent for a click-selected file and a browser without the API.
-  const [sourceHandle, setSourceHandle] = useState<FileSystemFileHandle>();
-  // The console profile behind the acquired shape: the console reads the file, so
-  // the browser holds only the profile (name, size, mtime, columns, samples, date
-  // format), committed via the picker's "Use this file" before consent. It backs the
-  // columns seed, the run's mounted-file reference, the coverage sweep, and the preview
-  // samples. Undefined on the hosted build, which reads the file in the browser behind
-  // the consent gate instead.
-  const [consoleSource, setConsoleSource] = useState<ProfiledJobInput>();
-  const [columnsState, setColumnsState] = useState<AcceptorColumnsState>();
-  // The console's own rendezvous mount, fetched once on a console build. Undefined
-  // before it resolves; a console filedrop accept is runnable only when `configured`
-  // is true (the exchange runs against the mounted directory), and `folderName` is
-  // this console's own name for that directory -- present only where the console
-  // can name it, and the only value this seat may show as the shared folder's name.
-  const [rendezvous, setRendezvous] = useState<JobRendezvousConfig>();
-  // The console's effective SFTP connection for an accepted SFTP endpoint, held
-  // and updated when the operator authors or clears one. Undefined before the
-  // accept SFTP endpoint is known; `connection` is null when none is authored, else
-  // the credential-free locator. An accepted SFTP exchange is blocked from launch
-  // until this holds a connection.
-  const [sftpInfo, setSftpInfo] = useState<SftpConnectionInfo>();
-  // The offer's progress and, for a failed deposit, what it was about when a
-  // column name explains it. Held as one value so no reset can leave a refusal
-  // standing over an idle offer.
-  const [manageOffer, setManageOffer] =
-    useState<ManageOfferState>(MANAGE_OFFER_IDLE);
-  // The launched exchange (the assembled edits + optional advisory).
-  const [launched, setLaunched] = useState<AcceptorLaunched>();
+  const {
+    acceptedFile,
+    acceptorDeduplicate,
+    acceptorName,
+    acquired,
+    columnsSection,
+    columnsState,
+    committedDeduplicate,
+    committedName,
+    connectionTuning,
+    consoleSource,
+    consented,
+    decode,
+    exchangeFiles,
+    fieldErrors,
+    file,
+    launched,
+    manageOffer,
+    parseAlert,
+    parsing,
+    receipts,
+    rejectionMessage,
+    rendezvous,
+    runDiagnostics,
+    sanitizedColumnPositions,
+    sftpInfo,
+    sourceHandle,
+    step,
+  } = screenState;
 
   // Decode the fragment token once, failing closed: an empty fragment, a bad
   // checksum/schema, an expired token, or an endpoint this build cannot drive
@@ -360,8 +247,8 @@ export function AcceptorScreen() {
   useEffect(() => {
     const encoded = window.location.hash.replace(/^#/, "");
     if (encoded === "") {
-      setDecode({
-        status: "error",
+      dispatch({
+        type: "decode-refused",
         message: displayText`No invitation was found in this link. Paste the code into the accept form instead.`,
       });
       return;
@@ -378,13 +265,18 @@ export function AcceptorScreen() {
         const rvz = consoleBuild
           ? await fetchJobRendezvous()
           : { configured: false };
-        if (!controller.signal.aborted) {
-          setRendezvous(rvz);
-          setDecode({ status: "ready", invitation });
-        }
+        if (!controller.signal.aborted)
+          dispatch({
+            type: "invitation-decoded",
+            invitation,
+            rendezvous: rvz,
+          });
       } catch (error) {
         if (!controller.signal.aborted)
-          setDecode({ status: "error", message: describeDecodeError(error) });
+          dispatch({
+            type: "decode-refused",
+            message: describeDecodeError(error),
+          });
       }
     })();
     return () => controller.abort();
@@ -483,7 +375,7 @@ export function AcceptorScreen() {
   // locator object), so it fires once rather than on every render.
   useEffect(() => {
     if (acceptSftpEndpoint === undefined || sftpInfo !== undefined) return;
-    setSftpInfo({ connection: null });
+    dispatch({ type: "accept-sftp-endpoint-resolved" });
   }, [acceptSftpEndpoint, sftpInfo]);
 
   // The effective SFTP connection. `sftpConnection` is undefined while the accept
@@ -566,13 +458,19 @@ export function AcceptorScreen() {
       hasLaunch: launched !== undefined,
     });
     if (settled === "columns:cleaning") {
-      setColumnsSection("cleaning");
-      setStep("columns");
+      dispatch({
+        type: "step-shown",
+        step: "columns",
+        columnsSection: "cleaning",
+      });
       return settled;
     }
     if (!isAcceptorStep(settled)) return;
-    setColumnsSection("columns");
-    setStep(settled);
+    dispatch({
+      type: "step-shown",
+      step: settled,
+      columnsSection: "columns",
+    });
     return settled;
   }
 
@@ -585,17 +483,12 @@ export function AcceptorScreen() {
     nextColumnsSection: AcceptorColumnsSection = "columns",
   ) {
     if (nextStep === step && nextColumnsSection === columnsSection) return;
-    setColumnsSection(nextColumnsSection);
-    setStep(nextStep);
+    dispatch({
+      type: "step-shown",
+      step: nextStep,
+      columnsSection: nextColumnsSection,
+    });
     pushStep(positionToken(nextStep, nextColumnsSection));
-  }
-
-  function selectFile(chosen: File) {
-    setRejectionMessage(undefined);
-    setParseAlert(undefined);
-    setSanitizedColumnPositions([]);
-    setFieldErrors((current) => ({ ...current, file: false }));
-    setFile(chosen);
   }
 
   // The file-assurance line for the acceptor's own intake: the console reads the
@@ -623,48 +516,33 @@ export function AcceptorScreen() {
       reasons.push(`larger than the ${maxMb} MB maximum`);
     if (codes.has("file-invalid-type") || reasons.length === 0)
       reasons.push("not a supported file type");
-    setRejectionMessage(
-      `That file is ${reasons.join(" and ")}. Choose a CSV file under ${maxMb} MB.`,
-    );
+    dispatch({
+      type: "file-rejected",
+      message: `That file is ${reasons.join(" and ")}. Choose a CSV file under ${maxMb} MB.`,
+    });
   }
 
   // Commit a profiled mounted file (the console picker's "Use this file") to the
   // consent step. A blank header cell is refused early with the shared unnameable
   // alert -- core's inferMetadata would otherwise throw when the columns-step editor
-  // seeds and unmount the console. The editor is seeded here from the profile's column
-  // NAMES (which the operator already saw in the picker's confirm panel, not from
-  // file content), reconciling a re-profile of the committed file the way the inviter
-  // does: unchanged columns keep the operator's remaps and cleaning edits, changed
-  // columns reseed. `acquired` stays unset until the consent gate passes, so the
-  // columns step is still gated on "Accept and continue".
+  // seeds and unmount the console. The commit seeds that editor from the profile's
+  // column NAMES, which the operator already saw in the picker's confirm panel
+  // rather than from file content. `acquired` stays unset until the consent gate
+  // passes, so the columns step is still gated on "Accept and continue".
   function commitConsoleAcceptFile(profile: ProfiledJobInput) {
-    // Before the refusal below, not after it: the same read that emptied a name
-    // changed the positions this notice states, and a refused file never reaches
-    // the columns step where the notice is otherwise shown.
-    setSanitizedColumnPositions(profile.sanitizedColumnPositions);
     const emptyPositions = emptyColumnPositions(profile.columns);
     if (emptyPositions.length > 0) {
-      setParseAlert(
-        unnameableColumnsAlert(
+      dispatch({
+        type: "unnameable-columns-refused",
+        positions: profile.sanitizedColumnPositions,
+        alert: unnameableColumnsAlert(
           emptyPositions,
           profile.sanitizedColumnPositions,
         ),
-      );
+      });
       return;
     }
-    setParseAlert(undefined);
-    setFieldErrors((current) => ({ ...current, file: false }));
-    const columnsUnchanged =
-      consoleSource !== undefined &&
-      consoleSource.name === profile.name &&
-      columnsState !== undefined &&
-      consoleSource.columns.length === profile.columns.length &&
-      consoleSource.columns.every(
-        (column, index) => column === profile.columns[index],
-      );
-    setConsoleSource(profile);
-    if (!columnsUnchanged)
-      setColumnsState(acceptorInitialColumnsState(profile.columns));
+    dispatch({ type: "console-file-committed", source: profile });
   }
 
   // "Accept and continue": re-check the consent gate in the handler (not the
@@ -682,6 +560,10 @@ export function AcceptorScreen() {
     // submit that reaches this handler meets exactly what the step shows.
     if (pairRefusal !== undefined) return;
     const name = acceptorConsentName({ consented, name: acceptorName });
+    // Read beside `name`, before the parse below can await: the checkbox stays
+    // enabled while a parse is in flight, so a value read after the await could
+    // differ from what was on screen at consent time.
+    const deduplicate = acceptorDeduplicate;
     // The shape of the name the run would adopt, re-checked here for the same
     // reason the consent gate is: the disabled state alone is not the refusal.
     const nameProblem = acceptorNameProblem(acceptorName);
@@ -695,10 +577,9 @@ export function AcceptorScreen() {
       if (name === undefined && acceptorName.trim() === "")
         nextErrors.name = "Your name is required";
       if (!fileChosen) nextErrors.file = true;
-      setFieldErrors(nextErrors);
+      dispatch({ type: "consent-refused", errors: nextErrors });
       return;
     }
-    setFieldErrors({});
 
     if (consoleBuild) {
       // The console reads the file itself: the profile was committed and
@@ -707,17 +588,17 @@ export function AcceptorScreen() {
       // committing the gate-checked name and deduplicate value for the reason the
       // hosted branch below states.
       if (consoleSource === undefined) return;
-      setCommittedName(name);
-      setCommittedDeduplicate(acceptorDeduplicate);
-      setAcquired(
-        consoleAcquiredCsv({
+      dispatch({
+        type: "console-accept-committed",
+        name,
+        acquired: consoleAcquiredCsv({
           fileName: consoleSource.name,
           sizeBytes: consoleSource.sizeBytes,
           columns: consoleSource.columns,
           rowCount: consoleSource.rowCount,
           dateInputFormat: consoleSource.dateInputFormat,
         }),
-      );
+      });
       goToStep("columns");
       return;
     }
@@ -728,8 +609,7 @@ export function AcceptorScreen() {
     parseAbort.current?.abort();
     const controller = new AbortController();
     parseAbort.current = controller;
-    setParsing(true);
-    setParseAlert(undefined);
+    dispatch({ type: "parse-started" });
     try {
       const result = await loadCSVFileOffMainThread(file, {
         signal: controller.signal,
@@ -737,11 +617,13 @@ export function AcceptorScreen() {
       if (id !== parseId.current) return;
       const columns = result.meta.fields ?? [];
       const stripped = result.meta.sanitizedColumnPositions;
-      // Before the refusal below, for the reason commitConsoleAcceptFile states.
-      setSanitizedColumnPositions(stripped);
       const emptyPositions = emptyColumnPositions(columns);
       if (emptyPositions.length > 0) {
-        setParseAlert(unnameableColumnsAlert(emptyPositions, stripped));
+        dispatch({
+          type: "unnameable-columns-refused",
+          positions: stripped,
+          alert: unnameableColumnsAlert(emptyPositions, stripped),
+        });
         return;
       }
       // Store the parsed CSV (not discard it) and seed the columns-step editor from
@@ -749,29 +631,33 @@ export function AcceptorScreen() {
       // the gate-checked name and this party's own deduplicate value here, so the
       // run records and presents what passed the gate even if either control is
       // later edited.
-      setCommittedName(name);
-      setCommittedDeduplicate(acceptorDeduplicate);
-      setAcceptedFile(file);
-      setSourceHandle(capturedInputHandle(file));
-      setAcquired({
-        fileName: file.name,
-        sizeBytes: file.size,
-        columns,
-        rawRows: result.data,
-        rowCount: result.data.length,
+      dispatch({
+        type: "file-accepted",
+        name,
+        deduplicate,
+        positions: stripped,
+        file,
+        handle: capturedInputHandle(file),
+        acquired: {
+          fileName: file.name,
+          sizeBytes: file.size,
+          columns,
+          rawRows: result.data,
+          rowCount: result.data.length,
+        },
       });
-      setColumnsState(acceptorInitialColumnsState(columns));
       goToStep("columns");
     } catch (error) {
       if (id !== parseId.current) return;
-      // A parse failure keeps every input: the file handle, the name, and the
-      // consent all survive so the operator can retry or swap files.
-      setParseAlert({
-        title: "Could not read your file",
-        message: sanitizeErrorForDisplay(error),
+      dispatch({
+        type: "parse-failed",
+        alert: {
+          title: "Could not read your file",
+          message: sanitizeErrorForDisplay(error),
+        },
       });
     } finally {
-      if (id === parseId.current) setParsing(false);
+      if (id === parseId.current) dispatch({ type: "parse-finished" });
     }
   }
 
@@ -1099,57 +985,26 @@ export function AcceptorScreen() {
       name: acceptorName,
     }) && nameProblem === undefined;
 
-  // The columns-step edit callbacks over the shared layered state: a metadata edit
-  // replaces the metadata layer; a remap re-roles the chosen column for matching
-  // (setColumnTypeForMatching, forcing role linkage, not a bare retype); a cleaning
-  // edit sets an override layer; reset returns to the seed.
   const changeMetadata = (next: Metadata) =>
-    setColumnsState((prev) =>
-      prev === undefined ? prev : { ...prev, metadata: next },
-    );
+    dispatch({ type: "metadata-changed", metadata: next });
   const remapColumn = (type: SemanticType, columnName: string) =>
-    setColumnsState((prev) =>
-      prev === undefined
-        ? prev
-        : {
-            ...prev,
-            metadata: setColumnTypeForMatching(prev.metadata, columnName, type),
-          },
-    );
+    dispatch({
+      type: "column-remapped",
+      semanticType: type,
+      column: columnName,
+    });
+  // The cleaning tab authors steps for a field, whose input column the live
+  // standardization names; an authored override records the two together.
   const setFieldSteps = (output: string, steps: Array<StandardizationStep>) => {
     const input = editorState?.standardization.find(
       (transformation) => transformation.output === output,
     )?.input;
     if (input === undefined) return;
-    setColumnsState((prev) =>
-      prev === undefined
-        ? prev
-        : {
-            ...prev,
-            stepOverrides: new Map<string, FieldStepOverride>(
-              prev.stepOverrides,
-            ).set(output, { input, steps }),
-          },
-    );
+    dispatch({ type: "field-steps-changed", output, input, steps });
   };
   const setFieldInput = (output: string, column: string) =>
-    setColumnsState((prev) =>
-      prev === undefined
-        ? prev
-        : {
-            ...prev,
-            inputOverrides: new Map<string, string>(prev.inputOverrides).set(
-              output,
-              column,
-            ),
-          },
-    );
-  const resetColumns = () =>
-    setColumnsState((prev) =>
-      prev === undefined || acquired === undefined
-        ? prev
-        : acceptorInitialColumnsState(acquired.columns),
-    );
+    dispatch({ type: "field-input-changed", output, column });
+  const resetColumns = () => dispatch({ type: "columns-reset" });
   const launchExchange = () => {
     if (verdict === undefined || editorState === undefined) return;
     // Defense in depth behind the disabled launch button: an accepted SFTP
@@ -1164,13 +1019,9 @@ export function AcceptorScreen() {
     // the committed value, so it starts only while the terms step shows that
     // same value.
     if (deduplicateChangedAfterConsent) return;
-    // A re-launch reached by browser Back leaves the offer as the prior launch
-    // left it, so the fresh launch resets it rather than opening under a refusal
-    // the operator has already acted on.
-    setManageOffer(MANAGE_OFFER_IDLE);
-    setLaunched({
+    dispatch({
+      type: "exchange-launched",
       ...acceptorLaunchPayload(editorState),
-      deduplicate: committedDeduplicate,
     });
     goToStep("launched");
   };
@@ -1181,15 +1032,13 @@ export function AcceptorScreen() {
   // scoped to this one exchange; the browser holds only the locator. A freshly
   // authored server is a different rendezvous directory, so any sweep
   // confirmation is re-asked.
-  const authorSftpConnection = (connection: SftpConnectionProjection) => {
-    setSftpInfo({ connection });
-    setRunDiagnostics(runDiagnosticsAfterRetarget);
-  };
+  const authorSftpConnection = (connection: SftpConnectionProjection) =>
+    dispatch({ type: "sftp-connection-authored", connection });
 
   // Clear the authored connection: forget it on the console and locally, so the
   // card returns to the authoring prompt and launch re-blocks.
   const clearSftpConnection = () => {
-    setSftpInfo({ connection: null });
+    dispatch({ type: "sftp-connection-cleared" });
     void deleteSftpConnection();
   };
 
@@ -1201,8 +1050,7 @@ export function AcceptorScreen() {
     // cancel-if-running and DELETE, which frees the console's single slot for
     // the re-launch. A no-op on a browser accept.
     abandonRun();
-    setLaunched(undefined);
-    setManageOffer(MANAGE_OFFER_IDLE);
+    dispatch({ type: "launch-discarded" });
     goToStep("columns");
   };
 
@@ -1220,7 +1068,7 @@ export function AcceptorScreen() {
     if (decode.status !== "ready" || launched === undefined) return;
     const { token: invitationToken, endpoint } = decode.invitation;
     if (endpoint.channel !== "webrtc") return;
-    setManageOffer({ status: "depositing" });
+    dispatch({ type: "manage-offer-started" });
     try {
       await createManagedExchange(
         buildManagedDeposit(
@@ -1253,7 +1101,7 @@ export function AcceptorScreen() {
           Date.now(),
         ),
       );
-      setManageOffer({ status: "deposited" });
+      dispatch({ type: "manage-offer-deposited" });
     } catch (error) {
       console.error(
         "managed exchange deposit failed:",
@@ -1266,8 +1114,8 @@ export function AcceptorScreen() {
       // what the refused parse read; a failure no column explains leaves the
       // generic copy standing.
       const refused = refusedColumnNames(launched.edits.metadata);
-      setManageOffer({
-        status: "error",
+      dispatch({
+        type: "manage-offer-failed",
         ...(refused.length > 0
           ? { refusal: savedExchangeColumnRefusalAlert(refused) }
           : {}),
@@ -1317,7 +1165,8 @@ export function AcceptorScreen() {
               connectionEndpoint={decode.invitation.token.connectionEndpoint}
               acceptorDeduplicate={{
                 value: acceptorDeduplicate,
-                onChange: setAcceptorDeduplicate,
+                onChange: (deduplicate) =>
+                  dispatch({ type: "deduplicate-chosen", deduplicate }),
                 ...(pairRefusal !== undefined ? { refusal: pairRefusal } : {}),
               }}
               perspective="review"
@@ -1373,7 +1222,12 @@ export function AcceptorScreen() {
             <Checkbox
               mt="md"
               checked={consented}
-              onChange={(event) => setConsented(event.currentTarget.checked)}
+              onChange={(event) =>
+                dispatch({
+                  type: "consent-chosen",
+                  consented: event.currentTarget.checked,
+                })
+              }
               label="I have reviewed the terms my partner proposed and I consent to this exchange"
             />
             <TextInput
@@ -1385,14 +1239,12 @@ export function AcceptorScreen() {
               value={acceptorName}
               maxLength={200}
               error={fieldErrors.name ?? nameProblem}
-              onChange={(event) => {
-                setAcceptorName(event.currentTarget.value);
-                if (fieldErrors.name !== undefined)
-                  setFieldErrors((current) => ({
-                    ...current,
-                    name: undefined,
-                  }));
-              }}
+              onChange={(event) =>
+                dispatch({
+                  type: "name-changed",
+                  name: event.currentTarget.value,
+                })
+              }
             />
             {consoleBuild ? (
               <ServerFilePicker
@@ -1410,7 +1262,8 @@ export function AcceptorScreen() {
                   openRef={openFilePicker}
                   onDrop={(files) => {
                     const chosen = files.at(0);
-                    if (chosen !== undefined) selectFile(chosen);
+                    if (chosen !== undefined)
+                      dispatch({ type: "file-selected", file: chosen });
                   }}
                   onReject={handleReject}
                   accept={[
@@ -1656,22 +1509,30 @@ export function AcceptorScreen() {
                     <ExchangeFilesCard
                       draft={exchangeFiles}
                       capabilities={CONFIG_EXCHANGE_FILES}
-                      onChange={setExchangeFiles}
+                      onChange={(draft) =>
+                        dispatch({ type: "exchange-files-chosen", draft })
+                      }
                     />
                     <ConnectionTuningCard
                       draft={connectionTuning}
                       capabilities={tuningCapabilities}
-                      onChange={setConnectionTuning}
+                      onChange={(draft) =>
+                        dispatch({ type: "connection-tuning-chosen", draft })
+                      }
                     />
                     <RunDiagnosticsCard
                       draft={runDiagnostics}
-                      onChange={setRunDiagnostics}
+                      onChange={(draft) =>
+                        dispatch({ type: "run-diagnostics-chosen", draft })
+                      }
                     />
                     <ReceiptsCard
                       draft={receipts}
                       identity={committedName}
                       rendezvous={rendezvous}
-                      onChange={setReceipts}
+                      onChange={(draft) =>
+                        dispatch({ type: "receipts-chosen", draft })
+                      }
                     />
                   </>
                 ) : undefined
