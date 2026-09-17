@@ -341,8 +341,10 @@ export function maxAgeCadenceNote(
 }
 
 /** The operator guidance for the label field: name the partnership without
- * sensitive counterparty detail. Reuses the spec's settled label-row language --
- * the label is disclosed to any reader of the store and never sent, so agreement
- * numbers and contact details do not belong in it. */
+ * sensitive counterparty detail. The label is never sent, but it is disclosed to
+ * any reader of the store, written into results file names, and shown in a
+ * between-visit notification, so agreement numbers and contact details do not
+ * belong in it (see docs/SECURITY_DESIGN.md, "Metadata at rest: presence and
+ * shape"). */
 export const LABEL_GUIDANCE =
-  "Name the partnership so you recognize it later. The label is stored in this browser and never sent, but any reader of this browser's storage can see it, so keep agreement numbers, contact details, and other sensitive counterparty information out of it.";
+  "Name the partnership so you recognize it later. The label is never sent, but three things show it: this browser's storage, which anyone reading it can see; the name of every results file, in a folder you grant and in a copy you download; and, if you turn on between-visit notifications, a notification your device may show on a locked screen or mirror to your other devices. Keep agreement numbers, contact details, and other sensitive counterparty information out of it.";
