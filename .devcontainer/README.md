@@ -44,7 +44,9 @@ Four layers, so prompt-free operation inside is safe:
    API redirects Actions log bodies and run artifacts to), the Anthropic API and
    login, and the VS Code extension CDN. Telemetry and updater hosts are absent:
    the container sets `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` and
-   `DISABLE_AUTOUPDATER`, so Claude makes no such calls.
+   `DISABLE_AUTOUPDATER`, so Claude makes no such calls. It is safe to re-run by
+   hand: it flushes and rebuilds the ruleset from scratch each time, resetting
+   the chain policies as it goes.
 3. **A hostname-gated second lane** (`init-egress-proxy.sh`, run via the same
    sudo grant immediately after the firewall): a `tinyproxy` HTTP CONNECT proxy
    on `127.0.0.1:8888`, default-deny, admitting a destination by HOSTNAME and

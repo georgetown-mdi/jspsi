@@ -138,6 +138,40 @@ afterEach(() => {
 
 describeHookTreeParity("the EB log-retention hook's two copies", HOOK_TREES);
 
+// The hook itself degrades gracefully with no logrotate on PATH (it installs
+// the rewrite unchecked and says so on stderr), so every case above passes
+// whether or not logrotate ran. Where logrotate is expected -- CI
+// (GITHUB_ACTIONS) and the devcontainer, which installs it
+// (.devcontainer/Dockerfile) and marks itself with the ENV set there -- its
+// absence would leave the hook's own `logrotate --debug` check silently
+// unexercised, so that case fails loudly instead of degrading with the rest.
+const hasLogrotate = () =>
+  spawnSync("logrotate", ["--version"], { stdio: "ignore" }).status === 0;
+const inCI = process.env.GITHUB_ACTIONS === "true";
+const inDevcontainer = process.env.DEVCONTAINER === "true";
+
+describe("the real logrotate gate", () => {
+  it("is available where it is expected to run", (ctx) => {
+    if (hasLogrotate()) return;
+    if (!inCI && !inDevcontainer) {
+      return ctx.skip(
+        "logrotate is not on PATH and this run is neither CI " +
+          "(GITHUB_ACTIONS) nor the devcontainer (DEVCONTAINER), so the " +
+          "cases above install every fixture's rewrite unchecked instead of " +
+          "driving the hook's real logrotate check.",
+      );
+    }
+    const where = inCI
+      ? "CI, which runs on an image that carries it"
+      : "the devcontainer, which installs it (.devcontainer/Dockerfile)";
+    expect.fail(
+      `logrotate is missing from PATH in ${where}; the cases above would ` +
+        "silently install every fixture's rewrite unchecked instead of " +
+        "driving the hook's real logrotate check.",
+    );
+  });
+});
+
 describe("the EB log-retention hook", () => {
   it("bounds every fragment it is responsible for by time", () => {
     const { conf } = fixtureTree();

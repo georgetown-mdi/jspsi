@@ -20,9 +20,11 @@ ARG CLAUDE_CODE_VERSION=latest
 # (init-egress-proxy.sh), which both profiles run. The binary-only
 # tinyproxy-bin is installed rather than the tinyproxy metapackage over it, so
 # the image gains no service unit, no default config listening on 8888, and no
-# cron/logrotate dependency chain; the system user and the whole configuration
-# are the script's own. netcat-openbsd provides the `nc` that script and
-# post-create.sh use to test whether the proxy is listening.
+# tinyproxy-owned cron job or logrotate fragment; the system user and the
+# whole configuration are the script's own. logrotate itself is installed
+# below, for the EB log-retention hook test, not as tinyproxy's dependency.
+# netcat-openbsd provides the `nc` that script and post-create.sh use to test
+# whether the proxy is listening.
 RUN apt-get update && apt-get install -y --no-install-recommends \
   less \
   git \
@@ -43,6 +45,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   jq \
   nano \
   vim \
+  logrotate \
   tinyproxy-bin \
   netcat-openbsd \
   && apt-get clean && rm -rf /var/lib/apt/lists/*
