@@ -248,10 +248,10 @@ export async function buildTemplateData(
     // default); init has no transport, so reclassify it as a usage error (exit
     // 64) naming the file.
     if (err instanceof UsageError) throw err;
-    throw new UsageError(
-      `could not read input file ${input}: ` +
-        (err instanceof Error ? err.message : String(err)),
-    );
+    const message = messageWithOperatorText`could not read input file ${operatorSuppliedText(
+      input,
+    )}: ${err instanceof Error ? err.message : String(err)}`;
+    throw keepOperatorSuppliedText(new UsageError(message.text), message);
   }
 
   warnSanitizedColumns(inferred.sanitizedColumnPositions);

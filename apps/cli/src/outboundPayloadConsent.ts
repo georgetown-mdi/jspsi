@@ -1,6 +1,10 @@
 import {
   assessOutboundPayloadConsent,
+  keepOperatorSuppliedText,
+  messageWithOperatorText,
+  operatorSuppliedText,
   outboundPayloadConsentRefusal,
+  redactAndRenderOperatorSuppliedText,
   redactAndSanitizeForDisplay,
   UsageError,
 } from "@psilink/core";
@@ -95,6 +99,18 @@ function displayOutboundColumns(
 }
 
 /**
+ * What {@link confirmOutboundPayloadConsent} states ahead of the config path a
+ * confirmation could not be recorded in.
+ */
+const UNRECORDED_CONFIRMATION_PREAMBLE =
+  "you confirmed the columns, but the confirmation could not be recorded in ";
+
+/** What that failure states behind the config path. */
+const UNRECORDED_CONFIRMATION_REMEDY =
+  ", so the exchange did not run and nothing was sent. Fix the file or its " +
+  "permissions and run again; you will be asked to confirm again.";
+
+/**
  * Show and confirm the columns this run would send to the partner, before any
  * credential, terms, or data are sent, when the exchange has an
  * outbound-payload consent record its current set does not satisfy. A no-op
@@ -169,17 +185,19 @@ export async function confirmOutboundPayloadConsent(params: {
     // name the path, and keep the cause on the chain. Nothing was sent -- no
     // credential, terms, or data precede this refusal -- and the confirmation is
     // re-asked on the next run rather than assumed.
-    throw new UsageError(
-      `you confirmed the columns, but the confirmation could not be recorded ` +
-        `in ${configPath}, so the exchange did not run and nothing was sent. ` +
-        `Fix the file or its permissions and run again; you will be asked to ` +
-        `confirm again.`,
-      { cause: err },
+    const message = messageWithOperatorText`${UNRECORDED_CONFIRMATION_PREAMBLE}${operatorSuppliedText(
+      configPath,
+    )}${UNRECORDED_CONFIRMATION_REMEDY}`;
+    throw keepOperatorSuppliedText(
+      new UsageError(message.text, { cause: err }),
+      message,
     );
   }
   spec.outboundPayloadConsent = confirmed;
   log.info(
-    `recorded your confirmation in ${configPath}; later runs of this exchange ` +
+    `recorded your confirmation in ${redactAndRenderOperatorSuppliedText(
+      operatorSuppliedText(configPath),
+    )}; later runs of this exchange ` +
       "send exactly these columns and ask again if that set changes.",
   );
 }

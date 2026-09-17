@@ -1011,10 +1011,12 @@ async function namedLocalIdentity(
   identityFileArg: string,
 ): Promise<LocalIdentityAnchor> {
   const named = await identityAnchorAt(expandTilde(identityFileArg), "named");
-  if (named === undefined)
-    throw new UsageError(
-      `signing identity file ${identityFileArg} does not exist`,
-    );
+  if (named === undefined) {
+    const message = messageWithOperatorText`signing identity file ${operatorSuppliedText(
+      identityFileArg,
+    )} does not exist`;
+    throw keepOperatorSuppliedText(new UsageError(message.text), message);
+  }
   return named;
 }
 
@@ -1030,21 +1032,26 @@ async function foundLocalIdentity(
   log: { warn: (message: string) => void },
 ): Promise<LocalIdentityAnchor | undefined> {
   const target = expandTilde(identityPath);
+  // Both warnings name the same path, and it is the operator's own, so it
+  // renders once as they typed it rather than escaped per message.
+  const identityFileDisplay = redactAndRenderOperatorSuppliedText(
+    operatorSuppliedText(target),
+  );
   let resolved: LocalIdentityAnchor | undefined;
   try {
     resolved = await identityAnchorAt(target, "resolved");
   } catch (err) {
     log.warn(
-      `the signing identity at ${target} could not be read, so it anchors ` +
-        `no certificate in this record: ${sanitizeErrorForDisplay(err)}`,
+      `the signing identity at ${identityFileDisplay} could not be read, so ` +
+        `it anchors no certificate in this record: ${sanitizeErrorForDisplay(err)}`,
     );
     return undefined;
   }
   if (resolved === undefined)
     log.warn(
-      `the signing identity at ${target}, named by the configuration's ` +
-        `signing.identity_file, does not exist, so it anchors no ` +
-        `certificate in this record`,
+      `the signing identity at ${identityFileDisplay}, named by the ` +
+        `configuration's signing.identity_file, does not exist, so it ` +
+        `anchors no certificate in this record`,
     );
   return resolved;
 }

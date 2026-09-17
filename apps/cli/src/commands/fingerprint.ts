@@ -135,14 +135,18 @@ export function readConfigHints(
     text = fs.readFileSync(target, "utf8");
   } catch (err: unknown) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-      if (explicit)
-        throw new UsageError(`config file ${target} does not exist`);
+      if (explicit) {
+        const missing = messageWithOperatorText`config file ${operatorSuppliedText(
+          target,
+        )} does not exist`;
+        throw keepOperatorSuppliedText(new UsageError(missing.text), missing);
+      }
       return {};
     }
-    throw new UsageError(
-      `config file ${target} could not be read: ` +
-        (err instanceof Error ? err.message : String(err)),
-    );
+    const message = messageWithOperatorText`config file ${operatorSuppliedText(
+      target,
+    )} could not be read: ${err instanceof Error ? err.message : String(err)}`;
+    throw keepOperatorSuppliedText(new UsageError(message.text), message);
   }
   // The YAML parse can echo source bytes (an inline connection credential), so it
   // routes through the sensitive-file chokepoint, which reports path-only (see

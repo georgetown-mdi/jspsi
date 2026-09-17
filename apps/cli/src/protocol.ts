@@ -21,6 +21,9 @@ import {
   ReceiptVerificationError,
   causeChainSome,
   isPeerWaitTimeout,
+  keepOperatorSuppliedText,
+  messageWithOperatorText,
+  operatorSuppliedText,
   redactAndDisplayPartyIdentity,
   redactAndSanitizeForDisplay,
   sanitizeErrorForDisplay,
@@ -922,6 +925,16 @@ async function openRunTransport(params: {
   return role;
 }
 
+/** What {@link authenticateRun} states ahead of the key file it could not save. */
+const ROTATED_TOKEN_SAVE_PREAMBLE =
+  "authentication succeeded and the shared token was rotated, but the " +
+  "updated token could not be saved to ";
+
+/** What {@link authenticateRun} states behind that key file and the failure. */
+const ROTATED_TOKEN_SAVE_REMEDY =
+  " Your partner may already hold the rotated token. To recover, both " +
+  "parties must re-invite to establish a new shared secret.";
+
 /**
  * The run's authentication stage: run the key exchange, persist the rotated
  * token, fire the caller's post-handshake hook, wrap the transport in the
@@ -1021,15 +1034,11 @@ async function authenticateRun(params: {
     // uses on its own validation errors (see auth.ts), so the
     // runProtocol catch below skips its generic authStarted advisory
     // and the user sees one coherent recovery message.
+    const message = messageWithOperatorText`${ROTATED_TOKEN_SAVE_PREAMBLE}${operatorSuppliedText(
+      keyFilePath,
+    )}: ${err instanceof Error ? err.message : String(err)}${ROTATED_TOKEN_SAVE_REMEDY}`;
     throw Object.assign(
-      new Error(
-        `authentication succeeded and the shared token was rotated, but ` +
-          `the updated token could not be saved to ${keyFilePath}: ` +
-          (err instanceof Error ? err.message : String(err)) +
-          ` Your partner may already hold the rotated token. ` +
-          `To recover, both parties must re-invite to establish a new ` +
-          `shared secret.`,
-      ),
+      keepOperatorSuppliedText(new Error(message.text), message),
       { psilinkRecoveryHintEmitted: true },
     );
   }

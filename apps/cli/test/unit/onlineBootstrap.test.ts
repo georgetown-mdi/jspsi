@@ -14,6 +14,7 @@ import {
   INFER_DATE_SCAN_CAP,
   MAX_PAYLOAD_ENTRIES,
   MAX_RECONNECT_ATTEMPTS,
+  operatorSuppliedSpans,
   parseExchangeSpec,
   reconcileReceivedPayload,
   safeParseConnectionConfig,
@@ -2159,6 +2160,90 @@ test("runOnlineBootstrap does not write the config when the handshake fails", as
     ).rejects.toThrow("partner declined");
     expect(fs.existsSync(configPath)).toBe(false);
   } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Both messages below name the operator's own configuration and key paths, so
+// each marks the path it names and the sink shows it as they typed it rather
+// than escaping every separator (packages/core/src/utils/operatorSuppliedText.ts).
+// The fixture path holds backslashes off Windows too, where a backslash is a
+// legal filename character, so the doubling a missed mark causes is visible
+// wherever the suite runs. The rest of this cluster's sinks are driven in
+// test/unit/operatorPathMarks.test.ts.
+
+/** A path under `dir` holding backslashes, its parent created. */
+function backslashedPath(dir: string, name: string): string {
+  const full =
+    process.platform === "win32"
+      ? path.join(dir, "psilink", name)
+      : path.join(dir, `C:\\psilink\\${name}`);
+  fs.mkdirSync(path.dirname(full), { recursive: true });
+  return full;
+}
+
+test("runOnlineBootstrap marks the path in the refusal to overwrite a config that appeared late", async () => {
+  // The re-gate immediately before the write: a file lands at the config path
+  // between the pre-network check and the acceptance hook.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+  const configPath = backslashedPath(dir, "psilink.yaml");
+  vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
+    const onAuthenticated = onAuthenticatedArg(callArgs);
+    fs.writeFileSync(configPath, "");
+    await onAuthenticated();
+  }) as never);
+
+  try {
+    const thrown = await runOnlineBootstrap(
+      onlineBootstrapParams(configPath),
+    ).then(
+      () => undefined,
+      (err: unknown) => err,
+    );
+    expect((thrown as Error).message).toContain("refusing to overwrite");
+    const spans = operatorSuppliedSpans(
+      thrown as Error,
+      (thrown as Error).message,
+    );
+    expect(
+      (spans ?? [])
+        .filter((span) => span.operatorSupplied)
+        .map((span) => span.text),
+    ).toContain(configPath);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runOnlineBootstrap names both written paths as the operator typed them when the exchange then fails", async () => {
+  // Handshake and both writes succeeded, then the exchange failed: the note
+  // telling the operator to retry with 'psilink exchange' names the two files
+  // they would look for.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+  const configPath = backslashedPath(dir, "psilink.yaml");
+  vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
+    const onAuthenticated = onAuthenticatedArg(callArgs);
+    await onAuthenticated();
+    throw new Error("data exchange failed");
+  }) as never);
+
+  const params = onlineBootstrapParams(configPath);
+  const errors: string[] = [];
+  const errorSink = vi
+    .spyOn(getLogger(params.loggerName), "error")
+    .mockImplementation((...args: unknown[]) => {
+      errors.push(args.map(String).join(" "));
+    });
+  try {
+    await expect(runOnlineBootstrap(params)).rejects.toThrow(
+      "data exchange failed",
+    );
+    const line = errors.find((entry) => entry.includes("are on disk"));
+    expect(line).toContain(configPath);
+    expect(line).toContain(params.keyPath);
+    expect(line).not.toContain(configPath.replaceAll("\\", "\\\\"));
+  } finally {
+    errorSink.mockRestore();
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });

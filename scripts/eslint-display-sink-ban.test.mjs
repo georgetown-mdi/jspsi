@@ -143,12 +143,38 @@ declare function errorMessage(value: unknown): string;
 declare function sanitizeForDisplay(value: string): string;
 declare function sanitizeErrorForDisplay(value: unknown): string;
 declare function record(value: string): void;
+declare function promptConfirm(question: string): Promise<boolean>;
+declare function promptFreeText(question: string): Promise<string>;
+declare function writePromptLine(line: string): void;
 export function fixture(): void {
 `;
 
 function fixture(body) {
   return `${PREAMBLE}  ${body}\n}\n`;
 }
+
+// The CLI's terminal prompts, which the ban treats as sinks beside the console
+// and logger calls: neither prompt function escapes what it is handed, so an
+// error rendered into a question reaches the terminal exactly as one rendered
+// into a console line does (apps/cli/src/util/prompt.ts).
+const PROMPT_SINK_BANNED = [
+  [
+    "a raw error in a confirmation question",
+    "void promptConfirm(`retry after ${err.message}?`);",
+  ],
+  [
+    "a raw error in a free-text question",
+    "void promptFreeText(`${errorMessage(err)}. Where should it go?`);",
+  ],
+  ["a raw error on a prompt-stream line", "writePromptLine(`failed: ${err}`);"],
+];
+
+const PROMPT_SINK_ALLOWED = [
+  [
+    "a sanitized error in a confirmation question",
+    "void promptConfirm(`retry after ${sanitizeErrorForDisplay(err)}?`);",
+  ],
+];
 
 describe("the display-sink raw-error ban", () => {
   beforeAll(async () => {
@@ -213,6 +239,19 @@ describe("the display-sink raw-error ban", () => {
       expect(
         await banHits(filePath, fixture("log.warn(err.message);")),
       ).not.toHaveLength(0);
+    });
+  }
+
+  // Linted as a CLI source, the only tree the prompt functions exist in.
+  for (const [label, body] of PROMPT_SINK_BANNED) {
+    it(`rejects ${label}`, async () => {
+      expect(await banHits(CLI_FILE, fixture(body))).not.toHaveLength(0);
+    });
+  }
+
+  for (const [label, body] of PROMPT_SINK_ALLOWED) {
+    it(`accepts ${label}`, async () => {
+      expect(await banHits(CLI_FILE, fixture(body))).toHaveLength(0);
     });
   }
 });

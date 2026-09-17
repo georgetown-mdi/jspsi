@@ -27,6 +27,9 @@ const mockState = vi.hoisted(() => ({
   // Constructor options the mock SFTP adapter last received, so a test can assert
   // runProtocol threads connection_per_poll into the adapter's ephemeralSessions.
   lastSftpAdapterOptions: undefined as Record<string, unknown> | undefined,
+  // The key-file path whose post-handshake save must fail, for the case that
+  // drives the refusal naming it. Every other save runs for real.
+  unwritableKeyFilePath: undefined as string | undefined,
 }));
 
 // Keep FileSyncConnection and authenticateConnection real so the key exchange runs over a
@@ -150,6 +153,25 @@ async function backdateDropDirRendezvousFile(dropDir: string): Promise<void> {
   }
 }
 
+// The rotated token's save, real except at one path a test names: the refusal
+// composed there follows a successful handshake, a moment no fault reachable
+// from the transport or the filesystem reproduces once the pre-flight has made
+// the parent writable.
+vi.mock("../../src/keyFile", async (importActual) => {
+  const actual = await importActual<typeof import("../../src/keyFile")>();
+  return {
+    ...actual,
+    saveKeyFile: (
+      keyFilePath: string,
+      file: Parameters<typeof actual.saveKeyFile>[1],
+    ) => {
+      if (keyFilePath === mockState.unwritableKeyFilePath)
+        throw new Error("EACCES: permission denied");
+      actual.saveKeyFile(keyFilePath, file);
+    },
+  };
+});
+
 vi.mock("@psilink/core", async (importActual) => {
   const actual = await importActual<typeof import("@psilink/core")>();
   return {
@@ -268,6 +290,7 @@ import {
   getDefaultLinkageTerms,
   DEFAULT_MAX_DISPLAY_LENGTH,
   DISPLAY_TRUNCATION_MARKER,
+  operatorSuppliedSpans,
   WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
 } from "@psilink/core";
 import {
@@ -394,6 +417,7 @@ beforeEach(() => {
   mockState.errors.length = 0;
   mockState.runExchangeEntries = 0;
   mockState.lastSftpAdapterOptions = undefined;
+  mockState.unwritableKeyFilePath = undefined;
   fs.mkdirSync(dropDir);
 
   fd3Chunks = [];
@@ -3314,6 +3338,59 @@ test("runProtocol suppresses the generic advisory when a tagged error is wrapped
   // Neither generic advisory should fire: the tag is on the inner error,
   // not the outer wrap, but the cause walker finds it anyway.
   expectNoGenericRecoveryAdvisory(mockState.errors);
+}, 20_000);
+
+test("runProtocol marks the key-file path when the rotated token cannot be saved", async () => {
+  // The refusal names the operator's own key file, so it marks that path and
+  // the display sink shows it as they typed it rather than doubling every
+  // separator. The fixture path holds backslashes off Windows too, where a
+  // backslash is a legal filename character, so a missed mark is visible
+  // wherever the suite runs. The cluster's other sinks are driven in
+  // test/unit/operatorPathMarks.test.ts.
+  const keyFileA =
+    process.platform === "win32"
+      ? path.join(tmpDir, "psilink", "a.key")
+      : path.join(tmpDir, "C:\\psilink\\a.key");
+  fs.mkdirSync(path.dirname(keyFileA), { recursive: true });
+  const keyFileB = path.join(tmpDir, "b.key");
+  saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
+  saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
+  mockState.unwritableKeyFilePath = keyFileA;
+
+  const pA = runProtocol({
+    connection: {
+      channel: "filedrop",
+      path: dropDir,
+      options: TWO_PARTY_OPTIONS,
+    },
+    auth: { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
+    prepared: minimalPrepared,
+    output: undefined,
+    verbosity: -1,
+    loggerName: "test-a",
+  });
+  const pB = runProtocol({
+    connection: {
+      channel: "filedrop",
+      path: dropDir,
+      options: TWO_PARTY_OPTIONS,
+    },
+    auth: { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
+    prepared: minimalPrepared,
+    output: undefined,
+    verbosity: -1,
+    loggerName: "test-b",
+  });
+
+  const [resultA] = await Promise.allSettled([pA, pB]);
+  expect(resultA.status).toBe("rejected");
+  const thrown = (resultA as PromiseRejectedResult).reason as Error;
+  expect(thrown.message).toContain("could not be saved to");
+  expect(
+    (operatorSuppliedSpans(thrown, thrown.message) ?? [])
+      .filter((span) => span.operatorSupplied)
+      .map((span) => span.text),
+  ).toContain(keyFileA);
 }, 20_000);
 
 test("runProtocol suppresses the generic advisory for a terminal FrameSizeExceededError", async () => {

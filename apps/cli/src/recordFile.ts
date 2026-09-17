@@ -1,5 +1,7 @@
 import {
   getLogger,
+  operatorSuppliedText,
+  redactAndRenderOperatorSuppliedText,
   sanitizeErrorForDisplay,
   serializeExchangeRecord,
   serializeVerificationKeys,
@@ -132,13 +134,17 @@ export function writeExchangeRecord(
     // between the writes -- a failed record write goes to the catch below, which
     // names the orphaned keys file instead.
     log.info(
-      `wrote private verification keys to ${keysFilePath}; keep them private -- ` +
+      `wrote private verification keys to ${redactAndRenderOperatorSuppliedText(
+        operatorSuppliedText(keysFilePath),
+      )}; keep them private -- ` +
         "with the record they can open the commitments, but they hold only " +
         "per-commitment salts (no matched data)",
     );
     log.info(
       "wrote self-attested exchange record (a local audit artifact, NOT a " +
-        `signed or non-repudiable receipt) to ${recordFilePath}` +
+        `signed or non-repudiable receipt) to ${redactAndRenderOperatorSuppliedText(
+          operatorSuppliedText(recordFilePath),
+        )}` +
         (terminated
           ? "; it records a disclosure this run made before the run " +
             "terminated, and states that no receipt accompanies it"
@@ -169,7 +175,9 @@ export function writeExchangeRecord(
     // than silently orphan it.
     if (keysWritten) {
       log.warn(
-        `the private verification keys were already written to ${keysFilePath} ` +
+        `the private verification keys were already written to ${redactAndRenderOperatorSuppliedText(
+          operatorSuppliedText(keysFilePath),
+        )} ` +
           "before this failure; they hold only salts (no matched data) but are " +
           "still private -- delete them or keep them private",
       );
