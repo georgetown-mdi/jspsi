@@ -22,6 +22,7 @@ import { prepareAcceptorExchange } from "@exchange/acceptorExchange";
 import { LEG_ENVIRONMENT_FAILURE } from "./legTypes";
 
 import type { LiveLegCliOutcome, LiveLegStart, MatchedPair } from "./legTypes";
+import type { DataConnection } from "peerjs";
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 import type { PeerCloseOutcome } from "@psi/transport/waitForPeerClose";
 
@@ -107,14 +108,48 @@ declare module "vitest/internal/browser" {
   }
 }
 
+/**
+ * What ended the PeerJS connection before the browser party reached its own
+ * close, which is what the two close orderings differ by: `none` is this party
+ * closing first, `peer-close` is the CLI party having closed first. The other
+ * two are the ways a run can reach the same cleared `open` flag with nothing
+ * delivered.
+ */
+type EndBeforeOwnClose =
+  "none" | "peer-close" | "link-failed" | "connection-error";
+
+/**
+ * Read that ending off the connection the moment before this party closes.
+ * PeerJS clears `open` whenever it ends the connection itself, so an open
+ * connection is this party closing first and a cleared one is the CLI party's
+ * close sentinel -- unless ICE gave up on the link or a send raised, the two
+ * separated here. The remaining way PeerJS ends a connection, a broker-relayed
+ * leave, cannot reach this party: it drops its broker socket on the exchange's
+ * first frame.
+ */
+function endBeforeOwnClose(
+  conn: DataConnection,
+  connectionError: boolean,
+): EndBeforeOwnClose {
+  if (connectionError) return "connection-error";
+  if (conn.open) return "none";
+  return conn.peerConnection.connectionState === "failed"
+    ? "link-failed"
+    : "peer-close";
+}
+
 /** What the browser peer's own half of the exchange produced. */
 interface BrowserOutcome {
   /** The partner's declared identity, read off the agreed terms. */
   partnerIdentity: string | undefined;
   /** The matched (own row, partner row) pairs, ascending by own row. */
   pairs: Array<MatchedPair>;
-  /** How the clean close's wait for the peer ended. */
+  /** How the clean close's wait for the peer ended, or undefined where there
+   * was no wait to take. */
   closeOutcome: PeerCloseOutcome | undefined;
+  /** Which close ordering the run took, which the outcome above is read
+   * against. */
+  endBeforeOwnClose: EndBeforeOwnClose;
   /** How long that wait took: the span from asking for the flushing close --
    * which queues the in-band close sentinel behind the final frame -- to the
    * close returning. */
@@ -191,6 +226,11 @@ async function runBrowserPeer(invitation: string): Promise<BrowserOutcome> {
   // (apps/web/src/psi/exchangeLifecycle.ts).
   conn.once("data", () => peer.disconnect());
 
+  let connectionError = false;
+  conn.on("error", () => {
+    connectionError = true;
+  });
+
   let closeOutcome: PeerCloseOutcome | undefined;
   const mc = await openPeerMessageConnection(conn, {
     onCloseOutcome: (outcome) => {
@@ -207,6 +247,7 @@ async function runBrowserPeer(invitation: string): Promise<BrowserOutcome> {
   const psiLibrary = await (PSI() as Promise<PSILibrary>);
   const result = await runExchange(mc, handshakeRole, prepared, { psiLibrary });
 
+  const ending = endBeforeOwnClose(conn, connectionError);
   // The measurement: a flushing close queues the in-band close sentinel behind
   // the final frame and then waits for the peer to close the channel, so this
   // span is what a browser operator waits after their result is on screen.
@@ -219,6 +260,7 @@ async function runBrowserPeer(invitation: string): Promise<BrowserOutcome> {
     partnerIdentity: result.partnerTerms.identity,
     pairs: matchedPairs(result.associationTable),
     closeOutcome,
+    endBeforeOwnClose: ending,
     closeWaitMs,
   };
 }
@@ -287,16 +329,28 @@ test("each side's clean-close wait is measured and recorded", () => {
   // from one measurement.
   console.log(
     `[live-webrtc] close wait: browser ${browserOutcome.closeWaitMs}ms ` +
-      `(${String(browserOutcome.closeOutcome)}), CLI ` +
+      `(${String(browserOutcome.closeOutcome)}, ended before its own close: ` +
+      `${browserOutcome.endBeforeOwnClose}), CLI ` +
       `${String(cliOutcome.closeWaitMs)}ms`,
   );
-  // The two endings a correct exchange leaves the browser party with.
-  // `peer-closed` is the CLI party's close arriving while the wait stands, the
-  // one exit that is a delivery signal; `undefined` is that close already read
-  // when this side reached its own, which leaves no wait to take and is PeerJS
-  // ending the connection on the sentinel. Every other exit raises the
-  // operator's doubt notice on a run whose result is correct.
-  expect([undefined, "peer-closed"]).toContain(browserOutcome.closeOutcome);
+  // The exit is read against the ordering the run took, because the two
+  // orderings have different right answers and an absent outcome on its own is
+  // also what a link that died before this party's close leaves behind.
+  if (browserOutcome.endBeforeOwnClose === "none") {
+    // This party closed first, so the CLI party's close has to end the wait --
+    // the one exit that is a delivery signal. Every other one raises the
+    // operator's doubt notice on a run whose result is correct.
+    expect(browserOutcome.closeOutcome).toBe("peer-closed");
+  } else {
+    expect(
+      browserOutcome.endBeforeOwnClose,
+      "the connection ended before this party's close, and on something other " +
+        "than the CLI party's close sentinel",
+    ).toBe("peer-close");
+    // PeerJS ends the connection on reading that sentinel, so the flushing
+    // close finds it already ended, takes no wait, and reports no outcome.
+    expect(browserOutcome.closeOutcome).toBeUndefined();
+  }
   expect(browserOutcome.closeWaitMs).toBeLessThan(
     BROWSER_CLOSE_WAIT_CEILING_MS,
   );
