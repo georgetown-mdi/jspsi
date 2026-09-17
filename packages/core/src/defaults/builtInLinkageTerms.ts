@@ -587,6 +587,38 @@ export function resolveLinkageRuleSetCitation(
 }
 
 /**
+ * The set among `ruleSets` that `reference` names whole: the one whose field
+ * set and key set identities are both the named ones, and `undefined` where no
+ * single set declares both. This is how an authoring path chooses which
+ * built-in rules it derives terms from, where
+ * {@link linkageTermsFromRuleSet} then builds the document.
+ *
+ * Both halves against one set, where {@link resolveLinkageRuleSetCitation}
+ * resolves each half on its own: a citation records where a document's rules
+ * came from and may name two sets, while a choice selects rules to derive and
+ * takes one set's fields, keys, and reference together.
+ *
+ * Matched on name AND version per half, since a name without its content
+ * version identifies no fixed content. A reference naming no shipped set
+ * answers `undefined` rather than the default set: nothing here guesses at a
+ * name it does not ship, and what an unknown name means is the caller's
+ * decision.
+ *
+ * @param ruleSets the sets the reference is looked up in, this build's own
+ * ({@link BUILT_IN_LINKAGE_RULE_SETS}) by default.
+ */
+export function findBuiltInLinkageRuleSet(
+  reference: LinkageRuleSetReference,
+  ruleSets: ReadonlyArray<BuiltInLinkageRuleSet> = BUILT_IN_LINKAGE_RULE_SETS,
+): BuiltInLinkageRuleSet | undefined {
+  return ruleSets.find(
+    (ruleSet) =>
+      namesSameSet(reference.fieldSet, ruleSet.reference.fieldSet) &&
+      namesSameSet(reference.keySet, ruleSet.reference.keySet),
+  );
+}
+
+/**
  * This build's verdict on `citation`, the rule set `rules` are cited to,
  * one half at a time.
  *

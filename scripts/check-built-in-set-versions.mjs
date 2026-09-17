@@ -14,13 +14,15 @@
 //
 // Two parts, each read from the tree alone:
 //
-//   A. THE SET CONTENT, digested per set out of
+//   A. THE SET CONTENT, digested per named set out of
 //      packages/core/src/defaults/builtInLinkageTerms.ts: the fields with their
 //      constraints, and the keys with their elements, transforms, swaps, and the
-//      order they are applied in. The digest is taken over the evaluated
-//      declarations rather than the file text, so a comment, a reflow, a move
-//      within the file, or a property written in another order moves nothing --
-//      the "leaves a version alone" case the note names.
+//      order they are applied in. Every set the registry declares is read, not
+//      the default alone, so a set added to it is pinned from its first commit.
+//      The digest is taken over the evaluated declarations rather than the file
+//      text, so a comment, a reflow, a move within the file, or a property
+//      written in another order moves nothing -- the "leaves a version alone"
+//      case the note names.
 //
 //   B. THE PIN LEDGER, scripts/built-in-set-pins.json: the digest recorded for
 //      each version of each named set. Unlike the protocol-version pin, this
@@ -33,6 +35,11 @@
 // from a rewrite that dodges the bump -- the same limit the pull-request
 // checklist's security-review sha has -- so an edit to an already-recorded
 // entry is a reviewer's call, not this check's.
+//
+// One name and version identify one content, which the ledger's own keying
+// takes for granted: two registry entries may share a set, and a shared set is
+// one declaration read twice, but two DIFFERENT contents under one name and
+// version fail here rather than being pinned to whichever entry comes first.
 //
 // What this check cannot see:
 //   - Whether the version decision taken was the RIGHT one. It fails content
@@ -54,10 +61,10 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
-  FIELD_SET_DECLARATIONS,
-  KEY_SET_DECLARATIONS,
+  REGISTRY_DECLARATION,
   RULE_SET_SOURCE,
-  contentDigest,
+  declaredSets,
+  identityConflicts,
   readRuleSetsFrom,
 } from "./lib/builtInRuleSets.mjs";
 
@@ -69,18 +76,6 @@ export const PINS_FILE = "scripts/built-in-set-pins.json";
 /** The section stating the rule, named by every failure this check reports. */
 export const NOTE_SECTION =
   'docs/notes/default-linkage-rule-set.md, "What the versions mean"';
-
-/** What each set's version declaration is called, for a message that names it. */
-export const VERSION_DECLARATIONS = {
-  fieldSet: FIELD_SET_DECLARATIONS.version,
-  keySet: KEY_SET_DECLARATIONS.version,
-};
-
-/** What each set's content declaration is called. */
-export const CONTENT_DECLARATIONS = {
-  fieldSet: FIELD_SET_DECLARATIONS.content,
-  keySet: KEY_SET_DECLARATIONS.content,
-};
 
 /**
  * The `major.minor.patch` triple a version names, or undefined when the value is
@@ -108,28 +103,37 @@ export function compareVersions(a, b) {
 
 /**
  * The version a suggested ledger records under: the declared one when the ledger
- * holds no entry for it, the next minor when its entry has moved -- so the
- * printed block is never the in-place rewrite of a recorded pin. Which component
- * a real change deserves is the author's call; this only keeps the suggestion
- * off a version that already means something.
+ * holds no entry for it, otherwise the first free minor above it -- so the
+ * printed block is never the in-place rewrite of a recorded pin. One name may
+ * carry several declared versions, so the minor above a moved one can itself be
+ * recorded, and a suggestion landing there would rewrite that pin. Which
+ * component a real change deserves is the author's call; this only keeps the
+ * suggestion off a version that already means something.
  */
 export function suggestionVersion(entry, version) {
   if (entry[version] === undefined) return version;
   const [major, minor] = parseVersion(version);
-  return `${major}.${minor + 1}.0`;
+  let next = minor + 1;
+  while (entry[`${major}.${next}.0`] !== undefined) next += 1;
+  return `${major}.${next}.0`;
 }
 
 /**
  * The reasons the recorded pins and the tree do not agree, as `{kind, set,
- * message}`; empty when they agree. `sets` is the two declared sets by role,
- * each `{name, version, digest}`; `pins` is the ledger's entries by set name.
- * `kind` is `record` (no pin is recorded and printing one is the remedy),
- * `moved` (a recorded version's content has moved), or `ledger` (the ledger's
- * own shape is wrong, which no printed pin repairs).
+ * message}`; empty when they agree. `sets` is the named sets the registry
+ * declares, each `{name, version, digest, declarations}`; `pins` is the
+ * ledger's entries by set name. `kind` is `record` (no pin is recorded and
+ * printing one is the remedy), `moved` (a recorded version's content has
+ * moved), or `ledger` (the ledger's own shape is wrong, which no printed pin
+ * repairs). A `record` or `moved` violation also carries the `version` and
+ * `digest` of the declared set it is about: one name may carry several declared
+ * versions, so the name alone does not say which content a remedy records. For
+ * the same reason a recorded pin is read against the newest version its name
+ * declares, and once rather than once per entry sharing that name.
  */
 export function pinViolations({ sets, pins }) {
   const violations = [];
-  const declaredNames = Object.values(sets).map((set) => set.name);
+  const declaredNames = sets.map((set) => set.name);
 
   for (const name of Object.keys(pins)) {
     if (declaredNames.includes(name)) continue;
@@ -140,25 +144,38 @@ export function pinViolations({ sets, pins }) {
     });
   }
 
-  for (const [role, set] of Object.entries(sets)) {
+  const newest = new Map();
+  for (const set of sets) {
+    const held = newest.get(set.name);
+    if (held === undefined || compareVersions(set.version, held.version) > 0) {
+      newest.set(set.name, set);
+    }
+  }
+
+  const readLedger = new Set();
+  for (const set of sets) {
     const entry = pins[set.name] ?? {};
     const recorded = Object.keys(entry);
 
-    for (const version of recorded) {
-      if (parseVersion(version) === undefined) {
-        violations.push({
-          kind: "ledger",
-          set: set.name,
-          message: `${PINS_FILE} records a pin for ${set.name} under "${version}", which is not a version. A ledger key is the \`major.minor.patch\` ${VERSION_DECLARATIONS[role]} carries, and a pin is looked up by exactly that string, so a key in any other shape records content nothing is held to.`,
-        });
-        continue;
-      }
-      if (compareVersions(version, set.version) > 0) {
-        violations.push({
-          kind: "ledger",
-          set: set.name,
-          message: `${PINS_FILE} records a pin for ${set.name} ${version}, above the ${set.version} ${VERSION_DECLARATIONS[role]} declares: a pin names a version the tree shipped, so nothing should be recorded ahead of the source.`,
-        });
+    if (!readLedger.has(set.name)) {
+      readLedger.add(set.name);
+      const latest = newest.get(set.name);
+      for (const version of recorded) {
+        if (parseVersion(version) === undefined) {
+          violations.push({
+            kind: "ledger",
+            set: set.name,
+            message: `${PINS_FILE} records a pin for ${set.name} under "${version}", which is not a version. A ledger key is the \`major.minor.patch\` ${latest.declarations.version} carries, and a pin is looked up by exactly that string, so a key in any other shape records content nothing is held to.`,
+          });
+          continue;
+        }
+        if (compareVersions(version, latest.version) > 0) {
+          violations.push({
+            kind: "ledger",
+            set: set.name,
+            message: `${PINS_FILE} records a pin for ${set.name} ${version}, above the ${latest.version} ${latest.declarations.version} declares: a pin names a version the tree shipped, so nothing should be recorded ahead of the source.`,
+          });
+        }
       }
     }
 
@@ -171,16 +188,20 @@ export function pinViolations({ sets, pins }) {
       violations.push({
         kind: "record",
         set: set.name,
+        version: set.version,
+        digest: set.digest,
         message:
           highest === undefined
-            ? `${PINS_FILE} records no pin for ${set.name}. Record the pin below; it is the content ${set.name} ${set.version} names, and every later edit to ${CONTENT_DECLARATIONS[role]} takes a bump with its own pin beside it (${NOTE_SECTION}).`
-            : `${PINS_FILE} records no pin for ${set.name} ${set.version}, the version ${VERSION_DECLARATIONS[role]} declares. A bump records the content it ships beside it -- record the pin below (${NOTE_SECTION}).`,
+            ? `${PINS_FILE} records no pin for ${set.name}. Record the pin below; it is the content ${set.name} ${set.version} names, and every later edit to ${set.declarations.content} takes a bump with its own pin beside it (${NOTE_SECTION}).`
+            : `${PINS_FILE} records no pin for ${set.name} ${set.version}, the version ${set.declarations.version} declares. A bump records the content it ships beside it -- record the pin below (${NOTE_SECTION}).`,
       });
     } else if (pinned !== set.digest) {
       violations.push({
         kind: "moved",
         set: set.name,
-        message: `${CONTENT_DECLARATIONS[role]} has moved under ${set.name} ${set.version} (recorded ${pinned}, tree ${set.digest}). The recorded validation attaches to a name and a version together, so an edit to a built-in set takes a bump: raise ${VERSION_DECLARATIONS[role]} in ${RULE_SET_SOURCE} and record the new pin beside the earlier ones, or leave the content where it is (${NOTE_SECTION}).`,
+        version: set.version,
+        digest: set.digest,
+        message: `${set.declarations.content} has moved under ${set.name} ${set.version} (recorded ${pinned}, tree ${set.digest}). The recorded validation attaches to a name and a version together, so an edit to a built-in set takes a bump: raise ${set.declarations.version} in ${RULE_SET_SOURCE} and record the new pin beside the earlier ones, or leave the content where it is (${NOTE_SECTION}).`,
       });
     }
   }
@@ -188,27 +209,45 @@ export function pinViolations({ sets, pins }) {
   return violations;
 }
 
-/** The ledger the tree implies, with each named set's pin added under `versions`. */
-export function suggestedLedger(pins, sets, versions) {
+/**
+ * The pins a failing run offers to record, as `{name, version, digest}` per
+ * violation a printed pin remedies. Each one is taken from the violation's own
+ * declared set rather than looked up by name, and is resolved against the pins
+ * the earlier suggestions claim as well as the ledger's, so two violated
+ * versions of one name are recorded as the two entries they are.
+ */
+export function suggestedPins(pins, violations) {
+  const suggestions = [];
+  const claimed = {};
+  for (const { kind, set, version, digest } of violations) {
+    if (kind !== "record" && kind !== "moved") continue;
+    const entry = { ...pins[set], ...claimed[set] };
+    const suggested = suggestionVersion(entry, version);
+    claimed[set] = { ...claimed[set], [suggested]: digest };
+    suggestions.push({ name: set, version: suggested, digest });
+  }
+  return suggestions;
+}
+
+/** The ledger the tree implies, with each of `suggestions` added to it. */
+export function suggestedLedger(pins, suggestions) {
   const suggested = { ...pins };
-  for (const set of Object.values(sets)) {
-    if (versions[set.name] === undefined) continue;
-    suggested[set.name] = {
-      ...(pins[set.name] ?? {}),
-      [versions[set.name]]: set.digest,
-    };
+  for (const { name, version, digest } of suggestions) {
+    suggested[name] = { ...suggested[name], [version]: digest };
   }
   return `${JSON.stringify({ pins: suggested }, null, 2)}\n`;
 }
 
 /**
  * Read the tree at `root` and report what the rule holds there, as `{sets, pins,
- * violations, blocked}`. `blocked` holds the reasons the check could not read
- * an input at all, which fail rather than passing as agreement.
+ * violations, blocked}`. `sets` holds one entry per named set the registry
+ * declares, a set two entries share appearing once. `blocked` holds the reasons
+ * the check could not read an input at all, which fail rather than passing as
+ * agreement.
  */
 export function inspect(root) {
   const blocked = [];
-  const { fieldSet, keySet, unreadable } = readRuleSetsFrom(root);
+  const { ruleSets, unreadable } = readRuleSetsFrom(root);
   for (const { declaration, reason } of unreadable) {
     blocked.push(
       declaration === RULE_SET_SOURCE
@@ -217,20 +256,21 @@ export function inspect(root) {
     );
   }
 
-  const sets = {};
-  for (const [role, declared] of Object.entries({ fieldSet, keySet })) {
-    if (declared === undefined) continue;
-    if (parseVersion(declared.version) === undefined) {
+  const declared = declaredSets(ruleSets);
+  const conflicts = identityConflicts(declared);
+  const sets = [];
+  const seen = new Set();
+  for (const set of declared) {
+    if (parseVersion(set.version) === undefined) {
       blocked.push(
-        `${VERSION_DECLARATIONS[role]} declares "${declared.version}", which is not a \`major.minor.patch\` version, so there is no version to record a pin under.`,
+        `${set.declarations.version} declares "${set.version}", which is not a \`major.minor.patch\` version, so there is no version to record a pin under.`,
       );
       continue;
     }
-    sets[role] = {
-      name: declared.name,
-      version: declared.version,
-      digest: contentDigest(declared.content),
-    };
+    const identity = `${set.name} ${set.version}`;
+    if (seen.has(identity)) continue;
+    seen.add(identity);
+    sets.push(set);
   }
 
   let pins = {};
@@ -257,7 +297,10 @@ export function inspect(root) {
   return {
     sets,
     pins,
-    violations: blocked.length === 0 ? pinViolations({ sets, pins }) : [],
+    violations:
+      blocked.length === 0
+        ? [...conflicts, ...pinViolations({ sets, pins })]
+        : [],
     blocked,
   };
 }
@@ -268,7 +311,7 @@ export function inspect(root) {
  * pinned is read rather than inferred.
  */
 export function pinReport(sets) {
-  return Object.values(sets).map(
+  return sets.map(
     ({ name, version, digest }) => `  ${name} ${version} -- ${digest}`,
   );
 }
@@ -300,17 +343,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   if (report.violations.length > 0) {
     console.error("Built-in rule set version check failed:\n");
     for (const { message } of report.violations) console.error("  " + message);
-    const versions = {};
-    for (const { kind, set } of report.violations) {
-      if (kind !== "record" && kind !== "moved") continue;
-      versions[set] = suggestionVersion(
-        report.pins[set] ?? {},
-        Object.values(report.sets).find((entry) => entry.name === set).version,
-      );
-    }
-    if (Object.keys(versions).length > 0) {
+    const suggestions = suggestedPins(report.pins, report.violations);
+    if (suggestions.length > 0) {
       console.error(`\nThe ledger ${PINS_FILE} would carry:\n`);
-      console.error(suggestedLedger(report.pins, report.sets, versions));
+      console.error(suggestedLedger(report.pins, suggestions));
       console.error(
         report.violations.some(({ kind }) => kind === "moved")
           ? `Where the block records a version the source does not yet declare, that is the bump: raise it in ${RULE_SET_SOURCE} to match. Then write the block, run \`npm run format\`, and leave every already-recorded entry as it stands -- an entry rewritten in place records a version that never shipped that content (${NOTE_SECTION}).`

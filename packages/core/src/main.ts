@@ -281,10 +281,12 @@ export {
   OPT_IN_LINKAGE_FIELD_TYPES,
   authoredLinkageFields,
   encodeForComparison,
+  findBuiltInLinkageRuleSet,
   getDefaultLinkageTerms,
   isDrawnFromLinkageRuleSet,
   isOptInLinkageKey,
   linkageRuleSetReferenceFor,
+  linkageTermsFromRuleSet,
   optInLinkageKeys,
   resolveLinkageRuleSetCitation,
 } from "./defaults/builtInLinkageTerms";

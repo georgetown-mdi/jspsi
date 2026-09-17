@@ -12,11 +12,7 @@ import { fileURLToPath } from "node:url";
 
 import { afterAll, describe, expect, it } from "vitest";
 
-import {
-  FIELD_SET_DECLARATIONS,
-  KEY_SET_DECLARATIONS,
-  contentDigest,
-} from "./lib/builtInRuleSets.mjs";
+import { REGISTRY_DECLARATION, contentDigest } from "./lib/builtInRuleSets.mjs";
 import {
   NOTE_SECTION,
   PINS_FILE,
@@ -26,6 +22,7 @@ import {
   pinReport,
   pinViolations,
   suggestedLedger,
+  suggestedPins,
   suggestionVersion,
 } from "./check-built-in-set-versions.mjs";
 import { CHECKS } from "./run-checks.mjs";
@@ -68,36 +65,104 @@ const KEYS = [
   { name: "LN", elements: [{ field: "last_name" }] },
 ];
 
+/** What each half of the default entry is declared as, as the reader reports
+ * it: what a failure names for the author to edit. */
+const DECLARATIONS = {
+  fieldSet: {
+    name: "DEFAULT_LINKAGE_FIELD_SET_NAME",
+    version: "DEFAULT_LINKAGE_FIELD_SET_VERSION",
+    content: "DEFAULT_LINKAGE_FIELDS",
+  },
+  keySet: {
+    name: "DEFAULT_LINKAGE_KEY_SET_NAME",
+    version: "DEFAULT_LINKAGE_KEY_SET_VERSION",
+    content: "DEFAULT_LINKAGE_KEYS",
+  },
+};
+
+/** The named sets a registry declares, as the reader hands them over. */
 const declaredSets = ({
   fieldSetVersion = "1.0.0",
   keySetVersion = "1.0.0",
   fields = FIELDS,
   keys = KEYS,
-} = {}) => ({
-  fieldSet: {
+} = {}) => [
+  {
+    role: "fieldSet",
     name: "baseline-pii",
     version: fieldSetVersion,
     digest: contentDigest(fields),
+    declarations: DECLARATIONS.fieldSet,
   },
-  keySet: {
+  {
+    role: "keySet",
     name: "hmis-keys",
     version: keySetVersion,
     digest: contentDigest(keys),
+    declarations: DECLARATIONS.keySet,
   },
-});
+];
+
+/** A second field set the registry declares under the first one's name at a
+ * later version, which the ledger holds no pin for. */
+const SECOND_FIELDS = [{ name: "ssn", type: "ssn" }];
+
+const SECOND_BASELINE = {
+  role: "fieldSet",
+  name: "baseline-pii",
+  version: "2.0.0",
+  digest: contentDigest(SECOND_FIELDS),
+  declarations: {
+    name: "COUNTY_FIELD_SET_NAME",
+    version: "COUNTY_FIELD_SET_VERSION",
+    content: "COUNTY_FIELDS",
+  },
+};
 
 /** The ledger those sets imply at their declared versions. */
 const ledgerFor = (sets) =>
   Object.fromEntries(
-    Object.values(sets).map((set) => [set.name, { [set.version]: set.digest }]),
+    sets.map((set) => [set.name, { [set.version]: set.digest }]),
   );
 
-/** A tree holding only what the check reads: the two sets and the ledger. */
+/** One rule set as the source declares it: its declarations, and the
+ * composition the reader follows from the registry. */
+const ruleSetSource = ({
+  prefix,
+  fieldSetName,
+  fieldSetVersion,
+  fields,
+  keySetName,
+  keySetVersion,
+  keys,
+}) => `
+export const ${prefix}_FIELD_SET_NAME = "${fieldSetName}";
+export const ${prefix}_FIELD_SET_VERSION = "${fieldSetVersion}";
+const ${prefix}_FIELDS = ${JSON.stringify(fields, null, 2)};
+export const ${prefix}_KEY_SET_NAME = "${keySetName}";
+export const ${prefix}_KEY_SET_VERSION = "${keySetVersion}";
+const ${prefix}_KEYS = ${JSON.stringify(keys, null, 2)};
+export const ${prefix}_RULE_SET = Object.freeze({
+  reference: Object.freeze({
+    fieldSet: {
+      name: ${prefix}_FIELD_SET_NAME,
+      version: ${prefix}_FIELD_SET_VERSION,
+    },
+    keySet: { name: ${prefix}_KEY_SET_NAME, version: ${prefix}_KEY_SET_VERSION },
+  }),
+  linkageFields: frozenThroughContents(${prefix}_FIELDS),
+  linkageKeys: frozenThroughContents(${prefix}_KEYS),
+});
+`;
+
+/** A tree holding only what the check reads: the registry's sets and the
+ * ledger. */
 function fixtureTree({
   fieldSetVersion = "1.0.0",
   keySetVersion = "1.0.0",
   fields = FIELDS,
   keys = KEYS,
+  second,
   source,
   pins,
   ledgerText,
@@ -111,12 +176,18 @@ function fixtureTree({
   write(
     RULE_SET_SOURCE,
     source ??
-      `export const ${FIELD_SET_DECLARATIONS.name} = "baseline-pii";
-export const ${FIELD_SET_DECLARATIONS.version} = "${fieldSetVersion}";
-const ${FIELD_SET_DECLARATIONS.content} = ${JSON.stringify(fields, null, 2)};
-export const ${KEY_SET_DECLARATIONS.name} = "hmis-keys";
-export const ${KEY_SET_DECLARATIONS.version} = "${keySetVersion}";
-const ${KEY_SET_DECLARATIONS.content} = ${JSON.stringify(keys, null, 2)};
+      `${ruleSetSource({
+        prefix: "DEFAULT_LINKAGE",
+        fieldSetName: "baseline-pii",
+        fieldSetVersion,
+        fields,
+        keySetName: "hmis-keys",
+        keySetVersion,
+        keys,
+      })}${second === undefined ? "" : ruleSetSource(second)}
+export const ${REGISTRY_DECLARATION} = Object.freeze([DEFAULT_LINKAGE_RULE_SET${
+        second === undefined ? "" : `, ${second.prefix}_RULE_SET`
+      }]);
 `,
   );
   write(
@@ -163,17 +234,58 @@ describe("the ledger block a failure prints", () => {
     expect(suggestionVersion({ "1.4.2": "sha256:x" }, "1.4.2")).toBe("1.5.0");
   });
 
+  it("steps past a recorded minor to the first version that is free", () => {
+    expect(
+      suggestionVersion({ "1.0.0": "sha256:x", "1.1.0": "sha256:y" }, "1.0.0"),
+    ).toBe("1.2.0");
+  });
+
   it("adds the entry beside the recorded ones rather than over them", () => {
     const sets = declaredSets();
     const pins = { "baseline-pii": { "1.0.0": "sha256:old" } };
     const block = JSON.parse(
-      suggestedLedger(pins, sets, { "baseline-pii": "1.1.0" }),
+      suggestedLedger(pins, [
+        { name: "baseline-pii", version: "1.1.0", digest: sets[0].digest },
+      ]),
     );
     expect(block.pins["baseline-pii"]).toEqual({
       "1.0.0": "sha256:old",
-      "1.1.0": sets.fieldSet.digest,
+      "1.1.0": sets[0].digest,
     });
     expect(block.pins["hmis-keys"]).toBeUndefined();
+  });
+
+  it("records an unpinned version of a name under that same version", () => {
+    const pins = ledgerFor(declaredSets());
+    const sets = [...declaredSets(), SECOND_BASELINE];
+    const suggestions = suggestedPins(pins, pinViolations({ sets, pins }));
+    expect(suggestions).toEqual([
+      {
+        name: "baseline-pii",
+        version: "2.0.0",
+        digest: contentDigest(SECOND_FIELDS),
+      },
+    ]);
+    expect(
+      JSON.parse(suggestedLedger(pins, suggestions)).pins["baseline-pii"],
+    ).toEqual({
+      "1.0.0": contentDigest(FIELDS),
+      "2.0.0": contentDigest(SECOND_FIELDS),
+    });
+  });
+
+  it("keeps two violated versions of one name off each other's entry", () => {
+    const moved = { ...declaredSets()[0], digest: "sha256:moved" };
+    const pins = ledgerFor(declaredSets());
+    const sets = [moved, SECOND_BASELINE];
+    expect(suggestedPins(pins, pinViolations({ sets, pins }))).toEqual([
+      { name: "baseline-pii", version: "1.1.0", digest: "sha256:moved" },
+      {
+        name: "baseline-pii",
+        version: "2.0.0",
+        digest: contentDigest(SECOND_FIELDS),
+      },
+    ]);
   });
 });
 
@@ -190,8 +302,8 @@ describe("the rule over a recorded pin", () => {
     expect(violations).toHaveLength(1);
     expect(violations[0].kind).toBe("moved");
     expect(violations[0].set).toBe("hmis-keys");
-    expect(violations[0].message).toContain(KEY_SET_DECLARATIONS.content);
-    expect(violations[0].message).toContain(KEY_SET_DECLARATIONS.version);
+    expect(violations[0].message).toContain(DECLARATIONS.keySet.content);
+    expect(violations[0].message).toContain(DECLARATIONS.keySet.version);
     expect(violations[0].message).toContain(NOTE_SECTION);
   });
 
@@ -262,6 +374,13 @@ describe("the rule over a recorded pin", () => {
     expect(violations).toHaveLength(1);
     expect(violations[0].kind).toBe("ledger");
     expect(violations[0].message).toContain("above the 1.0.0");
+  });
+
+  it("reads a recorded pin against the newest version its name declares", () => {
+    const sets = [...declaredSets(), SECOND_BASELINE];
+    const pins = ledgerFor(declaredSets());
+    pins["baseline-pii"]["2.0.0"] = SECOND_BASELINE.digest;
+    expect(pinViolations({ sets, pins })).toEqual([]);
   });
 
   it("fails a ledger key that is not a version, naming the key", () => {
@@ -349,7 +468,119 @@ describe("the check driven end to end", () => {
     const { status, stderr } = runCheck(root);
     expect(status).toBe(1);
     expect(stderr).toContain("could not run");
-    expect(stderr).toContain(KEY_SET_DECLARATIONS.version);
+    expect(stderr).toContain(DECLARATIONS.keySet.version);
+  });
+
+  it("pins a second registry set the same way as the first", () => {
+    const countyFields = [{ name: "ssn", type: "ssn" }];
+    const countyKeys = [{ name: "SSN", elements: [{ field: "ssn" }] }];
+    const second = {
+      prefix: "COUNTY",
+      fieldSetName: "county-pii",
+      fieldSetVersion: "1.0.0",
+      fields: countyFields,
+      keySetName: "county-keys",
+      keySetVersion: "1.0.0",
+      keys: countyKeys,
+    };
+    const unpinned = fixtureTree({ second, pins: ledgerFor(declaredSets()) });
+    expect(runCheck(unpinned).stderr).toContain(
+      "records no pin for county-pii",
+    );
+
+    const pins = ledgerFor(declaredSets());
+    pins["county-pii"] = { "1.0.0": contentDigest(countyFields) };
+    pins["county-keys"] = { "1.0.0": contentDigest(countyKeys) };
+    const pinned = fixtureTree({ second, pins });
+    const { status, stdout } = runCheck(pinned);
+    expect(status).toBe(0);
+    expect(stdout).toContain("county-keys 1.0.0");
+  });
+
+  it("fails one name and version covering two different contents", () => {
+    // A second entry over its own idea of baseline-pii 1.0.0 would resolve to
+    // whichever came first and ship the other under a name nothing holds it to.
+    const root = fixtureTree({
+      second: {
+        prefix: "COUNTY",
+        fieldSetName: "baseline-pii",
+        fieldSetVersion: "1.0.0",
+        fields: [{ name: "ssn", type: "ssn" }],
+        keySetName: "county-keys",
+        keySetVersion: "1.0.0",
+        keys: [{ name: "SSN", elements: [{ field: "ssn" }] }],
+      },
+      pins: ledgerFor(declaredSets()),
+    });
+    const { status, stderr } = runCheck(root);
+    expect(status).toBe(1);
+    expect(stderr).toContain(
+      'declares "baseline-pii" 1.0.0 over two different',
+    );
+    expect(stderr).toContain("DEFAULT_LINKAGE_FIELDS");
+    expect(stderr).toContain("COUNTY_FIELDS");
+  });
+
+  it("passes a set two entries share, which is one content under one name", () => {
+    const root = fixtureTree({
+      second: {
+        prefix: "COUNTY",
+        fieldSetName: "baseline-pii",
+        fieldSetVersion: "1.0.0",
+        fields: FIELDS,
+        keySetName: "county-keys",
+        keySetVersion: "1.0.0",
+        keys: [{ name: "LN", elements: [{ field: "last_name" }] }],
+      },
+      pins: {
+        ...ledgerFor(declaredSets()),
+        "county-keys": {
+          "1.0.0": contentDigest([
+            { name: "LN", elements: [{ field: "last_name" }] },
+          ]),
+        },
+      },
+    });
+    const { status, stdout } = runCheck(root);
+    expect(status).toBe(0);
+    expect(stdout.match(/baseline-pii 1\.0\.0/g)).toHaveLength(1);
+  });
+
+  it("suggests each version's own pin where one name spans two", () => {
+    const secondKeys = [{ name: "SSN", elements: [{ field: "ssn" }] }];
+    const pins = ledgerFor(declaredSets());
+    pins["county-keys"] = { "1.0.0": contentDigest(secondKeys) };
+    const root = fixtureTree({
+      second: {
+        prefix: "COUNTY",
+        fieldSetName: "baseline-pii",
+        fieldSetVersion: "2.0.0",
+        fields: SECOND_FIELDS,
+        keySetName: "county-keys",
+        keySetVersion: "1.0.0",
+        keys: secondKeys,
+      },
+      pins,
+    });
+
+    const { status, stderr } = runCheck(root);
+    expect(status).toBe(1);
+    expect(stderr).toContain("records no pin for baseline-pii 2.0.0");
+    const block = stderr.slice(
+      stderr.indexOf("{", stderr.indexOf("would carry")),
+      stderr.lastIndexOf("}") + 1,
+    );
+    expect(JSON.parse(block).pins["baseline-pii"]).toEqual({
+      "1.0.0": contentDigest(FIELDS),
+      "2.0.0": contentDigest(SECOND_FIELDS),
+    });
+
+    writeFileSync(resolve(root, PINS_FILE), `${block}\n`);
+    const applied = runCheck(root);
+    expect(applied.status).toBe(0);
+    expect(applied.stdout).toContain(
+      `baseline-pii 2.0.0 -- ${contentDigest(SECOND_FIELDS)}`,
+    );
   });
 
   it("fails a --root missing the source file rather than crashing", () => {
