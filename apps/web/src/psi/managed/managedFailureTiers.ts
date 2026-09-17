@@ -82,8 +82,8 @@ export type ManagedFailureTier =
   | "none";
 
 /**
- * Whether a record was restored from a backup and has not successfully run since --
- * the `imported` sibling marker's meaning. The marker is stamped at install/revive
+ * Whether a record's secret came from a backup or a key file and has not succeeded
+ * since -- the `imported` sibling marker's meaning. It is stamped at install/revive
  * and by a take-back that installs a secret from a command-line key file, and cleared
  * on the first rotation after one (a completed handshake proves the parties held the
  * same secret), so its mere presence is the "import since the last success" evidence

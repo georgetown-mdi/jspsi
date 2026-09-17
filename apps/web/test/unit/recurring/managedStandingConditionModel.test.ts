@@ -93,7 +93,9 @@ describe("managedStandingConditionView", () => {
       restored,
     );
     expect(view?.clearance).toBe("acknowledge");
-    expect(view?.title).toBe("This exchange was restored from a backup");
+    expect(view?.title).toBe(
+      "This exchange was restored from a backup or key file",
+    );
   });
 
   test("the copy names the condition's instant, not the last run's", () => {

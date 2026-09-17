@@ -331,7 +331,7 @@ describe("deriveManagedFailureTier: the import/restore tier", () => {
     // The import marker explains only a failed-CLOSED (auth) handshake -- a stale
     // restored secret cannot authenticate. A transport drop is a connection problem the
     // marker does not bear on, so it stays the retryable transport tier, not mis-tiered
-    // as "restored from a backup".
+    // as the benign imported tier.
     expect(
       deriveManagedFailureTier(
         record({ lastRun: failed("transport") }),
