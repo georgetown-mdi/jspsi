@@ -145,6 +145,12 @@ A sentence that qualifies a headline renders at the same visibility level as tha
 
 The rendezvous peer-id derivation that places the two parties on the connection is specified in [PROTOCOL.md](spec/PROTOCOL.md).
 
+### While the matching step runs
+
+The matching step encrypts and compares every value under your linkage keys, and on a large file one of those operations runs for minutes with nothing sent or received meanwhile. A browser seat conducting the exchange itself states what is running beneath the stage it is on: the step's name where the stage does not already give it, how many values the step covers, and how long it has been running, redrawn each second and dropped the moment the step ends. Between two steps, and on an exchange the console conducts through the command-line tool, the stage stands alone. The command line reports the same figures its own way - see [CLI.md](CLI.md#progress-while-a-long-run-works).
+
+Under count-only terms the figure is the values the round masks, not the matches it finds: the count the run reports is at most that figure. Nothing states a percentage, because the encryption is a single call into the PSI library, which reports nothing until it returns - so the figure shown is the whole step's.
+
 ## Message delivery and teardown
 
 Each channel passes messages through a common transport contract whose one subtlety is easy to misread when auditing the code: a send completing does not mean the peer has received the message. There is no end-to-end delivery acknowledgement at this layer. What a completed send does guarantee differs by channel, and that difference is the whole contract. Every channel must guarantee that the final frame of an exchange survives a clean connection close, and it may do so in one of two ways.

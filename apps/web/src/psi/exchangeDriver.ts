@@ -7,7 +7,7 @@ import type {
   GenerateOutput,
   StageDefinition,
 } from "./exchangeLifecycle";
-import type { ResolvedMatching } from "@psilink/core";
+import type { PsiProgress, ResolvedMatching } from "@psilink/core";
 
 /** The typed lifecycle events a driver emits over a single run, plus the run's
  * {@link AbortSignal}. This is the whole surface a consumer sees: a driver runs
@@ -58,6 +58,13 @@ export interface ExchangeDriverEvents<
    * instead (`serverJobExchangeDriver`), the only relayed frame that holds
    * it. */
   onResolvedMatching?: (matching: ResolvedMatching) => void;
+  /** Where each PSI crypto operation stands, reported by the in-browser driver
+   * as one starts and again as it settles, so the consumer can show live
+   * figures through the minutes an operation over a large set can run. Optional
+   * on both sides -- a consumer with no progress line omits it, and a
+   * console-conducted run reports none, leaving that consumer its static
+   * in-progress state -- and never terminal. */
+  onPsiProgress?: (progress: PsiProgress) => void;
 }
 
 /** A per-channel exchange driver: a `run` that conducts one exchange and
@@ -109,6 +116,7 @@ export function createBrowserExchangeDriver<
       onError,
       onWarning,
       onResolvedMatching,
+      onPsiProgress,
     }) =>
       runExchangeLifecycle<TOutputs>({
         acquire,
@@ -123,6 +131,7 @@ export function createBrowserExchangeDriver<
         onError,
         onWarning,
         onResolvedMatching,
+        onPsiProgress,
       }),
   };
 }
