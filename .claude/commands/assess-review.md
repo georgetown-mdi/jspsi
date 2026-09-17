@@ -252,7 +252,8 @@ line already attesting an earlier sha goes stale. The mechanical paths below are
 the DEFAULT here, not the fallback: batch the round's open findings into one fix
 pass, run the verifier
 (`node .claude/scripts/verify-nonexecutable-delta.mjs <attested-sha> <head-sha>`,
-or `verify-rebase-invariance.mjs` where the head moved by a rebase)
+`verify-additive-test-delta.mjs` where the head only added test lines, or
+`verify-rebase-invariance.mjs` where the head moved by a rebase)
 before scheduling anything, and re-attest once for the batch rather than once per
 finding. The verdict is about the git worktree the command runs in, which the run
 names in its output -- the primary checkout when the flow's own invocation calls
@@ -287,6 +288,19 @@ Each path is recorded on the checklist line naming both shas:
   reports comment-only edits as changes. A single executable line voids this
   path and takes a full round, as does a delta that only a reviewer could judge
   harmless.
+- **An additive test delta.** A head whose diff against the attested sha only
+  ADDS lines to test files is re-attested by verifying exactly that, recorded as
+  an additive-test-delta verification. A test-only delta in general is NOT this
+  path and takes a full round: a deleted assertion, a loosened expectation and a
+  mock that bypasses a check each weaken a control while touching tests alone.
+  What this path admits is the narrow case where every line the round read is
+  still there untouched, and nothing added reaches past the statement holding
+  it. Verified mechanically or not at all, by `node
+  .claude/scripts/verify-additive-test-delta.mjs <attested-sha> <head-sha>`,
+  which names the directories it treats as test-only and the inserted lines it
+  refuses. It fails closed on a deleted or replaced line, on a path outside those
+  directories, and on a change it cannot read as lines at all; a head it refuses
+  takes one of the paths above or a full round.
 - **A rebase that left the branch's own diff alone.** A head the branch was
   REBASED to -- its commits re-authored onto a later origin/staging, which
   leaves the attested head no ancestor of the new one -- is re-attested by
@@ -304,7 +318,7 @@ Each path is recorded on the checklist line naming both shas:
   take a full round; so does a head of any other shape, which the verifier
   refuses rather than answering about.
 
-That fourth path composes the branch with staging content no round has read,
+The rebase path composes the branch with staging content no round has read,
 which is the same objection that keeps a base sync out, and it answers it rather
 than routing around it: a rebase leaves the branch's own effective diff as an
 object that can be compared across the move, and a merge does not. Where that
@@ -320,7 +334,7 @@ and the `docs/spec/` conflict that exclusion leaves unread:
 [`docs/notes/rebase-reattestation.md`](../../docs/notes/rebase-reattestation.md).
 
 A head moved by a BASE SYNC -- a merge commit whose first parent is the attested
-sha and whose second parent is on origin/staging -- is outside all four paths.
+sha and whose second parent is on origin/staging -- is outside every path above.
 The attested-to-head diff contains the whole merged staging range, so the verifier
 answers for what that range touched rather than for the merge, and a conflict
 resolution is branch-authored change no round has read. What it reports across
@@ -346,7 +360,7 @@ budget like any other round; a spent cap is the owner's to raise, noted in the
 ledger. The checklist line then attests the merge head citing that round. An n/a
 line keeps its own path above -- the enumeration re-runs against the merged
 head's diff the same way -- and a head moved by anything other than that merge
-shape is not a base sync: a rebase takes the fourth path above, and any other
+shape is not a base sync: a rebase takes its own path above, and any other
 shape takes the rules as already written.
 
 ## Step 5 -- Clean up

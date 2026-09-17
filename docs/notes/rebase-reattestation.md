@@ -49,8 +49,8 @@ path unverifiable, which fails the run.
 ## Why a rebase is admitted where a base sync is not
 
 A rebase composes the branch with staging content no round has read, exactly as
-a base-sync merge does. That argument is what keeps a base sync outside all
-four paths, and the exception has to answer it rather than route around it.
+a base-sync merge does. That argument is what keeps a base sync outside every
+mechanical path, and the exception has to answer it rather than route around it.
 
 The difference is that the branch's own effective diff survives a rebase as a
 comparable object, and a merge's does not:
