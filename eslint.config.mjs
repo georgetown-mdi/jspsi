@@ -187,16 +187,19 @@ const noDisplayableAsErrorArgument = ERROR_TEXT_POSITIONS.map((position) => ({
 // (packages/core/src/utils/operatorSuppliedText.ts).
 //
 // A path is recognized by NAME, which is the only origin evidence text alone
-// holds -- this config runs no TypeScript program. Two shapes, both how
-// apps/cli/src names a path it took from the command line or from the
+// holds -- this config runs no TypeScript program. Three shapes, all of them
+// how apps/cli/src names a path it took from the command line or from the
 // operator's configuration: an identifier or property ENDING in Path, File,
-// Dir, Directory or Folder (with or without a trailing s, or one of those
-// words alone), and one OPENING with path, file, dir, directory or folder,
+// Dir, Directory or Folder, with or without a trailing s and with or without a
+// trailing Arg or Args, or one of those words alone, which reaches configPath
+// and identityFileArg; one OPENING with path, file, dir, directory or folder,
 // followed by s, name or names or nothing, and then a capital or the end of
-// the name, which reaches pathValue, fileName, filename and dirPath. A name
-// outside both -- target, output, destination -- is not reached, so what this
-// holds is the shape it can recognize and not every operator path
-// (docs/spec/CHANNEL_SECURITY.md, display-sanitization escape format).
+// the name, which reaches pathValue, fileName, filename and dirPath; and the
+// bare words target, input, targets and inputs, which a positional argument
+// takes its name from. A name outside all three -- output, destination,
+// source -- is not reached, so what this holds is the shape it can recognize
+// and not every operator path (docs/spec/CHANNEL_SECURITY.md,
+// display-sanitization escape format).
 //
 // The name says nothing about WHO CHOSE the bytes, so a value a partner or a
 // server named -- a remote listing's entry, a path out of an invitation -- is
@@ -204,7 +207,7 @@ const noDisplayableAsErrorArgument = ERROR_TEXT_POSITIONS.map((position) => ({
 // eslint-disable every other ban here does; the mark states origin and this
 // only asks that the site state it.
 const OPERATOR_PATH_NAME =
-  "/((Path|File|Dir|Directory|Folder)s?$|^(path|file|dir|directory|folder)(s|name|names)?([A-Z]|$))/";
+  "/((Path|File|Dir|Directory|Folder)s?(Args?)?$|^(path|file|dir|directory|folder)(s|name|names)?([A-Z]|$)|^(target|input)s?$)/";
 const UNMARKED_OPERATOR_PATH = [
   `Identifier[name=${OPERATOR_PATH_NAME}]`,
   `MemberExpression[property.name=${OPERATOR_PATH_NAME}]`,

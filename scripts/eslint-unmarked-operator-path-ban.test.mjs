@@ -119,6 +119,19 @@ const BANNED = [
     "a name ending in Path behind an initialism",
     "log.warn(`${ACLPath} is unreadable`);",
   ],
+  [
+    "a path under the name of the flag argument it came from",
+    "throw new Error(`could not read ${identityFileArg}`);",
+  ],
+  [
+    "a plural flag-argument name",
+    "log.warn(`${configFileArgs} are unreadable`);",
+  ],
+  [
+    "a positional named target",
+    "throw new Error(`could not write ${target}`);",
+  ],
+  ["a positional named input", "log.warn(`${input} is unreadable`);"],
 ];
 
 const ALLOWED = [
@@ -148,7 +161,17 @@ const ALLOWED = [
     // What the name-based recognition does not reach, pinned so the spec
     // paragraph stating the miss cannot drift from the selector.
     "a path under a name the pattern does not reach",
-    "throw new Error(`could not read ${target} to ${destination}`);",
+    "throw new Error(`could not read ${output} to ${destination}`);",
+  ],
+  [
+    "a flag-argument name whose stem names no path",
+    "throw new Error(`could not read ${signedRecordArg}`);",
+  ],
+  [
+    // The generic words are matched whole: a longer name opening with one of
+    // them says what it holds and is outside the shape.
+    "a longer name opening with one of the bare generic words",
+    "log.warn(`${inputColumns} are unreadable`);",
   ],
   [
     // The suffix is matched with its capital, so a lowercase word closing a
@@ -173,6 +196,12 @@ declare const CSVFile: string;
 declare const ACLPath: string;
 declare const keyfile: string;
 declare const target: string;
+declare const input: string;
+declare const identityFileArg: string;
+declare const configFileArgs: readonly string[];
+declare const signedRecordArg: string;
+declare const inputColumns: readonly string[];
+declare const output: string;
 declare const destination: string;
 declare const missing: boolean;
 declare const options: { configFile: string };

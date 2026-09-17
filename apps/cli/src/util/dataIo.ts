@@ -4,7 +4,12 @@
 
 import fs from "node:fs";
 
-import { UsageError } from "@psilink/core";
+import {
+  keepOperatorSuppliedText,
+  messageWithOperatorText,
+  operatorSuppliedText,
+  UsageError,
+} from "@psilink/core";
 
 import { createOwnerOnlyWriteStream } from "../fileUtils";
 
@@ -52,8 +57,13 @@ export function openInputSource(
       );
     return process.stdin;
   }
-  if (!fs.existsSync(input))
-    throw Object.assign(new Error(`${input} does not exist`), { exitCode: 69 });
+  if (!fs.existsSync(input)) {
+    const message = messageWithOperatorText`${operatorSuppliedText(input)} does not exist`;
+    throw Object.assign(
+      keepOperatorSuppliedText(new Error(message.text), message),
+      { exitCode: 69 },
+    );
+  }
   return fs.createReadStream(input);
 }
 
