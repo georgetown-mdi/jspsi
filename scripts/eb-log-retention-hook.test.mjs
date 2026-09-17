@@ -1,4 +1,4 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -11,6 +11,8 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
+
+import { describeHookTreeParity } from "./lib/hookTreeParity.mjs";
 
 // The Elastic Beanstalk log-retention hook, driven against fixture fragments.
 //
@@ -74,6 +76,7 @@ const hookSource = read(HOOK_TREES[0]);
 const retentionDays = Number(
   /^RETENTION_DAYS=(\d+)$/m.exec(hookSource)?.[1] ?? NaN,
 );
+const rotatedDays = retentionDays - 1;
 
 const tmpDirs = [];
 
@@ -106,35 +109,7 @@ afterEach(() => {
   }
 });
 
-describe("the EB log-retention hook's two copies", () => {
-  it("are byte-identical", () => {
-    const [first, ...rest] = HOOK_TREES.map(read);
-    for (const content of rest) {
-      expect(content).toBe(first);
-    }
-  });
-
-  it("both fail the hook loudly on a failed rewrite", () => {
-    for (const content of HOOK_TREES.map(read)) {
-      expect(content.split("\n").slice(0, 2)).toEqual([
-        "#!/bin/bash",
-        "set -euo pipefail",
-      ]);
-    }
-  });
-
-  it("are both executable in the git index (mode 100755)", () => {
-    const output = execFileSync("git", ["ls-files", "-s", ...HOOK_TREES], {
-      cwd: repoRoot,
-      encoding: "utf8",
-    });
-    const lines = output.trim().split("\n").filter(Boolean);
-    expect(lines).toHaveLength(HOOK_TREES.length);
-    for (const line of lines) {
-      expect(line).toMatch(/^100755 /);
-    }
-  });
-});
+describeHookTreeParity("the EB log-retention hook's two copies", HOOK_TREES);
 
 describe("the EB log-retention hook", () => {
   it("bounds every fragment it is responsible for by time", () => {
@@ -156,12 +131,8 @@ describe("the EB log-retention hook", () => {
     expect(runHook(conf).status).toBe(0);
     for (const name of FRAGMENTS) {
       const bounded = readFileSync(join(conf, name), "utf8");
-      expect(bounded).toMatch(
-        new RegExp(`^ *rotate ${retentionDays - 1}$`, "m"),
-      );
-      expect(bounded).toMatch(
-        new RegExp(`^ *maxage ${retentionDays - 1}$`, "m"),
-      );
+      expect(bounded).toMatch(new RegExp(`^ *rotate ${rotatedDays}$`, "m"));
+      expect(bounded).toMatch(new RegExp(`^ *maxage ${rotatedDays}$`, "m"));
     }
   });
 
@@ -195,6 +166,73 @@ describe("the EB log-retention hook", () => {
     );
   });
 
+  it("leaves a minsize floor where the platform wrote it", () => {
+    // minsize holds a floor under rotation rather than triggering it, so the
+    // hook's daily trigger replaces neither it nor its position in the block.
+    const conf = confDir();
+    writeFileSync(
+      join(conf, FRAGMENTS[0]),
+      [
+        "/var/log/nginx/access.log {",
+        "    minsize 1M",
+        "    size 10M",
+        "    copytruncate",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    expect(runHook(conf).status).toBe(0);
+    expect(readFileSync(join(conf, FRAGMENTS[0]), "utf8").split("\n")).toEqual([
+      "/var/log/nginx/access.log {",
+      "    minsize 1M",
+      "    copytruncate",
+      "    daily",
+      "    maxsize 10M",
+      `    rotate ${rotatedDays}`,
+      `    maxage ${rotatedDays}`,
+      "}",
+      "",
+    ]);
+  });
+
+  it("bounds a block whose braces hold trailing spaces or a comment", () => {
+    // A closing brace the rewrite does not recognize strips the block's
+    // rotation directives and puts none back.
+    const conf = confDir();
+    writeFileSync(
+      join(conf, FRAGMENTS[0]),
+      [
+        "/var/log/nginx/access.log {",
+        "    size 10M # bursts",
+        "    copytruncate",
+        "} # the platform's own note",
+        "/var/log/nginx/error.log {",
+        "    size 20M",
+        "    copytruncate",
+        "}   ",
+        "",
+      ].join("\n"),
+    );
+    expect(runHook(conf).status).toBe(0);
+    expect(readFileSync(join(conf, FRAGMENTS[0]), "utf8").split("\n")).toEqual([
+      "/var/log/nginx/access.log {",
+      "    copytruncate",
+      "    daily",
+      "    maxsize 10M",
+      `    rotate ${rotatedDays}`,
+      `    maxage ${rotatedDays}`,
+      "} # the platform's own note",
+      "/var/log/nginx/error.log {",
+      "    copytruncate",
+      "    daily",
+      "    maxsize 20M",
+      `    rotate ${rotatedDays}`,
+      `    maxage ${rotatedDays}`,
+      "}   ",
+      "",
+    ]);
+  });
+
   it("leaves an already-bounded fragment untouched", () => {
     // It runs on every deployment, and a rewrite that never settles would
     // rewrite the platform's file each time.
@@ -219,6 +257,24 @@ describe("the EB log-retention hook", () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain(FRAGMENTS[1]);
     expect(result.stderr).toContain(conf);
+  });
+
+  it("fails the deployment rather than install a block without the bound", () => {
+    // Whatever shape defeats the rewrite -- here a block the fragment never
+    // closes -- the result is not installed and the deployment stops.
+    const conf = confDir();
+    const unclosed = [
+      "/var/log/web.stdout.log {",
+      "    size 25M",
+      "    copytruncate",
+      "",
+    ].join("\n");
+    writeFileSync(join(conf, FRAGMENTS[1]), unclosed);
+    const result = runHook(conf);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(FRAGMENTS[1]);
+    expect(result.stderr).toContain("/var/log/web.stdout.log {");
+    expect(readFileSync(join(conf, FRAGMENTS[1]), "utf8")).toBe(unclosed);
   });
 
   it("bounds each block of a fragment that rotates several logs by its own size", () => {
