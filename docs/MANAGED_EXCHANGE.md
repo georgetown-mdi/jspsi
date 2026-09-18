@@ -1301,6 +1301,15 @@ the acknowledgement puts its gate rather than the invitation: the two-outcome
 gate is asked once per failure, and no control mints while one of them is
 unanswered.
 
+A run in flight withholds the same two controls for an unrelated reason and on
+its own schedule: while a run of this exchange is under way anywhere in the
+browser profile -- this tab, another tab, or its schedule -- a fresh invitation
+would replace the secret the run is connecting on, so neither control mints one
+until the run ends. Nothing here is answered away the way the compromise
+response is: the withhold lifts on its own once the run finishes, whatever it
+finished with, and the control that mints still re-checks whether a run has
+started since the page last read that state before it acts.
+
 ### Expiry is its own state, never routed through attack framing
 
 A lapsed age bound (`expires` in the past) is detected **before** any

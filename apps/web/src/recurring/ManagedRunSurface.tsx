@@ -259,9 +259,10 @@ export function ManagedRunSurface({ id }: { id: string }) {
   // connection failure. Only the offline direction is gated -- being online is no
   // promise the partner is there (see @utils/networkStatus).
   const online = useOnlineStatus();
-  // Every hand-off affordance on this surface reads one in-flight signal, which sees
-  // a run started anywhere in this browser profile -- here, in a second tab, or by
-  // the scheduled runtime -- not just the one this surface started.
+  // Every hand-off affordance on this surface, plus the re-invite mint below, reads
+  // one in-flight signal, which sees a run started anywhere in this browser profile
+  // -- here, in a second tab, or by the scheduled runtime -- not just the one this
+  // surface started.
   const { inFlight: runInFlight, recheckLock } = useManagedRunInFlight(
     id,
     running,

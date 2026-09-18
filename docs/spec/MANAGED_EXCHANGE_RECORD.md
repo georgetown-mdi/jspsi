@@ -389,6 +389,13 @@ with the condition. A run never writes it, and a run never clears it.
   its controls do. That makes the clear-and-acknowledge the one order in which a
   fresh invitation is minted: the answer is cleared by the acknowledgement
   first, and the re-invite is on offer after it.
+- **A run in flight is a second, independent withhold, checked only at the
+  click.** It shares the two controls and their withheld reason with the
+  compromise response, but not the write-time guarantee: the rotation write
+  above refuses solely on a standing response, never on a run, so the click
+  that would mint re-reads the polled run signal itself immediately beforehand.
+  It needs no clearer of its own because it is not standing: ending the run
+  restores the controls without an acknowledgement.
 
 ### The schedule object
 
