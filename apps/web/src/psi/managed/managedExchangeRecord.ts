@@ -33,16 +33,19 @@ import type {
 import type { ZodType } from "zod";
 
 /**
- * The single recognized `schemaVersion` literal for the v2 record. A reader
+ * The single recognized `schemaVersion` literal for the v3 record. A reader
  * rejects any other value rather than migrating it (the reader-rejects-unknown
- * rule the exchange-record and verification-keys files follow), the v1 literal
- * among them: a record stored under it has no
- * {@link ManagedExchangeRecord.standingCondition}, which v2 requires, and its
- * recovery is re-invite rather than a migration. A later shape change is a new
- * literal under a new version, never an existing version holding speculative
- * fields.
+ * rule the exchange-record and verification-keys files follow), the earlier
+ * literals among them: a v1 record has no
+ * {@link ManagedExchangeRecord.standingCondition} at all, and a v2 one's
+ * condition holds no {@link ManagedStandingResponse}. The literal moves for that
+ * member because a build not knowing it would read the record and offer a fresh
+ * invitation over an answer it cannot see; the whole record is refused instead,
+ * and the recovery is re-invite rather than a migration. A later shape change is
+ * a new literal under a new version, never an existing version holding
+ * speculative fields.
  */
-export const MANAGED_EXCHANGE_SCHEMA_VERSION = "psilink-managed-exchange/v2";
+export const MANAGED_EXCHANGE_SCHEMA_VERSION = "psilink-managed-exchange/v3";
 
 /**
  * The single recognized `artifactVersion` literal for the v1 export/import
@@ -161,14 +164,32 @@ export type ManagedStandingConditionKind = "auth" | "storage";
  * by a run and unanswered since. It stands BESIDE `lastRun` rather than inside
  * it because `lastRun` holds one run: the next run's stamp replaces it, so a
  * no-show or a later success would otherwise carry the evidence off with the
- * entry that held it. No free text, like every other bookkeeping field -- an
- * instant and a closed enum. Its normative shape, and what clears it, are in
+ * entry that held it. No free text, like every other bookkeeping field -- two
+ * instants and two closed enums at most. Its normative shape, and what clears
+ * it, are in
  * docs/spec/MANAGED_EXCHANGE_RECORD.md, the `standingCondition` row. */
 export interface ManagedStandingCondition {
   /** ISO 8601 UTC instant of the run whose failure raised it. */
   since: string;
   /** The failure kind that raised it. */
   kind: ManagedStandingConditionKind;
+  /** The operator's answer to the gate this condition was put through; absent
+   * until one is given, and the first answer stands. */
+  response?: ManagedStandingResponse;
+}
+
+/** The operator's answer at a failure gate that nothing about the failure adds
+ * up: the compromise response (see docs/MANAGED_EXCHANGE.md, "Telling a desync
+ * from an attack"). An instant and a closed enum, like every other bookkeeping
+ * field. It is a member of the condition it answers rather than a field beside
+ * it, so the three acts that clear a condition clear the answer with it and the
+ * answer has no clearer of its own. */
+export interface ManagedStandingResponse {
+  /** The closed enum's one member: the operator treated the failure as a
+   * possible compromise. */
+  kind: "compromise";
+  /** ISO 8601 UTC instant the operator answered. */
+  at: string;
 }
 
 /** The `standingCondition` of a record holding none. The field is required, so a
@@ -198,7 +219,7 @@ export const NO_STANDING_CONDITION: ManagedStandingConditionNone = {
  * docs/spec/MANAGED_EXCHANGE_RECORD.md for the field-by-field shape.
  */
 export interface ManagedExchangeRecord {
-  /** The single recognized v2 literal; a reader rejects an unrecognized value
+  /** The single recognized v3 literal; a reader rejects an unrecognized value
    * rather than migrating (see {@link MANAGED_EXCHANGE_SCHEMA_VERSION}). */
   schemaVersion: typeof MANAGED_EXCHANGE_SCHEMA_VERSION;
   /** Locally-generated identifier for this managed exchange, distinct from any
@@ -313,21 +334,37 @@ export const lastRunSchema: ZodType<ManagedExchangeLastRun> = z.object({
     .optional(),
 });
 
+/** The canonical validator for the operator's answer. Strict, so a member a
+ * later shape adds is refused by a build that does not know it rather than
+ * dropped from the value that build parses -- the reader-rejects-unknown rule
+ * held one level down, where the condition's own `response` sits. */
+export const standingResponseSchema: ZodType<ManagedStandingResponse> = z
+  .object({
+    kind: z.literal("compromise"),
+    at: z.iso.datetime(),
+  })
+  .strict();
+
 /** The canonical `standingCondition` validator. Exported so the export/import
  * artifact reuses it rather than re-declaring a laxer copy: the condition travels
  * with the record, since an export that dropped it would clear a state only the
  * operator, a re-invite, or a delete may clear. */
-export const standingConditionSchema: ZodType<ManagedStandingCondition> =
-  z.object({
+export const standingConditionSchema: ZodType<ManagedStandingCondition> = z
+  .object({
     since: z.iso.datetime(),
     kind: z.enum(["auth", "storage"]),
-  });
+    response: standingResponseSchema.optional(),
+  })
+  .strict();
 
 /** The canonical validator for the record's required `standingCondition` field:
  * a raised condition, or the none form. The artifact validates the raised shape
  * alone, its own field being optional and omitted where none stands. */
 export const standingConditionFieldSchema: ZodType<ManagedStandingConditionField> =
-  z.union([standingConditionSchema, z.object({ kind: z.literal("none") })]);
+  z.union([
+    standingConditionSchema,
+    z.object({ kind: z.literal("none") }).strict(),
+  ]);
 
 /** The canonical `tokenMaxAgeDays` validator (a positive integer bounded by
  * {@link MAX_TOKEN_MAX_AGE_DAYS}). Exported so the export/import artifact reuses it
@@ -409,7 +446,7 @@ const ManagedExchangeRecordSchema: ZodType<ManagedExchangeRecord> = z.object({
  * secret, or a document holding an `authentication` block, rather than migrating
  * or silently accepting -- the reader-rejects-unknown rule.
  *
- * @throws {ZodError} if the value is not a valid v2 record.
+ * @throws {ZodError} if the value is not a valid v3 record.
  */
 export function parseManagedExchangeRecord(
   raw: unknown,
@@ -423,7 +460,7 @@ export function safeParseManagedExchangeRecord(raw: unknown) {
 }
 
 /**
- * A per-entry read of the stored list: the entries that parsed as v2 records, and
+ * A per-entry read of the stored list: the entries that parsed as v3 records, and
  * the stored keys of the entries that did not. The unreadable half is the STORED
  * KEY rather than the entry's own `id`, which a failed parse leaves untrusted --
  * the same reason the diagnostic read's unreadable marker holds the key (see
@@ -497,7 +534,7 @@ export interface ManagedExchangeDiagnosticEssentials {
  * {@link parseManagedExchangeRecord} throws here exactly as it would on the
  * strict read; the caller catches that to mark the entry unreadable.
  *
- * @throws {ZodError} if the value is not a valid v2 record.
+ * @throws {ZodError} if the value is not a valid v3 record.
  */
 export function diagnoseManagedExchangeRecord(
   raw: unknown,
@@ -603,7 +640,7 @@ export interface NewManagedExchange {
 
 /**
  * Build a complete {@link ManagedExchangeRecord} from the caller's fields: assign
- * a fresh `id` and the v2 `schemaVersion`, then validate the whole record through
+ * a fresh `id` and the v3 `schemaVersion`, then validate the whole record through
  * the schema so the label cap, the credential-free document, and the secret
  * format are enforced at write. The optional local fields are attached only when
  * present, so an absent policy is an omitted key rather than an explicit
@@ -800,6 +837,15 @@ export function raisedStandingCondition(
   return condition.kind === "none" ? undefined : condition;
 }
 
+/** The compromise response standing on a record, or `undefined` where the
+ * operator has answered no gate. A response rides on the condition it answers,
+ * so a record holding none holds no response either. */
+export function standingCompromiseResponse(
+  record: ManagedExchangeRecord,
+): ManagedStandingResponse | undefined {
+  return raisedStandingCondition(record)?.response;
+}
+
 /** Raise a standing condition on a record, unless one already stands or there is
  * none to raise. First raise wins: the standing condition is the one the operator
  * has yet to answer, and answering it is a single act over everything that stood
@@ -825,6 +871,40 @@ export function applyManagedExchangeStandingConditionCleared(
   return parseManagedExchangeRecord({
     ...record,
     standingCondition: NO_STANDING_CONDITION,
+  });
+}
+
+/**
+ * Apply the operator's compromise response -- "something does not add up" at a
+ * failure gate -- to a record, producing a validated new record whose standing
+ * condition holds it. The secret, the document, and the run bookkeeping remain
+ * untouched, and the input record is not mutated.
+ *
+ * First answer stands: a record already holding one comes back unchanged, the
+ * same object, so a second gate cannot restamp the instant of the first.
+ *
+ * The answer always has a carrier. Where no condition stands -- the raise write
+ * the failure earned never landed -- this write raises one, of the `"auth"` kind
+ * at the last run's instant (the failure being answered) or at `at` where the
+ * record holds no run either. Without it the answer would have nowhere to live,
+ * and the gate would be put again at the next visit.
+ *
+ * @throws {ZodError} if the stored record is invalid, or `at` is not an ISO 8601
+ *   UTC instant.
+ */
+export function applyManagedExchangeCompromiseResponse(
+  record: ManagedExchangeRecord,
+  at: string,
+): ManagedExchangeRecord {
+  const standing = raisedStandingCondition(record);
+  if (standing?.response !== undefined) return record;
+  const carrier: ManagedStandingCondition = standing ?? {
+    since: record.lastRun?.at ?? at,
+    kind: "auth",
+  };
+  return parseManagedExchangeRecord({
+    ...record,
+    standingCondition: { ...carrier, response: { kind: "compromise", at } },
   });
 }
 

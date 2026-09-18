@@ -94,7 +94,7 @@ are the standing definition of the managed exchange.
 
 | Field | Type | Notes |
 | ----- | ---- | ----- |
-| `schemaVersion` | string literal | The single recognized literal for v2, `psilink-managed-exchange/v2`; a reader rejects any other value rather than migrating it -- the v1 literal among them, whose records hold no `standingCondition` -- matching the reader-rejects-unknown rule the exchange-record and verification-keys files follow (see [EXCHANGE_RECORD.md](EXCHANGE_RECORD.md)). |
+| `schemaVersion` | string literal | The single recognized literal for v3, `psilink-managed-exchange/v3`; a reader rejects any other value rather than migrating it -- the earlier literals among them, `psilink-managed-exchange/v1` (whose records hold no `standingCondition`) and `psilink-managed-exchange/v2` (whose condition holds no operator response) -- matching the reader-rejects-unknown rule the exchange-record and verification-keys files follow (see [EXCHANGE_RECORD.md](EXCHANGE_RECORD.md)). |
 | `id` | string (UUID) | A locally-generated identifier for this managed exchange, distinct from any rendezvous id. Used only to name the record in local UI; never sent on the wire. |
 | `label` | string, at most 120 characters (enforced at write) | An operator-supplied display name for the partnership. Local only; never sent -- but disclosed to any reader of the store (see [Metadata at rest](../SECURITY_DESIGN.md#metadata-at-rest-presence-and-shape)). The length cap is enforced; the content guidance is not and cannot be: keeping agreement numbers, contact details, and other sensitive counterparty detail out of the label is **operator cooperation**, exactly as export-source invalidation is -- the field's only structural protections are the cap and its never-sent locality. |
 | `exchangeFile` | object | This party's exchange-file document, verbatim: the validated `ExchangeSpec` shape both applications share (see [EXCHANGE_FILE.md](EXCHANGE_FILE.md), "The artifact is the CLI config schema") -- the linkage terms both parties validated (column **shape** and disclosed payload column **names**, never a row value), metadata, standardization, any payload-column commitments, the acceptor's own outbound-payload consent record (see [EXCHANGE_FILE.md](EXCHANGE_FILE.md#payload-disclosure-consent), "Payload-disclosure consent"), the acceptor's `expectedPartnerDeduplicate` -- the cardinality side the accepted invitation declared for the partner, which a re-run holds the partner to (see [EXCHANGE_FILE.md](EXCHANGE_FILE.md#terms-binding-consent), "Terms-binding consent") -- this party's own `includeOwnColumns` output-composition choice, a closed two-value enum naming no column, and the connection block. It has **no `authentication` block** (the secret lives in `sharedSecret` below) and is composed exactly as the mint layer composes a downloadable file: assembled from a credential-free locator input, validated through the shared schema, with the **parse result** (never the raw input) persisted. The document's operator-authored free-text fields persist verbatim with it: each metadata column's optional `description` (no schema length bound), each standardization step's `params` (an open parameter map -- an authored cleaning step can embed a literal value, a pattern or a replacement string), and `retentionDisposition` (bounded at 1024 characters, the config schema's text bound), plus the terms' own 1024-bounded payload `description` and legal-agreement `purpose` strings. The record stores the document as minted, so the content guidance for these fields is the same **operator cooperation** the `label` row describes, and no additional bound or strip pass runs at persist time: the document is kept verbatim, and a document the mint layer accepts must remain saveable as managed (see [Metadata at rest](../SECURITY_DESIGN.md#metadata-at-rest-presence-and-shape)). The document is immutable for the partnership: a re-invite re-issues it verbatim with only a fresh secret, and exchanging on different terms is a new exchange, not an edit or re-invite of this record. |
@@ -106,7 +106,7 @@ are the standing definition of the managed exchange.
 | `tokenMaxAgeDays` | integer or absent | The operator's max-token-age policy for this exchange, the browser analog of the CLI `authentication.token_max_age_days`, and like it **off by default**: absent means no bound is in force, and a record is created with it absent unless the operator sets one. When set, each successful run stamps `expires` this many days out onto the rotated secret. The reason to opt in is a dormant partnership: rotation caps exposure only for an exchange that actually runs, so an idle stored secret has no automatic exposure bound without it (see [The primary controls](../SECURITY_DESIGN.md#the-primary-controls)). It is a **local field** the operator may edit in place without a re-invite; what the edit does to `expires` is [Edit-time re-derivation of `expires`](#edit-time-re-derivation-of-expires). |
 | `schedule` | object or absent | The partnership-agreed run schedule the unattended path executes: the agreed recurrence and run window -- the schedule is partnership-level agreement, coordinated out-of-band exactly as the terms are -- plus the retry bookkeeping for a missed window (the next planned attempt). Absent for an exchange run attended-only. The field-by-field layout is in [The `schedule` object](#the-schedule-object). |
 | `lastRun` | object or absent | Run bookkeeping the backup state and the tiered desync UX read (see [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md)): `at` (ISO 8601 UTC), `outcome` (`"succeeded"` \| `"failed"` \| `"desynced"` \| `"missed"`), and, for a non-succeeded outcome, an optional `failureKind` (`"auth"` \| `"transport"` \| `"storage"` \| `"custody-unreadable"` \| `"input"` \| `"terms-shortfall"` \| `"consent"` \| `"handed-off"` \| `"cancelled"`). A `"missed"` outcome records a no-show: the wait for the other party's runner spent its whole budget with nobody arriving, so no handshake ran. A scheduled run reaches it when an agreed window passes without a completed handshake; an attended run reaches it when its own wait for the partner expires. It has no `failureKind` -- the outcome is the whole account, and it is held apart from `"transport"` (a connection that was made and broke, whose remedy is retrying the connection) and from `"cancelled"` (the operator stopped the run). It is benign, retried at the next window or whenever the operator runs the exchange again, and never routed through the desync/attack framing (see [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md#a-missed-window-is-neither-desync-nor-attack)). An `"input"` failure records a benign pre-run acquisition problem -- the handle's file missing, moved, or unreadable at run start -- detected before any connection, likewise never routed through that framing; putting the file back clears it, so its surface offers the run again. A `"terms-shortfall"` failure records the other benign pre-run input state, held apart from it because its remedy is not another attempt: the file was read and cannot satisfy every linkage key the standing terms declare, so the run is refused before connecting (by the run-start input guard, or by the run boundary's own `assertLinkageTermsSatisfiable` inside the pre-connection prepare), and the same file refuses identically at the next window. Its remedy is a file covering every agreed key, or terms re-agreed with the partner out of band -- never a retry or a bare re-pick. A `"consent"` failure records the third pre-connection refusal: a send-side disclosure gate refused because the set this run would send is not the one the exchange recorded agreeing to send (see [What the setup consent covers across runs](../MANAGED_EXCHANGE.md#what-the-setup-consent-covers-across-runs)). It is likewise benign and outside that framing. A `"handed-off"` failure records the fourth: the run found this device's copy [spent](#the-backup-marker-the-spent-state-and-the-import-marker-local-siblings-never-in-the-artifact) by an export and refused inside the run+rotate lock, before reading the input file and before connecting, rather than rotating a secret whose owner is now elsewhere. It is the single-owner invariant holding rather than a fault, so it too stays outside the desync/attack framing, and it is the record's own account of a run -- attended or scheduled -- that met a hand-off nobody was present to answer for. A `"custody-unreadable"` failure records the fifth, and it is that same refusal failing to read the entry it decides on: the sibling entry did not validate, or its store did not answer, so the run stopped in the same place rather than rotating on custody it could not establish. It is held apart from `"storage"` because the two leave different states behind -- a `"storage"` failure rotated a secret it could not save, which can leave the two parties holding different ones and is recovered by re-inviting, while this refusal precedes the handshake and rotates nothing, so nothing here is a desync and a fresh secret would replace one nothing moved. `"consent"`, `"terms-shortfall"`, `"handed-off"`, and `"custody-unreadable"` are the failure kinds a surface must **not** present as retryable: the same input determines the same disclosure and falls the same way short of the same keys, a handed-off copy refuses identically at every later run, and a run reads the same unreadable entry every time, so the remedy is the operator's, not another attempt's. A record written before a kind was added to the enum still reads -- an entry with `"input"` for a shortfall loads and tiers as the generic input state; the converse is the reader-rejects-unknown rule's consequence, an artifact with a kind this reader does not know being refused whole rather than read with the kind dropped. A **re-invite clears `lastRun`** in the same rotation transaction that advances the fresh secret: the re-invite is the recovery for the failure the entry recorded, so leaving it would re-derive a consumed tier at the next visit -- and once the import marker is cleared alongside, a stale `"auth"` failure would re-derive as the attack tier rather than the benign import one. A successful run instead advances `lastRun` to `"succeeded"`; only the re-invite recovery drops it. Which of two runs' entries the store keeps is [Recording a run outcome](#recording-a-run-outcome). |
-| `standingCondition` | object | The unanswered **standing condition**: evidence that this device's secret may no longer be the partnership's, raised by a run and not answered since. It holds one of two forms, neither with free text: a raised condition, `since` (ISO 8601 UTC, the instant of the run that raised it) and `kind` (`"auth"` \| `"storage"`), the two `failureKind`s whose remedy is out-of-band rather than an act on this device; or `{"kind": "none"}` while none stands. The field is **required**, so a reader never has to tell a record holding none from one written without the field: a record stored under `psilink-managed-exchange/v1`, which has no such field, is rejected whole and re-established by re-invite (see [Versioning](#versioning-an-app-upgrade-can-invalidate-a-stored-record)). It stands BESIDE `lastRun` rather than inside it because `lastRun` holds one run: the next run's stamp replaces it, so a no-show or a later success would otherwise carry the evidence off with the entry that held it and the operator would never again be asked for the confirmation the design requires (see [A standing condition outlives the run that raised it](../MANAGED_EXCHANGE.md#a-standing-condition-outlives-the-run-that-raised-it)). What raises and clears it is [The standing condition](#the-standing-condition). |
+| `standingCondition` | object | The unanswered **standing condition**: evidence that this device's secret may no longer be the partnership's, raised by a run and not answered since. It holds one of two forms, neither with free text: a raised condition, `since` (ISO 8601 UTC, the instant of the run that raised it) and `kind` (`"auth"` \| `"storage"`), the two `failureKind`s whose remedy is out-of-band rather than an act on this device; or `{"kind": "none"}` while none stands. A raised condition additionally holds the operator's `response` where one has been given -- `kind` (`"compromise"`) and `at` (ISO 8601 UTC, the instant they answered) -- nested inside the condition it answers rather than beside it, so the acts that clear the condition clear the response with it (see [The standing condition](#the-standing-condition)). The field is **required**, so a reader never has to tell a record holding none from one written without the field: a record stored under `psilink-managed-exchange/v1`, which has no such field, is rejected whole and re-established by re-invite, as is one under `psilink-managed-exchange/v2`, whose condition cannot hold a response (see [Versioning](#versioning-an-app-upgrade-can-invalidate-a-stored-record)). It stands BESIDE `lastRun` rather than inside it because `lastRun` holds one run: the next run's stamp replaces it, so a no-show or a later success would otherwise carry the evidence off with the entry that held it and the operator would never again be asked for the confirmation the design requires (see [A standing condition outlives the run that raised it](../MANAGED_EXCHANGE.md#a-standing-condition-outlives-the-run-that-raised-it)). What raises and clears it is [The standing condition](#the-standing-condition). |
 
 Everything in this table except `sharedSecret` is non-secret but not
 non-sensitive. Together the persisted fields disclose the partnership's
@@ -187,6 +187,15 @@ That evolution path -- reject, re-invite, re-create -- is also how the shape
 grows: a schema revision adds its fields under a new `schemaVersion`, required
 on that new shape, rather than as optional, structurally always-absent
 placeholders on the version already stored.
+
+A version bump therefore destroys an **unanswered compromise response** along
+with the condition it answers and the record that holds both. That is accepted,
+because it collapses into the three clearers rather than adding a fourth: the
+record the response stood on is refused whole, no surface renders an invitation
+control over a record that does not load, and re-establishing the exchange is
+the delete-and-re-invite the versioning rule already prescribes. The same holds
+for a page running older code than the record it reads: it refuses the record
+rather than reading it as unanswered.
 
 #### Edit-time re-derivation of `expires`
 
@@ -344,6 +353,32 @@ including what an adversary gains by provoking the benign reading, is [Telling a
 desync from an attack](../MANAGED_EXCHANGE.md#telling-a-desync-from-an-attack).
 A recorded benign cause is not displaced by either rule: it is the run's own
 actionable state, and the condition stands until something clears it.
+
+#### The operator's response to it
+
+The two-outcome gate's "something does not add up" reply -- the **compromise
+response** (see [Telling a desync from an
+attack](../MANAGED_EXCHANGE.md#telling-a-desync-from-an-attack)) -- is recorded
+as a `response` member of the raised condition: the closed `kind`
+(`"compromise"`) and the `at` instant the operator answered, no free text. It is
+nested inside the condition rather than standing beside it so that it has
+exactly the clearers the condition has and no clearer of its own; the three acts
+that clear a condition each write the whole field, and each takes the response
+with the condition. A run never writes it, and a run never clears it.
+
+- **The first answer stands.** A second gate reached later leaves the recorded
+  instant as it is, for the reason the first raise stands: the answer is a
+  single act over everything that stood before it.
+- **The answer always has a carrier.** Answered where no condition stands --
+  the raise write the failure earned never landed -- the same write raises one,
+  of the `"auth"` kind at the answered failure's instant (the last run's, or the
+  answer's own where the record holds no run). Without it the answer would have
+  nowhere to live and the gate would be put again at the next visit.
+- **While it stands, no control offers a fresh invitation.** Neither gate is put
+  again, no failure recovery mints, and the configuration section's re-invite on
+  the same terms is withheld. The in-app re-invite is reachable only after the
+  clear-and-acknowledge, which is the interposition the response exists for and
+  not a gap in it.
 
 ### The schedule object
 
@@ -860,11 +895,13 @@ same discipline the mint layer applies to a validated spec). `key` is the
 And `local` holds the browser-only fields the two CLI artifacts do not (`label`,
 `side`, `schedule`, `lastRun`, `standingCondition`, `tokenMaxAgeDays`, and the
 two held-grant markers above). The [standing
-condition](#the-standing-condition) travels because an export that dropped it
-would be a fourth way to clear one, and only the operator's acknowledgement, a
-re-invite, and a delete may. The artifact's field is optional and omitted where
-none stands, so an import holding none installs a record whose condition is the
-`"none"` form. The artifact's own
+condition](#the-standing-condition) travels, the operator's `response` to it
+included, because an export that dropped either would be a fourth way to clear
+one, and only the operator's acknowledgement, a re-invite, and a delete may. The
+artifact's field is optional and omitted where none stands, so an import holding
+none installs a record whose condition is the `"none"` form. The
+`artifactVersion` does not move for the response: it rides inside the canonical
+condition schema the artifact already reuses. The artifact's own
   JSON keys are `camelCase`, by design: the `.psilink.key` file the CLI reads is
   itself `camelCase` JSON (`sharedSecret`, `expires`), parsed without a
   `snake_case` conversion, so a `camelCase` `key` block is what maps onto a valid
@@ -878,6 +915,9 @@ none stands, so an import holding none installs a record whose condition is the
   holding one readable everywhere. A build whose `local` schema does not know
   the key refuses the artifact whole, because the strict reader-rejects-unknown
   schema rejects an unknown nested key and the top-level parse fails with it.
+  The condition's own schema is strict on the same rule, so a member nested one
+  level further in -- the operator's `response` -- is refused rather than
+  dropped from the record the import would otherwise reconstruct.
   The import surface holds that rejection apart from a file whose bytes do not
   parse at all: a document that parses and then fails the schema names a newer
   build's export as a likely cause and states the two ways past it -- bring the

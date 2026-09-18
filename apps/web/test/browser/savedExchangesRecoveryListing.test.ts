@@ -127,7 +127,7 @@ describe("read-failed recovery listing", () => {
     await rawPut({
       ...good,
       id: "zzz-bad-record",
-      schemaVersion: "psilink-managed-exchange/v3",
+      schemaVersion: "psilink-managed-exchange/v4",
     });
     // Precondition: the strict list read rejects wholesale on the bad record.
     await expect(listManagedExchanges()).rejects.toThrow();
@@ -174,7 +174,7 @@ describe("read-failed recovery listing", () => {
     await rawPut({
       ...good,
       id: "zzz-bad-record",
-      schemaVersion: "psilink-managed-exchange/v3",
+      schemaVersion: "psilink-managed-exchange/v4",
     });
 
     app.render(createElement(SavedExchanges));
@@ -201,7 +201,7 @@ describe("recovery listing: the delete confirm's custody notes", () => {
     await rawPut({
       ...good,
       id: "zzz-bad-record",
-      schemaVersion: "psilink-managed-exchange/v3",
+      schemaVersion: "psilink-managed-exchange/v4",
     });
     if (seedState) await seedState(good);
     await expect(listManagedExchanges()).rejects.toThrow();
@@ -344,7 +344,7 @@ describe("the import this surface offers works from the read-failed state", () =
     await rawPut({
       ...good,
       id: "zzz-bad-record",
-      schemaVersion: "psilink-managed-exchange/v3",
+      schemaVersion: "psilink-managed-exchange/v4",
     });
     await expect(listManagedExchanges()).rejects.toThrow();
 

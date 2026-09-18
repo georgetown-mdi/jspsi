@@ -93,10 +93,10 @@ interface ManagedExchangeArtifactLocal {
   schedule?: ManagedExchangeSchedule;
   /** The run bookkeeping retained from the imported record. */
   lastRun?: ManagedExchangeLastRun;
-  /** The standing condition the source record held, unanswered; omitted where
-   * none stood. It travels because an export that dropped it would be a fourth
-   * way to clear one, and only the operator's acknowledgement, a re-invite, and
-   * a delete may. */
+  /** The standing condition the source record held, with the operator's answer
+   * to it where one was given; omitted where none stood. Both travel because an
+   * export that dropped either would be a fourth way to clear a condition, and
+   * only the operator's acknowledgement, a re-invite, and a delete may. */
   standingCondition?: ManagedStandingCondition;
   /** The max-token-age policy, when the operator opted in. */
   tokenMaxAgeDays?: number;
@@ -214,7 +214,9 @@ export function serializeManagedExchangeArtifact(
  * schemas from the record
  * module so the artifact cannot be laxer than the record it reconstructs -- a
  * tampered artifact with `intervalDays: 0` is rejected here exactly as a stored
- * record would be, not merely at the reconstructed record's later re-validation. */
+ * record would be, not merely at the reconstructed record's later re-validation.
+ * The condition's own schema is strict too, so a member nested inside it is
+ * refused rather than dropped from the reconstructed record. */
 const artifactLocalSchema: ZodType<ManagedExchangeArtifactLocal> = z
   .object({
     label: z.string(),
@@ -265,7 +267,7 @@ export function parseManagedExchangeArtifact(
  * installs the one owner. The embedded document is parsed back through
  * {@link parseSensitiveYaml} and {@link parseExchangeSpec}, the secret and
  * `expires` come from the key pair, and the local fields pass through
- * unchanged. Built through {@link buildManagedExchangeRecord} -- a fresh `id`, the v2
+ * unchanged. Built through {@link buildManagedExchangeRecord} -- a fresh `id`, the v3
  * `schemaVersion`, re-validated through the record schema -- so a malformed
  * document or secret is rejected and nothing is installed. Holds no
  * input-file handle: the first run re-acquires one by selection.

@@ -22,6 +22,7 @@ import {
   persistManagedExchangeRotation,
   persistManagedExchangeScheduleAdvance,
   putManagedExchange,
+  recordManagedExchangeCompromiseResponse,
   recordManagedExchangeLastRun,
   requestPersistentStorage,
   spendManagedExchangeIfCurrent,
@@ -31,6 +32,7 @@ import {
   MAX_LABEL_LENGTH,
   MAX_SCHEDULE_INTERVAL_DAYS,
   composeManagedExchangeFile,
+  standingCompromiseResponse,
 } from "@psi/managed/managedExchangeRecord";
 import {
   appendDisclosureRecordToStore,
@@ -603,6 +605,63 @@ describe("field-scoped lastRun write", () => {
   });
 });
 
+describe("field-scoped compromise response write", () => {
+  const failedAt = "2026-07-14T12:00:00.000Z";
+  const answeredAt = "2026-07-14T15:00:00.000Z";
+
+  async function withFailedHandshake(): Promise<string> {
+    const created = await createManagedExchange(newExchange());
+    await recordManagedExchangeLastRun(
+      created.id,
+      { at: failedAt, outcome: "failed", failureKind: "auth" },
+      Date.parse(failedAt),
+    );
+    return created.id;
+  }
+
+  test("writes the answer onto the standing condition and nothing else", async () => {
+    const id = await withFailedHandshake();
+    const before = await getManagedExchange(id);
+    const updated = await recordManagedExchangeCompromiseResponse(
+      id,
+      answeredAt,
+    );
+    expect(updated.standingCondition).toEqual({
+      since: failedAt,
+      kind: "auth",
+      response: { kind: "compromise", at: answeredAt },
+    });
+    expect(updated.sharedSecret).toBe(before?.sharedSecret);
+    expect(updated.lastRun).toEqual(before?.lastRun);
+    // What persists is what the call returned, not a validating read's view: the
+    // answer has to be there for the next visit to read it.
+    expect((await getManagedExchange(id))?.standingCondition).toEqual(
+      updated.standingCondition,
+    );
+  });
+
+  test("answering cannot revert a concurrent rotation write", async () => {
+    const id = await withFailedHandshake();
+    const rotatedSecret = generateSharedSecret();
+    await persistManagedExchangeRotation(id, {
+      sharedSecret: rotatedSecret,
+      expires: null,
+    });
+    const updated = await recordManagedExchangeCompromiseResponse(
+      id,
+      answeredAt,
+    );
+    expect(updated.sharedSecret).toBe(rotatedSecret);
+    expect(standingCompromiseResponse(updated)).toBeDefined();
+  });
+
+  test("rejects for a record that is gone", async () => {
+    await expect(
+      recordManagedExchangeCompromiseResponse("no-such-record", answeredAt),
+    ).rejects.toThrow();
+  });
+});
+
 describe("atomic schedule advance", () => {
   const advanced: ManagedExchangeSchedule = {
     ...schedule,
@@ -827,7 +886,7 @@ describe("deposit persists a managed record of the party's side", () => {
 describe("reader rejects unknown on a store read", () => {
   test("a future schemaVersion in the store rejects rather than loading", async () => {
     const created = await createManagedExchange(newExchange());
-    await rawPut({ ...created, schemaVersion: "psilink-managed-exchange/v3" });
+    await rawPut({ ...created, schemaVersion: "psilink-managed-exchange/v4" });
     await expect(getManagedExchange(created.id)).rejects.toThrow();
     await expect(listManagedExchanges()).rejects.toThrow();
   });
@@ -1508,7 +1567,7 @@ describe("diagnostic read never rejects wholesale", () => {
     await rawPut({
       ...good,
       id: "bad-record",
-      schemaVersion: "psilink-managed-exchange/v3",
+      schemaVersion: "psilink-managed-exchange/v4",
     });
     // The spend is the sibling entry's, so it reads whatever the record does: the
     // delete confirm for this row must still state what the hand-off keeps running.
@@ -1533,7 +1592,7 @@ describe("diagnostic read never rejects wholesale", () => {
     await rawPut({
       ...good,
       id: "bad-record",
-      schemaVersion: "psilink-managed-exchange/v3",
+      schemaVersion: "psilink-managed-exchange/v4",
     });
 
     // The strict read still rejects wholesale -- the untouched contract.
@@ -1556,7 +1615,7 @@ describe("diagnostic read never rejects wholesale", () => {
     await rawPut({
       ...good,
       id: "bad-record",
-      schemaVersion: "psilink-managed-exchange/v3",
+      schemaVersion: "psilink-managed-exchange/v4",
     });
     // The sibling backup marker survives the record's unreadability: a delete of the
     // bad record must still warn about the exported backup's custody.
@@ -1576,7 +1635,7 @@ describe("diagnostic read never rejects wholesale", () => {
     await rawPut({
       ...good,
       id: "bad-record",
-      schemaVersion: "psilink-managed-exchange/v3",
+      schemaVersion: "psilink-managed-exchange/v4",
     });
 
     await deleteManagedExchange("bad-record");
