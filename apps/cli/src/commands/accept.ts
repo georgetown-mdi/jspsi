@@ -29,6 +29,7 @@ import type {
 
 import {
   applyConnectionOverrides,
+  configWithNamedRuleSetRules,
   diffLinkageTerms,
   linkageTermsStandingOf,
   persistExpectedPartnerDeduplicate,
@@ -820,8 +821,14 @@ function readExistingAcceptConfig(
     )} but is not valid YAML, so it cannot be compared against ${against}.${RECONCILE_RETRY_REMEDY} ${retryWith}.`;
     throw keepOperatorSuppliedText(new UsageError(message.text), message);
   }
+  // Rules the file names a rule set for instead of writing out are taken from
+  // that set first, so a configuration written that way is compared against
+  // the invitation on the rules it runs on. Outside the catch below: an
+  // unknown set name is its own refusal, naming the set the file cited, rather
+  // than a document that could not be parsed.
+  const namedRuleSetConfig = configWithNamedRuleSetRules(parsed, configPath);
   try {
-    return parseExchangeSpec(parsed);
+    return parseExchangeSpec(namedRuleSetConfig);
   } catch (err) {
     const message = messageWithOperatorText`${EXISTING_CONFIG_PREAMBLE}${operatorSuppliedText(
       configPath,

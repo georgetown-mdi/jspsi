@@ -6,7 +6,8 @@ import {
   loadCSVFile,
   prepareForExchange,
   inferMetadata,
-  getDefaultLinkageTerms,
+  DEFAULT_LINKAGE_RULE_SET,
+  linkageTermsFromRuleSet,
   getDefaultStandardization,
   columnValues,
   inferDateFormat,
@@ -23,6 +24,7 @@ import {
   UsageError,
 } from "@psilink/core";
 import type {
+  BuiltInLinkageRuleSet,
   ConnectionConfig,
   ConnectionEndpoint,
   CSVRow,
@@ -599,6 +601,11 @@ export function singlePassDisclosureNotice(): string {
  * Absent (or `cascade`) leaves the default strategy untouched, so omitting the
  * selection is byte-identical to before the flag existed.
  *
+ * `ruleSet`, when given, is the built-in rule set the terms this function
+ * authors are drawn from; it is the default set otherwise, and it is ignored
+ * where `terms` are supplied, which were drawn from whatever their author drew
+ * them from. The derived terms cite the set they came from either way.
+ *
  * `dateInputFormat`, when given, is the DOB date-input format the caller already
  * inferred (via `inferDateInputFormatFromSource`, from a bounded sample) and
  * short-circuits this function's own inference from `rawRows`. `init` uses it
@@ -619,8 +626,10 @@ export function buildDataSpec(args: {
   };
   dateInputFormat?: string;
   linkageStrategy?: LinkageStrategy;
+  ruleSet?: BuiltInLinkageRuleSet;
 }): ResolvedDataSpec {
   const { terms, identity, rows, linkageStrategy } = args;
+  const ruleSet = args.ruleSet ?? DEFAULT_LINKAGE_RULE_SET;
 
   if (rows === undefined) {
     if (terms === undefined)
@@ -636,7 +645,7 @@ export function buildDataSpec(args: {
   const linkageTerms =
     terms ??
     withLinkageStrategy(
-      getDefaultLinkageTerms(identity, metadata),
+      linkageTermsFromRuleSet(ruleSet, identity, metadata),
       linkageStrategy,
     );
 

@@ -31,7 +31,9 @@ import {
   applyConnectionOverrides,
   assertPartnerFingerprintRecordable,
   assertRetainSweepGuard,
+  configWithNamedRuleSetRules,
   diffLinkageTerms,
+  linkageTermsWithNamedRuleSetRules,
   formatReconcileDiffs,
   linkageTermsStandingOf,
   reconcileConflictError,
@@ -57,6 +59,7 @@ import type {
   ReconcileDiff,
 } from "../../src/config";
 import type {
+  BuiltInLinkageRuleSet,
   ConnectionConfig,
   ExchangeSpec,
   FileDropConnectionConfig,
@@ -4650,6 +4653,218 @@ test("persistOutboundPayloadConsent writes a confirmed-empty set verbatim", () =
   });
 });
 
+// --- rules taken from a named rule set ---------------------------------------
+
+/**
+ * A second built-in rule set, for the reads that must be shown resolving the
+ * set a document names rather than the default one. Only one set ships, so the
+ * registry every function here takes is how a non-default set is reached; this
+ * one is passed in by the tests below and by nothing else.
+ */
+const OTHER_RULE_SET: BuiltInLinkageRuleSet = {
+  reference: {
+    fieldSet: { name: "other-fields", version: "3.1.0" },
+    keySet: { name: "other-keys", version: "4.2.0" },
+  },
+  linkageFields: [
+    { name: "ssn", type: "ssn", constraints: { validOnly: true } },
+    { name: "last_name", type: "last_name" },
+  ],
+  linkageKeys: [
+    { name: "SSN", elements: [{ field: "ssn" }] },
+    { name: "LN", elements: [{ field: "last_name" }] },
+  ],
+};
+
+const OTHER_RULE_SETS: ReadonlyArray<BuiltInLinkageRuleSet> = [OTHER_RULE_SET];
+
+/** Linkage terms as a configuration file writes them when it names its rule
+ *  set instead of writing the rules out: snake_case, and holding every field
+ *  the set does not cover. */
+function namedRuleSetTerms(
+  reference: LinkageRuleSetReference,
+): Record<string, unknown> {
+  return {
+    version: "1.0.0",
+    identity: "Agency A",
+    date: "2026-01-01",
+    algorithm: "psi",
+    output: { expects_output: true, share_with_partner: true },
+    deduplicate: false,
+    linkage_rule_set: {
+      field_set: { ...reference.fieldSet },
+      key_set: { ...reference.keySet },
+    },
+  };
+}
+
+/** The terms of a configuration file written with `terms` as its linkage
+ *  terms, read back through the config reader. */
+function loadNamedRuleSetConfig(terms: Record<string, unknown>): LinkageTerms {
+  const configPath = path.join(dir, "psilink.yaml");
+  fs.writeFileSync(
+    configPath,
+    YAML.stringify({
+      connection: { channel: "filedrop", path: "/mnt/share" },
+      linkage_terms: terms,
+    }),
+  );
+  const source = loadConfigLinkageSource(configPath);
+  expect(source).toBeDefined();
+  return source!.linkageTerms;
+}
+
+test("a config naming the built-in set runs on that set's rules", () => {
+  const terms = loadNamedRuleSetConfig(
+    namedRuleSetTerms(DEFAULT_LINKAGE_RULE_SET.reference),
+  );
+  expect(terms.linkageKeys).toEqual(DEFAULT_LINKAGE_RULE_SET.linkageKeys);
+  expect(terms.linkageFields).toEqual(DEFAULT_LINKAGE_RULE_SET.linkageFields);
+  // The citation the file wrote stands as written: it is what named the set.
+  expect(terms.linkageRuleSet).toEqual(DEFAULT_LINKAGE_RULE_SET.reference);
+  // The fields the set does not cover are the file's own.
+  expect(terms.identity).toBe("Agency A");
+  expect(terms.date).toBe("2026-01-01");
+});
+
+test("a config naming a non-default set runs on that set's rules", () => {
+  const spec = parseExchangeSpec({
+    connection: { channel: "filedrop", path: "/mnt/share" },
+    linkage_terms: linkageTermsWithNamedRuleSetRules(
+      namedRuleSetTerms(OTHER_RULE_SET.reference),
+      "psilink.yaml",
+      OTHER_RULE_SETS,
+    ),
+  });
+  expect(spec.linkageTerms.linkageKeys).toEqual(OTHER_RULE_SET.linkageKeys);
+  expect(spec.linkageTerms.linkageFields).toEqual(OTHER_RULE_SET.linkageFields);
+  expect(spec.linkageTerms.linkageRuleSet).toEqual(OTHER_RULE_SET.reference);
+});
+
+test("a config naming a set this build does not ship fails at load", () => {
+  const cited: LinkageRuleSetReference = {
+    fieldSet: { name: "no-such-fields", version: "9.9.9" },
+    keySet: { name: "no-such-keys", version: "9.9.9" },
+  };
+  const attempt = () => loadNamedRuleSetConfig(namedRuleSetTerms(cited));
+  expect(attempt).toThrow(UsageError);
+  let message = "";
+  try {
+    attempt();
+  } catch (err) {
+    message = (err as Error).message;
+  }
+  // What was cited, and what this build ships instead.
+  expect(message).toContain('"no-such-keys" 9.9.9 over "no-such-fields" 9.9.9');
+  expect(message).toContain(
+    `It ships "${DEFAULT_LINKAGE_RULE_SET.reference.keySet.name}" ` +
+      `${DEFAULT_LINKAGE_RULE_SET.reference.keySet.version} over ` +
+      `"${DEFAULT_LINKAGE_RULE_SET.reference.fieldSet.name}" ` +
+      `${DEFAULT_LINKAGE_RULE_SET.reference.fieldSet.version}.`,
+  );
+  expect(message).toContain("write the linkage_fields and linkage_keys out");
+});
+
+test("an unknown set is decided against the registry passed, not the default", () => {
+  // The default set is unknown to a build shipping only the other one, and the
+  // refusal reports that build's own sets.
+  expect(() =>
+    linkageTermsWithNamedRuleSetRules(
+      namedRuleSetTerms(DEFAULT_LINKAGE_RULE_SET.reference),
+      "psilink.yaml",
+      OTHER_RULE_SETS,
+    ),
+  ).toThrow('It ships "other-keys" 4.2.0 over "other-fields" 3.1.0.');
+});
+
+test("a citation is read in the camelCase spelling too", () => {
+  const { fieldSet, keySet } = DEFAULT_LINKAGE_RULE_SET.reference;
+  const filled = linkageTermsWithNamedRuleSetRules(
+    {
+      version: "1.0.0",
+      linkageRuleSet: { fieldSet: { ...fieldSet }, keySet: { ...keySet } },
+    },
+    "psilink.yaml",
+  ) as { linkageKeys: unknown };
+  expect(filled.linkageKeys).toEqual(DEFAULT_LINKAGE_RULE_SET.linkageKeys);
+});
+
+test("rules written out beside a citation are the rules, untouched", () => {
+  const written = {
+    ...namedRuleSetTerms(DEFAULT_LINKAGE_RULE_SET.reference),
+    linkage_fields: [{ name: "ssn", type: "ssn" }],
+    linkage_keys: [{ name: "SSN", elements: [{ field: "ssn" }] }],
+  };
+  expect(linkageTermsWithNamedRuleSetRules(written, "psilink.yaml")).toBe(
+    written,
+  );
+});
+
+test("a citation of an unshipped set beside written rules is left alone", () => {
+  // Terms imported from a partner keep the citation their author wrote,
+  // including one naming a set psilink does not ship. Nothing is resolved for
+  // them, so nothing is refused either.
+  const written = {
+    ...namedRuleSetTerms({
+      fieldSet: { name: "no-such-fields", version: "9.9.9" },
+      keySet: { name: "no-such-keys", version: "9.9.9" },
+    }),
+    linkage_fields: [{ name: "ssn", type: "ssn" }],
+    linkage_keys: [{ name: "SSN", elements: [{ field: "ssn" }] }],
+  };
+  expect(linkageTermsWithNamedRuleSetRules(written, "psilink.yaml")).toBe(
+    written,
+  );
+});
+
+test("a named set beside one of the two rule lists is refused", () => {
+  const halfWritten = {
+    ...namedRuleSetTerms(DEFAULT_LINKAGE_RULE_SET.reference),
+    linkage_keys: [{ name: "SSN", elements: [{ field: "ssn" }] }],
+  };
+  expect(() =>
+    linkageTermsWithNamedRuleSetRules(halfWritten, "psilink.yaml"),
+  ).toThrow("writes linkage_keys but no linkage_fields");
+});
+
+test("a citation written in some other shape is left for the schema", () => {
+  const configPath = path.join(dir, "psilink.yaml");
+  fs.writeFileSync(
+    configPath,
+    YAML.stringify({
+      linkage_terms: {
+        ...namedRuleSetTerms(DEFAULT_LINKAGE_RULE_SET.reference),
+        linkage_rule_set: { field_set: "baseline-pii" },
+      },
+    }),
+  );
+  expect(() => loadConfigLinkageSource(configPath)).toThrow(
+    "has invalid linkage_terms",
+  );
+});
+
+test("configWithNamedRuleSetRules fills the terms and leaves the rest", () => {
+  const raw = {
+    connection: { channel: "filedrop", path: "/mnt/share" },
+    linkage_terms: namedRuleSetTerms(DEFAULT_LINKAGE_RULE_SET.reference),
+  };
+  const filled = configWithNamedRuleSetRules(raw, "psilink.yaml") as {
+    connection: unknown;
+    linkage_terms: { linkageKeys: unknown };
+  };
+  expect(filled.connection).toBe(raw.connection);
+  expect(filled.linkage_terms.linkageKeys).toEqual(
+    DEFAULT_LINKAGE_RULE_SET.linkageKeys,
+  );
+  // The caller's own value is left as it read it.
+  expect(raw.linkage_terms).not.toHaveProperty("linkageKeys");
+});
+
+test("a config with no linkage terms passes through untouched", () => {
+  const raw = { connection: { channel: "filedrop", path: "/mnt/share" } };
+  expect(configWithNamedRuleSetRules(raw, "psilink.yaml")).toBe(raw);
+});
+
 // --- warnOnLinkageRuleSetCitationDrift ---------------------------------------
 
 /** The warnings one drift check emits, in order. Terms default to the standing
@@ -4659,6 +4874,7 @@ function citationWarnings(
   terms: Pick<LinkageTerms, "linkageRuleSet" | "linkageFields" | "linkageKeys">,
   standing: LinkageTermsStanding = "held-alone",
   alternative: CitationDriftAlternative = "decline-to-reuse",
+  ruleSets?: ReadonlyArray<BuiltInLinkageRuleSet>,
 ): string[] {
   const warnings: string[] = [];
   warnOnLinkageRuleSetCitationDrift(
@@ -4667,8 +4883,22 @@ function citationWarnings(
     { warn: (message: string) => warnings.push(message) },
     standing,
     alternative,
+    ...(ruleSets === undefined ? [] : [ruleSets]),
   );
   return warnings;
+}
+
+/** Terms citing `ruleSet` over the rules `rules` declares, for the checks that
+ *  judge a citation against a set other than the default one. */
+function termsCiting(
+  ruleSet: BuiltInLinkageRuleSet,
+  rules: Pick<BuiltInLinkageRuleSet, "linkageFields" | "linkageKeys">,
+): Pick<LinkageTerms, "linkageRuleSet" | "linkageFields" | "linkageKeys"> {
+  return {
+    linkageRuleSet: ruleSet.reference,
+    linkageFields: [...rules.linkageFields],
+    linkageKeys: [...rules.linkageKeys],
+  };
 }
 
 /** The terms with their first two keys swapped: the smallest edit that takes
@@ -4748,6 +4978,50 @@ test("both halves edited are reported in one warning, each against its own set",
     `its linkage_keys are not drawn from the "${keySet.name}" ` +
       `${keySet.version} this build ships`,
   );
+});
+
+test("a non-default set's own rules under its citation draw no warning", () => {
+  expect(
+    citationWarnings(
+      termsCiting(OTHER_RULE_SET, OTHER_RULE_SET),
+      "held-alone",
+      "decline-to-reuse",
+      OTHER_RULE_SETS,
+    ),
+  ).toEqual([]);
+});
+
+test("the drift warning judges the cited set, not the default one", () => {
+  // The rules here are the default set's, whole and in order. What decides the
+  // verdict is the set the terms cite, which is not that one.
+  const warnings = citationWarnings(
+    termsCiting(OTHER_RULE_SET, DEFAULT_LINKAGE_RULE_SET),
+    "held-alone",
+    "decline-to-reuse",
+    OTHER_RULE_SETS,
+  );
+  expect(warnings).toHaveLength(1);
+  expect(warnings[0]).toContain(
+    'its linkage_keys are not drawn from the "other-keys" 4.2.0 this build ships',
+  );
+  expect(warnings[0]).toContain(
+    'its linkage_fields are not drawn from the "other-fields" 3.1.0 this ' +
+      "build ships",
+  );
+});
+
+test("a citation of a set the registry does not hold stays unchecked", () => {
+  // Nothing resolves the default set's name in a build shipping only the other
+  // one, so its rules are compared against nothing rather than against the
+  // set that happens to be there.
+  expect(
+    citationWarnings(
+      termsCiting(DEFAULT_LINKAGE_RULE_SET, OTHER_RULE_SET),
+      "held-alone",
+      "decline-to-reuse",
+      OTHER_RULE_SETS,
+    ),
+  ).toEqual([]);
 });
 
 test("a set name in the drift warning cannot forge the clause it is named in", () => {
