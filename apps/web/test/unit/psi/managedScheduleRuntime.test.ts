@@ -857,6 +857,7 @@ describe("the host that wakes the tick", () => {
         {
           id: "legacy-out-of-bounds",
           caughtUpMisses: 0,
+          caughtUpSkips: 0,
           attempts: 0,
           skipped: "unreadable" as const,
         },

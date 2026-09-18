@@ -30,7 +30,10 @@
  *   has said the secret may be in someone else's hands, so the window connects
  *   to nobody and rotates nothing. It is the window's own outcome rather than a
  *   partner absence, so it counts no miss, and the next window is attempted as
- *   soon as one of the three acts clears the response.
+ *   soon as one of the three acts clears the response. A window that opened
+ *   under the response and elapsed while nothing was running folds the same way
+ *   in the catch-up walk, so a machine asleep across several of them wakes with
+ *   the miss count where it stood.
  *
  * Two properties of the loop are not visible from the criteria they serve
  * (docs/spec/MANAGED_EXCHANGE_RECORD.md, "Occupying a due window"):
@@ -194,6 +197,9 @@ export interface ManagedScheduleTickEntry {
   /** Fully-elapsed windows the catch-up walk counted as missed before any
    * attempt. */
   caughtUpMisses: number;
+  /** Fully-elapsed windows the catch-up walk held back over the operator's
+   * compromise response, counted as neither an attempt nor a miss. */
+  caughtUpSkips: number;
   /** Attempts made inside the due window. */
   attempts: number;
   /** The window's disposition, absent where the wake neither occupied nor
@@ -238,6 +244,7 @@ export async function tickManagedSchedules(
     (id) => ({
       id,
       caughtUpMisses: 0,
+      caughtUpSkips: 0,
       attempts: 0,
       skipped: "unreadable" as const,
     }),
@@ -248,6 +255,7 @@ export async function tickManagedSchedules(
         return {
           id: record.id,
           caughtUpMisses: 0,
+          caughtUpSkips: 0,
           attempts: 0,
           skipped: "in-flight" as const,
         };
@@ -275,6 +283,7 @@ async function tickManagedScheduleRecord(
   const entry: ManagedScheduleTickEntry = {
     id: record.id,
     caughtUpMisses: 0,
+    caughtUpSkips: 0,
     attempts: 0,
   };
   const schedule = record.schedule;
@@ -299,8 +308,18 @@ async function occupyDueWindow(
   entry: ManagedScheduleTickEntry,
   seams: ManagedScheduleTickSeams,
 ): Promise<ManagedScheduleTickEntry> {
-  const catchUp = catchUpManagedSchedule(stored, record.lastRun, seams.now());
+  // The response is read off the tick's own snapshot because the walk decides
+  // windows that closed before this wake: the answer in force across them is the
+  // stored one, not whatever the catch-up write returns below.
+  const response = standingCompromiseResponse(record);
+  const catchUp = catchUpManagedSchedule(
+    stored,
+    record.lastRun,
+    seams.now(),
+    response === undefined ? undefined : parseStoredInstant(response.at),
+  );
   entry.caughtUpMisses = catchUp.missedWindows;
+  entry.caughtUpSkips = catchUp.skippedWindows;
 
   // The catch-up bookkeeping is written BEFORE anything is attempted, so an
   // attempt that never finishes still leaves the elapsed windows counted.
@@ -311,8 +330,8 @@ async function occupyDueWindow(
       schedule: catchUp.schedule,
       fromNextWindow: catchUp.fromNextWindow,
       fromConsecutiveMisses: catchUp.fromConsecutiveMisses,
-      ...(catchUp.missedLastRun !== undefined
-        ? { lastRun: catchUp.missedLastRun }
+      ...(catchUp.caughtUpLastRun !== undefined
+        ? { lastRun: catchUp.caughtUpLastRun }
         : {}),
     });
     // The write is conditioned on the plan it was computed from: a record some

@@ -565,7 +565,10 @@ On wake, before attempting anything, the runner applies one catch-up rule:
 
 - Every fully-elapsed, unattempted window counts as **one miss each**:
   `consecutiveMisses` is incremented by the count, and `lastRun` records the
-  most recent elapsed window as `"missed"`.
+  most recent elapsed window as `"missed"`. A window that opened at or after the
+  operator's [compromise response](#the-operators-response-to-it) is the one
+  exception: it is skipped rather than missed, on the rule [a due window under
+  that response](#a-due-window-under-the-operators-compromise-response) takes.
 - `nextWindow` advances past every fully-elapsed window to the first window not
   yet closed: if the current instant falls inside that window, the runner
   attempts it immediately; otherwise `nextWindow` is the first window opening
@@ -773,6 +776,12 @@ same single conditioned write every other window takes:
 - No standing condition is raised or altered. The condition the answer rides on
   is the one an earlier failure raised, and a window nothing was attempted in
   adds no evidence to it.
+
+A window that opened under the response and was already elapsed when the runner
+woke folds the same way in [catch-up](#catch-up-on-wake): it counts no miss, and
+the `lastRun` the catch-up write carries for the most recent such window states
+`"skipped"` at that window's close. A window that opened before the operator
+answered is still a miss -- nothing held it back at the time.
 
 It is not one of the three passed-over records above: those leave their window
 with no disposition, to be counted as missed at the wake that finds it elapsed,

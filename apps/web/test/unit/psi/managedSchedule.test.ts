@@ -265,7 +265,7 @@ describe("daylight saving", () => {
       );
       expect(caught.schedule.nextWindow).toBe("2026-03-17T14:00:00.000Z");
       expect(caught.missedWindows).toBe(2);
-      expect(caught.missedLastRun?.at).toBe("2026-03-10T17:00:00.000Z");
+      expect(caught.caughtUpLastRun?.at).toBe("2026-03-10T17:00:00.000Z");
       expect(caught.dueWindow?.index).toBe(2);
     });
   });
@@ -436,7 +436,7 @@ describe("catch-up on wake", () => {
     expect(caught.schedule).toEqual(weekly);
     expect(caught.missedWindows).toBe(0);
     expect(caught.dueWindow).toBeUndefined();
-    expect(caught.missedLastRun).toBeUndefined();
+    expect(caught.caughtUpLastRun).toBeUndefined();
   });
 
   test("a wake inside the planned window reports it due without advancing", () => {
@@ -459,7 +459,7 @@ describe("catch-up on wake", () => {
     expect(caught.missedWindows).toBe(1);
     expect(caught.schedule.consecutiveMisses).toBe(1);
     expect(caught.schedule.nextWindow).toBe("2026-01-13T14:00:00.000Z");
-    expect(caught.missedLastRun).toEqual({
+    expect(caught.caughtUpLastRun).toEqual({
       at: "2026-01-06T17:00:00.000Z",
       outcome: "missed",
     });
@@ -477,7 +477,66 @@ describe("catch-up on wake", () => {
     expect(caught.missedWindows).toBe(0);
     expect(caught.schedule.consecutiveMisses).toBe(0);
     expect(caught.schedule.nextWindow).toBe("2026-01-13T14:00:00.000Z");
-    expect(caught.missedLastRun).toBeUndefined();
+    expect(caught.caughtUpLastRun).toBeUndefined();
+  });
+
+  test("elapsed windows that opened under the response count no miss", () => {
+    const caught = catchUpManagedSchedule(
+      { ...weekly, nextWindow: "2026-01-13T14:00:00.000Z" },
+      undefined,
+      at("2026-02-03T15:00:00.000Z"),
+      at("2026-01-07T09:00:00.000Z"),
+    );
+    expect(caught.skippedWindows).toBe(3);
+    expect(caught.missedWindows).toBe(0);
+    expect(caught.schedule.consecutiveMisses).toBe(0);
+    expect(caught.dueWindow?.index).toBe(4);
+    expect(caught.caughtUpLastRun).toEqual({
+      at: "2026-01-27T17:00:00.000Z",
+      outcome: "skipped",
+    });
+  });
+
+  test("the same wake with no response standing counts every window a miss", () => {
+    const caught = catchUpManagedSchedule(
+      { ...weekly, nextWindow: "2026-01-13T14:00:00.000Z" },
+      undefined,
+      at("2026-02-03T15:00:00.000Z"),
+    );
+    expect(caught.skippedWindows).toBe(0);
+    expect(caught.missedWindows).toBe(3);
+    expect(caught.schedule.consecutiveMisses).toBe(3);
+    expect(caught.dueWindow?.index).toBe(4);
+    expect(caught.caughtUpLastRun).toEqual({
+      at: "2026-01-27T17:00:00.000Z",
+      outcome: "missed",
+    });
+  });
+
+  test("a window that opened before the response is still a miss", () => {
+    const caught = catchUpManagedSchedule(
+      { ...weekly, nextWindow: "2026-01-13T14:00:00.000Z" },
+      undefined,
+      at("2026-02-03T15:00:00.000Z"),
+      at("2026-01-16T09:00:00.000Z"),
+    );
+    // Window 1 opened before the operator answered, so a partner's absence is
+    // what passed it; windows 2 and 3 opened under the answer.
+    expect(caught.missedWindows).toBe(1);
+    expect(caught.skippedWindows).toBe(2);
+    expect(caught.schedule.consecutiveMisses).toBe(1);
+  });
+
+  test("a window opening at the response instant itself is held back", () => {
+    const caught = catchUpManagedSchedule(
+      { ...weekly, nextWindow: "2026-01-13T14:00:00.000Z" },
+      undefined,
+      at("2026-01-20T13:00:00.000Z"),
+      at("2026-01-13T14:00:00.000Z"),
+    );
+    expect(caught.skippedWindows).toBe(1);
+    expect(caught.missedWindows).toBe(0);
+    expect(caught.schedule.consecutiveMisses).toBe(0);
   });
 
   test("multiple elapsed windows count one miss each and land on a live one", () => {
@@ -493,7 +552,7 @@ describe("catch-up on wake", () => {
     expect(caught.schedule.nextWindow).toBe("2026-01-27T14:00:00.000Z");
     expect(caught.dueWindow?.index).toBe(3);
     // The most recent elapsed window holds the miss.
-    expect(caught.missedLastRun).toEqual({
+    expect(caught.caughtUpLastRun).toEqual({
       at: "2026-01-20T17:00:00.000Z",
       outcome: "missed",
     });
@@ -508,7 +567,7 @@ describe("catch-up on wake", () => {
     expect(caught.missedWindows).toBe(4);
     expect(caught.schedule.nextWindow).toBe("2026-02-03T14:00:00.000Z");
     expect(caught.dueWindow).toBeUndefined();
-    expect(caught.missedLastRun?.at).toBe("2026-01-27T17:00:00.000Z");
+    expect(caught.caughtUpLastRun?.at).toBe("2026-01-27T17:00:00.000Z");
   });
 
   test("the count includes the elapsed windows on top of the stored one", () => {
@@ -531,7 +590,7 @@ describe("catch-up on wake", () => {
     // that window 0 had built, so only the two after it remain.
     expect(caught.missedWindows).toBe(3);
     expect(caught.schedule.consecutiveMisses).toBe(2);
-    expect(caught.missedLastRun?.at).toBe("2026-01-27T17:00:00.000Z");
+    expect(caught.caughtUpLastRun?.at).toBe("2026-01-27T17:00:00.000Z");
   });
 
   test("a run in the most recent elapsed window keeps its own bookkeeping", () => {
@@ -545,7 +604,7 @@ describe("catch-up on wake", () => {
     // Three windows were missed, but the newest bookkeeping is the run's own
     // success, so the wake writes no miss over it.
     expect(caught.missedWindows).toBe(3);
-    expect(caught.missedLastRun).toBeUndefined();
+    expect(caught.caughtUpLastRun).toBeUndefined();
   });
 
   test("a handshake that ran and failed in an elapsed window is not a miss", () => {
@@ -561,7 +620,7 @@ describe("catch-up on wake", () => {
     expect(caught.missedWindows).toBe(0);
     expect(caught.schedule.consecutiveMisses).toBe(2);
     expect(caught.schedule.nextWindow).toBe("2026-02-03T14:00:00.000Z");
-    expect(caught.missedLastRun).toBeUndefined();
+    expect(caught.caughtUpLastRun).toBeUndefined();
   });
 
   test("a recorded miss in an elapsed window counts once, not twice", () => {
@@ -609,7 +668,7 @@ describe("catch-up on wake", () => {
     expect(caught.schedule.nextWindow).toBe("2026-02-03T14:00:00.000Z");
     // Window 2's miss is real bookkeeping the record never recorded; the write
     // path is what holds `lastRun` monotonic against the newer success.
-    expect(caught.missedLastRun).toEqual({
+    expect(caught.caughtUpLastRun).toEqual({
       at: "2026-01-20T17:00:00.000Z",
       outcome: "missed",
     });
@@ -729,7 +788,7 @@ describe("catch-up on wake", () => {
     expect(caught.schedule.consecutiveMisses).toBe(2192);
     expect(caught.dueWindow?.index).toBe(2192);
     expect(caught.schedule.nextWindow).toBe("2026-01-06T14:00:00.000Z");
-    expect(caught.missedLastRun?.at).toBe("2026-01-05T17:00:00.000Z");
+    expect(caught.caughtUpLastRun?.at).toBe("2026-01-05T17:00:00.000Z");
   });
 
   test("a span no stored cadence produces is refused rather than walked", () => {

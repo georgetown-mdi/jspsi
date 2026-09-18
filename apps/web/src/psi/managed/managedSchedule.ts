@@ -97,19 +97,25 @@ interface ManagedScheduleCatchUp {
    * must not have it restored by a walk that counted from the old one. */
   fromConsecutiveMisses: number;
   /** How many fully-elapsed windows passed unattempted -- one miss each,
-   * whichever side was absent. Zero when the wake found nothing elapsed. */
+   * whichever side was absent. Zero when the wake found nothing elapsed, and
+   * never counting a window `skippedWindows` holds. */
   missedWindows: number;
+  /** How many fully-elapsed windows opened under the operator's compromise
+   * response and so were withheld by this device rather than passed by an absent
+   * partner. They count no miss (see {@link nextConsecutiveMisses}). */
+  skippedWindows: number;
   /** The window to attempt immediately: the first window not yet closed, when
    * `now` falls inside it and no recorded success has already satisfied it.
    * Absent when that window has not opened yet. */
   dueWindow?: ManagedScheduleWindow;
-  /** The `"missed"` bookkeeping the most recent elapsed window earns, stamped at
-   * that window's close. Absent when no window elapsed, or when the most recent
-   * elapsed one already has a recorded run whose own bookkeeping stands. A run
-   * recorded in a LATER window that is still open leaves this stamp in place:
-   * the write path holds `lastRun` monotonic on `at` rather than resolving
-   * which entry is newer (see `applyManagedExchangeScheduleAdvance`). */
-  missedLastRun?: ManagedExchangeLastRun;
+  /** The bookkeeping the most recent elapsed unattempted window earns --
+   * `"missed"`, or `"skipped"` where the operator's response held it back --
+   * stamped at that window's close. Absent when no window elapsed, or when the
+   * most recent elapsed one already has a recorded run whose own bookkeeping
+   * stands. A run recorded in a LATER window that is still open leaves this
+   * stamp in place: the write path holds `lastRun` monotonic on `at` rather than
+   * resolving which entry is newer (see `applyManagedExchangeScheduleAdvance`). */
+  caughtUpLastRun?: ManagedExchangeLastRun;
 }
 
 /**
@@ -350,6 +356,13 @@ export function advanceManagedScheduleAfterWindow(
  * walk itself does not visit, is read the same way before the walk starts,
  * crediting a concurrent run's outcome recorded there.
  *
+ * An elapsed window with no recorded run that opened at or after
+ * `respondedAtMs` is `"skipped"` instead of missed: the operator's compromise
+ * response stood over that window, so this device withheld it and waited for no
+ * partner (docs/spec/MANAGED_EXCHANGE_RECORD.md, "A due window under the
+ * operator's compromise response"). A window that opened before the response is
+ * still a miss.
+ *
  * The walk is bounded by {@link MAX_CATCH_UP_WINDOWS}.
  *
  * `lastRun` is read as evidence, not validated: an entry whose `at` is not a
@@ -361,6 +374,11 @@ export function advanceManagedScheduleAfterWindow(
  *   not yet accounted for.
  * @param lastRun The record's run bookkeeping, if any.
  * @param nowMs The wake instant, UTC milliseconds.
+ * @param respondedAtMs The instant the operator gave the compromise response
+ *   standing on the record, UTC milliseconds, or `undefined` where none stands.
+ *   An instant that is not a usable one holds back no window, so every elapsed
+ *   window folds to `"missed"` -- the same conservative direction `lastRun`
+ *   takes above.
  * @throws {RangeError} if the schedule's lattice is unusable, if the wake
  *   instant is not a representable one, if the resumed window falls outside the
  *   range a stored UTC instant admits, or if the span from `nextWindow` to the
@@ -370,6 +388,7 @@ export function catchUpManagedSchedule(
   schedule: ManagedExchangeSchedule,
   lastRun: ManagedExchangeLastRun | undefined,
   nowMs: number,
+  respondedAtMs?: number,
 ): ManagedScheduleCatchUp {
   // The walk reads the wake instant against one window at a time, so a wake
   // instant that is not a real one would make every window read as elapsed and
@@ -408,9 +427,12 @@ export function catchUpManagedSchedule(
       ? 0
       : schedule.consecutiveMisses;
   let missedWindows = 0;
-  // The close of the most recent elapsed window that passed unattempted, cleared
-  // by a later elapsed window whose own recorded bookkeeping stands instead.
-  let missedCloseMs: number | undefined;
+  let skippedWindows = 0;
+  // The most recent elapsed window that passed unattempted, with the outcome it
+  // earns; cleared by a later elapsed window whose own recorded bookkeeping
+  // stands instead.
+  let caughtUp:
+    { closesAtMs: number; outcome: "missed" | "skipped" } | undefined;
   let dueWindow: ManagedScheduleWindow | undefined;
   let resume = windowAt(geometry, firstUnaccounted);
 
@@ -422,15 +444,26 @@ export function catchUpManagedSchedule(
       dueWindow = resume;
       break;
     }
+    // What a window with no run of its own earns: this device's own withhold
+    // where the operator's response already stood when the window opened, and a
+    // partner's absence otherwise.
+    const unrecordedOutcome =
+      respondedAtMs !== undefined && resume.opensAtMs >= respondedAtMs
+        ? "skipped"
+        : "missed";
     if (state === "elapsed") {
       if (recorded === undefined) {
-        missedWindows += 1;
-        missedCloseMs = resume.closesAtMs;
-      } else missedCloseMs = undefined;
+        if (unrecordedOutcome === "skipped") skippedWindows += 1;
+        else missedWindows += 1;
+        caughtUp = {
+          closesAtMs: resume.closesAtMs,
+          outcome: unrecordedOutcome,
+        };
+      } else caughtUp = undefined;
     }
     consecutiveMisses = nextConsecutiveMisses(
       consecutiveMisses,
-      recorded?.outcome ?? "missed",
+      recorded?.outcome ?? unrecordedOutcome,
     );
     if (resume.index - firstUnaccounted >= MAX_CATCH_UP_WINDOWS)
       throw new RangeError(
@@ -448,12 +481,13 @@ export function catchUpManagedSchedule(
     fromNextWindow: schedule.nextWindow,
     fromConsecutiveMisses: schedule.consecutiveMisses,
     missedWindows,
+    skippedWindows,
     ...(dueWindow !== undefined ? { dueWindow } : {}),
-    ...(missedCloseMs !== undefined
+    ...(caughtUp !== undefined
       ? {
-          missedLastRun: {
-            at: toScheduleInstant(missedCloseMs),
-            outcome: "missed" as const,
+          caughtUpLastRun: {
+            at: toScheduleInstant(caughtUp.closesAtMs),
+            outcome: caughtUp.outcome,
           },
         }
       : {}),

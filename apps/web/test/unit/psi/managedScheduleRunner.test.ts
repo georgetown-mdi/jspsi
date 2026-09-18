@@ -37,6 +37,7 @@ import { ManagedInputError } from "@psi/managed/managedInputGuard";
 import { PartnerNoShowError } from "@psi/transport/waitForConnection";
 import { RotationPersistError } from "@psi/managed/managedRunRotate";
 import { managedScheduleWindow } from "@psi/managed/managedSchedule";
+import { repeatedMissCoordination } from "@psi/managed/managedFailureCopy";
 
 import type {
   ManagedExchangeRecord,
@@ -718,13 +719,15 @@ describe("a due window under the operator's compromise response", () => {
 
   /** A record carrying an unanswered failure the operator has since answered
    * "something does not add up" at. */
-  function respondedRecord(): ManagedExchangeRecord {
+  function respondedRecord(
+    respondedAt = "2026-01-05T11:00:00.000Z",
+  ): ManagedExchangeRecord {
     return applyManagedExchangeCompromiseResponse(
       parseManagedExchangeRecord({
         ...recordWith(),
         standingCondition: { since: "2026-01-05T10:00:00.000Z", kind: "auth" },
       }),
-      "2026-01-05T11:00:00.000Z",
+      respondedAt,
     );
   }
 
@@ -732,6 +735,15 @@ describe("a due window under the operator's compromise response", () => {
     const stored = runner.stored.get(id);
     if (stored === undefined) throw new Error("the record went missing");
     return stored;
+  }
+
+  function storedSchedule(
+    runner: Harness,
+    id: string,
+  ): ManagedExchangeSchedule {
+    const { schedule } = storedRecord(runner, id);
+    if (schedule === undefined) throw new Error("the schedule went missing");
+    return schedule;
   }
 
   test("connects to nobody, rotates nothing, and advances on the window's own outcome", async () => {
@@ -784,6 +796,69 @@ describe("a due window under the operator's compromise response", () => {
       since: "2026-01-05T10:00:00.000Z",
       kind: "auth",
       response: { kind: "compromise", at: "2026-01-05T11:00:00.000Z" },
+    });
+  });
+
+  test("holds every window that elapsed under the answer, counting no miss", async () => {
+    const record = parseManagedExchangeRecord({
+      ...respondedRecord(),
+      schedule: { ...weekly, consecutiveMisses: 1 },
+    });
+    // Three windows opened and closed while the machine slept, and the wake
+    // lands inside the fourth.
+    const runner = harness({
+      records: [record],
+      startAt: "2026-01-27T14:30:00.000Z",
+    });
+
+    const [entry] = await tickManagedSchedules(runner.seams);
+
+    expect(entry).toMatchObject({
+      caughtUpMisses: 0,
+      caughtUpSkips: 3,
+      attempts: 0,
+      disposition: "skipped",
+    });
+    expect(runner.attempts).toHaveLength(0);
+    const schedule = storedSchedule(runner, record.id);
+    expect(schedule).toMatchObject({
+      nextWindow: "2026-02-03T14:00:00.000Z",
+      consecutiveMisses: 1,
+    });
+    expect(storedRecord(runner, record.id).lastRun).toEqual({
+      at: "2026-01-27T14:30:00.000Z",
+      outcome: "skipped",
+    });
+    // The miss count stands where it did, so the coordination prompt a run of
+    // absences earns is not put beside the answer's own message.
+    expect(repeatedMissCoordination(schedule)).toBeUndefined();
+  });
+
+  test("counts the window that elapsed before the answer, and only that one", async () => {
+    // The operator answered in the gap after the first window closed, so that
+    // window was a partner's absence and the two after it were this device's
+    // own withhold.
+    const record = respondedRecord("2026-01-10T09:00:00.000Z");
+    const runner = harness({
+      records: [record],
+      startAt: "2026-01-27T14:30:00.000Z",
+    });
+
+    const [entry] = await tickManagedSchedules(runner.seams);
+
+    expect(entry).toMatchObject({
+      caughtUpMisses: 1,
+      caughtUpSkips: 2,
+      attempts: 0,
+      disposition: "skipped",
+    });
+    expect(storedSchedule(runner, record.id)).toMatchObject({
+      nextWindow: "2026-02-03T14:00:00.000Z",
+      consecutiveMisses: 1,
+    });
+    expect(storedRecord(runner, record.id).lastRun).toEqual({
+      at: "2026-01-27T14:30:00.000Z",
+      outcome: "skipped",
     });
   });
 
@@ -1206,6 +1281,7 @@ describe("a stored entry the read could not parse", () => {
     expect(entries).toContainEqual({
       id: "legacy-out-of-bounds",
       caughtUpMisses: 0,
+      caughtUpSkips: 0,
       attempts: 0,
       skipped: "unreadable",
     });

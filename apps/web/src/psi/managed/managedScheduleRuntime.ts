@@ -627,6 +627,7 @@ function reportTick(entries: Array<ManagedScheduleTickEntry>): void {
     log.debug(
       `scheduled managed exchange ${entry.id}: ` +
         `${String(entry.caughtUpMisses)} caught-up miss(es), ` +
+        `${String(entry.caughtUpSkips)} caught-up skip(s), ` +
         `${String(entry.attempts)} attempt(s), ` +
         `${entry.disposition ?? entry.skipped ?? "nothing"}`,
     );
