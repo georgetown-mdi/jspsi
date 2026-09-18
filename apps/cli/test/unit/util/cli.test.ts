@@ -19,7 +19,11 @@ import {
 } from "@psilink/core";
 import type { ConnectionErrorKind } from "@psilink/core";
 
-import { openInputSource, writeOutput } from "../../../src/util/dataIo";
+import {
+  openInputSource,
+  stdoutDrainExpiredNotice,
+  writeOutput,
+} from "../../../src/util/dataIo";
 import {
   exitCodeForError,
   exitWithError,
@@ -911,6 +915,35 @@ test("writeOutput: the stdout branch waits for the last line to be flushed", asy
   } finally {
     stdoutSpy.mockRestore();
   }
+});
+
+test("writeOutput: a reader that stops taking the result fails the write at the ceiling", async () => {
+  // The other side of the drain: a consumer that has stopped reading holds the
+  // last line in the process forever, so the wait is bounded -- and what it
+  // reports at the bound is a failure, since the result is still here. A
+  // resolve would tell the run a result it is holding was delivered.
+  const stdoutSpy = vi
+    .spyOn(process.stdout, "write")
+    .mockImplementation(
+      ((_chunk: string | Uint8Array): boolean =>
+        true) as typeof process.stdout.write,
+    );
+  try {
+    await expect(
+      writeOutput(undefined, ["a"], [["1"]], logCollector(), 20),
+    ).rejects.toThrow(/still buffered/);
+  } finally {
+    stdoutSpy.mockRestore();
+  }
+});
+
+test("writeOutput: the drain failure says the exchange happened and how to receive it", async () => {
+  // The operator reads this beside exit 73, whose instruction is not to
+  // re-run: the notice has to say why, and what to change before any retry.
+  const notice = stdoutDrainExpiredNotice(60_000);
+  expect(notice).toContain("60s");
+  expect(notice).toContain("The exchange itself completed");
+  expect(notice).toContain("write the result to a path");
 });
 
 test("writeOutput: a redirected regular-file stdout warns at error level about umask exposure", async () => {

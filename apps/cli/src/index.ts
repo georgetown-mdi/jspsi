@@ -9,9 +9,10 @@ buildCli(hideBin(process.argv))
   .parseAsync()
   .then(() => {
     // The command has finished everything it owes -- every local write, the
-    // terminal event, the log flush -- so from here the process is only
-    // waiting for the event loop to empty. Bound that wait (see
-    // armProcessReturnGate); a clean loop exits before it and says nothing.
+    // drain that hands a stdout result to its reader, the terminal event, the
+    // log flush -- so from here the process is only waiting for the event loop
+    // to empty. Bound that wait (see armProcessReturnGate); a clean loop exits
+    // before it and says nothing.
     armProcessReturnGate();
   })
   .catch((err: unknown) => {

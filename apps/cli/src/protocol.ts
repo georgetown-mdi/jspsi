@@ -1695,16 +1695,18 @@ async function writeExchangeOutputs(params: {
     try {
       await writeOutput(output, headers, rows, log);
     } catch (err) {
-      // The result file did not reach disk -- the terminal form of the
-      // same loss the persistence-loss reports share: the exchange
-      // completed, only local generation failed, and re-running would
-      // re-send this party's data for an exchange that already
-      // happened. Set the persistence-loss code on the error so a
-      // command boundary reports it instead of the 69 a transport
-      // fault gets; exitCodeForError (util/exit.ts) prefers an error's
-      // own code, measured (not asserted) by exchange.test.ts and
-      // zeroSetup.test.ts driving each handler to a trapped
-      // process.exit. An error that already holds a code keeps it.
+      // The result did not reach where it was owed -- a file that did
+      // not reach disk, or a stdout reader that stopped taking it before
+      // the drain's ceiling -- the terminal form of the same loss the
+      // persistence-loss reports share: the exchange completed, only
+      // local delivery failed, and re-running would re-send this party's
+      // data for an exchange that already happened. Set the
+      // persistence-loss code on the error so a command boundary reports
+      // it instead of the 69 a transport fault gets; exitCodeForError
+      // (util/exit.ts) prefers an error's own code, measured (not
+      // asserted) by exchange.test.ts and zeroSetup.test.ts driving each
+      // handler to a trapped process.exit. An error that already holds a
+      // code keeps it.
       if (
         typeof err === "object" &&
         err !== null &&

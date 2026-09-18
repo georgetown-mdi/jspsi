@@ -171,8 +171,20 @@ function partyArgs(party: "a" | "b", output: string[]): string[] {
   ];
 }
 
-/** Run one party to completion, through `tsx` as the test suite runs the CLI. */
-function runParty(entry: string, args: string[]): Promise<FinishedParty> {
+/**
+ * Run one party to completion, through `tsx` as the test suite runs the CLI.
+ *
+ * `firstReadDelayMs` makes the parent a slow reader of the party's stdout: it
+ * stops reading for that long once the first chunk arrives, then takes the
+ * rest at speed. A result larger than the pipe's own buffer therefore cannot
+ * finish leaving the party before that wait is over. Left at 0 the parent
+ * reads as fast as the party writes.
+ */
+function runParty(
+  entry: string,
+  args: string[],
+  { firstReadDelayMs = 0 }: { firstReadDelayMs?: number } = {},
+): Promise<FinishedParty> {
   const child = spawn(
     process.execPath,
     [require.resolve("tsx/cli"), entry, ...args],
@@ -180,15 +192,23 @@ function runParty(entry: string, args: string[]): Promise<FinishedParty> {
   );
   let stdout = "";
   let stderr = "";
-  child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
+  let delayed = firstReadDelayMs === 0;
+  child.stdout.on("data", (chunk: Buffer) => {
+    stdout += chunk.toString();
+    if (delayed) return;
+    delayed = true;
+    child.stdout.pause();
+    setTimeout(() => child.stdout.resume(), firstReadDelayMs).unref();
+  });
   child.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
   const deadline = setTimeout(() => child.kill("SIGKILL"), PARTY_DEADLINE_MS);
   return new Promise<FinishedParty>((resolve) => {
-    child.once("exit", (exitCode, signal) => {
+    // `close` rather than `exit`: the party can exit with its last chunk still
+    // in a pipe this side has not read, and what it wrote -- the result on
+    // stdout, the probe's own markers on stderr -- is what each case reads.
+    child.once("close", (exitCode, signal) => {
       clearTimeout(deadline);
-      // Let the last chunk of either pipe land: `exit` can arrive before they
-      // have drained, and the probe's own markers are on stderr.
-      setImmediate(() => resolve({ exitCode, signal, stdout, stderr }));
+      resolve({ exitCode, signal, stdout, stderr });
     });
   });
 }
@@ -197,13 +217,14 @@ function runParty(entry: string, args: string[]): Promise<FinishedParty> {
 async function runBoth(params: {
   probeArgs: string[];
   probeOutput: string[];
+  firstReadDelayMs?: number;
 }): Promise<{ probe: FinishedParty; peer: FinishedParty }> {
   const [probe, peer] = await Promise.all([
-    runParty(probeEntry, [
-      ...params.probeArgs,
-      "--",
-      ...partyArgs("a", params.probeOutput),
-    ]),
+    runParty(
+      probeEntry,
+      [...params.probeArgs, "--", ...partyArgs("a", params.probeOutput)],
+      { firstReadDelayMs: params.firstReadDelayMs },
+    ),
     runParty(cliEntry, partyArgs("b", [path.join(work, "b-out.csv")])),
   ]);
   return { probe, peer };
@@ -328,6 +349,79 @@ test(
     expect(probe.stderr).toContain("still held open");
     const rows = probe.stdout.trimEnd().split("\n");
     expect(rows).toHaveLength(MATCHED_ROWS + 1);
+    expect(rows[0]).toContain("row_id");
+  },
+  CASE_TIMEOUT_MS,
+);
+
+/**
+ * Both parties' inputs, rewritten as `count` records they share, so the result
+ * is that many matched rows. The records differ from one another in every
+ * field, which keeps the match one-to-one and the result's size a function of
+ * the count alone.
+ */
+function writeMatchedInputs(count: number): void {
+  const letters = (index: number): string => {
+    let suffix = "";
+    let left = index;
+    do {
+      suffix = String.fromCharCode(65 + (left % 26)) + suffix;
+      left = Math.floor(left / 26);
+    } while (left > 0);
+    return suffix;
+  };
+  const rows: string[] = [];
+  for (let i = 0; i < count; i += 1) {
+    const month = String((i % 12) + 1).padStart(2, "0");
+    const day = String((i % 28) + 1).padStart(2, "0");
+    rows.push(
+      `${100000000 + i},SMITH${letters(i)},JOHN${letters(i)},1990${month}${day}`,
+    );
+  }
+  const csv = `${CSV_HEADER}\n${rows.join("\n")}\n`;
+  fs.writeFileSync(path.join(work, "a-input.csv"), csv);
+  fs.writeFileSync(path.join(work, "b-input.csv"), csv);
+}
+
+/** Records enough for a result past any pipe buffer the platform gives it. */
+const LARGE_RESULT_RECORDS = 8_000;
+
+/**
+ * How long the reading side stops once the result starts arriving. Above the
+ * gate budget, so a gate armed while the result was still draining would
+ * return the process before the last line had left it.
+ */
+const FIRST_READ_DELAY_MS = 2_000;
+
+test(
+  "a result still draining to a slow reader is delivered whole",
+  async () => {
+    // The result is larger than the pipe holds and the reader stops taking it
+    // for longer than the gate's budget, so the drain is still running well
+    // past that budget. The gate is armed after the command settles, which is
+    // after the drain, and this is what says so: a gate armed beside it would
+    // return the process at the budget and cut the result off.
+    writeMatchedInputs(LARGE_RESULT_RECORDS);
+    const { probe } = await runBoth({
+      probeArgs: [
+        "--probe-gate-budget-ms",
+        String(PROBE_GATE_BUDGET_MS),
+        "--probe-leak-ms",
+        String(LEAK_MS),
+        "--probe-obligation-ms",
+        "0",
+      ],
+      probeOutput: [],
+      firstReadDelayMs: FIRST_READ_DELAY_MS,
+    });
+
+    expect(probe.exitCode).toBe(0);
+    expect(probe.stderr).toContain("still held open");
+    // Past the smallest pipe buffer a platform here gives: the last line
+    // could not have been flushed before the reader took what came first.
+    expect(probe.stdout.length).toBeGreaterThan(64 * 1024);
+    const rows = probe.stdout.trimEnd().split("\n");
+    expect(rows).toHaveLength(LARGE_RESULT_RECORDS + 1);
     expect(rows[0]).toContain("row_id");
   },
   CASE_TIMEOUT_MS,

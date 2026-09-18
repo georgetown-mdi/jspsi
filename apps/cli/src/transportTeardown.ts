@@ -1,11 +1,13 @@
-// The ceiling on closing a run's transport. Everything the exchange owes
-// locally is awaited with no budget -- a wedged local write is the
-// supervisor's kill budget to bound, not this one's -- so the transport's
-// teardown is the single obligation a finished run stops waiting on, and this
-// module holds how long it waits and what it reports when it stops.
+// The ceiling on closing a run's transport: how long a finished run waits for
+// it and what it reports when it stops. Every local artifact the exchange owes
+// a path is awaited with no budget -- a wedged write to disk is the
+// supervisor's kill budget to bound, not this one's -- so what a finished run
+// bounds is the close here and, where the result goes to stdout instead of a
+// path, the drain that hands it to the reader (util/dataIo).
 
 import type { ConnectionConfig } from "@psilink/core";
 
+import { settleWithinCeiling, type CeilingOutcome } from "./util/ceiling";
 import { heldResourceKinds } from "./util/exitGate";
 
 /**
@@ -43,11 +45,7 @@ export function transportTeardownCeilingMs(
 }
 
 /** How a run's transport teardown ended. */
-export interface TeardownOutcome {
-  /** Whether the close finished inside its ceiling. */
-  finished: boolean;
-  /** Wall-clock the close was waited on, in whole milliseconds. */
-  elapsedMs: number;
+export interface TeardownOutcome extends CeilingOutcome {
   /**
    * The resource kinds still holding the event loop when the ceiling was
    * reached; empty when the close finished.
@@ -56,44 +54,20 @@ export interface TeardownOutcome {
 }
 
 /**
- * Wait for `close` for at most `ceilingMs`, reporting which way it ended.
+ * Wait for `close` for at most `ceilingMs`, reporting which way it ended and,
+ * where it did not finish, what was still holding the event loop.
  *
- * On expiry the close is left running: it is the transport's own idempotent
- * teardown and may still complete, and nothing here can safely cancel it. Its
- * eventual rejection is absorbed rather than left to surface as an unhandled
- * rejection after the caller has moved on.
- *
- * The deadline timer is ref'd on purpose. A close that neither settles nor
- * holds the loop would otherwise let the process exit before the ceiling is
- * reached, and the run would report nothing about a teardown it abandoned.
+ * The race itself, and what it does with a close that outlives the ceiling, is
+ * {@link settleWithinCeiling}. An expiry here is housekeeping the run reports
+ * and carries on from ({@link teardownCeilingNotice}), not a failure: the
+ * exchange and everything it owed are already finished when this is called.
  */
 export async function closeWithinCeiling(
   ceilingMs: number,
   close: () => Promise<void>,
 ): Promise<TeardownOutcome> {
-  const startedAt = Date.now();
-  let deadline: NodeJS.Timeout | undefined;
-  const expired = new Promise<"expired">((resolve) => {
-    deadline = setTimeout(() => resolve("expired"), ceilingMs);
-  });
-  try {
-    const outcome = await Promise.race([
-      close().then(
-        () => "closed" as const,
-        () => "closed" as const,
-      ),
-      expired,
-    ]);
-    if (outcome === "closed")
-      return { finished: true, elapsedMs: Date.now() - startedAt, heldBy: [] };
-    return {
-      finished: false,
-      elapsedMs: Date.now() - startedAt,
-      heldBy: heldResourceKinds(),
-    };
-  } finally {
-    if (deadline !== undefined) clearTimeout(deadline);
-  }
+  const outcome = await settleWithinCeiling(ceilingMs, close);
+  return { ...outcome, heldBy: outcome.finished ? [] : heldResourceKinds() };
 }
 
 /**

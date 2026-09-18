@@ -12,6 +12,7 @@ import {
 } from "@psilink/core";
 
 import { createOwnerOnlyWriteStream } from "../fileUtils";
+import { settleWithinCeiling } from "./ceiling";
 
 /**
  * Resolve a CSV input positional to the readable stream core's `loadCSVFile`
@@ -90,17 +91,31 @@ function stdoutIsRedirectedFile(): boolean {
 
 /**
  * How long the stdout result waits to be flushed before the run gives up on
- * the reader and carries on. A pipe's consumer sets the pace, so the drain
- * is normally as long as that consumer takes to read a few hundred kilobytes;
- * this bounds the other case, a consumer that has stopped reading altogether
- * and would otherwise hold a finished run open with no one left to receive
- * what it is holding.
+ * the reader. A pipe's consumer sets the pace, so the drain is normally as
+ * long as that consumer takes to read a few hundred kilobytes; this bounds the
+ * other case, a consumer that has stopped reading altogether and would
+ * otherwise hold a finished run open with no one left to receive what it is
+ * holding.
  */
 export const STDOUT_RESULT_DRAIN_CEILING_MS = 60_000;
 
 /**
- * Write the result CSV to stdout and resolve once the last line has left the
- * process, or at {@link STDOUT_RESULT_DRAIN_CEILING_MS}.
+ * What the run reports when the drain reached its ceiling: the result was not
+ * delivered, and the exchange it came from still happened.
+ */
+export function stdoutDrainExpiredNotice(ceilingMs: number): string {
+  return (
+    `the result was still buffered ${Math.round(ceilingMs / 1000)}s after it ` +
+    `was handed to stdout, so the reader has stopped taking it and what is ` +
+    `past that point is lost. The exchange itself completed, so re-running ` +
+    `conducts a second one: fix the receiving command to keep reading, and ` +
+    `write the result to a path instead of a pipe if it cannot.`
+  );
+}
+
+/**
+ * Write the result CSV to stdout, resolving once the last line has left the
+ * process and REJECTING if that has not happened within `ceilingMs`.
  *
  * The drain waits on the LAST LINE's own write callback. A zero-length chunk
  * written after the rows is not equivalent: measured against a reader taking
@@ -108,21 +123,20 @@ export const STDOUT_RESULT_DRAIN_CEILING_MS = 60_000;
  * already empty while the real write is still in flight, and an exit taken on
  * it truncated the result (45,582 of 50,000 lines), where the last line's
  * callback delivered all 50,000.
+ *
+ * Reaching the ceiling is a result that was not delivered, which is what the
+ * caller's own result-write failure path reports, so it is raised rather than
+ * resolved: resolving would hand back a flush and a give-up as the same
+ * outcome, and the run would report a result it still holds as written.
  */
-function writeResultToStdout(
+async function writeResultToStdout(
   headers: string[],
   rows: Array<Array<string>>,
+  ceilingMs: number,
 ): Promise<void> {
-  return new Promise<void>((resolve) => {
-    let settled = false;
-    const flushed = (): void => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(ceiling);
-      resolve();
-    };
-    const ceiling = setTimeout(flushed, STDOUT_RESULT_DRAIN_CEILING_MS);
+  const drained = new Promise<void>((resolve) => {
     const lastRow = rows.length - 1;
+    const flushed = (): void => resolve();
     process.stdout.write(
       headers.join(",") + "\n",
       rows.length === 0 ? flushed : undefined,
@@ -134,6 +148,8 @@ function writeResultToStdout(
       );
     });
   });
+  const outcome = await settleWithinCeiling(ceilingMs, () => drained);
+  if (!outcome.finished) throw new Error(stdoutDrainExpiredNotice(ceilingMs));
 }
 
 /**
@@ -161,13 +177,15 @@ function writeResultToStdout(
  * result CSV as written.
  *
  * The stdout branch (no path given) writes to `process.stdout` and resolves
- * once the last line has been flushed to the descriptor, or after
- * {@link STDOUT_RESULT_DRAIN_CEILING_MS} if the reader has stopped consuming.
- * A write to a pipe is buffered, so resolving before the flush would hand the
- * caller a result that is only partly out of the process, and the run's exit
- * would truncate it. The drain is bounded rather than unbounded because a
- * reader that never reads again would otherwise hold the run forever; what is
- * past the bound is lost, as a `>`-redirected result on a full disk already is.
+ * once the last line has been flushed to the descriptor. A write to a pipe is
+ * buffered, so resolving before the flush would hand the caller a result that
+ * is only partly out of the process, and the run's exit would truncate it.
+ * That wait is bounded -- a reader that never reads again would otherwise hold
+ * the run forever -- and reaching the bound rejects, on the same channel as
+ * the file branch's own faults: what the reader did not take is as lost as a
+ * result that never reached disk, and the caller reports both the same way.
+ * `drainCeilingMs` is that bound; it is a parameter so a test can drive the
+ * expiry rather than wait one out.
  *
  * Before it writes, it checks whether stdout is a redirected
  * regular file ({@link stdoutIsRedirectedFile}) and, if so, notifies the
@@ -185,6 +203,7 @@ export function writeOutput(
   headers: string[],
   rows: Array<Array<string>>,
   log: { error: (message: string) => void },
+  drainCeilingMs: number = STDOUT_RESULT_DRAIN_CEILING_MS,
 ): Promise<void> {
   if (output === undefined) {
     if (stdoutIsRedirectedFile())
@@ -196,7 +215,7 @@ export function writeOutput(
           "redirecting stdout with `>` to have psilink create the result " +
           "owner-only.",
       );
-    return writeResultToStdout(headers, rows);
+    return writeResultToStdout(headers, rows, drainCeilingMs);
   }
   return new Promise<void>((resolve, reject) => {
     // createOwnerOnlyWriteStream is inside the executor so a synchronous failure
