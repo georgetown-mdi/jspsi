@@ -19,11 +19,11 @@
  * chokepoint and the strict key-pair schema ({@link keyFileFieldsSchema}), and only
  * a validated pair reaches the store. Nothing here writes: the store's re-take
  * ({@link retakeHandedOffManagedExchange}) is the single cross-store step that
- * installs the secret and clears the spent state, under the run+rotate lock. A file
- * whose secret is installed leaves the record marked imported: no check here tells a
- * current key file from a stale one, so an authentication failure at the next run
- * has that benign reading available until a run succeeds
- * ({@link ./managedFailureTiers.ts}).
+ * installs the secret and clears the spent state, under the run+rotate lock. Either
+ * route leaves the record marked imported: no check here tells a current key file
+ * from a stale one, and none can check the attestation that nothing has run on the
+ * other machine, so an authentication failure at the next run has that benign
+ * reading available until a run succeeds ({@link ./managedFailureTiers.ts}).
  *
  * Where the key file cannot be produced at all, the recovery is the one a stale
  * secret always has: take the exchange back without it and mint a fresh invitation
@@ -64,8 +64,8 @@ export function parseManagedKeyFile(source: string): ManagedExchangeKeyFields {
  * without a database. */
 export interface ManagedRetakeDeps {
   /** Clear the record's spent state, installing `key`'s secret where it has moved
-   * past the stored one and marking that install an import as of `at`, in one store
-   * step under the run+rotate lock. */
+   * past the stored one and marking the record imported -- as of `at` where that
+   * install happened -- in one store step under the run+rotate lock. */
   retake: (
     id: string,
     at: string,

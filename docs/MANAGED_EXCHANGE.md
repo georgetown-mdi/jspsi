@@ -1072,6 +1072,12 @@ the exchange back without it and create a fresh invitation for the partner from 
 same page -- the recovery for any secret this browser cannot match ([Recovery: fast
 re-invite](#recovery-fast-re-invite)).
 
+An exchange taken back either way counts as restored until a run succeeds here. So
+if a command-line run did happen after all, and the secret stored here is behind the
+partner's, the next run's failure reports that benign state and its re-invite
+recovery instead of sending you to check with your partner out of band ([Telling a
+desync from an attack](#telling-a-desync-from-an-attack)).
+
 Declining the confirmation writes nothing: the exchange stays handed off, and the
 files on the other machine stay its backup of record. The exchange comes back as
 it was -- same terms, same label, same schedule, same accounting of disclosures --

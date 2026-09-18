@@ -819,10 +819,14 @@ export type ManagedRetakeOutcome =
  * needs reading in. A `key` whose secret has moved past the stored one is applied
  * through {@link applyManagedExchangeRotation}, the same field-scoped write a run's
  * own rotation takes, and clears the backup marker with it: the secret has advanced,
- * so any earlier export of this exchange no longer holds it. That install is stamped
- * as an import as of `at`, nothing here being able to tell a current key file from a
- * stale or wrong one, so a handshake failure at the next run tiers as imported until
- * a run succeeds ({@link ./managedFailureTiers.ts}).
+ * so any earlier export of this exchange no longer holds it.
+ *
+ * Either way the entry is left marked imported -- as of `at` where a key file
+ * installed a secret, and as of the hand-off instant where none was chosen. Nothing
+ * here can tell a current key file from a stale or wrong one, and nothing here can
+ * check the attestation that no command-line run has happened, so a handshake
+ * failure at the next run tiers as imported, with the re-invite recovery, until a
+ * run succeeds ({@link ./managedFailureTiers.ts}).
  *
  * A `lastRun` recording the `handed-off` refusal is dropped in the same
  * transaction, with or without a key ({@link clearHandedOffLastRun}); every other
@@ -853,8 +857,8 @@ export async function retakeHandedOffManagedExchange(
 
 /** The re-take itself, run under the record's run+rotate lock: the cross-store
  * transaction that reads the hand-off, applies the key file's secret where it has
- * advanced and records that install as an import as of `at`, drops the hand-off's
- * own run refusal, and clears the spent state. */
+ * advanced, marks the entry imported, drops the hand-off's own run refusal, and
+ * clears the spent state. */
 async function retakeSpentCopy(
   id: string,
   at: string,
@@ -898,7 +902,13 @@ async function retakeSpentCopy(
             : stored;
           const retaken = clearHandedOffLastRun(rotated);
           if (retaken !== stored) records.put(retaken);
-          clearSpentOnLocalStore(local, id, current, advanced ? at : undefined);
+          clearSpentOnLocalStore(
+            local,
+            id,
+            current,
+            advanced ? at : current.spent.spentAt,
+            advanced,
+          );
           outcome = { kind: "retaken", record: retaken };
         } catch (error) {
           failure = error;
@@ -918,30 +928,27 @@ async function retakeSpentCopy(
 
 /**
  * Drop the spent state from a record's sibling entry, on an already-open local-state
- * object store inside a live transaction. `installedAt` is set where the re-take
- * advanced the secret from a key file: the backup marker goes, the secret having
- * moved past any earlier export, and the entry is left marked imported as of that
- * instant, nothing here being able to check the file's currency. Deletes the whole
- * entry rather than leaving an empty one behind.
+ * object store inside a live transaction, leaving it marked imported as of
+ * `importedAt`: what the copy taken back holds cannot be checked here, whether the
+ * operator chose a key file or attested that nothing has run since the hand-off.
+ * `secretAdvanced` says a key file's newer secret was installed, which drops the
+ * backup marker with it -- no earlier export holds that secret -- while a re-take
+ * that installed nothing keeps it.
  */
 function clearSpentOnLocalStore(
   store: IDBObjectStore,
   id: string,
   current: ManagedLocalState,
-  installedAt: string | undefined,
+  importedAt: string,
+  secretAdvanced: boolean,
 ): void {
-  const kept: ManagedLocalState =
-    installedAt !== undefined
-      ? { imported: { importedAt: installedAt } }
-      : {
-          ...(current.backup !== undefined ? { backup: current.backup } : {}),
-          ...(current.imported !== undefined
-            ? { imported: current.imported }
-            : {}),
-        };
-  if (kept.backup === undefined && kept.imported === undefined)
-    store.delete(id);
-  else store.put(parseManagedLocalState(kept), id);
+  const kept: ManagedLocalState = {
+    ...(secretAdvanced || current.backup === undefined
+      ? {}
+      : { backup: current.backup }),
+    imported: { importedAt },
+  };
+  store.put(parseManagedLocalState(kept), id);
 }
 
 /**
