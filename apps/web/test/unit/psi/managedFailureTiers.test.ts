@@ -90,6 +90,16 @@ describe("deriveManagedFailureTier: tier per recorded benign state", () => {
     ).toBe("missed");
   });
 
+  test("a skipped window is no failure of its own, and never the no-show tier", () => {
+    expect(
+      deriveManagedFailureTier(
+        record({ lastRun: { at: RUN_AT, outcome: "skipped" } }),
+        undefined,
+        NOW,
+      ),
+    ).toBe("none");
+  });
+
   test("a recorded input failure is the benign input tier", () => {
     expect(
       deriveManagedFailureTier(
@@ -411,6 +421,25 @@ describe("readManagedFailure: a standing condition outlives the stamps after it"
         NOW,
       ),
     ).toEqual({ tier: "storage", standing: true });
+  });
+
+  test("the answered condition still reads through the window it skipped", () => {
+    // The stamp a skipped window leaves holds no failure, so the condition the
+    // operator's answer rides on is what the surfaces show across it.
+    expect(
+      readManagedFailure(
+        record({
+          lastRun: { at: LATER_RUN_AT, outcome: "skipped" },
+          standingCondition: {
+            since: RAISED_AT,
+            kind: "auth",
+            response: { kind: "compromise", at: LATER_RUN_AT },
+          },
+        }),
+        undefined,
+        NOW,
+      ),
+    ).toEqual({ tier: "unexplained", standing: true });
   });
 
   test("it survives however many no-shows follow: the reading is of the condition, not the run", () => {

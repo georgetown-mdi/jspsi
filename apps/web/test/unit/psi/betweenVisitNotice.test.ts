@@ -190,6 +190,76 @@ describe("betweenVisitNotice: the missed window", () => {
   });
 });
 
+describe("betweenVisitNotice: the window an answer held back", () => {
+  /** The record a skipped window leaves: the answered condition, and the window's
+   * own outcome where a run's would have been. */
+  function skipped(): ManagedExchangeRecord {
+    return record({
+      lastRun: { at: RUN_AT, outcome: "skipped" },
+      standingCondition: {
+        since: "2026-07-13T09:00:00.000Z",
+        kind: "auth",
+        response: { kind: "compromise", at: "2026-07-13T10:00:00.000Z" },
+      },
+    });
+  }
+
+  test("names the exchange, what stopped the run, and the way back", () => {
+    const notice = betweenVisitNotice({
+      record: skipped(),
+      local: undefined,
+      caughtUpMisses: 0,
+      disposition: "skipped",
+      now: NOW,
+    });
+
+    expect(notice?.kind).toBe("skipped");
+    expect(notice?.body).toContain("Riverbend quarterly");
+    expect(notice?.body).toContain("something did not add up");
+    expect(notice?.body).toContain("clear it");
+  });
+
+  test("is not the miss notice, whatever the misses beside it", () => {
+    const notice = betweenVisitNotice({
+      record: skipped(),
+      local: undefined,
+      // A wake that found windows elapsed before this one still reports the
+      // answer holding the schedule, not another quiet miss.
+      caughtUpMisses: 3,
+      disposition: "skipped",
+      now: NOW,
+    });
+
+    expect(notice?.kind).toBe("skipped");
+  });
+
+  test("holds every window it skips to one notice: the tag is the standing state", () => {
+    const first = betweenVisitNotice({
+      record: skipped(),
+      local: undefined,
+      caughtUpMisses: 0,
+      disposition: "skipped",
+      now: NOW,
+    });
+    const second = betweenVisitNotice({
+      record: record({
+        lastRun: { at: "2026-07-15T09:00:00.000Z", outcome: "skipped" },
+        standingCondition: {
+          since: "2026-07-13T09:00:00.000Z",
+          kind: "auth",
+          response: { kind: "compromise", at: "2026-07-13T10:00:00.000Z" },
+        },
+      }),
+      local: undefined,
+      caughtUpMisses: 0,
+      disposition: "skipped",
+      now: NOW,
+    });
+
+    expect(first?.tag).toBe(second?.tag);
+  });
+});
+
 describe("betweenVisitNotice: the failures that need the operator", () => {
   const cases: Array<{
     tier: ManagedFailureTier;

@@ -2,7 +2,7 @@
  * What the installed app runtime tells the operator between visits, derived from
  * the run bookkeeping the next visit's surfaces read: the window's disposition,
  * the record's `lastRun` and `consecutiveMisses`, the local backup marker, and the
- * failure tier those resolve to. Five moments earn a notification and everything
+ * failure tier those resolve to. Six moments earn a notification and everything
  * else stays quiet (docs/MANAGED_EXCHANGE.md, "The between-visit notification").
  *
  * Pure, and a reader only: it writes nothing, keeps no status of its own, and can
@@ -13,8 +13,9 @@
  * fires. A tag naming one occurrence -- a run that just finished, a window that
  * just passed -- differs at every occurrence, so each fires once; a tag naming a
  * STANDING state -- repeated misses, an input the runs cannot use, a refused
- * disclosure, an unverified partner -- is the same string while that state stands,
- * so the second window that meets it says nothing further
+ * disclosure, an unverified partner, an answer that holds the schedule -- is the
+ * same string while that state stands, so the second window that meets it says
+ * nothing further
  * ({@link ./managedScheduleRuntime.ts} holds the comparison).
  */
 
@@ -42,6 +43,7 @@ import type { ManagedScheduleWindowDisposition } from "./managedSchedule";
 export type BetweenVisitNoticeKind =
   | "backup"
   | "missed"
+  | "skipped"
   | "repeated-misses"
   | "input"
   | "terms-shortfall"
@@ -74,7 +76,8 @@ export interface BetweenVisitNoticeInput {
   local: ManagedLocalState | undefined;
   /** Fully-elapsed windows this wake's catch-up walk counted before any attempt. */
   caughtUpMisses: number;
-  /** The window's disposition, absent where no window was occupied. */
+  /** The window's disposition, absent where the wake neither occupied nor
+   * skipped a window. */
   disposition?: ManagedScheduleWindowDisposition;
   /** The instant the notice is derived at, for the failure tiering's lapse check. */
   now: number;
@@ -84,14 +87,15 @@ export interface BetweenVisitNoticeInput {
  * the next visit's own alert holds its title to
  * ({@link ../../recurring/managedRunLaunchModel.ts}), which
  * betweenVisitNotice.test.ts holds this surface's titles equal to; the
- * completed-run and missed-window titles are this surface's own, the next
- * visit having no alert for either. */
+ * completed-run, missed-window and skipped-window titles are this surface's own,
+ * the next visit having no alert for any of them. */
 const NOTICE_TITLES: Record<
   Exclude<BetweenVisitNoticeKind, "repeated-misses">,
   string
 > = {
   backup: "A scheduled run finished; back up this exchange",
   missed: "A scheduled run did not happen",
+  skipped: "Scheduled runs are on hold",
   input: INPUT_FAILURE_TITLE,
   "terms-shortfall": TERMS_SHORTFALL_FAILURE_TITLE,
   consent: CONSENT_FAILURE_TITLE,
@@ -111,9 +115,10 @@ const NOTIFIED_FAILURE_TIERS: ReadonlySet<ManagedFailureTier> = new Set([
  * The notice one record's window earns, or `undefined` where it earns none.
  *
  * The order is the design's: a completed run's stale backup first, then the
- * failures that block every later window, then the misses -- so a window that
- * failed for a reason the operator must answer says that rather than counting
- * another quiet miss beside it.
+ * failures that block every later window, then the window the operator's own
+ * answer held back, then the misses -- so a window that did not run for a reason
+ * the operator must answer says that rather than counting another quiet miss
+ * beside it.
  *
  * The switch is exhaustive over `disposition` (including `undefined`, for a
  * wake that occupied no window) with a `default` narrowed to `never`: a new
@@ -146,6 +151,18 @@ export function betweenVisitNotice(
       if (notice !== undefined) return notice;
       break;
     }
+    case "skipped":
+      return {
+        kind: "skipped",
+        title: NOTICE_TITLES.skipped,
+        body:
+          `${name} had a run window pass with no run: you answered that ` +
+          `something did not add up about a failure on it, and its scheduled ` +
+          `runs stop while that answer stands. Open this app and clear it once ` +
+          `your partner confirms on a channel you trust, or delete the ` +
+          `exchange.`,
+        tag: noticeTag(record.id, "skipped"),
+      };
     case "missed":
     case "unattempted":
     case undefined:

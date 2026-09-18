@@ -70,10 +70,12 @@ type ManagedScheduleWindowState = "before" | "open" | "elapsed";
 
 /**
  * What a window's occupancy produced, as the advance rules read it. The run
- * outcomes are the record's own closed enum; `"unattempted"` is the extra case
- * the record cannot hold by design -- a window this runner never attempted,
- * because the single-writer lock was held elsewhere -- which advances the
- * schedule past the window while recording neither an attempt nor a miss.
+ * outcomes are the record's own closed enum, `"skipped"` among them -- the due
+ * window the runner declined to open at all while the operator's compromise
+ * response stood. `"unattempted"` is the extra case the record cannot hold by
+ * design -- a window this runner never attempted, because the single-writer lock
+ * was held elsewhere -- which advances the schedule past the window while
+ * recording neither an attempt nor a miss.
  */
 export type ManagedScheduleWindowDisposition =
   ManagedExchangeRunOutcome | "unattempted";
@@ -287,7 +289,9 @@ export function firstUnclosedManagedScheduleWindow(
  * outcome table: a success resets the count, a miss increments it, and every
  * other disposition leaves it untouched -- a handshake that ran and failed means
  * the two runners DID meet, so it is a desync question rather than a
- * coordination-drift one, and a window this runner never attempted is neither.
+ * coordination-drift one, a window this runner never attempted is neither, and a
+ * window skipped under the operator's compromise response is this device's own
+ * withhold rather than a partner who did not arrive.
  */
 export function nextConsecutiveMisses(
   consecutiveMisses: number,

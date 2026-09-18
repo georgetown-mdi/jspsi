@@ -376,6 +376,9 @@ describe("nextConsecutiveMisses", () => {
     // A window the single-writer lock was held through is neither an attempt nor
     // a miss.
     expect(nextConsecutiveMisses(4, "unattempted")).toBe(4);
+    // Nor is a window the runner skipped over the operator's own answer: no
+    // partner was absent from it.
+    expect(nextConsecutiveMisses(4, "skipped")).toBe(4);
   });
 });
 
@@ -460,6 +463,21 @@ describe("catch-up on wake", () => {
       at: "2026-01-06T17:00:00.000Z",
       outcome: "missed",
     });
+  });
+
+  test("an elapsed window the runner skipped counts no miss", () => {
+    // The skip's own stamp is what the walk reads, so a window this device
+    // withheld is accounted for rather than counted against a partner who was
+    // never waited for.
+    const caught = catchUpManagedSchedule(
+      weekly,
+      { at: "2026-01-06T14:30:00.000Z", outcome: "skipped" },
+      at("2026-01-13T12:00:00.000Z"),
+    );
+    expect(caught.missedWindows).toBe(0);
+    expect(caught.schedule.consecutiveMisses).toBe(0);
+    expect(caught.schedule.nextWindow).toBe("2026-01-13T14:00:00.000Z");
+    expect(caught.missedLastRun).toBeUndefined();
   });
 
   test("multiple elapsed windows count one miss each and land on a live one", () => {

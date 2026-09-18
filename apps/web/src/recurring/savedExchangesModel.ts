@@ -185,9 +185,15 @@ function lastRunStatus(
     );
   const { tier } = reading;
   if (tier === "none") {
-    if (record.lastRun === undefined) return "Not run yet";
-    // The only "none" with a recorded run is a succeeded one.
-    return `Last run succeeded ${dateTimeLabel(new Date(record.lastRun.at))}`;
+    const { lastRun } = record;
+    if (lastRun === undefined) return "Not run yet";
+    const when = dateTimeLabel(new Date(lastRun.at));
+    // The two "none" readings with a recorded entry: a succeeded run, and a
+    // window the schedule skipped whose answer has since been cleared -- while it
+    // stands the standing line above takes the row.
+    if (lastRun.outcome === "skipped")
+      return `A scheduled run was skipped ${when}`;
+    return `Last run succeeded ${when}`;
   }
   const at =
     record.lastRun !== undefined

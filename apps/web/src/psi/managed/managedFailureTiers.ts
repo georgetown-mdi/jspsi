@@ -139,9 +139,10 @@ export function managedStandingConditionTier(
  * {@link recordedFailureTier}; the standing condition supplies the tier in two
  * places:
  *
- * - where the recorded reading has no failure to show (`"none"` from a success or
- *   a record never run, and `"missed"` from a no-show), which is what keeps a
- *   condition visible across the stamps that would otherwise consume it;
+ * - where the recorded reading has no failure to show (`"none"` from a success, a
+ *   record never run, or a window the schedule skipped, and `"missed"` from a
+ *   no-show), which is what keeps a condition visible across the stamps that
+ *   would otherwise consume it;
  * - where the recorded reading is `"unexplained"` and a standing persist failure
  *   explains it, which is Tier 1's "the record holds a benign explanation" made
  *   durable (docs/MANAGED_EXCHANGE.md, "Telling a desync from an attack").
@@ -200,6 +201,10 @@ function recordedFailureTier(
 ): ManagedFailureTier {
   const lastRun = record.lastRun;
   if (lastRun === undefined || lastRun.outcome === "succeeded") return "none";
+  // A window the schedule skipped is neither a run nor a failure: it records
+  // that nothing was attempted, and the condition the operator's answer rides on
+  // is what the surfaces read across it.
+  if (lastRun.outcome === "skipped") return "none";
   if (lastRun.outcome === "missed") return "missed";
 
   // A recorded benign pre-run input problem: its own tier, never desync/attack.

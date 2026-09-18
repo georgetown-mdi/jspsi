@@ -25,6 +25,12 @@
  *   occupied by bounded re-attempts while it is open, and a window that closes
  *   with no completed handshake advances to the NEXT window -- never a backoff,
  *   never an off-schedule retry.
+ * - **A due window is skipped while the operator's compromise response stands**
+ *   (docs/MANAGED_EXCHANGE.md, "Telling a desync from an attack"): the operator
+ *   has said the secret may be in someone else's hands, so the window connects
+ *   to nobody and rotates nothing. It is the window's own outcome rather than a
+ *   partner absence, so it counts no miss, and the next window is attempted as
+ *   soon as one of the three acts clears the response.
  *
  * Two properties of the loop are not visible from the criteria they serve
  * (docs/spec/MANAGED_EXCHANGE_RECORD.md, "Occupying a due window"):
@@ -58,11 +64,14 @@ import {
   advanceManagedScheduleAfterWindow,
   catchUpManagedSchedule,
 } from "./managedSchedule";
+import {
+  parseStoredInstant,
+  standingCompromiseResponse,
+} from "./managedExchangeRecord";
 import { ManagedExchangeExpiredError } from "./managedExpiry";
 import { ManagedExchangeLockUnavailableError } from "./managedExchangeLock";
 import { ManagedInputError } from "./managedInputGuard";
 import { RotationPersistError } from "./managedRunRotate";
-import { parseStoredInstant } from "./managedExchangeRecord";
 
 import type {
   ManagedExchangeReadableRecords,
@@ -187,10 +196,10 @@ export interface ManagedScheduleTickEntry {
   caughtUpMisses: number;
   /** Attempts made inside the due window. */
   attempts: number;
-  /** The window's disposition, absent when no window was occupied. It stands
-   * alongside a `"bookkeeping-failed"` skip: the window was occupied and its
-   * disposition determined, and the write that would have recorded it is what
-   * failed. */
+  /** The window's disposition, absent where the wake neither occupied nor
+   * skipped a window. It stands alongside a `"bookkeeping-failed"` skip: the
+   * window's disposition was determined, and the write that would have recorded
+   * it is what failed. */
   disposition?: ManagedScheduleWindowDisposition;
   /** Why nothing was attempted, absent when a window was occupied and its
    * bookkeeping landed. */
@@ -319,6 +328,20 @@ async function occupyDueWindow(
   if (due === undefined) return { ...entry, skipped: "not-due" };
   if (parseStoredInstant(planned.nextWindow) !== due.opensAtMs)
     return { ...entry, skipped: "plan-moved" };
+
+  // The operator's answer that nothing added up, read off the record the store
+  // holds: while it stands, this window connects to nobody and rotates nothing,
+  // and the plan advances past it on the window's own skipped outcome.
+  if (standingCompromiseResponse(claimed) !== undefined) {
+    entry.disposition = "skipped";
+    await seams.persistAdvance(record.id, {
+      schedule: advanceManagedScheduleAfterWindow(planned, due, "skipped"),
+      fromNextWindow: planned.nextWindow,
+      fromConsecutiveMisses: planned.consecutiveMisses,
+      lastRun: { at: new Date(seams.now()).toISOString(), outcome: "skipped" },
+    });
+    return { ...entry };
+  }
 
   const handle = claimed.inputFileHandle;
   // Without a persisted handle there is no unattended read of the input at all

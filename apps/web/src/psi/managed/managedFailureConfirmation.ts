@@ -177,10 +177,13 @@ export const COMPROMISE_RESPONSE_MESSAGE =
   "what happened before re-establishing this exchange.";
 
 /** The response is the record's own and stands until an act clears it, so the page
- * states how long the operator is looking at it for. */
+ * states how long the operator is looking at it for, and what this exchange does
+ * not do meanwhile -- the schedule included, since nobody is watching those
+ * windows pass. */
 export const COMPROMISE_RESPONSE_STANDS =
-  "This stays here, and this exchange offers no fresh invitation, until you " +
-  "clear it below or delete the exchange.";
+  "This stays here until you clear it below or delete the exchange. While it " +
+  "does, this exchange offers no fresh invitation, and its scheduled runs do " +
+  "not happen.";
 
 /** The lead over the control that clears the response: what the operator does
  * before taking it. */

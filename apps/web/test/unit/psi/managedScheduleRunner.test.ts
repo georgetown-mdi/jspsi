@@ -17,9 +17,12 @@ import {
 } from "@psi/managed/managedExchangeRun";
 import {
   NO_STANDING_CONDITION,
+  applyManagedExchangeCompromiseResponse,
   applyManagedExchangeLastRun,
   applyManagedExchangeLocalEdits,
+  applyManagedExchangeReinviteRotation,
   applyManagedExchangeScheduleAdvance,
+  applyManagedExchangeStandingConditionCleared,
   buildManagedExchangeRecord,
   composeManagedExchangeFile,
   parseManagedExchangeRecord,
@@ -705,6 +708,142 @@ describe("a window whose run raised a standing condition", () => {
     await tickManagedSchedules(runner.seams);
 
     expect(runner.advances[0].advance.standingCondition).toBeUndefined();
+  });
+});
+
+describe("a due window under the operator's compromise response", () => {
+  /** A week in milliseconds: the cadence's own period, so a wake after one lands
+   * on the next window at the same wall clock. */
+  const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+  /** A record carrying an unanswered failure the operator has since answered
+   * "something does not add up" at. */
+  function respondedRecord(): ManagedExchangeRecord {
+    return applyManagedExchangeCompromiseResponse(
+      parseManagedExchangeRecord({
+        ...recordWith(),
+        standingCondition: { since: "2026-01-05T10:00:00.000Z", kind: "auth" },
+      }),
+      "2026-01-05T11:00:00.000Z",
+    );
+  }
+
+  function storedRecord(runner: Harness, id: string): ManagedExchangeRecord {
+    const stored = runner.stored.get(id);
+    if (stored === undefined) throw new Error("the record went missing");
+    return stored;
+  }
+
+  test("connects to nobody, rotates nothing, and advances on the window's own outcome", async () => {
+    const record = respondedRecord();
+    const runner = harness({
+      records: [record],
+      startAt: "2026-01-06T14:30:00.000Z",
+    });
+
+    const [entry] = await tickManagedSchedules(runner.seams);
+
+    expect(entry).toMatchObject({
+      id: record.id,
+      attempts: 0,
+      disposition: "skipped",
+    });
+    expect(runner.attempts).toHaveLength(0);
+    const stored = storedRecord(runner, record.id);
+    expect(stored.lastRun).toEqual({
+      at: "2026-01-06T14:30:00.000Z",
+      outcome: "skipped",
+    });
+    expect(stored.sharedSecret).toBe(record.sharedSecret);
+    expect(stored.schedule).toMatchObject({
+      nextWindow: "2026-01-13T14:00:00.000Z",
+      consecutiveMisses: 0,
+    });
+  });
+
+  test("counts no miss at the windows it holds, and adds nothing to the evidence", async () => {
+    const record = respondedRecord();
+    const runner = harness({
+      records: [record],
+      startAt: "2026-01-06T14:30:00.000Z",
+    });
+
+    await tickManagedSchedules(runner.seams);
+    runner.advanceClock(WEEK_MS);
+    await tickManagedSchedules(runner.seams);
+
+    const stored = storedRecord(runner, record.id);
+    // Two windows held, and the coordination prompt the second consecutive miss
+    // would have earned is not reached: no partner was absent from either.
+    expect(stored.schedule).toMatchObject({
+      nextWindow: "2026-01-20T14:00:00.000Z",
+      consecutiveMisses: 0,
+    });
+    expect(runner.attempts).toHaveLength(0);
+    expect(stored.standingCondition).toEqual({
+      since: "2026-01-05T10:00:00.000Z",
+      kind: "auth",
+      response: { kind: "compromise", at: "2026-01-05T11:00:00.000Z" },
+    });
+  });
+
+  test("resumes at the next window once the acknowledgement clears the answer", async () => {
+    const record = respondedRecord();
+    const runner = harness({
+      records: [record],
+      startAt: "2026-01-06T14:30:00.000Z",
+      script: [{ kind: "succeed" }],
+    });
+
+    await tickManagedSchedules(runner.seams);
+    runner.stored.set(
+      record.id,
+      applyManagedExchangeStandingConditionCleared(
+        storedRecord(runner, record.id),
+      ),
+    );
+    runner.advanceClock(WEEK_MS);
+    const [entry] = await tickManagedSchedules(runner.seams);
+
+    expect(entry).toMatchObject({ attempts: 1, disposition: "succeeded" });
+  });
+
+  test("resumes at the next window once a re-invite clears the answer", async () => {
+    const record = respondedRecord();
+    const runner = harness({
+      records: [record],
+      startAt: "2026-01-06T14:30:00.000Z",
+      script: [{ kind: "succeed" }],
+    });
+
+    await tickManagedSchedules(runner.seams);
+    runner.stored.set(
+      record.id,
+      applyManagedExchangeReinviteRotation(storedRecord(runner, record.id), {
+        sharedSecret: generateSharedSecret(),
+        expires: null,
+      }),
+    );
+    runner.advanceClock(WEEK_MS);
+    const [entry] = await tickManagedSchedules(runner.seams);
+
+    expect(entry).toMatchObject({ attempts: 1, disposition: "succeeded" });
+  });
+
+  test("has no window to resume at once the exchange is deleted", async () => {
+    const record = respondedRecord();
+    const runner = harness({
+      records: [record],
+      startAt: "2026-01-06T14:30:00.000Z",
+      script: [{ kind: "succeed" }],
+    });
+
+    await tickManagedSchedules(runner.seams);
+    runner.stored.delete(record.id);
+    runner.advanceClock(WEEK_MS);
+
+    expect(await tickManagedSchedules(runner.seams)).toEqual([]);
+    expect(runner.attempts).toHaveLength(0);
   });
 });
 
