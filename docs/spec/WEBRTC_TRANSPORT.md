@@ -505,7 +505,12 @@ condition holds.
 | Sentinel hand-off | 2 s | Getting the close sentinel itself onto the wire |
 | Channel close | 2 s | The data channel's own close completing on a clean close -- the peer answering the stream reset. A partner that goes during the teardown spends it whole, ICE being slower than this to call the link dead; reaching it closes the session anyway |
 | ICE statistics | 2 s | Collecting the candidate report a failure or an open channel is described by; expiring costs the description, not the outcome |
+| Transport teardown | 6 min | The whole close of this transport at the run's own teardown point, above the sum of the close drain, sentinel hand-off, channel close and ICE statistics budgets in this table |
 | Signaling certificate check | 5 s | The handshake that answers whether a `wss://` socket that failed before registering failed on its certificate; a socket that drops after registering is not asked about, having completed that handshake already, and neither is one on a run configured for an environment proxy, whose dial the handshake does not follow |
+
+The teardown ceiling is the run's, not this transport's: it is applied at the channel-independent point where a run closes what it opened, and every channel declares a value there above its own teardown budgets (the file-based channels' is in [FILE_SYNC.md](FILE_SYNC.md)). Reaching it stops the wait, states the elapsed time and the resource kinds still holding the process on stderr and as a `transportTeardown` warning on the event stream, and changes no exit code ([CLI_EVENTS.md](CLI_EVENTS.md#warning-sources)). Nothing local is inside it: the result, the exchange record and the receipt are written and awaited before cleanup begins, each with no budget of its own where it goes to a path. The one local wait that is bounded is a result streamed to stdout, whose drain and its outcome are in [CLI_EVENTS.md](CLI_EVENTS.md#error-categories).
+
+Once the run's own work and its teardown are finished, the process returns within **3 s**. A clean event loop exits at once and says nothing -- measured from the command settling to natural exit, a completed two-party `filedrop` exchange drained in 0-1 ms across ten party-runs -- and a loop still held at the budget names the resource kinds still armed on stderr and exits with the status the run already resolved. The handle that held it is not released or swept: a run that reports what held it is how the next one is found.
 
 `connection.options.peer_timeout_ms`, when set, replaces the rendezvous,
 channel-open, and parked-receive budgets: on this channel the documented "total
@@ -518,19 +523,19 @@ broker socket and the peer connection on it, so a party that interrupts while
 waiting for its partner exits at once rather than at the end of the rendezvous
 budget.
 
-A configured relay adds one wait that is not a ceiling and does not end early.
+A configured relay leaves one timer armed that this transport cannot release.
 werift keeps a TURN allocation alive by re-sending refresh on a timer armed from
 the lifetime the relay granted, and tearing the peer connection down leaves a
-timer that is already waiting armed; a waiting timer holds the process. So a run
-that allocated against a relay returns five sixths of the granted lifetime after
-its work is done -- about 500 s where a relay grants the usual 600 s. Everything
-the exchange owes is finished before that wait begins: the result, the exchange
-record and the receipt are written, the channel and the broker socket are
-closed, and nothing crosses the wire during it. What it costs is the process,
-and in a container the container, which is what a scheduled recurring run has to
-allow for. Nothing werift exposes releases the timer, so the wait is a stated
-limit rather than a budget this transport sets; the measurement, and the release
-paths that were driven against it, are in
+timer that is already waiting armed; a waiting timer holds the event loop, for
+five sixths of the granted lifetime -- about 500 s where a relay grants the
+usual 600 s. Everything the exchange owes is complete before that wait begins:
+the result, the exchange record and the receipt are written, the channel and
+the broker socket are closed, and nothing crosses the wire during it. So what
+the timer holds is the loop rather than the run, and the return budget above is
+what ends the process, naming the kinds of handle still armed as it goes.
+Nothing werift exposes releases the timer, so it is a stated limit rather than
+a budget this transport sets; the measurement, and the release paths that were
+driven against it, are in
 [DEPENDENCY_PINS.md](DEPENDENCY_PINS.md#the-behavioural-assumptions).
 
 Two bounds are memory rather than time, both on inbound signaling: a signaling

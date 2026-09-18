@@ -62,7 +62,14 @@ import {
 import { createPsiEngine } from "./psiWorkerHost";
 import { writeExchangeRecord, type RecordOutput } from "./recordFile";
 import { writeDualSignedRecord, type ReceiptOutput } from "./receiptFile";
+import {
+  closeWithinCeiling,
+  teardownCeilingNotice,
+  transportTeardownCeilingMs,
+  type TeardownOutcome,
+} from "./transportTeardown";
 import { writeOutput } from "./util/dataIo";
+import { noteSignalOwnsExit } from "./util/exitGate";
 import { runBeforeEachLogLine } from "./util/logging";
 import { logRuntimeEnv } from "./util/runtimeEnv";
 import {
@@ -1212,13 +1219,21 @@ interface RunLifecycle {
  * Reads the {@link RunLifecycle} itself rather than a copy of its flags, so an
  * open that completes while an earlier layer's close is still being awaited
  * counts as opened for the layers below it.
+ *
+ * The three layer closes share one ceiling, `ceilingMs`: they are one
+ * obligation, the transport's, and this is the channel-independent point at
+ * which a finished run stops waiting on it (see
+ * {@link transportTeardownCeilingMs}). Nothing local is inside it -- the
+ * result, the record and the receipt are already on disk by the time cleanup
+ * runs -- so reaching the ceiling costs the close, never an artifact.
  */
 async function closeRunLayers(params: {
   build: PreparedTransport;
   run: RunLifecycle;
   log: ReturnType<typeof getLogger>;
-}): Promise<void> {
-  const { build, run, log } = params;
+  ceilingMs: number;
+}): Promise<TeardownOutcome> {
+  const { build, run, log, ceilingMs } = params;
   // Seal the abort decision before the first layer-close drives the real
   // conn.close() cascade (secure.close() -> mc.close() -> conn.close()):
   // on the clean-completion, signal, and echo paths no writeAbortMarker()
@@ -1230,51 +1245,59 @@ async function closeRunLayers(params: {
   build.fileSync?.sealAbort();
   if (run.started) log.info("stopping polling");
   if (run.opened) log.info("closing connection");
-  // When the AEAD decorator was built (encryption negotiated), close it:
-  // its close() delegates to mc.close(), detaching the bridge's
-  // data/error listeners and closing the underlying FileSyncConnection.
-  // `secure` is undefined on the no-auth path, when applyEncryption was
-  // negotiated false, and in the window where a signal arrived between
-  // authenticateConnection returning and create resolving -- in each case
-  // mc.close() below closes the transport directly. All idempotent.
-  if (run.secure !== undefined) {
-    await run.secure.close().catch((err: unknown) => {
-      log.debug("secure.close() during cleanup:", sanitizeErrorForDisplay(err));
-    });
-  }
-  // Closing the transport detaches the file-sync bridge's data/error
-  // listeners and closes the underlying FileSyncConnection -- stopping
-  // the poller, sweeping the responsible files, and ending the client --
-  // or, on webrtc, flushes the outbound queue and tears the data channel,
-  // peer connection and broker socket down. All idempotent, so this is
-  // safe even when open() never ran. Undefined only when the webrtc
-  // rendezvous never produced a connection.
-  await build.transport?.close().catch((err: unknown) => {
-    log.debug("transport close during cleanup:", sanitizeErrorForDisplay(err));
-  });
-  // If an earlier transport failure already terminated the bridge, its
-  // close() returns immediately without re-closing fileSync (that earlier
-  // close was fire-and-forget, hence unawaited). Close fileSync directly
-  // to guarantee the poller is stopped, the responsible files are swept,
-  // and the client is ended before doCleanup returns. Idempotent, so in
-  // the normal path this is a near no-op after the bridge already closed
-  // it.
-  await build.fileSync?.close().catch((err: unknown) => {
-    // When the connection was open, a close failure is user-visible: the
-    // transport may not have terminated cleanly (e.g. SSH session timeout).
-    // close() is idempotent and does not throw on an unopened instance, so
-    // the else branch is only a defensive fallback for an unexpected error.
-    if (run.opened) {
-      log.warn(
-        "failed to close connection during cleanup:",
-        sanitizeErrorForDisplay(err),
-      );
-    } else {
-      log.debug(
-        "fileSync.close() during cleanup:",
-        sanitizeErrorForDisplay(err),
-      );
+  return closeWithinCeiling(ceilingMs, async () => {
+    // When the AEAD decorator was built (encryption negotiated), close it:
+    // its close() delegates to mc.close(), detaching the bridge's
+    // data/error listeners and closing the underlying FileSyncConnection.
+    // `secure` is undefined on the no-auth path, when applyEncryption was
+    // negotiated false, and in the window where a signal arrived between
+    // authenticateConnection returning and create resolving -- in each case
+    // mc.close() below closes the transport directly. All idempotent.
+    if (run.secure !== undefined) {
+      await run.secure.close().catch((err: unknown) => {
+        log.debug(
+          "secure.close() during cleanup:",
+          sanitizeErrorForDisplay(err),
+        );
+      });
     }
+    // Closing the transport detaches the file-sync bridge's data/error
+    // listeners and closes the underlying FileSyncConnection -- stopping
+    // the poller, sweeping the responsible files, and ending the client --
+    // or, on webrtc, flushes the outbound queue and tears the data channel,
+    // peer connection and broker socket down. All idempotent, so this is
+    // safe even when open() never ran. Undefined only when the webrtc
+    // rendezvous never produced a connection.
+    await build.transport?.close().catch((err: unknown) => {
+      log.debug(
+        "transport close during cleanup:",
+        sanitizeErrorForDisplay(err),
+      );
+    });
+    // If an earlier transport failure already terminated the bridge, its
+    // close() returns immediately without re-closing fileSync (that earlier
+    // close was fire-and-forget, hence unawaited). Close fileSync directly
+    // to guarantee the poller is stopped, the responsible files are swept,
+    // and the client is ended before doCleanup returns. Idempotent, so in
+    // the normal path this is a near no-op after the bridge already closed
+    // it.
+    await build.fileSync?.close().catch((err: unknown) => {
+      // When the connection was open, a close failure is user-visible: the
+      // transport may not have terminated cleanly (e.g. SSH session timeout).
+      // close() is idempotent and does not throw on an unopened instance, so
+      // the else branch is only a defensive fallback for an unexpected error.
+      if (run.opened) {
+        log.warn(
+          "failed to close connection during cleanup:",
+          sanitizeErrorForDisplay(err),
+        );
+      } else {
+        log.debug(
+          "fileSync.close() during cleanup:",
+          sanitizeErrorForDisplay(err),
+        );
+      }
+    });
   });
 }
 
@@ -1582,9 +1605,13 @@ type ExchangeOutcome = Awaited<ReturnType<typeof runExchange>>;
  *
  * Each artifact after the result CSV is non-fatal and reports its own loss:
  * a missing one is a persistence-loss warning rather than a failed exchange.
- * The result CSV is the exception -- a write that does not reach disk throws,
- * carrying `PERSISTENCE_LOSS_EXIT_CODE` so a command boundary reports the loss
- * rather than the exit code a transport fault gets.
+ * The result CSV is the exception -- a result that does not reach where it was
+ * owed throws, carrying `PERSISTENCE_LOSS_EXIT_CODE` so a command boundary
+ * reports the loss rather than the exit code a transport fault gets. That
+ * throw is raised after the audit artifacts have been written and not at the
+ * write that failed: the exchange disclosed, and what it disclosed is owed its
+ * record whether or not this party got to keep the result
+ * (docs/notes/record-durability-point.md).
  */
 async function writeExchangeOutputs(params: {
   outcome: ExchangeOutcome;
@@ -1618,6 +1645,11 @@ async function writeExchangeOutputs(params: {
     bootstrap,
     signedReceipt,
   } = outcome;
+
+  // The result-write failure, held until the audit artifacts below have been
+  // written. A box rather than the error itself, since a thrower may raise any
+  // value, `undefined` included.
+  let undelivered: { error: unknown } | undefined;
 
   // A count-only exchange produces no matched pairing for either party,
   // so there is no result file to write and nothing was withheld from
@@ -1673,34 +1705,41 @@ async function writeExchangeOutputs(params: {
     try {
       await writeOutput(output, headers, rows, log);
     } catch (err) {
-      // The result file did not reach disk -- the terminal form of the
-      // same loss the persistence-loss reports share: the exchange
-      // completed, only local generation failed, and re-running would
-      // re-send this party's data for an exchange that already
-      // happened. Set the persistence-loss code on the error so a
-      // command boundary reports it instead of the 69 a transport
-      // fault gets; exitCodeForError (util/exit.ts) prefers an error's
-      // own code, measured (not asserted) by exchange.test.ts and
-      // zeroSetup.test.ts driving each handler to a trapped
-      // process.exit. An error that already holds a code keeps it.
+      // The result did not reach where it was owed -- a file that did
+      // not reach disk, or a stdout reader that stopped taking it before
+      // the drain's ceiling -- the terminal form of the same loss the
+      // persistence-loss reports share: the exchange completed, only
+      // local delivery failed, and re-running would re-send this party's
+      // data for an exchange that already happened. Set the
+      // persistence-loss code on the error so a command boundary reports
+      // it instead of the 69 a transport fault gets; exitCodeForError
+      // (util/exit.ts) prefers an error's own code, measured (not
+      // asserted) by exchange.test.ts and zeroSetup.test.ts driving each
+      // handler to a trapped process.exit. An error that already holds a
+      // code keeps it.
       if (
         typeof err === "object" &&
         err !== null &&
         (err as { exitCode?: number }).exitCode === undefined
       )
         Object.assign(err, { exitCode: PERSISTENCE_LOSS_EXIT_CODE });
-      throw err;
+      // Raised below, after the record and the receipt: a disclosure that
+      // occurred is owed its record whatever became of the result
+      // (docs/notes/record-durability-point.md), and a result the reader of
+      // a pipe refused leaves the disk the record goes to untouched.
+      undelivered = { error: err };
     }
   }
 
   // How the entity closure grouped the pairs this party just wrote, stated
-  // after the result it describes. Core hands one to a party that ran the
-  // closure over a many-to-many table -- both parties under the cascade, the
-  // receiver alone under single-pass -- and none otherwise, so the
-  // cardinality is not re-read here. The sentence is core's own composition
-  // over integers it formats itself -- the same one the browser seat renders,
-  // so no two sinks drift -- and holds no partner-authored text.
-  if (entityClusters !== undefined)
+  // after the result it describes and only where that result was delivered.
+  // Core hands one to a party that ran the closure over a many-to-many table
+  // -- both parties under the cascade, the receiver alone under single-pass --
+  // and none otherwise, so the cardinality is not re-read here. The sentence
+  // is core's own composition over integers it formats itself -- the same one
+  // the browser seat renders, so no two sinks drift -- and holds no
+  // partner-authored text.
+  if (entityClusters !== undefined && undelivered === undefined)
     log.info(describeEntityClusters(entityClusters));
 
   // Every audit artifact this run was asked for and could not produce,
@@ -1709,14 +1748,14 @@ async function writeExchangeOutputs(params: {
 
   // Persist the self-attested record after the results: a secondary
   // audit artifact, written last, whose failure is non-fatal (see
-  // writeExchangeRecord). Skipped when records are disabled, and not
-  // reached if the result-CSV write above failed (that await throws to
-  // the catch), which also avoids orphaning the private
-  // verification-keys file on a disk that just failed mid-write. A
-  // withheld result writes no CSV but still records the exchange. An
-  // audit runExchange did not return is a record that could not be
-  // built (warned there, with the cause), so it reports as a missing
-  // artifact exactly as a failed write does.
+  // writeExchangeRecord). Skipped when records are disabled, and written
+  // even where the result was not delivered, since the disclosure it
+  // accounts for happened either way; on a disk that failed mid-write the
+  // write fails too and reports itself as a missing artifact. A withheld
+  // result writes no CSV but still records the exchange. An audit
+  // runExchange did not return is a record that could not be built
+  // (warned there, with the cause), so it reports as a missing artifact
+  // exactly as a failed write does.
   if (recordOutput !== undefined) {
     const failure =
       audit === undefined
@@ -1764,6 +1803,11 @@ async function writeExchangeOutputs(params: {
   // config write) still runs and still reports what it loses.
   for (const missing of missingArtifacts)
     reportPersistenceLoss(missing, eventStream);
+
+  // The result went nowhere, so the run fails on it and the caller's own
+  // persistence below does not run: it writes configuration for a run whose
+  // operator never received the result.
+  if (undelivered !== undefined) throw undelivered.error;
 
   // The caller's own last persistence, run here rather than after this function
   // returns so that whatever it loses is reported BEFORE the terminal event
@@ -2046,17 +2090,49 @@ export async function runProtocol(
     if (cleaned) return;
     cleaned = true;
     psiProgress.close();
-    await closeRunLayers({ build, run, log });
-    logTransportCounters(build.client, log);
-    process.off("SIGINT", onSigint);
-    process.off("SIGTERM", onSigterm);
-    // Undo our own contribution to the max-listeners threshold rather than
-    // decrementing from whatever it is now: if another module (or a
-    // parallel runProtocol) mutated the threshold in between, decrementing
-    // from the current value would walk the baseline off by +/-2 each
-    // cleanup cycle. Restoring the captured value verbatim leaves any
-    // external adjustment intact and undoes only our own +2.
-    if (maxListenersIncremented) process.setMaxListeners(prevMaxListeners);
+    // The handlers come off in the finally: the guard above makes cleanup
+    // single-entry, so a close that throws past its own per-layer catch would
+    // otherwise leave a finished run's SIGINT and SIGTERM handlers installed
+    // with nothing left to remove them, and they accumulate where a caller
+    // drives runProtocol in-process.
+    try {
+      const teardown = await closeRunLayers({
+        build,
+        run,
+        log,
+        ceilingMs: transportTeardownCeilingMs(connection.channel),
+      });
+      // The one bounded obligation reached its bound. Reported on both machine
+      // channels the run has -- the operator log and the event stream -- and
+      // before the terminal event, which is why cleanup runs ahead of the
+      // emission sites rather than in the finally alone. It changes no exit
+      // code: the teardown is housekeeping, and a supervisor that saw the
+      // status move would retry a run that already disclosed.
+      if (!teardown.finished) {
+        const notice = teardownCeilingNotice(teardown, {
+          channel: connection.channel,
+          retainFiles:
+            connection.channel !== "webrtc" &&
+            connection.options?.retainFiles === true,
+          // The output stage opens where this flag is set, so a run holding it
+          // has written its local artifacts or failed somewhere inside them.
+          reachedOutputStage: run.exchangeComplete,
+        });
+        log.warn(notice);
+        emit((e) => e.warning("transportTeardown", notice));
+      }
+      logTransportCounters(build.client, log);
+    } finally {
+      process.off("SIGINT", onSigint);
+      process.off("SIGTERM", onSigterm);
+      // Undo our own contribution to the max-listeners threshold rather than
+      // decrementing from whatever it is now: if another module (or a
+      // parallel runProtocol) mutated the threshold in between, decrementing
+      // from the current value would walk the baseline off by +/-2 each
+      // cleanup cycle. Restoring the captured value verbatim leaves any
+      // external adjustment intact and undoes only our own +2.
+      if (maxListenersIncremented) process.setMaxListeners(prevMaxListeners);
+    }
   }
   // The try/catch/finally in each handler ensures process.exit always runs,
   // and that a rejection from doCleanup (an uncaught throw added later)
@@ -2091,6 +2167,10 @@ export async function runProtocol(
     // Must be set synchronously, before the first await, so the runProtocol
     // catch block sees it as soon as the cleanup-induced failure propagates.
     run.signalReceived = "SIGINT";
+    // This handler ends the process, at 130 below. The catch returns normally
+    // on a signal, so the command promise settles while the teardown here is
+    // still running, and nothing else may exit on that settlement.
+    noteSignalOwnsExit();
     // Synchronous too, and before the cleanup it cannot substitute for: an
     // in-flight rendezvous tears itself down on this rather than on doCleanup.
     interrupted.abort();
@@ -2114,6 +2194,9 @@ export async function runProtocol(
     // Must be set synchronously, before the first await, so the runProtocol
     // catch block sees it as soon as the cleanup-induced failure propagates.
     run.signalReceived = "SIGTERM";
+    // As in onSigint: the exit at 143 below is this handler's, and the
+    // command promise settles before it is reached.
+    noteSignalOwnsExit();
     interrupted.abort();
     // The live line is dropped before the first interrupt line, as in onSigint.
     psiProgress.close();
@@ -2275,6 +2358,23 @@ export async function runProtocol(
     // entity-cluster summary the output stage logged above rides it on that
     // same footing.
     // The metrics summary precedes it so the terminal event stays last.
+    //
+    // Cleanup is awaited first, so the terminal event states a run that owes
+    // nothing further: every local artifact is on disk above, and the
+    // transport is closed or has reached its ceiling and said so on this
+    // stream. The finally below re-enters doCleanup and returns at its guard.
+    // A close that throws past its own per-layer catch is logged at debug, as
+    // the failure path below does with it: the run's result, record and
+    // receipt are on disk, so a teardown fault must not turn a completed run
+    // into a terminal error event.
+    try {
+      await doCleanup();
+    } catch (cleanupErr: unknown) {
+      log.debug(
+        "cleanup threw after the run completed:",
+        sanitizeErrorForDisplay(cleanupErr),
+      );
+    }
     emitMetrics();
     emit((e) =>
       e.result(
@@ -2551,6 +2651,21 @@ export async function runProtocol(
     // per run, so this is the only error emission and it precedes the rethrow.
     // The metrics summary (with whatever counts the run accrued before the fault)
     // precedes it so the terminal event stays last on the stream.
+    //
+    // Cleanup is awaited first, as on the success path above and after the
+    // abort marker this catch may have written, so a teardown that reaches
+    // its ceiling states that on the stream before the outcome does. A close
+    // that throws past its own per-layer catch is logged at debug, as the
+    // interrupt paths do, rather than propagating: it must not displace the
+    // original fault nor skip the terminal event this path owes.
+    try {
+      await doCleanup();
+    } catch (cleanupErr: unknown) {
+      log.debug(
+        "cleanup threw during failure:",
+        sanitizeErrorForDisplay(cleanupErr),
+      );
+    }
     emitMetrics();
     emit((e) => e.error(err, terminalPhase));
     // The error is rethrown holding whatever exit code its own thrower

@@ -3,9 +3,18 @@ import { hideBin } from "yargs/helpers";
 import { sanitizeErrorForDisplay } from "@psilink/core";
 
 import { buildCli } from "./cliParser";
+import { armProcessReturnGate } from "./util/exitGate";
 
 buildCli(hideBin(process.argv))
   .parseAsync()
+  .then(() => {
+    // The command has finished everything it owes -- every local write, the
+    // drain that hands a stdout result to its reader, the terminal event, the
+    // log flush -- so from here the process is only waiting for the event loop
+    // to empty. Bound that wait (see armProcessReturnGate); a clean loop exits
+    // before it and says nothing.
+    armProcessReturnGate();
+  })
   .catch((err: unknown) => {
     // Last-resort printer for an error that escaped every command handler.
     // Routes through the display-boundary sanitizer rather than

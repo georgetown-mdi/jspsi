@@ -333,6 +333,19 @@ liveTest(
       describeCliRun("the inviting party", inviteRun),
     ).toBe(0);
 
+    // Neither party had to be made to return: both event loops emptied on
+    // their own after the run, so neither reached the process-return budget
+    // and neither said anything about what was holding it. A dependency that
+    // starts leaving a handle armed on this channel reddens this line.
+    expect(
+      acceptRun.stderr,
+      describeCliRun("the acceptance", acceptRun),
+    ).not.toContain("still held open");
+    expect(
+      inviteRun.stderr,
+      describeCliRun("the inviting party", inviteRun),
+    ).not.toContain("still held open");
+
     // The acceptance asked about the coordination server it actually dialed --
     // host and port, resolved from the invitation's endpoint by the same
     // resolver the dial uses. This is the last checkpoint before a locator the

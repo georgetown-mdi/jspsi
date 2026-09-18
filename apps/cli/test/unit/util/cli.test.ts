@@ -19,7 +19,12 @@ import {
 } from "@psilink/core";
 import type { ConnectionErrorKind } from "@psilink/core";
 
-import { openInputSource, writeOutput } from "../../../src/util/dataIo";
+import {
+  openInputSource,
+  resetStdoutErrorGuard,
+  stdoutDrainExpiredNotice,
+  writeOutput,
+} from "../../../src/util/dataIo";
 import {
   exitCodeForError,
   exitWithError,
@@ -837,10 +842,15 @@ async function runStdoutBranch(kind: keyof typeof STDOUT_KINDS): Promise<{
   const chunks: string[] = [];
   const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(((
     chunk: string | Uint8Array,
+    flushed?: () => void,
   ): boolean => {
     chunks.push(
       typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"),
     );
+    // A real Writable invokes the per-chunk callback once that chunk is
+    // flushed, and writeOutput's stdout drain waits on the last line's. A stub
+    // that swallowed it would hold the drain for its whole ceiling.
+    flushed?.();
     return true;
   }) as typeof process.stdout.write);
   // Force only fd 1's stat; a real Stats with the kind's predicate set avoids
@@ -868,6 +878,254 @@ async function runStdoutBranch(kind: keyof typeof STDOUT_KINDS): Promise<{
   }
   return { stdout: chunks.join(""), errors: log.errors, warns: log.warns };
 }
+
+test("writeOutput: the stdout branch waits for the last line to be flushed", async () => {
+  // The result is handed to a pipe, so the run must not report it written while
+  // it is still buffered: the exit that follows would truncate it. The stub
+  // holds every chunk's callback, and the returned promise must stay pending
+  // until the last one is invoked.
+  const held: Array<(err?: Error | null) => void> = [];
+  const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(((
+    _chunk: string | Uint8Array,
+    flushed?: (err?: Error | null) => void,
+  ): boolean => {
+    if (flushed !== undefined) held.push(flushed);
+    return true;
+  }) as typeof process.stdout.write);
+  try {
+    let settled = false;
+    const writing = writeOutput(
+      undefined,
+      ["a", "b"],
+      [
+        ["1", "2"],
+        ["3", "4"],
+      ],
+      logCollector(),
+    ).then(() => {
+      settled = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(settled).toBe(false);
+    // Only the last line carries a callback: it is the one whose flush states
+    // that every line before it has left the process. The lines before it are
+    // paced by the stream's own backpressure, which this stub never applies.
+    expect(held).toHaveLength(1);
+    held[0]();
+    await writing;
+    expect(settled).toBe(true);
+  } finally {
+    stdoutSpy.mockRestore();
+  }
+});
+
+test("writeOutput: a reader taking the result slowly is given as long as it needs", async () => {
+  // The ceiling bounds a reader that stopped, not one that is slow: a consumer
+  // taking a large result in small reads holds the drain open for many times
+  // the ceiling, and failing it would turn a completed exchange into a
+  // truncated result and an instruction not to re-run.
+  const idleCeilingMs = 40;
+  const rows = Array.from({ length: 20 }, (_, i) => [String(i)]);
+  // A quarter of the ceiling between the lines the stub takes, so the whole
+  // write runs several times past the ceiling and no single gap reaches it.
+  const gapMs = idleCeilingMs / 4;
+  const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(((
+    _chunk: string | Uint8Array,
+    flushed?: (err?: Error | null) => void,
+  ): boolean => {
+    // No callback marks every line but the last: the stub refuses it as a full
+    // buffer does and reports the space a gap later, which is the drain the
+    // write loop waits on.
+    if (flushed === undefined) {
+      setTimeout(() => process.stdout.emit("drain"), gapMs);
+      return false;
+    }
+    setTimeout(() => flushed(), gapMs);
+    return true;
+  }) as typeof process.stdout.write);
+  try {
+    const startedAt = Date.now();
+    await writeOutput(undefined, ["a"], rows, logCollector(), idleCeilingMs);
+    expect(Date.now() - startedAt).toBeGreaterThan(idleCeilingMs);
+  } finally {
+    stdoutSpy.mockRestore();
+  }
+});
+
+test("writeOutput: a reader that stops mid-result fails at the ceiling after the last line", async () => {
+  // Progress earns the drain more time and does not buy the whole wait. The
+  // stub flushes the first lines and then stops, which is what a consumer that
+  // dies part-way through a result does to the pipe.
+  const idleCeilingMs = 40;
+  const rows = Array.from({ length: 20 }, (_, i) => [String(i)]);
+  const gapMs = idleCeilingMs / 4;
+  let taken = 0;
+  const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(((
+    _chunk: string | Uint8Array,
+    _flushed?: (err?: Error | null) => void,
+  ): boolean => {
+    taken += 1;
+    if (taken <= 5) setTimeout(() => process.stdout.emit("drain"), gapMs);
+    return false;
+  }) as typeof process.stdout.write);
+  try {
+    await expect(
+      writeOutput(undefined, ["a"], rows, logCollector(), idleCeilingMs),
+    ).rejects.toThrow(/nothing more of the result left the process/);
+  } finally {
+    stdoutSpy.mockRestore();
+    resetStdoutErrorGuard();
+  }
+});
+
+test("writeOutput: a reader that stops taking the result fails the write at the ceiling", async () => {
+  // The other side of the drain: a consumer that has stopped reading holds the
+  // last line in the process forever, so the wait is bounded -- and what it
+  // reports at the bound is a failure, since the result is still here. A
+  // resolve would tell the run a result it is holding was delivered.
+  const stdoutSpy = vi
+    .spyOn(process.stdout, "write")
+    .mockImplementation(
+      ((_chunk: string | Uint8Array): boolean =>
+        true) as typeof process.stdout.write,
+    );
+  try {
+    await expect(
+      writeOutput(undefined, ["a"], [["1"]], logCollector(), 20),
+    ).rejects.toThrow(/nothing more of the result left the process/);
+  } finally {
+    stdoutSpy.mockRestore();
+  }
+});
+
+test("writeOutput: the drain failure says the exchange happened and how to receive it", async () => {
+  // The operator reads this beside exit 73, whose instruction is not to
+  // re-run: the notice has to say why, and what to change before any retry.
+  const notice = stdoutDrainExpiredNotice(60_000);
+  // The bound it states is the idle one, so the operator is told what the run
+  // observed -- a reader that stopped -- rather than how long the drain ran.
+  expect(notice).toContain("nothing more of the result left the process");
+  expect(notice).toContain("60s");
+  expect(notice).toContain("The exchange itself completed");
+  expect(notice).toContain("write the result to a path");
+});
+
+test("writeOutput: a write the reader refused fails the run rather than reporting delivery", async () => {
+  // `psilink ... | head -1`: the reader takes its line and closes the pipe, and
+  // the last line's own callback reports the EPIPE. Reporting it as a flush
+  // would tell the run a result nobody took was delivered.
+  const refused = Object.assign(new Error("write EPIPE"), { code: "EPIPE" });
+  const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(((
+    _chunk: string | Uint8Array,
+    flushed?: (err?: Error | null) => void,
+  ): boolean => {
+    flushed?.(refused);
+    return true;
+  }) as typeof process.stdout.write);
+  try {
+    const failure = await writeOutput(
+      undefined,
+      ["a"],
+      [["1"]],
+      logCollector(),
+    ).catch((err: unknown) => err);
+    expect(failure).toBeInstanceOf(Error);
+    // Beside exit 73, whose instruction is not to re-run: the notice states
+    // why, and what to change before any retry.
+    expect((failure as Error).message).toContain(
+      "could not be written to stdout",
+    );
+    expect((failure as Error).message).toContain(
+      "The exchange itself completed",
+    );
+    expect((failure as Error).message).toContain("write the result to a path");
+    // The cause is kept, so the operator log names EPIPE beneath the notice.
+    expect((failure as Error).cause).toBe(refused);
+  } finally {
+    stdoutSpy.mockRestore();
+  }
+});
+
+test("writeOutput: a failure the stream reports, not a callback, fails the write too", async () => {
+  // An EPIPE reaching a line before the last one has no callback of this
+  // drain's to report it: `process.stdout` emits it instead, and with no
+  // listener for the drain's duration Node would end the process on the spot,
+  // before the record of the disclosure the run already made is written.
+  const refused = Object.assign(new Error("write EPIPE"), { code: "EPIPE" });
+  resetStdoutErrorGuard();
+  const listenersBefore = process.stdout.listenerCount("error");
+  const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(((
+    _chunk: string | Uint8Array,
+    flushed?: (err?: Error | null) => void,
+  ): boolean => {
+    if (flushed === undefined)
+      setImmediate(() => process.stdout.emit("error", refused));
+    return true;
+  }) as typeof process.stdout.write);
+  try {
+    await expect(
+      writeOutput(undefined, ["a"], [["1"]], logCollector()),
+    ).rejects.toThrow(/could not be written to stdout/);
+    // The drain's own reject listener is off, and the one left in its place is
+    // the guard the failure installs for the rest of the process.
+    expect(process.stdout.listenerCount("error")).toBe(listenersBefore + 1);
+  } finally {
+    stdoutSpy.mockRestore();
+    resetStdoutErrorGuard();
+  }
+});
+
+test("writeOutput: stdout errors after the drain expiry do not end the run", async () => {
+  // At the expiry the pipe still holds what was never flushed, and the run has
+  // its exchange record, receipt and teardown still to go. A reader that dies
+  // during those emits an `'error'` on `process.stdout`, which ends the
+  // process where nothing is listening -- before the run's terminal event, on
+  // a run whose result and record are already on disk.
+  resetStdoutErrorGuard();
+  const listenersBefore = process.stdout.listenerCount("error");
+  const stdoutSpy = vi
+    .spyOn(process.stdout, "write")
+    .mockImplementation(
+      ((_chunk: string | Uint8Array): boolean =>
+        true) as typeof process.stdout.write,
+    );
+  try {
+    await expect(
+      writeOutput(undefined, ["a"], [["1"]], logCollector(), 20),
+    ).rejects.toThrow(/nothing more of the result left the process/);
+    expect(process.stdout.listenerCount("error")).toBe(listenersBefore + 1);
+    expect(() =>
+      process.stdout.emit(
+        "error",
+        Object.assign(new Error("write EPIPE"), { code: "EPIPE" }),
+      ),
+    ).not.toThrow();
+  } finally {
+    stdoutSpy.mockRestore();
+    resetStdoutErrorGuard();
+  }
+});
+
+test("writeOutput: a drain that finished leaves no listener behind", async () => {
+  // The other half of the same rule: nothing is queued after a flush that
+  // completed, so the run's later writes to stdout are the caller's to answer
+  // for and this listener would only swallow them.
+  resetStdoutErrorGuard();
+  const listenersBefore = process.stdout.listenerCount("error");
+  const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(((
+    _chunk: string | Uint8Array,
+    flushed?: (err?: Error | null) => void,
+  ): boolean => {
+    flushed?.();
+    return true;
+  }) as typeof process.stdout.write);
+  try {
+    await writeOutput(undefined, ["a"], [["1"]], logCollector());
+    expect(process.stdout.listenerCount("error")).toBe(listenersBefore);
+  } finally {
+    stdoutSpy.mockRestore();
+  }
+});
 
 test("writeOutput: a redirected regular-file stdout warns at error level about umask exposure", async () => {
   // `psilink exchange data.csv > results.csv`: fd 1 is a regular file the shell
@@ -908,8 +1166,10 @@ test("writeOutput: a stat failure on fd 1 suppresses the warning rather than thr
   const chunks: string[] = [];
   const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(((
     chunk: string | Uint8Array,
+    flushed?: () => void,
   ): boolean => {
     chunks.push(String(chunk));
+    flushed?.();
     return true;
   }) as typeof process.stdout.write);
   const realFstat = fs.fstatSync.bind(fs);

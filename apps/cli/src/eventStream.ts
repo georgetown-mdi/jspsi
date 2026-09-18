@@ -88,6 +88,7 @@ export const WARNING_SOURCES = [
   "signingWithoutRecord",
   "terminatedRunRecord",
   "persistenceLoss",
+  "transportTeardown",
 ] as const;
 
 /** One {@link WARNING_SOURCES} value; see that list. */
