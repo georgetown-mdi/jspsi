@@ -151,6 +151,17 @@ import type { ParkedResultsRead } from "@psi/parkedResultsStore";
 import type { RunOutputs } from "@psi/runOutputs";
 import type { UnfiledDisclosureRead } from "@psi/unfiledDisclosureStore";
 
+/** The classified failure on screen, with the number of the run that produced it.
+ * Each tier's copy is a shared constant, so two runs failing the same way yield the
+ * same alert object; the run number is what tells one failure from another, and it
+ * is what a confirmation the operator gave at a gate is granted for. */
+interface LiveManagedRunFailure {
+  /** The classified failure the surface renders. */
+  alert: ManagedRunFailureAlert;
+  /** Which of this visit's runs produced it, counting from one. */
+  runNumber: number;
+}
+
 /**
  * The attended re-run surface: open a stored managed exchange, confirm the input,
  * and run -- reconnecting to the partner without a new invitation and completing
@@ -266,7 +277,10 @@ export function ManagedRunSurface({ id }: { id: string }) {
   const [finishedAt, setFinishedAt] = useState<Date>();
   // This holds alert copy alone: the hand-off state has no copy of its own and
   // never lands here, because reaching it moves the surface to the spent state below.
-  const [failure, setFailure] = useState<ManagedRunFailureAlert>();
+  const [liveFailure, setLiveFailure] = useState<LiveManagedRunFailure>();
+  const failure = liveFailure?.alert;
+  // How many runs this visit has started, so each failure gets a number of its own.
+  const runsStarted = useRef(0);
   // The run's non-fatal notices, in arrival order. The driver raises one only for
   // a run that produced its outputs, and its close resolves after those outputs
   // reach here, so a notice lands on the completion surface beside the results.
@@ -277,8 +291,14 @@ export function ManagedRunSurface({ id }: { id: string }) {
   const [matching, setMatching] = useState<ResolvedMatching>();
   // The Tier-2 confirmation gate: once the operator confirms a real partner-side
   // failure, the surface proceeds to re-invite; a "does not add up" reply routes to
-  // the compromise-response copy instead.
-  const [confirmationGated, setConfirmationGated] = useState(false);
+  // the compromise-response copy instead. The grant names the failure it was given
+  // for, so a later failure the operator has answered nothing about still gets the
+  // gate.
+  const [confirmationGrantedFor, setConfirmationGrantedFor] =
+    useState<number>();
+  const confirmationGated =
+    liveFailure !== undefined &&
+    confirmationGrantedFor === liveFailure.runNumber;
   // The compromise response is the record's own, written at whichever gate the
   // operator answered and read back off the record this page holds, so one answer
   // covers both gates and stands at the next visit as it does here. A write this
@@ -286,6 +306,11 @@ export function ManagedRunSurface({ id }: { id: string }) {
   // fail to; the panel states that where the operator reads it.
   const [respondingCompromise, setRespondingCompromise] = useState(false);
   const [compromiseWriteFailed, setCompromiseWriteFailed] = useState(false);
+  // Which failure's own gate the answer was given at, where it was given on this
+  // visit. Clearing the response grants the confirmation for that failure alone: a
+  // response given at the standing condition's gate, or at an earlier visit, has no
+  // live failure behind it and grants none.
+  const [compromiseAnsweredFor, setCompromiseAnsweredFor] = useState<number>();
   const compromiseResponse =
     compromiseWriteFailed ||
     (record !== undefined && standingCompromiseResponse(record) !== undefined);
@@ -474,11 +499,14 @@ export function ManagedRunSurface({ id }: { id: string }) {
     if (record === undefined || source === undefined || running) return;
     const controller = new AbortController();
     abortRef.current = controller;
+    runsStarted.current += 1;
+    const runNumber = runsStarted.current;
     setRunning(true);
-    setFailure(undefined);
+    setLiveFailure(undefined);
     setRunWarnings([]);
     setMatching(undefined);
-    setConfirmationGated(false);
+    setConfirmationGrantedFor(undefined);
+    setCompromiseWriteFailed(false);
     setReinvite(undefined);
     setReinviteFailed(false);
     // This run's phase boundary, read by the failure classification below: a state
@@ -538,9 +566,9 @@ export function ManagedRunSurface({ id }: { id: string }) {
         // failureKind), so the record and its import marker are reloaded before
         // classifying -- an unattended run's failure would show through the same
         // tiers at the next visit. A corrupted record or sibling entry makes the
-        // reload reject (a ZodError); rather than skip setFailure entirely (spinner
-        // clears, no error UI, unhandled rejection), fall back to the launch
-        // reading and no sibling state, so the original error still shows
+        // reload reject (a ZodError); rather than skip setLiveFailure entirely
+        // (spinner clears, no error UI, unhandled rejection), fall back to the
+        // launch reading and no sibling state, so the original error still shows
         // through the generic tier.
         //
         // The classification also gets the record as the store held it at this
@@ -584,7 +612,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
           setLoadFailure("spent");
           return;
         }
-        setFailure(failed);
+        setLiveFailure({ alert: failed, runNumber });
       } finally {
         if (!controller.signal.aborted) setRunning(false);
         abortRef.current = undefined;
@@ -713,17 +741,24 @@ export function ManagedRunSurface({ id }: { id: string }) {
     setReinviteSource(source);
     setReinviting(true);
     setReinviteFailed(false);
-    void reinviteManagedExchange(record)
-      .then((result) => {
+    void (async () => {
+      try {
+        // The controls above render from a poll, so a run started since the last
+        // reading is still news here; re-reading also puts the reason on screen.
+        // Nothing below takes the run's own lock, so this reading is what stands
+        // between the mint and a run connecting on the secret it replaces.
+        if (await recheckLock()) return;
+        const result = await reinviteManagedExchange(record);
         setRecord(result.record);
-        setFailure(undefined);
+        setLiveFailure(undefined);
         setReinvite(result.reinvite);
-      })
-      .catch((error) => {
+      } catch (error) {
         whenDiagnostic(() => console.error(error));
         setReinviteFailed(true);
-      })
-      .finally(() => setReinviting(false));
+      } finally {
+        setReinviting(false);
+      }
+    })();
   }
 
   // Write the operator's answer that nothing adds up onto the record, so the mint
@@ -756,10 +791,11 @@ export function ManagedRunSurface({ id }: { id: string }) {
     // standing condition's gate: that channel is the one the operator flagged.
     if (compromiseResponse) return;
     if (routeConfirmationReply(outcome) === "compromise-response") {
+      setCompromiseAnsweredFor(liveFailure?.runNumber);
       respondCompromise();
       return;
     }
-    setConfirmationGated(true);
+    setConfirmationGrantedFor(liveFailure?.runNumber);
     if (record !== undefined && canReinviteFromRecord(record))
       reinviteNow("recovery");
   }
@@ -780,8 +816,10 @@ export function ManagedRunSurface({ id }: { id: string }) {
         setStandingSettled(true);
         setCompromiseWriteFailed(false);
         // The gate is not put again to an operator who answered it and then settled
-        // it out-of-band: the live failure's recovery is the mint they can now take.
-        if (pastResponse) setConfirmationGated(true);
+        // it out-of-band: the failure they answered offers the mint they can now
+        // take. Only that failure -- a run since then raised one they have answered
+        // nothing about, and it keeps its own gate.
+        if (pastResponse) setConfirmationGrantedFor(compromiseAnsweredFor);
       })
       .catch((error) => {
         whenDiagnostic(() => console.error(error));
@@ -821,15 +859,14 @@ export function ManagedRunSurface({ id }: { id: string }) {
     (standingSettled ||
       (standingView !== undefined && standingView.tier !== failure?.kind));
 
-  // Whether the live failure is already offering the re-invite -- directly, or past
-  // the confirmation gate, which ends on the same offer. Both mint from this record,
-  // so the standing section drops its own copy of the offer and keeps its status and
-  // its clear control: one control for the act, not two identical buttons whose
-  // failed mint alerts twice.
-  const failureOffersReinvite =
+  // Whether the live failure holds the re-invite: it offers the mint directly, or it
+  // holds the confirmation gate, whose two outcomes decide whether one happens at
+  // all. Both mint from this record, so the standing section keeps its status and
+  // its clear control and adds no button of its own -- neither a second copy of the
+  // offer, whose failed mint would alert twice, nor a way around the gate.
+  const failureHoldsReinvite =
     failure !== undefined &&
-    (managedRunReinvites(failure) ||
-      (failure.recovery === "confirm" && confirmationGated));
+    (managedRunReinvites(failure) || failure.recovery === "confirm");
 
   // Persist an in-place edit to the local fields (label, max-token-age policy)
   // through the single-transaction store path, then adopt the returned record so
@@ -1175,7 +1212,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
                 reinviting={reinviting}
                 runInFlight={runInFlight}
                 reinviteFailed={reinviteFailed && reinviteSource === "recovery"}
-                reinviteOffered={failureOffersReinvite}
+                reinviteHeldByFailure={failureHoldsReinvite}
                 onReinvite={() => reinviteNow("recovery")}
                 onClear={() => clearStanding(false)}
                 onResolve={resolveStanding}
@@ -1353,6 +1390,18 @@ function FailureRecovery({
   return null;
 }
 
+/** The alert every clearance shows when the store refused the write: the standing
+ * condition's two legs and the compromise response's acknowledgement all take the
+ * same write, and a rejected one leaves the condition standing wherever it was
+ * taken from. */
+function ClearFailureAlert() {
+  return (
+    <Alert color="red" title="Could not clear this" mt="sm">
+      Nothing changed here, so this still stands. Try again.
+    </Alert>
+  );
+}
+
 /**
  * The compromise response: the answer the operator gave at a failure gate, held on
  * the record so it stands at the next visit and not this one alone. It renders
@@ -1395,11 +1444,7 @@ function CompromiseResponsePanel({
       <div className={styles.callout}>
         <p className={styles.calloutLead}>{COMPROMISE_ACKNOWLEDGE_LEAD}</p>
         <p className={styles.small}>{COMPROMISE_ACKNOWLEDGE_NOTE}</p>
-        {clearFailed && (
-          <Alert color="red" title="Could not clear this" mt="sm">
-            Nothing changed here, so this still stands. Try again.
-          </Alert>
-        )}
+        {clearFailed && <ClearFailureAlert />}
         <Button
           mt="sm"
           variant="default"
@@ -1428,10 +1473,11 @@ function CompromiseResponsePanel({
  *
  * Once cleared, the section keeps its place and shows the re-invite: settling a
  * condition is not the same act as re-establishing the secret it was raised over.
- * Where the live failure above is already offering that re-invite, the offer is
- * left to it -- one control for the act, whichever state asked for it. The host
- * renders none of this while a compromise response stands, showing the
- * {@link CompromiseResponsePanel} in its place.
+ * Where the live failure above holds that re-invite -- offering it, or holding the
+ * gate that decides whether it happens -- the act is left to it, so there is one
+ * control for it and no way around the gate. The host renders none of this while a
+ * compromise response stands, showing the {@link CompromiseResponsePanel} in its
+ * place.
  */
 function StandingConditionSection({
   record,
@@ -1443,7 +1489,7 @@ function StandingConditionSection({
   reinviting,
   runInFlight,
   reinviteFailed,
-  reinviteOffered,
+  reinviteHeldByFailure,
   onReinvite,
   onClear,
   onResolve,
@@ -1460,22 +1506,16 @@ function StandingConditionSection({
   reinviting: boolean;
   runInFlight: boolean;
   reinviteFailed: boolean;
-  /** Whether the live failure above is already offering the re-invite. It mints
-   * from the same record, so this section shows its status and its clearance
-   * without a second copy of the offer. */
-  reinviteOffered: boolean;
+  /** Whether the live failure above holds the re-invite: it offers the mint itself,
+   * or it holds the gate deciding whether one happens. Either way this section shows
+   * its status and its clearance and no control of its own. */
+  reinviteHeldByFailure: boolean;
   onReinvite: () => void;
   onClear: () => void;
   onResolve: (outcome: Parameters<typeof routeConfirmationReply>[0]) => void;
 }) {
-  const offersReinvite = !reinviteOffered;
-  // The same alert on both legs: the confirming option and the acknowledge control
-  // take the same store write, and a rejected one leaves the condition standing.
-  const clearFailure = clearFailed ? (
-    <Alert color="red" title="Could not clear this" mt="sm">
-      Nothing changed here, so this still stands. Try again.
-    </Alert>
-  ) : null;
+  const offersReinvite = !reinviteHeldByFailure;
+  const clearFailure = clearFailed ? <ClearFailureAlert /> : null;
   if (settled)
     return offersReinvite ? (
       <ReinviteRecovery

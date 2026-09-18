@@ -27,9 +27,13 @@ import {
 import { ManagedRunSurface } from "@recurring/ManagedRunSurface";
 import { composeManagedExchangeFile } from "@psi/managed/managedExchangeRecord";
 import { getManagedLocalState } from "@psi/managed/managedLocalState";
-import { managedExchangeLockName } from "@psi/managed/managedExchangeLock";
 
 import { disclosureToggle, openDisclosure } from "./collapsePanels";
+import {
+  filterLockFromReadings,
+  holdRunLockElsewhere,
+  stalePollUntilClick,
+} from "./runLockReadings";
 import { captureDownloads } from "./captureDownloads";
 import { createAppMount } from "./renderApp";
 
@@ -198,83 +202,6 @@ async function dispatchCommandLineExport(
     .toBeInTheDocument();
   await downloads.settled();
   expect(downloads.captured).toHaveLength(before + 2);
-}
-
-/**
- * Filter this record's lock out of every `navigator.locks.query()` reading, so a
- * surface reads the record free while a run actually holds it -- the poll and the
- * confirm handler's re-read both rely on this reading, so filtering puts a click on
- * the far side of it deterministically without waiting out the real 400 ms interval.
- *
- * `reveal` stops the filtering, once the reading should catch up mid-click; leaving
- * it unrevealed keeps the surface from ever seeing the run.
- */
-function filterLockFromReadings(id: string): {
-  reveal: () => void;
-  restore: () => void;
-} {
-  const name = managedExchangeLockName(id);
-  const realQuery = navigator.locks.query.bind(navigator.locks);
-  let hidden = true;
-  (navigator.locks as unknown as { query: unknown }).query = async () => {
-    const snapshot = await realQuery();
-    if (!hidden) return snapshot;
-    return {
-      ...snapshot,
-      held: snapshot.held?.filter((lock) => lock.name !== name),
-    };
-  };
-  return {
-    reveal: () => {
-      hidden = false;
-    },
-    restore: () => {
-      (navigator.locks as unknown as { query: typeof realQuery }).query =
-        realQuery;
-    },
-  };
-}
-
-/**
- * Hold this record's lock reading STALE for the surfaces' poll -- their only
- * reading of a run in another context -- until a click is dispatched, from which
- * moment the reading is true again.
- *
- * This is the gap a confirm handler's click-time re-read exists for: the lock can
- * be taken between two poll readings, leaving a confirm button enabled over a run
- * already under way.
- */
-function stalePollUntilClick(id: string): () => void {
-  const readings = filterLockFromReadings(id);
-  // Capture phase, so it runs while the click is being dispatched and before the
-  // handler React invokes on it: the button cannot be disabled out from under the
-  // click, and everything the handler itself reads is the truth. Only a real
-  // pointer's click counts -- the download dispatches reach the page as
-  // `anchor.click()`, whose untrusted event is not the operator pressing confirm.
-  const revealOnClick = (event: Event) => {
-    if (event.isTrusted) readings.reveal();
-  };
-  document.addEventListener("click", revealOnClick, { capture: true });
-  return () => {
-    document.removeEventListener("click", revealOnClick, { capture: true });
-    readings.restore();
-  };
-}
-
-/** Hold this record's run+rotate lock the way a second tab's run or the scheduled
- * runtime does, until the returned release is called. */
-async function holdRunLockElsewhere(id: string): Promise<() => void> {
-  let release: () => void = () => undefined;
-  const untilReleased = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  await new Promise<void>((granted) => {
-    void navigator.locks.request(managedExchangeLockName(id), () => {
-      granted();
-      return untilReleased;
-    });
-  });
-  return release;
 }
 
 beforeEach(async () => {

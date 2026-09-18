@@ -1293,6 +1293,12 @@ goes with it, and the fresh invitation is on offer again for the operator to
 send. That ordering -- reach the partner another way first, then re-invite -- is
 what the response is for.
 
+The answer covers the failure it was given at. Where a run since then failed the
+same way, that later failure is one the operator has confirmed nothing about, so
+the acknowledgement puts its gate rather than the invitation: the two-outcome
+gate is asked once per failure, and no control mints while one of them is
+unanswered.
+
 ### Expiry is its own state, never routed through attack framing
 
 A lapsed age bound (`expires` in the past) is detected **before** any
