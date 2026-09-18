@@ -1455,17 +1455,19 @@ function CompromiseResponsePanel({
 }) {
   return (
     <>
-      <Alert color="red" title={COMPROMISE_RESPONSE_TITLE} mb="md">
-        <span style={{ whiteSpace: "pre-line" }}>
-          {COMPROMISE_RESPONSE_MESSAGE}
-        </span>
-        <p className={styles.small}>{COMPROMISE_RESPONSE_STANDS}</p>
-      </Alert>
       {unsaved && (
         <Alert color="yellow" title={COMPROMISE_RESPONSE_UNSAVED_TITLE} mb="md">
           {COMPROMISE_RESPONSE_UNSAVED_REASON}
         </Alert>
       )}
+      <Alert color="red" title={COMPROMISE_RESPONSE_TITLE} mb="md">
+        <span style={{ whiteSpace: "pre-line" }}>
+          {COMPROMISE_RESPONSE_MESSAGE}
+        </span>
+        {!unsaved && (
+          <p className={styles.small}>{COMPROMISE_RESPONSE_STANDS}</p>
+        )}
+      </Alert>
       <div className={styles.callout}>
         <p className={styles.calloutLead}>{COMPROMISE_ACKNOWLEDGE_LEAD}</p>
         <p className={styles.small}>{COMPROMISE_ACKNOWLEDGE_NOTE}</p>

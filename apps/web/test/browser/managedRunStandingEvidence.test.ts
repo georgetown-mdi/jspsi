@@ -11,6 +11,7 @@ import "@mantine/core/styles.css";
 
 import {
   COMPROMISE_ACKNOWLEDGE_LABEL,
+  COMPROMISE_RESPONSE_STANDS,
   COMPROMISE_RESPONSE_TITLE,
   COMPROMISE_RESPONSE_UNSAVED_REASON,
   COMPROMISE_RESPONSE_UNSAVED_TITLE,
@@ -862,6 +863,7 @@ describe("a compromise response this device could not save", () => {
     expect(app.container.textContent).toContain(
       COMPROMISE_RESPONSE_UNSAVED_REASON,
     );
+    expect(app.container.textContent).not.toContain(COMPROMISE_RESPONSE_STANDS);
     expect(page.getByText(COMPROMISE_RESPONSE_TITLE).elements()).toHaveLength(
       1,
     );

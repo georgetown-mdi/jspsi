@@ -46,12 +46,13 @@ export const UNRECOGNIZED_IMPORT_REASON =
 
 /** The file was written in the previous artifact format, which this build does not
  * read. The remedies a newer file has are void here -- there is no version to move
- * to and no build left that writes this one -- so the way on is a new exchange with
- * the partner. */
+ * to and no build left that writes this one -- so the wrong-file check leads, and a
+ * new exchange with the partner is the way on. */
 export const OUTDATED_IMPORT_REASON =
   "This backup was written by an earlier version of this app and cannot be " +
-  "restored. Set up a new exchange with your partner instead. Delete the old " +
-  "exchange if this browser still holds it.";
+  "restored. Check that you chose the backup file you exported and that it " +
+  "was not modified. Set up a new exchange with your partner instead. " +
+  "Delete the old exchange if this browser still holds it.";
 
 /**
  * Which refusal an import error is shown as. A file holding the previous artifact

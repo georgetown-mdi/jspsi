@@ -117,8 +117,9 @@ describe("a backup file from the previous artifact format", () => {
     expect(reason).toBe(OUTDATED_IMPORT_REASON);
     expect(reason).toBe(
       "This backup was written by an earlier version of this app and cannot " +
-        "be restored. Set up a new exchange with your partner instead. Delete " +
-        "the old exchange if this browser still holds it.",
+        "be restored. Check that you chose the backup file you exported and " +
+        "that it was not modified. Set up a new exchange with your partner " +
+        "instead. Delete the old exchange if this browser still holds it.",
     );
     expect(reason).not.toContain("newer version");
     expect(reason).not.toContain("reload");
