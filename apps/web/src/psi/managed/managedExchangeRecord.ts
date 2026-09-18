@@ -53,16 +53,27 @@ export const MANAGED_EXCHANGE_SCHEMA_VERSION = "psilink-managed-exchange/v3";
  * {@link MANAGED_EXCHANGE_SCHEMA_VERSION}: the artifact is a separate on-disk
  * format (the embedded document plus the key pair plus the local block), so it
  * versions independently of the stored record. A reader rejects any other value
- * rather than migrating it, `psilink-managed-exchange-backup/v1` among them. The
- * literal moves for the {@link ManagedStandingResponse} nested in a raised
- * condition: a build that does not know the member reads it with a schema that
- * drops what it cannot name, so it would import a condition stripped of the
- * operator's answer and offer a fresh invitation over it. The whole file is
- * refused on the literal instead, and the recovery is an export taken from a
- * build that matches.
+ * rather than migrating it, {@link MANAGED_EXCHANGE_PREVIOUS_ARTIFACT_VERSION}
+ * among them. The literal moves for the {@link ManagedStandingResponse} nested
+ * in a raised condition: a build that does not know the member reads it with a
+ * schema that drops what it cannot name, so it would import a condition
+ * stripped of the operator's answer and offer a fresh invitation over it. The
+ * whole file is refused on the literal instead, and the recovery is an export
+ * taken from a build that matches.
  */
 export const MANAGED_EXCHANGE_ARTIFACT_VERSION =
   "psilink-managed-exchange-backup/v2";
+
+/**
+ * The `artifactVersion` literal of the artifact format this one replaced. Every
+ * backup taken before the operator's response existed holds it, and no build
+ * reads one again. It is kept so the import can tell such a file from an
+ * unreadable one and from a newer build's export, whose remedies are not an
+ * older file's: the recovery here is a fresh exchange, not a version to move
+ * between.
+ */
+export const MANAGED_EXCHANGE_PREVIOUS_ARTIFACT_VERSION =
+  "psilink-managed-exchange-backup/v1";
 
 /**
  * Upper bound on the operator's {@link ManagedExchangeRecord.label}, in

@@ -2,14 +2,16 @@ import { describe, expect, test } from "vitest";
 import { generateSharedSecret, getDefaultLinkageTerms } from "@psilink/core";
 
 import {
+  MANAGED_EXCHANGE_PREVIOUS_ARTIFACT_VERSION,
+  buildManagedExchangeRecord,
+  composeManagedExchangeFile,
+} from "@psi/managed/managedExchangeRecord";
+import {
+  OUTDATED_IMPORT_REASON,
   UNREADABLE_IMPORT_REASON,
   UNRECOGNIZED_IMPORT_REASON,
   importFailureReason,
 } from "@recurring/managedImportFailure";
-import {
-  buildManagedExchangeRecord,
-  composeManagedExchangeFile,
-} from "@psi/managed/managedExchangeRecord";
 import {
   encodeManagedExchangeArtifact,
   importManagedExchangeArtifact,
@@ -99,6 +101,27 @@ describe("a backup file the artifact schema rejects", () => {
     expect(reasonForImporting(serialize(document))).toBe(
       UNRECOGNIZED_IMPORT_REASON,
     );
+  });
+});
+
+describe("a backup file from the previous artifact format", () => {
+  test("says the file is older, and gives an older file's way on", () => {
+    // Every backup taken before the response existed holds this tag. Told the
+    // newer-build story, the operator would reload a page that is already current
+    // and re-export from a device that cannot write this format any more.
+    const document = artifactDocument();
+    document.artifactVersion = MANAGED_EXCHANGE_PREVIOUS_ARTIFACT_VERSION;
+
+    const reason = reasonForImporting(serialize(document));
+
+    expect(reason).toBe(OUTDATED_IMPORT_REASON);
+    expect(reason).toBe(
+      "This backup was written by an earlier version of this app and cannot " +
+        "be restored. Set up a new exchange with your partner instead. Delete " +
+        "the old exchange if this browser still holds it.",
+    );
+    expect(reason).not.toContain("newer version");
+    expect(reason).not.toContain("reload");
   });
 });
 

@@ -52,6 +52,7 @@ import { z } from "zod";
 
 import {
   MANAGED_EXCHANGE_ARTIFACT_VERSION,
+  MANAGED_EXCHANGE_PREVIOUS_ARTIFACT_VERSION,
   buildManagedExchangeRecord,
   keyFileFieldsSchema,
   lastRunSchema,
@@ -243,6 +244,26 @@ const artifactSchema: ZodType<ManagedExchangeArtifact> = z
   })
   .strict();
 
+/** Raised when a backup file holds the previous artifact format
+ * ({@link MANAGED_EXCHANGE_PREVIOUS_ARTIFACT_VERSION}). The strict schema refuses
+ * the tag either way; this names which direction the difference runs, so the
+ * import states the remedy an older file has -- a fresh exchange -- rather than
+ * the version-gap remedies that only close a newer file's. */
+export class ManagedArtifactOutdatedError extends Error {
+  constructor() {
+    super("the backup file holds the previous artifact format");
+    this.name = "ManagedArtifactOutdatedError";
+  }
+}
+
+/** Matches any document whose `artifactVersion` is the previous literal, ahead of
+ * the strict schema that refuses it. The rest of the document is left unchecked:
+ * an older file's other fields are not this build's to read, and the tag alone
+ * decides what the operator is told. */
+const previousArtifactSchema = z.object({
+  artifactVersion: z.literal(MANAGED_EXCHANGE_PREVIOUS_ARTIFACT_VERSION),
+});
+
 /**
  * Parse untrusted artifact bytes into a validated {@link ManagedExchangeArtifact}.
  * The whole document is parsed through the shared sensitive-JSON chokepoint
@@ -252,13 +273,22 @@ const artifactSchema: ZodType<ManagedExchangeArtifact> = z
  * here; {@link reconstructRecordFromArtifact} validates it through the exchange-file
  * parser.
  *
+ * The previous format's tag is refused first, with its own error: it fails the
+ * schema as surely, but as a rejection it is indistinguishable from a newer build's
+ * export, whose remedies do not apply to a file this build has already moved past.
+ * Nothing is reconstructed either way.
+ *
  * @throws {UsageError} if the bytes are not parseable JSON.
+ * @throws {ManagedArtifactOutdatedError} if the document holds the previous
+ *   artifact format.
  * @throws {ZodError} if the parsed value is not a valid artifact.
  */
 export function parseManagedExchangeArtifact(
   source: string,
 ): ManagedExchangeArtifact {
   const raw = parseSensitiveJson(source, "managed exchange backup");
+  if (previousArtifactSchema.safeParse(raw).success)
+    throw new ManagedArtifactOutdatedError();
   return artifactSchema.parse(raw);
 }
 
@@ -338,6 +368,8 @@ export interface ImportedManagedExchangeArtifact {
  *
  * @throws {UsageError} if the bytes are not parseable JSON or the embedded document
  *   is not parseable YAML.
+ * @throws {ManagedArtifactOutdatedError} if the bytes hold the previous artifact
+ *   format.
  * @throws {ZodError} if the artifact or the reconstructed record is invalid.
  */
 export function importManagedExchangeArtifact(

@@ -1724,7 +1724,9 @@ which from the file in front of them. The import therefore separates the two: a
 file whose bytes do not parse leaves only the file itself to check, while a
 document the schema rejects names the version difference first and states both
 ways past it, reloading the page for the current version or exporting the backup
-again from the device that wrote the file.
+again from the device that wrote the file. A backup written in the app's
+previous artifact format is the one case with neither way out: it is refused as
+an older file, and the way on is a new exchange set up with the partner.
 
 **The import says which grants this browser does not hold.** An artifact holds the
 exchange, not the two pointers into this device that the record also keeps: the

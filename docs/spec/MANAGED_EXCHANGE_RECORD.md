@@ -933,14 +933,21 @@ either imports with the answer or is refused entire. The artifact's own
   refusing the file -- installing a record whose condition holds no answer and
   offering the fresh invitation over it. That is why the response moved the
   `artifactVersion` literal to `psilink-managed-exchange-backup/v2`: such a
-  build refuses the whole file on the tag before any nested schema sees it. This
-  build's condition schema is strict, so a member it does not know is refused
-  rather than dropped from the record an import would otherwise reconstruct.
+  build refuses the whole file on the tag and reconstructs no record from it.
+  The nested schemas do run, and one rejection can name the tag and a nested
+  path together; what the tag fixes is that nothing is installed, not that
+  nothing else was read. This build's condition schema is strict, so a member
+  it does not know is refused rather than dropped from the record an import
+  would otherwise reconstruct.
   The import surface holds that rejection apart from a file whose bytes do not
   parse at all: a document that parses and then fails the schema names a newer
   build's export as a likely cause and states the two ways past it -- bring the
   page up to date, or write the file from a build that matches -- alongside the
-  wrong-file and modified-file checks.
+  wrong-file and modified-file checks. A file tagged
+  `psilink-managed-exchange-backup/v1`, the format this one replaced, is the
+  other direction and is told apart from both: neither remedy applies to it, so
+  the refusal states that the backup is from an earlier version and points at
+  setting the exchange up again with the partner.
 - **What a reconstructed `lastRun` can and cannot assert.** The `local.lastRun`
   block is validated against the record's own `lastRun` schema rather than a
   narrower one, so an artifact is accepted with every outcome and
