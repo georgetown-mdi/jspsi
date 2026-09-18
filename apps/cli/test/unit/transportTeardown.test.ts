@@ -9,6 +9,7 @@ import {
   closeWithinCeiling,
   teardownCeilingNotice,
   transportTeardownCeilingMs,
+  type TeardownOutcome,
 } from "../../src/transportTeardown";
 
 /**
@@ -97,24 +98,54 @@ test("a close rejecting after the ceiling does not raise an unhandled rejection"
   await new Promise((resolve) => setImmediate(resolve));
 });
 
+/** One expired teardown, the input every notice case below reads. */
+const EXPIRED: TeardownOutcome = {
+  finished: false,
+  elapsedMs: 180_000,
+  heldBy: ["TCPSocketWrap"],
+};
+
 test("the expiry notice states the wait, what held it, and that the status stands", () => {
-  const notice = teardownCeilingNotice({
-    finished: false,
-    elapsedMs: 180_000,
-    heldBy: ["TCPSocketWrap"],
+  const notice = teardownCeilingNotice(EXPIRED, {
+    channel: "filedrop",
+    retainFiles: false,
   });
   expect(notice).toContain("within 180s");
   expect(notice).toContain("still held by: TCPSocketWrap");
   expect(notice).toContain("exit status are unchanged");
 });
 
-test("the expiry notice points at the files the abandoned close would have removed", () => {
-  const notice = teardownCeilingNotice({
-    finished: false,
-    elapsedMs: 180_000,
-    heldBy: ["FSReqCallback"],
+test("a delete-mode run is pointed at the files the abandoned close left", () => {
+  // The close is what removes this party's own protocol files, so an expiry
+  // leaves them in the shared directory for the operator to clear.
+  const notice = teardownCeilingNotice(EXPIRED, {
+    channel: "sftp",
+    retainFiles: false,
   });
-  expect(notice).toContain("file-drop or SFTP exchange");
-  expect(notice).toContain("check the exchange directory");
+  expect(notice).toContain("Check the exchange directory");
   expect(notice).toContain("remove any protocol files this run left there");
+  expect(notice).toContain("--sweep-exchange-files");
+});
+
+test("a retain-mode run is not told to remove its own transcript", () => {
+  // In retain mode the close deletes nothing (docs/spec/FILE_SYNC.md), so the
+  // files in the directory are the transcript the operator configured the run
+  // to keep, and the expiry leaves no deletion undone.
+  const notice = teardownCeilingNotice(EXPIRED, {
+    channel: "filedrop",
+    retainFiles: true,
+  });
+  expect(notice).toContain("exit status are unchanged");
+  expect(notice).not.toContain("exchange directory");
+  expect(notice).not.toContain("protocol files");
+  expect(notice).not.toContain("--sweep-exchange-files");
+});
+
+test("a webrtc run, which has no protocol files, is told nothing about them", () => {
+  const notice = teardownCeilingNotice(EXPIRED, {
+    channel: "webrtc",
+    retainFiles: false,
+  });
+  expect(notice).toContain("exit status are unchanged");
+  expect(notice).not.toContain("exchange directory");
 });

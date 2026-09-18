@@ -75,6 +75,14 @@ export async function closeWithinCeiling(
   return { ...outcome, heldBy: outcome.finished ? [] : heldResourceKinds() };
 }
 
+/** What a run was set to do with the protocol files of its exchange. */
+export interface ExchangeFileDisposition {
+  /** The run's channel; only the file-based ones have protocol files at all. */
+  channel: ConnectionConfig["channel"];
+  /** Whether the run keeps those files as a transcript instead of deleting them. */
+  retainFiles: boolean;
+}
+
 /**
  * The notice a run states -- on the operator log and on the machine-interface
  * stream -- when its transport did not finish closing inside the ceiling: how
@@ -82,24 +90,33 @@ export async function closeWithinCeiling(
  * the exchange's own outcome either way, which the second sentence says so an
  * unattended supervisor does not read the notice as a failure to retry.
  *
- * The third sentence names the one thing the abandoned close leaves for the
- * operator. On the file channels that close is what removes this party's own
- * protocol files from the shared directory (docs/spec/FILE_SYNC.md,
- * `responsibleFiles`), so an expired teardown can leave them there; the notice
- * does not know the channel, so it names the two channels it applies to.
+ * A run deleting its protocol files gets one more sentence, naming the one
+ * thing the abandoned close leaves for the operator: on the file channels that
+ * close is what removes this party's own files from the shared directory
+ * (docs/spec/FILE_SYNC.md, `responsibleFiles`), so an expired teardown can
+ * leave them there. A retain-mode run's close removes nothing, and those files
+ * are the transcript it was set to keep, so it is told nothing about them.
  */
-export function teardownCeilingNotice(outcome: TeardownOutcome): string {
+export function teardownCeilingNotice(
+  outcome: TeardownOutcome,
+  files: ExchangeFileDisposition,
+): string {
   const held =
     outcome.heldBy.length === 0
       ? "something Node does not name"
       : outcome.heldBy.join(", ");
+  const leftBehind =
+    files.channel === "webrtc" || files.retainFiles
+      ? ""
+      : ` Check the exchange directory and remove any protocol files this run ` +
+        `left there; deleting them is the part of the close that did not ` +
+        `finish, and passing --sweep-exchange-files to the next run removes ` +
+        `them before it meets the partner.`;
   return (
     `the transport did not finish closing within ` +
     `${Math.round(outcome.elapsedMs / 1000)}s, so this run stopped waiting ` +
     `on it; still held by: ${held}. The exchange's own outcome and exit ` +
-    `status are unchanged, and everything it writes is already on disk. On a ` +
-    `file-drop or SFTP exchange, check the exchange directory and remove any ` +
-    `protocol files this run left there; deleting them is the part of the ` +
-    `close that did not finish.`
+    `status are unchanged, and everything it writes is already on disk.` +
+    leftBehind
   );
 }

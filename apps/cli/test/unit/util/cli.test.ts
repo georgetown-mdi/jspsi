@@ -21,6 +21,7 @@ import type { ConnectionErrorKind } from "@psilink/core";
 
 import {
   openInputSource,
+  resetStdoutErrorGuard,
   stdoutDrainExpiredNotice,
   writeOutput,
 } from "../../../src/util/dataIo";
@@ -988,6 +989,7 @@ test("writeOutput: a failure the stream reports, not a callback, fails the write
   // listener for the drain's duration Node would end the process on the spot,
   // before the record of the disclosure the run already made is written.
   const refused = Object.assign(new Error("write EPIPE"), { code: "EPIPE" });
+  resetStdoutErrorGuard();
   const listenersBefore = process.stdout.listenerCount("error");
   const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(((
     _chunk: string | Uint8Array,
@@ -1001,8 +1003,61 @@ test("writeOutput: a failure the stream reports, not a callback, fails the write
     await expect(
       writeOutput(undefined, ["a"], [["1"]], logCollector()),
     ).rejects.toThrow(/could not be written to stdout/);
-    // Held for the drain and no longer: the run's own later writes are not
-    // this listener's to answer for.
+    // The drain's own reject listener is off, and the one left in its place is
+    // the guard the failure installs for the rest of the process.
+    expect(process.stdout.listenerCount("error")).toBe(listenersBefore + 1);
+  } finally {
+    stdoutSpy.mockRestore();
+    resetStdoutErrorGuard();
+  }
+});
+
+test("writeOutput: stdout errors after the drain expiry do not end the run", async () => {
+  // At the expiry the pipe still holds what was never flushed, and the run has
+  // its exchange record, receipt and teardown still to go. A reader that dies
+  // during those emits an `'error'` on `process.stdout`, which ends the
+  // process where nothing is listening -- before the run's terminal event, on
+  // a run whose result and record are already on disk.
+  resetStdoutErrorGuard();
+  const listenersBefore = process.stdout.listenerCount("error");
+  const stdoutSpy = vi
+    .spyOn(process.stdout, "write")
+    .mockImplementation(
+      ((_chunk: string | Uint8Array): boolean =>
+        true) as typeof process.stdout.write,
+    );
+  try {
+    await expect(
+      writeOutput(undefined, ["a"], [["1"]], logCollector(), 20),
+    ).rejects.toThrow(/still buffered/);
+    expect(process.stdout.listenerCount("error")).toBe(listenersBefore + 1);
+    expect(() =>
+      process.stdout.emit(
+        "error",
+        Object.assign(new Error("write EPIPE"), { code: "EPIPE" }),
+      ),
+    ).not.toThrow();
+  } finally {
+    stdoutSpy.mockRestore();
+    resetStdoutErrorGuard();
+  }
+});
+
+test("writeOutput: a drain that finished leaves no listener behind", async () => {
+  // The other half of the same rule: nothing is queued after a flush that
+  // completed, so the run's later writes to stdout are the caller's to answer
+  // for and this listener would only swallow them.
+  resetStdoutErrorGuard();
+  const listenersBefore = process.stdout.listenerCount("error");
+  const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(((
+    _chunk: string | Uint8Array,
+    flushed?: (err?: Error | null) => void,
+  ): boolean => {
+    flushed?.();
+    return true;
+  }) as typeof process.stdout.write);
+  try {
+    await writeOutput(undefined, ["a"], [["1"]], logCollector());
     expect(process.stdout.listenerCount("error")).toBe(listenersBefore);
   } finally {
     stdoutSpy.mockRestore();

@@ -5158,6 +5158,101 @@ test("a close that throws during an organic failure still emits the terminal err
   expect(String(lines[1].message)).not.toContain("returned a promise");
 }, 20_000);
 
+test("a close that throws deregisters the run's signal handlers all the same", async () => {
+  // Cleanup is single-entry, so a throwing close is the last chance to take
+  // this run's SIGINT and SIGTERM handlers off the process; left installed,
+  // they accumulate wherever a caller drives runProtocol in-process, and the
+  // max-listener threshold this run raised stays raised with them.
+  const sigintBefore = process.listenerCount("SIGINT");
+  const sigtermBefore = process.listenerCount("SIGTERM");
+  const maxListenersBefore = process.getMaxListeners();
+  const realClose = FileSyncConnection.prototype.close;
+  FileSyncConnection.prototype.close = function (): Promise<void> {
+    throw new Error("close() threw before it returned a promise");
+  };
+  try {
+    await runProtocol({
+      connection: {
+        channel: "filedrop",
+        path: "/nonexistent-path-that-cannot-exist-psilink-test",
+      },
+      auth: null,
+      prepared: minimalPrepared,
+      output: undefined,
+      verbosity: -1,
+      loggerName: "test",
+    }).catch(() => undefined);
+  } finally {
+    FileSyncConnection.prototype.close = realClose;
+  }
+
+  expect(process.listenerCount("SIGINT")).toBe(sigintBefore);
+  expect(process.listenerCount("SIGTERM")).toBe(sigtermBefore);
+  expect(process.getMaxListeners()).toBe(maxListenersBefore);
+}, 20_000);
+
+test("a close that throws on a completed run still emits the terminal result event", async () => {
+  // The success path's own cleanup: the exchange finished and the result,
+  // record and receipt are on disk, so a layer close that throws OUTSIDE its
+  // own catch -- synchronously, before it returns a promise at all -- must not
+  // turn the run into a terminal error (docs/spec/CLI_EVENTS.md, Terminal-event
+  // guarantees). Both parties throw from close, and each is closed for real in
+  // the finally so no poller outlives the case.
+  const realClose = FileSyncConnection.prototype.close;
+  const unclosed = new Set<FileSyncConnection>();
+  FileSyncConnection.prototype.close = function (
+    this: FileSyncConnection,
+  ): Promise<void> {
+    unclosed.add(this);
+    throw new Error("close() threw before it returned a promise");
+  };
+  mockFd3Open();
+  try {
+    await Promise.all([
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        output: path.join(tmpDir, "throwing-close.csv"),
+        verbosity: -1,
+        loggerName: "test-a",
+        fileSyncRuntime: { eventStream: true },
+      }),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        output: path.join(tmpDir, "throwing-close-b.csv"),
+        verbosity: -1,
+        loggerName: "test-b",
+      }),
+    ]);
+  } finally {
+    FileSyncConnection.prototype.close = realClose;
+    vi.mocked(fs.fstatSync).mockRestore();
+    await Promise.all(
+      [...unclosed].map((conn) => realClose.call(conn).catch(() => {})),
+    );
+  }
+
+  const lines = takeFd3Lines();
+  expect(lines.map((line) => line.type)).toEqual([
+    "stages",
+    "metrics",
+    "result",
+  ]);
+  // The exchange completed, so the run's status is the exchange's own.
+  expect(process.exitCode).toBeUndefined();
+}, 20_000);
+
 test("a count-only run's terminal event includes the count beside resultWritten:false", async () => {
   // The outcome a supervisor reading only fd 3 would otherwise misreport: a
   // count-only run writes no result file, so its terminal event has the same

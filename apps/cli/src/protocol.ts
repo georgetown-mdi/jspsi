@@ -2090,33 +2090,46 @@ export async function runProtocol(
     if (cleaned) return;
     cleaned = true;
     psiProgress.close();
-    const teardown = await closeRunLayers({
-      build,
-      run,
-      log,
-      ceilingMs: transportTeardownCeilingMs(connection.channel),
-    });
-    // The one bounded obligation reached its bound. Reported on both machine
-    // channels the run has -- the operator log and the event stream -- and
-    // before the terminal event, which is why cleanup runs ahead of the
-    // emission sites rather than in the finally alone. It changes no exit
-    // code: the teardown is housekeeping, and a supervisor that saw the
-    // status move would retry a run that already disclosed.
-    if (!teardown.finished) {
-      const notice = teardownCeilingNotice(teardown);
-      log.warn(notice);
-      emit((e) => e.warning("transportTeardown", notice));
+    // The handlers come off in the finally: the guard above makes cleanup
+    // single-entry, so a close that throws past its own per-layer catch would
+    // otherwise leave a finished run's SIGINT and SIGTERM handlers installed
+    // with nothing left to remove them, and they accumulate where a caller
+    // drives runProtocol in-process.
+    try {
+      const teardown = await closeRunLayers({
+        build,
+        run,
+        log,
+        ceilingMs: transportTeardownCeilingMs(connection.channel),
+      });
+      // The one bounded obligation reached its bound. Reported on both machine
+      // channels the run has -- the operator log and the event stream -- and
+      // before the terminal event, which is why cleanup runs ahead of the
+      // emission sites rather than in the finally alone. It changes no exit
+      // code: the teardown is housekeeping, and a supervisor that saw the
+      // status move would retry a run that already disclosed.
+      if (!teardown.finished) {
+        const notice = teardownCeilingNotice(teardown, {
+          channel: connection.channel,
+          retainFiles:
+            connection.channel !== "webrtc" &&
+            connection.options?.retainFiles === true,
+        });
+        log.warn(notice);
+        emit((e) => e.warning("transportTeardown", notice));
+      }
+      logTransportCounters(build.client, log);
+    } finally {
+      process.off("SIGINT", onSigint);
+      process.off("SIGTERM", onSigterm);
+      // Undo our own contribution to the max-listeners threshold rather than
+      // decrementing from whatever it is now: if another module (or a
+      // parallel runProtocol) mutated the threshold in between, decrementing
+      // from the current value would walk the baseline off by +/-2 each
+      // cleanup cycle. Restoring the captured value verbatim leaves any
+      // external adjustment intact and undoes only our own +2.
+      if (maxListenersIncremented) process.setMaxListeners(prevMaxListeners);
     }
-    logTransportCounters(build.client, log);
-    process.off("SIGINT", onSigint);
-    process.off("SIGTERM", onSigterm);
-    // Undo our own contribution to the max-listeners threshold rather than
-    // decrementing from whatever it is now: if another module (or a
-    // parallel runProtocol) mutated the threshold in between, decrementing
-    // from the current value would walk the baseline off by +/-2 each
-    // cleanup cycle. Restoring the captured value verbatim leaves any
-    // external adjustment intact and undoes only our own +2.
-    if (maxListenersIncremented) process.setMaxListeners(prevMaxListeners);
   }
   // The try/catch/finally in each handler ensures process.exit always runs,
   // and that a rejection from doCleanup (an uncaught throw added later)
@@ -2347,7 +2360,18 @@ export async function runProtocol(
     // nothing further: every local artifact is on disk above, and the
     // transport is closed or has reached its ceiling and said so on this
     // stream. The finally below re-enters doCleanup and returns at its guard.
-    await doCleanup();
+    // A close that throws past its own per-layer catch is logged at debug, as
+    // the failure path below does with it: the run's result, record and
+    // receipt are on disk, so a teardown fault must not turn a completed run
+    // into a terminal error event.
+    try {
+      await doCleanup();
+    } catch (cleanupErr: unknown) {
+      log.debug(
+        "cleanup threw after the run completed:",
+        sanitizeErrorForDisplay(cleanupErr),
+      );
+    }
     emitMetrics();
     emit((e) =>
       e.result(

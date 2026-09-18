@@ -127,6 +127,33 @@ function stdoutWriteFailedNotice(): string {
   );
 }
 
+// Installed for the rest of the process once a result write to stdout has
+// failed or reached its drain ceiling. The pipe still holds what was not
+// flushed, so a reader that dies later -- during the exchange record and
+// receipt writes, or the transport teardown -- emits an `'error'` on a stream
+// with no listener, which ends the process before the run's terminal event.
+// The loss is already reported by the throw that installs this, and nothing
+// after it writes to stdout, so there is nothing further to say about one.
+let laterStdoutErrorsIgnored = false;
+function ignoreStdoutError(): void {}
+function ignoreLaterStdoutErrors(): void {
+  if (laterStdoutErrorsIgnored) return;
+  laterStdoutErrorsIgnored = true;
+  process.stdout.on("error", ignoreStdoutError);
+}
+
+/**
+ * Remove the `process.stdout` `'error'` guard a failed result write leaves
+ * installed, so a case drives that install from a known state.
+ *
+ * @internal exported for testing
+ */
+export function resetStdoutErrorGuard(): void {
+  if (!laterStdoutErrorsIgnored) return;
+  process.stdout.off("error", ignoreStdoutError);
+  laterStdoutErrorsIgnored = false;
+}
+
 /**
  * Write the result CSV to stdout, resolving once the last line has left the
  * process and REJECTING if that has not happened within `ceilingMs` or if the
@@ -152,6 +179,12 @@ function stdoutWriteFailedNotice(): string {
  * does not take; without that listener `process.stdout` emits an unhandled
  * `'error'` and the run ends there, before the record of the disclosure it
  * already made is written.
+ *
+ * Either failure leaves a no-op `'error'` listener behind it for the rest of
+ * the process ({@link ignoreLaterStdoutErrors}): the data the reader did not
+ * take is still queued, so a reader that dies during the writes or the
+ * teardown that follow would otherwise end the run before its terminal event.
+ * A drain that finished leaves nothing queued and removes its listener.
  */
 async function writeResultToStdout(
   headers: string[],
@@ -183,11 +216,15 @@ async function writeResultToStdout(
   try {
     outcome = await settleWithinCeiling(ceilingMs, () => drained);
   } catch (err) {
+    ignoreLaterStdoutErrors();
     throw new Error(stdoutWriteFailedNotice(), { cause: err });
   } finally {
     process.stdout.off("error", rejectDrain);
   }
-  if (!outcome.finished) throw new Error(stdoutDrainExpiredNotice(ceilingMs));
+  if (!outcome.finished) {
+    ignoreLaterStdoutErrors();
+    throw new Error(stdoutDrainExpiredNotice(ceilingMs));
+  }
 }
 
 /**
