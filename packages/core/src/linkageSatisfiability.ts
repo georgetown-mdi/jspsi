@@ -40,6 +40,7 @@ import {
   compileSteps,
   fanOutDeclaredMessage,
   isTransformFunctionLabel,
+  openTransformWorkMeter,
   parseDateFormat,
   renderDateOutput,
   resolveFieldColumns,
@@ -56,6 +57,7 @@ import type {
   FieldValue,
   Params,
   PendingCompiledTransforms,
+  TransformWorkMeter,
 } from "./standardization.js";
 
 /**
@@ -811,13 +813,19 @@ type MeasuredRunOutcome =
 // reading. A measured limit, not an omission: the ceiling the marker rests on is
 // checked; the row-assembly bound the exchange also enforces is out of this
 // measurement's scope.
+//
+// The work budget IS charged, on a meter the grading pass owns: this
+// measurement runs the same partner-authored steps the exchange runs, on as many
+// probes, so an amplifying pipeline spends here too. Crossing it throws, which
+// leaves the probe unreadable exactly as a step that throws does.
 function runCompiledSteps(
   input: string,
   compiled: ReadonlyArray<CompiledStep>,
+  work: TransformWorkMeter,
 ): MeasuredRunOutcome {
   let current: FieldValue = input;
   for (const step of compiled) {
-    current = applyStep(current, step);
+    current = applyStep(current, step, undefined, undefined, work);
     if (valueOverCeiling(current) !== undefined) return { kind: "unread" };
   }
   return measuredValueOutcome(current);
@@ -1007,6 +1015,7 @@ function advanceParsedDateSpan(
   step: TransformStep,
   index: number,
   compiledStep: (index: number) => CompiledStep,
+  work: TransformWorkMeter,
 ): void {
   if (!LAYOUT_DETERMINED_FUNCTION_NAMES.has(step.function))
     span.everyStepLayoutDetermined = false;
@@ -1020,7 +1029,7 @@ function advanceParsedDateSpan(
   span.probes = span.probes.map((value) => {
     if (value === undefined) return undefined;
     try {
-      const next = applyStep(value, compiled);
+      const next = applyStep(value, compiled, undefined, undefined, work);
       return valueOverCeiling(next) === undefined ? next : undefined;
     } catch {
       return undefined;
@@ -1104,6 +1113,7 @@ function parsedDateSpanReading(span: ParsedDateSpan): ParsedDateRunReading {
 function parsedDateRunReadings(
   steps: ReadonlyArray<TransformStep>,
   compiledStep: (index: number) => CompiledStep,
+  work: TransformWorkMeter,
 ): ParsedDateRunReading[] {
   const readings = steps.map(() => UNDETERMINED);
   for (const [parseDateIndex, parseDateStep] of steps.entries()) {
@@ -1118,7 +1128,7 @@ function parsedDateRunReadings(
     if (lastRunEnd < 0) continue;
     const span = openParsedDateSpan(parseDateStep);
     for (let index = parseDateIndex + 1; index <= lastRunEnd; index += 1) {
-      advanceParsedDateSpan(span, steps[index], index, compiledStep);
+      advanceParsedDateSpan(span, steps[index], index, compiledStep, work);
       if (endsSubstringRun(steps, index))
         readings[index] = parsedDateSpanReading(span);
     }
@@ -1208,8 +1218,9 @@ export function substringCollapsesParsedDateToConstant(
   index: number,
 ): boolean {
   const compiledStep = stepCompilerFor(steps);
-  const readings = parsedDateRunReadings(steps, compiledStep);
-  return collapsesAtRunEnd(steps, index, readings[index], compiledStep);
+  const work = openTransformWorkMeter();
+  const readings = parsedDateRunReadings(steps, compiledStep, work);
+  return collapsesAtRunEnd(steps, index, readings[index], compiledStep, work);
 }
 
 /**
@@ -1244,6 +1255,7 @@ function collapsesAtRunEnd(
   index: number,
   reading: ParsedDateRunReading | undefined,
   compiledStep: (index: number) => CompiledStep,
+  work: TransformWorkMeter,
 ): boolean {
   if (reading === undefined) return false;
   if (reading.kind === "cannotMeasure" || reading.kind === "valueDependentDrop")
@@ -1255,6 +1267,7 @@ function collapsesAtRunEnd(
       steps
         .slice(index + 1)
         .map((_step, offset) => compiledStep(index + 1 + offset)),
+      work,
     );
     // Every surviving record holds `reading.value` by the run's end, so the tail
     // is determinate with no probing. Only a measured DROP withdraws the collapse
@@ -1292,8 +1305,11 @@ export function substringRunDropsEveryParsedDate(
   index: number,
 ): boolean {
   return (
-    parsedDateRunReadings(steps, stepCompilerFor(steps))[index]?.kind ===
-    "layoutDeterminedDrop"
+    parsedDateRunReadings(
+      steps,
+      stepCompilerFor(steps),
+      openTransformWorkMeter(),
+    )[index]?.kind === "layoutDeterminedDrop"
   );
 }
 
@@ -1441,14 +1457,17 @@ export function gradeElementPipeline(
   steps: ReadonlyArray<TransformStep>,
 ): ElementPipelineGrading {
   const compiledStep = stepCompilerFor(steps);
+  // One meter for the pass, so what the walk and the tail readings spend on one
+  // element accumulates across them as a row's does across a key's elements.
+  const work = openTransformWorkMeter();
   let readings: ParsedDateRunReading[] | undefined;
   const runReadings = (): ParsedDateRunReading[] =>
-    (readings ??= parsedDateRunReadings(steps, compiledStep));
+    (readings ??= parsedDateRunReadings(steps, compiledStep, work));
   return {
     alwaysDrops: () => alwaysDropsGivenRunReadings(steps, runReadings()),
     collapsesParsedDateToConstant: () =>
       runReadings().some((reading, index) =>
-        collapsesAtRunEnd(steps, index, reading, compiledStep),
+        collapsesAtRunEnd(steps, index, reading, compiledStep, work),
       ),
   };
 }

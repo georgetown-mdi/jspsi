@@ -36,6 +36,7 @@ import type {
   LinkageKey,
   LinkageKeyElement,
   LinkageTerms,
+  TransformStep,
 } from "../src/config/linkageTermsSchema";
 import { withUnlistedFanOutFunctions } from "./utils/unlistedFanOut";
 import {
@@ -3586,6 +3587,198 @@ describe("buildKeyStrings", () => {
     expect(accumulationFateAtCharge("drop", false)).toBe("drop");
     expect(accumulationFateAtCharge("refuse", true)).toBe("refuse");
     expect(accumulationFateAtCharge("refuse", false)).toBe("refuse");
+  });
+
+  // --- the work limb ---------------------------------------------------------
+  // The budget on what a row's transforms may SPEND, beside the limbs above on
+  // what a row retains. Each pair of steps below expands one character to the
+  // per-value ceiling and collapses it back, so the row keeps nothing the byte
+  // limb can see while the engine allocates and reads 8,194 code units per
+  // pair: the shape the byte limb charges about one character for.
+
+  // 1 for the cell the element reads, 4,097 for the first expansion, and 8,194
+  // for each expand-and-collapse pair after it.
+  const PAIRS_PER_ELEMENT = 127;
+  const WORK_PER_ELEMENT = 1 + 4097 + PAIRS_PER_ELEMENT * 8194;
+  const WORK_BUDGET_PER_ROW = 8 * 1024 * 4096;
+
+  const amplifyCollapseSteps = (): TransformStep[] => [
+    { function: "pad_left", params: { length: 4096, char: "0" } },
+    ...Array.from({ length: PAIRS_PER_ELEMENT }, () => [
+      { function: "substring", params: { start: 1, length: 1 } },
+      { function: "pad_left", params: { length: 4096, char: "0" } },
+    ]).flat(),
+  ];
+
+  const amplifyingElements = (count: number): LinkageKeyElement[] =>
+    Array.from({ length: count }, (_unused, i) => ({
+      field: `spender_${i}`,
+      transform: amplifyCollapseSteps(),
+    }));
+
+  const spenderRow = (count: number): Record<string, string> =>
+    Object.fromEntries(
+      Array.from({ length: count }, (_unused, i) => [`spender_${i}`, "b"]),
+    );
+
+  // One element short of the budget and one element past it: the pair reads the
+  // boundary rather than a round number, so a charge moved off one of the sites
+  // that spends it shows up here.
+  const ELEMENTS_UNDER_BUDGET = 32;
+  const ELEMENTS_OVER_BUDGET = 33;
+  const amplifiedValue = "0".repeat(4096);
+
+  test("an amplifying pipeline under the budget derives its keys untouched", () => {
+    expect(ELEMENTS_UNDER_BUDGET * WORK_PER_ELEMENT).toBeLessThan(
+      WORK_BUDGET_PER_ROW,
+    );
+    expect(
+      buildKeyStrings(
+        { name: "spend", elements: amplifyingElements(ELEMENTS_UNDER_BUDGET) },
+        makeDataset(spenderRow(ELEMENTS_UNDER_BUDGET)),
+        0,
+        false,
+        1,
+      ),
+    ).toEqual(new Set([amplifiedValue.repeat(ELEMENTS_UNDER_BUDGET)]));
+  });
+
+  test("the same pipeline past the budget refuses, naming no value", () => {
+    expect(ELEMENTS_OVER_BUDGET * WORK_PER_ELEMENT).toBeGreaterThan(
+      WORK_BUDGET_PER_ROW,
+    );
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    let raised: unknown;
+    try {
+      buildKeyStrings(
+        {
+          name: "PARTNER AUTHORED KEY NAME",
+          elements: amplifyingElements(ELEMENTS_OVER_BUDGET),
+        },
+        makeDataset(spenderRow(ELEMENTS_OVER_BUDGET)),
+        0,
+        false,
+        1,
+      );
+    } catch (err) {
+      raised = err;
+    }
+    expect(raised).toBeInstanceOf(UsageError);
+    const message = (raised as UsageError).message;
+    expect(message).toMatch(
+      /a linkage key spent \d+ code units of transform work on row 0 of this party's data \(linkageKeys\[1\]\.elements\[32\]\), above the 33554432 one row may spend deriving one key/,
+    );
+    // Neither this party's value nor the key's partner-authored name.
+    expect(message).not.toContain("0".repeat(20));
+    expect(message).not.toContain("PARTNER AUTHORED KEY NAME");
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  test("a declared fan-out row over the budget drops for that key alone", () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const dataset = makeDataset({
+      ...spenderRow(ELEMENTS_OVER_BUDGET),
+      last_name: ["SMITH", "JONES"],
+      date_of_birth: "19750716",
+    });
+    expect(
+      buildKeyStrings(
+        {
+          name: "spend",
+          elements: [
+            { field: "last_name" },
+            ...amplifyingElements(ELEMENTS_OVER_BUDGET),
+          ],
+        },
+        dataset,
+        0,
+        false,
+        1,
+      ),
+    ).toBeNull();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toMatch(
+      /spends \d+ code units of transform work on this key's declared fan-out, more than the 33554432 one row may spend deriving one key/,
+    );
+    // The row sits out this key's round alone.
+    expect(
+      buildKeyStrings(
+        { name: "DOB", elements: [{ field: "date_of_birth" }] },
+        dataset,
+        0,
+        false,
+        2,
+      ),
+    ).toEqual(new Set(["19750716"]));
+  });
+
+  test("the spend is the row's across the key, wherever the crossing lands", () => {
+    // The same total, reached with the spending elements in different positions
+    // and beside elements that spend almost nothing: one decided outcome per
+    // (record, key), taken at whichever element the budget runs out at.
+    const dataset = makeDataset({
+      ...spenderRow(ELEMENTS_OVER_BUDGET),
+      date_of_birth: "19750716",
+    });
+    for (const elements of [
+      amplifyingElements(ELEMENTS_OVER_BUDGET),
+      [{ field: "date_of_birth" }, ...amplifyingElements(ELEMENTS_OVER_BUDGET)],
+      [
+        ...amplifyingElements(ELEMENTS_OVER_BUDGET).slice(0, 16),
+        { field: "date_of_birth" },
+        ...amplifyingElements(ELEMENTS_OVER_BUDGET).slice(16),
+      ],
+    ]) {
+      let raised: unknown;
+      try {
+        buildKeyStrings({ name: "spend", elements }, dataset, 0, false, 1);
+      } catch (err) {
+        raised = err;
+      }
+      expect(raised).toBeInstanceOf(UsageError);
+      expect((raised as UsageError).message).toMatch(
+        /code units of transform work on row 0/,
+      );
+    }
+  });
+
+  test("an honest pipeline at real step and element counts spends no budget", () => {
+    // Sixteen elements, sixteen steps each, over values as long as a name or an
+    // address runs to: the pipeline a real exchange authors, orders of magnitude
+    // under the budget and deriving the key it derives without one.
+    const honest: TransformStep[] = Array.from(
+      { length: 16 },
+      (_unused, i) =>
+        [
+          { function: "trim_whitespace" },
+          { function: "to_upper_case" },
+          { function: "remove_accents" },
+          { function: "remove_punctuation" },
+          { function: "squash_spaces" },
+          { function: "remove_dashes" },
+        ][i % 6],
+    );
+    const fields = Object.fromEntries(
+      Array.from({ length: 16 }, (_unused, i) => [
+        `f${i}`,
+        " Ana-Maria Gonzalez de la Cruz ",
+      ]),
+    );
+    expect(
+      buildKeyStrings(
+        {
+          name: "honest",
+          elements: Object.keys(fields).map((field) => ({
+            field,
+            transform: honest,
+          })),
+        },
+        makeDataset(fields),
+        0,
+        false,
+        1,
+      ),
+    ).toEqual(new Set(["ANAMARIA GONZALEZ DE LA CRUZ".repeat(16)]));
   });
 
   test("an unrecognized function name reaches the operator as a literal", () => {
