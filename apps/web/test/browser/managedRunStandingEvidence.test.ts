@@ -35,7 +35,11 @@ import { REINVITE_RUN_IN_FLIGHT_REASON } from "@recurring/managedReinviteGate";
 import { STANDING_CONDITION_CLEAR_LABEL } from "@recurring/managedStandingConditionModel";
 
 import { createAppMount, flushPendingUpdates } from "./renderApp";
-import { holdRunLockElsewhere, stalePollUntilClick } from "./runLockReadings";
+import {
+  filterLockFromReadings,
+  holdRunLockElsewhere,
+  stalePollUntilClick,
+} from "./runLockReadings";
 
 import type * as ManagedExchangeStore from "@psi/managed/managedExchangeStore";
 import type { NewManagedExchange } from "@psi/managed/managedExchangeRecord";
@@ -1394,9 +1398,8 @@ describe("a re-invite control while a run is in flight", () => {
 
   test("a run taken since the last reading is caught at the click", async () => {
     // The reading behind the controls is a poll, so a run can take the lock while a
-    // button is still enabled from the last reading. The mint takes no lock of its
-    // own, so the handler's re-read at the click is the whole of what keeps a fresh
-    // secret from replacing the one the run is connecting on.
+    // button is still enabled from the last reading. The handler's re-read at the
+    // click catches that run and names it, ahead of the write's own refusal.
     const created = await createManagedExchange(
       newExchange({ inputFileHandle: await inputHandle() }),
     );
@@ -1446,6 +1449,66 @@ describe("a re-invite control while a run is in flight", () => {
     } finally {
       release?.();
       restorePoll?.();
+    }
+  });
+
+  test("a run the click's re-read never saw is refused by the mint's write", async () => {
+    // The re-read is a reading, not an exclusion: a run can take the lock in the
+    // moment after it. The write takes that same lock, so what stands between the
+    // fresh secret and the one the run is connecting on is the write's own refusal
+    // rather than any reading the page took.
+    const created = await createManagedExchange(
+      newExchange({ inputFileHandle: await inputHandle() }),
+    );
+    const failedAt = Date.now() - 120_000;
+    await recordManagedExchangeLastRun(
+      created.id,
+      failedRun(failedAt, "failed", "storage"),
+      failedAt,
+    );
+    const secretBefore = (await getManagedExchange(created.id))?.sharedSecret;
+    let readings: ReturnType<typeof filterLockFromReadings> | undefined;
+    let release: (() => void) | undefined;
+    try {
+      app.render(createElement(ManagedRunSurface, { id: created.id }));
+      const recovery = page.getByRole("button", {
+        name: "Create a fresh invitation",
+      });
+      await expect.element(recovery).toBeEnabled();
+
+      // Hidden from every reading this page takes -- the poll and the click's own
+      // re-read alike -- while the run really holds the lock.
+      readings = filterLockFromReadings(created.id);
+      release = await holdRunLockElsewhere(created.id);
+      await expect.element(recovery).toBeEnabled();
+      await recovery.click();
+
+      // Nothing minted, and the run is named as the reason rather than the operator
+      // being left with a control that silently did nothing.
+      await vi.waitFor(() => {
+        expect(app.container.textContent).toContain(
+          REINVITE_RUN_IN_FLIGHT_REASON,
+        );
+      });
+      expect((await getManagedExchange(created.id))?.sharedSecret).toBe(
+        secretBefore,
+      );
+
+      release();
+      release = undefined;
+      readings.restore();
+      readings = undefined;
+      // The refusal consumed nothing: the mint goes through once the run is over.
+      await expect.element(recovery).toBeEnabled();
+      await recovery.click();
+      await vi.waitFor(async () => {
+        expect((await getManagedExchange(created.id))?.sharedSecret).not.toBe(
+          secretBefore,
+        );
+      });
+    } finally {
+      release?.();
+      readings?.restore();
     }
   });
 });

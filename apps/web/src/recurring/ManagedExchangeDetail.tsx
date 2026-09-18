@@ -146,6 +146,7 @@ export function ManagedExchangeDetail({
   canReinvite,
   compromiseResponse,
   runInFlight,
+  runHoldsReinvite,
   reinviting,
   reinviteFailed,
 }: {
@@ -222,6 +223,10 @@ export function ManagedExchangeDetail({
    * see. The terms re-invite waits it out: the mint replaces the secret the run is
    * connecting on. */
   runInFlight: boolean;
+  /** That same reading, or the mint write's own refusal when a run held the lock at
+   * it. It states the reason; it does not disable the control, which the reading
+   * gives back when the run ends (see {@link ./ManagedRunSurface.tsx}). */
+  runHoldsReinvite: boolean;
   /** Whether a re-invite is in flight, so the terms button shows loading. Shared
    * with the run surface's own re-invite state (see {@link ./ManagedRunSurface.tsx}),
    * so an in-flight re-invite displays the same on a healthy exchange as on a failed one. */
@@ -255,6 +260,7 @@ export function ManagedExchangeDetail({
         canReinvite={canReinvite}
         compromiseResponse={compromiseResponse}
         runInFlight={runInFlight}
+        runHoldsReinvite={runHoldsReinvite}
         reinviting={reinviting}
         reinviteFailed={reinviteFailed}
       />
@@ -344,6 +350,7 @@ function ConfigurationView({
   canReinvite,
   compromiseResponse,
   runInFlight,
+  runHoldsReinvite,
   reinviting,
   reinviteFailed,
 }: {
@@ -352,6 +359,7 @@ function ConfigurationView({
   canReinvite: boolean;
   compromiseResponse: boolean;
   runInFlight: boolean;
+  runHoldsReinvite: boolean;
   reinviting: boolean;
   reinviteFailed: boolean;
 }) {
@@ -397,7 +405,7 @@ function ConfigurationView({
           {compromiseResponse ? (
             <p className={styles.small}>{REINVITE_COMPROMISE_REASON}</p>
           ) : (
-            runInFlight && (
+            runHoldsReinvite && (
               <p className={styles.small}>{REINVITE_RUN_IN_FLIGHT_REASON}</p>
             )
           )}

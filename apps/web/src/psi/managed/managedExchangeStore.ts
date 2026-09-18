@@ -1071,7 +1071,17 @@ export class ManagedReinviteWithheldError extends Error {
  * check is over a record read before the answer may have been written (see
  * docs/spec/MANAGED_EXCHANGE_RECORD.md, the response's rules).
  *
+ * A run in flight is excluded rather than checked, exactly as the hand-off spend
+ * and the re-take exclude it: this step takes the record's run+rotate lock
+ * ({@link ./managedExchangeLock.ts}) with `ifAvailable` before the transaction
+ * opens, so a run holding it is refused here rather than having its secret
+ * replaced mid-exchange. Neither rotation write compares against the secret it
+ * replaces, so a re-invite landing beside a run's own rotation would discard one
+ * of the two.
+ *
  * @throws {Error} if no record with `id` exists.
+ * @throws {ManagedExchangeLockUnavailableError} if a run of this record holds the
+ *   lock; no transaction is opened and nothing is written.
  * @throws {ManagedReinviteWithheldError} if the stored record has a standing
  *   compromise response; the transaction aborts, leaving the secret and the
  *   response as they were.
@@ -1082,14 +1092,19 @@ export async function persistManagedExchangeReinvite(
   id: string,
   rotation: ManagedExchangeRotation,
 ): Promise<ManagedExchangeRecord> {
-  return readModifyWriteRotation(id, (stored) => {
-    if (stored === undefined)
-      throw new Error(`no managed exchange with id ${id}`);
-    const existing = parseManagedExchangeRecord(stored);
-    if (standingCompromiseResponse(existing) !== undefined)
-      throw new ManagedReinviteWithheldError(id);
-    return applyManagedExchangeReinviteRotation(existing, rotation);
-  });
+  return withManagedExchangeLock(
+    id,
+    () =>
+      readModifyWriteRotation(id, (stored) => {
+        if (stored === undefined)
+          throw new Error(`no managed exchange with id ${id}`);
+        const existing = parseManagedExchangeRecord(stored);
+        if (standingCompromiseResponse(existing) !== undefined)
+          throw new ManagedReinviteWithheldError(id);
+        return applyManagedExchangeReinviteRotation(existing, rotation);
+      }),
+    { ifAvailable: true },
+  );
 }
 
 /**

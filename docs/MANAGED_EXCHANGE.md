@@ -826,6 +826,8 @@ A hand-off's confirmation takes the same lock before it spends this device's cop
 so a hand-off and a run exclude each other as two runs do. Whichever takes the lock
 first wins the ordering: a confirmation meeting a run is refused and told to wait,
 and a run meeting a confirmation waits for it and then finds the copy handed off.
+A re-invite's mint takes it on the same terms before it replaces the secret, so a
+run and a fresh invitation cannot each write a secret the other discards.
 
 On the scheduled path that refusal lasts as long as the run window does. Each
 attempt holds the lock across its whole wait for the partner, and the next
@@ -1307,8 +1309,11 @@ browser profile -- this tab, another tab, or its schedule -- a fresh invitation
 would replace the secret the run is connecting on, so neither control mints one
 until the run ends. Nothing here is answered away the way the compromise
 response is: the withhold lifts on its own once the run finishes, whatever it
-finished with, and the control that mints still re-checks whether a run has
-started since the page last read that state before it acts.
+finished with. Nothing rests on the reading: the mint's own write takes the run's
+lock before it replaces the secret, so a run started since the page last read that
+state refuses the mint in the same words the withholding uses. The control
+re-checks the reading at the click as well, which puts the reason on screen
+without waiting for that refusal.
 
 ### Expiry is its own state, never routed through attack framing
 

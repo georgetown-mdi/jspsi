@@ -63,6 +63,7 @@ import {
 } from "@psi/managed/managedRetake";
 
 import { MANAGED_EXCHANGE_ARTIFACT_MIME } from "@psi/managed/managedExchangeArtifact";
+import { ManagedExchangeLockUnavailableError } from "@psi/managed/managedExchangeLock";
 import { canReinviteFromRecord } from "@psi/managed/managedReinvite";
 import { chooseManagedOutputDirectory } from "@psi/managed/managedOutputDirectory";
 import { deriveManagedBackupState } from "@psi/managed/managedBackupState";
@@ -339,6 +340,12 @@ export function ManagedRunSurface({ id }: { id: string }) {
   const [reinvite, setReinvite] = useState<ManagedReinvite>();
   const [reinviting, setReinviting] = useState(false);
   const [reinviteFailed, setReinviteFailed] = useState(false);
+  // The mint's own write refused this click: a run held the record's lock at it,
+  // which the poll's last reading was too old to see. It states the reason; it does
+  // not disable the control, which the poll gives back when the run ends.
+  const [reinviteRefusedByRun, setReinviteRefusedByRun] = useState(false);
+  // A run holds the mint back: the polled reading, or that refusal.
+  const runHoldsReinvite = runInFlight || reinviteRefusedByRun;
   // Which entry point triggered the in-flight (or last) re-invite: the failure-path
   // recovery near the top, or the detail configuration section far below. The failed
   // alert renders only at the triggering site (so the two on-screen sites do not both
@@ -749,20 +756,21 @@ export function ManagedRunSurface({ id }: { id: string }) {
     // Closed at the mint rather than at each control that reaches it, whichever part
     // of the page asked: while a compromise response stands, a fresh invitation on
     // this channel would hand the new secret to whoever is interfering, and a run in
-    // flight is connecting on the secret the mint replaces. The response's half is a
-    // second check over the store's own refusal, which is decided on the record the
-    // store holds rather than the one this page read.
+    // flight is connecting on the secret the mint replaces. Both halves are a second
+    // check over the store's own refusals, which are decided on the record the store
+    // reads and the lock a run holds rather than on this page's copy.
     if (record === undefined || reinviting || compromiseResponse || runInFlight)
       return;
     setReinviteSource(source);
     setReinviting(true);
     setReinviteFailed(false);
+    setReinviteRefusedByRun(false);
     void (async () => {
       try {
         // The controls above render from a poll, so a run started since the last
-        // reading is still news here; re-reading also puts the reason on screen.
-        // Nothing below takes the run's own lock, so this reading is what stands
-        // between the mint and a run connecting on the secret it replaces.
+        // reading is still news here; re-reading also puts the reason on screen. A
+        // run this reading still misses is refused by the mint's own write, which
+        // takes the run's lock.
         if (await recheckLock()) return;
         const result = await reinviteManagedExchange(record);
         setRecord(result.record);
@@ -774,6 +782,8 @@ export function ManagedRunSurface({ id }: { id: string }) {
         // acknowledgement instead.
         if (error instanceof ManagedReinviteWithheldError) {
           setReinviteWithheld(true);
+        } else if (error instanceof ManagedExchangeLockUnavailableError) {
+          setReinviteRefusedByRun(true);
         } else {
           whenDiagnostic(() => console.error(error));
           setReinviteFailed(true);
@@ -1208,6 +1218,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
                       confirmationGated={confirmationGated}
                       reinviting={reinviting}
                       runInFlight={runInFlight}
+                      runHoldsReinvite={runHoldsReinvite}
                       // The failed alert renders only at the site that triggered the
                       // mint, so the recovery and the detail section do not both show it.
                       reinviteFailed={
@@ -1239,6 +1250,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
                 clearFailed={clearStandingFailed}
                 reinviting={reinviting}
                 runInFlight={runInFlight}
+                runHoldsReinvite={runHoldsReinvite}
                 reinviteFailed={reinviteFailed && reinviteSource === "recovery"}
                 reinviteHeldByFailure={failureHoldsReinvite}
                 onReinvite={() => reinviteNow("recovery")}
@@ -1324,6 +1336,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
               canReinvite={canReinviteFromRecord(record)}
               compromiseResponse={compromiseResponse}
               runInFlight={runInFlight}
+              runHoldsReinvite={runHoldsReinvite}
               reinviting={reinviting}
               // The failed alert renders here only when the detail section triggered
               // the mint, so it and the failure-path recovery do not both show it.
@@ -1363,6 +1376,7 @@ function FailureRecovery({
   confirmationGated,
   reinviting,
   runInFlight,
+  runHoldsReinvite,
   reinviteFailed,
   onReinvite,
   onResolveConfirmation,
@@ -1372,6 +1386,7 @@ function FailureRecovery({
   confirmationGated: boolean;
   reinviting: boolean;
   runInFlight: boolean;
+  runHoldsReinvite: boolean;
   reinviteFailed: boolean;
   onReinvite: () => void;
   onResolveConfirmation: (
@@ -1388,6 +1403,7 @@ function FailureRecovery({
           record={record}
           reinviting={reinviting}
           runInFlight={runInFlight}
+          runHoldsReinvite={runHoldsReinvite}
           reinviteFailed={reinviteFailed}
           onReinvite={onReinvite}
         />
@@ -1407,6 +1423,7 @@ function FailureRecovery({
         record={record}
         reinviting={reinviting}
         runInFlight={runInFlight}
+        runHoldsReinvite={runHoldsReinvite}
         reinviteFailed={reinviteFailed}
         onReinvite={onReinvite}
       />
@@ -1515,6 +1532,7 @@ function StandingConditionSection({
   clearFailed,
   reinviting,
   runInFlight,
+  runHoldsReinvite,
   reinviteFailed,
   reinviteHeldByFailure,
   onReinvite,
@@ -1530,6 +1548,7 @@ function StandingConditionSection({
   clearFailed: boolean;
   reinviting: boolean;
   runInFlight: boolean;
+  runHoldsReinvite: boolean;
   reinviteFailed: boolean;
   /** Whether the live failure above holds the re-invite: it offers the mint itself,
    * or it holds the gate deciding whether one happens. Either way this section shows
@@ -1547,6 +1566,7 @@ function StandingConditionSection({
         record={record}
         reinviting={reinviting}
         runInFlight={runInFlight}
+        runHoldsReinvite={runHoldsReinvite}
         reinviteFailed={reinviteFailed}
         onReinvite={onReinvite}
       />
@@ -1577,6 +1597,7 @@ function StandingConditionSection({
               record={record}
               reinviting={reinviting}
               runInFlight={runInFlight}
+              runHoldsReinvite={runHoldsReinvite}
               reinviteFailed={reinviteFailed}
               onReinvite={onReinvite}
             />
@@ -1607,6 +1628,7 @@ function ReinviteRecovery({
   record,
   reinviting,
   runInFlight,
+  runHoldsReinvite,
   reinviteFailed,
   onReinvite,
 }: {
@@ -1614,8 +1636,12 @@ function ReinviteRecovery({
   reinviting: boolean;
   /** Whether a run of this exchange is under way anywhere this browser profile
    * can see. The mint replaces the secret that run is connecting on, so the
-   * control waits it out with the reason beside it. */
+   * control waits it out. */
   runInFlight: boolean;
+  /** That same reading, or the mint write's own refusal when a run held the lock
+   * at it. It states the reason; it does not disable the control, which the
+   * reading gives back when the run ends. */
+  runHoldsReinvite: boolean;
   reinviteFailed: boolean;
   onReinvite: () => void;
 }) {
@@ -1647,7 +1673,7 @@ function ReinviteRecovery({
           >
             Create a fresh invitation
           </Button>
-          {runInFlight && (
+          {runHoldsReinvite && (
             <p className={styles.small}>{REINVITE_RUN_IN_FLIGHT_REASON}</p>
           )}
         </>

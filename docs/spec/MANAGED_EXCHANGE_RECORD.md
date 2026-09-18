@@ -389,13 +389,18 @@ with the condition. A run never writes it, and a run never clears it.
   its controls do. That makes the clear-and-acknowledge the one order in which a
   fresh invitation is minted: the answer is cleared by the acknowledgement
   first, and the re-invite is on offer after it.
-- **A run in flight is a second, independent withhold, checked only at the
-  click.** It shares the two controls and their withheld reason with the
-  compromise response, but not the write-time guarantee: the rotation write
-  above refuses solely on a standing response, never on a run, so the click
-  that would mint re-reads the polled run signal itself immediately beforehand.
-  It needs no clearer of its own because it is not standing: ending the run
-  restores the controls without an acknowledgement.
+- **A run in flight is a second, independent withhold, excluded rather than
+  checked.** It shares the two controls and their withheld reason with the
+  compromise response, and it has a write-time guarantee of its own: the rotation
+  write takes the record's [run+rotate lock](#the-secret-is-a-linear-resource) with
+  `ifAvailable` before it opens its transaction, exactly as the [hand-off
+  spend](#the-backup-marker-the-spent-state-and-the-import-marker-local-siblings-never-in-the-artifact)
+  does, and refuses while a run holds it. Neither rotation write compares against
+  the secret it replaces, so a mint landing beside a run's own rotation would
+  discard one of the two. The click re-reads the polled run signal immediately
+  beforehand, which pre-empts that refusal in the words the refusal is shown in
+  rather than deciding it. This withhold needs no clearer of its own because it is
+  not standing: ending the run restores the controls without an acknowledgement.
 
 ### The schedule object
 
@@ -782,8 +787,10 @@ begin through the success stamp it writes, so **one exchange of a record is in
 flight at a time** on a browser profile: a second tab, a second attended Run, and
 a scheduled attempt are each refused or queued across the whole run, the payload
 exchange included, rather than across its rotation alone. A [hand-off
-spend](#the-backup-marker-the-spent-state-and-the-import-marker-local-siblings-never-in-the-artifact)
-contends for that same lock, so it too is refused while an exchange is in flight.
+spend](#the-backup-marker-the-spent-state-and-the-import-marker-local-siblings-never-in-the-artifact),
+a [command-line hand-off taken back](#taking-a-command-line-hand-off-back), and a
+[re-invite's rotation write](#the-operators-response-to-it) each contend for that
+same lock, so they too are refused while an exchange is in flight.
 The partner influences how long the payload exchange takes, so the run's cancel
 reaches that width: it closes the run's connection, which rejects the wait the
 exchange is parked in, so the run ends and the lock releases without the holding
