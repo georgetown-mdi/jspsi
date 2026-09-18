@@ -5,7 +5,12 @@ import { Dropzone } from "@mantine/dropzone";
 import { IconAlertCircle } from "@tabler/icons-react";
 import { getLogger } from "@psilink/core";
 
+import {
+  CSV_DELIMITER_LOCAL_NOTICE,
+  CsvDelimiterField,
+} from "@components/CsvDelimiterField";
 import { MAX_CSV_FILE_BYTES } from "@components/csvIntake";
+import { resolveCsvDelimiter } from "@components/csvDelimiterChoice";
 
 import { isConsoleBuild } from "@utils/clientConfig";
 
@@ -22,6 +27,7 @@ import type {
 } from "@psi/jobClient/workInputClient";
 import type { AcquiredCsv } from "@psi/inviterEditor";
 import type { AlertContent } from "@components/csvIntake";
+import type { CsvDelimiterChoice } from "@components/csvDelimiterChoice";
 import type { FileRejection } from "@mantine/dropzone";
 
 const log = getLogger("YourFileSection");
@@ -41,6 +47,8 @@ export function YourFileSection({
   name,
   onNameChange,
   onFile,
+  delimiter,
+  onDelimiterChange,
   reading,
   acquired,
   linkable,
@@ -56,6 +64,10 @@ export function YourFileSection({
   onNameChange: (name: string) => void;
   /** The dropped or selected file; the host parses it. Hosted build only. */
   onFile: (file: File) => void;
+  /** How this party's file separates its fields. Hosted build only: the console
+   * reads the file on the host, not in the browser. */
+  delimiter: CsvDelimiterChoice;
+  onDelimiterChange: (choice: CsvDelimiterChoice) => void;
   reading: boolean;
   acquired: AcquiredCsv | undefined;
   /** Whether the read file can back at least one matching key. */
@@ -109,8 +121,15 @@ export function YourFileSection({
     );
   }
 
+  // A delimiter the rule refuses reads nothing: the intake closes and Continue
+  // is withheld, rather than a file being read by a delimiter nobody chose.
+  const delimiterUsable = resolveCsvDelimiter(delimiter).ok;
   const ready =
-    name.trim().length > 0 && acquired !== undefined && linkable && !reading;
+    name.trim().length > 0 &&
+    acquired !== undefined &&
+    linkable &&
+    delimiterUsable &&
+    !reading;
   return (
     <>
       <p className={styles.eyebrow}>Step 1 of 3</p>
@@ -155,8 +174,15 @@ export function YourFileSection({
         </>
       ) : (
         <>
+          <CsvDelimiterField
+            choice={delimiter}
+            onChange={onDelimiterChange}
+            disabled={reading}
+            note={CSV_DELIMITER_LOCAL_NOTICE}
+          />
           <Dropzone
             className={styles.dropzone}
+            disabled={!delimiterUsable}
             onDrop={(files) => {
               setRejectionMessage(undefined);
               const file = files.at(0);
@@ -277,7 +303,9 @@ export function YourFileSection({
         >
           {ready
             ? "Ready to continue."
-            : "A name and a file are needed to proceed."}
+            : !delimiterUsable
+              ? "Enter a field separator your file uses to proceed."
+              : "A name and a file are needed to proceed."}
         </p>
       </div>
     </>

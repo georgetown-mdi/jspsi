@@ -53,12 +53,14 @@ export type CSVParseRows = CSVParseResult["data"];
 export const CSV_WORKER_FILE_BYTE_THRESHOLD = 4 * 1024 * 1024;
 
 /** Worker request: parse this File, bounding a single logical line at `byteCeiling`
- * (undefined lets core apply its own default). A File is the only input the worker
- * takes -- it is structured-cloneable and read via FileReader in the worker, which a
- * Node stream is not. */
+ * (undefined lets core apply its own default) and splitting fields on `delimiter`
+ * (undefined lets core's read detect one from the file). A File is the only input the
+ * worker takes -- it is structured-cloneable and read via FileReader in the worker,
+ * which a Node stream is not. */
 export interface CSVParseRequest {
   file: File;
   byteCeiling: number | undefined;
+  delimiter: string | undefined;
 }
 
 /**
@@ -162,16 +164,20 @@ export function shouldParseOffThread(file: CSVParseInput): boolean {
  * `signal` tears the worker down if the caller aborts mid-parse (a component
  * unmount); a caller that never unmounts mid-parse (the inviter flows) simply
  * omits it.
+ *
+ * `delimiter` is the field delimiter to split on, taken either way -- on the
+ * worker path it rides the request. Omit it to have core's read detect one.
  */
 export async function loadCSVFileOffMainThread(
   file: CSVParseInput,
   options: {
     byteCeiling?: number;
+    delimiter?: string;
     spawnWorker?: SpawnCSVParseWorker;
     signal?: AbortSignal;
   } = {},
 ): Promise<CSVParseResult> {
-  const { byteCeiling, spawnWorker, signal } = options;
+  const { byteCeiling, delimiter, spawnWorker, signal } = options;
   // Off-thread for a browser File: a large one, or any File when a test injects
   // a spawner. A Node stream is not structured-cloneable, so it -- and a small
   // File -- parses inline. The isBrowserFile guard narrows `file` to File for
@@ -183,9 +189,9 @@ export async function loadCSVFileOffMainThread(
     const spawn =
       spawnWorker ??
       (await import("./csvParseWorkerClient")).defaultSpawnCSVParseWorker;
-    return parseInWorker(spawn(), file, byteCeiling, signal);
+    return parseInWorker(spawn(), file, byteCeiling, delimiter, signal);
   }
-  return loadCSVFile(file, byteCeiling);
+  return loadCSVFile(file, byteCeiling, delimiter);
 }
 
 /**
@@ -205,6 +211,7 @@ function parseInWorker(
   worker: CSVParseWorker,
   file: File,
   byteCeiling: number | undefined,
+  delimiter: string | undefined,
   signal: AbortSignal | undefined,
 ): Promise<CSVParseResult> {
   return new Promise((resolve, reject) => {
@@ -268,7 +275,7 @@ function parseInWorker(
       );
 
     try {
-      worker.postMessage({ file, byteCeiling });
+      worker.postMessage({ file, byteCeiling, delimiter });
     } catch (error) {
       // A synchronous structured-clone failure never reaches onmessage/onerror, so
       // tear the worker down here rather than leak it.

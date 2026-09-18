@@ -242,6 +242,37 @@ describe("buildRunOutputs", () => {
     );
   });
 
+  test("the result is written with the delimiter the input was read by", async () => {
+    const { urls, blobs } = recordingUrls();
+    buildRunOutputs(receivedResult(false), prepared, urls, "|");
+
+    expect(await blobs[0].text()).toBe("client_id|row_id|program\n17|5|B\n");
+  });
+
+  test("a value holding the chosen delimiter is quoted against it, not the comma", async () => {
+    const { urls, blobs } = recordingUrls();
+    const result = receivedResult(false);
+    buildRunOutputs(
+      {
+        ...result,
+        partnerPayload: {
+          columns: ["program"],
+          rowIndices: [5],
+          rows: [["B|C"]],
+        },
+      },
+      prepared,
+      urls,
+      "|",
+    );
+
+    // Quoted because it holds the delimiter this file is joined with; a comma
+    // in the same cell would not be, since a comma ends no field here.
+    expect(await blobs[0].text()).toBe(
+      'client_id|row_id|program\n17|5|"B|C"\n',
+    );
+  });
+
   test("a result without an audit pair omits the record downloads", () => {
     const { urls, created, revoked } = recordingUrls();
     const outputs = buildRunOutputs(receivedResult(false), prepared, urls);

@@ -258,6 +258,10 @@ export type ManagedInputSource =
  * permission, or an unreadable file. The `File` is read at THIS run start and
  * never retained across runs. On the handle path, permission is secured first.
  *
+ * `csvDelimiter` is the field delimiter the record stored for this input;
+ * omit it to read by the delimiter the file itself shows, as a record written
+ * with none does.
+ *
  * @throws {ManagedInputError} an `"acquire"` rejection holding the underlying
  *   error, so the runner records the benign `"input"` failure and knows no
  *   connection was attempted.
@@ -265,6 +269,7 @@ export type ManagedInputSource =
 export async function acquireManagedInput(
   source: ManagedInputSource,
   permission: HandlePermissionQuery = browserHandlePermission,
+  csvDelimiter?: string,
 ): Promise<AcquiredManagedInput> {
   let file: File;
   try {
@@ -288,7 +293,9 @@ export async function acquireManagedInput(
   let rows: CSVParseRows;
   let columns: Array<string>;
   try {
-    const parsed = await loadCSVFileOffMainThread(file);
+    const parsed = await loadCSVFileOffMainThread(file, {
+      ...(csvDelimiter !== undefined ? { delimiter: csvDelimiter } : {}),
+    });
     rows = parsed.data;
     columns = parsed.meta.fields ?? [];
   } catch (cause) {
@@ -327,7 +334,9 @@ export async function readInputFileModifiedAt(
 /**
  * Acquire and validate a run's input against the record's standing terms in one
  * step, the guard every run path applies before any connection. Reads the input
- * through {@link acquireManagedInput}, then rejects an input that cannot satisfy
+ * through {@link acquireManagedInput} -- by the delimiter the stored document
+ * states, so an unattended run reads the file the way the operator chose with
+ * nobody there to choose again -- then rejects an input that cannot satisfy
  * every linkage key the standing terms declare as a benign `"columns"` rejection
  * ({@link assessManagedInputColumns}) -- never silently linked. Returns the read
  * `File` and its columns when the input is accepted.
@@ -341,7 +350,11 @@ export async function acquireValidatedManagedInput(
   source: ManagedInputSource,
   permission: HandlePermissionQuery = browserHandlePermission,
 ): Promise<AcquiredManagedInput> {
-  const acquired = await acquireManagedInput(source, permission);
+  const acquired = await acquireManagedInput(
+    source,
+    permission,
+    exchangeFile.csvDelimiter,
+  );
   const rejection = assessManagedInputColumns(exchangeFile, acquired.columns);
   if (rejection !== undefined) throw new ManagedInputError(rejection);
   return acquired;

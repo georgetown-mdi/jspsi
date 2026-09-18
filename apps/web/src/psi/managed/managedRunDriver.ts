@@ -385,7 +385,12 @@ export function runManagedExchangeInBrowser(
           // its entry. Awaited, unlike the teardown below: a local write of
           // bounded duration, not a wait the partner's peer picks.
           await appendDisclosure(record.id, result, onWarning);
-          const outputs = buildRunOutputs(result, carried.prepared, urls);
+          const outputs = buildRunOutputs(
+            result,
+            carried.prepared,
+            urls,
+            record.exchangeFile.csvDelimiter,
+          );
           builtOutputs = true;
           return outputs;
         } catch (error) {

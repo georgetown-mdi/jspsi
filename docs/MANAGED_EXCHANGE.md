@@ -676,6 +676,8 @@ reaches the run:
 - The file **moved aside to an archive name**, with the new extract written in
   its place: the run reads the new extract, not the archived copy.
 
+The record also holds the field delimiter the operator chose at the file step, so an unattended run splits the refreshed file's fields the way the operator does and writes its result file the same way. It is local to this party: the partner's file is read by whatever that party chose.
+
 A refresh costs a run only when the run lands inside it rather than after it:
 between a delete and the new file's arrival there is nothing at the path, so
 that run fails its read as a missing file instead of running on last period's

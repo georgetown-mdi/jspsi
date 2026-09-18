@@ -1,4 +1,11 @@
-import { Fragment, useEffect, useMemo, useReducer, useRef } from "react";
+import {
+  Fragment,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from "react";
 
 import { Alert, Button, Checkbox, Text, TextInput } from "@mantine/core";
 import { Dropzone } from "@mantine/dropzone";
@@ -30,6 +37,15 @@ import { createManagedExchange } from "@psi/managed/managedExchangeStore";
 import { deleteSftpConnection } from "@psi/jobClient/sftpAuthoringClient";
 import { fetchJobRendezvous } from "@psi/jobClient/workInputClient";
 import { loadCSVFileOffMainThread } from "@psi/workers/csvParseController";
+
+import {
+  CSV_DELIMITER_LOCAL_NOTICE,
+  CsvDelimiterField,
+} from "@components/CsvDelimiterField";
+import {
+  DETECTED_CSV_DELIMITER_CHOICE,
+  resolveCsvDelimiter,
+} from "@components/csvDelimiterChoice";
 
 import { deploymentProfile, isConsoleBuild } from "@utils/clientConfig";
 import { whenDiagnostic } from "@utils/diagnostics";
@@ -142,6 +158,7 @@ import type {
 import type { AcceptorLaunchSource } from "./useAcceptorExchange";
 import type { AcceptorStep } from "./acceptorModel";
 import type { CoverageInput } from "@components/useNonEmptyRates";
+import type { CsvDelimiterChoice } from "@components/csvDelimiterChoice";
 import type { ProfiledJobInput } from "@psi/jobClient/workInputClient";
 
 import type { ColumnSamples } from "@psi/columnSamples";
@@ -236,6 +253,17 @@ export function AcceptorScreen() {
     sourceHandle,
     step,
   } = screenState;
+
+  // How this party's own file is read and its own result file written. Local
+  // component state rather than reducer state: the consent gate resolves it to
+  // a character, and only that character reaches the parse and the run.
+  const [delimiterChoice, setDelimiterChoice] = useState<CsvDelimiterChoice>(
+    DETECTED_CSV_DELIMITER_CHOICE,
+  );
+  const delimiterResolution = resolveCsvDelimiter(delimiterChoice);
+  const csvDelimiter = delimiterResolution.ok
+    ? delimiterResolution.delimiter
+    : undefined;
 
   // Decode the fragment token once, failing closed: an empty fragment, a bad
   // checksum/schema, an expired token, or an endpoint this build cannot drive
@@ -613,6 +641,7 @@ export function AcceptorScreen() {
     try {
       const result = await loadCSVFileOffMainThread(file, {
         signal: controller.signal,
+        ...(csvDelimiter !== undefined ? { delimiter: csvDelimiter } : {}),
       });
       if (id !== parseId.current) return;
       const columns = result.meta.fields ?? [];
@@ -783,6 +812,7 @@ export function AcceptorScreen() {
       ...(options !== undefined ? { options } : {}),
       runDiagnostics: runDiagnosticsIntentFields(runDiagnostics),
       receipts: receiptsIntentFields(receipts),
+      ...(csvDelimiter !== undefined ? { csvDelimiter } : {}),
     };
     // `launched` is the launch key: it is set once, from the same render that
     // fixes the acquired CSV, its input source, the committed name, and the ready
@@ -979,11 +1009,15 @@ export function AcceptorScreen() {
   // would adopt as this party's identity, named at the field the operator can fix
   // rather than showing up as an opaque failure once the exchange is under way.
   const nameProblem = acceptorNameProblem(acceptorName);
+  // A delimiter the rule refuses holds the gate: the file is read the moment
+  // the gate passes, so the choice must resolve before it does.
   const consentGateReady =
     acceptorConsentReady({
       consented,
       name: acceptorName,
-    }) && nameProblem === undefined;
+    }) &&
+    nameProblem === undefined &&
+    delimiterResolution.ok;
 
   const changeMetadata = (next: Metadata) =>
     dispatch({ type: "metadata-changed", metadata: next });
@@ -1090,6 +1124,7 @@ export function AcceptorScreen() {
                 : {}),
               expectedPartnerDeduplicate:
                 invitationToken.linkageTerms.deduplicate,
+              ...(csvDelimiter !== undefined ? { csvDelimiter } : {}),
             },
             connection: webrtcLocatorFromEndpoint(endpoint),
             sharedSecret: invitationToken.sharedSecret,
@@ -1257,8 +1292,15 @@ export function AcceptorScreen() {
               />
             ) : (
               <>
+                <CsvDelimiterField
+                  choice={delimiterChoice}
+                  onChange={setDelimiterChoice}
+                  disabled={parsing}
+                  note={CSV_DELIMITER_LOCAL_NOTICE}
+                />
                 <Dropzone
                   className={styles.dropzone}
+                  disabled={!delimiterResolution.ok}
                   openRef={openFilePicker}
                   onDrop={(files) => {
                     const chosen = files.at(0);

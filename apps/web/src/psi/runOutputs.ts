@@ -1,4 +1,5 @@
 import {
+  DEFAULT_CSV_DELIMITER,
   buildOutputTable,
   countIsPartnerReported,
   serializeExchangeRecord,
@@ -50,10 +51,18 @@ export function recordFileStamp(createdAt: string): string {
 /**
  * Build the run's downloadable artifacts from the exchange result: the results
  * CSV (unless the terms withheld it) with its matched-row count, plus the
- * record pair when the audit exists. The results CSV holds this party's own
+ * record pair when the audit exists.
+ *
+ * The results CSV holds this party's own
  * input columns beside the partner's where the prepared exchange selects them
  * (`include_own_columns`), which changes only this file: the exchange sent
  * nothing extra, and nothing here reaches the partner.
+ *
+ * `csvDelimiter` is the field delimiter this party read its own input by; the
+ * table is escaped against it and joined with it -- one delimiter for both, or
+ * a value holding it would be quoted against one character and split on another
+ * -- so the file reads back the way the input did. A party that named none
+ * writes commas.
  *
  * If anything throws after a URL was
  * created, every already-created URL is revoked before the error propagates:
@@ -64,6 +73,7 @@ export function buildRunOutputs(
   result: ExchangeResult,
   prepared: PreparedExchange,
   urls: ObjectUrls,
+  csvDelimiter: string = DEFAULT_CSV_DELIMITER,
 ): RunOutputs {
   const created: Array<string> = [];
   const trackedUrl = (blob: Blob): string => {
@@ -100,11 +110,12 @@ export function buildRunOutputs(
                 prepared.metadata,
                 result.partnerPayload,
                 prepared.includeOwnColumns,
+                csvDelimiter,
               );
               const csv =
-                headers.join(",") +
+                headers.join(csvDelimiter) +
                 "\n" +
-                rows.map((r) => r.join(",") + "\n").join("");
+                rows.map((r) => r.join(csvDelimiter) + "\n").join("");
               return {
                 kind: "matched" as const,
                 resultsUrl: trackedUrl(new Blob([csv], { type: "text/csv" })),
