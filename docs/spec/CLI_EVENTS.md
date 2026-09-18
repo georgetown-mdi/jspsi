@@ -129,7 +129,7 @@ The terminal counterpart of the same loss is a result file that could not be wri
 
 ### `metrics`
 
-The per-run operational-counter summary. Emitted exactly once, immediately before the terminal `result` or `error` event (so the terminal event stays last on the stream), on any run that reaches the terminal-event site. It reports this party's dataset size and how often the transport had to retry a data operation or re-establish the connection over the run. Every field is this party's own non-negative integer -- none is partner-derived. On a signal exit no terminal event fires, so no `metrics` event fires either.
+The per-run operational-counter summary. Emitted exactly once, immediately before the terminal `result` or `error` event (so the terminal event stays last on the stream), on any run that reaches the terminal-event site. It reports this party's dataset size and how often the transport had to retry a data operation or re-establish the connection over the run. Every field is this party's own non-negative integer -- none is partner-derived. On a signal exit no terminal event fires, so no `metrics` event fires either. The counters are read at the moment this event is emitted, which precedes the transport close that follows the terminal event, so retries or re-establishments during that close are not in them; the operator log states its own connection counts after the close.
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
