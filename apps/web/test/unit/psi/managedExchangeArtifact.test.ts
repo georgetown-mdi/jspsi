@@ -146,9 +146,9 @@ describe("export/import round-trip", () => {
   });
 
   test("an unknown member nested in the condition is refused, not dropped", () => {
-    // The strict schema reaches inside the condition as well as around it: a build
-    // that does not know a member refuses the whole artifact rather than
-    // reconstructing a record with the member gone.
+    // This build's strict schema reaches inside the condition as well as around
+    // it: an unknown member refuses the whole artifact rather than reconstructing
+    // a record with the member gone.
     const artifact = JSON.parse(
       serializeManagedExchangeArtifact(
         encodeManagedExchangeArtifact(
@@ -344,9 +344,20 @@ describe("rejection of malformed or tampered imports", () => {
 
   test("an unrecognized artifactVersion is rejected", () => {
     const artifact = JSON.parse(goodBytes());
-    artifact.artifactVersion = "psilink-managed-exchange-backup/v2";
+    artifact.artifactVersion = "psilink-managed-exchange-backup/v3";
     expect(() =>
       parseManagedExchangeArtifact(JSON.stringify(artifact)),
+    ).toThrow();
+  });
+
+  test("an artifact written under the previous version is refused whole", () => {
+    // A v1 file predates the operator's answer to a standing condition. The
+    // version is what this build reads it on, so an older file is refused entire
+    // rather than imported as a record, exactly as an older stored record is.
+    const artifact = JSON.parse(goodBytes());
+    artifact.artifactVersion = "psilink-managed-exchange-backup/v1";
+    expect(() =>
+      importManagedExchangeArtifact(JSON.stringify(artifact)),
     ).toThrow();
   });
 

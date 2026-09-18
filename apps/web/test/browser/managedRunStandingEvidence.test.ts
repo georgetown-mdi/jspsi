@@ -791,8 +791,8 @@ describe("a compromise response this device could not save", () => {
 
   test("holds the page, says what it cost, and asks again at the next visit", async () => {
     // A write this device refused is the side to fail to: the answer holds the
-    // page as a saved one does, and the page states that it is gone at the next
-    // visit rather than letting the operator read it as recorded.
+    // page as a saved one does, and the page states how far that reaches rather
+    // than letting the operator read it as recorded.
     const id = await answerAgainstARefusedWrite();
 
     expect(app.container.textContent).toContain(
@@ -824,10 +824,10 @@ describe("a compromise response this device could not save", () => {
   });
 
   test("a fresh run in the same visit is not held behind it", async () => {
-    // The unsaved answer stands for the visit, not over whatever the page shows
-    // next. A run since then has a failure of its own, classified differently, and
-    // the panel whose one control clears the record's standing condition must not
-    // be sitting over it.
+    // The unsaved answer stands until a run starts, not over whatever the page
+    // shows next. A run since then has a failure of its own, classified
+    // differently, and the panel whose one control clears the record's standing
+    // condition must not be sitting over it.
     const id = await answerAgainstARefusedWrite();
 
     driver.lapsedAt = "2026-07-01T00:00:00.000Z";

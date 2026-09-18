@@ -204,9 +204,9 @@ export const COMPROMISE_ACKNOWLEDGE_LABEL =
 /** The heading over a response this device could not save. */
 export const COMPROMISE_RESPONSE_UNSAVED_TITLE = "Your answer was not saved";
 
-/** What an unsaved response costs: it holds this page as a saved one does, and it
- * is gone at the next visit. */
+/** What an unsaved response holds: this page until the operator leaves it or
+ * starts a run, and nothing past that. */
 export const COMPROMISE_RESPONSE_UNSAVED_REASON =
-  "This device could not record your answer. Nothing here offers a fresh " +
-  "invitation while you are on this page, but this exchange may ask you again " +
-  "at your next visit - answer it the same way if it does.";
+  "This device could not record your answer. It holds here until you leave " +
+  "this page or start a run. Answer again the next time this exchange asks. " +
+  "If it still will not save, delete the exchange.";

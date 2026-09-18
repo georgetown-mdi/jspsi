@@ -899,9 +899,11 @@ condition](#the-standing-condition) travels, the operator's `response` to it
 included, because an export that dropped either would be a fourth way to clear
 one, and only the operator's acknowledgement, a re-invite, and a delete may. The
 artifact's field is optional and omitted where none stands, so an import holding
-none installs a record whose condition is the `"none"` form. The
-`artifactVersion` does not move for the response: it rides inside the canonical
-condition schema the artifact already reuses. The artifact's own
+none installs a record whose condition is the `"none"` form. The response rides
+only in a `psilink-managed-exchange-backup/v2` artifact: the `artifactVersion`
+literal moved for it, so a build that does not know the member refuses the file
+whole on the tag. Nothing strips it -- an artifact holding an answered condition
+either imports with the answer or is refused entire. The artifact's own
   JSON keys are `camelCase`, by design: the `.psilink.key` file the CLI reads is
   itself `camelCase` JSON (`sharedSecret`, `expires`), parsed without a
   `snake_case` conversion, so a `camelCase` `key` block is what maps onto a valid
@@ -915,9 +917,15 @@ condition schema the artifact already reuses. The artifact's own
   holding one readable everywhere. A build whose `local` schema does not know
   the key refuses the artifact whole, because the strict reader-rejects-unknown
   schema rejects an unknown nested key and the top-level parse fails with it.
-  The condition's own schema is strict on the same rule, so a member nested one
-  level further in -- the operator's `response` -- is refused rather than
-  dropped from the record the import would otherwise reconstruct.
+  That rule reaches only as far as the reading build's schemas are strict. The
+  operator's `response` sits one level further in, inside the condition, and a
+  build whose condition schema does not know the member drops it rather than
+  refusing the file -- installing a record whose condition holds no answer and
+  offering the fresh invitation over it. That is why the response moved the
+  `artifactVersion` literal to `psilink-managed-exchange-backup/v2`: such a
+  build refuses the whole file on the tag before any nested schema sees it. This
+  build's condition schema is strict, so a member it does not know is refused
+  rather than dropped from the record an import would otherwise reconstruct.
   The import surface holds that rejection apart from a file whose bytes do not
   parse at all: a document that parses and then fails the schema names a newer
   build's export as a likely cause and states the two ways past it -- bring the

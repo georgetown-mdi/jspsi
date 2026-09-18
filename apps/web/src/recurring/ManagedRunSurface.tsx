@@ -302,8 +302,9 @@ export function ManagedRunSurface({ id }: { id: string }) {
   // The compromise response is the record's own, written at whichever gate the
   // operator answered and read back off the record this page holds, so one answer
   // covers both gates and stands at the next visit as it does here. A write this
-  // device refused leaves it standing for the visit alone, which is the side to
-  // fail to; the panel states that where the operator reads it.
+  // device refused leaves it standing until the page is left or a run starts,
+  // which is the side to fail to; the panel states that where the operator reads
+  // it.
   const [respondingCompromise, setRespondingCompromise] = useState(false);
   const [compromiseWriteFailed, setCompromiseWriteFailed] = useState(false);
   // Which failure's own gate the answer was given at, where it was given on this
@@ -1422,7 +1423,8 @@ function CompromiseResponsePanel({
   onAcknowledge,
 }: {
   /** Whether this device refused the write. The response holds this page either
-   * way; an unsaved one is gone at the next visit, and says so. */
+   * way; an unsaved one ends when the page is left or a run starts, and says
+   * so. */
   unsaved: boolean;
   clearing: boolean;
   clearFailed: boolean;

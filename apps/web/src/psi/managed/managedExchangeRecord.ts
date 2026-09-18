@@ -48,15 +48,21 @@ import type { ZodType } from "zod";
 export const MANAGED_EXCHANGE_SCHEMA_VERSION = "psilink-managed-exchange/v3";
 
 /**
- * The single recognized `artifactVersion` literal for the v1 export/import
+ * The single recognized `artifactVersion` literal for the v2 export/import
  * artifact (see {@link ./managedExchangeArtifact.ts}). Distinct from
  * {@link MANAGED_EXCHANGE_SCHEMA_VERSION}: the artifact is a separate on-disk
  * format (the embedded document plus the key pair plus the local block), so it
  * versions independently of the stored record. A reader rejects any other value
- * rather than migrating it.
+ * rather than migrating it, `psilink-managed-exchange-backup/v1` among them. The
+ * literal moves for the {@link ManagedStandingResponse} nested in a raised
+ * condition: a build that does not know the member reads it with a schema that
+ * drops what it cannot name, so it would import a condition stripped of the
+ * operator's answer and offer a fresh invitation over it. The whole file is
+ * refused on the literal instead, and the recovery is an export taken from a
+ * build that matches.
  */
 export const MANAGED_EXCHANGE_ARTIFACT_VERSION =
-  "psilink-managed-exchange-backup/v1";
+  "psilink-managed-exchange-backup/v2";
 
 /**
  * Upper bound on the operator's {@link ManagedExchangeRecord.label}, in
