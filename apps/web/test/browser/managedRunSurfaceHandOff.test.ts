@@ -203,7 +203,11 @@ describe("the re-take on a spent copy's own surface", () => {
     await expect
       .element(page.getByRole("button", { name: "Run exchange" }))
       .toBeEnabled();
-    expect(await getManagedLocalState(created.id)).toBeUndefined();
+    // No key file was offered, so the re-take stamps the hand-off's own spent
+    // instant as the import, with no backup marker to keep alongside it.
+    expect(await getManagedLocalState(created.id)).toEqual({
+      imported: { importedAt: "2026-07-14T09:00:00.000Z" },
+    });
     expect((await getManagedExchange(created.id))?.sharedSecret).toBe(
       created.sharedSecret,
     );
