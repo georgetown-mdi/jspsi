@@ -1238,7 +1238,7 @@ csv_delimiter: "|"
 
 There is no separate setting for the result file: it is written with the same delimiter the input was read by, so it can be fed straight back to the system the input came from. A field holding the delimiter, a double quote, or a line break is quoted on the way out, so the result reads back through the same delimiter.
 
-With the key absent, psilink reads a file by the delimiter the file itself shows and writes the result with commas. `psilink exchange --csv-delimiter` replaces the key for one run, and `psilink init --csv-delimiter` writes the key into the template it produces; see [CLI.md](CLI.md#the-field-delimiter).
+With the key absent, psilink reads a file by the delimiter the file itself shows and writes the result with commas. A `--csv-delimiter` on a command reading this configuration replaces the key for that run, and `psilink init --csv-delimiter` writes the key into the template it produces; see [CLI.md](CLI.md#the-field-delimiter).
 
 The key is read by the CLI and by the console when it runs a config file. The web application does not offer a control for it and reads and writes commas.
 

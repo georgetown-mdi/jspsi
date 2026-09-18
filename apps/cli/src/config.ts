@@ -2233,41 +2233,44 @@ function csvDelimiterLabel(delimiter: string): string {
 }
 
 /**
- * The field delimiter a run takes where a configuration file governs it: that
- * file's `csv_delimiter`, or none where it sets none. A `--csv-delimiter`
- * naming something else has no effect and is reported as such, for the reason
- * the same commands report `--identity` that way -- the file, not this run,
- * reads and writes every exchange it governs, so a flag that changed one run's
- * delimiter would leave that run disagreeing with the file about how the
- * operator's own CSVs are read.
+ * The field delimiter one run reads its CSV by and writes its result with:
+ * `--csv-delimiter` where the command line gives it, the configuration's
+ * `csv_delimiter` otherwise -- the precedence every command that reads a CSV
+ * applies.
  *
- * `clause` names why the file governs, so each command states its own case.
- * A flag naming exactly what the file already does describes the run and is
- * not reported.
+ * A flag naming something the configuration does not is reported where that
+ * file governs later runs: it reads and writes every exchange run from it, so
+ * an operator who meant to change those has a field to edit rather than a flag
+ * to repeat. A flag naming what the file already records describes the run and
+ * is not reported, and neither is one over a file recording no delimiter --
+ * there is no recorded value for the run to disagree with, and a file recording
+ * none reads each CSV by the delimiter it shows.
+ *
+ * `configPath` is the configuration this command read and leaves in place. A
+ * caller whose configuration governs no later run -- one that writes the
+ * delimiter this run used, or verifies files named on its own command line --
+ * resolves the two values without this helper.
  */
-export function configuredCsvDelimiter(params: {
+export function csvDelimiterForRun(params: {
   configured: string | undefined;
   supplied: string | undefined;
   configPath: string;
-  clause: string;
   warn: (message: string) => void;
 }): string | undefined {
-  const { configured, supplied, configPath, clause, warn } = params;
-  if (supplied === undefined || supplied === configured) return configured;
-  const named = redactAndRenderOperatorSuppliedText(
-    operatorSuppliedText(configPath),
-  );
-  const instead =
-    configured !== undefined
-      ? `the file's csv_delimiter (${csvDelimiterLabel(configured)}) is used ` +
-        `instead. Edit csv_delimiter in ${named} to change it.`
-      : "that file names no csv_delimiter, so the delimiter the input file " +
-        `itself shows is used instead. Add csv_delimiter to ${named} to set one.`;
-  warn(
-    `--csv-delimiter ${csvDelimiterLabel(supplied)} has no effect ` +
-      `${clause}; ${instead}`,
-  );
-  return configured;
+  const { configured, supplied, configPath, warn } = params;
+  if (supplied === undefined) return configured;
+  if (configured !== undefined && configured !== supplied) {
+    const named = redactAndRenderOperatorSuppliedText(
+      operatorSuppliedText(configPath),
+    );
+    warn(
+      `--csv-delimiter ${csvDelimiterLabel(supplied)} applies to this run; ` +
+        `every later exchange over ${named} reads and writes by the ` +
+        `csv_delimiter (${csvDelimiterLabel(configured)}) that file records. ` +
+        `Edit csv_delimiter in ${named} to change it.`,
+    );
+  }
+  return supplied;
 }
 
 // --- Rules taken from a named rule set ---------------------------------------

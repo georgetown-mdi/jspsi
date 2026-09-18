@@ -27,6 +27,7 @@ import {
   assertPartnerFingerprintRecordable,
   assertRetainSweepGuard,
   configWithNamedRuleSetRules,
+  csvDelimiterForRun,
   DEFAULT_CONFIG_PATH,
   linkageTermsStandingOf,
   warnOnLinkageRuleSetCitationDrift,
@@ -1048,7 +1049,12 @@ export async function handler(argv: Arguments): Promise<void> {
     // which reads the delimiter the file itself shows and writes commas. Both
     // values came through the same accepted-set rule, so neither can be a
     // character the reader and the writer would disagree on.
-    const csvDelimiter = csvDelimiterArg ?? exchangeDataSpec.csvDelimiter;
+    const csvDelimiter = csvDelimiterForRun({
+      configured: exchangeDataSpec.csvDelimiter,
+      supplied: csvDelimiterArg,
+      configPath: options.configFile,
+      warn: (message) => log.warn(message),
+    });
 
     // A certificate-mode run naming no signing identity is unrunnable from the
     // parsed configuration alone, so it is refused here: ahead of the dataset

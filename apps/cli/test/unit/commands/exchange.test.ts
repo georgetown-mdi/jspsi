@@ -1423,10 +1423,31 @@ test("handler: the configuration's csv_delimiter governs a run with no flag", as
 
 test("handler: --csv-delimiter replaces the configuration's value for that run", async () => {
   expect(await delimiterReachingTheRun(";", "|")).toBe("|");
+  // The configuration runs every later exchange and is not rewritten here, so
+  // the value it still holds is reported beside the one this run took.
+  const reported = mockState.warnings.filter((m) =>
+    m.includes("--csv-delimiter"),
+  );
+  expect(reported).toHaveLength(1);
+  expect(reported[0]).toContain('--csv-delimiter "|" applies to this run');
+  expect(reported[0]).toContain('csv_delimiter (";")');
+  expect(reported[0]).toContain(configFile);
+});
+
+test("handler: a flag the configuration agrees with is not reported", async () => {
+  expect(await delimiterReachingTheRun("|", "|")).toBe("|");
+  expect(
+    mockState.warnings.filter((m) => m.includes("--csv-delimiter")),
+  ).toEqual([]);
 });
 
 test("handler: the flag alone governs a configuration that sets none", async () => {
   expect(await delimiterReachingTheRun(undefined, "|")).toBe("|");
+  // Nothing to disagree with: a configuration recording no delimiter leaves
+  // every later run reading the delimiter each file shows.
+  expect(
+    mockState.warnings.filter((m) => m.includes("--csv-delimiter")),
+  ).toEqual([]);
 });
 
 test("handler: neither one leaves the run with no chosen delimiter", async () => {

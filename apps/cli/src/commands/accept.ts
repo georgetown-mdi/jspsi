@@ -29,8 +29,8 @@ import type {
 
 import {
   applyConnectionOverrides,
-  configuredCsvDelimiter,
   configWithNamedRuleSetRules,
+  csvDelimiterForRun,
   diffLinkageTerms,
   linkageTermsStandingOf,
   persistExpectedPartnerDeduplicate,
@@ -363,8 +363,9 @@ export async function validateAccept(params: {
    * The field delimiter this run reads its input by and, where the acceptance
    * runs the exchange itself, writes its result with. Recorded in the
    * configuration this acceptance writes so the recurring exchange it governs
-   * needs no flag of its own; an acceptance that keeps a configuration already
-   * at the path takes that file's own (see {@link configuredCsvDelimiter}).
+   * needs no flag of its own; absent, an acceptance that keeps a configuration
+   * already at the path reads by that file's own (see
+   * {@link csvDelimiterForRun}).
    */
   csvDelimiter?: string;
 }): Promise<AcceptReady> {
@@ -419,22 +420,17 @@ export async function validateAccept(params: {
       : resolveIdentity(
           await identityFromFlagOrPrompt(options.identity, askIdentity),
         );
-  // The kept file governs the delimiter for the same reason it governs the
-  // label: it, not this acceptance, runs every later exchange, and a flag that
-  // read this run's CSV another way would leave that run and the file
-  // disagreeing about this party's own files. Reported on the logger rather
-  // than the consent surface -- the delimiter is a local file-format choice,
-  // not a term this acceptance agrees to.
-  const csvDelimiter =
-    keptConfig !== undefined
-      ? configuredCsvDelimiter({
-          configured: keptConfig.csvDelimiter,
-          supplied: csvDelimiterArg,
-          configPath: options.configFile,
-          clause: "on an acceptance that keeps the existing configuration file",
-          warn: (message) => log.warn(message),
-        })
-      : csvDelimiterArg;
+  // A kept file reads this acceptance's input where the command line names no
+  // delimiter, and a flag naming a different one is reported: that file, not
+  // this acceptance, runs every later exchange. The report goes on the logger
+  // rather than the consent surface -- the delimiter is a local file-format
+  // choice, not a term this acceptance agrees to.
+  const csvDelimiter = csvDelimiterForRun({
+    configured: keptConfig?.csvDelimiter,
+    supplied: csvDelimiterArg,
+    configPath: options.configFile,
+    warn: (message) => log.warn(message),
+  });
   const delimiterSection = csvDelimiter !== undefined ? { csvDelimiter } : {};
   // Adopt the invitation's agreed linkage fields/keys/algorithm, but record this
   // party's own identity (the invitation's identity is the inviter's) and MIRROR
@@ -1217,8 +1213,8 @@ export async function handler(argv: Arguments): Promise<void> {
           keyPath: options.keyFile,
           configPath: options.configFile,
           output: ready.output,
-          // The delimiter the acceptance settled on, which is the kept
-          // configuration's where one governs rather than the flag's.
+          // The delimiter the acceptance settled on: the flag's, or a kept
+          // configuration's where the command line named none.
           csvDelimiter: ready.dataSpec.csvDelimiter,
           verbosity: options.verbosity,
           loggerName: "accept",

@@ -2663,8 +2663,9 @@ describe("reconciling a pre-existing config", () => {
   });
 
   // --- the CSV field delimiter over a kept configuration ---------------------
-  // The kept file runs every later exchange, so it decides how this party's own
-  // CSVs are read and written, exactly as it decides the label above.
+  // The kept file runs every later exchange, so its csv_delimiter reads this
+  // acceptance's input where the command line names none, and is reported
+  // where a flag reads the run another way.
 
   /** A configuration already at the path holding `csvDelimiter` (or none),
    *  beside a pipe-delimited input file. */
@@ -2738,8 +2739,8 @@ describe("reconciling a pre-existing config", () => {
     }
   });
 
-  test("validateAccept: --csv-delimiter over a kept configuration is reported, not applied", async () => {
-    const { dir, configFile, keyFile, input } = keptDelimiterConfig("|");
+  test("validateAccept: --csv-delimiter reads this acceptance's input over the kept configuration's value", async () => {
+    const { dir, configFile, keyFile, input } = keptDelimiterConfig(";");
     const log = getLogger("accept-kept-delimiter-test");
     log.setLevel("silent");
     const warnSpy = vi.spyOn(log, "warn");
@@ -2751,19 +2752,48 @@ describe("reconciling a pre-existing config", () => {
           input,
         },
         options: testOptions({ configFile, keyFile, identity: undefined }),
-        csvDelimiter: ";",
+        csvDelimiter: "|",
         log,
       });
-      // The run proceeds under the file's delimiter -- a semicolon read of this
-      // input would have refused on the same satisfiability check above.
+      // The run proceeds under the flag -- a semicolon read of this input, what
+      // the kept file alone would have taken, refuses on the satisfiability
+      // check above.
       expect(ready.dataSpec.csvDelimiter).toBe("|");
-      const ignored = warnSpy.mock.calls
+      const reported = warnSpy.mock.calls
         .map((call) => String(call[0]))
         .filter((message) => message.includes("--csv-delimiter"));
-      expect(ignored).toHaveLength(1);
-      expect(ignored[0]).toContain('--csv-delimiter ";" has no effect');
-      expect(ignored[0]).toContain('csv_delimiter ("|") is used instead');
-      expect(ignored[0]).toContain(configFile);
+      expect(reported).toHaveLength(1);
+      expect(reported[0]).toContain('--csv-delimiter "|" applies to this run');
+      expect(reported[0]).toContain('csv_delimiter (";")');
+      expect(reported[0]).toContain(configFile);
+    } finally {
+      warnSpy.mockRestore();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("validateAccept: a --csv-delimiter the kept configuration already records is not reported", async () => {
+    const { dir, configFile, keyFile, input } = keptDelimiterConfig("|");
+    const log = getLogger("accept-kept-delimiter-match-test");
+    log.setLevel("silent");
+    const warnSpy = vi.spyOn(log, "warn");
+    try {
+      const ready = await validateAccept({
+        resolved: {
+          mode: "offline",
+          invitation: await encodeInvitation(sampleToken(FUTURE())),
+          input,
+        },
+        options: testOptions({ configFile, keyFile, identity: undefined }),
+        csvDelimiter: "|",
+        log,
+      });
+      expect(ready.dataSpec.csvDelimiter).toBe("|");
+      expect(
+        warnSpy.mock.calls
+          .map((call) => String(call[0]))
+          .filter((message) => message.includes("--csv-delimiter")),
+      ).toEqual([]);
     } finally {
       warnSpy.mockRestore();
       fs.rmSync(dir, { recursive: true, force: true });

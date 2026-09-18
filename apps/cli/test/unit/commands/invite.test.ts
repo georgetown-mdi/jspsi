@@ -1709,9 +1709,10 @@ test("validateInvite: --identity over a reused config is reported, not applied",
 });
 
 // --- the CSV field delimiter on a config-as-source mint ----------------------
-// The config the exchange will run from decides how this party's CSV is read, so
-// the check made at mint time has to read it the same way; the accepted set and
-// the round trip are core's own.
+// A mint given no flag reads its input by the config's csv_delimiter, so the
+// check made at mint time reads the CSV the way the exchange that config
+// governs will; a flag reads this run instead and reports what that config
+// still holds. The accepted set and the round trip are core's own.
 
 /** A config holding `csvDelimiter` (or none) beside a pipe-delimited input: the
  *  shape a party whose source system exports pipes runs. */
@@ -1776,12 +1777,13 @@ test("validateInvite: the config's csv_delimiter reads the input its terms are c
   }
 });
 
-test("validateInvite: --csv-delimiter over a reused config is reported, not applied", async () => {
-  // Same rule as --identity and --linkage-strategy above: the config persists
-  // unchanged and governs every exchange run from it, so a flag cannot read one
-  // run's CSV another way. The mint succeeding is what shows the config's pipe
-  // read, not the flag's semicolon, reached the input.
-  const { dir, configPath, keyPath, input } = withDelimiterConfig("|");
+test("validateInvite: --csv-delimiter reads this mint's input over the config's value", async () => {
+  // The flag governs the run it is given on, here and on every other command.
+  // The config persists unchanged, so the delimiter every exchange run from it
+  // takes is reported beside the one this run used. The mint succeeding is
+  // what shows the flag's pipe read, not the config's semicolon, reached the
+  // input: a semicolon read of this file parses as one column and refuses.
+  const { dir, configPath, keyPath, input } = withDelimiterConfig(";");
   const log = getLogger("invite-delimiter-flag-test");
   log.setLevel("silent");
   const warnSpy = vi.spyOn(log, "warn");
@@ -1790,17 +1792,41 @@ test("validateInvite: --csv-delimiter over a reused config is reported, not appl
       resolved: { mode: "offline", input },
       options: testOptions({ configFile: configPath, keyFile: keyPath }),
       acceptTimeout: 900,
-      csvDelimiter: ";",
+      csvDelimiter: "|",
       log,
     });
     expect(ready.mode).toBe("offlineFromConfig");
-    const ignored = warnSpy.mock.calls
+    const reported = warnSpy.mock.calls
       .map((call) => String(call[0]))
       .filter((message) => message.includes("--csv-delimiter"));
-    expect(ignored).toHaveLength(1);
-    expect(ignored[0]).toContain('--csv-delimiter ";" has no effect');
-    expect(ignored[0]).toContain('csv_delimiter ("|") is used instead');
-    expect(ignored[0]).toContain(configPath);
+    expect(reported).toHaveLength(1);
+    expect(reported[0]).toContain('--csv-delimiter "|" applies to this run');
+    expect(reported[0]).toContain('csv_delimiter (";")');
+    expect(reported[0]).toContain(configPath);
+  } finally {
+    warnSpy.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("validateInvite: a --csv-delimiter the config already records is not reported", async () => {
+  const { dir, configPath, keyPath, input } = withDelimiterConfig("|");
+  const log = getLogger("invite-delimiter-match-test");
+  log.setLevel("silent");
+  const warnSpy = vi.spyOn(log, "warn");
+  try {
+    await validateInvite({
+      resolved: { mode: "offline", input },
+      options: testOptions({ configFile: configPath, keyFile: keyPath }),
+      acceptTimeout: 900,
+      csvDelimiter: "|",
+      log,
+    });
+    expect(
+      warnSpy.mock.calls
+        .map((call) => String(call[0]))
+        .filter((message) => message.includes("--csv-delimiter")),
+    ).toEqual([]);
   } finally {
     warnSpy.mockRestore();
     fs.rmSync(dir, { recursive: true, force: true });

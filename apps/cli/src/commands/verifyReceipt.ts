@@ -1164,10 +1164,11 @@ export async function handler(argv: Arguments): Promise<void> {
 
     const localSource = configFileSource(configFile, log);
     const localTerms = localSource?.linkageTerms;
-    // The files being verified are the ones the configuration's own exchange
-    // wrote, so its csv_delimiter reads them where the command line names none.
-    // The flag governs over it: the paths verified here are named on this
-    // command line and need not be that run's own files.
+    // The flag governs this verification and the configuration's csv_delimiter
+    // a verification given none, the precedence every command reading a CSV
+    // applies: the files being verified are the ones that configuration's own
+    // exchange wrote, and the paths named here need not be those files.
+    // Nothing later reads by this value, so a difference is not reported.
     const csvDelimiter = csvDelimiterArg ?? localSource?.csvDelimiter;
     const suppliedPartnerTerms = partnerTermsFrom(partnerTermsFile);
     const signedRecord =
