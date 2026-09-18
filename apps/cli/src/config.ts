@@ -3,6 +3,7 @@ import path from "node:path";
 
 import YAML from "yaml";
 import type {
+  BuiltInLinkageRuleSet,
   CompatibilityMessageFragment,
   ConnectionConfig,
   ExchangeSpec,
@@ -16,12 +17,14 @@ import type {
 } from "@psilink/core";
 import {
   bareTermsValue,
+  BUILT_IN_LINKAGE_RULE_SETS,
   canonicalString,
   CanonicalEncodingError,
   clipToRenderedCost,
   compatibilityMessage,
   COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
   DISPLAY_TRUNCATION_MARKER,
+  findBuiltInLinkageRuleSet,
   isDrawnFromLinkageRuleSet,
   keepFirstPartyLineBreaks,
   keepOperatorSuppliedText,
@@ -1955,6 +1958,20 @@ function describeSchemaIssues(
 }
 
 /**
+ * Whether a read takes a `linkage_terms` block's rules from the rule set the
+ * block names ({@link linkageTermsWithNamedRuleSetRules}), for a block that
+ * names one and writes no rules of its own.
+ *
+ * Only a document THIS party wrote is read `"from-the-named-set"`. A
+ * partner-authored terms document is read `"as-written"`, the default: the
+ * citation in it is text that party wrote about its own rules, so filling
+ * this build's content in under it would hash rules the partner never sent,
+ * and a name this build does not ship would stop a verification the
+ * partner's file is not at fault for.
+ */
+export type NamedRuleSetRules = "from-the-named-set" | "as-written";
+
+/**
  * Read the linkage-terms source from a config file, reporting a missing file
  * and a config that defines no `linkage_terms` as distinct outcomes, so each
  * caller attributes them in its own terms.
@@ -1967,9 +1984,14 @@ function describeSchemaIssues(
  * is treated as intentional, so a broken one is reported for the user to
  * fix. Top-level keys are read as either the written snake_case form or
  * their camelCase spelling.
+ *
+ * @param rules whether a rule-set citation is resolved into this build's own
+ * rules; see {@link NamedRuleSetRules}, whose default leaves the document as
+ * its author wrote it.
  */
 export function readConfigLinkageSource(
   configPath: string,
+  rules: NamedRuleSetRules = "as-written",
 ): ConfigLinkageSourceResult {
   // Read, then parse through the sensitive-file chokepoint. A read failure
   // holds only a path and errno (ENOENT means no config, not an error here); a
@@ -2003,11 +2025,24 @@ export function readConfigLinkageSource(
   const rawTerms = obj["linkage_terms"] ?? obj["linkageTerms"];
   if (rawTerms === undefined) return { status: "no-linkage-terms" };
 
+  // Rules the block names a set for instead of writing out are taken from that
+  // set before validation: the schema requires both lists, and a mint from this
+  // config declares what it resolved to, citation and all.
+  const terms =
+    rules === "from-the-named-set"
+      ? linkageTermsWithNamedRuleSetRules(
+          rawTerms,
+          configPath,
+          BUILT_IN_LINKAGE_RULE_SETS,
+          obj,
+        )
+      : rawTerms;
+
   // Read through the entry point whose refusals address the party who WROTE
   // the document: this block is the operator's own, and the file is open to
   // them, so a mistyped text param names the remedy rather than the type
   // alone (@psilink/core, transformParamTypes.ts).
-  const result = safeParseLinkageTermsTheReaderWrote(rawTerms);
+  const result = safeParseLinkageTermsTheReaderWrote(terms);
   if (!result.success)
     throw configFileRefusal(
       configPath,
@@ -2122,11 +2157,15 @@ function readRetainFilesDeclaration(config: Record<string, unknown>): boolean {
  * invitation's linkage terms, so one that defines none cannot serve as that
  * source and is a {@link UsageError} rather than a silent fall-through to
  * input inference.
+ *
+ * The file here is this party's own configuration, so a rule set it names
+ * instead of writing the rules out is resolved (see
+ * {@link NamedRuleSetRules}).
  */
 export function loadConfigLinkageSource(
   configPath: string,
 ): ConfigLinkageSource | undefined {
-  const result = readConfigLinkageSource(configPath);
+  const result = readConfigLinkageSource(configPath, "from-the-named-set");
   if (result.status === "no-config-file") return undefined;
   if (result.status === "no-linkage-terms")
     throw configFileRefusal(
@@ -2136,6 +2175,270 @@ export function loadConfigLinkageSource(
         "linkage terms",
     );
   return result.source;
+}
+
+// --- Rules taken from a named rule set ---------------------------------------
+
+/**
+ * A rule-set reference as one clause, keys first -- the keys are the specific
+ * artifact and the fields the substrate they are built from -- matching the
+ * order the invitation display and core's mismatch message render the pair in.
+ * Each half is rendered by `renderHalf`, which applies the treatment its sink
+ * calls for: a warning escapes the two names for its `log.warn`, a refusal
+ * composes them raw for the single escape its display applies.
+ */
+function ruleSetCitationClause(
+  reference: LinkageRuleSetReference,
+  renderHalf: (identity: LinkageSetIdentity) => string,
+): string {
+  return `${renderHalf(reference.keySet)} over ${renderHalf(reference.fieldSet)}`;
+}
+
+/**
+ * One half of a rule-set citation for a refusal message, through core's
+ * terms-value grammar ({@link ruleSetCitation}) and otherwise raw: a fragment
+ * composed into an `Error` is escaped once at the sink that shows it, so
+ * escaping it here would double-escape every backslash the operator reads.
+ */
+function refusalRuleSetHalf(identity: LinkageSetIdentity): string {
+  return ruleSetCitation(identity.name, identity.version);
+}
+
+/**
+ * The set identity `raw` writes, or `undefined` where it is not written as one.
+ * Shape only, and the shallowest shape a lookup needs: what a name and a
+ * version may hold is the linkage-terms schema's to decide, and a citation it
+ * refuses reaches the operator under its own issue path either way.
+ */
+function citedSetIdentity(raw: unknown): LinkageSetIdentity | undefined {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw))
+    return undefined;
+  const { name, version } = raw as Record<string, unknown>;
+  if (typeof name !== "string" || typeof version !== "string") return undefined;
+  return { name, version };
+}
+
+/**
+ * The rule set `raw` names, or `undefined` where it does not name one whole.
+ * Both spellings of each half are read, as every raw-document read here is: a
+ * configuration file writes `field_set`, and the camelCase form is what
+ * reaches the schema.
+ */
+function citedRuleSetReference(
+  raw: unknown,
+): LinkageRuleSetReference | undefined {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw))
+    return undefined;
+  const halves = raw as Record<string, unknown>;
+  const fieldSet = citedSetIdentity(halves["field_set"] ?? halves["fieldSet"]);
+  const keySet = citedSetIdentity(halves["key_set"] ?? halves["keySet"]);
+  if (fieldSet === undefined || keySet === undefined) return undefined;
+  return { fieldSet, keySet };
+}
+
+/**
+ * Whether a raw block writes a key under either spelling, a present-but-empty
+ * value included: what the document declares is the question here, not what
+ * the declaration holds, which the schema decides.
+ */
+function declaresKey(
+  block: Record<string, unknown>,
+  written: string,
+  camelized: string,
+): boolean {
+  return Object.hasOwn(block, written) || Object.hasOwn(block, camelized);
+}
+
+/** The two rule lists, each as the pair of spellings a raw read accepts. */
+const RULE_LIST_SPELLINGS: ReadonlyArray<readonly [string, string]> = [
+  ["linkage_fields", "linkageFields"],
+  ["linkage_keys", "linkageKeys"],
+];
+
+/**
+ * The rule lists `document` writes at its own top level, spelled as it writes
+ * them. A list un-indented out of `linkage_terms` lands exactly there, and the
+ * block it left then holds no rules at all.
+ *
+ * The top level and nothing deeper: that is where the mis-indentation puts a
+ * list. A list under a key spelled some third way is outside what any read
+ * here can see, a limit docs/EXCHANGE_REFERENCE.md states.
+ */
+function ruleListsWrittenAtTopLevel(document: unknown): Array<string> {
+  if (
+    document === null ||
+    typeof document !== "object" ||
+    Array.isArray(document)
+  )
+    return [];
+  const top = document as Record<string, unknown>;
+  return RULE_LIST_SPELLINGS.flatMap(([written, camelized]) => {
+    if (Object.hasOwn(top, written)) return [written];
+    if (Object.hasOwn(top, camelized)) return [camelized];
+    return [];
+  });
+}
+
+/**
+ * What this build ships, as the sentence the unknown-set refusal states it in.
+ * A build shipping none says so rather than trailing an empty list: the
+ * refusal is read by someone deciding what to write instead.
+ */
+function shippedRuleSets(
+  ruleSets: ReadonlyArray<BuiltInLinkageRuleSet>,
+): string {
+  if (ruleSets.length === 0) return "This build ships no rule set at all.";
+  const shipped = ruleSets
+    .map((ruleSet) =>
+      ruleSetCitationClause(ruleSet.reference, refusalRuleSetHalf),
+    )
+    .join("; ");
+  return `It ships ${shipped}.`;
+}
+
+/**
+ * A raw configuration's `linkage_terms` with its `linkage_fields` and
+ * `linkage_keys` taken from the rule set the block's `linkage_rule_set` names,
+ * where it names a set this build ships and writes neither list of its own.
+ * Every path that reads a configuration file runs its terms through this ahead
+ * of the schema, so a named set resolves alike whether the file is read to run
+ * an exchange, to mint an invitation from, or to compare against one.
+ *
+ * Rules are taken whole or not at all:
+ *
+ * - Both lists written -- what every configuration written to date holds --
+ *   are the rules, untouched here. The citation beside them stays the claim
+ *   {@link warnOnLinkageRuleSetCitationDrift} judges.
+ * - Neither list written, and the citation names a shipped set: both lists
+ *   come from that set, and the citation stands as the file wrote it.
+ * - Neither list written, and the citation names a set this build does not
+ *   ship: refused, naming what was cited and what this build ships. Nothing
+ *   here guesses at a name it does not ship, and the file writes no rules to
+ *   fall back to.
+ * - One list written and the other not: refused. A key set is built from its
+ *   own fields, so filling in the missing half would compose the rules of one
+ *   exchange from two sources under one name.
+ * - Neither list written in the block, but one of them written at the top
+ *   level of the document around it: refused, naming where it was found and
+ *   where it belongs. A list un-indented out of the block is an editing
+ *   mistake, not a file asking to run the whole set.
+ *
+ * A citation written in some other shape is left for the schema, which names
+ * the field and the issue.
+ *
+ * @param ruleSets the sets a citation is looked up in, this build's own
+ * ({@link BUILT_IN_LINKAGE_RULE_SETS}) by default.
+ * @param enclosingDocument the raw document the block was read out of, where
+ * the caller holds it, for the misplacement check above. Omitting it checks
+ * the block alone.
+ */
+export function linkageTermsWithNamedRuleSetRules(
+  rawTerms: unknown,
+  configPath: string,
+  ruleSets: ReadonlyArray<BuiltInLinkageRuleSet> = BUILT_IN_LINKAGE_RULE_SETS,
+  enclosingDocument?: unknown,
+): unknown {
+  if (
+    rawTerms === null ||
+    typeof rawTerms !== "object" ||
+    Array.isArray(rawTerms)
+  )
+    return rawTerms;
+  const terms = rawTerms as Record<string, unknown>;
+  const citation = terms["linkage_rule_set"] ?? terms["linkageRuleSet"];
+  if (citation === undefined) return rawTerms;
+
+  const writesFields = declaresKey(terms, "linkage_fields", "linkageFields");
+  const writesKeys = declaresKey(terms, "linkage_keys", "linkageKeys");
+  if (writesFields && writesKeys) return rawTerms;
+
+  const reference = citedRuleSetReference(citation);
+  if (reference === undefined) return rawTerms;
+  const cited = ruleSetCitationClause(reference, refusalRuleSetHalf);
+
+  if (writesFields || writesKeys) {
+    const written = writesFields ? "linkage_fields" : "linkage_keys";
+    const missing = writesFields ? "linkage_keys" : "linkage_fields";
+    throw configFileRefusal(
+      configPath,
+      `names the rule set ${cited} in linkage_terms.linkage_rule_set and ` +
+        `writes ${written} but no ${missing}. psilink takes both lists from ` +
+        `a named set or neither: remove ${written} to run the set's own ` +
+        `rules, or write ${missing} out beside it.`,
+    );
+  }
+
+  const misplaced = ruleListsWrittenAtTopLevel(enclosingDocument);
+  if (misplaced.length > 0) {
+    const names = misplaced.join(" and ");
+    const them = misplaced.length === 1 ? "it" : "them";
+    throw configFileRefusal(
+      configPath,
+      `names the rule set ${cited} in linkage_terms.linkage_rule_set and ` +
+        "writes no linkage_fields or linkage_keys inside that block, but " +
+        `writes ${names} at the top level of the file. Indent ${them} under ` +
+        `linkage_terms to run the rules the file holds, or delete ${them} ` +
+        "to run the named set's own rules.",
+    );
+  }
+
+  const ruleSet = findBuiltInLinkageRuleSet(reference, ruleSets);
+  if (ruleSet === undefined)
+    throw configFileRefusal(
+      configPath,
+      `names the rule set ${cited} in linkage_terms.linkage_rule_set and ` +
+        "writes no linkage_fields or linkage_keys of its own, but this build " +
+        `ships no such rule set. ${shippedRuleSets(ruleSets)} Name a set ` +
+        "this build ships, or write the linkage_fields and linkage_keys out " +
+        "in the file.",
+    );
+
+  // Cloned rather than aliased: a built-in set is frozen through every level,
+  // and what this returns is a document later passes rewrite.
+  return {
+    ...terms,
+    linkageFields: structuredClone(ruleSet.linkageFields),
+    linkageKeys: structuredClone(ruleSet.linkageKeys),
+  };
+}
+
+/**
+ * `rawConfig` with its linkage terms' rules taken from the rule set they name
+ * ({@link linkageTermsWithNamedRuleSetRules}), for a caller holding the whole
+ * raw document. A new object where anything was filled in, leaving the
+ * caller's own value as it read it, and the configuration itself otherwise.
+ *
+ * Runs on the raw configuration, ahead of the schema: what it fills in is a
+ * block the schema requires.
+ *
+ * @param ruleSets the sets a citation is looked up in, this build's own
+ * ({@link BUILT_IN_LINKAGE_RULE_SETS}) by default.
+ */
+export function configWithNamedRuleSetRules(
+  rawConfig: unknown,
+  configPath: string,
+  ruleSets: ReadonlyArray<BuiltInLinkageRuleSet> = BUILT_IN_LINKAGE_RULE_SETS,
+): unknown {
+  if (
+    rawConfig === null ||
+    typeof rawConfig !== "object" ||
+    Array.isArray(rawConfig)
+  )
+    return rawConfig;
+  const config = rawConfig as Record<string, unknown>;
+  const key = Object.hasOwn(config, "linkage_terms")
+    ? "linkage_terms"
+    : Object.hasOwn(config, "linkageTerms")
+      ? "linkageTerms"
+      : undefined;
+  if (key === undefined) return rawConfig;
+  const filled = linkageTermsWithNamedRuleSetRules(
+    config[key],
+    configPath,
+    ruleSets,
+    config,
+  );
+  return filled === config[key] ? rawConfig : { ...config, [key]: filled };
 }
 
 // --- Rule-set citation drift -------------------------------------------------
@@ -2160,15 +2463,11 @@ function describeRuleSetHalf(identity: LinkageSetIdentity): string {
 }
 
 /**
- * A rule-set citation as one clause, keys first -- the keys are the specific
- * artifact and the fields the substrate they are built from -- matching the
- * order the invitation display and core's mismatch message render the pair in.
+ * A rule-set citation as one clause for the drift warning, each half escaped
+ * for that sink ({@link ruleSetCitationClause}).
  */
 function describeRuleSetCitation(reference: LinkageRuleSetReference): string {
-  return (
-    `${describeRuleSetHalf(reference.keySet)} over ` +
-    `${describeRuleSetHalf(reference.fieldSet)}`
-  );
+  return ruleSetCitationClause(reference, describeRuleSetHalf);
 }
 
 /**
@@ -2238,6 +2537,10 @@ export function linkageTermsStandingOf(
  * the exchange would then abort against the partner. `alternative` names
  * what that operator can do instead of settling (see
  * {@link CitationDriftAlternative}).
+ *
+ * @param ruleSets the sets the citation is resolved against, this build's own
+ * ({@link BUILT_IN_LINKAGE_RULE_SETS}) by default. The rules are compared
+ * against the set the terms cite, whichever of those it is.
  */
 export function warnOnLinkageRuleSetCitationDrift(
   terms: Pick<LinkageTerms, "linkageRuleSet" | "linkageFields" | "linkageKeys">,
@@ -2245,11 +2548,12 @@ export function warnOnLinkageRuleSetCitationDrift(
   log: { warn: (message: string) => void },
   standing: LinkageTermsStanding,
   alternative: CitationDriftAlternative,
+  ruleSets: ReadonlyArray<BuiltInLinkageRuleSet> = BUILT_IN_LINKAGE_RULE_SETS,
 ): void {
   const cited = terms.linkageRuleSet;
   if (cited === undefined) return;
 
-  const shipped = resolveLinkageRuleSetCitation(cited);
+  const shipped = resolveLinkageRuleSetCitation(cited, ruleSets);
 
   // Each half is judged by handing the predicate that half's shipped
   // declarations over rules with nothing on the other side: an empty list

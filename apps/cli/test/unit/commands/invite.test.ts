@@ -8,6 +8,7 @@ import logLibrary from "loglevel";
 import YAML from "yaml";
 import {
   decodeInvitation,
+  DEFAULT_LINKAGE_RULE_SET,
   DEFAULT_PEER_TIMEOUT_MS,
   DEFAULT_POLLING_FREQUENCY_MS,
   disclosedColumnNames,
@@ -1560,6 +1561,57 @@ test("validateInvite: derives terms from a config when no input file is given", 
     // The minted invitation holds the config's terms, not inferred ones.
     const token = await decodeInvitation(ready.invitation);
     expect(token.linkageTerms).toEqual(terms);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("validateInvite: an invitation declares the rule set the config names", async () => {
+  // The config names its rule set instead of writing the rules out, so what
+  // the partner is offered is the set's own fields and keys under the citation
+  // the file wrote -- the same declaration a config holding those rules mints.
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-named-"));
+  const configPath = path.join(dir, "psilink.yaml");
+  const { fieldSet, keySet } = DEFAULT_LINKAGE_RULE_SET.reference;
+  fs.writeFileSync(
+    configPath,
+    YAML.stringify({
+      connection: { channel: "filedrop", path: "/mnt/share" },
+      linkage_terms: {
+        version: "1.0.0",
+        identity: "Agency Config",
+        date: "2026-01-01",
+        algorithm: "psi",
+        output: { expects_output: true, share_with_partner: true },
+        deduplicate: false,
+        linkage_rule_set: {
+          field_set: { ...fieldSet },
+          key_set: { ...keySet },
+        },
+      },
+    }),
+  );
+  try {
+    const ready = await validateInvite({
+      resolved: { mode: "offline" },
+      options: testOptions({
+        configFile: configPath,
+        keyFile: path.join(dir, ".psilink.key"),
+      }),
+      acceptTimeout: 900,
+      log: silentLog,
+    });
+    expect(ready.mode).toBe("offlineFromConfig");
+    const token = await decodeInvitation(ready.invitation);
+    expect(token.linkageTerms.linkageRuleSet).toEqual(
+      DEFAULT_LINKAGE_RULE_SET.reference,
+    );
+    expect(token.linkageTerms.linkageKeys).toEqual(
+      DEFAULT_LINKAGE_RULE_SET.linkageKeys,
+    );
+    expect(token.linkageTerms.linkageFields).toEqual(
+      DEFAULT_LINKAGE_RULE_SET.linkageFields,
+    );
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

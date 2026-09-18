@@ -1,14 +1,16 @@
 import type { Argv, Arguments } from "yargs";
 
 import {
-  getDefaultLinkageTerms,
+  DEFAULT_LINKAGE_RULE_SET,
   inferDateInputFormatFromSource,
   keepOperatorSuppliedText,
+  linkageTermsFromRuleSet,
   messageWithOperatorText,
   operatorSuppliedText,
   redactAndRenderOperatorSuppliedText,
   UsageError,
 } from "@psilink/core";
+import type { BuiltInLinkageRuleSet } from "@psilink/core";
 
 import { DEFAULT_CONFIG_PATH } from "../config";
 import {
@@ -227,14 +229,20 @@ export function resolveInitInput(
  * positions it changed through the same warning line the exchange reads use: the
  * config this writes names the sanitized column, not the header as typed.
  *
+ * `ruleSet` is the built-in rule set the terms are drawn from, the default set
+ * unless one is chosen. The template cites whichever it was, so the file this
+ * writes states where its rules came from and a later load resolves that
+ * citation to the same rules.
+ *
  * @internal exported for testing
  */
 export async function buildTemplateData(
   input: string | undefined,
   identity: string,
+  ruleSet: BuiltInLinkageRuleSet = DEFAULT_LINKAGE_RULE_SET,
 ): Promise<TemplateDataSpec> {
   if (input === undefined)
-    return { linkageTerms: getDefaultLinkageTerms(identity) };
+    return { linkageTerms: linkageTermsFromRuleSet(ruleSet, identity) };
 
   let inferred;
   try {
@@ -258,6 +266,7 @@ export async function buildTemplateData(
 
   return buildDataSpec({
     identity,
+    ruleSet,
     rows: {
       rawRows: [],
       columns: inferred.columns,

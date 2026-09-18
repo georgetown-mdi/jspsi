@@ -110,6 +110,8 @@ That case is recognized from a record `psilink accept` writes into the configura
 
 Only a set this build ships can be checked. A citation naming another set, or the built-in set at a version this build does not include, passes without comment: there is nothing behind that name here to compare your rules against. The field set and the key set are checked separately, so a citation pairing a name this build does not know with the built-in key set is still held to the built-in keys. A partner's citation on an invitation is their statement about their own rules; `psilink accept` runs this same check over it against the rules the invitation declares and shows the per-half verdict on the accept prompt before you consent.
 
+A configuration file can name its rule set instead of writing the rules out: a `linkage_terms` block holding `linkage_rule_set` and neither `linkage_fields` nor `linkage_keys` runs on that set's rules, filled in as psilink ships them. Nothing in such a file can diverge, so the check above has nothing to report on it -- a name this build does not ship stops the load instead, naming what the file cited and what this build ships. See [Naming a set instead of writing the rules out](EXCHANGE_REFERENCE.md#naming-a-set-instead-of-writing-the-rules-out).
+
 ## Initialization
 
 ```sh

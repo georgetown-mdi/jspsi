@@ -789,14 +789,19 @@ export function formatSignedRecordReport(
  * (this command never auto-loads a config). The rule-set citation is
  * checked here, not in the reader shared with `--partner-terms`: this
  * party's config load has no standing to report on the PARTNER's own
- * citation of its rules.
+ * citation of its rules. For the same reason only this side resolves a
+ * citation into rules, which is what the run being verified did with the
+ * same file.
  */
 function configFileTerms(
   configFile: string | undefined,
   log: { warn: (message: string) => void },
 ): LinkageTerms | undefined {
   if (configFile === undefined) return undefined;
-  const source = readConfigLinkageSource(expandTilde(configFile));
+  const source = readConfigLinkageSource(
+    expandTilde(configFile),
+    "from-the-named-set",
+  );
   if (source.status === "no-config-file") {
     const message = messageWithOperatorText`config file ${operatorSuppliedText(
       configFile,
@@ -821,12 +826,19 @@ function configFileTerms(
  * refused rather than noted, and a path that does not exist is refused as well:
  * either would otherwise leave the agreed-terms hash reported as not checked,
  * which is what a run with no partner terms at all looks like.
+ *
+ * Read as the partner wrote it: a rule set the document names is not resolved
+ * into this build's rules, so the hash is computed over the partner's own
+ * terms and a name this build does not ship stops nothing here.
  */
 function partnerTermsFrom(
   partnerTermsFile: string | undefined,
 ): LinkageTerms | undefined {
   if (partnerTermsFile === undefined) return undefined;
-  const source = readConfigLinkageSource(expandTilde(partnerTermsFile));
+  const source = readConfigLinkageSource(
+    expandTilde(partnerTermsFile),
+    "as-written",
+  );
   if (source.status === "no-config-file") {
     const message = messageWithOperatorText`partner-terms file ${operatorSuppliedText(
       partnerTermsFile,

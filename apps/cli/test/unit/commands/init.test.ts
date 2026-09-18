@@ -6,6 +6,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Arguments } from "yargs";
 import YAML from "yaml";
 import {
+  BUILT_IN_LINKAGE_RULE_SETS,
   ExchangeSpecSchema,
   StandardizationSchema,
   UsageError,
@@ -29,6 +30,7 @@ import {
   resolveInitInput,
 } from "../../../src/commands/init";
 import { buildDataSpec, loadInputRows } from "../../../src/onlineBootstrap";
+import { warnOnLinkageRuleSetCitationDrift } from "../../../src/config";
 import {
   IDENTITY_PROMPT_PREAMBLE,
   INIT_IDENTITY_QUESTION,
@@ -146,6 +148,31 @@ test("renderConfigTemplate: defaults are pre-filled and the active body parses",
   // Default connection options are present and pre-filled.
   expect(template).toContain("server_connect_timeout_ms: 30000");
   expect(template).toContain("port: 22");
+});
+
+test("renderConfigTemplate: every shipped rule set round-trips as its own citation", async () => {
+  // A template drawn from a set cites that set, and the citation resolves back
+  // to the rules the file holds -- so the drift check a later load runs over
+  // the written file has nothing to report. One shipped set today; a set added
+  // to the registry is covered here without an edit.
+  for (const ruleSet of BUILT_IN_LINKAGE_RULE_SETS) {
+    const template = renderConfigTemplate(
+      await buildTemplateData(undefined, "Org", ruleSet),
+    );
+    const parsed = parseExchangeSpec(YAML.parse(template));
+    expect(parsed.linkageTerms.linkageRuleSet).toEqual(ruleSet.reference);
+    expect(parsed.linkageTerms.linkageKeys).toEqual(ruleSet.linkageKeys);
+
+    const warnings: string[] = [];
+    warnOnLinkageRuleSetCitationDrift(
+      parsed.linkageTerms,
+      "psilink.yaml",
+      { warn: (message: string) => warnings.push(message) },
+      "held-alone",
+      "decline-to-reuse",
+    );
+    expect(warnings).toEqual([]);
+  }
 });
 
 test("renderConfigTemplate: an input file populates metadata and standardization", async () => {

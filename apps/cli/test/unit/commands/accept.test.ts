@@ -13,6 +13,7 @@ import {
   DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
   DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
   DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT,
+  DEFAULT_LINKAGE_RULE_SET,
   DEFAULT_MAX_DISPLAY_LENGTH,
   DEFAULT_POLLING_FREQUENCY_MS,
   DISPLAY_TRUNCATION_MARKER,
@@ -2110,6 +2111,30 @@ function identityNoEffectNotice(promptWrites: string): string {
   return notices[0];
 }
 
+/**
+ * A configuration at `configPath` whose linkage terms name `reference` and
+ * write no `linkage_fields` or `linkage_keys` of their own -- the short form
+ * `readExistingAcceptConfig` fills in from the named set before the reconcile
+ * compares the file against the invitation.
+ */
+function writeRuleSetNamingConfig(
+  configPath: string,
+  reference: LinkageRuleSetReference,
+): void {
+  const {
+    linkageFields: _fields,
+    linkageKeys: _keys,
+    ...rest
+  } = getDefaultLinkageTerms("Acceptor Org");
+  fs.writeFileSync(
+    configPath,
+    YAML.stringify({
+      connection: { channel: "filedrop", path: "/mnt/share" },
+      linkage_terms: { ...rest, linkageRuleSet: reference },
+    }),
+  );
+}
+
 /** The default terms with their first two keys swapped: rules that no longer
  *  support the rule-set citation the same terms hold, key order being cascade
  *  order. */
@@ -2372,6 +2397,60 @@ describe("reconciling a pre-existing config", () => {
     } finally {
       stdio.restore();
       warnSpy.mockRestore();
+      fs.rmSync(options.configFile, { force: true });
+    }
+  });
+
+  test("validateAccept: a reused config naming the shipped rule set reconciles", async () => {
+    // The kept file writes no rules, so the reconcile has terms to compare only
+    // because the named set was resolved into them first. The invitation
+    // declares that same whole set.
+    const options = testOptions();
+    writeRuleSetNamingConfig(
+      options.configFile,
+      DEFAULT_LINKAGE_RULE_SET.reference,
+    );
+    const stdio = captureStdio();
+    try {
+      const encoded = await encodeInvitation({
+        ...sampleToken(FUTURE()),
+        linkageTerms: getDefaultLinkageTerms("Inviter Org"),
+      });
+      const ready = await validateAccept({
+        resolved: { mode: "offline", invitation: encoded },
+        options,
+        log: silentLog,
+      });
+      expect(ready.reuseExistingConfig).toBe(true);
+    } finally {
+      stdio.restore();
+      fs.rmSync(options.configFile, { force: true });
+    }
+  });
+
+  test("validateAccept: a reused config naming a set this build lacks refuses", async () => {
+    // Nothing fills the rules in, and the file writes none to fall back to, so
+    // the acceptance stops on the citation rather than on a terms diff.
+    const options = testOptions();
+    writeRuleSetNamingConfig(options.configFile, {
+      fieldSet: { name: "no-such-fields", version: "9.9.9" },
+      keySet: { name: "no-such-keys", version: "9.9.9" },
+    });
+    try {
+      const encoded = await encodeInvitation({
+        ...sampleToken(FUTURE()),
+        linkageTerms: getDefaultLinkageTerms("Inviter Org"),
+      });
+      const run = () =>
+        validateAccept({
+          resolved: { mode: "offline", invitation: encoded },
+          options,
+          log: silentLog,
+        });
+      await expect(run()).rejects.toBeInstanceOf(UsageError);
+      await expect(run()).rejects.toThrow("ships no such rule set");
+      await expect(run()).rejects.toThrow(options.configFile);
+    } finally {
       fs.rmSync(options.configFile, { force: true });
     }
   });

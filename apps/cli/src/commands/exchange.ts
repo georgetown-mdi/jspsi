@@ -26,6 +26,7 @@ import {
   announceRetainMode,
   assertPartnerFingerprintRecordable,
   assertRetainSweepGuard,
+  configWithNamedRuleSetRules,
   DEFAULT_CONFIG_PATH,
   linkageTermsStandingOf,
   warnOnLinkageRuleSetCitationDrift,
@@ -394,9 +395,18 @@ export function loadConfig(options: ExchangeOptions): {
       log,
     );
 
+  // Rules the linkage terms name a rule set for instead of writing out are
+  // taken from that set here, on the raw config: the schema below requires
+  // both lists. An unknown name is a UsageError of its own, naming the set the
+  // file cited, and is not relabeled as an invalid spec.
+  const namedRuleSetConfig = configWithNamedRuleSetRules(
+    rawConfig,
+    options.configFile,
+  );
+
   let parsedSpec: ReturnType<typeof parseExchangeSpec>;
   try {
-    parsedSpec = parseExchangeSpec(rawConfig);
+    parsedSpec = parseExchangeSpec(namedRuleSetConfig);
   } catch (err) {
     // Well-formed YAML that fails schema validation is still invalid caller
     // configuration (exit 64), not a transport failure.

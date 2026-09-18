@@ -212,6 +212,9 @@ export const FIELD_DOCS: Array<{ path: Array<string>; lines: Array<string> }> =
         "yourself are no longer that set's. Leaving out a key or field you cannot",
         "supply narrows the set rather than departing from it, so the citation",
         "still holds.",
+        "Delete linkage_fields and linkage_keys instead, keeping this block, to",
+        "run the whole named set without writing its rules out -- every key in",
+        "it, so your input file must supply the fields they all name.",
       ],
     },
     {

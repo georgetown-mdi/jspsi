@@ -6,6 +6,7 @@ import yargs, { type Arguments } from "yargs";
 import YAML from "yaml";
 import { UsageError } from "@psilink/core";
 import {
+  DEFAULT_LINKAGE_RULE_SET,
   encodeInvitation,
   generateSigningIdentity,
   getDefaultLinkageTerms,
@@ -15,6 +16,7 @@ import {
 } from "@psilink/core";
 import type {
   InvitationToken,
+  LinkageRuleSetReference,
   LinkageTerms,
   PreparedExchange,
 } from "@psilink/core";
@@ -352,6 +354,66 @@ test("loadConfig stays silent on a config containing no citation", () => {
   writeConfigWithTerms({ ...terms, linkageKeys: [second!, first!, ...rest] });
   loadConfig(baseOptions());
   expect(citationWarnings()).toEqual([]);
+});
+
+// --- rules taken from a named rule set ---------------------------------------
+
+/** A filedrop config whose linkage terms name `cited` and write no rules of
+ *  their own, plus the key file the load needs. */
+function writeConfigNamingRuleSet(cited: LinkageRuleSetReference): void {
+  fs.writeFileSync(
+    configFile,
+    YAML.stringify({
+      connection: { channel: "filedrop", path: "/mnt/share/drop" },
+      linkage_terms: {
+        version: "1.0.0",
+        identity: "Test Party",
+        date: "2026-01-01",
+        algorithm: "psi",
+        output: { expects_output: true, share_with_partner: true },
+        deduplicate: false,
+        linkage_rule_set: {
+          field_set: { ...cited.fieldSet },
+          key_set: { ...cited.keySet },
+        },
+      },
+    }),
+  );
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
+}
+
+test("loadConfig runs a config that names the built-in set on that set's rules", () => {
+  writeConfigNamingRuleSet(DEFAULT_LINKAGE_RULE_SET.reference);
+  const result = loadConfig(baseOptions());
+  expect(result.linkageTerms?.linkageKeys).toEqual(
+    DEFAULT_LINKAGE_RULE_SET.linkageKeys,
+  );
+  expect(result.linkageTerms?.linkageRuleSet).toEqual(
+    DEFAULT_LINKAGE_RULE_SET.reference,
+  );
+  expect(citationWarnings()).toEqual([]);
+});
+
+test("loadConfig refuses a config naming a set this build does not ship", () => {
+  writeConfigNamingRuleSet({
+    fieldSet: { name: "no-such-fields", version: "9.9.9" },
+    keySet: { name: "no-such-keys", version: "9.9.9" },
+  });
+  let caught: unknown;
+  try {
+    loadConfig(baseOptions());
+  } catch (err) {
+    caught = err;
+  }
+  expect(caught).toBeInstanceOf(UsageError);
+  expect((caught as Error).message).toContain(configFile);
+  expect((caught as Error).message).toContain('"no-such-keys" 9.9.9');
+  expect((caught as Error).message).toContain(
+    `"${DEFAULT_LINKAGE_RULE_SET.reference.keySet.name}" ` +
+      DEFAULT_LINKAGE_RULE_SET.reference.keySet.version,
+  );
+  // Its own refusal, not a spec that failed to validate.
+  expect((caught as Error).message).not.toContain("not a valid exchange spec");
 });
 
 // --- config file errors ------------------------------------------------------

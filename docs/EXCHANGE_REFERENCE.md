@@ -219,7 +219,7 @@ expected_partner_deduplicate: true
 ### `linkage_terms.linkage_fields`
 
 *Type:* array  
-*Required:* yes  
+*Required:* yes, unless the block names the rule set to take them from ([Naming a set instead of writing the rules out](#naming-a-set-instead-of-writing-the-rules-out))  
 *Consistency:* mandatory
 
 The linkage fields define the standardized form of each PII element that participates in linkage. Each field has a name, a semantic type, and optional constraints. The name is a unique identifier used by linkage key elements and data standardizing transformations.
@@ -304,7 +304,7 @@ The table above is the complete set of constraints. A constraint not listed for 
 ### `linkage_terms.linkage_keys`
 
 *Type:* array  
-*Required:* yes  
+*Required:* yes, unless the block names the rule set to take them from ([Naming a set instead of writing the rules out](#naming-a-set-instead-of-writing-the-rules-out))  
 *Consistency:* mandatory
 
 An ordered list of linkage keys applied in sequence from most to least precise. Each round of the PSI protocol matches only records not yet resolved in a prior round. Each element references a linkage field by name and may optionally specify transformations applied to that field's canonical value before it is concatenated into the key.
@@ -417,6 +417,38 @@ What it does and does not determine:
 - **Omit it for rules you author yourself.** Rules you author can cite only the built-in set -- there is no way to select another -- and citing a set your rules were not drawn from misdescribes them. A terms document you import keeps the citation its own author wrote, including one naming a set psilink does not ship; the web Advanced invite path drops that citation as soon as the rules stop being drawn from the set it names, exactly as it drops the built-in citation when you edit your way out of the rules it seeded from. It tells you when it will not include an imported citation and why -- your edits moved the rules out of the cited set, the terms declare no key to claim provenance for, or the document cited the set psilink ships over rules that are not it -- and leaves you free to create the invitation without it.
 - **A configuration file keeps the citation you edit past.** Editing `linkage_fields` or `linkage_keys` in `psilink.yaml` leaves the citation the file was written with in place, so the CLI checks it wherever it reads those terms and warns when the file's own rules no longer support it -- see [a rule-set citation that no longer fits](CLI.md#a-rule-set-citation-that-no-longer-fits).
 - **Two parties that both cite a set must cite the same one**; a mismatch cancels the exchange before any data moves. A party that cites none is not held to the other's, which is what lets hand-authored rules meet an identical named set. A `psilink accept` that reuses a configuration already at the path applies the same rule when it compares that file against the invitation, so a citation the two disagree on is reported with the other terms differences and stops the acceptance, rather than passing there and cancelling the run later.
+
+#### Naming a set instead of writing the rules out
+
+In a configuration file the CLI reads, a `linkage_terms` block that names a rule set and writes no `linkage_fields` and no `linkage_keys` of its own runs on the named set's rules: psilink fills both lists in from the set as it ships it, before anything else reads the file. The rest of the block is yours as it always was -- a rule set covers the fields and the keys, and nothing else.
+
+```yaml
+linkage_terms:
+  version: "1.0.0"
+  identity: "County Health Agency"
+  date: "2026-01-01"
+  algorithm: psi
+  output:
+    expects_output: true
+    share_with_partner: true
+  deduplicate: false
+  linkage_rule_set:
+    field_set:
+      name: "baseline-pii"
+      version: "1.0.0"
+    key_set:
+      name: "hmis-keys"
+      version: "1.0.0"
+```
+
+The exchange this runs is the one the written-out rules run: the filled-in fields and keys travel to your partner, are compared against theirs field by field and key by key, and are recorded in both parties' exchange records under the citation the file wrote. Naming a set is a shorthand for writing its rules into your own file, not a name resolved anywhere else -- your partner's citation is still text your partner wrote, and nothing resolves it.
+
+- **Both lists or neither.** A block that names a set and writes one of the two lists is refused, naming the one it left out. A key set is built from its own fields, so the pair comes from a set or is written out together.
+- **Neither list at the top level.** The short form takes effect when `linkage_terms` names a set and writes neither `linkage_fields` nor `linkage_keys` of its own. A list found at the top level of the file -- a sibling of `linkage_terms` -- is refused rather than filled over, naming where it was found and where it belongs. A list under a mis-spelled key, or nested inside another block such as `linkage_terms.output` or `connection`, is not seen: psilink cannot tell it from any other key it does not read, and the block it was meant for holds no rules at all. After editing either list by hand, check both lists' indentation before running.
+- **The set is taken whole.** Every key the set declares is filled in, including one your input file cannot supply -- which the exchange refuses before it starts, naming the keys and the fields behind them. Where your file supports only part of the set, run `psilink init INPUT_FILE` and keep the narrowed lists it writes: they are a subset of the set and cite it just the same.
+- **Written rules are the rules.** A block that writes both lists runs on exactly what it writes, cited set or not -- which is what `psilink init` writes, and what the citation-drift warning is about.
+- **A name this build does not ship stops the load.** A block naming a set psilink does not ship and writing no rules of its own fails to load, naming what it cited and what this build ships; no exchange runs. Beside written-out rules the same name is left alone, so a terms document you imported keeps its author's citation.
+- **The set psilink ships is the one to name.** [The built-in rules](#the-built-in-rules) are that set, and the template `psilink init` writes cites it.
 
 ### `linkage_terms.legal_agreement`
 
