@@ -95,13 +95,15 @@ export function managedStandingConditionView(
     case "imported":
       return {
         tier,
-        title: "This exchange was restored from a backup or key file",
+        title:
+          "This exchange was restored from a backup or key file, or taken " +
+          "back from the command line",
         message:
-          `A run on ${when} could not verify your partner, and this exchange's ` +
-          "secret came from a backup or a command-line key file since its last " +
-          "successful run. Such a secret can be one your partnership has " +
-          "rotated past, which explains it. Re-invite your partner to " +
-          `reconnect. ${STANDS_UNTIL}`,
+          `A run on ${when} could not verify your partner, and this exchange ` +
+          "was restored from a backup or key file, or taken back from the " +
+          "command line, since its last successful run. Such a secret can " +
+          "be one your partnership has rotated past, which explains it. " +
+          `Re-invite your partner to reconnect. ${STANDS_UNTIL}`,
         clearance: "acknowledge",
       };
     default:

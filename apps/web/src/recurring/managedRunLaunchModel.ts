@@ -289,18 +289,21 @@ const STORAGE_FAILURE: ManagedRunFailureAlert = {
   recovery: "reinvite",
 };
 
-/** The Tier-1 restore/import state: this exchange's secret came from a backup or a
- * command-line key file and has not successfully run since, so it may be one the
- * partnership has already moved past. Plain, specific copy naming re-invite -- no
- * attack checklist. */
+/** The Tier-1 restore/import state: this exchange was restored from a backup or
+ * key file, or taken back from the command line, and has not successfully run
+ * since, so it may be one the partnership has already moved past. Plain,
+ * specific copy naming re-invite -- no attack checklist. */
 const IMPORTED_FAILURE: ManagedRunFailureAlert = {
   kind: "imported",
-  title: "This exchange was restored from a backup or key file",
+  title:
+    "This exchange was restored from a backup or key file, or taken back " +
+    "from the command line",
   message:
-    "This exchange's secret came from a backup or a command-line key file, and " +
-    "no run has succeeded since, so it may be one you and your partner have " +
-    "already moved past. Re-invite your partner to reconnect; the exchange " +
-    "keeps your terms and only replaces the secret.",
+    "This exchange was restored from a backup or key file, or taken back " +
+    "from the command line, and no run has succeeded since, so it may be " +
+    "one you and your partner have already moved past. Re-invite your " +
+    "partner to reconnect; the exchange keeps your terms and only " +
+    "replaces the secret.",
   recovery: "reinvite",
 };
 

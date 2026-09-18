@@ -94,7 +94,8 @@ describe("managedStandingConditionView", () => {
     );
     expect(view?.clearance).toBe("acknowledge");
     expect(view?.title).toBe(
-      "This exchange was restored from a backup or key file",
+      "This exchange was restored from a backup or key file, or taken " +
+        "back from the command line",
     );
   });
 
