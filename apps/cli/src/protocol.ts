@@ -415,8 +415,27 @@ export interface FileSyncRuntimeOptions {
    * a local write, so it is logged at error level and reported as a
    * persistence loss on both machine channels rather than shown as a clean
    * success.
+   *
+   * The hook states what became of its own writes on
+   * {@link OutputCompleteResult}. A hook that catches its own failure and
+   * reports it returns `persisted: false`, which is the only way that loss
+   * reaches what the run afterwards tells the operator about its files: a
+   * caught failure throws nothing for this frame to see.
    */
-  onOutputComplete?: (context: OutputCompleteContext) => void | Promise<void>;
+  onOutputComplete?: (
+    context: OutputCompleteContext,
+  ) => OutputCompleteResult | Promise<OutputCompleteResult>;
+}
+
+/** What a {@link FileSyncRuntimeOptions.onOutputComplete} hook reports back. */
+export interface OutputCompleteResult {
+  /**
+   * Whether everything this hook owed disk reached it. A hook with nothing to
+   * write for this run returns true; one that caught a write failure and
+   * reported it as a persistence loss returns false, so the run no longer
+   * claims every file it writes is on disk (`teardownCeilingNotice`).
+   */
+  persisted: boolean;
 }
 
 /** What {@link FileSyncRuntimeOptions.onOutputComplete} is handed. */
@@ -1199,10 +1218,11 @@ interface RunLifecycle {
   exchangeComplete: boolean;
   /**
    * Set once the output stage returned with every local artifact a run owes --
-   * the result file, the exchange record, the receipt -- on disk. A run that
-   * entered the stage and failed inside it, and one that lost an artifact
-   * non-fatally, each wrote some or none of them, so nothing told to the
-   * operator about what is on disk keys on the stage being reached.
+   * the result file, the exchange record, the receipt, and whatever the
+   * caller's own post-exchange step writes -- on disk. A run that entered the
+   * stage and failed inside it, and one that lost an artifact non-fatally,
+   * each wrote some or none of them, so nothing told to the operator about
+   * what is on disk keys on the stage being reached.
    */
   outputsWritten: boolean;
   /**
@@ -1622,9 +1642,10 @@ type ExchangeOutcome = Awaited<ReturnType<typeof runExchange>>;
  * (docs/notes/record-durability-point.md).
  *
  * Returns whether every artifact it owed reached disk: false once any of the
- * non-fatal losses above has been reported, so what the run tells the operator
- * afterwards about its files keys on the artifacts rather than on this stage
- * returning.
+ * non-fatal losses above has been reported, the caller's own persistence
+ * included -- whether that step threw or caught its failure and reported
+ * `persisted: false` -- so what the run tells the operator afterwards about
+ * its files keys on the artifacts rather than on this stage returning.
  */
 async function writeExchangeOutputs(params: {
   outcome: ExchangeOutcome;
@@ -1830,10 +1851,11 @@ async function writeExchangeOutputs(params: {
   // supervisor that stops reading at the terminal event can observe.
   if (onOutputComplete !== undefined) {
     try {
-      await onOutputComplete({
+      const hookOutcome = await onOutputComplete({
         observedReceivedPayloadColumns: partnerPayload.columns,
         bootstrap,
       });
+      if (!hookOutcome.persisted) everyArtifactOnDisk = false;
     } catch (hookErr) {
       // The hook reports its own losses; reaching here means one escaped it.
       // The exchange is already complete and cannot be undone by a local

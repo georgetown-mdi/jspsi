@@ -31,6 +31,10 @@ const mockState = vi.hoisted(() => ({
   // The key-file path whose post-handshake save must fail, for the case that
   // drives the refusal naming it. Every other save runs for real.
   unwritableKeyFilePath: undefined as string | undefined,
+  // Whether the transport close reports the ceiling as reached, for the case
+  // that reads the notice a run states about its own files. Every other test
+  // gets the real close and its real outcome.
+  expireTeardown: false,
 }));
 
 // Keep FileSyncConnection and authenticateConnection real so the key exchange runs over a
@@ -169,6 +173,28 @@ vi.mock("../../src/keyFile", async (importActual) => {
       if (keyFilePath === mockState.unwritableKeyFilePath)
         throw new Error("EACCES: permission denied");
       actual.saveKeyFile(keyFilePath, file);
+    },
+  };
+});
+
+// The close's own outcome, real unless a test asks for the ceiling. An expiry
+// is injected rather than provoked: the real close still runs, so the poller
+// stops and the drop directory is left as any other run leaves it, and what
+// `closeWithinCeiling` does with a close that never returns is
+// test/unit/transportTeardown.test.ts.
+vi.mock("../../src/transportTeardown", async (importActual) => {
+  const actual =
+    await importActual<typeof import("../../src/transportTeardown")>();
+  return {
+    ...actual,
+    closeWithinCeiling: async (
+      ceilingMs: number,
+      close: () => Promise<void>,
+    ) => {
+      if (!mockState.expireTeardown)
+        return actual.closeWithinCeiling(ceilingMs, close);
+      await close();
+      return { finished: false, elapsedMs: 180_000, heldBy: ["TCPSocketWrap"] };
     },
   };
 });
@@ -419,6 +445,7 @@ beforeEach(() => {
   mockState.runExchangeEntries = 0;
   mockState.lastSftpAdapterOptions = undefined;
   mockState.unwritableKeyFilePath = undefined;
+  mockState.expireTeardown = false;
   fs.mkdirSync(dropDir);
 
   fd3Chunks = [];
@@ -5693,7 +5720,7 @@ function mockExchangeObserving(columns: string[]): void {
   }) as never);
 }
 
-test("a loss reported from the pre-terminal hook precedes the metrics and terminal events", async () => {
+test("a loss reported from the pre-terminal hook precedes the terminal events and drops the on-disk claim", async () => {
   // The ordering the whole hook exists for, measured on the REAL stream. The
   // online bootstrap's last write -- crystallizing the observed
   // received-payload set -- can fail, and the warning naming that loss is
@@ -5702,6 +5729,11 @@ test("a loss reported from the pre-terminal hook precedes the metrics and termin
   // it (apps/web's job manager drops post-terminal events outright). Driven
   // as the bootstrap drives it: the caller opens the stream and hands
   // runProtocol the emitter.
+  //
+  // The hook catches its own failure, as both real hooks do, so the run learns
+  // of the loss from what the hook reports back and from nothing else: the
+  // teardown notice each party states below is where that shows.
+  mockState.expireTeardown = true;
   mockExchangeObserving(OBSERVED_PARTNER_COLUMNS);
   const emitter = openEventStreamWithFdWired();
   let seen: string[] | undefined;
@@ -5723,6 +5755,7 @@ test("a loss reported from the pre-terminal hook precedes the metrics and termin
           onOutputComplete: ({ observedReceivedPayloadColumns }) => {
             seen = observedReceivedPayloadColumns;
             reportPersistenceLoss("the lock-in was not recorded", emitter);
+            return { persisted: false };
           },
         },
       }),
@@ -5752,6 +5785,20 @@ test("a loss reported from the pre-terminal hook precedes the metrics and termin
     "metrics",
     "result",
   ]);
+
+  // What each party's abandoned close then tells its operator about the files
+  // on disk. The party whose hook lost its write claims nothing; its partner,
+  // which lost nothing, still claims everything -- and that difference is what
+  // tells the two notices apart, both runs sharing this process and this log.
+  const notices = mockState.errors.filter((line) =>
+    line.includes("the transport did not finish closing"),
+  );
+  expect(notices).toHaveLength(2);
+  expect(
+    notices.filter((line) =>
+      line.includes("everything it writes is already on disk"),
+    ),
+  ).toHaveLength(1);
 }, 20_000);
 
 test("a throw from the pre-terminal hook does not fail the completed exchange", async () => {

@@ -82,12 +82,12 @@ export interface ExchangeFileDisposition {
   /** Whether the run keeps those files as a transcript instead of deleting them. */
   retainFiles: boolean;
   /**
-   * Whether the output stage returned with the result, the exchange record and
-   * the receipt all on disk. A run that never reached that stage -- an
-   * interrupt, or a failure in the exchange itself -- a run that failed inside
-   * it, and a run that lost one of those artifacts non-fatally all leave this
-   * false, since none of them wrote the whole set the notice would otherwise
-   * account for.
+   * Whether the output stage returned with the result, the exchange record,
+   * the receipt and the caller's own post-exchange writes all on disk. A run
+   * that never reached that stage -- an interrupt, or a failure in the
+   * exchange itself -- a run that failed inside it, and a run that lost one of
+   * those artifacts non-fatally all leave this false, since none of them wrote
+   * the whole set the notice would otherwise account for.
    */
   outputsWritten: boolean;
 }

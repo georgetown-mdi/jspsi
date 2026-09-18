@@ -17,7 +17,10 @@ vi.mock("../../../src/protocol", () => ({ runProtocol: vi.fn() }));
 
 import { handler as inviteHandler } from "../../../src/commands/invite";
 import { runProtocol } from "../../../src/protocol";
-import type { RunProtocolOptions } from "../../../src/protocol";
+import type {
+  FileSyncRuntimeOptions,
+  RunProtocolOptions,
+} from "../../../src/protocol";
 import { DEFAULT_ACCEPT_TIMEOUT_SECONDS } from "../../../src/onlineBootstrap";
 import { captureStdio } from "../../loggingTestSupport";
 
@@ -46,14 +49,10 @@ function onAuthenticatedArg(callArgs: unknown[]): () => void | Promise<void> {
  *  would show. */
 function outputCompleteHook(
   callArgs: unknown[],
-): (result: {
-  observedReceivedPayloadColumns: string[];
-}) => void | Promise<void> {
+): NonNullable<FileSyncRuntimeOptions["onOutputComplete"]> {
   const hook = optionsArg(callArgs).fileSyncRuntime?.onOutputComplete;
   expect(hook).toBeTypeOf("function");
-  return hook as (result: {
-    observedReceivedPayloadColumns: string[];
-  }) => void | Promise<void>;
+  return hook as NonNullable<FileSyncRuntimeOptions["onOutputComplete"]>;
 }
 
 /** A received-payload set for the mocked exchange to have observed, so the

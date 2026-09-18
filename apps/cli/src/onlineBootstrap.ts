@@ -1173,11 +1173,15 @@ export async function runOnlineBootstrap(params: {
         // failure here only leaves the recurring path reconciling lazily -- its
         // prior behavior -- and must not fail the already-completed exchange.
         onOutputComplete: ({ observedReceivedPayloadColumns }) => {
-          if (!params.persistObservedReceivedPayload || !configWritten) return;
+          // Nothing owed disk on either of these paths, so both report a
+          // complete persistence: the run has no write of this hook's to
+          // account for.
+          if (!params.persistObservedReceivedPayload || !configWritten)
+            return { persisted: true };
           const observedLockIn = observedReceivedColumnsForSave(
             observedReceivedPayloadColumns,
           );
-          if (observedLockIn === undefined) return;
+          if (observedLockIn === undefined) return { persisted: true };
           try {
             saveConfig(params.configPath, {
               connection: params.connection,
@@ -1202,6 +1206,7 @@ export async function runOnlineBootstrap(params: {
                   }
                 : {}),
             });
+            return { persisted: true };
           } catch (err) {
             const notice =
               `the exchange succeeded and ${params.configPath} was written, but ` +
@@ -1212,6 +1217,7 @@ export async function runOnlineBootstrap(params: {
               `${notice}: ${sanitizeErrorForDisplay(err)}`,
             );
             reportPersistenceLoss(notice, eventStream);
+            return { persisted: false };
           }
         },
       },

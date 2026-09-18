@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import yargs from "yargs";
@@ -12,9 +13,17 @@ import {
   builder as exchangeBuilder,
   handler as exchangeHandler,
 } from "../../../src/commands/exchange";
+import {
+  builder as zeroSetupBuilder,
+  handler as zeroSetupHandler,
+} from "../../../src/commands/zeroSetup";
 import { saveConfig } from "../../../src/config";
 import { PERSISTENCE_LOSS_EXIT_CODE } from "../../../src/eventStream";
 import { saveKeyFile } from "../../../src/keyFile";
+import {
+  denyDirectoryWrites,
+  restoreDirectoryWrites,
+} from "../../directoryWriteAccess";
 import { captureFd3 } from "../../eventStreamTestSupport";
 
 /**
@@ -35,7 +44,9 @@ import { captureFd3 } from "../../eventStreamTestSupport";
  *
  * The clause about what is on disk is driven at both settings, since a run
  * that lost an artifact non-fatally reaches the notice as any other completed
- * run does.
+ * run does, and in both shapes that loss takes: an artifact the output stage
+ * writes itself, and the caller's own post-exchange save, which catches its
+ * failure and reports it back rather than raising it.
  *
  * The expiry is injected rather than provoked. `closeWithinCeiling` is
  * replaced with one that still drives the real close -- so the poller stops
@@ -158,6 +169,41 @@ function partyArgs(
   ];
 }
 
+/** The zero-setup pair's rendezvous, from the drop directory the fixture makes. */
+function dropUrl(): string {
+  return pathToFileURL(path.join(work, "drop")).href;
+}
+
+/** A zero-setup party's whole command line: meet at the drop URL and save the
+ *  recurring setup the exchange establishes. The poll interval goes on the
+ *  command line, zero-setup having no config to set one in. */
+function savingPartyArgs(
+  party: "a" | "b",
+  configFile: string,
+  extra: string[],
+): string[] {
+  return [
+    dropUrl(),
+    path.join(work, `${party}-input.csv`),
+    path.join(work, `${party}-out.csv`),
+    "--save",
+    "--config-file",
+    configFile,
+    "--key-file",
+    path.join(work, `${party}-saved.key`),
+    "--identity",
+    `party-${party}`,
+    "--no-record",
+    "--polling-frequency",
+    "10ms",
+    "--peer-timeout",
+    PEER_TIMEOUT,
+    "--log-level",
+    "error",
+    ...extra,
+  ];
+}
+
 /** Everything written to stderr while `body` runs, and what it resolved with. */
 async function captureStderr<T>(
   body: () => Promise<T>,
@@ -179,6 +225,7 @@ async function captureStderr<T>(
 async function runCli(argv: string[]): Promise<void> {
   await yargs(argv)
     .scriptName("psilink")
+    .command("$0", "zero-setup exchange", zeroSetupBuilder, zeroSetupHandler)
     .command("exchange <input> [output]", "", exchangeBuilder, exchangeHandler)
     .exitProcess(false)
     // Raise a failing run to the caller instead of letting yargs print its
@@ -350,6 +397,72 @@ test(
     ).toEqual(["persistenceLoss"]);
     expect(process.exitCode).toBe(PERSISTENCE_LOSS_EXIT_CODE);
     expect(exitSpy).not.toHaveBeenCalled();
+
+    const notices = stderrText
+      .split("\n")
+      .filter((line) => line.includes("the transport did not finish closing"));
+    expect(notices).toHaveLength(2);
+    expect(
+      notices.filter((line) =>
+        line.includes("everything it writes is already on disk"),
+      ),
+    ).toHaveLength(1);
+  },
+  CASE_TIMEOUT_MS,
+);
+
+test(
+  "a save the hook itself could not write claims nothing about what is on disk",
+  async () => {
+    // The other shape of a non-fatal loss, and the one the flag exists for: the
+    // --save provisioning runs from the pre-terminal hook and catches its own
+    // failure, so the run hears of it from what the hook reports back rather
+    // than from a throw. Party A saves into a directory it cannot write:
+    // nothing is at the path, so the pre-flight conflict check passes, and the
+    // write itself is what fails, while the exchange and its result stand.
+    // Party B saves for real and its notice still states the clause, which is
+    // what tells the two apart in a process running both.
+    writeExchangeFixture();
+    const unwritable = path.join(work, "unwritable");
+    fs.mkdirSync(unwritable);
+    denyDirectoryWrites(unwritable);
+
+    let stderrText: string;
+    let lines: Array<Record<string, unknown>>;
+    try {
+      ({ value: stderrText, lines } = await captureFd3(async () => {
+        const { text } = await captureStderr(async () => {
+          const results = await Promise.allSettled([
+            runCli(
+              savingPartyArgs("a", path.join(unwritable, "psilink.yaml"), [
+                "--event-stream",
+              ]),
+            ),
+            runCli(savingPartyArgs("b", path.join(work, "b-saved.yaml"), [])),
+          ]);
+          const failures = results.filter((r) => r.status === "rejected");
+          if (failures.length > 0)
+            throw new AggregateError(
+              failures.map((r) => (r as PromiseRejectedResult).reason),
+              "a party failed",
+            );
+        });
+        return text;
+      }));
+    } finally {
+      restoreDirectoryWrites(unwritable);
+    }
+
+    const types = lines.map((line) => line["type"]);
+    expect(types[types.length - 1]).toBe("result");
+    expect(
+      lines
+        .filter((line) => line["type"] === "warning")
+        .map((line) => line["source"]),
+    ).toEqual(["persistenceLoss"]);
+    expect(process.exitCode).toBe(PERSISTENCE_LOSS_EXIT_CODE);
+    expect(exitSpy).not.toHaveBeenCalled();
+    expect(fs.existsSync(path.join(work, "b-saved.yaml"))).toBe(true);
 
     const notices = stderrText
       .split("\n")
