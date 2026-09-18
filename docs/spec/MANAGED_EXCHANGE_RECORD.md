@@ -327,7 +327,9 @@ nothing else:
   an unexplained handshake failure is the two-outcome gate (see
   [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md#a-standing-condition-outlives-the-run-that-raised-it));
 - a **re-invite**, in the same rotation transaction that drops `lastRun` -- the
-  fresh secret is what the condition's recovery asked for;
+  fresh secret is what the condition's recovery asked for -- which the rotation
+  write itself refuses while the condition holds the operator's
+  [response](#the-operators-response-to-it);
 - **deleting** the record, which takes it along with everything else.
 
 A no-show never clears it, and neither does a successful run on its own: a later
@@ -379,6 +381,14 @@ with the condition. A run never writes it, and a run never clears it.
   the same terms is withheld. The in-app re-invite is reachable only after the
   clear-and-acknowledge, which is the interposition the response exists for and
   not a gap in it.
+- **The re-invite's own write refuses it.** The withheld controls are read off
+  the record a page mounted with, so a page open since before the answer was
+  written still offers them. The rotation write therefore re-reads the record
+  inside its own transaction and refuses while a response stands, leaving the
+  secret and the answer as they were; the page states the same withheld reason
+  its controls do. That makes the clear-and-acknowledge the one order in which a
+  fresh invitation is minted: the answer is cleared by the acknowledgement
+  first, and the re-invite is on offer after it.
 
 ### The schedule object
 

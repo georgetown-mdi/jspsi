@@ -33,6 +33,7 @@ import {
   exportManagedBackup,
 } from "@psi/managed/managedExchangeExport";
 import {
+  ManagedReinviteWithheldError,
   clearManagedExchangeStandingCondition,
   getManagedExchange,
   persistManagedExchangeOutputDirectory,
@@ -307,13 +308,24 @@ export function ManagedRunSurface({ id }: { id: string }) {
   // it.
   const [respondingCompromise, setRespondingCompromise] = useState(false);
   const [compromiseWriteFailed, setCompromiseWriteFailed] = useState(false);
+  // The store refused this page's mint because the record it holds has an answer
+  // this page had not read -- another tab's, written after this one mounted. The
+  // response stands on the exchange, so the page reads as it would have had it
+  // mounted after the answer.
+  const [reinviteWithheld, setReinviteWithheld] = useState(false);
   // Which failure's own gate the answer was given at, where it was given on this
   // visit. Clearing the response grants the confirmation for that failure alone: a
   // response given at the standing condition's gate, or at an earlier visit, has no
   // live failure behind it and grants none.
   const [compromiseAnsweredFor, setCompromiseAnsweredFor] = useState<number>();
+  // Every state in which an answer holds this page: one the record holds, one
+  // being written (whose two outcomes both keep the withhold, so no control is live
+  // across the write), one this device refused, and one the store refused a mint
+  // over.
   const compromiseResponse =
+    respondingCompromise ||
     compromiseWriteFailed ||
+    reinviteWithheld ||
     (record !== undefined && standingCompromiseResponse(record) !== undefined);
   // The standing condition's own clearance, held apart from the live failure's gate
   // above: the two states can stand at once (a no-show this visit over a condition an
@@ -736,7 +748,9 @@ export function ManagedRunSurface({ id }: { id: string }) {
     // Closed at the mint rather than at each control that reaches it, whichever part
     // of the page asked: while a compromise response stands, a fresh invitation on
     // this channel would hand the new secret to whoever is interfering, and a run in
-    // flight is connecting on the secret the mint replaces.
+    // flight is connecting on the secret the mint replaces. The response's half is a
+    // second check over the store's own refusal, which is decided on the record the
+    // store holds rather than the one this page read.
     if (record === undefined || reinviting || compromiseResponse || runInFlight)
       return;
     setReinviteSource(source);
@@ -754,8 +768,15 @@ export function ManagedRunSurface({ id }: { id: string }) {
         setLiveFailure(undefined);
         setReinvite(result.reinvite);
       } catch (error) {
-        whenDiagnostic(() => console.error(error));
-        setReinviteFailed(true);
+        // The store refuses the rotation over an answer this page has not read, and
+        // that is not a failure to retry: the page adopts the withhold and offers the
+        // acknowledgement instead.
+        if (error instanceof ManagedReinviteWithheldError) {
+          setReinviteWithheld(true);
+        } else {
+          whenDiagnostic(() => console.error(error));
+          setReinviteFailed(true);
+        }
       } finally {
         setReinviting(false);
       }
@@ -808,7 +829,11 @@ export function ManagedRunSurface({ id }: { id: string }) {
   // disappearing on the write. `pastResponse` is the same act taken from under a
   // compromise response, which the write clears along with the condition holding it.
   function clearStanding(pastResponse: boolean) {
-    if (record === undefined || clearingStanding) return;
+    // The answer's own write has to land first: a clear that overtook it would be
+    // reverted by the answer arriving after it, leaving a response the operator has
+    // already settled.
+    if (record === undefined || clearingStanding || respondingCompromise)
+      return;
     setClearingStanding(true);
     setClearStandingFailed(false);
     clearManagedExchangeStandingCondition(record.id)
@@ -816,6 +841,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
         setRecord(updated);
         setStandingSettled(true);
         setCompromiseWriteFailed(false);
+        setReinviteWithheld(false);
         // The gate is not put again to an operator who answered it and then settled
         // it out-of-band: the failure they answered offers the mint they can now
         // take. Only that failure -- a run since then raised one they have answered
@@ -1179,7 +1205,6 @@ export function ManagedRunSurface({ id }: { id: string }) {
                       failure={failure}
                       record={record}
                       confirmationGated={confirmationGated}
-                      responding={respondingCompromise}
                       reinviting={reinviting}
                       runInFlight={runInFlight}
                       // The failed alert renders only at the site that triggered the
@@ -1197,7 +1222,9 @@ export function ManagedRunSurface({ id }: { id: string }) {
             {compromiseResponse && (
               <CompromiseResponsePanel
                 unsaved={compromiseWriteFailed}
-                clearing={clearingStanding}
+                // The acknowledgement waits out the answer's own write, which it
+                // cannot be taken ahead of.
+                clearing={clearingStanding || respondingCompromise}
                 clearFailed={clearStandingFailed}
                 onAcknowledge={() => clearStanding(true)}
               />
@@ -1208,7 +1235,6 @@ export function ManagedRunSurface({ id }: { id: string }) {
                 view={standingView}
                 settled={standingSettled}
                 clearing={clearingStanding}
-                responding={respondingCompromise}
                 clearFailed={clearStandingFailed}
                 reinviting={reinviting}
                 runInFlight={runInFlight}
@@ -1334,7 +1360,6 @@ function FailureRecovery({
   failure,
   record,
   confirmationGated,
-  responding,
   reinviting,
   runInFlight,
   reinviteFailed,
@@ -1344,8 +1369,6 @@ function FailureRecovery({
   failure: ManagedRunFailureAlert;
   record: ManagedExchangeRecord;
   confirmationGated: boolean;
-  /** Whether the write a "does not add up" reply started is still in flight. */
-  responding: boolean;
   reinviting: boolean;
   runInFlight: boolean;
   reinviteFailed: boolean;
@@ -1371,7 +1394,7 @@ function FailureRecovery({
     return (
       <ConfirmationPanel
         record={record}
-        busy={reinviting || responding}
+        busy={reinviting}
         onResolve={onResolveConfirmation}
       />
     );
@@ -1486,7 +1509,6 @@ function StandingConditionSection({
   view,
   settled,
   clearing,
-  responding,
   clearFailed,
   reinviting,
   runInFlight,
@@ -1502,8 +1524,6 @@ function StandingConditionSection({
   /** Whether the operator has cleared the condition on this visit. */
   settled: boolean;
   clearing: boolean;
-  /** Whether the write a "does not add up" reply started is still in flight. */
-  responding: boolean;
   clearFailed: boolean;
   reinviting: boolean;
   runInFlight: boolean;
@@ -1542,7 +1562,7 @@ function StandingConditionSection({
         <>
           <ConfirmationPanel
             record={record}
-            busy={clearing || responding}
+            busy={clearing}
             onResolve={onResolve}
           />
           {clearFailure}

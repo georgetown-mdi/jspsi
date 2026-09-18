@@ -1283,7 +1283,9 @@ reload and the next visit find it as the operator left it, and no control on the
 exchange's page offers a fresh invitation while it stands -- neither the
 failure's own recovery nor the configuration section's re-invite on the same
 terms -- since minting one on that channel is the act the response names as the
-wrong one.
+wrong one. A page left open from before the answer was given is held by the same
+rule: the write that would rotate the secret reads the exchange itself and
+refuses, so a second tab cannot mint past an answer it never saw.
 
 It is kept where the standing condition is kept, so exactly the three acts that
 clear a standing condition clear it too, and nothing else does. The one the

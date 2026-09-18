@@ -35,6 +35,7 @@ import {
   parseManagedExchangeRecord,
   partitionReadableManagedExchanges,
   safeParseManagedExchangeRecord,
+  standingCompromiseResponse,
 } from "./managedExchangeRecord";
 import { parseManagedLocalState } from "./managedLocalStateShape";
 
@@ -1033,6 +1034,26 @@ export async function persistManagedExchangeRotation(
 }
 
 /**
+ * Raised when a re-invite's rotation is refused because the record the store holds
+ * has a standing compromise response: a fresh secret on the channel the operator
+ * flagged is the act the response names as the wrong one, and the rotation would
+ * clear the response along with the condition holding it. A page that read the
+ * record before the answer was written has a live control over a record that no
+ * longer admits the mint, so the refusal is made against the record inside the
+ * transaction rather than against any page's copy. The clear-and-acknowledge
+ * ({@link clearManagedExchangeStandingCondition}) is what puts the mint back on
+ * offer.
+ */
+export class ManagedReinviteWithheldError extends Error {
+  constructor(id: string) {
+    super(
+      `a compromise response stands on managed exchange ${id}, so no fresh invitation is minted`,
+    );
+    this.name = "ManagedReinviteWithheldError";
+  }
+}
+
+/**
  * Persist a re-invite's rotation to the stored record: advance the fresh setup
  * secret and re-derive the `expires` bound exactly as
  * {@link persistManagedExchangeRotation}, AND drop any `lastRun` bookkeeping -- all
@@ -1045,7 +1066,15 @@ export async function persistManagedExchangeRotation(
  * {@link applyManagedExchangeReinviteRotation} (which re-validates), so it cannot
  * include a stale secret or document.
  *
+ * The record read inside the transaction is what the refusal above is decided on,
+ * so this is the one place the compromise response holds the mint: a caller's own
+ * check is over a record read before the answer may have been written (see
+ * docs/spec/MANAGED_EXCHANGE_RECORD.md, the response's rules).
+ *
  * @throws {Error} if no record with `id` exists.
+ * @throws {ManagedReinviteWithheldError} if the stored record has a standing
+ *   compromise response; the transaction aborts, leaving the secret and the
+ *   response as they were.
  * @throws {ZodError} if the stored value is not a valid v3 record or the rotation
  *   produces an invalid one; the transaction aborts and nothing is written.
  */
@@ -1057,6 +1086,8 @@ export async function persistManagedExchangeReinvite(
     if (stored === undefined)
       throw new Error(`no managed exchange with id ${id}`);
     const existing = parseManagedExchangeRecord(stored);
+    if (standingCompromiseResponse(existing) !== undefined)
+      throw new ManagedReinviteWithheldError(id);
     return applyManagedExchangeReinviteRotation(existing, rotation);
   });
 }
