@@ -90,26 +90,27 @@ function stdoutIsRedirectedFile(): boolean {
 }
 
 /**
- * How long the stdout result waits to be flushed before the run gives up on
- * the reader. A pipe's consumer sets the pace, so the drain is normally as
- * long as that consumer takes to read a few hundred kilobytes; this bounds the
- * other case, a consumer that has stopped reading altogether and would
+ * How long the stdout result may go with no line leaving the process before
+ * the run gives up on the reader. A pipe's consumer sets the pace, and a
+ * result of any size can take as long as that consumer needs to read it, so
+ * what this bounds is a consumer that has stopped reading altogether and would
  * otherwise hold a finished run open with no one left to receive what it is
- * holding.
+ * holding. Each time the reader takes what is buffered starts it again.
  */
-export const STDOUT_RESULT_DRAIN_CEILING_MS = 60_000;
+export const STDOUT_RESULT_IDLE_CEILING_MS = 60_000;
 
 /**
- * What the run reports when the drain reached its ceiling: the result was not
- * delivered, and the exchange it came from still happened.
+ * What the run reports when the drain went its whole idle ceiling with nothing
+ * leaving the process: the result was not delivered, and the exchange it came
+ * from still happened.
  */
-export function stdoutDrainExpiredNotice(ceilingMs: number): string {
+export function stdoutDrainExpiredNotice(idleCeilingMs: number): string {
   return (
-    `the result was still buffered ${Math.round(ceilingMs / 1000)}s after it ` +
-    `was handed to stdout, so the reader has stopped taking it and what is ` +
-    `past that point is lost. The exchange itself completed, so re-running ` +
-    `conducts a second one: fix the receiving command to keep reading, and ` +
-    `write the result to a path instead of a pipe if it cannot.`
+    `nothing more of the result left the process for ` +
+    `${Math.round(idleCeilingMs / 1000)}s, so the reader has stopped taking ` +
+    `it and what is past that point is lost. The exchange itself completed, ` +
+    `so re-running conducts a second one: fix the receiving command to keep ` +
+    `reading, and write the result to a path instead of a pipe if it cannot.`
   );
 }
 
@@ -156,7 +157,7 @@ export function resetStdoutErrorGuard(): void {
 
 /**
  * Write the result CSV to stdout, resolving once the last line has left the
- * process and REJECTING if that has not happened within `ceilingMs` or if the
+ * process and REJECTING if no line has left it for `idleCeilingMs` or if the
  * write fails.
  *
  * The drain waits on the LAST LINE's own write callback. A zero-length chunk
@@ -165,6 +166,20 @@ export function resetStdoutErrorGuard(): void {
  * already empty while the real write is still in flight, and an exit taken on
  * it truncated the result (45,582 of 50,000 lines), where the last line's
  * callback delivered all 50,000.
+ *
+ * The lines before it are written under BACKPRESSURE -- fill the stream's
+ * buffer, wait for its `'drain'`, write on -- and each `'drain'` is the
+ * progress that restarts the ceiling ({@link settleWithinCeiling}). That is
+ * what makes the ceiling a bound on a reader that STOPPED rather than on one
+ * that is slow: a consumer taking a large result in small reads holds the
+ * drain open for as long as it needs, where a total budget would fail it
+ * however much it had taken. Writing every line in one pass reports nothing
+ * to bound: measured against 60,000 lines read at about 1 MB/s, one pass hands
+ * libuv a single write it completes at the end, and all 60,001 callbacks
+ * arrive together 6.4 s in, where the same result written under backpressure
+ * reported 77 drains spread across it. A reader taking less than the stream's
+ * buffer in a whole ceiling is read as stopped, which at a ceiling of a minute
+ * is a kilobyte a second.
  *
  * Reaching the ceiling is a result that was not delivered, which is what the
  * caller's own result-write failure path reports, so it is raised rather than
@@ -189,41 +204,65 @@ export function resetStdoutErrorGuard(): void {
 async function writeResultToStdout(
   headers: string[],
   rows: Array<Array<string>>,
-  ceilingMs: number,
+  idleCeilingMs: number,
 ): Promise<void> {
-  // Assigned by the executor below, which runs before the next statement.
+  // Both assigned by the executor inside the wait below, which runs
+  // synchronously before that call returns.
   let rejectDrain!: (err: unknown) => void;
-  const drained = new Promise<void>((resolve, reject) => {
-    rejectDrain = reject;
-    process.stdout.on("error", reject);
-    const lastRow = rows.length - 1;
-    const flushed = (err?: Error | null): void => {
-      if (err === undefined || err === null) resolve();
-      else reject(err);
-    };
-    process.stdout.write(
-      headers.join(",") + "\n",
-      rows.length === 0 ? flushed : undefined,
-    );
-    rows.forEach((row, index) => {
-      process.stdout.write(
-        row.join(",") + "\n",
-        index === lastRow ? flushed : undefined,
-      );
-    });
-  });
+  let onDrain!: () => void;
   let outcome: CeilingOutcome;
   try {
-    outcome = await settleWithinCeiling(ceilingMs, () => drained);
+    outcome = await settleWithinCeiling(
+      idleCeilingMs,
+      (noteProgress) =>
+        new Promise<void>((resolve, reject) => {
+          rejectDrain = reject;
+          process.stdout.on("error", reject);
+          const flushed = (err?: Error | null): void => {
+            if (err === undefined || err === null) resolve();
+            else reject(err);
+          };
+          let next = 0;
+          const pump = (): void => {
+            while (next <= rows.length) {
+              const isLast = next === rows.length;
+              const line =
+                next === 0
+                  ? headers.join(",") + "\n"
+                  : rows[next - 1].join(",") + "\n";
+              next += 1;
+              const accepted = process.stdout.write(
+                line,
+                isLast ? flushed : undefined,
+              );
+              // The last line waits on its own callback rather than on a
+              // further drain, which is the same wait one event later.
+              if (!accepted && !isLast) {
+                process.stdout.once("drain", onDrain);
+                return;
+              }
+            }
+          };
+          onDrain = (): void => {
+            noteProgress();
+            pump();
+          };
+          pump();
+        }),
+    );
   } catch (err) {
     ignoreLaterStdoutErrors();
     throw new Error(stdoutWriteFailedNotice(), { cause: err });
   } finally {
+    // The pump is parked on a drain that never came where the wait expired,
+    // and writing on once the run has reported the loss would hand lines to a
+    // reader it has already told the operator is gone.
+    process.stdout.off("drain", onDrain);
     process.stdout.off("error", rejectDrain);
   }
   if (!outcome.finished) {
     ignoreLaterStdoutErrors();
-    throw new Error(stdoutDrainExpiredNotice(ceilingMs));
+    throw new Error(stdoutDrainExpiredNotice(idleCeilingMs));
   }
 }
 
@@ -255,14 +294,15 @@ async function writeResultToStdout(
  * once the last line has been flushed to the descriptor. A write to a pipe is
  * buffered, so resolving before the flush would hand the caller a result that
  * is only partly out of the process, and the run's exit would truncate it.
- * That wait is bounded -- a reader that never reads again would otherwise hold
- * the run forever -- and reaching the bound rejects, on the same channel as
- * the file branch's own faults: what the reader did not take is as lost as a
- * result that never reached disk, and the caller reports both the same way. A
- * reader that closes the pipe rather than stalling at it rejects on that same
- * channel, from the failed write instead of from the bound.
- * `drainCeilingMs` is that bound; it is a parameter so a test can drive the
- * expiry rather than wait one out.
+ * That wait is bounded by how long it goes with nothing leaving the process --
+ * a reader that never reads again would otherwise hold the run forever, while
+ * a slow one is entitled to as long as it takes -- and reaching the bound
+ * rejects, on the same channel as the file branch's own faults: what the
+ * reader did not take is as lost as a result that never reached disk, and the
+ * caller reports both the same way. A reader that closes the pipe rather than
+ * stalling at it rejects on that same channel, from the failed write instead
+ * of from the bound. `idleCeilingMs` is that bound; it is a parameter so a
+ * test can drive the expiry rather than wait one out.
  *
  * Before it writes, it checks whether stdout is a redirected
  * regular file ({@link stdoutIsRedirectedFile}) and, if so, notifies the
@@ -280,7 +320,7 @@ export function writeOutput(
   headers: string[],
   rows: Array<Array<string>>,
   log: { error: (message: string) => void },
-  drainCeilingMs: number = STDOUT_RESULT_DRAIN_CEILING_MS,
+  idleCeilingMs: number = STDOUT_RESULT_IDLE_CEILING_MS,
 ): Promise<void> {
   if (output === undefined) {
     if (stdoutIsRedirectedFile())
@@ -292,7 +332,7 @@ export function writeOutput(
           "redirecting stdout with `>` to have psilink create the result " +
           "owner-only.",
       );
-    return writeResultToStdout(headers, rows, drainCeilingMs);
+    return writeResultToStdout(headers, rows, idleCeilingMs);
   }
   return new Promise<void>((resolve, reject) => {
     // createOwnerOnlyWriteStream is inside the executor so a synchronous failure

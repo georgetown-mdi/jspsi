@@ -109,10 +109,36 @@ test("the expiry notice states the wait, what held it, and that the status stand
   const notice = teardownCeilingNotice(EXPIRED, {
     channel: "filedrop",
     retainFiles: false,
+    reachedOutputStage: true,
   });
   expect(notice).toContain("within 180s");
   expect(notice).toContain("still held by: TCPSocketWrap");
   expect(notice).toContain("exit status are unchanged");
+});
+
+test("a run that reached its output stage is told its files are on disk", () => {
+  // The clause answers the question an abandoned close raises for a completed
+  // run: whether anything it owed went with the wait it gave up on.
+  const notice = teardownCeilingNotice(EXPIRED, {
+    channel: "webrtc",
+    retainFiles: false,
+    reachedOutputStage: true,
+  });
+  expect(notice).toContain("everything it writes is already on disk");
+});
+
+test("a run cut short before its output stage claims nothing about disk", () => {
+  // Cleanup also runs from the interrupt paths and from a failure in the
+  // exchange itself, where the run wrote no result, record or receipt: telling
+  // the operator they are on disk sends them looking for files that are not
+  // there.
+  const notice = teardownCeilingNotice(EXPIRED, {
+    channel: "webrtc",
+    retainFiles: false,
+    reachedOutputStage: false,
+  });
+  expect(notice).toContain("exit status are unchanged");
+  expect(notice).not.toContain("on disk");
 });
 
 test("a delete-mode run is pointed at the files the abandoned close left", () => {
@@ -121,6 +147,7 @@ test("a delete-mode run is pointed at the files the abandoned close left", () =>
   const notice = teardownCeilingNotice(EXPIRED, {
     channel: "sftp",
     retainFiles: false,
+    reachedOutputStage: true,
   });
   expect(notice).toContain("Check the exchange directory");
   expect(notice).toContain("remove any protocol files this run left there");
@@ -134,6 +161,7 @@ test("a retain-mode run is not told to remove its own transcript", () => {
   const notice = teardownCeilingNotice(EXPIRED, {
     channel: "filedrop",
     retainFiles: true,
+    reachedOutputStage: true,
   });
   expect(notice).toContain("exit status are unchanged");
   expect(notice).not.toContain("exchange directory");
@@ -145,6 +173,7 @@ test("a webrtc run, which has no protocol files, is told nothing about them", ()
   const notice = teardownCeilingNotice(EXPIRED, {
     channel: "webrtc",
     retainFiles: false,
+    reachedOutputStage: true,
   });
   expect(notice).toContain("exit status are unchanged");
   expect(notice).not.toContain("exchange directory");

@@ -75,12 +75,19 @@ export async function closeWithinCeiling(
   return { ...outcome, heldBy: outcome.finished ? [] : heldResourceKinds() };
 }
 
-/** What a run was set to do with the protocol files of its exchange. */
+/** What a run had done, and was set to do, with the files a close touches. */
 export interface ExchangeFileDisposition {
   /** The run's channel; only the file-based ones have protocol files at all. */
   channel: ConnectionConfig["channel"];
   /** Whether the run keeps those files as a transcript instead of deleting them. */
   retainFiles: boolean;
+  /**
+   * Whether the run reached its output stage, where the result, the exchange
+   * record and the receipt are written. A run cut short before it -- an
+   * interrupt, or a failure in the exchange itself -- wrote no local files for
+   * the notice to account for.
+   */
+  reachedOutputStage: boolean;
 }
 
 /**
@@ -89,6 +96,12 @@ export interface ExchangeFileDisposition {
  * long it waited and which resource kinds were still armed. The exit status is
  * the exchange's own outcome either way, which the second sentence says so an
  * unattended supervisor does not read the notice as a failure to retry.
+ *
+ * The on-disk half of that second sentence is stated only by a run that
+ * reached its output stage. `doCleanup` also runs from the interrupt paths and
+ * from a failure ahead of that stage, where the run wrote no local files at
+ * all and telling the operator everything it writes is on disk would name
+ * artifacts they will not find.
  *
  * A run deleting its protocol files gets one more sentence, naming the one
  * thing the abandoned close leaves for the operator: on the file channels that
@@ -112,11 +125,14 @@ export function teardownCeilingNotice(
         `left there; deleting them is the part of the close that did not ` +
         `finish, and passing --sweep-exchange-files to the next run removes ` +
         `them before it meets the partner.`;
+  const onDisk = files.reachedOutputStage
+    ? `, and everything it writes is already on disk`
+    : "";
   return (
     `the transport did not finish closing within ` +
     `${Math.round(outcome.elapsedMs / 1000)}s, so this run stopped waiting ` +
     `on it; still held by: ${held}. The exchange's own outcome and exit ` +
-    `status are unchanged, and everything it writes is already on disk.` +
+    `status are unchanged${onDisk}.` +
     leftBehind
   );
 }

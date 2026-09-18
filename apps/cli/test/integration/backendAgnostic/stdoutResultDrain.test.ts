@@ -22,13 +22,17 @@ import { captureFd3 } from "../../eventStreamTestSupport";
  * `error` event under the `output` category, and no `result` event claiming a
  * result was written.
  *
- * The reader is stalled and the ceiling is cut rather than waited out: the
- * shipped one is a minute, and `process.stdout` in a test worker drains as
- * fast as it is written. Both are applied at `writeOutput`'s own boundary --
- * the ceiling through the parameter it takes for this, the stall by holding
- * the write callback that boundary waits on -- so everything under it, drain
- * included, is the shipped code path. What that boundary does with a real pipe
- * whose reader is slow is `boundedExit.test.ts`.
+ * The reader stops part-way through and the ceiling is cut rather than waited
+ * out: the shipped one is a minute, and `process.stdout` in a test worker
+ * drains as fast as it is written. Both are applied at `writeOutput`'s own
+ * boundary -- the ceiling through the parameter it takes for this, the stall
+ * by reporting the first line as taken and then holding the last one's write
+ * callback forever -- so everything under it, drain included, is the shipped
+ * code path. The stall follows a delivered line on purpose: the ceiling is an
+ * idle one, so a run that had made progress and stopped is the case that has
+ * to fail, where one that never moved would fail under a total budget too.
+ * What that boundary does with a real pipe and a reader that keeps taking the
+ * result is `stdoutDrainIdleCeiling.test.ts`.
  */
 
 /** The injected ceiling: long enough not to fire on scheduling, short to wait. */
@@ -47,9 +51,19 @@ vi.mock("../../../src/util/dataIo", async (importActual) => {
     ) => {
       if (output !== undefined)
         return actual.writeOutput(output, headers, rows, log);
-      const stalled = vi
-        .spyOn(process.stdout, "write")
-        .mockImplementation((() => true) as typeof process.stdout.write);
+      const stalled = vi.spyOn(process.stdout, "write").mockImplementation(((
+        _chunk: string | Uint8Array,
+        flushed?: (err?: Error | null) => void,
+      ): boolean => {
+        // The first line is refused and then reported as taken, which is the
+        // drain the write loop reads progress from; the line after it is held
+        // forever. A reader that took the first of the result and then stopped.
+        if (flushed === undefined) {
+          setTimeout(() => process.stdout.emit("drain"), 5);
+          return false;
+        }
+        return true;
+      }) as typeof process.stdout.write);
       return actual
         .writeOutput(output, headers, rows, log, DRAIN_CEILING_MS)
         .finally(() => stalled.mockRestore());
@@ -92,7 +106,7 @@ afterEach(() => {
   fs.rmSync(work, { recursive: true, force: true });
 });
 
-test("a stalled stdout reader fails the run at 73 rather than reporting a result", async () => {
+test("a reader that stops mid-result fails the run at 73 rather than reporting one", async () => {
   const dropDir = fs.mkdtempSync(path.join(work, "drop-"));
   const keyA = path.join(work, "a.key");
   const keyB = path.join(work, "b.key");
@@ -146,7 +160,9 @@ test("a stalled stdout reader fails the run at 73 rather than reporting a result
     message?: string;
   };
   expect(reason.exitCode).toBe(73);
-  expect(reason.message).toContain("still buffered");
+  expect(reason.message).toContain(
+    "nothing more of the result left the process",
+  );
 
   // On fd 3 the run reports a failed output stage, not a written result: a
   // supervisor reading only this stream must not record a delivery that did

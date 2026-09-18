@@ -884,10 +884,10 @@ test("writeOutput: the stdout branch waits for the last line to be flushed", asy
   // it is still buffered: the exit that follows would truncate it. The stub
   // holds every chunk's callback, and the returned promise must stay pending
   // until the last one is invoked.
-  const held: Array<() => void> = [];
+  const held: Array<(err?: Error | null) => void> = [];
   const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(((
     _chunk: string | Uint8Array,
-    flushed?: () => void,
+    flushed?: (err?: Error | null) => void,
   ): boolean => {
     if (flushed !== undefined) held.push(flushed);
     return true;
@@ -908,13 +908,73 @@ test("writeOutput: the stdout branch waits for the last line to be flushed", asy
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(settled).toBe(false);
     // Only the last line carries a callback: it is the one whose flush states
-    // that every line before it has left the process.
+    // that every line before it has left the process. The lines before it are
+    // paced by the stream's own backpressure, which this stub never applies.
     expect(held).toHaveLength(1);
     held[0]();
     await writing;
     expect(settled).toBe(true);
   } finally {
     stdoutSpy.mockRestore();
+  }
+});
+
+test("writeOutput: a reader taking the result slowly is given as long as it needs", async () => {
+  // The ceiling bounds a reader that stopped, not one that is slow: a consumer
+  // taking a large result in small reads holds the drain open for many times
+  // the ceiling, and failing it would turn a completed exchange into a
+  // truncated result and an instruction not to re-run.
+  const idleCeilingMs = 40;
+  const rows = Array.from({ length: 20 }, (_, i) => [String(i)]);
+  // A quarter of the ceiling between the lines the stub takes, so the whole
+  // write runs several times past the ceiling and no single gap reaches it.
+  const gapMs = idleCeilingMs / 4;
+  const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(((
+    _chunk: string | Uint8Array,
+    flushed?: (err?: Error | null) => void,
+  ): boolean => {
+    // No callback marks every line but the last: the stub refuses it as a full
+    // buffer does and reports the space a gap later, which is the drain the
+    // write loop waits on.
+    if (flushed === undefined) {
+      setTimeout(() => process.stdout.emit("drain"), gapMs);
+      return false;
+    }
+    setTimeout(() => flushed(), gapMs);
+    return true;
+  }) as typeof process.stdout.write);
+  try {
+    const startedAt = Date.now();
+    await writeOutput(undefined, ["a"], rows, logCollector(), idleCeilingMs);
+    expect(Date.now() - startedAt).toBeGreaterThan(idleCeilingMs);
+  } finally {
+    stdoutSpy.mockRestore();
+  }
+});
+
+test("writeOutput: a reader that stops mid-result fails at the ceiling after the last line", async () => {
+  // Progress earns the drain more time and does not buy the whole wait. The
+  // stub flushes the first lines and then stops, which is what a consumer that
+  // dies part-way through a result does to the pipe.
+  const idleCeilingMs = 40;
+  const rows = Array.from({ length: 20 }, (_, i) => [String(i)]);
+  const gapMs = idleCeilingMs / 4;
+  let taken = 0;
+  const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(((
+    _chunk: string | Uint8Array,
+    _flushed?: (err?: Error | null) => void,
+  ): boolean => {
+    taken += 1;
+    if (taken <= 5) setTimeout(() => process.stdout.emit("drain"), gapMs);
+    return false;
+  }) as typeof process.stdout.write);
+  try {
+    await expect(
+      writeOutput(undefined, ["a"], rows, logCollector(), idleCeilingMs),
+    ).rejects.toThrow(/nothing more of the result left the process/);
+  } finally {
+    stdoutSpy.mockRestore();
+    resetStdoutErrorGuard();
   }
 });
 
@@ -932,7 +992,7 @@ test("writeOutput: a reader that stops taking the result fails the write at the 
   try {
     await expect(
       writeOutput(undefined, ["a"], [["1"]], logCollector(), 20),
-    ).rejects.toThrow(/still buffered/);
+    ).rejects.toThrow(/nothing more of the result left the process/);
   } finally {
     stdoutSpy.mockRestore();
   }
@@ -942,6 +1002,9 @@ test("writeOutput: the drain failure says the exchange happened and how to recei
   // The operator reads this beside exit 73, whose instruction is not to
   // re-run: the notice has to say why, and what to change before any retry.
   const notice = stdoutDrainExpiredNotice(60_000);
+  // The bound it states is the idle one, so the operator is told what the run
+  // observed -- a reader that stopped -- rather than how long the drain ran.
+  expect(notice).toContain("nothing more of the result left the process");
   expect(notice).toContain("60s");
   expect(notice).toContain("The exchange itself completed");
   expect(notice).toContain("write the result to a path");
@@ -1029,7 +1092,7 @@ test("writeOutput: stdout errors after the drain expiry do not end the run", asy
   try {
     await expect(
       writeOutput(undefined, ["a"], [["1"]], logCollector(), 20),
-    ).rejects.toThrow(/still buffered/);
+    ).rejects.toThrow(/nothing more of the result left the process/);
     expect(process.stdout.listenerCount("error")).toBe(listenersBefore + 1);
     expect(() =>
       process.stdout.emit(

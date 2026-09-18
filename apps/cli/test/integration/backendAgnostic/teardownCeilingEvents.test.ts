@@ -19,7 +19,14 @@ import { captureFd3 } from "../../eventStreamTestSupport";
 /**
  * What a run puts on fd 3 when its transport does not finish closing inside
  * the ceiling: the `transportTeardown` warning before the terminal event, the
- * terminal event still last, and the exchange's own exit status untouched.
+ * terminal event still last, the exchange's own exit status untouched, and the
+ * notice composed from what this run was set to do with its files.
+ *
+ * Both file dispositions are driven, because the sentence that separates them
+ * is the one thing in the notice a run derives rather than states: a delete-
+ * mode run is asked to clear the protocol files its abandoned close left, and
+ * a retain-mode run, whose close deletes nothing, is not. A flag read the
+ * wrong way round tells one of them the opposite of what it needs.
  *
  * The expiry is injected rather than provoked. `closeWithinCeiling` is
  * replaced with one that still drives the real close -- so the poller stops
@@ -127,9 +134,12 @@ async function runCli(argv: string[]): Promise<void> {
     .parseAsync();
 }
 
-test(
-  "an expired teardown warns before the terminal event and leaves the status alone",
-  async () => {
+test.each([
+  { mode: "delete", flags: [] as string[], sweptByTheClose: true },
+  { mode: "retain", flags: ["--retain-files"], sweptByTheClose: false },
+])(
+  "an expired teardown warns before the terminal event, $mode mode",
+  async ({ flags, sweptByTheClose }) => {
     fs.writeFileSync(path.join(work, "a-input.csv"), PARTY_A_CSV);
     fs.writeFileSync(path.join(work, "b-input.csv"), PARTY_B_CSV);
     const prepared = prepareForExchange(
@@ -154,9 +164,11 @@ test(
 
     // Only the asserted party opens the stream, so fd 3 holds one run's events.
     const { lines } = await captureFd3(async () => {
+      // Both parties take the flag: retain mode is a property of the exchange,
+      // and a mismatch is refused at the rendezvous rather than run.
       const results = await Promise.allSettled([
-        runCli(partyArgs("a", ["--event-stream"])),
-        runCli(partyArgs("b", [])),
+        runCli(partyArgs("a", ["--event-stream", ...flags])),
+        runCli(partyArgs("b", flags)),
       ]);
       const failures = results.filter((r) => r.status === "rejected");
       if (failures.length > 0)
@@ -179,10 +191,20 @@ test(
     );
     expect(warningIndex).toBeGreaterThanOrEqual(0);
     expect(warningIndex).toBeLessThan(types.length - 2);
-    expect(String(lines[warningIndex]["message"])).toContain(EXPIRED_HELD_KIND);
-    expect(String(lines[warningIndex]["message"])).toContain(
-      `within ${EXPIRED_ELAPSED_MS / 1000}s`,
-    );
+    const notice = String(lines[warningIndex]["message"]);
+    expect(notice).toContain(EXPIRED_HELD_KIND);
+    expect(notice).toContain(`within ${EXPIRED_ELAPSED_MS / 1000}s`);
+    // The run reached its output stage, so the close it gave up on took
+    // nothing with it.
+    expect(notice).toContain("everything it writes is already on disk");
+    // The sweep sentence, which the run derives from its own file disposition.
+    if (sweptByTheClose) {
+      expect(notice).toContain("Check the exchange directory");
+      expect(notice).toContain("--sweep-exchange-files");
+    } else {
+      expect(notice).not.toContain("exchange directory");
+      expect(notice).not.toContain("--sweep-exchange-files");
+    }
 
     // The exchange succeeded, so its status stands: the teardown is
     // housekeeping and never pushes a supervisor toward a retry.

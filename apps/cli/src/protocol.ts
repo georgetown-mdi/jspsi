@@ -2114,6 +2114,9 @@ export async function runProtocol(
           retainFiles:
             connection.channel !== "webrtc" &&
             connection.options?.retainFiles === true,
+          // The output stage opens where this flag is set, so a run holding it
+          // has written its local artifacts or failed somewhere inside them.
+          reachedOutputStage: run.exchangeComplete,
         });
         log.warn(notice);
         emit((e) => e.warning("transportTeardown", notice));
