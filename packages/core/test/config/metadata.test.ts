@@ -461,11 +461,12 @@ test("inferMetadata never assigns role: ignored", () => {
 // --- inferMetadata: empty column name -----------------------------------------
 
 test("inferMetadata rejects an empty column name at intake", () => {
-  // An empty (zero-length) name -- a trailing comma, a blank cell, or a leading
-  // delimiter in the CSV header -- cannot be used for linkage, identification, or
-  // payload (every downstream name floors at .min(1)). Reject it at this intake
-  // chokepoint as a clear UsageError rather than disclosing it and losing the audit
-  // record to the non-fatal record-build guard. A UsageError so the CLI exits 64.
+  // An empty (zero-length) name -- a trailing delimiter, a blank cell, or a
+  // leading delimiter in the CSV header -- cannot be used for linkage,
+  // identification, or payload (every downstream name floors at .min(1)). Reject
+  // it at this intake chokepoint as a clear UsageError rather than disclosing it
+  // and losing the audit record to the non-fatal record-build guard. A
+  // UsageError so the CLI exits 64.
   expect(() => inferMetadata([""], [])).toThrow(UsageError);
   expect(() => inferMetadata(["ssn", "", "first_name"], [])).toThrow(
     UsageError,
@@ -486,7 +487,7 @@ test("inferMetadata empty-name error names the positions, not input", () => {
 });
 
 test("the empty-name refusal blames the removal when it emptied the name", () => {
-  // A header made only of control characters is neither a trailing comma
+  // A header made only of control characters is neither a trailing delimiter
   // nor a blank cell, so a caller holding the parse's sanitation positions gets a
   // cause and a remedy that fit what the operator's file actually had.
   let message = "";
@@ -498,7 +499,7 @@ test("the empty-name refusal blames the removal when it emptied the name", () =>
   expect(message).toContain("input column 2 has an empty name");
   expect(message).toContain("invisible control characters");
   expect(message).toContain("ordinary characters");
-  expect(message).not.toContain("trailing comma");
+  expect(message).not.toContain("trailing delimiter");
 });
 
 test("the empty-name refusal states both causes for a mixed header", () => {
@@ -511,7 +512,7 @@ test("the empty-name refusal states both causes for a mixed header", () => {
   expect(message).toContain("input columns 2, 4 have an empty name");
   expect(message).toContain("column 2 held");
   expect(message).toContain("invisible control characters");
-  expect(message).toContain("trailing comma");
+  expect(message).toContain("trailing delimiter");
 });
 
 test("a sanitized position that is not empty leaves the generic cause", () => {
@@ -523,7 +524,7 @@ test("a sanitized position that is not empty leaves the generic cause", () => {
   } catch (err) {
     message = err instanceof Error ? err.message : String(err);
   }
-  expect(message).toContain("trailing comma");
+  expect(message).toContain("trailing delimiter");
   expect(message).not.toContain("invisible control characters");
 });
 

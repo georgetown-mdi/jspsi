@@ -398,7 +398,7 @@ test("buildTemplateData: a header the strip emptied names the removal", async ()
   const message = (refusal as Error).message;
   expect(message).toContain("input column 2 has an empty name");
   expect(message).toContain("nothing but invisible control characters");
-  expect(message).not.toContain("trailing comma");
+  expect(message).not.toContain("trailing delimiter");
   const line = logged.find((entry) =>
     entry.includes("invisible control characters"),
   );

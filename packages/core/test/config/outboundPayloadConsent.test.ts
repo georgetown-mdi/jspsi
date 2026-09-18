@@ -461,7 +461,8 @@ test("resolveExchangeInputs: derives default terms for a spec that holds none", 
 test("prepareForExchange: positions name the removal for an emptied header", () => {
   // The zero-setup seat prepares straight from its own read, so that read's
   // changed positions reach the metadata resolution: a name the removal emptied
-  // is refused as that, and not as the trailing comma its header did not have.
+  // is refused as that, and not as the trailing delimiter its header did not
+  // have.
   let message = "";
   try {
     prepareForExchange(
@@ -476,7 +477,7 @@ test("prepareForExchange: positions name the removal for an emptied header", () 
   }
   expect(message).toContain("input column 2 has an empty name");
   expect(message).toContain("invisible control characters");
-  expect(message).not.toContain("trailing comma");
+  expect(message).not.toContain("trailing delimiter");
 });
 
 test("prepareForExchange: a caller passing no positions states the header causes", () => {
@@ -494,7 +495,7 @@ test("prepareForExchange: a caller passing no positions states the header causes
     message = err instanceof Error ? err.message : String(err);
   }
   expect(message).toContain("input column 2 has an empty name");
-  expect(message).toContain("trailing comma");
+  expect(message).toContain("trailing delimiter");
   expect(message).not.toContain("invisible control characters");
 });
 

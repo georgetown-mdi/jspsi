@@ -1240,7 +1240,7 @@ There is no separate setting for the result file: it is written with the same de
 
 With the key absent, psilink reads a file by the delimiter the file itself shows and writes the result with commas. A `--csv-delimiter` on a command reading this configuration replaces the key for that run, and `psilink init --csv-delimiter` writes the key into the template it produces; see [CLI.md](CLI.md#the-field-delimiter).
 
-The key is read by the CLI and by the console when it runs a config file. The web application does not offer a control for it and reads and writes commas.
+The key is read by the CLI and by the console when it runs a config file. The web application offers no control for it: it reads a file by the delimiter the file itself shows, and writes commas.
 
 ---
 
@@ -1248,7 +1248,7 @@ The key is read by the CLI and by the console when it runs a config file. The we
 
 Optional field-level descriptions of the input dataset. If omitted, semantic types are inferred from column names. If no identifier columns are specified, output row indices reference positions in the input file.
 
-When metadata is inferred (no explicit `metadata` block), an empty (zero-length) column name in the input is rejected at intake with a clear error, the same way an explicit `metadata` `name` is rejected at config parse (see the `name` field below). A trailing comma, a blank cell, or a leading delimiter in a CSV header row produces such an unnamed column; because an empty name cannot be used for linkage, identification, or payload, the file is refused up front rather than silently dropping the column's audit record during the exchange. Name the column or remove the empty header field. The web app shows the same rejection at its file-intake surfaces (the quick and Advanced invite paths and the acceptor's file step).
+When metadata is inferred (no explicit `metadata` block), an empty (zero-length) column name in the input is rejected at intake with a clear error, the same way an explicit `metadata` `name` is rejected at config parse (see the `name` field below). A trailing delimiter, a blank cell, or a leading delimiter in a CSV header row produces such an unnamed column; because an empty name cannot be used for linkage, identification, or payload, the file is refused up front rather than silently dropping the column's audit record during the exchange. Name the column or remove the empty header field. The web app shows the same rejection at its file-intake surfaces (the quick and Advanced invite paths and the acceptor's file step).
 
 A column name that holds invisible control characters -- a tab, a NUL, an escape, or one of the text-direction characters among them -- loses them at every read (see [CSV header sanitation](spec/CHANNEL_SECURITY.md#csv-header-sanitation-at-ingestion)), and the seat that read the file states which column positions changed. Two consequences reach this block. A name made only of those characters comes back empty and meets the refusal above, which states the removal as the cause instead of the header-row causes. And a name written as the header was typed -- a `metadata` `name`, a `linkage_fields` `name`, or a `standardization` output -- does not name a column of the file: write it as the column without those characters, which is the name `psilink init` writes into a configuration it authors from that file.
 

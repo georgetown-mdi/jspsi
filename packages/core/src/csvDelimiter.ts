@@ -76,11 +76,15 @@ function csvDelimiterShape(value: string): string {
  * The one operator-readable refusal for a delimiter outside the accepted set,
  * shared by the CLI flag and the configuration schema so neither can word the
  * same refusal differently. States the rule and the shape of what was given.
+ *
+ * The tab remedy names one spelling, `tab`, and holds no backslash: every sink
+ * this text reaches escapes a backslash once more, so a `\t` written here would
+ * show the operator a spelling that is refused when they type it back.
  */
 export function csvDelimiterRefusal(value: string): string {
   return (
     `a CSV field delimiter must be a single character -- a tab (write it ` +
-    `\`tab\` or \`\\t\`), or a printable ASCII character other than the ` +
-    `double quote -- and this is ${csvDelimiterShape(value)}`
+    `\`tab\`), or a printable ASCII character other than the double quote -- ` +
+    `and this is ${csvDelimiterShape(value)}`
   );
 }

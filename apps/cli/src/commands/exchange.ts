@@ -227,6 +227,16 @@ type ExchangeOptions = Omit<
 
 /** @internal exported for testing */
 export function parseArgs(argv: Arguments): ExchangeArgs {
+  // Graded ahead of every flag whose parse opens a file -- the @-file host-key
+  // fingerprint parseCommonBootstrapArgs resolves, and the @-file credential
+  // references below -- so a value either one refuses ends the run at usage
+  // with no file read for a run that cannot start.
+  const csvDelimiter = csvDelimiterFlag(argv);
+  // Kept verbatim: unlike the server-* credential flags below, the invitation is
+  // NOT @-resolved here. Its @-file form is read at decode time by
+  // decodeAndValidateInvitation (via provisionKeyFileFromInvitation), so the
+  // code stays out of process argv even when supplied as `@code.txt`.
+  const invitation = singleValue(argv, "invitation") as string | undefined;
   // Parse the common options through the shared parser (the same singleValue
   // repeat-rejection and log-level validation invite/accept use), then layer the
   // exchange-specific handling on top.
@@ -251,7 +261,7 @@ export function parseArgs(argv: Arguments): ExchangeArgs {
     serverPrivateKeyPassphrase: resolveAtSignRefs(
       common.serverPrivateKeyPassphrase,
     ) as string | undefined,
-    csvDelimiter: csvDelimiterFlag(argv),
+    csvDelimiter,
     // exchange-specific positionals; not repeatable flags, so they stay plain.
     input: expandTilde(argv["input"] as string),
     output: expandTilde(argv["output"] as string | undefined),
@@ -261,11 +271,7 @@ export function parseArgs(argv: Arguments): ExchangeArgs {
       (argv["sweep-exchange-files"] as boolean | undefined) ?? false,
     forceRetainSweep:
       (argv["force-retain-sweep"] as boolean | undefined) ?? false,
-    // Kept verbatim: unlike the server-* credential flags above, the
-    // invitation is NOT @-resolved here. Its @-file form is read at decode time
-    // by decodeAndValidateInvitation (via provisionKeyFileFromInvitation), so the
-    // code stays out of process argv even when supplied as `@code.txt`.
-    invitation: singleValue(argv, "invitation") as string | undefined,
+    invitation,
   };
 }
 

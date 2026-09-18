@@ -78,6 +78,11 @@ test("the refusal names the rule and the shape, never the value", () => {
     const message = csvDelimiterRefusal(value);
     expect(message).toContain("single character");
     expect(message).toContain("printable ASCII");
+    // The remedy is spelled the way the operator must type it, and holds no
+    // backslash: every sink escapes one more time, so a backslash-t spelling
+    // here would reach them doubled and be refused when typed back.
+    expect(message).toContain("write it `tab`");
+    expect(message).not.toContain("\\");
   }
   expect(csvDelimiterRefusal("::")).toContain("2-character value");
   expect(csvDelimiterRefusal("")).toContain("an empty value");

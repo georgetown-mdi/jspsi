@@ -4375,7 +4375,7 @@ test("the empty-name refusal blames the removal when the strip emptied the name"
   expect(thrown).toBeInstanceOf(UsageError);
   expect(message).toContain("input column 2 has an empty name");
   expect(message).toContain("invisible control characters");
-  expect(message).not.toContain("trailing comma");
+  expect(message).not.toContain("trailing delimiter");
   expect(
     logged.some((entry) => entry.includes("invisible control characters")),
   ).toBe(true);
@@ -4399,7 +4399,7 @@ test("the empty-name refusal keeps the blank-cell cause for a blank header cell"
   }
 
   expect(message).toContain("input column 2 has an empty name");
-  expect(message).toContain("trailing comma");
+  expect(message).toContain("trailing delimiter");
   expect(message).not.toContain("invisible control characters");
 });
 

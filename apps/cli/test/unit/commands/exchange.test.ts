@@ -7,6 +7,7 @@ import YAML from "yaml";
 import { UsageError } from "@psilink/core";
 import {
   DEFAULT_LINKAGE_RULE_SET,
+  csvDelimiterRefusal,
   encodeInvitation,
   generateSigningIdentity,
   getDefaultLinkageTerms,
@@ -1492,6 +1493,45 @@ test("handler: a delimiter outside the accepted set stops the run before anythin
     ).rejects.toThrow("exit:64");
     expect(vi.mocked(runProtocol)).not.toHaveBeenCalled();
   } finally {
+    exitSpy.mockRestore();
+  }
+});
+
+test("handler: a refused delimiter stops the run before an @-file credential is read", async () => {
+  // The delimiter is a usage question answerable with nothing open, so it is
+  // graded ahead of the @-reference resolution the credential flags take: the
+  // password reference here names a file that does not exist, and a run
+  // reporting the delimiter instead of the unreadable reference never read it.
+  fs.writeFileSync(configFile, YAML.stringify(minimalFiledropConfig));
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
+  const input = path.join(dir, "in.csv");
+  fs.writeFileSync(input, "ssn\n123456789\n");
+  const passwordRef = path.join(dir, "absent-sftp-password");
+  expect(fs.existsSync(passwordRef)).toBe(false);
+  vi.mocked(runProtocol).mockReset();
+  const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  const exitSpy = captureProcessExit();
+  try {
+    await expect(
+      handler({
+        _: [],
+        $0: "psilink",
+        input,
+        "config-file": configFile,
+        "key-file": keyFile,
+        "log-level": "silent",
+        "csv-delimiter": "::",
+        "server-password": `@${passwordRef}`,
+      } as unknown as Arguments),
+    ).rejects.toThrow("exit:64");
+    const reported = errSpy.mock.calls
+      .map((call) => String(call[0]))
+      .join("\n");
+    expect(reported).toContain(`--csv-delimiter: ${csvDelimiterRefusal("::")}`);
+    expect(reported).not.toContain(passwordRef);
+    expect(vi.mocked(runProtocol)).not.toHaveBeenCalled();
+  } finally {
+    errSpy.mockRestore();
     exitSpy.mockRestore();
   }
 });
