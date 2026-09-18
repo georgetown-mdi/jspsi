@@ -54,17 +54,18 @@ export type ManagedSpendOutcome =
   "spent" | "run-in-flight" | "superseded" | "gone";
 
 /** This device's import marker for a record: stamped when the record was installed
- * or revived from a backup artifact, or when a take-back installed a secret from a
- * command-line key file. It is the evidence the desync tiering reads to
+ * or revived from a backup artifact, and by a take-back of a command-line hand-off,
+ * with or without a key file. It is the evidence the desync tiering reads to
  * tell an import-since-last-success apart from an unexplained handshake failure: a
- * restored copy can hold a secret the partnership has rotated past, so a handshake
- * failure after an import newer than the last success is the benign import/restore
- * tier, not the attack path. A plain instant -- no secret material, no rotation
- * epoch -- and a local sibling by design: it is this device's own restore history,
- * meaningless to an imported copy, so it must never enter the export artifact. */
+ * restored or taken-back copy can hold a secret the partnership has rotated past, so
+ * a handshake failure after an import newer than the last success is the benign
+ * import/restore tier, not the attack path. A plain instant -- no secret material, no
+ * rotation epoch -- and a local sibling by design: it is this device's own restore
+ * history, meaningless to an imported copy, so it must never enter the export
+ * artifact. */
 export interface ManagedImportMarker {
-  /** ISO 8601 UTC instant the record was installed, revived, or taken back with a
-   * key file. */
+  /** ISO 8601 UTC instant the record was installed or revived, the key file's secret
+   * installed, or -- for a take-back that chose no key file -- the copy handed off. */
   importedAt: string;
 }
 
@@ -78,9 +79,9 @@ export interface ManagedLocalState {
   /** This device's spent state (see {@link ManagedSpentState}); absent unless an
    * export handed the copy off. */
   spent?: ManagedSpentState;
-  /** When this device installed or revived the record from a backup (see
-   * {@link ManagedImportMarker}); absent for a record created by an invite/accept
-   * deposit rather than an import. */
+  /** When this device installed or revived the record from a backup, or took it back
+   * from a command-line hand-off (see {@link ManagedImportMarker}); absent for a
+   * record created by an invite/accept deposit and neither imported nor taken back. */
   imported?: ManagedImportMarker;
 }
 

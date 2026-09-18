@@ -1138,9 +1138,10 @@ record, in a separate origin-local store keyed by the record `id`, and are
   response (see
   [SECURITY_DESIGN.md](../SECURITY_DESIGN.md#rollback-at-rest-copies-can-silently-resurrect)).
 - **The import marker** (`importedAt`, an ISO 8601 UTC instant) records that this
-  device installed or revived the record from a backup artifact. It is the
-  evidence the desync tiering reads to tell an **import/restore since the last
-  successful run** apart from an unexplained handshake failure (Tier 1 versus
+  device installed or revived the record from a backup artifact, or took it back from
+  a command-line hand-off. It is the evidence the desync tiering reads to tell an
+  **import/restore since the last successful run** apart from an unexplained
+  handshake failure (Tier 1 versus
   Tier 2; see [Telling a desync from an
   attack](../MANAGED_EXCHANGE.md#telling-a-desync-from-an-attack)). A restored
   copy can hold a secret the partnership has rotated past, so a handshake
@@ -1150,9 +1151,10 @@ record, in a separate origin-local store keyed by the record `id`, and are
   the backup marker's:
   - **Import stamps it.** A fresh install and a revive-in-place both stamp
     `importedAt` (alongside the backup marker) as of the import instant, so a
-    restored record holds the evidence from the moment it lands. A [take-back that
-    installs a key file's secret](#taking-a-command-line-hand-off-back) stamps it
-    too, clearing the backup marker rather than stamping it.
+    restored record holds the evidence from the moment it lands. Every [take-back of
+    a command-line hand-off](#taking-a-command-line-hand-off-back) stamps it too,
+    with or without a key file, and the one that installs a key file's secret clears
+    the backup marker rather than stamping it.
   - **Rotation clears it.** The persist-before-success rotation write clears the
     import marker in the **same** transaction that advances the secret. A rotation is
     driven by a completed handshake, which proves the two parties held the same
@@ -1236,14 +1238,18 @@ accepts.
   exchange holds it. Whether it advances is decided on `sharedSecret` alone, so a
   file holding the stored secret with a different `expires` applies nothing, which a
   hand-edited file is the only way to reach.
-- **A key file's install is recorded as an import**, stamping the
+- **Every re-take is recorded as an import**, stamping the
   [import marker](#the-backup-marker-the-spent-state-and-the-import-marker-local-siblings-never-in-the-artifact)
   in that same transaction. Nothing here can tell this exchange's current key file
-  from a stale one or another exchange's, so the likeliest mistake the re-take admits
-  is a secret the partner does not share: an `auth` failure at the next run therefore
+  from a stale one or another exchange's, and nothing here can check the attestation
+  that no run has happened on the other machine, so either route can leave the record
+  holding a secret the partner has moved past: an `auth` failure at the next run
   tiers as **imported**, whose recovery is the re-invite, until a run succeeds and
-  the rotation clears the marker. A re-take needing no key leaves both markers where
-  they stand.
+  the rotation clears the marker. The instant differs with the route: a key file's
+  install stamps the re-take instant, and a re-take that chose no key file stamps the
+  hand-off's own `spentAt`, the point from which this device's copy may have fallen
+  behind. A re-take needing no key leaves the backup marker where it stands, the
+  stored secret still being the one that backup holds.
 - **The hand-off's own refusal is consumed.** A `lastRun` recording the
   `handed-off` refusal -- a run that came due while this copy was spent -- is
   dropped in the same transaction, with or without a key: the take-back ends the

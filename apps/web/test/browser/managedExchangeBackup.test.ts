@@ -1223,10 +1223,11 @@ describe("taking a command-line hand-off back", () => {
     return record;
   }
 
-  test("a re-take with no key file makes the record live, changing nothing else", async () => {
-    // The case the ruling settles with "no cron run happened": the stored secret
-    // is still the partnership's, so nothing is read in and the backup taken
-    // before the hand-off still holds the current secret.
+  test("a re-take with no key file makes the record live, leaving the secret alone", async () => {
+    // The operator attests that no command-line run has happened, so nothing is read
+    // in and the backup taken before the hand-off still holds the stored secret.
+    // The entry is marked imported as of the hand-off: the attestation cannot be
+    // checked here, and a wrong one leaves this copy behind the partnership's.
     const record = await handedOff();
 
     const outcome = await retakeHandedOffManagedExchange(record.id, retakenAt);
@@ -1235,6 +1236,7 @@ describe("taking a command-line hand-off back", () => {
     expect(await getManagedExchange(record.id)).toEqual(record);
     expect(await getManagedLocalState(record.id)).toEqual({
       backup: { backedUpAt: "2026-07-14T12:00:00.000Z" },
+      imported: { importedAt: "2026-07-14T13:00:00.000Z" },
     });
   });
 
@@ -1391,6 +1393,29 @@ describe("taking a command-line hand-off back", () => {
     await retakeHandedOffManagedExchange(record.id, retakenAt, {
       sharedSecret: generateSharedSecret(),
     });
+    await recordManagedExchangeLastRun(
+      record.id,
+      failedRun(Date.now(), "failed", "auth"),
+      Date.now(),
+    );
+
+    const [stored, local] = [
+      await getManagedExchange(record.id),
+      await getManagedLocalState(record.id),
+    ];
+    expect(deriveManagedFailureTier(stored!, local, Date.now())).toBe(
+      "imported",
+    );
+  });
+
+  test("an auth failure after a take-back with no key file tiers as imported", async () => {
+    // The attestation that nothing ran on the other machine cannot be checked here,
+    // and a wrong one leaves this copy holding a secret the partnership rotated past.
+    // The operator's own mistake reaches them as the re-invite, not the attack
+    // checklist an unexplained failure opens.
+    const record = await handedOff();
+
+    await retakeHandedOffManagedExchange(record.id, retakenAt);
     await recordManagedExchangeLastRun(
       record.id,
       failedRun(Date.now(), "failed", "auth"),
