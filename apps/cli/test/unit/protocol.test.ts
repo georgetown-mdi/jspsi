@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -5253,6 +5254,44 @@ test("a close that throws on a completed run still emits the terminal result eve
   expect(process.exitCode).toBeUndefined();
 }, 20_000);
 
+// Which run a callback belongs to, for the close hook below. A two-party case
+// closes two connections in one process while only one of the parties writes to
+// fd 3, and the async context is what tells them apart: every continuation of a
+// party's runProtocol call, its teardown close included, carries the store the
+// call was entered with.
+const closeWatchParty = new AsyncLocalStorage<string>();
+
+/**
+ * Capture what fd 3 held when `party`'s own transport close began, reading it
+ * back as the event types written to that point. The party's run is entered
+ * through `closeWatchParty.run(party, ...)`; another party's close in the same
+ * case is left alone.
+ */
+function snapshotStreamAtClose(party: string): {
+  eventTypesAtClose: () => string[];
+  restore: () => void;
+} {
+  const realClose = FileSyncConnection.prototype.close;
+  let streamAtClose: string | undefined;
+  FileSyncConnection.prototype.close = function (
+    this: FileSyncConnection,
+  ): Promise<void> {
+    if (closeWatchParty.getStore() === party)
+      streamAtClose ??= Buffer.concat(fd3Chunks).toString("utf8");
+    return realClose.call(this);
+  };
+  return {
+    eventTypesAtClose: () =>
+      (streamAtClose ?? "")
+        .split("\n")
+        .filter((line) => line.length > 0)
+        .map((line) => (JSON.parse(line) as { type: string }).type),
+    restore: () => {
+      FileSyncConnection.prototype.close = realClose;
+    },
+  };
+}
+
 test("the terminal event is on the stream before the transport close begins", async () => {
   // The ordering the stream's terminal-event guarantee rests on: the outcome
   // reaches a consumer without waiting on a close that has a ceiling of its
@@ -5260,41 +5299,148 @@ test("the terminal event is on the stream before the transport close begins", as
   // (docs/spec/CLI_EVENTS.md, Terminal-event guarantees). One party waits for a
   // partner who never arrives, so one connection is closed and the snapshot
   // below is that close's own.
-  const realClose = FileSyncConnection.prototype.close;
-  let streamAtClose: string | undefined;
-  FileSyncConnection.prototype.close = function (
-    this: FileSyncConnection,
-  ): Promise<void> {
-    streamAtClose ??= Buffer.concat(fd3Chunks).toString("utf8");
-    return realClose.call(this);
-  };
+  const watched = snapshotStreamAtClose("lone");
   mockFd3Open();
   try {
-    await runProtocol({
-      connection: {
-        channel: "filedrop",
-        path: dropDir,
-        options: {
-          pollIntervalMs: 1,
-          peerTimeoutMs: LONE_PARTY_PEER_BUDGET_MS,
+    await closeWatchParty.run("lone", () =>
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: {
+            pollIntervalMs: 1,
+            peerTimeoutMs: LONE_PARTY_PEER_BUDGET_MS,
+          },
         },
-      },
-      auth: null,
-      prepared: minimalPrepared,
-      output: undefined,
-      verbosity: -1,
-      loggerName: "test",
-      fileSyncRuntime: { eventStream: true },
-    }).catch(() => undefined);
+        auth: null,
+        prepared: minimalPrepared,
+        output: undefined,
+        verbosity: -1,
+        loggerName: "test",
+        fileSyncRuntime: { eventStream: true },
+      }).catch(() => undefined),
+    );
   } finally {
-    FileSyncConnection.prototype.close = realClose;
+    watched.restore();
     vi.mocked(fs.fstatSync).mockRestore();
   }
 
-  const typesAtClose = (streamAtClose ?? "")
-    .split("\n")
-    .filter((line) => line.length > 0)
-    .map((line) => (JSON.parse(line) as { type: string }).type);
+  const typesAtClose = watched.eventTypesAtClose();
+  expect(typesAtClose[typesAtClose.length - 1]).toBe("error");
+  expect(typesAtClose[typesAtClose.length - 2]).toBe("metrics");
+  // The close added nothing to what the outcome already said.
+  expect(takeFd3Lines().map((line) => line.type)).toEqual(typesAtClose);
+}, 20_000);
+
+test("a completed exchange states its result before its own close begins", async () => {
+  // The same ordering on the path that has an outcome to state: two parties
+  // complete the exchange, and the metrics and result of the party reading fd 3
+  // are already on the stream when its close starts -- the close that on this
+  // channel deletes its protocol files and can run to the teardown ceiling
+  // (docs/spec/CLI_EVENTS.md, Terminal-event guarantees).
+  const watched = snapshotStreamAtClose("a");
+  mockFd3Open();
+  try {
+    await Promise.all([
+      closeWatchParty.run("a", () =>
+        runProtocol({
+          connection: {
+            channel: "filedrop",
+            path: dropDir,
+            options: TWO_PARTY_OPTIONS,
+          },
+          auth: null,
+          prepared: minimalPrepared,
+          output: path.join(tmpDir, "close-after-result.csv"),
+          verbosity: -1,
+          loggerName: "test-a",
+          fileSyncRuntime: { eventStream: true },
+        }),
+      ),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        output: path.join(tmpDir, "close-after-result-b.csv"),
+        verbosity: -1,
+        loggerName: "test-b",
+      }),
+    ]);
+  } finally {
+    watched.restore();
+    vi.mocked(fs.fstatSync).mockRestore();
+  }
+
+  const typesAtClose = watched.eventTypesAtClose();
+  expect(typesAtClose.slice(-2)).toEqual(["metrics", "result"]);
+  // The close added nothing to what the outcome already said.
+  expect(takeFd3Lines().map((line) => line.type)).toEqual(typesAtClose);
+}, 20_000);
+
+test("a failure after the handshake states its error before the close begins", async () => {
+  // The failure path's own ordering, on the fault that has a handshake behind
+  // it: both parties rotate their token and then fail in the exchange, so this
+  // party reaches teardown holding a session, an armed abort marker and files
+  // of its own in the directory -- and its error is on the stream before any of
+  // that is closed (docs/spec/CLI_EVENTS.md, Terminal-event guarantees).
+  const keyFileA = path.join(tmpDir, "a.key");
+  const keyFileB = path.join(tmpDir, "b.key");
+  saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
+  saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
+  async function waitForRotationThenThrow(): Promise<never> {
+    await waitForBothKeysRotated(keyFileA, keyFileB);
+    throw new Error("simulated transport error after token rotation");
+  }
+  vi.mocked(runExchange)
+    .mockImplementationOnce(waitForRotationThenThrow)
+    .mockImplementationOnce(waitForRotationThenThrow);
+
+  const watched = snapshotStreamAtClose("a");
+  mockFd3Open();
+  try {
+    const settled = await Promise.allSettled([
+      closeWatchParty.run("a", () =>
+        runProtocol({
+          connection: {
+            channel: "filedrop",
+            path: dropDir,
+            options: TWO_PARTY_OPTIONS,
+          },
+          auth: { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
+          prepared: minimalPrepared,
+          output: undefined,
+          verbosity: -1,
+          loggerName: "test-a",
+          fileSyncRuntime: { eventStream: true },
+        }),
+      ),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
+        prepared: minimalPrepared,
+        output: undefined,
+        verbosity: -1,
+        loggerName: "test-b",
+      }),
+    ]);
+    expect(settled.map((outcome) => outcome.status)).toEqual([
+      "rejected",
+      "rejected",
+    ]);
+  } finally {
+    watched.restore();
+    vi.mocked(fs.fstatSync).mockRestore();
+  }
+
+  const typesAtClose = watched.eventTypesAtClose();
   expect(typesAtClose[typesAtClose.length - 1]).toBe("error");
   expect(typesAtClose[typesAtClose.length - 2]).toBe("metrics");
   // The close added nothing to what the outcome already said.
