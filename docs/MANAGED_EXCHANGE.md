@@ -1181,11 +1181,11 @@ Three things clear a standing condition, and nothing else does:
   For a handshake failure nothing explains, that control is the two-outcome gate
   below: a partner who confirms their identity and a real failure on their side
   clears the condition, with the re-invite still offered as the remedy, and a
-  reply that does not add up clears nothing and routes to the compromise
-  response. Where the record already holds the explanation -- a persist failure,
-  or a restore since the last success -- there is no attack checklist to pass:
-  the page states the condition and its re-invite recovery, and a short
-  acknowledgement clears it.
+  reply that does not add up clears nothing and records the compromise response
+  on the exchange instead. Where the record already holds the explanation -- a
+  persist failure, or a restore since the last success -- there is no attack
+  checklist to pass: the page states the condition and its re-invite recovery,
+  and a short acknowledgement clears it.
 - **A re-invite**, which drops it with the run bookkeeping in the same rotation
   that installs the fresh secret. It is the recovery the condition asked for.
 - **Deleting the exchange**, which takes it along with the record.
@@ -1277,12 +1277,21 @@ framing is the CLI's posture: the tool reports the failure and structures the
 confirmation, but the operator, not the tool, makes the desync-versus-attack
 call out-of-band.
 
-Once given, a compromise response stands for the rest of the visit, wherever it
-was given: a later run that fails the same way does not put the question again,
-and no control on the exchange's page offers a fresh invitation while it stands
--- neither the failure's own recovery nor the configuration section's re-invite
-on the same terms -- since minting one on that channel is the act the response
-names as the wrong one.
+Once given, a compromise response is kept with the exchange, wherever it was
+given: a later run that fails the same way does not put the question again, a
+reload and the next visit find it as the operator left it, and no control on the
+exchange's page offers a fresh invitation while it stands -- neither the
+failure's own recovery nor the configuration section's re-invite on the same
+terms -- since minting one on that channel is the act the response names as the
+wrong one.
+
+It is kept where the standing condition is kept, so exactly the three acts that
+clear a standing condition clear it too, and nothing else does. The one the
+exchange's page offers under a response is the acknowledgement that the partner
+confirmed the failure on another channel: it settles the condition, the response
+goes with it, and the fresh invitation is on offer again for the operator to
+send. That ordering -- reach the partner another way first, then re-invite -- is
+what the response is for.
 
 ### Expiry is its own state, never routed through attack framing
 

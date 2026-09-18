@@ -16,8 +16,14 @@ import { triggerBlobDownload } from "@components/blobDownload";
 import { useOnlineStatus } from "@components/useOnlineStatus";
 
 import {
+  COMPROMISE_ACKNOWLEDGE_LABEL,
+  COMPROMISE_ACKNOWLEDGE_LEAD,
+  COMPROMISE_ACKNOWLEDGE_NOTE,
   COMPROMISE_RESPONSE_MESSAGE,
+  COMPROMISE_RESPONSE_STANDS,
   COMPROMISE_RESPONSE_TITLE,
+  COMPROMISE_RESPONSE_UNSAVED_REASON,
+  COMPROMISE_RESPONSE_UNSAVED_TITLE,
   composeManagedFailureConfirmation,
   routeConfirmationReply,
 } from "@psi/managed/managedFailureConfirmation";
@@ -31,6 +37,7 @@ import {
   getManagedExchange,
   persistManagedExchangeOutputDirectory,
   readRecordAndMarkBackedUp,
+  recordManagedExchangeCompromiseResponse,
   spendManagedExchangeIfCurrent,
   updateManagedExchangeLocalFields,
 } from "@psi/managed/managedExchangeStore";
@@ -62,6 +69,7 @@ import { getManagedLocalState } from "@psi/managed/managedLocalState";
 import { managedRerunCompletion } from "@psi/managed/managedCompletionSurface";
 import { reinviteManagedExchange } from "@psi/managed/managedReinviteDriver";
 import { runManagedExchangeInBrowser } from "@psi/managed/managedRunDriver";
+import { standingCompromiseResponse } from "@psi/managed/managedExchangeRecord";
 import { storedInputHandleUsable } from "@psi/managed/managedInputHandle";
 import { whenDiagnostic } from "@utils/diagnostics";
 
@@ -114,6 +122,7 @@ import {
 } from "./managedStandingConditionModel";
 import { DeleteExchangeButton } from "./SavedExchanges";
 import { ManagedCronExportPanel } from "./ManagedCronExportPanel";
+import { REINVITE_RUN_IN_FLIGHT_REASON } from "./managedReinviteGate";
 import { useManagedRunInFlight } from "./useManagedRunInFlight";
 
 import type { Ref } from "react";
@@ -270,10 +279,16 @@ export function ManagedRunSurface({ id }: { id: string }) {
   // failure, the surface proceeds to re-invite; a "does not add up" reply routes to
   // the compromise-response copy instead.
   const [confirmationGated, setConfirmationGated] = useState(false);
-  // The compromise response, one state for the whole visit across both gates: the
-  // operator answers "does not add up" once, at whichever gate asked, and a later
-  // run of the same visit lands under that answer rather than being asked again.
-  const [compromiseResponse, setCompromiseResponse] = useState(false);
+  // The compromise response is the record's own, written at whichever gate the
+  // operator answered and read back off the record this page holds, so one answer
+  // covers both gates and stands at the next visit as it does here. A write this
+  // device refused leaves it standing for the visit alone, which is the side to
+  // fail to; the panel states that where the operator reads it.
+  const [respondingCompromise, setRespondingCompromise] = useState(false);
+  const [compromiseWriteFailed, setCompromiseWriteFailed] = useState(false);
+  const compromiseResponse =
+    compromiseWriteFailed ||
+    (record !== undefined && standingCompromiseResponse(record) !== undefined);
   // The standing condition's own clearance, held apart from the live failure's gate
   // above: the two states can stand at once (a no-show this visit over a condition an
   // earlier run raised), and clearing one must not move the other.
@@ -689,10 +704,12 @@ export function ManagedRunSurface({ id }: { id: string }) {
   // a subsequent run derives the rendezvous from the fresh one, and clearing the
   // consumed failure shows "fresh invitation sent" rather than the recovered tier.
   function reinviteNow(source: "recovery" | "detail") {
-    // Closed at the mint rather than at each control that reaches it: while a
-    // compromise response stands, a fresh invitation on this channel would hand the
-    // new secret to whoever is interfering, whichever part of the page asked for it.
-    if (record === undefined || reinviting || compromiseResponse) return;
+    // Closed at the mint rather than at each control that reaches it, whichever part
+    // of the page asked: while a compromise response stands, a fresh invitation on
+    // this channel would hand the new secret to whoever is interfering, and a run in
+    // flight is connecting on the secret the mint replaces.
+    if (record === undefined || reinviting || compromiseResponse || runInFlight)
+      return;
     setReinviteSource(source);
     setReinviting(true);
     setReinviteFailed(false);
@@ -709,14 +726,23 @@ export function ManagedRunSurface({ id }: { id: string }) {
       .finally(() => setReinviting(false));
   }
 
-  // While a compromise response stands, whichever gate the operator answered, every
-  // act that mints on this channel is withheld: neither gate is offered, no re-invite
-  // offer renders beside the live failure or the standing condition, the Configuration
-  // section's re-invite is withheld, and reinviteNow refuses whichever control asked.
-  // The response's alert renders in the live failure's place while that gate's own
-  // state is on screen, and in the standing condition's section otherwise.
-  const compromiseAtStanding =
-    compromiseResponse && failure?.recovery !== "confirm";
+  // Write the operator's answer that nothing adds up onto the record, so the mint
+  // stays withheld past this visit. Both gates route here; the record the store
+  // holds is what the write attaches the answer to, and the page adopts it.
+  function respondCompromise() {
+    if (record === undefined || respondingCompromise) return;
+    setRespondingCompromise(true);
+    void recordManagedExchangeCompromiseResponse(
+      record.id,
+      new Date().toISOString(),
+    )
+      .then(setRecord)
+      .catch((error) => {
+        whenDiagnostic(() => console.error(error));
+        setCompromiseWriteFailed(true);
+      })
+      .finally(() => setRespondingCompromise(false));
+  }
 
   // The two-outcome gate: a confirmed real partner-side failure proceeds to re-invite;
   // anything that does not add up routes to the compromise response (no quiet
@@ -730,7 +756,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
     // standing condition's gate: that channel is the one the operator flagged.
     if (compromiseResponse) return;
     if (routeConfirmationReply(outcome) === "compromise-response") {
-      setCompromiseResponse(true);
+      respondCompromise();
       return;
     }
     setConfirmationGated(true);
@@ -742,8 +768,9 @@ export function ManagedRunSurface({ id }: { id: string }) {
   // only clearance a page offers (a re-invite drops the condition in its own rotation
   // write, and deleting the exchange takes it with the record). The re-invite stays
   // offered afterwards, which is why the section holds its place rather than
-  // disappearing on the write.
-  function clearStanding() {
+  // disappearing on the write. `pastResponse` is the same act taken from under a
+  // compromise response, which the write clears along with the condition holding it.
+  function clearStanding(pastResponse: boolean) {
     if (record === undefined || clearingStanding) return;
     setClearingStanding(true);
     setClearStandingFailed(false);
@@ -751,6 +778,10 @@ export function ManagedRunSurface({ id }: { id: string }) {
       .then((updated) => {
         setRecord(updated);
         setStandingSettled(true);
+        setCompromiseWriteFailed(false);
+        // The gate is not put again to an operator who answered it and then settled
+        // it out-of-band: the live failure's recovery is the mint they can now take.
+        if (pastResponse) setConfirmationGated(true);
       })
       .catch((error) => {
         whenDiagnostic(() => console.error(error));
@@ -769,10 +800,10 @@ export function ManagedRunSurface({ id }: { id: string }) {
     // or mints on a channel the operator has already flagged.
     if (compromiseResponse) return;
     if (routeConfirmationReply(outcome) === "compromise-response") {
-      setCompromiseResponse(true);
+      respondCompromise();
       return;
     }
-    clearStanding();
+    clearStanding(false);
   }
 
   // The standing condition as the page would render it, and whether it renders at
@@ -796,7 +827,6 @@ export function ManagedRunSurface({ id }: { id: string }) {
   // its clear control: one control for the act, not two identical buttons whose
   // failed mint alerts twice.
   const failureOffersReinvite =
-    !compromiseResponse &&
     failure !== undefined &&
     (managedRunReinvites(failure) ||
       (failure.recovery === "confirm" && confirmationGated));
@@ -1102,37 +1132,52 @@ export function ManagedRunSurface({ id }: { id: string }) {
                       the disclosure, and that notice speaks for a run with no
                       completion surface to show it on. */}
                   <RunWarningsAlert warnings={runWarnings} />
-                  <FailureRecovery
-                    failure={failure}
-                    record={record}
-                    confirmationGated={confirmationGated}
-                    compromiseResponse={compromiseResponse}
-                    reinviting={reinviting}
-                    // The failed alert renders only at the site that triggered the
-                    // mint, so the recovery and the detail section do not both show it.
-                    reinviteFailed={
-                      reinviteFailed && reinviteSource === "recovery"
-                    }
-                    onReinvite={() => reinviteNow("recovery")}
-                    onResolveConfirmation={resolveConfirmation}
-                  />
+                  {/* The recovery is the whole of what a compromise response
+                      withholds: every branch of it either mints or asks a gate
+                      the operator has answered. The failure's own account of
+                      what happened stays above it. */}
+                  {!compromiseResponse && (
+                    <FailureRecovery
+                      failure={failure}
+                      record={record}
+                      confirmationGated={confirmationGated}
+                      responding={respondingCompromise}
+                      reinviting={reinviting}
+                      runInFlight={runInFlight}
+                      // The failed alert renders only at the site that triggered the
+                      // mint, so the recovery and the detail section do not both show it.
+                      reinviteFailed={
+                        reinviteFailed && reinviteSource === "recovery"
+                      }
+                      onReinvite={() => reinviteNow("recovery")}
+                      onResolveConfirmation={resolveConfirmation}
+                    />
+                  )}
                 </>
               )
             )}
-            {showStanding && (
+            {compromiseResponse && (
+              <CompromiseResponsePanel
+                unsaved={compromiseWriteFailed}
+                clearing={clearingStanding}
+                clearFailed={clearStandingFailed}
+                onAcknowledge={() => clearStanding(true)}
+              />
+            )}
+            {showStanding && !compromiseResponse && (
               <StandingConditionSection
                 record={record}
                 view={standingView}
                 settled={standingSettled}
-                showCompromiseResponse={compromiseAtStanding}
-                compromiseResponse={compromiseResponse}
                 clearing={clearingStanding}
+                responding={respondingCompromise}
                 clearFailed={clearStandingFailed}
                 reinviting={reinviting}
+                runInFlight={runInFlight}
                 reinviteFailed={reinviteFailed && reinviteSource === "recovery"}
                 reinviteOffered={failureOffersReinvite}
                 onReinvite={() => reinviteNow("recovery")}
-                onClear={clearStanding}
+                onClear={() => clearStanding(false)}
                 onResolve={resolveStanding}
               />
             )}
@@ -1213,6 +1258,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
               onReinviteToChangeTerms={() => reinviteNow("detail")}
               canReinvite={canReinviteFromRecord(record)}
               compromiseResponse={compromiseResponse}
+              runInFlight={runInFlight}
               reinviting={reinviting}
               // The failed alert renders here only when the detail section triggered
               // the mint, so it and the failure-path recovery do not both show it.
@@ -1240,17 +1286,19 @@ export function ManagedRunSurface({ id }: { id: string }) {
 
 /** The recovery affordance a classified failure offers, below its alert: fast
  * re-invite for the re-invite tiers, the out-of-band confirmation and two-outcome gate
- * for the unexplained tier, the compromise response in place of that gate once one
- * stands, and nothing extra for a retry/wait state (the run button and the input
- * picker are the recovery there). Thin over the pure model: the copy and
+ * for the unexplained tier, and nothing extra for a retry/wait state (the run button
+ * and the input picker are the recovery there). Thin over the pure model: the copy and
  * the routing are the model's; this renders the buttons. A composed re-invite renders
- * above this (the {@link ReinvitePanel}), so this never handles the minted artifacts. */
+ * above this (the {@link ReinvitePanel}), so this never handles the minted artifacts.
+ * The host renders none of this while a compromise response stands, showing the
+ * {@link CompromiseResponsePanel} in its place. */
 function FailureRecovery({
   failure,
   record,
   confirmationGated,
-  compromiseResponse,
+  responding,
   reinviting,
+  runInFlight,
   reinviteFailed,
   onReinvite,
   onResolveConfirmation,
@@ -1258,12 +1306,10 @@ function FailureRecovery({
   failure: ManagedRunFailureAlert;
   record: ManagedExchangeRecord;
   confirmationGated: boolean;
-  /** Whether a compromise response stands on this page at all -- this gate's or the
-   * standing condition's. No gate is offered and no re-invite offer renders under
-   * one, and the alert takes the unexplained tier's slot here: the standing section
-   * holds it for every other live state. */
-  compromiseResponse: boolean;
+  /** Whether the write a "does not add up" reply started is still in flight. */
+  responding: boolean;
   reinviting: boolean;
+  runInFlight: boolean;
   reinviteFailed: boolean;
   onReinvite: () => void;
   onResolveConfirmation: (
@@ -1271,17 +1317,6 @@ function FailureRecovery({
   ) => void;
 }) {
   if (failure.recovery === "confirm") {
-    // The response stands in the gate's place, this gate's own or the standing
-    // condition's: a reply that does not add up has already been given, and a later
-    // run landing on the same state does not put the question again.
-    if (compromiseResponse)
-      return (
-        <Alert color="red" title={COMPROMISE_RESPONSE_TITLE} mb="md">
-          <span style={{ whiteSpace: "pre-line" }}>
-            {COMPROMISE_RESPONSE_MESSAGE}
-          </span>
-        </Alert>
-      );
     // Past the gate on a confirmed partner-side failure, the recovery is fast
     // re-invite -- the same panel a direct re-invite tier shows (which mints for the
     // inviter and names asking the partner for the acceptor, with a retry on failure).
@@ -1290,6 +1325,7 @@ function FailureRecovery({
         <ReinviteRecovery
           record={record}
           reinviting={reinviting}
+          runInFlight={runInFlight}
           reinviteFailed={reinviteFailed}
           onReinvite={onReinvite}
         />
@@ -1297,23 +1333,84 @@ function FailureRecovery({
     return (
       <ConfirmationPanel
         record={record}
-        busy={reinviting}
+        busy={reinviting || responding}
         onResolve={onResolveConfirmation}
       />
     );
   }
 
-  if (managedRunReinvites(failure) && !compromiseResponse)
+  if (managedRunReinvites(failure))
     return (
       <ReinviteRecovery
         record={record}
         reinviting={reinviting}
+        runInFlight={runInFlight}
         reinviteFailed={reinviteFailed}
         onReinvite={onReinvite}
       />
     );
 
   return null;
+}
+
+/**
+ * The compromise response: the answer the operator gave at a failure gate, held on
+ * the record so it stands at the next visit and not this one alone. It renders
+ * wherever the page would have put a gate or an offer of a fresh invitation, since
+ * minting on the channel the operator flagged is the act the response names as the
+ * wrong one.
+ *
+ * The acknowledgement below it is the one way back to that offer from this page: the
+ * operator reached the partner on another channel and heard the failure was theirs.
+ * It clears the standing condition, and the response with it, and mints nothing --
+ * the re-invite is offered again once the write lands (a re-invite and a delete are
+ * the other two acts that clear it, and neither is reachable from here under one).
+ */
+function CompromiseResponsePanel({
+  unsaved,
+  clearing,
+  clearFailed,
+  onAcknowledge,
+}: {
+  /** Whether this device refused the write. The response holds this page either
+   * way; an unsaved one is gone at the next visit, and says so. */
+  unsaved: boolean;
+  clearing: boolean;
+  clearFailed: boolean;
+  onAcknowledge: () => void;
+}) {
+  return (
+    <>
+      <Alert color="red" title={COMPROMISE_RESPONSE_TITLE} mb="md">
+        <span style={{ whiteSpace: "pre-line" }}>
+          {COMPROMISE_RESPONSE_MESSAGE}
+        </span>
+        <p className={styles.small}>{COMPROMISE_RESPONSE_STANDS}</p>
+      </Alert>
+      {unsaved && (
+        <Alert color="yellow" title={COMPROMISE_RESPONSE_UNSAVED_TITLE} mb="md">
+          {COMPROMISE_RESPONSE_UNSAVED_REASON}
+        </Alert>
+      )}
+      <div className={styles.callout}>
+        <p className={styles.calloutLead}>{COMPROMISE_ACKNOWLEDGE_LEAD}</p>
+        <p className={styles.small}>{COMPROMISE_ACKNOWLEDGE_NOTE}</p>
+        {clearFailed && (
+          <Alert color="red" title="Could not clear this" mt="sm">
+            Nothing changed here, so this still stands. Try again.
+          </Alert>
+        )}
+        <Button
+          mt="sm"
+          variant="default"
+          loading={clearing}
+          onClick={onAcknowledge}
+        >
+          {COMPROMISE_ACKNOWLEDGE_LABEL}
+        </Button>
+      </div>
+    </>
+  );
 }
 
 /**
@@ -1324,27 +1421,27 @@ function FailureRecovery({
  * The copy and which clearance applies are the pure model's
  * ({@link managedStandingConditionView}); this renders them. The unexplained tier
  * goes through the same two-outcome gate the live Tier-2 failure uses, so a reply
- * that does not add up reaches the compromise response here exactly as it does
- * there, and clears nothing. Every other tier's explanation the record already
- * holds, so it gets the re-invite recovery and a short acknowledgement instead of
- * an attack checklist (docs/MANAGED_EXCHANGE.md, "Telling a desync from an
- * attack").
+ * that does not add up is written onto the record here exactly as it is there, and
+ * clears nothing. Every other tier's explanation the record already holds, so it
+ * gets the re-invite recovery and a short acknowledgement instead of an attack
+ * checklist (docs/MANAGED_EXCHANGE.md, "Telling a desync from an attack").
  *
  * Once cleared, the section keeps its place and shows the re-invite: settling a
  * condition is not the same act as re-establishing the secret it was raised over.
  * Where the live failure above is already offering that re-invite, the offer is
- * left to it -- one control for the act, whichever state asked for it -- and where
- * either gate has routed to the compromise response, no offer renders here at all.
+ * left to it -- one control for the act, whichever state asked for it. The host
+ * renders none of this while a compromise response stands, showing the
+ * {@link CompromiseResponsePanel} in its place.
  */
 function StandingConditionSection({
   record,
   view,
   settled,
-  showCompromiseResponse,
-  compromiseResponse,
   clearing,
+  responding,
   clearFailed,
   reinviting,
+  runInFlight,
   reinviteFailed,
   reinviteOffered,
   onReinvite,
@@ -1356,16 +1453,12 @@ function StandingConditionSection({
   view: ManagedStandingConditionView | undefined;
   /** Whether the operator has cleared the condition on this visit. */
   settled: boolean;
-  /** Whether this section holds the compromise response's alert: it renders in the
-   * live failure's place instead while that gate's own state is on screen, so the
-   * two sites never show it at once. */
-  showCompromiseResponse: boolean;
-  /** Whether a compromise response stands on this page at all -- this gate's or the
-   * live failure's. No gate and no re-invite offer renders under one. */
-  compromiseResponse: boolean;
   clearing: boolean;
+  /** Whether the write a "does not add up" reply started is still in flight. */
+  responding: boolean;
   clearFailed: boolean;
   reinviting: boolean;
+  runInFlight: boolean;
   reinviteFailed: boolean;
   /** Whether the live failure above is already offering the re-invite. It mints
    * from the same record, so this section shows its status and its clearance
@@ -1375,7 +1468,7 @@ function StandingConditionSection({
   onClear: () => void;
   onResolve: (outcome: Parameters<typeof routeConfirmationReply>[0]) => void;
 }) {
-  const offersReinvite = !reinviteOffered && !compromiseResponse;
+  const offersReinvite = !reinviteOffered;
   // The same alert on both legs: the confirming option and the acknowledge control
   // take the same store write, and a rejected one leaves the condition standing.
   const clearFailure = clearFailed ? (
@@ -1383,19 +1476,12 @@ function StandingConditionSection({
       Nothing changed here, so this still stands. Try again.
     </Alert>
   ) : null;
-  if (showCompromiseResponse)
-    return (
-      <Alert color="red" title={COMPROMISE_RESPONSE_TITLE} mb="md">
-        <span style={{ whiteSpace: "pre-line" }}>
-          {COMPROMISE_RESPONSE_MESSAGE}
-        </span>
-      </Alert>
-    );
   if (settled)
     return offersReinvite ? (
       <ReinviteRecovery
         record={record}
         reinviting={reinviting}
+        runInFlight={runInFlight}
         reinviteFailed={reinviteFailed}
         onReinvite={onReinvite}
       />
@@ -1414,7 +1500,7 @@ function StandingConditionSection({
         <>
           <ConfirmationPanel
             record={record}
-            busy={clearing}
+            busy={clearing || responding}
             onResolve={onResolve}
           />
           {clearFailure}
@@ -1425,6 +1511,7 @@ function StandingConditionSection({
             <ReinviteRecovery
               record={record}
               reinviting={reinviting}
+              runInFlight={runInFlight}
               reinviteFailed={reinviteFailed}
               onReinvite={onReinvite}
             />
@@ -1454,11 +1541,16 @@ function StandingConditionSection({
 function ReinviteRecovery({
   record,
   reinviting,
+  runInFlight,
   reinviteFailed,
   onReinvite,
 }: {
   record: ManagedExchangeRecord;
   reinviting: boolean;
+  /** Whether a run of this exchange is under way anywhere this browser profile
+   * can see. The mint replaces the secret that run is connecting on, so the
+   * control waits it out with the reason beside it. */
+  runInFlight: boolean;
   reinviteFailed: boolean;
   onReinvite: () => void;
 }) {
@@ -1482,9 +1574,17 @@ function ReinviteRecovery({
               Nothing changed here; try again.
             </Alert>
           )}
-          <Button mt="sm" onClick={onReinvite} loading={reinviting}>
+          <Button
+            mt="sm"
+            onClick={onReinvite}
+            loading={reinviting}
+            disabled={runInFlight}
+          >
             Create a fresh invitation
           </Button>
+          {runInFlight && (
+            <p className={styles.small}>{REINVITE_RUN_IN_FLIGHT_REASON}</p>
+          )}
         </>
       )}
     </div>

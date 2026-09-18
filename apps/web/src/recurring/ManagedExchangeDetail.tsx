@@ -87,6 +87,10 @@ import {
   projectedResultSizeWarning,
 } from "./parkedResultsModel";
 import {
+  REINVITE_COMPROMISE_REASON,
+  REINVITE_RUN_IN_FLIGHT_REASON,
+} from "./managedReinviteGate";
+import {
   REPEATED_MISS_TITLE,
   UNCHANGED_INPUT_TITLE,
 } from "./scheduleSurfacingModel";
@@ -141,6 +145,7 @@ export function ManagedExchangeDetail({
   onReinviteToChangeTerms,
   canReinvite,
   compromiseResponse,
+  runInFlight,
   reinviting,
   reinviteFailed,
 }: {
@@ -208,10 +213,15 @@ export function ManagedExchangeDetail({
   /** Whether this party can mint a re-invite (inviter-only); drives the terms
    * re-invite affordance's copy. */
   canReinvite: boolean;
-  /** Whether the operator has answered a failure gate "something does not add up"
-   * on this visit (see {@link ./ManagedRunSurface.tsx}). The terms re-invite is
-   * withheld under one: it mints a fresh secret on the channel they flagged. */
+  /** Whether a compromise response stands on this exchange's record -- the
+   * operator answered a failure gate "something does not add up" (see
+   * {@link ./ManagedRunSurface.tsx}). The terms re-invite is withheld under one: it
+   * mints a fresh secret on the channel they flagged. */
   compromiseResponse: boolean;
+  /** Whether a run of this exchange is under way anywhere this browser profile can
+   * see. The terms re-invite waits it out: the mint replaces the secret the run is
+   * connecting on. */
+  runInFlight: boolean;
   /** Whether a re-invite is in flight, so the terms button shows loading. Shared
    * with the run surface's own re-invite state (see {@link ./ManagedRunSurface.tsx}),
    * so an in-flight re-invite displays the same on a healthy exchange as on a failed one. */
@@ -244,6 +254,7 @@ export function ManagedExchangeDetail({
         onReinviteToChangeTerms={onReinviteToChangeTerms}
         canReinvite={canReinvite}
         compromiseResponse={compromiseResponse}
+        runInFlight={runInFlight}
         reinviting={reinviting}
         reinviteFailed={reinviteFailed}
       />
@@ -322,14 +333,17 @@ function ConfigRowItem({ row }: { row: ConfigRow }) {
  * with a new secret on the SAME terms: the inviter mints a fresh invitation; the
  * acceptor is told the terms cannot change by re-invite, and that different
  * terms mean a new exchange from the partner. It is withheld while a compromise
- * response stands, which is the one state where minting would put a fresh secret
- * on a channel the operator has flagged.
+ * response stands -- minting would put a fresh secret on a channel the operator
+ * has flagged -- and while a run is in flight, whose secret the mint replaces
+ * ({@link ./managedReinviteGate.ts} holds both reasons, shared with the failure
+ * recovery's own control).
  */
 function ConfigurationView({
   record,
   onReinviteToChangeTerms,
   canReinvite,
   compromiseResponse,
+  runInFlight,
   reinviting,
   reinviteFailed,
 }: {
@@ -337,6 +351,7 @@ function ConfigurationView({
   onReinviteToChangeTerms: () => void;
   canReinvite: boolean;
   compromiseResponse: boolean;
+  runInFlight: boolean;
   reinviting: boolean;
   reinviteFailed: boolean;
 }) {
@@ -375,16 +390,16 @@ function ConfigurationView({
             variant="default"
             onClick={onReinviteToChangeTerms}
             loading={reinviting}
-            disabled={compromiseResponse}
+            disabled={compromiseResponse || runInFlight}
           >
             Re-invite with the same terms
           </Button>
-          {compromiseResponse && (
-            <p className={styles.small}>
-              You answered that something does not add up, so no fresh
-              invitation is offered on this channel. Reach your partner on a
-              different trusted channel first.
-            </p>
+          {compromiseResponse ? (
+            <p className={styles.small}>{REINVITE_COMPROMISE_REASON}</p>
+          ) : (
+            runInFlight && (
+              <p className={styles.small}>{REINVITE_RUN_IN_FLIGHT_REASON}</p>
+            )
           )}
         </>
       ) : (
