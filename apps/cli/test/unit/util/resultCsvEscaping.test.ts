@@ -130,10 +130,14 @@ async function stdoutBranchBytes(
   const chunks: string[] = [];
   const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(((
     chunk: string | Uint8Array,
+    flushed?: () => void,
   ): boolean => {
     chunks.push(
       typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"),
     );
+    // A real Writable invokes the per-chunk callback once that chunk is
+    // flushed, and writeOutput's stdout drain waits on the last line's.
+    flushed?.();
     return true;
   }) as typeof process.stdout.write);
   try {

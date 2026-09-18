@@ -505,7 +505,12 @@ condition holds.
 | Sentinel hand-off | 2 s | Getting the close sentinel itself onto the wire |
 | Channel close | 2 s | The data channel's own close completing on a clean close -- the peer answering the stream reset. A partner that goes during the teardown spends it whole, ICE being slower than this to call the link dead; reaching it closes the session anyway |
 | ICE statistics | 2 s | Collecting the candidate report a failure or an open channel is described by; expiring costs the description, not the outcome |
+| Transport teardown | 6 min | The whole close of this transport at the run's own teardown point, above the sum of the close drain, sentinel hand-off, channel close and ICE statistics budgets in this table |
 | Signaling certificate check | 5 s | The handshake that answers whether a `wss://` socket that failed before registering failed on its certificate; a socket that drops after registering is not asked about, having completed that handshake already, and neither is one on a run configured for an environment proxy, whose dial the handshake does not follow |
+
+The teardown ceiling is the run's, not this transport's: it is applied at the channel-independent point where a run closes what it opened, and every channel declares a value there above its own teardown budgets (the file-based channels' is in [FILE_SYNC.md](FILE_SYNC.md)). Reaching it stops the wait, states the elapsed time and the resource kinds still holding the process on stderr and as a `transportTeardown` warning on the event stream, and changes no exit code ([CLI_EVENTS.md](CLI_EVENTS.md#warning-sources)). Nothing local is inside it: the result, the exchange record and the receipt are written and awaited before cleanup begins, each with no budget at all.
+
+Once the run's own work and its teardown are finished, the process returns within **3 s**. A clean event loop exits at once and says nothing -- measured from the command settling to natural exit, a completed two-party `filedrop` exchange drained in 0-1 ms across ten party-runs -- and a loop still held at the budget names the resource kinds still armed on stderr and exits with the status the run already resolved. The handle that held it is not released or swept: a run that reports what held it is how the next one is found.
 
 `connection.options.peer_timeout_ms`, when set, replaces the rendezvous,
 channel-open, and parked-receive budgets: on this channel the documented "total

@@ -89,6 +89,54 @@ function stdoutIsRedirectedFile(): boolean {
 }
 
 /**
+ * How long the stdout result waits to be flushed before the run gives up on
+ * the reader and carries on. A pipe's consumer sets the pace, so the drain
+ * is normally as long as that consumer takes to read a few hundred kilobytes;
+ * this bounds the other case, a consumer that has stopped reading altogether
+ * and would otherwise hold a finished run open with no one left to receive
+ * what it is holding.
+ */
+export const STDOUT_RESULT_DRAIN_CEILING_MS = 60_000;
+
+/**
+ * Write the result CSV to stdout and resolve once the last line has left the
+ * process, or at {@link STDOUT_RESULT_DRAIN_CEILING_MS}.
+ *
+ * The drain waits on the LAST LINE's own write callback. A zero-length chunk
+ * written after the rows is not equivalent: measured against a reader taking
+ * 50,000 lines in 5 ms bursts, its callback fires with the stream's queue
+ * already empty while the real write is still in flight, and an exit taken on
+ * it truncated the result (45,582 of 50,000 lines), where the last line's
+ * callback delivered all 50,000.
+ */
+function writeResultToStdout(
+  headers: string[],
+  rows: Array<Array<string>>,
+): Promise<void> {
+  return new Promise<void>((resolve) => {
+    let settled = false;
+    const flushed = (): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(ceiling);
+      resolve();
+    };
+    const ceiling = setTimeout(flushed, STDOUT_RESULT_DRAIN_CEILING_MS);
+    const lastRow = rows.length - 1;
+    process.stdout.write(
+      headers.join(",") + "\n",
+      rows.length === 0 ? flushed : undefined,
+    );
+    rows.forEach((row, index) => {
+      process.stdout.write(
+        row.join(",") + "\n",
+        index === lastRow ? flushed : undefined,
+      );
+    });
+  });
+}
+
+/**
  * Write formatted exchange results to a file or stdout as CSV, resolving once
  * the write is complete. When given an output path, the result CSV -- the
  * most sensitive artifact the tool produces -- is created owner-only (see
@@ -113,7 +161,15 @@ function stdoutIsRedirectedFile(): boolean {
  * result CSV as written.
  *
  * The stdout branch (no path given) writes to `process.stdout` and resolves
- * immediately. Before it writes, it checks whether stdout is a redirected
+ * once the last line has been flushed to the descriptor, or after
+ * {@link STDOUT_RESULT_DRAIN_CEILING_MS} if the reader has stopped consuming.
+ * A write to a pipe is buffered, so resolving before the flush would hand the
+ * caller a result that is only partly out of the process, and the run's exit
+ * would truncate it. The drain is bounded rather than unbounded because a
+ * reader that never reads again would otherwise hold the run forever; what is
+ * past the bound is lost, as a `>`-redirected result on a full disk already is.
+ *
+ * Before it writes, it checks whether stdout is a redirected
  * regular file ({@link stdoutIsRedirectedFile}) and, if so, notifies the
  * operator on `log` at ERROR level (not warn, since a routine
  * `--log-level error` must not hide an operator-actionable data exposure): a
@@ -140,9 +196,7 @@ export function writeOutput(
           "redirecting stdout with `>` to have psilink create the result " +
           "owner-only.",
       );
-    process.stdout.write(headers.join(",") + "\n");
-    for (const row of rows) process.stdout.write(row.join(",") + "\n");
-    return Promise.resolve();
+    return writeResultToStdout(headers, rows);
   }
   return new Promise<void>((resolve, reject) => {
     // createOwnerOnlyWriteStream is inside the executor so a synchronous failure

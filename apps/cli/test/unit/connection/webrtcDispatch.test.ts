@@ -407,6 +407,32 @@ test.each(POLICY_LINES)(
   },
 );
 
+/**
+ * Trap the signal handler's `process.exit` and hand back a promise that
+ * settles when it fires.
+ *
+ * The handler's cleanup is not awaited by the run it interrupts -- the run's
+ * own cleanup returns at the once-only guard the moment either caller enters
+ * it -- so the handler's exit lands on its own schedule, after `runProtocol`
+ * has resolved. A case that restored the spy on that resolution alone would
+ * leave the exit to reach the runner's real `process.exit` and report as an
+ * unhandled rejection, at whatever tick the teardown happens to take.
+ */
+function captureSignalExit(): {
+  exit: ReturnType<typeof vi.spyOn>;
+  exited: Promise<void>;
+} {
+  let fired: () => void = () => {};
+  const exited = new Promise<void>((resolve) => {
+    fired = resolve;
+  });
+  const exit = vi.spyOn(process, "exit").mockImplementation((() => {
+    fired();
+    return undefined;
+  }) as never);
+  return { exit, exited };
+}
+
 test("a signal during the rendezvous closes the channel it opened", async () => {
   // The interrupt handler's cleanup runs while the dial is still in flight, so
   // it finds no transport to close. Whatever the dial then returns would be left
@@ -427,9 +453,7 @@ test("a signal during the rendezvous closes the channel it opened", async () => 
   });
   // The signal handler exits the process on a real run; here it must return so
   // the run under test can finish.
-  const exit = vi
-    .spyOn(process, "exit")
-    .mockImplementation((() => undefined) as never);
+  const { exit, exited } = captureSignalExit();
   try {
     await runProtocol({
       connection: webrtcConnection("inviter"),
@@ -439,6 +463,7 @@ test("a signal during the rendezvous closes the channel it opened", async () => 
       verbosity: -1,
       loggerName: "test",
     });
+    await exited;
   } finally {
     exit.mockRestore();
   }
@@ -484,9 +509,7 @@ test("a signal cancels a rendezvous that is still in flight", async () => {
       return await cancelled;
     },
   );
-  const exit = vi
-    .spyOn(process, "exit")
-    .mockImplementation((() => undefined) as never);
+  const { exit, exited } = captureSignalExit();
   try {
     await runProtocol({
       connection: webrtcConnection("inviter"),
@@ -496,6 +519,7 @@ test("a signal cancels a rendezvous that is still in flight", async () => {
       verbosity: -1,
       loggerName: "test",
     });
+    await exited;
   } finally {
     exit.mockRestore();
   }

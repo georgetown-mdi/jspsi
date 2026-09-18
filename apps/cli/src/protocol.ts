@@ -62,6 +62,12 @@ import {
 import { createPsiEngine } from "./psiWorkerHost";
 import { writeExchangeRecord, type RecordOutput } from "./recordFile";
 import { writeDualSignedRecord, type ReceiptOutput } from "./receiptFile";
+import {
+  closeWithinCeiling,
+  teardownCeilingNotice,
+  transportTeardownCeilingMs,
+  type TeardownOutcome,
+} from "./transportTeardown";
 import { writeOutput } from "./util/dataIo";
 import { runBeforeEachLogLine } from "./util/logging";
 import { logRuntimeEnv } from "./util/runtimeEnv";
@@ -1212,13 +1218,21 @@ interface RunLifecycle {
  * Reads the {@link RunLifecycle} itself rather than a copy of its flags, so an
  * open that completes while an earlier layer's close is still being awaited
  * counts as opened for the layers below it.
+ *
+ * The three layer closes share one ceiling, `ceilingMs`: they are one
+ * obligation, the transport's, and this is the channel-independent point at
+ * which a finished run stops waiting on it (see
+ * {@link transportTeardownCeilingMs}). Nothing local is inside it -- the
+ * result, the record and the receipt are already on disk by the time cleanup
+ * runs -- so reaching the ceiling costs the close, never an artifact.
  */
 async function closeRunLayers(params: {
   build: PreparedTransport;
   run: RunLifecycle;
   log: ReturnType<typeof getLogger>;
-}): Promise<void> {
-  const { build, run, log } = params;
+  ceilingMs: number;
+}): Promise<TeardownOutcome> {
+  const { build, run, log, ceilingMs } = params;
   // Seal the abort decision before the first layer-close drives the real
   // conn.close() cascade (secure.close() -> mc.close() -> conn.close()):
   // on the clean-completion, signal, and echo paths no writeAbortMarker()
@@ -1230,51 +1244,59 @@ async function closeRunLayers(params: {
   build.fileSync?.sealAbort();
   if (run.started) log.info("stopping polling");
   if (run.opened) log.info("closing connection");
-  // When the AEAD decorator was built (encryption negotiated), close it:
-  // its close() delegates to mc.close(), detaching the bridge's
-  // data/error listeners and closing the underlying FileSyncConnection.
-  // `secure` is undefined on the no-auth path, when applyEncryption was
-  // negotiated false, and in the window where a signal arrived between
-  // authenticateConnection returning and create resolving -- in each case
-  // mc.close() below closes the transport directly. All idempotent.
-  if (run.secure !== undefined) {
-    await run.secure.close().catch((err: unknown) => {
-      log.debug("secure.close() during cleanup:", sanitizeErrorForDisplay(err));
-    });
-  }
-  // Closing the transport detaches the file-sync bridge's data/error
-  // listeners and closes the underlying FileSyncConnection -- stopping
-  // the poller, sweeping the responsible files, and ending the client --
-  // or, on webrtc, flushes the outbound queue and tears the data channel,
-  // peer connection and broker socket down. All idempotent, so this is
-  // safe even when open() never ran. Undefined only when the webrtc
-  // rendezvous never produced a connection.
-  await build.transport?.close().catch((err: unknown) => {
-    log.debug("transport close during cleanup:", sanitizeErrorForDisplay(err));
-  });
-  // If an earlier transport failure already terminated the bridge, its
-  // close() returns immediately without re-closing fileSync (that earlier
-  // close was fire-and-forget, hence unawaited). Close fileSync directly
-  // to guarantee the poller is stopped, the responsible files are swept,
-  // and the client is ended before doCleanup returns. Idempotent, so in
-  // the normal path this is a near no-op after the bridge already closed
-  // it.
-  await build.fileSync?.close().catch((err: unknown) => {
-    // When the connection was open, a close failure is user-visible: the
-    // transport may not have terminated cleanly (e.g. SSH session timeout).
-    // close() is idempotent and does not throw on an unopened instance, so
-    // the else branch is only a defensive fallback for an unexpected error.
-    if (run.opened) {
-      log.warn(
-        "failed to close connection during cleanup:",
-        sanitizeErrorForDisplay(err),
-      );
-    } else {
-      log.debug(
-        "fileSync.close() during cleanup:",
-        sanitizeErrorForDisplay(err),
-      );
+  return closeWithinCeiling(ceilingMs, async () => {
+    // When the AEAD decorator was built (encryption negotiated), close it:
+    // its close() delegates to mc.close(), detaching the bridge's
+    // data/error listeners and closing the underlying FileSyncConnection.
+    // `secure` is undefined on the no-auth path, when applyEncryption was
+    // negotiated false, and in the window where a signal arrived between
+    // authenticateConnection returning and create resolving -- in each case
+    // mc.close() below closes the transport directly. All idempotent.
+    if (run.secure !== undefined) {
+      await run.secure.close().catch((err: unknown) => {
+        log.debug(
+          "secure.close() during cleanup:",
+          sanitizeErrorForDisplay(err),
+        );
+      });
     }
+    // Closing the transport detaches the file-sync bridge's data/error
+    // listeners and closes the underlying FileSyncConnection -- stopping
+    // the poller, sweeping the responsible files, and ending the client --
+    // or, on webrtc, flushes the outbound queue and tears the data channel,
+    // peer connection and broker socket down. All idempotent, so this is
+    // safe even when open() never ran. Undefined only when the webrtc
+    // rendezvous never produced a connection.
+    await build.transport?.close().catch((err: unknown) => {
+      log.debug(
+        "transport close during cleanup:",
+        sanitizeErrorForDisplay(err),
+      );
+    });
+    // If an earlier transport failure already terminated the bridge, its
+    // close() returns immediately without re-closing fileSync (that earlier
+    // close was fire-and-forget, hence unawaited). Close fileSync directly
+    // to guarantee the poller is stopped, the responsible files are swept,
+    // and the client is ended before doCleanup returns. Idempotent, so in
+    // the normal path this is a near no-op after the bridge already closed
+    // it.
+    await build.fileSync?.close().catch((err: unknown) => {
+      // When the connection was open, a close failure is user-visible: the
+      // transport may not have terminated cleanly (e.g. SSH session timeout).
+      // close() is idempotent and does not throw on an unopened instance, so
+      // the else branch is only a defensive fallback for an unexpected error.
+      if (run.opened) {
+        log.warn(
+          "failed to close connection during cleanup:",
+          sanitizeErrorForDisplay(err),
+        );
+      } else {
+        log.debug(
+          "fileSync.close() during cleanup:",
+          sanitizeErrorForDisplay(err),
+        );
+      }
+    });
   });
 }
 
@@ -2046,7 +2068,23 @@ export async function runProtocol(
     if (cleaned) return;
     cleaned = true;
     psiProgress.close();
-    await closeRunLayers({ build, run, log });
+    const teardown = await closeRunLayers({
+      build,
+      run,
+      log,
+      ceilingMs: transportTeardownCeilingMs(connection.channel),
+    });
+    // The one bounded obligation reached its bound. Reported on both machine
+    // channels the run has -- the operator log and the event stream -- and
+    // before the terminal event, which is why cleanup runs ahead of the
+    // emission sites rather than in the finally alone. It changes no exit
+    // code: the teardown is housekeeping, and a supervisor that saw the
+    // status move would retry a run that already disclosed.
+    if (!teardown.finished) {
+      const notice = teardownCeilingNotice(teardown);
+      log.warn(notice);
+      emit((e) => e.warning("transportTeardown", notice));
+    }
     logTransportCounters(build.client, log);
     process.off("SIGINT", onSigint);
     process.off("SIGTERM", onSigterm);
@@ -2275,6 +2313,12 @@ export async function runProtocol(
     // entity-cluster summary the output stage logged above rides it on that
     // same footing.
     // The metrics summary precedes it so the terminal event stays last.
+    //
+    // Cleanup is awaited first, so the terminal event states a run that owes
+    // nothing further: every local artifact is on disk above, and the
+    // transport is closed or has reached its ceiling and said so on this
+    // stream. The finally below re-enters doCleanup and returns at its guard.
+    await doCleanup();
     emitMetrics();
     emit((e) =>
       e.result(
@@ -2551,6 +2595,11 @@ export async function runProtocol(
     // per run, so this is the only error emission and it precedes the rethrow.
     // The metrics summary (with whatever counts the run accrued before the fault)
     // precedes it so the terminal event stays last on the stream.
+    //
+    // Cleanup is awaited first, as on the success path above and after the
+    // abort marker this catch may have written, so a teardown that reaches
+    // its ceiling states that on the stream before the outcome does.
+    await doCleanup();
     emitMetrics();
     emit((e) => e.error(err, terminalPhase));
     // The error is rethrown holding whatever exit code its own thrower

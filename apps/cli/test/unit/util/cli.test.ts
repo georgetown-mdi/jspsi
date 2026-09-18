@@ -837,10 +837,15 @@ async function runStdoutBranch(kind: keyof typeof STDOUT_KINDS): Promise<{
   const chunks: string[] = [];
   const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(((
     chunk: string | Uint8Array,
+    flushed?: () => void,
   ): boolean => {
     chunks.push(
       typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"),
     );
+    // A real Writable invokes the per-chunk callback once that chunk is
+    // flushed, and writeOutput's stdout drain waits on the last line's. A stub
+    // that swallowed it would hold the drain for its whole ceiling.
+    flushed?.();
     return true;
   }) as typeof process.stdout.write);
   // Force only fd 1's stat; a real Stats with the kind's predicate set avoids
@@ -868,6 +873,45 @@ async function runStdoutBranch(kind: keyof typeof STDOUT_KINDS): Promise<{
   }
   return { stdout: chunks.join(""), errors: log.errors, warns: log.warns };
 }
+
+test("writeOutput: the stdout branch waits for the last line to be flushed", async () => {
+  // The result is handed to a pipe, so the run must not report it written while
+  // it is still buffered: the exit that follows would truncate it. The stub
+  // holds every chunk's callback, and the returned promise must stay pending
+  // until the last one is invoked.
+  const held: Array<() => void> = [];
+  const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(((
+    _chunk: string | Uint8Array,
+    flushed?: () => void,
+  ): boolean => {
+    if (flushed !== undefined) held.push(flushed);
+    return true;
+  }) as typeof process.stdout.write);
+  try {
+    let settled = false;
+    const writing = writeOutput(
+      undefined,
+      ["a", "b"],
+      [
+        ["1", "2"],
+        ["3", "4"],
+      ],
+      logCollector(),
+    ).then(() => {
+      settled = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(settled).toBe(false);
+    // Only the last line carries a callback: it is the one whose flush states
+    // that every line before it has left the process.
+    expect(held).toHaveLength(1);
+    held[0]();
+    await writing;
+    expect(settled).toBe(true);
+  } finally {
+    stdoutSpy.mockRestore();
+  }
+});
 
 test("writeOutput: a redirected regular-file stdout warns at error level about umask exposure", async () => {
   // `psilink exchange data.csv > results.csv`: fd 1 is a regular file the shell
@@ -908,8 +952,10 @@ test("writeOutput: a stat failure on fd 1 suppresses the warning rather than thr
   const chunks: string[] = [];
   const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(((
     chunk: string | Uint8Array,
+    flushed?: () => void,
   ): boolean => {
     chunks.push(String(chunk));
+    flushed?.();
     return true;
   }) as typeof process.stdout.write);
   const realFstat = fs.fstatSync.bind(fs);
