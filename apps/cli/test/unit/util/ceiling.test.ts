@@ -44,10 +44,11 @@ test("work that rejects inside the ceiling raises rather than reporting finished
 });
 
 test("work that throws before it returns a promise raises the same way", async () => {
-  // The shape a teardown takes: an async function whose first statement calls
-  // a close that throws synchronously, outside any catch of its own.
+  // The shape a teardown takes: a close that throws on the way in, outside any
+  // catch of its own, so the race is handed a throw rather than a rejected
+  // promise. Written without `async`, which would turn the throw into one.
   await expect(
-    settleWithinCeiling(5_000, async () => {
+    settleWithinCeiling(5_000, (): Promise<void> => {
       throw new Error("close() threw before it awaited anything");
     }),
   ).rejects.toThrow("close() threw before it awaited anything");

@@ -54,9 +54,10 @@ test("a close that throws raises past the ceiling rather than reporting finished
   // Each layer close catches its own failure, so a throw reaching the ceiling
   // came from outside all of them -- a close that threw before its own catch
   // was attached -- and the run's cleanup has to see it rather than read the
-  // teardown as done.
+  // teardown as done. Written without `async`, so what is measured is the
+  // throw itself rather than a rejected promise.
   await expect(
-    closeWithinCeiling(60_000, async () => {
+    closeWithinCeiling(60_000, (): Promise<void> => {
       throw new Error("the session was already gone");
     }),
   ).rejects.toThrow("the session was already gone");
@@ -105,4 +106,15 @@ test("the expiry notice states the wait, what held it, and that the status stand
   expect(notice).toContain("within 180s");
   expect(notice).toContain("still held by: TCPSocketWrap");
   expect(notice).toContain("exit status are unchanged");
+});
+
+test("the expiry notice points at the files the abandoned close would have removed", () => {
+  const notice = teardownCeilingNotice({
+    finished: false,
+    elapsedMs: 180_000,
+    heldBy: ["FSReqCallback"],
+  });
+  expect(notice).toContain("file-drop or SFTP exchange");
+  expect(notice).toContain("check the exchange directory");
+  expect(notice).toContain("remove any protocol files this run left there");
 });

@@ -81,6 +81,12 @@ export async function closeWithinCeiling(
  * long it waited and which resource kinds were still armed. The exit status is
  * the exchange's own outcome either way, which the second sentence says so an
  * unattended supervisor does not read the notice as a failure to retry.
+ *
+ * The third sentence names the one thing the abandoned close leaves for the
+ * operator. On the file channels that close is what removes this party's own
+ * protocol files from the shared directory (docs/spec/FILE_SYNC.md,
+ * `responsibleFiles`), so an expired teardown can leave them there; the notice
+ * does not know the channel, so it names the two channels it applies to.
  */
 export function teardownCeilingNotice(outcome: TeardownOutcome): string {
   const held =
@@ -91,6 +97,9 @@ export function teardownCeilingNotice(outcome: TeardownOutcome): string {
     `the transport did not finish closing within ` +
     `${Math.round(outcome.elapsedMs / 1000)}s, so this run stopped waiting ` +
     `on it; still held by: ${held}. The exchange's own outcome and exit ` +
-    `status are unchanged, and everything it writes is already on disk.`
+    `status are unchanged, and everything it writes is already on disk. On a ` +
+    `file-drop or SFTP exchange, check the exchange directory and remove any ` +
+    `protocol files this run left there; deleting them is the part of the ` +
+    `close that did not finish.`
   );
 }

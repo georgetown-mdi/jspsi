@@ -5115,6 +5115,49 @@ test("a main-try failure under --event-stream emits exactly one terminal error e
   expect(lines[1].v).toBe(1);
 }, 20_000);
 
+test("a close that throws during an organic failure still emits the terminal error event", async () => {
+  // A layer close that throws OUTSIDE its own catch -- synchronously, before
+  // it returns a promise at all -- propagates out of the cleanup the failure
+  // path awaits before it emits. Unguarded, it would take the place of the
+  // fault that ended the run and leave the run's one classified error event
+  // unsent (docs/spec/CLI_EVENTS.md, Terminal-event guarantees).
+  const realClose = FileSyncConnection.prototype.close;
+  FileSyncConnection.prototype.close = function (): Promise<void> {
+    throw new Error("close() threw before it returned a promise");
+  };
+  mockFd3Open();
+  let failure: unknown;
+  try {
+    failure = await runProtocol({
+      connection: {
+        channel: "filedrop",
+        path: "/nonexistent-path-that-cannot-exist-psilink-test",
+      },
+      auth: null,
+      prepared: minimalPrepared,
+      output: undefined,
+      verbosity: -1,
+      loggerName: "test",
+      fileSyncRuntime: { eventStream: true },
+    }).then(
+      () => undefined,
+      (err: unknown) => err,
+    );
+  } finally {
+    FileSyncConnection.prototype.close = realClose;
+    vi.mocked(fs.fstatSync).mockRestore();
+  }
+
+  // What propagates is the fault the run failed on, not the cleanup's throw.
+  expect(failure).toBeInstanceOf(Error);
+  expect((failure as Error).message).not.toContain("returned a promise");
+
+  const lines = takeFd3Lines();
+  expect(lines.map((line) => line.type)).toEqual(["metrics", "error"]);
+  expect(lines[1].category).toBe("exchange");
+  expect(String(lines[1].message)).not.toContain("returned a promise");
+}, 20_000);
+
 test("a count-only run's terminal event includes the count beside resultWritten:false", async () => {
   // The outcome a supervisor reading only fd 3 would otherwise misreport: a
   // count-only run writes no result file, so its terminal event has the same

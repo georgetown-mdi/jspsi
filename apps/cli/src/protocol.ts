@@ -2627,8 +2627,18 @@ export async function runProtocol(
     //
     // Cleanup is awaited first, as on the success path above and after the
     // abort marker this catch may have written, so a teardown that reaches
-    // its ceiling states that on the stream before the outcome does.
-    await doCleanup();
+    // its ceiling states that on the stream before the outcome does. A close
+    // that throws past its own per-layer catch is logged at debug, as the
+    // interrupt paths do, rather than propagating: it must not displace the
+    // original fault nor skip the terminal event this path owes.
+    try {
+      await doCleanup();
+    } catch (cleanupErr: unknown) {
+      log.debug(
+        "cleanup threw during failure:",
+        sanitizeErrorForDisplay(cleanupErr),
+      );
+    }
     emitMetrics();
     emit((e) => e.error(err, terminalPhase));
     // The error is rethrown holding whatever exit code its own thrower
