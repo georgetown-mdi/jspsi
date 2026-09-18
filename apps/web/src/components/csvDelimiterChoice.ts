@@ -16,7 +16,8 @@ import {
  */
 
 /** The select value standing for no chosen delimiter: the read detects one from the
- * file, among the four the parser considers. */
+ * file, among the six the parser considers: the four {@link CSV_DELIMITER_OPTIONS}
+ * names, plus the ASCII record and unit separators. */
 export const CSV_DELIMITER_AUTO = "auto";
 
 /** The select value revealing the free-text field, for a delimiter outside the
@@ -24,8 +25,8 @@ export const CSV_DELIMITER_AUTO = "auto";
 export const CSV_DELIMITER_OTHER = "other";
 
 /** One entry of the delimiter select: the value it stores and the label it shows.
- * The named characters are the four the detection considers, so the option list and
- * {@link CSV_DELIMITER_AUTO}'s own label name the same set. */
+ * The named characters are the four common ones; detection reaches past them, which
+ * is what {@link CSV_DELIMITER_AUTO}'s own label states. */
 export interface CsvDelimiterOption {
   value: string;
   label: string;
@@ -33,7 +34,10 @@ export interface CsvDelimiterOption {
 
 /** The delimiter select's options, in the order they are offered. */
 export const CSV_DELIMITER_OPTIONS: ReadonlyArray<CsvDelimiterOption> = [
-  { value: CSV_DELIMITER_AUTO, label: "Detect (comma, tab, pipe, semicolon)" },
+  {
+    value: CSV_DELIMITER_AUTO,
+    label: "Detect (comma, tab, pipe, semicolon, and others)",
+  },
   { value: ",", label: "Comma" },
   { value: "\t", label: "Tab" },
   { value: "|", label: "Pipe" },
@@ -81,22 +85,4 @@ export function resolveCsvDelimiter(
   return isCsvDelimiter(resolved)
     ? { ok: true, delimiter: resolved }
     : { ok: false, refusal: csvDelimiterRefusal(choice.other) };
-}
-
-/**
- * The choice that shows `delimiter`: a named option where one holds that
- * character, {@link CSV_DELIMITER_OTHER} holding it otherwise, and detection for an
- * absent one. Restores a stored delimiter (a managed record's) onto the surface
- * that offers it.
- */
-export function csvDelimiterChoiceFor(
-  delimiter: string | undefined,
-): CsvDelimiterChoice {
-  if (delimiter === undefined) return DETECTED_CSV_DELIMITER_CHOICE;
-  const named = CSV_DELIMITER_OPTIONS.find(
-    (option) => option.value === delimiter,
-  );
-  return named !== undefined
-    ? { option: named.value, other: "" }
-    : { option: CSV_DELIMITER_OTHER, other: delimiter };
 }

@@ -6,7 +6,6 @@ import {
   CSV_DELIMITER_AUTO,
   CSV_DELIMITER_OPTIONS,
   CSV_DELIMITER_OTHER,
-  csvDelimiterChoiceFor,
   resolveCsvDelimiter,
 } from "@components/csvDelimiterChoice";
 
@@ -35,7 +34,7 @@ describe("resolving the delimiter choice", () => {
     }
   });
 
-  test("the four named characters are the ones detection considers", () => {
+  test("the named options are the four common characters", () => {
     const named = CSV_DELIMITER_OPTIONS.map((option) => option.value).filter(
       (value) => value !== CSV_DELIMITER_AUTO && value !== CSV_DELIMITER_OTHER,
     );
@@ -68,29 +67,5 @@ describe("resolving the delimiter choice", () => {
       // refusal to show, so it cannot read a file by a value the rule rejects.
       expect(resolution).not.toHaveProperty("delimiter");
     }
-  });
-});
-
-describe("showing a stored delimiter", () => {
-  test("an absent delimiter shows as detection", () => {
-    expect(csvDelimiterChoiceFor(undefined)).toEqual({
-      option: CSV_DELIMITER_AUTO,
-      other: "",
-    });
-  });
-
-  test("a stored delimiter round-trips through the choice it shows as", () => {
-    for (const delimiter of [",", "\t", "|", ";", "^"])
-      expect(resolveCsvDelimiter(csvDelimiterChoiceFor(delimiter))).toEqual({
-        ok: true,
-        delimiter,
-      });
-  });
-
-  test("a delimiter no option names shows in the free-text field", () => {
-    expect(csvDelimiterChoiceFor("^")).toEqual({
-      option: CSV_DELIMITER_OTHER,
-      other: "^",
-    });
   });
 });

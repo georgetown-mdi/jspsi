@@ -17,8 +17,8 @@ export const CSV_DELIMITER_LOCAL_NOTICE =
 
 /**
  * The "How your file separates fields" control, offered beside a file picker: a
- * compact select of the delimiters the parser detects, plus "Other" revealing a
- * field for any other accepted character.
+ * compact select of the four common delimiters, plus "Other" revealing a field for
+ * any other accepted character.
  *
  * It sits at the picker rather than under an advanced heading because a delimiter
  * read wrongly puts every field of a row in one column, which fails the whole run.
