@@ -74,6 +74,37 @@ function writeStderrLine(line: string): void {
 }
 
 /**
+ * Whether a signal handler has taken responsibility for ending this process.
+ * Module state rather than a parameter: the handler that takes it over and the
+ * entry point that arms the gate are in different modules and share no value.
+ */
+let signalOwnsExit = false;
+
+/**
+ * Record that a signal handler is ending this process with the status the
+ * signal calls for, so {@link armProcessReturnGate} stays out of its way.
+ *
+ * An interrupt's teardown runs after the command promise has already settled,
+ * so the gate would otherwise be armed over a handler that has not reached its
+ * own exit yet, and a teardown longer than the budget would end the run at the
+ * gate's status and print a notice saying the run finished and wrote its files.
+ */
+export function noteSignalOwnsExit(): void {
+  signalOwnsExit = true;
+}
+
+/**
+ * The status the gate exits with: the one the run already resolved.
+ *
+ * `process.exitCode` is `number | string | null | undefined`, and only a number
+ * is an exit status this can forward; anything else, and an unset code, is the
+ * clean 0 a command that set nothing means.
+ */
+function resolvedExitCode(): number {
+  return typeof process.exitCode === "number" ? process.exitCode : 0;
+}
+
+/**
  * Arm the one deadline that makes the process return: after `budgetMs` with
  * the event loop still held, name the resource kinds still armed on stderr and
  * exit with the code the run already resolved.
@@ -83,20 +114,25 @@ function writeStderrLine(line: string): void {
  * closed from here: sweeping it would hide the next leak instead of reporting
  * it, and nothing at this boundary knows what a stranger's handle owes.
  *
- * Called once, after the command promise settles. `process.exit()` with no
- * argument reports `process.exitCode`, so a persistence loss that set 73 keeps
- * it and a clean run still exits 0: a housekeeping fact about the process
- * never changes the exchange's own outcome.
+ * Called once, after the command promise settles. A signal handler owning the
+ * exit ({@link noteSignalOwnsExit}) stops it, whether that ownership was taken
+ * before the gate was armed or while it was waiting, so an interrupt always
+ * ends the process on its own status. The status here is read from
+ * `process.exitCode` and passed explicitly, so a persistence loss that set 73
+ * keeps it and a clean run still exits 0: a housekeeping fact about the
+ * process never changes the exchange's own outcome.
  */
 export function armProcessReturnGate(
   budgetMs: number = PROCESS_RETURN_BUDGET_MS,
 ): void {
+  if (signalOwnsExit) return;
   const armedAt = Date.now();
   const deadline = setTimeout(() => {
+    if (signalOwnsExit) return;
     writeStderrLine(
       processHeldNotice(Date.now() - armedAt, heldResourceKinds()),
     );
-    process.exit();
+    process.exit(resolvedExitCode());
   }, budgetMs);
   deadline.unref();
 }

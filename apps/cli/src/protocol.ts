@@ -69,6 +69,7 @@ import {
   type TeardownOutcome,
 } from "./transportTeardown";
 import { writeOutput } from "./util/dataIo";
+import { noteSignalOwnsExit } from "./util/exitGate";
 import { runBeforeEachLogLine } from "./util/logging";
 import { logRuntimeEnv } from "./util/runtimeEnv";
 import {
@@ -1604,9 +1605,13 @@ type ExchangeOutcome = Awaited<ReturnType<typeof runExchange>>;
  *
  * Each artifact after the result CSV is non-fatal and reports its own loss:
  * a missing one is a persistence-loss warning rather than a failed exchange.
- * The result CSV is the exception -- a write that does not reach disk throws,
- * carrying `PERSISTENCE_LOSS_EXIT_CODE` so a command boundary reports the loss
- * rather than the exit code a transport fault gets.
+ * The result CSV is the exception -- a result that does not reach where it was
+ * owed throws, carrying `PERSISTENCE_LOSS_EXIT_CODE` so a command boundary
+ * reports the loss rather than the exit code a transport fault gets. That
+ * throw is raised after the audit artifacts have been written and not at the
+ * write that failed: the exchange disclosed, and what it disclosed is owed its
+ * record whether or not this party got to keep the result
+ * (docs/notes/record-durability-point.md).
  */
 async function writeExchangeOutputs(params: {
   outcome: ExchangeOutcome;
@@ -1640,6 +1645,11 @@ async function writeExchangeOutputs(params: {
     bootstrap,
     signedReceipt,
   } = outcome;
+
+  // The result-write failure, held until the audit artifacts below have been
+  // written. A box rather than the error itself, since a thrower may raise any
+  // value, `undefined` included.
+  let undelivered: { error: unknown } | undefined;
 
   // A count-only exchange produces no matched pairing for either party,
   // so there is no result file to write and nothing was withheld from
@@ -1713,18 +1723,23 @@ async function writeExchangeOutputs(params: {
         (err as { exitCode?: number }).exitCode === undefined
       )
         Object.assign(err, { exitCode: PERSISTENCE_LOSS_EXIT_CODE });
-      throw err;
+      // Raised below, after the record and the receipt: a disclosure that
+      // occurred is owed its record whatever became of the result
+      // (docs/notes/record-durability-point.md), and a result the reader of
+      // a pipe refused leaves the disk the record goes to untouched.
+      undelivered = { error: err };
     }
   }
 
   // How the entity closure grouped the pairs this party just wrote, stated
-  // after the result it describes. Core hands one to a party that ran the
-  // closure over a many-to-many table -- both parties under the cascade, the
-  // receiver alone under single-pass -- and none otherwise, so the
-  // cardinality is not re-read here. The sentence is core's own composition
-  // over integers it formats itself -- the same one the browser seat renders,
-  // so no two sinks drift -- and holds no partner-authored text.
-  if (entityClusters !== undefined)
+  // after the result it describes and only where that result was delivered.
+  // Core hands one to a party that ran the closure over a many-to-many table
+  // -- both parties under the cascade, the receiver alone under single-pass --
+  // and none otherwise, so the cardinality is not re-read here. The sentence
+  // is core's own composition over integers it formats itself -- the same one
+  // the browser seat renders, so no two sinks drift -- and holds no
+  // partner-authored text.
+  if (entityClusters !== undefined && undelivered === undefined)
     log.info(describeEntityClusters(entityClusters));
 
   // Every audit artifact this run was asked for and could not produce,
@@ -1733,14 +1748,14 @@ async function writeExchangeOutputs(params: {
 
   // Persist the self-attested record after the results: a secondary
   // audit artifact, written last, whose failure is non-fatal (see
-  // writeExchangeRecord). Skipped when records are disabled, and not
-  // reached if the result-CSV write above failed (that await throws to
-  // the catch), which also avoids orphaning the private
-  // verification-keys file on a disk that just failed mid-write. A
-  // withheld result writes no CSV but still records the exchange. An
-  // audit runExchange did not return is a record that could not be
-  // built (warned there, with the cause), so it reports as a missing
-  // artifact exactly as a failed write does.
+  // writeExchangeRecord). Skipped when records are disabled, and written
+  // even where the result was not delivered, since the disclosure it
+  // accounts for happened either way; on a disk that failed mid-write the
+  // write fails too and reports itself as a missing artifact. A withheld
+  // result writes no CSV but still records the exchange. An audit
+  // runExchange did not return is a record that could not be built
+  // (warned there, with the cause), so it reports as a missing artifact
+  // exactly as a failed write does.
   if (recordOutput !== undefined) {
     const failure =
       audit === undefined
@@ -1788,6 +1803,11 @@ async function writeExchangeOutputs(params: {
   // config write) still runs and still reports what it loses.
   for (const missing of missingArtifacts)
     reportPersistenceLoss(missing, eventStream);
+
+  // The result went nowhere, so the run fails on it and the caller's own
+  // persistence below does not run: it writes configuration for a run whose
+  // operator never received the result.
+  if (undelivered !== undefined) throw undelivered.error;
 
   // The caller's own last persistence, run here rather than after this function
   // returns so that whatever it loses is reported BEFORE the terminal event
@@ -2131,6 +2151,10 @@ export async function runProtocol(
     // Must be set synchronously, before the first await, so the runProtocol
     // catch block sees it as soon as the cleanup-induced failure propagates.
     run.signalReceived = "SIGINT";
+    // This handler ends the process, at 130 below. The catch returns normally
+    // on a signal, so the command promise settles while the teardown here is
+    // still running, and nothing else may exit on that settlement.
+    noteSignalOwnsExit();
     // Synchronous too, and before the cleanup it cannot substitute for: an
     // in-flight rendezvous tears itself down on this rather than on doCleanup.
     interrupted.abort();
@@ -2154,6 +2178,9 @@ export async function runProtocol(
     // Must be set synchronously, before the first await, so the runProtocol
     // catch block sees it as soon as the cleanup-induced failure propagates.
     run.signalReceived = "SIGTERM";
+    // As in onSigint: the exit at 143 below is this handler's, and the
+    // command promise settles before it is reached.
+    noteSignalOwnsExit();
     interrupted.abort();
     // The live line is dropped before the first interrupt line, as in onSigint.
     psiProgress.close();

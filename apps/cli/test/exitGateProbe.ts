@@ -1,5 +1,7 @@
 import fs from "node:fs";
 
+import { FileSyncConnection } from "@psilink/core";
+
 import { buildCli } from "../src/cliParser";
 import { armProcessReturnGate } from "../src/util/exitGate";
 
@@ -11,7 +13,7 @@ import { armProcessReturnGate } from "../src/util/exitGate";
  * process cannot do, so this is a child probe in the shape of
  * `iceStatsExitProbe.ts`. It wires the entry point exactly as `src/index.ts`
  * does -- the same parser, the same gate after the same settlement -- with
- * three differences a test drives it through, each of which must be supplied:
+ * four differences a test drives it through, each of which must be supplied:
  *
  * - `--probe-gate-budget-ms`: the gate's budget, cut from its shipped value so
  *   a case measures in seconds rather than waiting one out.
@@ -20,8 +22,12 @@ import { armProcessReturnGate } from "../src/util/exitGate";
  * - `--probe-obligation-ms`: an obligation awaited after the command settles
  *   and before the gate is armed, so a case can check that the budget's clock
  *   starts after the run's obligations rather than during them.
+ * - `--probe-cleanup-delay-ms`: slows the run's own transport teardown by that
+ *   long, so an interrupt's cleanup outlasts the gate's budget by a fixed
+ *   margin rather than by whatever a real close happens to take. `0` slows
+ *   none.
  *
- * Everything after those three is the command line the run is given. The probe
+ * Everything after those four is the command line the run is given. The probe
  * reports on stderr: `PROBE-SETTLED` when the command promise settles, and
  * `PROBE-EXIT <ms>` from the exit hook, measured from settlement.
  */
@@ -36,9 +42,23 @@ function flagValue(name: string): number {
 const gateBudgetMs = flagValue("--probe-gate-budget-ms");
 const leakMs = flagValue("--probe-leak-ms");
 const obligationMs = flagValue("--probe-obligation-ms");
+const cleanupDelayMs = flagValue("--probe-cleanup-delay-ms");
 const cliArgs = process.argv.slice(process.argv.indexOf("--") + 1);
 
 if (leakMs > 0) setTimeout(() => {}, leakMs);
+
+// The transport close every file-based teardown awaits, whichever layer
+// reaches it first. Delaying it here is the one thing this probe changes
+// inside the run; everything the delay sits under is the shipped path.
+if (cleanupDelayMs > 0) {
+  const close = FileSyncConnection.prototype.close;
+  FileSyncConnection.prototype.close = async function (
+    this: FileSyncConnection,
+  ): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, cleanupDelayMs));
+    await close.call(this);
+  };
+}
 
 let settledAt: number | undefined;
 process.on("exit", () => {

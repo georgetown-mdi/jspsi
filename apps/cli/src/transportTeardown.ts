@@ -61,6 +61,11 @@ export interface TeardownOutcome extends CeilingOutcome {
  * {@link settleWithinCeiling}. An expiry here is housekeeping the run reports
  * and carries on from ({@link teardownCeilingNotice}), not a failure: the
  * exchange and everything it owed are already finished when this is called.
+ *
+ * A close that rejects inside the ceiling is raised to the caller rather than
+ * reported. Each layer's close catches its own failure, so a rejection that
+ * reaches here came from outside any of them and belongs on the run's own
+ * failure channel.
  */
 export async function closeWithinCeiling(
   ceilingMs: number,

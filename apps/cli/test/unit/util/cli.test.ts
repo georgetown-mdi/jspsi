@@ -946,6 +946,69 @@ test("writeOutput: the drain failure says the exchange happened and how to recei
   expect(notice).toContain("write the result to a path");
 });
 
+test("writeOutput: a write the reader refused fails the run rather than reporting delivery", async () => {
+  // `psilink ... | head -1`: the reader takes its line and closes the pipe, and
+  // the last line's own callback reports the EPIPE. Reporting it as a flush
+  // would tell the run a result nobody took was delivered.
+  const refused = Object.assign(new Error("write EPIPE"), { code: "EPIPE" });
+  const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(((
+    _chunk: string | Uint8Array,
+    flushed?: (err?: Error | null) => void,
+  ): boolean => {
+    flushed?.(refused);
+    return true;
+  }) as typeof process.stdout.write);
+  try {
+    const failure = await writeOutput(
+      undefined,
+      ["a"],
+      [["1"]],
+      logCollector(),
+    ).catch((err: unknown) => err);
+    expect(failure).toBeInstanceOf(Error);
+    // Beside exit 73, whose instruction is not to re-run: the notice states
+    // why, and what to change before any retry.
+    expect((failure as Error).message).toContain(
+      "could not be written to stdout",
+    );
+    expect((failure as Error).message).toContain(
+      "The exchange itself completed",
+    );
+    expect((failure as Error).message).toContain("write the result to a path");
+    // The cause is kept, so the operator log names EPIPE beneath the notice.
+    expect((failure as Error).cause).toBe(refused);
+  } finally {
+    stdoutSpy.mockRestore();
+  }
+});
+
+test("writeOutput: a failure the stream reports, not a callback, fails the write too", async () => {
+  // An EPIPE reaching a line before the last one has no callback of this
+  // drain's to report it: `process.stdout` emits it instead, and with no
+  // listener for the drain's duration Node would end the process on the spot,
+  // before the record of the disclosure the run already made is written.
+  const refused = Object.assign(new Error("write EPIPE"), { code: "EPIPE" });
+  const listenersBefore = process.stdout.listenerCount("error");
+  const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(((
+    _chunk: string | Uint8Array,
+    flushed?: (err?: Error | null) => void,
+  ): boolean => {
+    if (flushed === undefined)
+      setImmediate(() => process.stdout.emit("error", refused));
+    return true;
+  }) as typeof process.stdout.write);
+  try {
+    await expect(
+      writeOutput(undefined, ["a"], [["1"]], logCollector()),
+    ).rejects.toThrow(/could not be written to stdout/);
+    // Held for the drain and no longer: the run's own later writes are not
+    // this listener's to answer for.
+    expect(process.stdout.listenerCount("error")).toBe(listenersBefore);
+  } finally {
+    stdoutSpy.mockRestore();
+  }
+});
+
 test("writeOutput: a redirected regular-file stdout warns at error level about umask exposure", async () => {
   // `psilink exchange data.csv > results.csv`: fd 1 is a regular file the shell
   // created under its umask, not the owner-only permissions an OUTPUT_FILE path

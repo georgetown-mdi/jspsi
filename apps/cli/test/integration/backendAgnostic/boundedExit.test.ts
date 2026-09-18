@@ -1,11 +1,11 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import {
   computeCertificateFingerprint,
@@ -20,9 +20,11 @@ import { keysPathFor } from "../../../src/recordFile";
 import { saveSigningIdentity } from "../../../src/signingIdentityFile";
 
 /**
- * What a finished run does with the process: it returns within the gate's
- * budget whatever is still holding the event loop, and everything it owed is
- * complete when it does.
+ * How a run's process ends and what is on disk when it does: it returns within
+ * the gate's budget whatever is still holding the event loop, it ends on the
+ * signal's own status when one arrives, and everything it owed is complete
+ * either way -- down to the run whose result a reader refused, which still
+ * leaves the record of the disclosure it made.
  *
  * Every party here is a real child process, because it is the process exiting
  * that is under test and the runner's own process cannot exit. One party runs
@@ -172,7 +174,8 @@ function partyArgs(party: "a" | "b", output: string[]): string[] {
 }
 
 /**
- * Run one party to completion, through `tsx` as the test suite runs the CLI.
+ * Start one party through `tsx`, as the test suite runs the CLI, reporting the
+ * child beside what it finishes with, so a case can signal it mid-run.
  *
  * `firstReadDelayMs` makes the parent a slow reader of the party's stdout: it
  * stops reading for that long once the first chunk arrives, then takes the
@@ -180,27 +183,35 @@ function partyArgs(party: "a" | "b", output: string[]): string[] {
  * finish leaving the party before that wait is over. Left at 0 the parent
  * reads as fast as the party writes.
  */
-function runParty(
+function startParty(
   entry: string,
   args: string[],
   { firstReadDelayMs = 0 }: { firstReadDelayMs?: number } = {},
-): Promise<FinishedParty> {
+): { child: ChildProcess; finished: Promise<FinishedParty> } {
   const child = spawn(
     process.execPath,
     [require.resolve("tsx/cli"), entry, ...args],
     { cwd: work, stdio: ["ignore", "pipe", "pipe"] },
   );
+  return { child, finished: collectParty(child, firstReadDelayMs) };
+}
+
+/** Everything `child` writes, and the status it ends on; see {@link startParty}. */
+function collectParty(
+  child: ChildProcess,
+  firstReadDelayMs: number,
+): Promise<FinishedParty> {
   let stdout = "";
   let stderr = "";
   let delayed = firstReadDelayMs === 0;
-  child.stdout.on("data", (chunk: Buffer) => {
+  child.stdout?.on("data", (chunk: Buffer) => {
     stdout += chunk.toString();
     if (delayed) return;
     delayed = true;
-    child.stdout.pause();
-    setTimeout(() => child.stdout.resume(), firstReadDelayMs).unref();
+    child.stdout?.pause();
+    setTimeout(() => child.stdout?.resume(), firstReadDelayMs).unref();
   });
-  child.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
+  child.stderr?.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
   const deadline = setTimeout(() => child.kill("SIGKILL"), PARTY_DEADLINE_MS);
   return new Promise<FinishedParty>((resolve) => {
     // `close` rather than `exit`: the party can exit with its last chunk still
@@ -211,6 +222,15 @@ function runParty(
       resolve({ exitCode, signal, stdout, stderr });
     });
   });
+}
+
+/** Run one party to completion; see {@link startParty}. */
+function runParty(
+  entry: string,
+  args: string[],
+  options: { firstReadDelayMs?: number } = {},
+): Promise<FinishedParty> {
+  return startParty(entry, args, options).finished;
 }
 
 /** Run the probe party and its plain peer together, and report both. */
@@ -282,6 +302,8 @@ test(
         String(LEAK_MS),
         "--probe-obligation-ms",
         "0",
+        "--probe-cleanup-delay-ms",
+        "0",
       ],
       probeOutput: [resultPath],
     });
@@ -315,6 +337,8 @@ test(
         String(LEAK_MS),
         "--probe-obligation-ms",
         String(obligationMs),
+        "--probe-cleanup-delay-ms",
+        "0",
       ],
       probeOutput: [resultPath],
     });
@@ -339,6 +363,8 @@ test(
         "--probe-leak-ms",
         String(LEAK_MS),
         "--probe-obligation-ms",
+        "0",
+        "--probe-cleanup-delay-ms",
         "0",
       ],
       // No OUTPUT_FILE: the result goes to stdout, which is a pipe here.
@@ -410,6 +436,8 @@ test(
         String(LEAK_MS),
         "--probe-obligation-ms",
         "0",
+        "--probe-cleanup-delay-ms",
+        "0",
       ],
       probeOutput: [],
       firstReadDelayMs: FIRST_READ_DELAY_MS,
@@ -444,6 +472,152 @@ test(
     expect(a.stderr).not.toContain("still held open");
     expect(b.stderr).not.toContain("still held open");
     expectArtifactsComplete(resultPath);
+  },
+  CASE_TIMEOUT_MS,
+);
+
+/**
+ * The teardown an interrupted party is given, several times the gate's budget,
+ * so the gap between the command promise settling and the signal handler's own
+ * exit is fixed rather than whatever a real close happens to take.
+ */
+const SIGNAL_CLEANUP_DELAY_MS = 2_000;
+
+/**
+ * Start a lone party under the probe and interrupt it with `signal` once it is
+ * waiting at the rendezvous -- past the prepare block, so the run's own signal
+ * handlers are installed and the entry file it wrote is what says so.
+ *
+ * The party has no peer: what is under test is the interrupt, and a partner
+ * would race it to completion.
+ */
+async function runInterruptedParty(
+  signal: "SIGINT" | "SIGTERM",
+): Promise<FinishedParty> {
+  const { child, finished } = startParty(probeEntry, [
+    "--probe-gate-budget-ms",
+    String(PROBE_GATE_BUDGET_MS),
+    "--probe-leak-ms",
+    "0",
+    "--probe-obligation-ms",
+    "0",
+    "--probe-cleanup-delay-ms",
+    String(SIGNAL_CLEANUP_DELAY_MS),
+    "--",
+    ...partyArgs("a", [path.join(work, "a-out.csv")]),
+  ]);
+  await vi.waitFor(
+    () => expect(fs.readdirSync(dropDir).length).toBeGreaterThan(0),
+    { timeout: 30_000, interval: 25 },
+  );
+  child.kill(signal);
+  return finished;
+}
+
+test.each([
+  { signal: "SIGINT", status: 130 },
+  { signal: "SIGTERM", status: 143 },
+] as const)(
+  "$signal ends the run on its own status, whatever the gate's budget",
+  async ({ signal, status }) => {
+    // The interrupt's teardown outlasts the budget, and the command promise
+    // settles before that teardown is over -- PROBE-SETTLED says so, and the
+    // gate is armed on exactly that settlement. An armed gate would end this
+    // run at the status the run never reached and print a line saying it
+    // finished and wrote its files.
+    const party = await runInterruptedParty(signal);
+
+    expect(party.stderr).toContain("PROBE-SETTLED");
+    expect(party.exitCode).toBe(status);
+    expect(party.signal).toBeNull();
+    expect(party.stderr).not.toContain("still held open");
+    // The run was cut short, so it produced none of what a completed one owes.
+    expect(fs.existsSync(path.join(work, "a-out.csv"))).toBe(false);
+  },
+  CASE_TIMEOUT_MS,
+);
+
+/** One argument, quoted for the shell that runs the pipeline below. */
+function shellArg(value: string): string {
+  return `'${value.replaceAll("'", `'\\''`)}'`;
+}
+
+/**
+ * Party A with its result piped to `head -1`: a reader that takes one line and
+ * closes the pipe under a result far larger than the pipe holds.
+ *
+ * A real shell runs it, since that is how an operator writes it, and
+ * `pipefail` makes the pipeline report psilink's own status rather than
+ * `head`'s. The run's event stream goes to `eventsPath` on fd 3, which bash
+ * passes through to the party it starts.
+ */
+function runPipedToHead(eventsPath: string): Promise<FinishedParty> {
+  const party = [
+    process.execPath,
+    // `--import tsx` rather than tsx's own CLI, which re-launches node with an
+    // IPC channel on fd 3: the run would find that descriptor open, pass the
+    // event stream's fail-closed preflight, and have every write refused with
+    // EINVAL. Loading tsx in-process leaves fd 3 the one this test wired.
+    "--import",
+    require.resolve("tsx"),
+    cliEntry,
+    // No OUTPUT_FILE: the result goes to stdout, which is the pipe.
+    ...partyArgs("a", []),
+    "--event-stream",
+  ]
+    .map(shellArg)
+    .join(" ");
+  const events = fs.openSync(eventsPath, "w");
+  try {
+    const child = spawn("bash", ["-c", `set -o pipefail; ${party} | head -1`], {
+      cwd: work,
+      stdio: ["ignore", "pipe", "pipe", events],
+    });
+    return collectParty(child, 0);
+  } finally {
+    fs.closeSync(events);
+  }
+}
+
+test(
+  "a reader that closes the pipe costs the result, not the record",
+  async () => {
+    // The result is far past the pipe's buffer, so the write fails under the
+    // run rather than completing before `head` goes. What the run owes the
+    // accounting -- the record of the disclosure it already made, and the
+    // receipt for it -- is written all the same, and the run reports the
+    // undelivered result as the loss it is.
+    writeMatchedInputs(LARGE_RESULT_RECORDS);
+    const eventsPath = path.join(work, "a-events.jsonl");
+    const [a, b] = await Promise.all([
+      runPipedToHead(eventsPath),
+      runParty(cliEntry, partyArgs("b", [path.join(work, "b-out.csv")])),
+    ]);
+
+    expect(b.exitCode).toBe(0);
+    expect(a.exitCode).toBe(73);
+    expect(a.stdout.trimEnd().split("\n")).toHaveLength(1);
+
+    const events = fs
+      .readFileSync(eventsPath, "utf8")
+      .trimEnd()
+      .split("\n")
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    const terminal = events[events.length - 1];
+    expect(terminal["type"]).toBe("error");
+    expect(terminal["category"]).toBe("output");
+    expect(events.filter((line) => line["type"] === "result")).toEqual([]);
+
+    const recordPath = path.join(work, "a-record.json");
+    const record = JSON.parse(fs.readFileSync(recordPath, "utf8")) as {
+      localIdentity?: unknown;
+    };
+    expect(record.localIdentity).toBe("party-a");
+    expect(fs.existsSync(keysPathFor(recordPath))).toBe(true);
+    const receipt = JSON.parse(
+      fs.readFileSync(path.join(work, "a-receipt.json"), "utf8"),
+    ) as Record<string, unknown>;
+    expect(Object.keys(receipt).length).toBeGreaterThan(0);
   },
   CASE_TIMEOUT_MS,
 );

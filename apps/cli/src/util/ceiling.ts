@@ -16,10 +16,12 @@ export interface CeilingOutcome {
  * Wait for `work` for at most `ceilingMs`, reporting which way it ended.
  *
  * On expiry `work` is left running: the caller cannot cancel what it handed
- * in, and a later rejection is absorbed rather than surfacing as an unhandled
- * rejection once the caller has moved on. A rejection INSIDE the ceiling also
- * reports `finished`: the wait is over, and what the work's own failure means
- * is the caller's to read from the work itself.
+ * in, and a later rejection is absorbed rather than raising an unhandled
+ * rejection once the caller has moved on. A rejection INSIDE the ceiling is
+ * raised to the caller instead of reported: the wait ending and the work
+ * failing are different outcomes, and a race that returned the second as the
+ * first would report a close that threw, or a write that was refused, as
+ * finished.
  *
  * The deadline timer is ref'd on purpose. Work that neither settles nor holds
  * the event loop would otherwise let the process exit before the ceiling is
@@ -34,14 +36,23 @@ export async function settleWithinCeiling(
   const expired = new Promise<"expired">((resolve) => {
     deadline = setTimeout(() => resolve("expired"), ceilingMs);
   });
+  // Held rather than rethrown from the rejection handler: the handler is what
+  // keeps a rejection arriving after the expiry from going unhandled, so it
+  // settles the race either way and the failure is raised below only when the
+  // race was still waiting on it.
+  let failure: { error: unknown } | undefined;
   try {
     const outcome = await Promise.race([
       work().then(
         () => "settled" as const,
-        () => "settled" as const,
+        (err: unknown) => {
+          failure = { error: err };
+          return "settled" as const;
+        },
       ),
       expired,
     ]);
+    if (outcome === "settled" && failure !== undefined) throw failure.error;
     return {
       finished: outcome === "settled",
       elapsedMs: Date.now() - startedAt,

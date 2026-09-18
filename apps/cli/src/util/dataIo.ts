@@ -12,7 +12,7 @@ import {
 } from "@psilink/core";
 
 import { createOwnerOnlyWriteStream } from "../fileUtils";
-import { settleWithinCeiling } from "./ceiling";
+import { settleWithinCeiling, type CeilingOutcome } from "./ceiling";
 
 /**
  * Resolve a CSV input positional to the readable stream core's `loadCSVFile`
@@ -114,8 +114,23 @@ export function stdoutDrainExpiredNotice(ceilingMs: number): string {
 }
 
 /**
+ * What the run reports when the write to stdout failed outright: the same loss
+ * the ceiling reports, reached by the reader closing the pipe rather than by
+ * stopping at it.
+ */
+function stdoutWriteFailedNotice(): string {
+  return (
+    `the result could not be written to stdout, so what is past the point it ` +
+    `stopped is lost. The exchange itself completed, so re-running conducts a ` +
+    `second one: fix the receiving command to read the result to its end, and ` +
+    `write the result to a path instead of a pipe if it cannot.`
+  );
+}
+
+/**
  * Write the result CSV to stdout, resolving once the last line has left the
- * process and REJECTING if that has not happened within `ceilingMs`.
+ * process and REJECTING if that has not happened within `ceilingMs` or if the
+ * write fails.
  *
  * The drain waits on the LAST LINE's own write callback. A zero-length chunk
  * written after the rows is not equivalent: measured against a reader taking
@@ -128,15 +143,31 @@ export function stdoutDrainExpiredNotice(ceilingMs: number): string {
  * caller's own result-write failure path reports, so it is raised rather than
  * resolved: resolving would hand back a flush and a give-up as the same
  * outcome, and the run would report a result it still holds as written.
+ *
+ * A reader that CLOSES the pipe -- `psilink ... | head -1` past the pipe's own
+ * buffer -- is the same loss and takes the same path, over two channels
+ * because neither covers it alone. The last line's callback reports an EPIPE
+ * that reaches that line, and an `'error'` listener held for the drain's
+ * duration reports one that reaches any earlier write, whose callback this
+ * does not take; without that listener `process.stdout` emits an unhandled
+ * `'error'` and the run ends there, before the record of the disclosure it
+ * already made is written.
  */
 async function writeResultToStdout(
   headers: string[],
   rows: Array<Array<string>>,
   ceilingMs: number,
 ): Promise<void> {
-  const drained = new Promise<void>((resolve) => {
+  // Assigned by the executor below, which runs before the next statement.
+  let rejectDrain!: (err: unknown) => void;
+  const drained = new Promise<void>((resolve, reject) => {
+    rejectDrain = reject;
+    process.stdout.on("error", reject);
     const lastRow = rows.length - 1;
-    const flushed = (): void => resolve();
+    const flushed = (err?: Error | null): void => {
+      if (err === undefined || err === null) resolve();
+      else reject(err);
+    };
     process.stdout.write(
       headers.join(",") + "\n",
       rows.length === 0 ? flushed : undefined,
@@ -148,7 +179,14 @@ async function writeResultToStdout(
       );
     });
   });
-  const outcome = await settleWithinCeiling(ceilingMs, () => drained);
+  let outcome: CeilingOutcome;
+  try {
+    outcome = await settleWithinCeiling(ceilingMs, () => drained);
+  } catch (err) {
+    throw new Error(stdoutWriteFailedNotice(), { cause: err });
+  } finally {
+    process.stdout.off("error", rejectDrain);
+  }
   if (!outcome.finished) throw new Error(stdoutDrainExpiredNotice(ceilingMs));
 }
 
@@ -183,7 +221,9 @@ async function writeResultToStdout(
  * That wait is bounded -- a reader that never reads again would otherwise hold
  * the run forever -- and reaching the bound rejects, on the same channel as
  * the file branch's own faults: what the reader did not take is as lost as a
- * result that never reached disk, and the caller reports both the same way.
+ * result that never reached disk, and the caller reports both the same way. A
+ * reader that closes the pipe rather than stalling at it rejects on that same
+ * channel, from the failed write instead of from the bound.
  * `drainCeilingMs` is that bound; it is a parameter so a test can drive the
  * expiry rather than wait one out.
  *

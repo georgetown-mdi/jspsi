@@ -6,8 +6,8 @@ import { settleWithinCeiling } from "../../../src/util/ceiling";
  * The bounded wait both of a finished run's ceilings are built on: the
  * transport's close and the result's drain to stdout. What each caller does
  * with an expiry is its own -- the close reports it and carries on, the drain
- * raises it -- and what is checked here is that the two outcomes are never
- * handed back as the same one.
+ * raises it -- and what is checked here is that the three outcomes it can have
+ * are never handed back as one another: settled, expired, and failed.
  */
 
 test("work that settles inside the ceiling reports finished", async () => {
@@ -33,13 +33,24 @@ test("work that outlives the ceiling reports expired rather than finished", asyn
   release?.();
 });
 
-test("work that rejects inside the ceiling reports finished, and the rejection goes no further", async () => {
-  // The wait is over either way; what a failure means is the caller's to read
-  // from the work itself, not from the outcome of the race.
-  const outcome = await settleWithinCeiling(5_000, () =>
-    Promise.reject(new Error("the work failed")),
-  );
-  expect(outcome.finished).toBe(true);
+test("work that rejects inside the ceiling raises rather than reporting finished", async () => {
+  // A failure and an expiry are different outcomes, and mapping the first onto
+  // the second reports work that threw as work that finished.
+  await expect(
+    settleWithinCeiling(5_000, () =>
+      Promise.reject(new Error("the work failed")),
+    ),
+  ).rejects.toThrow("the work failed");
+});
+
+test("work that throws before it returns a promise raises the same way", async () => {
+  // The shape a teardown takes: an async function whose first statement calls
+  // a close that throws synchronously, outside any catch of its own.
+  await expect(
+    settleWithinCeiling(5_000, async () => {
+      throw new Error("close() threw before it awaited anything");
+    }),
+  ).rejects.toThrow("close() threw before it awaited anything");
 });
 
 test("a rejection after the ceiling is absorbed rather than left unhandled", async () => {

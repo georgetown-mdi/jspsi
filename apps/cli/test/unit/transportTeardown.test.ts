@@ -50,14 +50,16 @@ test("a close that finishes inside the ceiling reports as finished", async () =>
   expect(outcome.heldBy).toEqual([]);
 });
 
-test("a close that rejects is a finished teardown, not an expiry", async () => {
-  // Each layer close catches its own failure, so this stands for a rejection
-  // added later: the ceiling is about a close that does not RETURN, and a
-  // failed one has returned.
-  const outcome = await closeWithinCeiling(60_000, () =>
-    Promise.reject(new Error("the session was already gone")),
-  );
-  expect(outcome.finished).toBe(true);
+test("a close that throws raises past the ceiling rather than reporting finished", async () => {
+  // Each layer close catches its own failure, so a throw reaching the ceiling
+  // came from outside all of them -- a close that threw before its own catch
+  // was attached -- and the run's cleanup has to see it rather than read the
+  // teardown as done.
+  await expect(
+    closeWithinCeiling(60_000, async () => {
+      throw new Error("the session was already gone");
+    }),
+  ).rejects.toThrow("the session was already gone");
 });
 
 test("a close that never settles expires, naming what still holds the loop", async () => {
