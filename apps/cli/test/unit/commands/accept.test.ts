@@ -2661,6 +2661,114 @@ describe("reconciling a pre-existing config", () => {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  // --- the CSV field delimiter over a kept configuration ---------------------
+  // The kept file runs every later exchange, so it decides how this party's own
+  // CSVs are read and written, exactly as it decides the label above.
+
+  /** A configuration already at the path holding `csvDelimiter` (or none),
+   *  beside a pipe-delimited input file. */
+  function keptDelimiterConfig(csvDelimiter: string | undefined): {
+    dir: string;
+    configFile: string;
+    keyFile: string;
+    input: string;
+  } {
+    const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-accept-delim-"));
+    const configFile = path.join(dir, "psilink.yaml");
+    saveConfig(configFile, {
+      connection: { channel: "filedrop", path: "/mnt/share" },
+      linkageTerms: sampleTerms("Acceptor Org"),
+      ...(csvDelimiter !== undefined && { csvDelimiter }),
+    });
+    const input = path.join(dir, "input.csv");
+    fs.writeFileSync(
+      input,
+      "first_name|last_name|dob|ssn\nAlice|Smith|1990-01-02|123456789\n",
+    );
+    return { dir, configFile, keyFile: path.join(dir, ".psilink.key"), input };
+  }
+
+  test("validateAccept: the kept configuration's csv_delimiter reads this acceptance's input", async () => {
+    const pipes = keptDelimiterConfig("|");
+    try {
+      const ready = await validateAccept({
+        resolved: {
+          mode: "offline",
+          invitation: await encodeInvitation(sampleToken(FUTURE())),
+          input: pipes.input,
+        },
+        options: testOptions({
+          configFile: pipes.configFile,
+          keyFile: pipes.keyFile,
+          identity: undefined,
+        }),
+        log: silentLog,
+      });
+      expect(ready.reuseExistingConfig).toBe(true);
+      // What the run reads and writes by, with no flag anywhere on the command
+      // line: the kept file's own value.
+      expect(ready.dataSpec.csvDelimiter).toBe("|");
+    } finally {
+      fs.rmSync(pipes.dir, { recursive: true, force: true });
+    }
+    // The discriminating case: the same file under a kept config that reads
+    // commas parses as one column, which satisfies no linkage key. An
+    // acceptance that ignored the file would read the pipes it shows and accept
+    // terms the exchange that file governs cannot satisfy.
+    const commas = keptDelimiterConfig(",");
+    try {
+      await expect(
+        validateAccept({
+          resolved: {
+            mode: "offline",
+            invitation: await encodeInvitation(sampleToken(FUTURE())),
+            input: commas.input,
+          },
+          options: testOptions({
+            configFile: commas.configFile,
+            keyFile: commas.keyFile,
+            identity: undefined,
+          }),
+          log: silentLog,
+        }),
+      ).rejects.toThrow(UsageError);
+    } finally {
+      fs.rmSync(commas.dir, { recursive: true, force: true });
+    }
+  });
+
+  test("validateAccept: --csv-delimiter over a kept configuration is reported, not applied", async () => {
+    const { dir, configFile, keyFile, input } = keptDelimiterConfig("|");
+    const log = getLogger("accept-kept-delimiter-test");
+    log.setLevel("silent");
+    const warnSpy = vi.spyOn(log, "warn");
+    try {
+      const ready = await validateAccept({
+        resolved: {
+          mode: "offline",
+          invitation: await encodeInvitation(sampleToken(FUTURE())),
+          input,
+        },
+        options: testOptions({ configFile, keyFile, identity: undefined }),
+        csvDelimiter: ";",
+        log,
+      });
+      // The run proceeds under the file's delimiter -- a semicolon read of this
+      // input would have refused on the same satisfiability check above.
+      expect(ready.dataSpec.csvDelimiter).toBe("|");
+      const ignored = warnSpy.mock.calls
+        .map((call) => String(call[0]))
+        .filter((message) => message.includes("--csv-delimiter"));
+      expect(ignored).toHaveLength(1);
+      expect(ignored[0]).toContain('--csv-delimiter ";" has no effect');
+      expect(ignored[0]).toContain('csv_delimiter ("|") is used instead');
+      expect(ignored[0]).toContain(configFile);
+    } finally {
+      warnSpy.mockRestore();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 // --- online accept: invitation-endpoint split directories --------------------

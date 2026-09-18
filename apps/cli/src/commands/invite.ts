@@ -31,6 +31,7 @@ import type {
 } from "@psilink/core";
 
 import {
+  configuredCsvDelimiter,
   loadConfigLinkageSource,
   persistDisclosedPayloadColumns,
   persistOutboundPayloadConsent,
@@ -694,6 +695,17 @@ export async function validateInvite(params: {
             operatorSuppliedText(options.configFile),
           )} to change it.`,
       );
+    // The delimiter is governed the same way, and for the reason the check
+    // below exists: the config the exchange will run from decides how this
+    // party's CSV is read, so the input is graded here by exactly the
+    // delimiter that run will use.
+    const configCsvDelimiter = configuredCsvDelimiter({
+      configured: configSource.csvDelimiter,
+      supplied: csvDelimiter,
+      configPath: options.configFile,
+      clause: "when the linkage terms come from an existing configuration file",
+      warn: (message) => log.warn(message),
+    });
     // Config-as-source: the config supplies the linkage terms and persists
     // unchanged. The config read above is the mode discriminator, so it must run
     // first; the only conflict it can clobber here is an existing key file (the
@@ -709,7 +721,7 @@ export async function validateInvite(params: {
     if (resolved.input !== undefined) {
       const rows = await loadInputRows(resolved.input, {
         allowStdin: true,
-        csvDelimiter,
+        csvDelimiter: configCsvDelimiter,
       });
       // The input only validated compatibility; the invitation's terms come from
       // the config, not the input. Say so ahead of the check below, so a user who

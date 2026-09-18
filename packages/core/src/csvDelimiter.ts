@@ -65,7 +65,10 @@ function csvDelimiterShape(value: string): string {
   if (resolved === '"') return "the double quote";
   if (resolved === "\n" || resolved === "\r") return "a line terminator";
   const code = resolved.charCodeAt(0);
-  if (code > 0x7e) return "a non-ASCII character";
+  // DEL (0x7f) is an ASCII control character, not a character outside ASCII, so
+  // the bound here is one code point above the printable range isCsvDelimiter
+  // accepts.
+  if (code > 0x7f) return "a non-ASCII character";
   return `a control character (code point ${code})`;
 }
 

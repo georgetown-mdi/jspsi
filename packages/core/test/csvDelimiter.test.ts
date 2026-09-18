@@ -59,6 +59,7 @@ test("isCsvDelimiter refuses everything the read and the write could not agree o
   // unit.
   expect(isCsvDelimiter("\u00a7")).toBe(false);
   expect(isCsvDelimiter("\u0000")).toBe(false);
+  expect(isCsvDelimiter(String.fromCharCode(127))).toBe(false);
 });
 
 test("normalizeCsvDelimiter resolves the tab spellings and leaves everything else", () => {
@@ -83,6 +84,11 @@ test("the refusal names the rule and the shape, never the value", () => {
   expect(csvDelimiterRefusal('"')).toContain("the double quote");
   expect(csvDelimiterRefusal("\n")).toContain("a line terminator");
   expect(csvDelimiterRefusal("\u00a7")).toContain("a non-ASCII character");
+  // DEL sits above the printable range and inside ASCII, so it is named as the
+  // control character it is rather than as a character outside ASCII.
+  expect(csvDelimiterRefusal(String.fromCharCode(127))).toContain(
+    "a control character (code point 127)",
+  );
   // The offending bytes stay out of the message the operator is shown.
   expect(csvDelimiterRefusal("\u0007")).not.toContain("\u0007");
 });

@@ -380,10 +380,9 @@ const SHARED_CSV_PARSE_CONFIG = {
  * `""` is PapaParse's own value for "detect the delimiter from the file"
  * (driven and confirmed against the parser), and it is what a read with no
  * chosen delimiter takes. A party that names one is read by that character
- * alone: the
- * detection can otherwise settle on another candidate for a file whose rows
- * make one look more consistent, and a read that disagrees with the write
- * would not round-trip.
+ * alone: the detection can otherwise settle on another candidate for a file
+ * whose rows make one look more consistent, and a read that disagrees with the
+ * write would not round-trip.
  */
 function papaParseDelimiter(delimiter: string | undefined): string {
   return delimiter ?? "";
@@ -620,13 +619,13 @@ export async function loadCSVFile(
  * key per-column state without a separate read.
  *
  * Shares {@link runSharedCSVParse}'s config, `delimiter` handling, single-line
- * byte ceiling, row
- * normalization, and row-level fault gate with {@link loadCSVFile} -- one
- * config, two drivers -- so a streaming server pass and a browser worker
- * wrapping loadCSVFile parse identically. Resolves with the header column list
- * and the positions the header transform stripped ({@link CSVParseMeta}) once
- * the parse settles; rejects the same way as loadCSVFile: a
- * ceiling trip with {@link CsvLineByteCeilingError}, a row-level fault with
+ * byte ceiling, row normalization, and row-level fault gate with
+ * {@link loadCSVFile} -- one config, two drivers -- so a streaming server pass
+ * and a browser worker wrapping loadCSVFile parse identically. Resolves with
+ * the header column list and the positions the header transform stripped
+ * ({@link CSVParseMeta}) once the parse settles; rejects the same way as
+ * loadCSVFile: a ceiling trip with {@link CsvLineByteCeilingError}, a
+ * row-level fault with
  * {@link CsvRowParseError}. The fault gate refuses the read before the
  * faulting chunk reaches `consumeChunk`, so a consumer never accumulates rows
  * the file does not contain -- but chunks BEFORE the fault have already been

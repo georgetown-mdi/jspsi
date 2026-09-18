@@ -23,14 +23,17 @@ import {
   clipToRenderedCost,
   compatibilityMessage,
   COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
+  csvDelimiterRefusal,
   DISPLAY_TRUNCATION_MARKER,
   findBuiltInLinkageRuleSet,
+  isCsvDelimiter,
   isDrawnFromLinkageRuleSet,
   keepFirstPartyLineBreaks,
   keepOperatorSuppliedText,
   MAX_NESTING_DEPTH,
   messageWithOperatorText,
   NestingDepthExceededError,
+  normalizeCsvDelimiter,
   OperatorConfigError,
   operatorSuppliedText,
   partnerPinIsPresent,
@@ -49,6 +52,7 @@ import {
   safeParseLinkageTermsTheReaderWrote,
   safeParseMetadata,
   safeParseStandardization,
+  sanitizeForDisplay,
   snakeizeKey,
   snakeizeKeys,
   trimPartialControlCharacterMarker,
@@ -1881,6 +1885,14 @@ export interface ConfigLinkageSource {
    */
   retainsFiles: boolean;
   /**
+   * The config's `csv_delimiter`, resolved through the same spellings and
+   * graded by the same accepted-set rule the schema applies, and absent when
+   * the config sets none. Read so a command that checks an input against this
+   * config reads the file by the delimiter the exchange this config governs
+   * will read it by.
+   */
+  csvDelimiter?: string;
+  /**
    * Whether an acceptance stands behind the config's linkage terms, for
    * readers that report on the citation those terms hold. Read as the
    * single presence check {@link linkageTermsStandingOf} describes, at the
@@ -2093,10 +2105,43 @@ export function readConfigLinkageSource(
       linkageTerms: result.data,
       standardization,
       metadata,
+      csvDelimiter: readCsvDelimiterDeclaration(obj, configPath),
       retainsFiles: readRetainFilesDeclaration(obj),
       linkageTermsStanding: readLinkageTermsStanding(obj),
     },
   };
+}
+
+/**
+ * The config's `csv_delimiter`, resolved and graded here through core's own
+ * spelling resolver and accepted-set rule -- the pair the exchange spec's
+ * schema applies to the same key -- so this read and a later `psilink
+ * exchange` over the same file take the same character and refuse the same
+ * values. A value the rule refuses is a {@link UsageError}, like the invalid
+ * blocks above: a command that read on past it would check the operator's
+ * input by a delimiter their exchange will never run.
+ *
+ * Both key spellings are accepted, matching `saveConfig`'s snake_case write.
+ */
+function readCsvDelimiterDeclaration(
+  obj: Record<string, unknown>,
+  configPath: string,
+): string | undefined {
+  const declared = obj["csv_delimiter"] ?? obj["csvDelimiter"];
+  if (declared === undefined) return undefined;
+  if (typeof declared !== "string")
+    throw configFileRefusal(
+      configPath,
+      "has an invalid csv_delimiter: write the delimiter as text, as in " +
+        '`csv_delimiter: "|"`',
+    );
+  const resolved = normalizeCsvDelimiter(declared);
+  if (!isCsvDelimiter(resolved))
+    throw configFileRefusal(
+      configPath,
+      "has an invalid csv_delimiter: " + csvDelimiterRefusal(declared),
+    );
+  return resolved;
 }
 
 /**
@@ -2175,6 +2220,54 @@ export function loadConfigLinkageSource(
         "linkage terms",
     );
   return result.source;
+}
+
+/**
+ * A field delimiter as a message states it: the character in quotes, escaped
+ * for the sink that shows it, or the word a tab is written as on a command
+ * line and in a config, since a literal tab renders as blank space where the
+ * operator reads it.
+ */
+function csvDelimiterLabel(delimiter: string): string {
+  return delimiter === "\t" ? "tab" : `"${sanitizeForDisplay(delimiter)}"`;
+}
+
+/**
+ * The field delimiter a run takes where a configuration file governs it: that
+ * file's `csv_delimiter`, or none where it sets none. A `--csv-delimiter`
+ * naming something else has no effect and is reported as such, for the reason
+ * the same commands report `--identity` that way -- the file, not this run,
+ * reads and writes every exchange it governs, so a flag that changed one run's
+ * delimiter would leave that run disagreeing with the file about how the
+ * operator's own CSVs are read.
+ *
+ * `clause` names why the file governs, so each command states its own case.
+ * A flag naming exactly what the file already does describes the run and is
+ * not reported.
+ */
+export function configuredCsvDelimiter(params: {
+  configured: string | undefined;
+  supplied: string | undefined;
+  configPath: string;
+  clause: string;
+  warn: (message: string) => void;
+}): string | undefined {
+  const { configured, supplied, configPath, clause, warn } = params;
+  if (supplied === undefined || supplied === configured) return configured;
+  const named = redactAndRenderOperatorSuppliedText(
+    operatorSuppliedText(configPath),
+  );
+  const instead =
+    configured !== undefined
+      ? `the file's csv_delimiter (${csvDelimiterLabel(configured)}) is used ` +
+        `instead. Edit csv_delimiter in ${named} to change it.`
+      : "that file names no csv_delimiter, so the delimiter the input file " +
+        `itself shows is used instead. Add csv_delimiter to ${named} to set one.`;
+  warn(
+    `--csv-delimiter ${csvDelimiterLabel(supplied)} has no effect ` +
+      `${clause}; ${instead}`,
+  );
+  return configured;
 }
 
 // --- Rules taken from a named rule set ---------------------------------------

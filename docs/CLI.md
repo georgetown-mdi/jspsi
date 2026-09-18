@@ -87,7 +87,7 @@ The row check applies to every command that reads a CSV to set up or run an exch
 
 ### The field delimiter
 
-`--csv-delimiter` sets the field delimiter of the CSV a command reads and of the result file it writes, for a source system that exports pipe-, tab-, or semicolon-separated data. The configuration field is [`csv_delimiter`](EXCHANGE_REFERENCE.md#csv_delimiter); the flag replaces it for one run.
+`--csv-delimiter` sets the field delimiter of the CSV a command reads and of the result file it writes, for a source system that exports pipe-, tab-, or semicolon-separated data. The configuration field is [`csv_delimiter`](EXCHANGE_REFERENCE.md#csv_delimiter); on `psilink exchange` the flag replaces it for one run.
 
 - **Accepted values.** One character: a tab, or a printable ASCII character other than the double quote (`"`), which is the character RFC 4180 quotes a field with. Anything else -- more than one character, an empty value, the double quote, a line break, a character outside ASCII -- is refused with a usage error (exit 64) before any credential, terms, or data are sent.
 - **Writing a tab.** On the command line and in the configuration file, write a tab as `tab` or `\t`: `psilink exchange --csv-delimiter tab data.tsv results.tsv`. A literal tab is accepted where you can type one.
@@ -95,7 +95,8 @@ The row check applies to every command that reads a CSV to set up or run an exch
 - **It is yours alone.** The delimiter is a local reading and writing choice. It is not part of the linkage terms, the invitation, or the exchange record, nothing about it is sent to your partner, and the two parties need not use the same one.
 - **Where it applies.** Every command that reads a CSV takes the flag: `psilink exchange`, the zero-setup form, `psilink invite`, `psilink accept`, `psilink init`, and `psilink verify-receipt`. A command that reads none does not accept it and reports it as an unknown option.
 - **What `psilink init` does with it.** The template it writes records the delimiter it was given as `csv_delimiter`, so the recurring `psilink exchange` that template governs needs no flag. A zero-setup `--save` run and the configurations `invite`/`accept` write record it the same way.
-- **`psilink verify-receipt`.** The flag governs both CSVs it re-reads. It is not taken from `--config-file`, which that command consults for your linkage terms alone, so state the delimiter on the command line when the files you are verifying are not comma-delimited.
+- **When a configuration already supplies one.** Where `psilink invite` takes its linkage terms from an existing configuration, and where `psilink accept` keeps the configuration already at the config path, that file's `csv_delimiter` reads the input -- as that file's `linkage_terms.identity` names the party -- so the check made here reads your CSV exactly as the exchange it governs will. A `--csv-delimiter` naming something else is reported as having no effect; edit `csv_delimiter` in the configuration to change it.
+- **`psilink verify-receipt`.** The flag governs both CSVs it re-reads; with none, the `csv_delimiter` of the configuration passed as `--config-file` does, so the files an exchange wrote are re-read the way it wrote them.
 - **Leaving it out.** Given no delimiter, psilink reads a file by the delimiter the file itself shows -- what it has always done -- and writes the result with commas. Naming a delimiter is what makes the two agree.
 
 There is no delimiter inference beyond that: a file read with the wrong delimiter usually parses as a single column, which shows up as linkage terms the input cannot satisfy rather than as a wrong result.
