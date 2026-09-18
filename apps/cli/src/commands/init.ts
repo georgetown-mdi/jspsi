@@ -23,10 +23,14 @@ import { renderConfigTemplate } from "../configTemplate";
 import type { TemplateDataSpec } from "../configTemplate";
 import { openInputSource } from "../util/dataIo";
 import { runOrExit } from "../util/exit";
-import { assertNoUnknownOptions, singleValue } from "../util/flags";
+import {
+  assertNoUnknownOptions,
+  csvDelimiterFlag,
+  singleValue,
+} from "../util/flags";
 import { configureLogging, logLevelFlag } from "../util/logging";
 import { promptConfirm } from "../util/prompt";
-import { addLoggingOptions } from "../optionDefinitions";
+import { addCsvDelimiterOption, addLoggingOptions } from "../optionDefinitions";
 import { buildDataSpec, warnSanitizedColumns } from "../onlineBootstrap";
 import {
   askIdentityAtPrompt,
@@ -36,7 +40,7 @@ import {
 } from "../partyIdentity";
 
 export function builder(cmd: Argv): Argv {
-  const withoutLogging = cmd
+  const withoutLogging = addCsvDelimiterOption(cmd)
     // Capture positionals into `args` (rather than the global `_`) and treat an
     // unknown `-`-leading token as a positional, so a bare `-` (stdin) or an
     // input path is never swallowed or misread as a flag -- the same parsing the
@@ -98,6 +102,11 @@ export async function handler(argv: Arguments): Promise<void> {
       // value means is decided below, once it is known whether this run can ask
       // for one instead.
       const identityFlag = singleValue(argv, "identity") as string | undefined;
+      // Read with the other flags so a malformed value is a usage error before
+      // anything is read or written. It reads the input file below AND is
+      // written into the template, so the next run against that file needs no
+      // flag of its own.
+      const csvDelimiter = csvDelimiterFlag(argv);
       const positionals = (argv["args"] as Array<string> | undefined) ?? [];
       // This command sets unknown-options-as-args (so a bare `-` stdin token
       // survives as a positional), which also lets a mistyped `--flag` reach the
@@ -148,7 +157,12 @@ export async function handler(argv: Arguments): Promise<void> {
             : undefined,
         )) ?? PLACEHOLDER_IDENTITY;
 
-      const data = await buildTemplateData(input, identity);
+      const data = await buildTemplateData(
+        input,
+        identity,
+        DEFAULT_LINKAGE_RULE_SET,
+        csvDelimiter,
+      );
       const template = renderConfigTemplate(data);
       try {
         // Exclusive on the "create" path (the path was free at the check): if a
@@ -234,20 +248,30 @@ export function resolveInitInput(
  * writes states where its rules came from and a later load resolves that
  * citation to the same rules.
  *
+ * `csvDelimiter` reads the input by that field delimiter and is written into
+ * the template, so the exchange the template governs runs it without a flag.
+ *
  * @internal exported for testing
  */
 export async function buildTemplateData(
   input: string | undefined,
   identity: string,
   ruleSet: BuiltInLinkageRuleSet = DEFAULT_LINKAGE_RULE_SET,
+  csvDelimiter?: string,
 ): Promise<TemplateDataSpec> {
+  const delimiterSection = csvDelimiter !== undefined ? { csvDelimiter } : {};
   if (input === undefined)
-    return { linkageTerms: linkageTermsFromRuleSet(ruleSet, identity) };
+    return {
+      linkageTerms: linkageTermsFromRuleSet(ruleSet, identity),
+      ...delimiterSection,
+    };
 
   let inferred;
   try {
     inferred = await inferDateInputFormatFromSource(
       openInputSource(input, { allowStdin: true }),
+      undefined,
+      csvDelimiter,
     );
   } catch (err) {
     // openInputSource's stdin-specific rejections (`-` disallowed, `-` at a bare
@@ -264,18 +288,21 @@ export async function buildTemplateData(
 
   warnSanitizedColumns(inferred.sanitizedColumnPositions);
 
-  return buildDataSpec({
-    identity,
-    ruleSet,
-    rows: {
-      rawRows: [],
-      columns: inferred.columns,
-      sanitizedColumnPositions: inferred.sanitizedColumnPositions,
-    },
-    ...(inferred.dateInputFormat !== undefined
-      ? { dateInputFormat: inferred.dateInputFormat }
-      : {}),
-  });
+  return {
+    ...buildDataSpec({
+      identity,
+      ruleSet,
+      rows: {
+        rawRows: [],
+        columns: inferred.columns,
+        sanitizedColumnPositions: inferred.sanitizedColumnPositions,
+      },
+      ...(inferred.dateInputFormat !== undefined
+        ? { dateInputFormat: inferred.dateInputFormat }
+        : {}),
+    }),
+    ...delimiterSection,
+  };
 }
 
 /** What {@link decideOverwrite} states behind the occupied path. */

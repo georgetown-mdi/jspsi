@@ -92,6 +92,26 @@ export function addLoggingOptions(cmd: Argv): Argv {
 }
 
 /**
+ * Add `--csv-delimiter`, declared once here and called from the builder of
+ * every command that reads a CSV, so the flag keeps one name, type, and
+ * description across the CLI; `csvDelimiterFlag` (util/flags.ts) reads it
+ * back. A command that reads no CSV does not add it, and `strictOptions`
+ * refuses it there.
+ *
+ * `type: "string"` so a value that looks numeric stays a string rather than
+ * reaching the accepted-set rule as a number.
+ */
+export function addCsvDelimiterOption(cmd: Argv): Argv {
+  return cmd.option("csv-delimiter", {
+    type: "string",
+    describe:
+      "field delimiter of the CSV this run reads, and of the result it " +
+      "writes: one character, or `tab`; default=the delimiter the input " +
+      "file itself shows, writing commas",
+  });
+}
+
+/**
  * Per-command overrides for the descriptions of the common bootstrap options
  * whose accurate wording is command-specific -- chiefly whether the config/key
  * files are written or read, and whether the `server-*` (and `peer-id`)

@@ -58,6 +58,9 @@ interface InferredDateInputFormat {
  * profile rely on that equivalence to profile a CLI-scale file (millions of
  * rows) at bounded, not file-sized, peak memory.
  *
+ * `delimiter` reads the source by that field delimiter; omit it to have the
+ * read detect one, as {@link loadCSVColumnSample} does.
+ *
  * Resolves the header columns, the DOB column (absent without one), and the
  * format (absent without a DOB column or a signal in its sample); rejects,
  * like {@link loadCSVColumnSample}, on a read/parse error or line-ceiling
@@ -66,6 +69,7 @@ interface InferredDateInputFormat {
 export async function inferDateInputFormatFromSource(
   file: LocalFile,
   byteCeiling: number = CSV_LINE_BYTE_CEILING,
+  delimiter?: string,
 ): Promise<InferredDateInputFormat> {
   const { columns, sanitizedColumnPositions, sampledColumn, sample } =
     await loadCSVColumnSample(
@@ -73,6 +77,7 @@ export async function inferDateInputFormatFromSource(
       inferDateOfBirthColumn,
       INFER_DATE_SCAN_CAP,
       byteCeiling,
+      delimiter,
     );
   const dateInputFormat =
     sampledColumn !== undefined ? inferDateFormat(sample) : undefined;

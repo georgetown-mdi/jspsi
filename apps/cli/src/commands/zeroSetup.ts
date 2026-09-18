@@ -36,11 +36,12 @@ import {
 } from "../util/atSignRefs";
 import { establishHostKeyTrust } from "../hostKeyTrust";
 import { exitCodeForError, exitWithError } from "../util/exit";
-import { parseOrExit } from "../util/flags";
+import { csvDelimiterFlag, parseOrExit } from "../util/flags";
 import { configureLogging } from "../util/logging";
 import { channelFromURL, connectionFromURL } from "../connectionFromUrl";
 import {
   addCommonBootstrapOptions,
+  addCsvDelimiterOption,
   connectionOverridesFrom,
   parseCommonBootstrapArgs,
   warnConnectionPerPollShortInterval,
@@ -74,7 +75,7 @@ export { channelFromURL };
 
 export function builder(cmd: Argv): Argv {
   return addCommonBootstrapOptions(
-    cmd
+    addCsvDelimiterOption(cmd)
       .usage(
         "Usage:\n" +
           "  $0 [--save] [options] URL INPUT_FILE [OUTPUT_FILE]\n\n" +
@@ -194,6 +195,10 @@ interface ZeroSetupArgs extends CommonBootstrapOptions {
   // terms. Resolved to a definite boolean here: the terms schema makes the
   // field mandatory, and there is no config layer to merge an unset flag with.
   deduplicate: boolean;
+  // The field delimiter this run reads its input by and writes its result
+  // with. There is no configuration to merge with here -- a zero-setup run
+  // loads none -- so the flag alone decides it.
+  csvDelimiter?: string;
 }
 
 function parseArgs(argv: Arguments): ZeroSetupArgs {
@@ -223,6 +228,7 @@ function parseArgs(argv: Arguments): ZeroSetupArgs {
     // rejects a repeat first. Undefined when unset, leaving the cascade default.
     linkageStrategy: parseLinkageStrategyFlag(argv),
     deduplicate: (argv["deduplicate"] as boolean | undefined) ?? false,
+    csvDelimiter: csvDelimiterFlag(argv),
   };
 }
 
@@ -302,12 +308,13 @@ async function prepareDataset(
   input: string,
   linkageStrategy: LinkageStrategy | undefined,
   deduplicate: boolean,
+  csvDelimiter: string | undefined,
 ): Promise<PreparedExchange> {
   const log = getLogger("psilink");
 
   const { rawRows, columns, sanitizedColumnPositions } = await loadInputRows(
     input,
-    { allowStdin: true },
+    { allowStdin: true, csvDelimiter },
   );
   // The prepare resolves the metadata from this read's own columns, so it takes
   // this read's changed positions with them: a header the removal emptied is
@@ -348,12 +355,17 @@ async function prepareDataset(
  * empty or absent observation records nothing (see
  * {@link observedReceivedColumnsForSave}).
  *
+ * `csvDelimiter` is the delimiter this run read and wrote by, recorded so the
+ * recurring `psilink exchange` the saved config governs needs no flag of its
+ * own; absent when the run chose none.
+ *
  * @internal exported for testing
  */
 export function buildSaveSpec(
   connection: ConnectionConfig,
   prepared: PreparedExchange,
   observedReceivedColumns?: string[],
+  csvDelimiter?: string,
 ): ExchangeSpec {
   const expectedPayloadColumns = observedReceivedColumnsForSave(
     observedReceivedColumns,
@@ -363,6 +375,7 @@ export function buildSaveSpec(
     linkageTerms: prepared.linkageTerms,
     metadata: prepared.metadata,
     ...(expectedPayloadColumns !== undefined ? { expectedPayloadColumns } : {}),
+    ...(csvDelimiter !== undefined ? { csvDelimiter } : {}),
   };
 }
 
@@ -534,6 +547,7 @@ export async function handler(argv: Arguments): Promise<void> {
     eventStream,
     linkageStrategy,
     deduplicate,
+    csvDelimiter,
     ...options
   } = parsed;
 
@@ -662,6 +676,7 @@ export async function handler(argv: Arguments): Promise<void> {
         input,
         linkageStrategy,
         deduplicate,
+        csvDelimiter,
       );
       // Read the files any `@path` credential ref names, holding the values
       // aside rather than applying them: `connection` must keep the reference so
@@ -722,6 +737,7 @@ export async function handler(argv: Arguments): Promise<void> {
         auth: null,
         prepared,
         output,
+        csvDelimiter,
         verbosity,
         loggerName: "psilink",
         logFile,
@@ -768,6 +784,7 @@ export async function handler(argv: Arguments): Promise<void> {
                   connection,
                   prepared,
                   observedReceivedPayloadColumns,
+                  csvDelimiter,
                 ),
                 configFile: options.configFile,
                 keyFile: options.keyFile,

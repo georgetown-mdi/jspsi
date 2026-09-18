@@ -526,6 +526,15 @@ export {
   CsvLineByteCeilingError,
   CsvRowParseError,
 } from "./file";
+// The one accepted-character rule behind every CSV field delimiter psilink
+// reads or writes with: the spelling resolver, the predicate, and the refusal
+// the CLI flag and the configuration schema both state.
+export {
+  DEFAULT_CSV_DELIMITER,
+  csvDelimiterRefusal,
+  isCsvDelimiter,
+  normalizeCsvDelimiter,
+} from "./csvDelimiter.js";
 export type { CSVRow, CSVParseMeta } from "./file";
 // The characters no name may hold, the text-direction half of that class, and
 // the strip the CSV header transform applies. Shared so the ingestion boundary,

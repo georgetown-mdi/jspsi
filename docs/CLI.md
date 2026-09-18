@@ -85,6 +85,21 @@ Both refusals happen before the exchange begins: nothing is disclosed, no config
 
 The row check applies to every command that reads a CSV to set up or run an exchange (`psilink exchange`, the zero-setup form, `psilink invite`, `psilink accept`) and to the files `psilink verify-receipt` reads. The empty-dataset check applies to the exchange commands only: a result CSV with no rows is what a genuine zero-match exchange writes, and `psilink verify-receipt` must still be able to verify one. `psilink init` applies neither -- it reads the header and a bounded sample of one column to write its template, never the whole file -- so a template can still be authored from a file these checks would refuse for an exchange.
 
+### The field delimiter
+
+`--csv-delimiter` sets the field delimiter of the CSV a command reads and of the result file it writes, for a source system that exports pipe-, tab-, or semicolon-separated data. The configuration field is [`csv_delimiter`](EXCHANGE_REFERENCE.md#csv_delimiter); the flag replaces it for one run.
+
+- **Accepted values.** One character: a tab, or a printable ASCII character other than the double quote (`"`), which is the character RFC 4180 quotes a field with. Anything else -- more than one character, an empty value, the double quote, a line break, a character outside ASCII -- is refused with a usage error (exit 64) before any credential, terms, or data are sent.
+- **Writing a tab.** On the command line and in the configuration file, write a tab as `tab` or `\t`: `psilink exchange --csv-delimiter tab data.tsv results.tsv`. A literal tab is accepted where you can type one.
+- **The result follows the input.** There is no separate output setting: a run that reads pipes writes pipes, so the result file can be fed straight back to the system the input came from. A field holding the delimiter, a double quote, or a line break is quoted on the way out, so the result reads back through the same delimiter.
+- **It is yours alone.** The delimiter is a local reading and writing choice. It is not part of the linkage terms, the invitation, or the exchange record, nothing about it is sent to your partner, and the two parties need not use the same one.
+- **Where it applies.** Every command that reads a CSV takes the flag: `psilink exchange`, the zero-setup form, `psilink invite`, `psilink accept`, `psilink init`, and `psilink verify-receipt`. A command that reads none does not accept it and reports it as an unknown option.
+- **What `psilink init` does with it.** The template it writes records the delimiter it was given as `csv_delimiter`, so the recurring `psilink exchange` that template governs needs no flag. A zero-setup `--save` run and the configurations `invite`/`accept` write record it the same way.
+- **`psilink verify-receipt`.** The flag governs both CSVs it re-reads. It is not taken from `--config-file`, which that command consults for your linkage terms alone, so state the delimiter on the command line when the files you are verifying are not comma-delimited.
+- **Leaving it out.** Given no delimiter, psilink reads a file by the delimiter the file itself shows -- what it has always done -- and writes the result with commas. Naming a delimiter is what makes the two agree.
+
+There is no delimiter inference beyond that: a file read with the wrong delimiter usually parses as a single column, which shows up as linkage terms the input cannot satisfy rather than as a wrong result.
+
 Durations on the command line are written as a positive integer followed by a single-character unit -- `s` (seconds), `m` (minutes), `h` (hours), or `d` (days); for example `45s`, `30m`, `2h`, or `1d`. The unit suffix is required: a bare number such as `30` is not a valid duration and is rejected with the suffixed form to use (`30s`) rather than silently read as seconds. This applies to every duration-valued option, including `--expires-in`, `--accept-timeout`, `--connection-timeout`, and `--peer-timeout`.
 
 `--polling-frequency` sets how often the `sftp`/`filedrop` channels poll the shared directory for the partner's files, overriding the `poll_interval_ms` configuration field (default `5s`).

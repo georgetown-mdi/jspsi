@@ -16,6 +16,7 @@ import {
   quoteTermsValueList,
 } from "./config/compatibilityMessage.js";
 import type { OutboundPayloadConsent } from "./config/outboundPayloadConsent.js";
+import { DEFAULT_CSV_DELIMITER } from "./csvDelimiter.js";
 import { readRowColumn } from "./file.js";
 import type { CSVRow } from "./file.js";
 import type { CommittedPayload } from "./records/exchangeRecord.js";
@@ -997,8 +998,12 @@ async function sendPayloadReportingHandOff(
   report?.();
 }
 
-function quoteCsvField(value: string): string {
-  return value.includes(",") ||
+// Quote a field the writer joins with `delimiter`: RFC 4180 escaping against
+// the delimiter this file is actually written with, not against the comma
+// alone, so a value holding the chosen delimiter stays one field when the file
+// is read back through it.
+function quoteCsvField(value: string, delimiter: string): string {
+  return value.includes(delimiter) ||
     value.includes('"') ||
     value.includes("\n") ||
     value.includes("\r")
@@ -1050,7 +1055,10 @@ function uniqueColumnName(
  * bind, and (once the payload commitment stopped binding the partner's row
  * indices) it is not otherwise recoverable from the payload values. Then come
  * the partner's payload columns, each using its original name. All values are
- * RFC 4180 escaped. Null cells in the
+ * RFC 4180 escaped against `delimiter`, the field delimiter the caller joins
+ * them with (comma by default): a value holding that delimiter, a double quote,
+ * CR or LF is quoted and its own quotes doubled, so the file the caller writes
+ * reads back through the same delimiter. Null cells in the
  * partner's payload are emitted as empty strings; a payload collection that
  * is not an array, a row that is not an array or whose width disagrees with
  * the declared columns, and a cell that is neither a string nor null, are
@@ -1077,7 +1085,9 @@ export function buildOutputTable(
   metadata: Metadata,
   partnerPayload: PartnerPayload,
   includeOwnColumns?: OwnColumnSelection,
+  delimiter: string = DEFAULT_CSV_DELIMITER,
 ): { headers: string[]; rows: Array<Array<string>> } {
+  const quote = (value: string): string => quoteCsvField(value, delimiter);
   if (associationTable[0].length !== associationTable[1].length) {
     throw new Error(
       "association table arrays have different lengths: " +
@@ -1173,10 +1183,10 @@ export function buildOutputTable(
   const partnerIndexHeader = uniqueColumnName("row_id", taken);
 
   const headers = [
-    quoteCsvField(ourBaseName),
-    quoteCsvField(partnerIndexHeader),
-    ...valueHeaders.map(quoteCsvField),
-    ...ownHeaders.map(quoteCsvField),
+    quote(ourBaseName),
+    quote(partnerIndexHeader),
+    ...valueHeaders.map(quote),
+    ...ownHeaders.map(quote),
   ];
 
   const theirIdxToPayloadPos = new Map(
@@ -1217,12 +1227,12 @@ export function buildOutputTable(
     const ourRow = rawRows[ourIdx];
     const ourIdValue =
       ourIdCol && ourRow ? readRowColumn(ourRow, ourIdCol.name) : undefined;
-    const ourId = quoteCsvField(ourIdValue ?? String(ourIdx));
-    const partnerIndexCell = quoteCsvField(String(theirIdx));
+    const ourId = quote(ourIdValue ?? String(ourIdx));
+    const partnerIndexCell = quote(String(theirIdx));
     // A column the matched row does not hold -- a short row in an
     // operator-local CSV -- writes an empty cell, as a null partner cell does.
     const ownValues = ownColumns.map((name) =>
-      quoteCsvField((ourRow ? readRowColumn(ourRow, name) : undefined) ?? ""),
+      quote((ourRow ? readRowColumn(ourRow, name) : undefined) ?? ""),
     );
 
     if (!hasPartnerCols) {
@@ -1231,7 +1241,7 @@ export function buildOutputTable(
 
     const partnerRow = partnerPayload.rows[theirIdxToPayloadPos.get(theirIdx)!];
     const theirValues = partnerPayload.columns.map((_, colIdx) =>
-      quoteCsvField(partnerRow[colIdx] ?? ""),
+      quote(partnerRow[colIdx] ?? ""),
     );
 
     return [ourId, partnerIndexCell, ...theirValues, ...ownValues];

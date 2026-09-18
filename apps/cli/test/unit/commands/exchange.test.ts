@@ -1380,6 +1380,101 @@ test("handler suppresses the advisory when a successful exchange refreshes the t
   }
 });
 
+// --- handler: the CSV field delimiter ----------------------------------------
+// The setting and the flag reach one value, which reads the input and writes the
+// result. The accepted set and the round trip are core's and
+// util/resultCsvDelimiter.test.ts's; what is measured here is the precedence and
+// that the resolved value reaches the run.
+
+/** Seed a pipe-delimited input and a config holding `configured`, run the
+ * handler with `flag`, and return the delimiter runProtocol was handed. */
+async function delimiterReachingTheRun(
+  configured: string | undefined,
+  flag: string | undefined,
+): Promise<string | undefined> {
+  fs.writeFileSync(
+    configFile,
+    YAML.stringify({
+      ...minimalFiledropConfig,
+      ...(configured !== undefined ? { csv_delimiter: configured } : {}),
+    }),
+  );
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
+  const input = path.join(dir, "in.csv");
+  fs.writeFileSync(input, "ssn|note\n123456789|hello\n");
+
+  vi.mocked(runProtocol).mockReset();
+  vi.mocked(runProtocol).mockResolvedValueOnce({});
+  await handler({
+    _: [],
+    $0: "psilink",
+    input,
+    "config-file": configFile,
+    "key-file": keyFile,
+    "log-level": "silent",
+    ...(flag !== undefined ? { "csv-delimiter": flag } : {}),
+  } as unknown as Arguments);
+  return vi.mocked(runProtocol).mock.calls[0][0].csvDelimiter;
+}
+
+test("handler: the configuration's csv_delimiter governs a run with no flag", async () => {
+  expect(await delimiterReachingTheRun("|", undefined)).toBe("|");
+});
+
+test("handler: --csv-delimiter replaces the configuration's value for that run", async () => {
+  expect(await delimiterReachingTheRun(";", "|")).toBe("|");
+});
+
+test("handler: the flag alone governs a configuration that sets none", async () => {
+  expect(await delimiterReachingTheRun(undefined, "|")).toBe("|");
+});
+
+test("handler: neither one leaves the run with no chosen delimiter", async () => {
+  expect(await delimiterReachingTheRun(undefined, undefined)).toBeUndefined();
+});
+
+test("handler: the configured delimiter is the only one the input is read by", async () => {
+  // The same pipe-delimited file the cases above run, configured to be read by
+  // commas: it parses as one column, which cannot satisfy the terms, so the run
+  // refuses before anything is sent. With no setting the read takes the file's
+  // own delimiter and the run proceeds, so this is the discriminating case for
+  // a setting that never reached the read.
+  const exitSpy = captureProcessExit();
+  try {
+    await expect(delimiterReachingTheRun(",", undefined)).rejects.toThrow(
+      "exit:64",
+    );
+    expect(vi.mocked(runProtocol)).not.toHaveBeenCalled();
+  } finally {
+    exitSpy.mockRestore();
+  }
+});
+
+test("handler: a delimiter outside the accepted set stops the run before anything is sent", async () => {
+  fs.writeFileSync(configFile, YAML.stringify(minimalFiledropConfig));
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
+  const input = path.join(dir, "in.csv");
+  fs.writeFileSync(input, "ssn\n123456789\n");
+  vi.mocked(runProtocol).mockReset();
+  const exitSpy = captureProcessExit();
+  try {
+    await expect(
+      handler({
+        _: [],
+        $0: "psilink",
+        input,
+        "config-file": configFile,
+        "key-file": keyFile,
+        "log-level": "silent",
+        "csv-delimiter": "::",
+      } as unknown as Arguments),
+    ).rejects.toThrow("exit:64");
+    expect(vi.mocked(runProtocol)).not.toHaveBeenCalled();
+  } finally {
+    exitSpy.mockRestore();
+  }
+});
+
 // --- handler: signing-identity divergence (wiring) ---------------------------
 // The comparison itself is unit-tested in exchangeSigning.test.ts; these cover
 // the wiring -- that the handler hands the run's terms identity to the signing

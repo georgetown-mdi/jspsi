@@ -19,7 +19,7 @@ An exchange specification has four top-level components:
 | `metadata` | no | Descriptions of input fields and their roles |
 | `standardization` | no | Data cleaning and standardizing transformations applied before linkage |
 
-Beside them sit the optional top-level blocks documented below -- [`authentication`](#authentication), [`signing`](#signing), [`retention_disposition`](#retention_disposition), [`include_own_columns`](#include_own_columns) -- the three payload enforcement records (`outbound_payload_consent`, `disclosed_payload_columns`, `expected_payload_columns`), under the rules in [`linkage_terms.payload`](#linkage_termspayload), and the terms enforcement record [`expected_partner_deduplicate`](#expected_partner_deduplicate). psilink writes and refreshes all four for you on an online invite or accept, and you may also author them by hand in a recurring configuration. Any other top-level key is rejected at config-parse time with a user-facing error naming it, and no exchange runs until it is corrected: those enforcement records are optional, and an absent one means "nothing to enforce", so a misspelling that was quietly dropped would disable a consent or disclosure check with no signal. Unrecognized keys *inside* `linkage_terms`, `connection`, `metadata`, and `standardization` are dropped instead -- see [EXCHANGE_FILE.md](spec/EXCHANGE_FILE.md) for what each behavior means when a file minted by a newer web application is loaded by an older CLI.
+Beside them sit the optional top-level blocks documented below -- [`authentication`](#authentication), [`signing`](#signing), [`retention_disposition`](#retention_disposition), [`include_own_columns`](#include_own_columns), [`csv_delimiter`](#csv_delimiter) -- the three payload enforcement records (`outbound_payload_consent`, `disclosed_payload_columns`, `expected_payload_columns`), under the rules in [`linkage_terms.payload`](#linkage_termspayload), and the terms enforcement record [`expected_partner_deduplicate`](#expected_partner_deduplicate). psilink writes and refreshes all four for you on an online invite or accept, and you may also author them by hand in a recurring configuration. Any other top-level key is rejected at config-parse time with a user-facing error naming it, and no exchange runs until it is corrected: those enforcement records are optional, and an absent one means "nothing to enforce", so a misspelling that was quietly dropped would disable a consent or disclosure check with no signal. Unrecognized keys *inside* `linkage_terms`, `connection`, `metadata`, and `standardization` are dropped instead -- see [EXCHANGE_FILE.md](spec/EXCHANGE_FILE.md) for what each behavior means when a file minted by a newer web application is loaded by an older CLI.
 
 ## File references
 
@@ -1215,6 +1215,32 @@ The result's headers stay distinct: a partner payload column whose name collides
 The key is read by the CLI and by the console when it runs a config file. The web application sets it from its "Matching & sharing" step, beside the per-column sharing choices, and writes it into every artifact that step's exchange produces: the result the browser downloads, the exchange file the save path writes, the config the console runs, and the stored record a recurring exchange re-runs from. The control is offered only where the exchange gives you a result table to write into, so it does not appear on a count-only exchange or on one whose `output` hands the result to your partner alone.
 
 Your own columns are not covered by the exchange record's commitments, which bind what was exchanged rather than what you filed beside it; verification of a result written with the key is unaffected ([EXCHANGE_RECORD.md](spec/EXCHANGE_RECORD.md#commitment-scheme)).
+
+---
+
+## The field delimiter of your files
+
+Optional. The field delimiter psilink reads your input CSV by and writes your result file with.
+
+Purely local, like [`include_own_columns`](#include_own_columns) and [`retention_disposition`](#retention_disposition): it is not a linkage term, nothing about it is sent to your partner or folded into the agreed-terms hash, and the two parties need not use the same one. Your partner reads and writes its own files however it likes.
+
+### `csv_delimiter`
+
+*Type:* string (one character, or `tab`)  
+*Required:* no  
+*Consistency:* none (per-party; not exchanged)
+
+One character: a tab, or a printable ASCII character other than the double quote (`"`), which is the character RFC 4180 quotes a field with. Anything else -- more than one character, an empty value, the double quote, a line break, a character outside ASCII -- is refused when the configuration is read, before any credential, terms, or data are sent. Write a tab as `tab` or `\t`, or as a literal tab in a double-quoted YAML string.
+
+```yaml
+csv_delimiter: "|"
+```
+
+There is no separate setting for the result file: it is written with the same delimiter the input was read by, so it can be fed straight back to the system the input came from. A field holding the delimiter, a double quote, or a line break is quoted on the way out, so the result reads back through the same delimiter.
+
+With the key absent, psilink reads a file by the delimiter the file itself shows and writes the result with commas. `psilink exchange --csv-delimiter` replaces the key for one run, and `psilink init --csv-delimiter` writes the key into the template it produces; see [CLI.md](CLI.md#the-field-delimiter).
+
+The key is read by the CLI and by the console when it runs a config file. The web application does not offer a control for it and reads and writes commas.
 
 ---
 

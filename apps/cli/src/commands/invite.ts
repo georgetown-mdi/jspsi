@@ -44,6 +44,7 @@ import { DURATION_VALUE_HELP, parseDuration } from "../util/duration";
 import { runOrExit } from "../util/exit";
 import {
   assertNoUnknownOptions,
+  csvDelimiterFlag,
   durationFlagSeconds,
   MAX_TIMEOUT_SECONDS,
   singleValue,
@@ -68,6 +69,7 @@ import {
 } from "../connection/webrtc/weriftPeer";
 import {
   addCommonBootstrapOptions,
+  addCsvDelimiterOption,
   connectionOverridesFrom,
   parseCommonBootstrapArgs,
   warnConnectionPerPollShortInterval,
@@ -105,7 +107,7 @@ import {
 
 export function builder(cmd: Argv): Argv {
   return addCommonBootstrapOptions(
-    cmd
+    addCsvDelimiterOption(cmd)
       // Capture all positionals into `args` (rather than relying on the global
       // `_`) and treat an unknown `-`-leading token as a positional, so an
       // input path is never misread as a flag. Scoped to this command so the
@@ -334,10 +336,22 @@ export async function validateInvite(params: {
   acceptTimeout: number;
   expiresIn?: string;
   linkageStrategy?: LinkageStrategy;
+  /** The field delimiter this run reads its input by and, on the online path,
+   * writes its result with; recorded in the configuration this command writes
+   * so the recurring exchange it governs needs no flag. */
+  csvDelimiter?: string;
   log: ReturnType<typeof getLogger>;
 }): Promise<InviteReady> {
-  const { resolved, options, acceptTimeout, expiresIn, linkageStrategy, log } =
-    params;
+  const {
+    resolved,
+    options,
+    acceptTimeout,
+    expiresIn,
+    linkageStrategy,
+    csvDelimiter,
+    log,
+  } = params;
+  const delimiterSection = csvDelimiter !== undefined ? { csvDelimiter } : {};
   // parseDuration yields whole milliseconds at second granularity (its smallest
   // unit), so dividing by 1000 is exact: the lifetime is always a whole number
   // of seconds, whether defaulted or overridden, and feeds expiresFromNow below.
@@ -513,12 +527,14 @@ export async function validateInvite(params: {
           "first and a later acceptance will be rejected.",
       );
 
-    const rows = await loadInputRows(input, { allowStdin: true });
-    const builtDataSpec = buildDataSpec({
-      identity,
-      rows,
-      linkageStrategy,
+    const rows = await loadInputRows(input, {
+      allowStdin: true,
+      csvDelimiter,
     });
+    const builtDataSpec = {
+      ...buildDataSpec({ identity, rows, linkageStrategy }),
+      ...delimiterSection,
+    };
     // Grade the derived terms before the token is minted and before any
     // connection is opened: the same verdict prepareForExchange enforces at the
     // run boundary, where it is stated on the agreed standing rather than on
@@ -691,7 +707,10 @@ export async function validateInvite(params: {
     );
 
     if (resolved.input !== undefined) {
-      const rows = await loadInputRows(resolved.input, { allowStdin: true });
+      const rows = await loadInputRows(resolved.input, {
+        allowStdin: true,
+        csvDelimiter,
+      });
       // The input only validated compatibility; the invitation's terms come from
       // the config, not the input. Say so ahead of the check below, so a user who
       // passed an input expecting it to define the terms reads the refusal it can
@@ -861,12 +880,14 @@ export async function validateInvite(params: {
     keyPath: options.keyFile,
   });
 
-  const rows = await loadInputRows(resolved.input, { allowStdin: true });
-  const builtDataSpec = buildDataSpec({
-    identity,
-    rows,
-    linkageStrategy,
+  const rows = await loadInputRows(resolved.input, {
+    allowStdin: true,
+    csvDelimiter,
   });
+  const builtDataSpec = {
+    ...buildDataSpec({ identity, rows, linkageStrategy }),
+    ...delimiterSection,
+  };
   noteSinglePassSelection(linkageStrategy, log);
 
   // The metadata the inferred terms (and the eventual exchange) read this party's
@@ -956,6 +977,7 @@ export async function handler(argv: Arguments): Promise<void> {
       // mirroring how accept-timeout is parsed above; singleValue rejects a
       // repeat first.
       const linkageStrategy = parseLinkageStrategyFlag(argv);
+      const csvDelimiter = csvDelimiterFlag(argv);
       const positionals = (argv["args"] as Array<string> | undefined) ?? [];
       // This command sets unknown-options-as-args, so a mistyped `--flag` lands
       // in the positionals rather than being rejected by the top-level
@@ -969,6 +991,7 @@ export async function handler(argv: Arguments): Promise<void> {
         acceptTimeout,
         expiresIn,
         linkageStrategy,
+        csvDelimiter,
         log,
       });
 
@@ -998,6 +1021,7 @@ export async function handler(argv: Arguments): Promise<void> {
           keyPath: options.keyFile,
           configPath: options.configFile,
           output: ready.output,
+          csvDelimiter,
           verbosity: options.verbosity,
           loggerName: "invite",
           logFile: options.logFile,

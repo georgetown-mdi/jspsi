@@ -7,6 +7,7 @@ import type { Arguments } from "yargs";
 import YAML from "yaml";
 import {
   BUILT_IN_LINKAGE_RULE_SETS,
+  DEFAULT_LINKAGE_RULE_SET,
   ExchangeSpecSchema,
   StandardizationSchema,
   UsageError,
@@ -148,6 +149,26 @@ test("renderConfigTemplate: defaults are pre-filled and the active body parses",
   // Default connection options are present and pre-filled.
   expect(template).toContain("server_connect_timeout_ms: 30000");
   expect(template).toContain("port: 22");
+});
+
+test("renderConfigTemplate: the delimiter init was given is written into the template", async () => {
+  // The run that names a delimiter leaves it in the file, so the recurring
+  // `psilink exchange` that file governs reads and writes by it with no flag.
+  const template = renderConfigTemplate(
+    await buildTemplateData(undefined, "Org", DEFAULT_LINKAGE_RULE_SET, "|"),
+  );
+  expect(parseExchangeSpec(YAML.parse(template)).csvDelimiter).toBe("|");
+
+  // A tab is written as the character, and parses back as one.
+  const tabbed = renderConfigTemplate(
+    await buildTemplateData(undefined, "Org", DEFAULT_LINKAGE_RULE_SET, "\t"),
+  );
+  expect(parseExchangeSpec(YAML.parse(tabbed)).csvDelimiter).toBe("\t");
+
+  // A run that names none writes no active key, leaving the commented example
+  // the no-input template already documents.
+  const none = renderConfigTemplate(await buildTemplateData(undefined, "Org"));
+  expect(parseExchangeSpec(YAML.parse(none)).csvDelimiter).toBeUndefined();
 });
 
 test("renderConfigTemplate: every shipped rule set round-trips as its own citation", async () => {

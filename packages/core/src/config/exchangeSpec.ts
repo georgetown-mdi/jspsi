@@ -10,6 +10,11 @@ import {
   MAX_TEXT_LENGTH,
   nameValue,
 } from "./linkageTermsSchema.js";
+import {
+  csvDelimiterRefusal,
+  isCsvDelimiter,
+  normalizeCsvDelimiter,
+} from "../csvDelimiter.js";
 import { AuthenticationSchema, ConnectionConfigSchema } from "./connection.js";
 import { StandardizationSchema } from "./standardizationSchema.js";
 import { MetadataSchema, OwnColumnSelectionSchema } from "./metadata.js";
@@ -162,6 +167,23 @@ export const ExchangeSpecSchema = z
     // sees, or receives. Absent writes the result the partner's values
     // alone compose.
     includeOwnColumns: OwnColumnSelectionSchema.optional(),
+    // Optional local file-format setting: the field delimiter this party's CSV
+    // input is read by and its result file is written with. Per-party and
+    // local like the fields above -- never exchanged, cross-validated, or
+    // folded into the agreed-terms hash, and not a linkage term: the two
+    // parties' files need not agree on it, and neither reads the other's.
+    // Written as the character itself, or `tab` / `\t` for a tab, and resolved
+    // to the single character before the accepted-set rule grades it, so a
+    // configuration and a command line take the same spellings. Absent reads
+    // by the delimiter the file itself shows and writes commas.
+    csvDelimiter: z
+      .string()
+      .transform(normalizeCsvDelimiter)
+      .superRefine((value, ctx) => {
+        if (isCsvDelimiter(value)) return;
+        ctx.addIssue({ code: "custom", message: csvDelimiterRefusal(value) });
+      })
+      .optional(),
   })
   .refine(
     (spec) =>

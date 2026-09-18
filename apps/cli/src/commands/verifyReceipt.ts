@@ -58,7 +58,7 @@ import {
   warnOnLinkageRuleSetCitationDrift,
 } from "../config";
 import { expandTilde } from "../fileUtils";
-import { addLoggingOptions } from "../optionDefinitions";
+import { addCsvDelimiterOption, addLoggingOptions } from "../optionDefinitions";
 import { keysPathFor } from "../recordFile";
 import { parseSensitiveJson, parseSensitiveYaml } from "../sensitiveFile";
 import { loadSigningCertificate } from "../signingIdentityFile";
@@ -68,7 +68,7 @@ import {
   exitWithError,
   RECEIPT_VERIFICATION_FAILED_EXIT_CODE,
 } from "../util/exit";
-import { parseOrExit, singleValue } from "../util/flags";
+import { csvDelimiterFlag, parseOrExit, singleValue } from "../util/flags";
 import { configureLogging, logLevelFlag } from "../util/logging";
 
 // `psilink verify-receipt` reports whether a stored exchange artifact holds up. It
@@ -102,7 +102,7 @@ import { configureLogging, logLevelFlag } from "../util/logging";
 // short of verified rather than failed.
 
 export function builder(cmd: Argv): Argv {
-  const beforeLogging = cmd
+  const beforeLogging = addCsvDelimiterOption(cmd)
     .usage(
       "Usage: $0 verify-receipt <record> [input-file] [result-file] [options]",
     )
@@ -1113,6 +1113,12 @@ export async function handler(argv: Arguments): Promise<void> {
     if (recordPath === undefined || recordPath.length === 0)
       throw new UsageError("a record file to verify is required");
     const inputFile = singleValue(argv, "input-file") as string | undefined;
+    // Both CSVs this command re-reads are the party's own files, written and
+    // read by one delimiter, so one flag governs both. It is not taken from
+    // --config-file: that file is consulted for this party's linkage terms
+    // alone, so a run whose files are not comma-delimited states the delimiter
+    // here.
+    const csvDelimiter = csvDelimiterFlag(argv);
     const resultFile = singleValue(argv, "result-file") as string | undefined;
     const keysArg = singleValue(argv, "keys") as string | undefined;
     const configFile = singleValue(argv, "config-file") as string | undefined;
@@ -1202,8 +1208,14 @@ export async function handler(argv: Arguments): Promise<void> {
       if (inputFile !== undefined && resultFile !== undefined) {
         const inputParse = await loadCSVFile(
           openInputSource(inputFile, { allowStdin: true }),
+          undefined,
+          csvDelimiter,
         );
-        const resultParse = await loadCSVFile(openInputSource(resultFile));
+        const resultParse = await loadCSVFile(
+          openInputSource(resultFile),
+          undefined,
+          csvDelimiter,
+        );
         const result = toRetainedResult(resultParse);
         const ourIdColumn = deriveOurIdColumn(
           result.headers,

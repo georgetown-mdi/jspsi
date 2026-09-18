@@ -33,6 +33,10 @@ export interface TemplateDataSpec {
   linkageTerms: LinkageTerms;
   metadata?: Metadata;
   standardization?: Standardization;
+  /** The field delimiter the run was given, written into the template so the
+   * exchange it governs reads and writes by it without a flag. Absent when the
+   * run chose none. */
+  csvDelimiter?: string;
 }
 
 const HEADER_LINES = [
@@ -318,6 +322,19 @@ export const OPTIONAL_SECTIONS = `# --- Optional sections (uncomment and edit to
 # expected_partner_deduplicate: false
 `;
 
+// The commented csv_delimiter example, shown only when the run named no
+// delimiter (a run that named one gets the key written active). Its presence --
+// active or commented -- is what keeps every ExchangeSpec section represented.
+//
+// @internal exported so the section-coverage test reads it from one place.
+export const CSV_DELIMITER_HINT = `# csv_delimiter: the field delimiter of the CSV you link and of the result
+# psilink writes -- one character, or 'tab'. Local to you: your partner reads
+# and writes its own files however it likes, and nothing about this is sent.
+# Omit the field to have psilink take the delimiter the input file itself shows
+# and write the result with commas.
+# csv_delimiter: "|"
+`;
+
 // The commented metadata + standardization block shown only when no input file
 // was given (with an input file these sections are inferred and written active).
 // Their presence -- active or commented -- is what keeps every ExchangeSpec
@@ -377,6 +394,7 @@ export function renderConfigTemplate(data: TemplateDataSpec): string {
   if (data.metadata !== undefined) spec.metadata = data.metadata;
   if (data.standardization !== undefined)
     spec.standardization = data.standardization;
+  if (data.csvDelimiter !== undefined) spec.csvDelimiter = data.csvDelimiter;
 
   const doc = new YAML.Document(snakeizeKeys(spec));
   doc.commentBefore = commentBlock(HEADER_LINES);
@@ -386,6 +404,7 @@ export function renderConfigTemplate(data: TemplateDataSpec): string {
   // When no input file seeded metadata/standardization, document them (commented)
   // so every ExchangeSpec section is still represented in the template.
   if (data.metadata === undefined) sections.push(INFERRED_SECTIONS_HINT);
+  if (data.csvDelimiter === undefined) sections.push(CSV_DELIMITER_HINT);
   sections.push(OPTIONAL_SECTIONS);
   return sections.join("\n") + "\n";
 }
