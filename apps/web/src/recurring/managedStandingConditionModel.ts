@@ -6,8 +6,9 @@
  *
  * This is the condition's OWN surface, not a reading of the last run: it renders
  * wherever one stands, including on a record whose last run succeeded, and it
- * holds the only clearance the operator can reach from a page. What clears a
- * condition, and why a successful run is not one of them, is
+ * holds the clearance the operator reaches from a page where the condition has
+ * gone unanswered. What clears a condition, and why a successful run is not one
+ * of them, is
  * docs/MANAGED_EXCHANGE.md, "A standing condition outlives the run that raised
  * it"; the two-outcome gate the unexplained tier routes through is the one the
  * live Tier-2 failure uses ({@link ../psi/managed/managedFailureConfirmation.ts}).

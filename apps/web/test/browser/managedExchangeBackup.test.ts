@@ -717,7 +717,7 @@ async function plantUnreadable(id: string, fields: object): Promise<void> {
       );
       transaction
         .objectStore(MANAGED_EXCHANGE_STORE_NAME)
-        .put({ ...fields, id, schemaVersion: "psilink-managed-exchange/v3" });
+        .put({ ...fields, id, schemaVersion: "psilink-managed-exchange/v4" });
       transaction.oncomplete = () => resolve();
       transaction.onerror = () => reject(transaction.error);
       transaction.onabort = () => reject(transaction.error);

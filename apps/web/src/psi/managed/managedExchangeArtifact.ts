@@ -52,6 +52,7 @@ import { z } from "zod";
 
 import {
   MANAGED_EXCHANGE_ARTIFACT_VERSION,
+  MANAGED_EXCHANGE_PREVIOUS_ARTIFACT_VERSION,
   buildManagedExchangeRecord,
   keyFileFieldsSchema,
   lastRunSchema,
@@ -93,10 +94,10 @@ interface ManagedExchangeArtifactLocal {
   schedule?: ManagedExchangeSchedule;
   /** The run bookkeeping retained from the imported record. */
   lastRun?: ManagedExchangeLastRun;
-  /** The standing condition the source record held, unanswered; omitted where
-   * none stood. It travels because an export that dropped it would be a fourth
-   * way to clear one, and only the operator's acknowledgement, a re-invite, and
-   * a delete may. */
+  /** The standing condition the source record held, with the operator's answer
+   * to it where one was given; omitted where none stood. Both travel because an
+   * export that dropped either would be a fourth way to clear a condition, and
+   * only the operator's acknowledgement, a re-invite, and a delete may. */
   standingCondition?: ManagedStandingCondition;
   /** The max-token-age policy, when the operator opted in. */
   tokenMaxAgeDays?: number;
@@ -214,7 +215,9 @@ export function serializeManagedExchangeArtifact(
  * schemas from the record
  * module so the artifact cannot be laxer than the record it reconstructs -- a
  * tampered artifact with `intervalDays: 0` is rejected here exactly as a stored
- * record would be, not merely at the reconstructed record's later re-validation. */
+ * record would be, not merely at the reconstructed record's later re-validation.
+ * The condition's own schema is strict too, so a member nested inside it is
+ * refused rather than dropped from the reconstructed record. */
 const artifactLocalSchema: ZodType<ManagedExchangeArtifactLocal> = z
   .object({
     label: z.string(),
@@ -241,6 +244,26 @@ const artifactSchema: ZodType<ManagedExchangeArtifact> = z
   })
   .strict();
 
+/** Raised when a backup file holds the previous artifact format
+ * ({@link MANAGED_EXCHANGE_PREVIOUS_ARTIFACT_VERSION}). The strict schema refuses
+ * the tag either way; this names which direction the difference runs, so the
+ * import states the remedy an older file has -- a fresh exchange -- rather than
+ * the version-gap remedies that only close a newer file's. */
+export class ManagedArtifactOutdatedError extends Error {
+  constructor() {
+    super("the backup file holds the previous artifact format");
+    this.name = "ManagedArtifactOutdatedError";
+  }
+}
+
+/** Matches any document whose `artifactVersion` is the previous literal, ahead of
+ * the strict schema that refuses it. The rest of the document is left unchecked:
+ * an older file's other fields are not this build's to read, and the tag alone
+ * decides what the operator is told. */
+const previousArtifactSchema = z.object({
+  artifactVersion: z.literal(MANAGED_EXCHANGE_PREVIOUS_ARTIFACT_VERSION),
+});
+
 /**
  * Parse untrusted artifact bytes into a validated {@link ManagedExchangeArtifact}.
  * The whole document is parsed through the shared sensitive-JSON chokepoint
@@ -250,13 +273,22 @@ const artifactSchema: ZodType<ManagedExchangeArtifact> = z
  * here; {@link reconstructRecordFromArtifact} validates it through the exchange-file
  * parser.
  *
+ * The previous format's tag is refused first, with its own error: it fails the
+ * schema as surely, but as a rejection it is indistinguishable from a newer build's
+ * export, whose remedies do not apply to a file this build has already moved past.
+ * Nothing is reconstructed either way.
+ *
  * @throws {UsageError} if the bytes are not parseable JSON.
+ * @throws {ManagedArtifactOutdatedError} if the document holds the previous
+ *   artifact format.
  * @throws {ZodError} if the parsed value is not a valid artifact.
  */
 export function parseManagedExchangeArtifact(
   source: string,
 ): ManagedExchangeArtifact {
   const raw = parseSensitiveJson(source, "managed exchange backup");
+  if (previousArtifactSchema.safeParse(raw).success)
+    throw new ManagedArtifactOutdatedError();
   return artifactSchema.parse(raw);
 }
 
@@ -265,7 +297,7 @@ export function parseManagedExchangeArtifact(
  * installs the one owner. The embedded document is parsed back through
  * {@link parseSensitiveYaml} and {@link parseExchangeSpec}, the secret and
  * `expires` come from the key pair, and the local fields pass through
- * unchanged. Built through {@link buildManagedExchangeRecord} -- a fresh `id`, the v2
+ * unchanged. Built through {@link buildManagedExchangeRecord} -- a fresh `id`, the v3
  * `schemaVersion`, re-validated through the record schema -- so a malformed
  * document or secret is rejected and nothing is installed. Holds no
  * input-file handle: the first run re-acquires one by selection.
@@ -336,6 +368,8 @@ export interface ImportedManagedExchangeArtifact {
  *
  * @throws {UsageError} if the bytes are not parseable JSON or the embedded document
  *   is not parseable YAML.
+ * @throws {ManagedArtifactOutdatedError} if the bytes hold the previous artifact
+ *   format.
  * @throws {ZodError} if the artifact or the reconstructed record is invalid.
  */
 export function importManagedExchangeArtifact(

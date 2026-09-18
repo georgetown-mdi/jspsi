@@ -175,3 +175,38 @@ export const COMPROMISE_RESPONSE_MESSAGE =
   "interfering. Stop, and follow your organization's process for a suspected " +
   "compromise: reach your partner through a different trusted channel to confirm " +
   "what happened before re-establishing this exchange.";
+
+/** The response is the record's own and stands until an act clears it, so the page
+ * states how long the operator is looking at it for. */
+export const COMPROMISE_RESPONSE_STANDS =
+  "This stays here, and this exchange offers no fresh invitation, until you " +
+  "clear it below or delete the exchange.";
+
+/** The lead over the control that clears the response: what the operator does
+ * before taking it. */
+export const COMPROMISE_ACKNOWLEDGE_LEAD =
+  "Clear this once your partner confirms.";
+
+/** Where to reach the partner, and what clearing the response does -- stated
+ * where the operator is about to do it, since it puts the fresh invitation back
+ * on offer. */
+export const COMPROMISE_ACKNOWLEDGE_NOTE =
+  "Reach them on a channel you trust, not the one this exchange failed on, and " +
+  "ask what happened on their side. Clearing this offers the fresh invitation " +
+  "again.";
+
+/** The label on the control that clears the response. It names what the operator
+ * is attesting -- a confirmation reached somewhere other than the flagged
+ * channel -- rather than repeating the gate question they already answered. */
+export const COMPROMISE_ACKNOWLEDGE_LABEL =
+  "Partner confirmed on another channel";
+
+/** The heading over a response this device could not save. */
+export const COMPROMISE_RESPONSE_UNSAVED_TITLE = "Your answer was not saved";
+
+/** What an unsaved response holds: this page until the operator leaves it or
+ * starts a run, and nothing past that. */
+export const COMPROMISE_RESPONSE_UNSAVED_REASON =
+  "This device could not record your answer. It holds here until you leave " +
+  "this page or start a run. Answer again the next time this exchange asks. " +
+  "If it still will not save, delete the exchange.";

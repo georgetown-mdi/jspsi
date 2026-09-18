@@ -5,11 +5,12 @@
  *
  * It is a module of its own because BOTH sides of the mutual exclusion take it and
  * they sit on opposite sides of the store: the run's critical section
- * ({@link ./managedExchangeRun.ts}) and the hand-off spend the record store owns
- * ({@link ./managedExchangeStore.ts}, `spendManagedExchangeIfCurrent`). The run
+ * ({@link ./managedExchangeRun.ts}) and the secret-touching writes the record store
+ * owns ({@link ./managedExchangeStore.ts}, `spendManagedExchangeIfCurrent`,
+ * `retakeHandedOffManagedExchange`, and `persistManagedExchangeReinvite`). The run
  * module already imports the store, so a lock defined there could not be reached
- * from the store without an import cycle. Nothing here imports anything: the lock is
- * a name and a platform call.
+ * from the store without an import cycle. Nothing here imports anything: the lock
+ * is a name and a platform call.
  *
  * The lock is a same-profile **liveness guard**, not a persistent claim: it is
  * auto-released when the holding tab or worker is destroyed, and it is taken WITHOUT
@@ -53,11 +54,12 @@ export async function managedExchangeRunLockHeld(id: string): Promise<boolean> {
 /**
  * Raised when the run+rotate lock for a record cannot be acquired without
  * waiting -- another same-origin context already holds it. Its holder is a run in
- * progress in all but one case: a hand-off spend takes the same lock for the
- * duration of its own store step, which is a write, not a run. The runner treats
- * this as "a run is already in progress on this device" either way, since both mean
- * the same thing to it -- this context is not the one advancing the secret right
- * now. Only raised on the non-blocking (`ifAvailable`) acquisition path.
+ * progress, or one of the record store's own secret-touching writes -- the hand-off
+ * spend, the re-take, the re-invite's rotation -- each taking the same lock for the
+ * duration of its store step, which is a write, not a run. The runner treats this as
+ * "a run is already in progress on this device" either way, since both mean the same
+ * thing to it -- this context is not the one advancing the secret right now. Only
+ * raised on the non-blocking (`ifAvailable`) acquisition path.
  */
 export class ManagedExchangeLockUnavailableError extends Error {
   constructor(id: string) {

@@ -11,6 +11,7 @@ import {
   MAX_LABEL_LENGTH,
   MAX_SCHEDULE_INTERVAL_DAYS,
   NO_STANDING_CONDITION,
+  applyManagedExchangeCompromiseResponse,
   applyManagedExchangeInputHandle,
   applyManagedExchangeLastRun,
   applyManagedExchangeLocalEdits,
@@ -25,6 +26,7 @@ import {
   parseManagedExchangeRecord,
   partitionReadableManagedExchanges,
   safeParseManagedExchangeRecord,
+  standingCompromiseResponse,
   standingConditionFrom,
 } from "@psi/managed/managedExchangeRecord";
 import { withTimeZone } from "../../utils/hostTimeZone";
@@ -213,15 +215,26 @@ describe("no-input-content invariant", () => {
 describe("parseManagedExchangeRecord reader-rejects-unknown", () => {
   test("rejects an unrecognized schemaVersion rather than migrating", () => {
     const record = buildManagedExchangeRecord(newExchange());
-    const future = { ...record, schemaVersion: "psilink-managed-exchange/v3" };
+    const future = { ...record, schemaVersion: "psilink-managed-exchange/v4" };
     const result = safeParseManagedExchangeRecord(future);
     expect(result.success).toBe(false);
     expect(() => parseManagedExchangeRecord(future)).toThrow();
   });
 
-  test("accepts the recognized v2 schemaVersion", () => {
+  test("accepts the recognized v3 schemaVersion", () => {
     const record = buildManagedExchangeRecord(newExchange());
     expect(safeParseManagedExchangeRecord(record).success).toBe(true);
+  });
+
+  test("rejects a record stored under the v2 literal", () => {
+    // A v2 record's condition cannot hold the operator's answer, so a reader that
+    // knows the answer refuses the record rather than reading it as unanswered and
+    // offering the fresh invitation the answer withholds.
+    const stored = {
+      ...buildManagedExchangeRecord(newExchange()),
+      schemaVersion: "psilink-managed-exchange/v2",
+    };
+    expect(safeParseManagedExchangeRecord(stored).success).toBe(false);
   });
 
   test("rejects a record stored under the v1 literal", () => {
@@ -1113,7 +1126,7 @@ describe("diagnoseManagedExchangeRecord", () => {
     expect(() =>
       diagnoseManagedExchangeRecord({
         ...record,
-        schemaVersion: "psilink-managed-exchange/v3",
+        schemaVersion: "psilink-managed-exchange/v4",
       }),
     ).toThrow();
   });
@@ -1171,7 +1184,7 @@ describe("partitionReadableManagedExchanges", () => {
     const good = buildManagedExchangeRecord(newExchange({ label: "Good" }));
     const read = partitionReadableManagedExchanges(
       ["future", good.id],
-      [{ ...good, schemaVersion: "psilink-managed-exchange/v3" }, good],
+      [{ ...good, schemaVersion: "psilink-managed-exchange/v4" }, good],
     );
 
     expect(read.records.map((record) => record.id)).toEqual([good.id]);
@@ -1392,6 +1405,166 @@ describe("the standing condition across the bookkeeping writes", () => {
     const result = safeParseManagedExchangeRecord({
       ...buildManagedExchangeRecord(newExchange()),
       standingCondition: { since: raisedAt, kind: "tampered" },
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe("the operator's compromise response", () => {
+  const raisedAt = "2026-07-14T12:00:00.000Z";
+  const answeredAt = "2026-07-14T15:00:00.000Z";
+  const laterAt = "2026-07-14T18:00:00.000Z";
+
+  function withCondition(): ManagedExchangeRecord {
+    return applyManagedExchangeLastRun(
+      buildManagedExchangeRecord(newExchange()),
+      { at: raisedAt, outcome: "failed", failureKind: "auth" },
+      Date.parse(raisedAt),
+    );
+  }
+
+  test("it is written onto the condition it answers, changing nothing else", () => {
+    const record = withCondition();
+    const answered = applyManagedExchangeCompromiseResponse(record, answeredAt);
+    expect(answered.standingCondition).toEqual({
+      since: raisedAt,
+      kind: "auth",
+      response: { kind: "compromise", at: answeredAt },
+    });
+    expect(answered.lastRun).toEqual(record.lastRun);
+    expect(answered.sharedSecret).toBe(record.sharedSecret);
+    // The input record is not mutated.
+    expect(standingCompromiseResponse(record)).toBeUndefined();
+  });
+
+  test("the first answer stands: a second leaves the instant as it is", () => {
+    const answered = applyManagedExchangeCompromiseResponse(
+      withCondition(),
+      answeredAt,
+    );
+    const again = applyManagedExchangeCompromiseResponse(answered, laterAt);
+    expect(again).toBe(answered);
+  });
+
+  test("an answer with no condition standing raises one to hold it", () => {
+    // The raise write the failure earned never landed -- a store that refused the
+    // run's own bookkeeping. Without a carrier the answer would have nowhere to
+    // live, and the gate would be put again at the next visit.
+    const record = parseManagedExchangeRecord({
+      ...buildManagedExchangeRecord(newExchange()),
+      lastRun: { at: raisedAt, outcome: "failed", failureKind: "auth" },
+    });
+    expect(record.standingCondition).toEqual(NO_STANDING_CONDITION);
+    const answered = applyManagedExchangeCompromiseResponse(record, answeredAt);
+    expect(answered.standingCondition).toEqual({
+      since: raisedAt,
+      kind: "auth",
+      response: { kind: "compromise", at: answeredAt },
+    });
+  });
+
+  test("a carrier for a record with no run either stands at the answer's own instant", () => {
+    const answered = applyManagedExchangeCompromiseResponse(
+      buildManagedExchangeRecord(newExchange()),
+      answeredAt,
+    );
+    expect(answered.standingCondition).toEqual({
+      since: answeredAt,
+      kind: "auth",
+      response: { kind: "compromise", at: answeredAt },
+    });
+  });
+
+  test("a no-show and a later failure both leave it standing", () => {
+    const answered = applyManagedExchangeCompromiseResponse(
+      withCondition(),
+      answeredAt,
+    );
+    const missed = applyManagedExchangeLastRun(
+      answered,
+      { at: laterAt, outcome: "missed" },
+      Date.parse(laterAt),
+    );
+    expect(standingCompromiseResponse(missed)).toEqual({
+      kind: "compromise",
+      at: answeredAt,
+    });
+    const failedAgain = applyManagedExchangeLastRun(
+      missed,
+      { at: laterAt, outcome: "failed", failureKind: "auth" },
+      Date.parse(laterAt),
+    );
+    expect(standingCompromiseResponse(failedAgain)).toEqual({
+      kind: "compromise",
+      at: answeredAt,
+    });
+  });
+
+  test("the acknowledgement and the re-invite each take it with the condition", () => {
+    const answered = applyManagedExchangeCompromiseResponse(
+      withCondition(),
+      answeredAt,
+    );
+    const cleared = applyManagedExchangeStandingConditionCleared(answered);
+    expect(cleared.standingCondition).toEqual(NO_STANDING_CONDITION);
+    expect(standingCompromiseResponse(cleared)).toBeUndefined();
+    const reinvited = applyManagedExchangeReinviteRotation(answered, {
+      sharedSecret: generateSharedSecret(),
+      expires: null,
+    });
+    expect(reinvited.standingCondition).toEqual(NO_STANDING_CONDITION);
+  });
+
+  test("a run's own rotation does not take it: only the three acts do", () => {
+    const answered = applyManagedExchangeCompromiseResponse(
+      withCondition(),
+      answeredAt,
+    );
+    const rotated = applyManagedExchangeRotation(answered, {
+      sharedSecret: generateSharedSecret(),
+      expires: null,
+    });
+    expect(standingCompromiseResponse(rotated)).toEqual({
+      kind: "compromise",
+      at: answeredAt,
+    });
+  });
+
+  test("a stored answer survives the record's own parse", () => {
+    const answered = applyManagedExchangeCompromiseResponse(
+      withCondition(),
+      answeredAt,
+    );
+    const parsed = parseManagedExchangeRecord({ ...answered });
+    expect(standingCompromiseResponse(parsed)).toEqual({
+      kind: "compromise",
+      at: answeredAt,
+    });
+  });
+
+  test("an unknown member nested in the condition is refused, not dropped", () => {
+    // Strict one level down as well as at the top: a build that does not know a
+    // member must refuse the record rather than read it with the member gone,
+    // which for this one would read an answered gate as unanswered.
+    const result = safeParseManagedExchangeRecord({
+      ...buildManagedExchangeRecord(newExchange()),
+      standingCondition: {
+        since: raisedAt,
+        kind: "auth",
+        acknowledgedAt: answeredAt,
+      },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  test("an unknown answer kind is refused", () => {
+    const result = safeParseManagedExchangeRecord({
+      ...buildManagedExchangeRecord(newExchange()),
+      standingCondition: {
+        since: raisedAt,
+        kind: "auth",
+        response: { kind: "acknowledged", at: answeredAt },
+      },
     });
     expect(result.success).toBe(false);
   });

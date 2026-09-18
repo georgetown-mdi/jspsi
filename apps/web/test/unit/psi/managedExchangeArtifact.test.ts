@@ -124,6 +124,48 @@ describe("export/import round-trip", () => {
     expect(restored.standingCondition).toEqual(withCondition.standingCondition);
   });
 
+  test("keeps the operator's answer to a condition across the round trip", () => {
+    // The answer rides on the condition it answers, so an export that dropped it
+    // would clear it -- and an import would then offer the fresh invitation the
+    // operator withheld.
+    const answered = {
+      ...buildManagedExchangeRecord(newExchange()),
+      standingCondition: {
+        since: "2026-07-10T09:00:00.000Z",
+        kind: "auth" as const,
+        response: {
+          kind: "compromise" as const,
+          at: "2026-07-10T11:00:00.000Z",
+        },
+      },
+    };
+    const restored = reconstructRecordFromArtifact(
+      encodeManagedExchangeArtifact(answered),
+    );
+    expect(restored.standingCondition).toEqual(answered.standingCondition);
+  });
+
+  test("an unknown member nested in the condition is refused, not dropped", () => {
+    // This build's strict schema reaches inside the condition as well as around
+    // it: an unknown member refuses the whole artifact rather than reconstructing
+    // a record with the member gone.
+    const artifact = JSON.parse(
+      serializeManagedExchangeArtifact(
+        encodeManagedExchangeArtifact(
+          buildManagedExchangeRecord(newExchange()),
+        ),
+      ),
+    ) as { local: Record<string, unknown> };
+    artifact.local.standingCondition = {
+      since: "2026-07-10T09:00:00.000Z",
+      kind: "auth",
+      settledAt: "2026-07-10T11:00:00.000Z",
+    };
+    expect(() =>
+      importManagedExchangeArtifact(JSON.stringify(artifact)),
+    ).toThrow();
+  });
+
   test("a record with none standing round-trips to the none form", () => {
     const record = buildManagedExchangeRecord(newExchange());
     const artifact = encodeManagedExchangeArtifact(record);
@@ -302,9 +344,20 @@ describe("rejection of malformed or tampered imports", () => {
 
   test("an unrecognized artifactVersion is rejected", () => {
     const artifact = JSON.parse(goodBytes());
-    artifact.artifactVersion = "psilink-managed-exchange-backup/v2";
+    artifact.artifactVersion = "psilink-managed-exchange-backup/v3";
     expect(() =>
       parseManagedExchangeArtifact(JSON.stringify(artifact)),
+    ).toThrow();
+  });
+
+  test("an artifact written under the previous version is refused whole", () => {
+    // A v1 file predates the operator's answer to a standing condition. The
+    // version is what this build reads it on, so an older file is refused entire
+    // rather than imported as a record, exactly as an older stored record is.
+    const artifact = JSON.parse(goodBytes());
+    artifact.artifactVersion = "psilink-managed-exchange-backup/v1";
+    expect(() =>
+      importManagedExchangeArtifact(JSON.stringify(artifact)),
     ).toThrow();
   });
 

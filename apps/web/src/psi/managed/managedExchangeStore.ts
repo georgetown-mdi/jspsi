@@ -20,6 +20,7 @@ import {
   withManagedExchangeLock,
 } from "./managedExchangeLock";
 import {
+  applyManagedExchangeCompromiseResponse,
   applyManagedExchangeInputHandle,
   applyManagedExchangeLastRun,
   applyManagedExchangeLocalEdits,
@@ -34,6 +35,7 @@ import {
   parseManagedExchangeRecord,
   partitionReadableManagedExchanges,
   safeParseManagedExchangeRecord,
+  standingCompromiseResponse,
 } from "./managedExchangeRecord";
 import { parseManagedLocalState } from "./managedLocalStateShape";
 
@@ -271,7 +273,7 @@ export async function putManagedExchange(
  * app upgrade has otherwise invalidated -- rejects loudly rather than loading
  * (the recovery is re-invite, not migration).
  *
- * @throws {ZodError} if the stored value is not a valid v2 record.
+ * @throws {ZodError} if the stored value is not a valid v3 record.
  */
 export async function getManagedExchange(
   id: string,
@@ -287,7 +289,7 @@ export async function getManagedExchange(
  * read rather than silently dropping it, so a corrupted or app-upgrade-
  * invalidated store surfaces rather than partially loading.
  *
- * @throws {ZodError} if any stored value is not a valid v2 record.
+ * @throws {ZodError} if any stored value is not a valid v3 record.
  */
 export async function listManagedExchanges(): Promise<
   Array<ManagedExchangeRecord>
@@ -989,7 +991,7 @@ function markBackupOnLocalStore(
  * transaction opens, since the field-scoped transform must be synchronous.
  *
  * @throws {Error} if no record with `id` exists.
- * @throws {ZodError} if the stored value is not a valid v2 record or the edit
+ * @throws {ZodError} if the stored value is not a valid v3 record or the edit
  *   produces an invalid one; the transaction aborts and nothing is written.
  */
 export async function updateManagedExchangeLocalFields(
@@ -1016,7 +1018,7 @@ export async function updateManagedExchangeLocalFields(
  * docs/spec/MANAGED_EXCHANGE_RECORD.md).
  *
  * @throws {Error} if no record with `id` exists.
- * @throws {ZodError} if the stored value is not a valid v2 record or the rotation
+ * @throws {ZodError} if the stored value is not a valid v3 record or the rotation
  *   produces an invalid one; the transaction aborts and nothing is written.
  */
 export async function persistManagedExchangeRotation(
@@ -1032,6 +1034,26 @@ export async function persistManagedExchangeRotation(
 }
 
 /**
+ * Raised when a re-invite's rotation is refused because the record the store holds
+ * has a standing compromise response: a fresh secret on the channel the operator
+ * flagged is the act the response names as the wrong one, and the rotation would
+ * clear the response along with the condition holding it. A page that read the
+ * record before the answer was written has a live control over a record that no
+ * longer admits the mint, so the refusal is made against the record inside the
+ * transaction rather than against any page's copy. The clear-and-acknowledge
+ * ({@link clearManagedExchangeStandingCondition}) is what puts the mint back on
+ * offer.
+ */
+export class ManagedReinviteWithheldError extends Error {
+  constructor(id: string) {
+    super(
+      `a compromise response stands on managed exchange ${id}, so no fresh invitation is minted`,
+    );
+    this.name = "ManagedReinviteWithheldError";
+  }
+}
+
+/**
  * Persist a re-invite's rotation to the stored record: advance the fresh setup
  * secret and re-derive the `expires` bound exactly as
  * {@link persistManagedExchangeRotation}, AND drop any `lastRun` bookkeeping -- all
@@ -1044,20 +1066,45 @@ export async function persistManagedExchangeRotation(
  * {@link applyManagedExchangeReinviteRotation} (which re-validates), so it cannot
  * include a stale secret or document.
  *
+ * The record read inside the transaction is what the refusal above is decided on,
+ * so this is the one place the compromise response holds the mint: a caller's own
+ * check is over a record read before the answer may have been written (see
+ * docs/spec/MANAGED_EXCHANGE_RECORD.md, the response's rules).
+ *
+ * A run in flight is excluded rather than checked, exactly as the hand-off spend
+ * and the re-take exclude it: this step takes the record's run+rotate lock
+ * ({@link ./managedExchangeLock.ts}) with `ifAvailable` before the transaction
+ * opens, so a run holding it is refused here rather than having its secret
+ * replaced mid-exchange. Neither rotation write compares against the secret it
+ * replaces, so a re-invite landing beside a run's own rotation would discard one
+ * of the two.
+ *
  * @throws {Error} if no record with `id` exists.
- * @throws {ZodError} if the stored value is not a valid v2 record or the rotation
+ * @throws {ManagedExchangeLockUnavailableError} if a run of this record holds the
+ *   lock; no transaction is opened and nothing is written.
+ * @throws {ManagedReinviteWithheldError} if the stored record has a standing
+ *   compromise response; the transaction aborts, leaving the secret and the
+ *   response as they were.
+ * @throws {ZodError} if the stored value is not a valid v3 record or the rotation
  *   produces an invalid one; the transaction aborts and nothing is written.
  */
 export async function persistManagedExchangeReinvite(
   id: string,
   rotation: ManagedExchangeRotation,
 ): Promise<ManagedExchangeRecord> {
-  return readModifyWriteRotation(id, (stored) => {
-    if (stored === undefined)
-      throw new Error(`no managed exchange with id ${id}`);
-    const existing = parseManagedExchangeRecord(stored);
-    return applyManagedExchangeReinviteRotation(existing, rotation);
-  });
+  return withManagedExchangeLock(
+    id,
+    () =>
+      readModifyWriteRotation(id, (stored) => {
+        if (stored === undefined)
+          throw new Error(`no managed exchange with id ${id}`);
+        const existing = parseManagedExchangeRecord(stored);
+        if (standingCompromiseResponse(existing) !== undefined)
+          throw new ManagedReinviteWithheldError(id);
+        return applyManagedExchangeReinviteRotation(existing, rotation);
+      }),
+    { ifAvailable: true },
+  );
 }
 
 /**
@@ -1118,6 +1165,37 @@ export async function clearManagedExchangeStandingCondition(
 }
 
 /**
+ * Record the operator's compromise response -- "something does not add up" at a
+ * failure gate -- on the stored record, advancing only the standing-condition
+ * field through {@link applyManagedExchangeCompromiseResponse} inside one
+ * strict-durability readwrite transaction, so the answer cannot carry a stale
+ * secret or a stale document back over a concurrent rotation write.
+ *
+ * The answer is written against the record the STORE holds, not the one the page
+ * mounted with: a condition raised by a run since the mount is the one the answer
+ * attaches to, and the carrier this write raises where none stands is a last
+ * resort rather than a second condition beside it.
+ *
+ * It has no clear of its own. The three acts that clear a standing condition
+ * clear the answer with it, each by the whole-field write it already performs
+ * (docs/spec/MANAGED_EXCHANGE_RECORD.md, the `standingCondition` row).
+ *
+ * @throws {Error} if no record with `id` exists.
+ * @throws {ZodError} if the stored value or the resulting record is invalid.
+ */
+export async function recordManagedExchangeCompromiseResponse(
+  id: string,
+  at: string,
+): Promise<ManagedExchangeRecord> {
+  return readModifyWriteRecord(id, (stored) => {
+    if (stored === undefined)
+      throw new Error(`no managed exchange with id ${id}`);
+    const existing = parseManagedExchangeRecord(stored);
+    return applyManagedExchangeCompromiseResponse(existing, at);
+  });
+}
+
+/**
  * Persist a scheduled window's bookkeeping to the stored record: `nextWindow`,
  * `consecutiveMisses`, and the window's `lastRun` advance in ONE strict-durability
  * readwrite transaction ({@link readModifyWriteRecord}), leaving the rotated
@@ -1156,7 +1234,7 @@ export async function persistManagedExchangeScheduleAdvance(
  * handle after a missing-file failure.
  *
  * @throws {Error} if no record with `id` exists.
- * @throws {ZodError} if the stored value is not a valid v2 record or the result is
+ * @throws {ZodError} if the stored value is not a valid v3 record or the result is
  *   invalid; the transaction aborts and nothing is written.
  */
 export async function persistManagedExchangeInputHandle(
@@ -1182,7 +1260,7 @@ export async function persistManagedExchangeInputHandle(
  * scheduled run writes its results into.
  *
  * @throws {Error} if no record with `id` exists.
- * @throws {ZodError} if the stored value is not a valid v2 record or the result is
+ * @throws {ZodError} if the stored value is not a valid v3 record or the result is
  *   invalid; the transaction aborts and nothing is written.
  */
 export async function persistManagedExchangeOutputDirectory(

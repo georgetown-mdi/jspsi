@@ -10,21 +10,36 @@ import { createElement } from "react";
 import "@mantine/core/styles.css";
 
 import {
+  COMPROMISE_ACKNOWLEDGE_LABEL,
+  COMPROMISE_RESPONSE_STANDS,
+  COMPROMISE_RESPONSE_TITLE,
+  COMPROMISE_RESPONSE_UNSAVED_REASON,
+  COMPROMISE_RESPONSE_UNSAVED_TITLE,
+} from "@psi/managed/managedFailureConfirmation";
+import {
   NO_STANDING_CONDITION,
   composeManagedExchangeFile,
+  standingCompromiseResponse,
 } from "@psi/managed/managedExchangeRecord";
 import {
+  clearManagedExchangeStandingCondition,
   clearManagedExchanges,
   createManagedExchange,
   getManagedExchange,
+  recordManagedExchangeCompromiseResponse,
   recordManagedExchangeLastRun,
 } from "@psi/managed/managedExchangeStore";
 import { failedRun, missedRun } from "@psi/managed/managedRunRotate";
-import { COMPROMISE_RESPONSE_TITLE } from "@psi/managed/managedFailureConfirmation";
 import { ManagedRunSurface } from "@recurring/ManagedRunSurface";
+import { REINVITE_RUN_IN_FLIGHT_REASON } from "@recurring/managedReinviteGate";
 import { STANDING_CONDITION_CLEAR_LABEL } from "@recurring/managedStandingConditionModel";
 
 import { createAppMount, flushPendingUpdates } from "./renderApp";
+import {
+  filterLockFromReadings,
+  holdRunLockElsewhere,
+  stalePollUntilClick,
+} from "./runLockReadings";
 
 import type * as ManagedExchangeStore from "@psi/managed/managedExchangeStore";
 import type { NewManagedExchange } from "@psi/managed/managedExchangeRecord";
@@ -49,10 +64,14 @@ const driver = vi.hoisted(
     persistFailsFirstRun: boolean;
     lapsedAt?: string;
     handshakeFailsClosed: boolean;
+    handshakeStampFails: boolean;
+    held: Promise<void> | undefined;
   } => ({
     runs: 0,
     persistFailsFirstRun: false,
     handshakeFailsClosed: false,
+    handshakeStampFails: false,
+    held: undefined,
   }),
 );
 
@@ -66,8 +85,18 @@ const clearWrite = vi.hoisted(
   }),
 );
 
-// Everything but the clear-and-acknowledge write is the real store: the records these
-// tests read back are the ones the surface and the stubbed run actually wrote.
+// Whether the store's compromise-response write rejects, so the unsaved answer -- the
+// one that holds the visit and nothing beyond it -- can be driven, and a promise the
+// write waits on, so the page can be read while the answer is still in flight.
+const compromiseWrite = vi.hoisted(
+  (): { fails: boolean; held: Promise<void> | undefined } => ({
+    fails: false,
+    held: undefined,
+  }),
+);
+
+// Everything but the two writes below is the real store: the records these tests read
+// back are the ones the surface and the stubbed run actually wrote.
 vi.mock("@psi/managed/managedExchangeStore", async () => {
   const actual = await vi.importActual<typeof ManagedExchangeStore>(
     "@psi/managed/managedExchangeStore",
@@ -78,6 +107,11 @@ vi.mock("@psi/managed/managedExchangeStore", async () => {
       if (clearWrite.held !== undefined) await clearWrite.held;
       if (clearWrite.fails) throw new Error("the write failed");
       return await actual.clearManagedExchangeStandingCondition(id);
+    },
+    recordManagedExchangeCompromiseResponse: async (id: string, at: string) => {
+      if (compromiseWrite.held !== undefined) await compromiseWrite.held;
+      if (compromiseWrite.fails) throw new Error("the write failed");
+      return await actual.recordManagedExchangeCompromiseResponse(id, at);
     },
   };
 });
@@ -106,7 +140,15 @@ vi.mock("@psi/managed/managedRunDriver", async () => {
   return {
     runManagedExchangeInBrowser: async (config: { record: { id: string } }) => {
       driver.runs += 1;
+      // A run the test holds open, so a surface can be driven while one is in
+      // flight -- the state every hand-off and the re-invite wait out.
+      if (driver.held !== undefined) await driver.held;
       const at = Date.now();
+      // The handshake failed closed and the store refused the run's own
+      // bookkeeping write: the record keeps whatever it held, so a condition the
+      // failure would have raised is not there to answer.
+      if (driver.handshakeStampFails)
+        throw new Error("the handshake failed closed");
       // The lapse is read before any connection, so the run stamps no bookkeeping
       // of its own -- the record already holds the lapse.
       if (driver.lapsedAt !== undefined)
@@ -191,8 +233,12 @@ beforeEach(async () => {
   driver.persistFailsFirstRun = false;
   driver.lapsedAt = undefined;
   driver.handshakeFailsClosed = false;
+  driver.handshakeStampFails = false;
+  driver.held = undefined;
   clearWrite.fails = false;
   clearWrite.held = undefined;
+  compromiseWrite.fails = false;
+  compromiseWrite.held = undefined;
   await clearManagedExchanges();
 });
 
@@ -566,6 +612,74 @@ describe("a compromise response the operator has reached", () => {
     expect(stored?.standingCondition).not.toEqual(NO_STANDING_CONDITION);
   });
 
+  test("leaves a later failure in the same visit its own gate", async () => {
+    // The answer covers the failure it was given at. A second run fails closed the
+    // same way, and first raise wins, so the record's condition is still the first
+    // failure's -- the acknowledgement clears that one and settles nothing about
+    // the failure on screen, which keeps its gate and no way around it.
+    driver.handshakeFailsClosed = true;
+    const created = await createManagedExchange(
+      newExchange({ inputFileHandle: await inputHandle() }),
+    );
+    const secretBefore = (await getManagedExchange(created.id))?.sharedSecret;
+
+    app.render(createElement(ManagedRunSurface, { id: created.id }));
+    const runButton = page.getByRole("button", { name: "Run exchange" });
+    await expect.element(runButton).toBeEnabled();
+    await runButton.click();
+    const doesNotAddUp = page.getByRole("button", {
+      name: "Something does not add up",
+    });
+    await expect.element(doesNotAddUp).toBeInTheDocument();
+    await doesNotAddUp.click();
+    await expect
+      .element(page.getByText(COMPROMISE_RESPONSE_TITLE))
+      .toBeInTheDocument();
+    await vi.waitFor(async () => {
+      const answered = await getManagedExchange(created.id);
+      expect(answered?.standingCondition).toHaveProperty("response");
+    });
+
+    await expect.element(runButton).toBeEnabled();
+    await runButton.click();
+    await vi.waitFor(() => {
+      expect(driver.runs).toBe(2);
+    });
+    // The run control is disabled for the length of a run, so its return to
+    // enabled is the second run's classification having rendered.
+    await expect.element(runButton).toBeEnabled();
+    await flushPendingUpdates();
+
+    await page
+      .getByRole("button", { name: COMPROMISE_ACKNOWLEDGE_LABEL })
+      .click();
+    await vi.waitFor(async () => {
+      expect((await getManagedExchange(created.id))?.standingCondition).toEqual(
+        NO_STANDING_CONDITION,
+      );
+    });
+    await flushPendingUpdates();
+
+    // Both outcomes are put for the second failure, and nothing on the page mints
+    // until one of them is answered.
+    await expect.element(doesNotAddUp).toBeInTheDocument();
+    await expect
+      .element(
+        page.getByRole("button", {
+          name: "Partner confirmed their own failure",
+        }),
+      )
+      .toBeInTheDocument();
+    expect(
+      page
+        .getByRole("button", { name: "Create a fresh invitation" })
+        .elements(),
+    ).toHaveLength(0);
+    expect((await getManagedExchange(created.id))?.sharedSecret).toBe(
+      secretBefore,
+    );
+  });
+
   test("withholds the configuration section's re-invite and says why", async () => {
     // The response tells the operator not to re-invite on this channel. The
     // configuration section far below it mints on exactly that channel with the same
@@ -604,6 +718,63 @@ describe("a compromise response the operator has reached", () => {
     );
     const stored = await getManagedExchange(created.id);
     expect(stored?.sharedSecret).toBe(secretBefore);
+  });
+
+  test("holds every mint control while the answer is still being written", async () => {
+    // The write is not instant, and neither outcome of it puts a fresh invitation
+    // back on offer: the controls go with the answer, not with the write landing.
+    let release: () => void = () => undefined;
+    compromiseWrite.held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const created = await createManagedExchange(
+      newExchange({ inputFileHandle: await inputHandle() }),
+    );
+    const failedAt = Date.now() - 120_000;
+    await recordManagedExchangeLastRun(
+      created.id,
+      failedRun(failedAt, "failed", "auth"),
+      failedAt,
+    );
+
+    app.render(createElement(ManagedRunSurface, { id: created.id }));
+    const reinviteOnTerms = page.getByRole("button", {
+      name: "Re-invite with the same terms",
+    });
+    await expect.element(reinviteOnTerms).toBeEnabled();
+
+    await page
+      .getByRole("button", { name: "Something does not add up" })
+      .click();
+    await expect.element(reinviteOnTerms).toBeDisabled();
+    expect(app.container.textContent).toContain(
+      "no fresh invitation is offered on this channel",
+    );
+    // The gate above gave way to the response as well, so its other leg -- which
+    // proceeds to the mint -- cannot be taken while the answer is being written.
+    await expect
+      .element(page.getByText(COMPROMISE_RESPONSE_TITLE))
+      .toBeInTheDocument();
+    expect(
+      page
+        .getByRole("button", { name: "Partner confirmed their own failure" })
+        .elements(),
+    ).toHaveLength(0);
+    // The write really is still in flight: nothing has reached the record yet, so
+    // the withhold above is this page's own and not the stored answer's.
+    const midWrite = await getManagedExchange(created.id);
+    expect(
+      midWrite === undefined ? undefined : standingCompromiseResponse(midWrite),
+    ).toBeUndefined();
+
+    release();
+    await vi.waitFor(async () => {
+      const stored = await getManagedExchange(created.id);
+      expect(stored?.standingCondition).toHaveProperty("response");
+    });
+    await flushPendingUpdates();
+
+    await expect.element(reinviteOnTerms).toBeDisabled();
   });
 
   test("leaves a settled condition no re-invite to offer under it", async () => {
@@ -656,6 +827,103 @@ describe("a compromise response the operator has reached", () => {
         .getByRole("button", { name: "Create a fresh invitation" })
         .elements(),
     ).toHaveLength(0);
+  });
+});
+
+describe("a compromise response this device could not save", () => {
+  /** Seed the failed-closed handshake the standing gate is put for, mount the
+   * surface, and answer it "something does not add up" against a store that
+   * refuses the write. Returns the record's id. */
+  async function answerAgainstARefusedWrite(): Promise<string> {
+    compromiseWrite.fails = true;
+    const created = await createManagedExchange(
+      newExchange({ inputFileHandle: await inputHandle() }),
+    );
+    const failedAt = Date.now() - 120_000;
+    await recordManagedExchangeLastRun(
+      created.id,
+      failedRun(failedAt, "failed", "auth"),
+      failedAt,
+    );
+    app.render(createElement(ManagedRunSurface, { id: created.id }));
+    const doesNotAddUp = page.getByRole("button", {
+      name: "Something does not add up",
+    });
+    await expect.element(doesNotAddUp).toBeInTheDocument();
+    await doesNotAddUp.click();
+    await expect
+      .element(page.getByText(COMPROMISE_RESPONSE_UNSAVED_TITLE))
+      .toBeInTheDocument();
+    await flushPendingUpdates();
+    return created.id;
+  }
+
+  test("holds the page, says what it cost, and asks again at the next visit", async () => {
+    // A write this device refused is the side to fail to: the answer holds the
+    // page as a saved one does, and the page states how far that reaches rather
+    // than letting the operator read it as recorded.
+    const id = await answerAgainstARefusedWrite();
+
+    expect(app.container.textContent).toContain(
+      COMPROMISE_RESPONSE_UNSAVED_REASON,
+    );
+    expect(app.container.textContent).not.toContain(COMPROMISE_RESPONSE_STANDS);
+    expect(page.getByText(COMPROMISE_RESPONSE_TITLE).elements()).toHaveLength(
+      1,
+    );
+    expect(
+      page
+        .getByRole("button", { name: "Create a fresh invitation" })
+        .elements(),
+    ).toHaveLength(0);
+
+    // Nothing reached the record, so the gate is put again at the next visit.
+    const stored = await getManagedExchange(id);
+    expect(
+      stored === undefined ? undefined : standingCompromiseResponse(stored),
+    ).toBeUndefined();
+    app.unmount();
+
+    app.render(createElement(ManagedRunSurface, { id }));
+    await expect
+      .element(page.getByRole("button", { name: "Something does not add up" }))
+      .toBeInTheDocument();
+    expect(page.getByText(COMPROMISE_RESPONSE_TITLE).elements()).toHaveLength(
+      0,
+    );
+  });
+
+  test("a fresh run in the same visit is not held behind it", async () => {
+    // The unsaved answer stands until a run starts, not over whatever the page
+    // shows next. A run since then has a failure of its own, classified
+    // differently, and the panel whose one control clears the record's standing
+    // condition must not be sitting over it.
+    const id = await answerAgainstARefusedWrite();
+
+    driver.lapsedAt = "2026-07-01T00:00:00.000Z";
+    const runButton = page.getByRole("button", { name: "Run exchange" });
+    await expect.element(runButton).toBeEnabled();
+    await runButton.click();
+    await expect
+      .element(page.getByText("This exchange's stored secret has lapsed"))
+      .toBeInTheDocument();
+    await flushPendingUpdates();
+
+    expect(page.getByText(COMPROMISE_RESPONSE_TITLE).elements()).toHaveLength(
+      0,
+    );
+    expect(
+      page.getByText(COMPROMISE_RESPONSE_UNSAVED_TITLE).elements(),
+    ).toHaveLength(0);
+    await expect
+      .element(page.getByRole("button", { name: "Create a fresh invitation" }))
+      .toBeEnabled();
+    // The lapse really is the live state the recovery belongs to, and the record
+    // still holds nothing the operator answered.
+    const stored = await getManagedExchange(id);
+    expect(
+      stored === undefined ? undefined : standingCompromiseResponse(stored),
+    ).toBeUndefined();
   });
 });
 
@@ -818,5 +1086,429 @@ describe("a standing condition beside a live failure of another tier", () => {
         .getByRole("button", { name: "Create a fresh invitation" })
         .elements(),
     ).toHaveLength(1);
+  });
+});
+
+describe("a compromise response the operator gave at an earlier visit", () => {
+  /** Seed a failed-closed handshake, mount the surface, answer the standing
+   * condition's gate "something does not add up", and wait for the answer to reach
+   * the store. Returns the record's id. */
+  async function answerStandingGate(): Promise<string> {
+    const created = await createManagedExchange(
+      newExchange({ inputFileHandle: await inputHandle() }),
+    );
+    const failedAt = Date.now() - 120_000;
+    await recordManagedExchangeLastRun(
+      created.id,
+      failedRun(failedAt, "failed", "auth"),
+      failedAt,
+    );
+    app.render(createElement(ManagedRunSurface, { id: created.id }));
+    const doesNotAddUp = page.getByRole("button", {
+      name: "Something does not add up",
+    });
+    await expect.element(doesNotAddUp).toBeInTheDocument();
+    await doesNotAddUp.click();
+    await expect
+      .element(page.getByText(COMPROMISE_RESPONSE_TITLE))
+      .toBeInTheDocument();
+    await vi.waitFor(async () => {
+      const stored = await getManagedExchange(created.id);
+      expect(stored?.standingCondition).toHaveProperty("response");
+    });
+    await flushPendingUpdates();
+    return created.id;
+  }
+
+  test("stands at the next visit, with every mint still withheld", async () => {
+    // The answer is on the record rather than on the page, so a reload does not
+    // put the question again -- and the channel the operator flagged gets no
+    // fresh secret from either control.
+    const id = await answerStandingGate();
+    app.unmount();
+
+    app.render(createElement(ManagedRunSurface, { id }));
+    await expect
+      .element(page.getByText(COMPROMISE_RESPONSE_TITLE))
+      .toBeInTheDocument();
+    expect(
+      page
+        .getByRole("button", { name: "Something does not add up" })
+        .elements(),
+    ).toHaveLength(0);
+    expect(
+      page
+        .getByRole("button", { name: "Partner confirmed their own failure" })
+        .elements(),
+    ).toHaveLength(0);
+    expect(
+      page
+        .getByRole("button", { name: "Create a fresh invitation" })
+        .elements(),
+    ).toHaveLength(0);
+    await expect
+      .element(
+        page.getByRole("button", { name: "Re-invite with the same terms" }),
+      )
+      .toBeDisabled();
+    expect(app.container.textContent).toContain(
+      "no fresh invitation is offered on this channel",
+    );
+  });
+
+  test("the acknowledgement clears it and puts the fresh invitation back on offer", async () => {
+    // The way out of the response, and the only one this page holds: the operator
+    // reached the partner another way. It settles the condition and mints nothing
+    // -- the invitation is theirs to send afterwards.
+    const id = await answerStandingGate();
+    const secretBefore = (await getManagedExchange(id))?.sharedSecret;
+    app.unmount();
+
+    app.render(createElement(ManagedRunSurface, { id }));
+    const acknowledge = page.getByRole("button", {
+      name: COMPROMISE_ACKNOWLEDGE_LABEL,
+    });
+    await expect.element(acknowledge).toBeEnabled();
+    await acknowledge.click();
+    await vi.waitFor(async () => {
+      expect((await getManagedExchange(id))?.standingCondition).toEqual(
+        NO_STANDING_CONDITION,
+      );
+    });
+    await flushPendingUpdates();
+
+    expect(page.getByText(COMPROMISE_RESPONSE_TITLE).elements()).toHaveLength(
+      0,
+    );
+    await expect
+      .element(page.getByRole("button", { name: "Create a fresh invitation" }))
+      .toBeEnabled();
+    await expect
+      .element(
+        page.getByRole("button", { name: "Re-invite with the same terms" }),
+      )
+      .toBeEnabled();
+    // The acknowledgement is not the mint: the stored secret is the one the
+    // operator still has to replace.
+    expect((await getManagedExchange(id))?.sharedSecret).toBe(secretBefore);
+  });
+
+  test("a benign no-show later in the same visit does not take it", async () => {
+    // The run stamps a no-show, which records no failure kind at all, and nothing
+    // refreshes the page's own copy of the record. The answer is not a reading of
+    // the last run, so neither costs it.
+    const id = await answerStandingGate();
+    const runButton = page.getByRole("button", { name: "Run exchange" });
+    await expect.element(runButton).toBeEnabled();
+    await runButton.click();
+    await vi.waitFor(() => {
+      expect(driver.runs).toBe(1);
+    });
+    // The run control is disabled for the length of a run, so its return to
+    // enabled is the run's classification having rendered.
+    await expect.element(runButton).toBeEnabled();
+    await flushPendingUpdates();
+
+    expect(page.getByText(COMPROMISE_RESPONSE_TITLE).elements()).toHaveLength(
+      1,
+    );
+    expect(
+      page
+        .getByRole("button", { name: "Create a fresh invitation" })
+        .elements(),
+    ).toHaveLength(0);
+
+    // The no-show really did land over the entry the condition was raised beside:
+    // without this the assertions above would pass against a run that never wrote.
+    const stored = await getManagedExchange(id);
+    expect(stored?.lastRun?.outcome).toBe("missed");
+    expect(
+      stored === undefined ? undefined : standingCompromiseResponse(stored),
+    ).toBeDefined();
+  });
+});
+
+describe("a compromise response written after this page read the record", () => {
+  test("the mint is refused at the store and the page says why", async () => {
+    // A second tab answered the gate while this one was open. Its controls are live
+    // off the record it mounted with, which holds no answer -- so the store's own
+    // refusal, decided on the record it holds, is the whole of what keeps a fresh
+    // secret off the channel the operator flagged.
+    const created = await createManagedExchange(
+      newExchange({ inputFileHandle: await inputHandle() }),
+    );
+    const failedAt = Date.now() - 120_000;
+    await recordManagedExchangeLastRun(
+      created.id,
+      failedRun(failedAt, "failed", "storage"),
+      failedAt,
+    );
+    const secretBefore = (await getManagedExchange(created.id))?.sharedSecret;
+
+    app.render(createElement(ManagedRunSurface, { id: created.id }));
+    const recovery = page.getByRole("button", {
+      name: "Create a fresh invitation",
+    });
+    await expect.element(recovery).toBeEnabled();
+
+    await recordManagedExchangeCompromiseResponse(
+      created.id,
+      new Date().toISOString(),
+    );
+    // Still live: this page has not read the answer, which is the state the store's
+    // refusal exists for.
+    await expect.element(recovery).toBeEnabled();
+    await recovery.click();
+
+    await expect
+      .element(page.getByText(COMPROMISE_RESPONSE_TITLE))
+      .toBeInTheDocument();
+    await flushPendingUpdates();
+    expect(app.container.textContent).toContain(
+      "no fresh invitation is offered on this channel",
+    );
+    // Nothing minted, and the answer the other tab wrote is intact rather than
+    // cleared by the rotation this click asked for.
+    const stored = await getManagedExchange(created.id);
+    expect(stored?.sharedSecret).toBe(secretBefore);
+    expect(
+      stored === undefined ? undefined : standingCompromiseResponse(stored),
+    ).toBeDefined();
+    expect(app.container.textContent).not.toContain(
+      "Send this fresh invitation",
+    );
+    // The refusal is not a failure to retry, so the page does not ask for one.
+    expect(app.container.textContent).not.toContain(
+      "Could not create a fresh invitation",
+    );
+  });
+});
+
+describe("a live gate answered where no condition stands", () => {
+  test("raises the condition that holds the answer, and it stands at the next visit", async () => {
+    // The handshake failed closed and the store refused the run's own bookkeeping
+    // write, so the failure being answered raised nothing to answer. The answer
+    // still needs a carrier, or the gate is put again at the next visit.
+    const created = await createManagedExchange(
+      newExchange({ inputFileHandle: await inputHandle() }),
+    );
+    const failedAt = Date.now() - 120_000;
+    await recordManagedExchangeLastRun(
+      created.id,
+      failedRun(failedAt, "failed", "auth"),
+      failedAt,
+    );
+    await clearManagedExchangeStandingCondition(created.id);
+    driver.handshakeStampFails = true;
+
+    app.render(createElement(ManagedRunSurface, { id: created.id }));
+    const runButton = page.getByRole("button", { name: "Run exchange" });
+    await expect.element(runButton).toBeEnabled();
+    await runButton.click();
+    await expect
+      .element(
+        page.getByText(
+          "This run failed and needs you to check with your partner",
+        ),
+      )
+      .toBeInTheDocument();
+    await flushPendingUpdates();
+    // Nothing stands to hold the answer at the moment it is given.
+    expect((await getManagedExchange(created.id))?.standingCondition).toEqual(
+      NO_STANDING_CONDITION,
+    );
+
+    await page
+      .getByRole("button", { name: "Something does not add up" })
+      .click();
+    await expect
+      .element(page.getByText(COMPROMISE_RESPONSE_TITLE))
+      .toBeInTheDocument();
+    await vi.waitFor(async () => {
+      expect((await getManagedExchange(created.id))?.standingCondition).toEqual(
+        {
+          since: new Date(failedAt).toISOString(),
+          kind: "auth",
+          response: { kind: "compromise", at: expect.any(String) },
+        },
+      );
+    });
+    await flushPendingUpdates();
+    app.unmount();
+
+    app.render(createElement(ManagedRunSurface, { id: created.id }));
+    await expect
+      .element(page.getByText(COMPROMISE_RESPONSE_TITLE))
+      .toBeInTheDocument();
+    expect(
+      page
+        .getByRole("button", { name: "Create a fresh invitation" })
+        .elements(),
+    ).toHaveLength(0);
+  });
+});
+
+describe("a re-invite control while a run is in flight", () => {
+  test("both wait the run out and come back when it ends", async () => {
+    // A re-invite replaces the secret the run in progress is connecting on, so
+    // neither control is live for the length of it -- and both return whatever the
+    // run turned out to be.
+    let release: () => void = () => undefined;
+    driver.held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const created = await createManagedExchange(
+      newExchange({ inputFileHandle: await inputHandle() }),
+    );
+    const failedAt = Date.now() - 120_000;
+    await recordManagedExchangeLastRun(
+      created.id,
+      failedRun(failedAt, "failed", "storage"),
+      failedAt,
+    );
+
+    app.render(createElement(ManagedRunSurface, { id: created.id }));
+    const recovery = page.getByRole("button", {
+      name: "Create a fresh invitation",
+    });
+    const terms = page.getByRole("button", {
+      name: "Re-invite with the same terms",
+    });
+    await expect.element(recovery).toBeEnabled();
+    await expect.element(terms).toBeEnabled();
+
+    const runButton = page.getByRole("button", { name: "Run exchange" });
+    await runButton.click();
+    await expect.element(recovery).toBeDisabled();
+    await expect.element(terms).toBeDisabled();
+    expect(app.container.textContent).toContain(REINVITE_RUN_IN_FLIGHT_REASON);
+
+    release();
+    // The run control is disabled for the length of a run, so its return to
+    // enabled is the run's classification having rendered.
+    await expect.element(runButton).toBeEnabled();
+    await flushPendingUpdates();
+
+    await expect.element(recovery).toBeEnabled();
+    await expect.element(terms).toBeEnabled();
+    expect(app.container.textContent).not.toContain(
+      REINVITE_RUN_IN_FLIGHT_REASON,
+    );
+  });
+
+  test("a run taken since the last reading is caught at the click", async () => {
+    // The reading behind the controls is a poll, so a run can take the lock while a
+    // button is still enabled from the last reading. The handler's re-read at the
+    // click catches that run and names it, ahead of the write's own refusal.
+    const created = await createManagedExchange(
+      newExchange({ inputFileHandle: await inputHandle() }),
+    );
+    const failedAt = Date.now() - 120_000;
+    await recordManagedExchangeLastRun(
+      created.id,
+      failedRun(failedAt, "failed", "storage"),
+      failedAt,
+    );
+    const secretBefore = (await getManagedExchange(created.id))?.sharedSecret;
+    let restorePoll: (() => void) | undefined;
+    let release: (() => void) | undefined;
+    try {
+      app.render(createElement(ManagedRunSurface, { id: created.id }));
+      const recovery = page.getByRole("button", {
+        name: "Create a fresh invitation",
+      });
+      await expect.element(recovery).toBeEnabled();
+
+      restorePoll = stalePollUntilClick(created.id);
+      release = await holdRunLockElsewhere(created.id);
+      // Still enabled: the poll's readings do not see this run, which is the state
+      // the click-time re-read exists for.
+      await expect.element(recovery).toBeEnabled();
+      await recovery.click();
+
+      // Nothing minted, and the run is named as the reason rather than the operator
+      // being left with a control that silently did nothing.
+      expect((await getManagedExchange(created.id))?.sharedSecret).toBe(
+        secretBefore,
+      );
+      expect(app.container.textContent).toContain(
+        REINVITE_RUN_IN_FLIGHT_REASON,
+      );
+
+      release();
+      release = undefined;
+      // The control is intact once the run releases: the withheld click consumed
+      // nothing.
+      await expect.element(recovery).toBeEnabled();
+      await recovery.click();
+      await vi.waitFor(async () => {
+        expect((await getManagedExchange(created.id))?.sharedSecret).not.toBe(
+          secretBefore,
+        );
+      });
+    } finally {
+      release?.();
+      restorePoll?.();
+    }
+  });
+
+  test("a run the click's re-read never saw is refused by the mint's write", async () => {
+    // The re-read is a reading, not an exclusion: a run can take the lock in the
+    // moment after it. The write takes that same lock, so what stands between the
+    // fresh secret and the one the run is connecting on is the write's own refusal
+    // rather than any reading the page took.
+    const created = await createManagedExchange(
+      newExchange({ inputFileHandle: await inputHandle() }),
+    );
+    const failedAt = Date.now() - 120_000;
+    await recordManagedExchangeLastRun(
+      created.id,
+      failedRun(failedAt, "failed", "storage"),
+      failedAt,
+    );
+    const secretBefore = (await getManagedExchange(created.id))?.sharedSecret;
+    let readings: ReturnType<typeof filterLockFromReadings> | undefined;
+    let release: (() => void) | undefined;
+    try {
+      app.render(createElement(ManagedRunSurface, { id: created.id }));
+      const recovery = page.getByRole("button", {
+        name: "Create a fresh invitation",
+      });
+      await expect.element(recovery).toBeEnabled();
+
+      // Hidden from every reading this page takes -- the poll and the click's own
+      // re-read alike -- while the run really holds the lock.
+      readings = filterLockFromReadings(created.id);
+      release = await holdRunLockElsewhere(created.id);
+      await expect.element(recovery).toBeEnabled();
+      await recovery.click();
+
+      // Nothing minted, and the run is named as the reason rather than the operator
+      // being left with a control that silently did nothing.
+      await vi.waitFor(() => {
+        expect(app.container.textContent).toContain(
+          REINVITE_RUN_IN_FLIGHT_REASON,
+        );
+      });
+      expect((await getManagedExchange(created.id))?.sharedSecret).toBe(
+        secretBefore,
+      );
+
+      release();
+      release = undefined;
+      readings.restore();
+      readings = undefined;
+      // The refusal consumed nothing: the mint goes through once the run is over.
+      await expect.element(recovery).toBeEnabled();
+      await recovery.click();
+      await vi.waitFor(async () => {
+        expect((await getManagedExchange(created.id))?.sharedSecret).not.toBe(
+          secretBefore,
+        );
+      });
+    } finally {
+      release?.();
+      readings?.restore();
+    }
   });
 });

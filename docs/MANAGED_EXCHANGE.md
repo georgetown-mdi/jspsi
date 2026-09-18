@@ -826,6 +826,8 @@ A hand-off's confirmation takes the same lock before it spends this device's cop
 so a hand-off and a run exclude each other as two runs do. Whichever takes the lock
 first wins the ordering: a confirmation meeting a run is refused and told to wait,
 and a run meeting a confirmation waits for it and then finds the copy handed off.
+A re-invite's mint takes it on the same terms before it replaces the secret, so a
+run and a fresh invitation cannot each write a secret the other discards.
 
 On the scheduled path that refusal lasts as long as the run window does. Each
 attempt holds the lock across its whole wait for the partner, and the next
@@ -1181,11 +1183,11 @@ Three things clear a standing condition, and nothing else does:
   For a handshake failure nothing explains, that control is the two-outcome gate
   below: a partner who confirms their identity and a real failure on their side
   clears the condition, with the re-invite still offered as the remedy, and a
-  reply that does not add up clears nothing and routes to the compromise
-  response. Where the record already holds the explanation -- a persist failure,
-  or a restore since the last success -- there is no attack checklist to pass:
-  the page states the condition and its re-invite recovery, and a short
-  acknowledgement clears it.
+  reply that does not add up clears nothing and records the compromise response
+  on the exchange instead. Where the record already holds the explanation -- a
+  persist failure, or a restore since the last success -- there is no attack
+  checklist to pass: the page states the condition and its re-invite recovery,
+  and a short acknowledgement clears it.
 - **A re-invite**, which drops it with the run bookkeeping in the same rotation
   that installs the fresh secret. It is the recovery the condition asked for.
 - **Deleting the exchange**, which takes it along with the record.
@@ -1277,12 +1279,41 @@ framing is the CLI's posture: the tool reports the failure and structures the
 confirmation, but the operator, not the tool, makes the desync-versus-attack
 call out-of-band.
 
-Once given, a compromise response stands for the rest of the visit, wherever it
-was given: a later run that fails the same way does not put the question again,
-and no control on the exchange's page offers a fresh invitation while it stands
--- neither the failure's own recovery nor the configuration section's re-invite
-on the same terms -- since minting one on that channel is the act the response
-names as the wrong one.
+Once given, a compromise response is kept with the exchange, wherever it was
+given: a later run that fails the same way does not put the question again, a
+reload and the next visit find it as the operator left it, and no control on the
+exchange's page offers a fresh invitation while it stands -- neither the
+failure's own recovery nor the configuration section's re-invite on the same
+terms -- since minting one on that channel is the act the response names as the
+wrong one. A page left open from before the answer was given is held by the same
+rule: the write that would rotate the secret reads the exchange itself and
+refuses, so a second tab cannot mint past an answer it never saw.
+
+It is kept where the standing condition is kept, so exactly the three acts that
+clear a standing condition clear it too, and nothing else does. The one the
+exchange's page offers under a response is the acknowledgement that the partner
+confirmed the failure on another channel: it settles the condition, the response
+goes with it, and the fresh invitation is on offer again for the operator to
+send. That ordering -- reach the partner another way first, then re-invite -- is
+what the response is for.
+
+The answer covers the failure it was given at. Where a run since then failed the
+same way, that later failure is one the operator has confirmed nothing about, so
+the acknowledgement puts its gate rather than the invitation: the two-outcome
+gate is asked once per failure, and no control mints while one of them is
+unanswered.
+
+A run in flight withholds the same two controls for an unrelated reason and on
+its own schedule: while a run of this exchange is under way anywhere in the
+browser profile -- this tab, another tab, or its schedule -- a fresh invitation
+would replace the secret the run is connecting on, so neither control mints one
+until the run ends. Nothing here is answered away the way the compromise
+response is: the withhold lifts on its own once the run finishes, whatever it
+finished with. Nothing rests on the reading: the mint's own write takes the run's
+lock before it replaces the secret, so a run started since the page last read that
+state refuses the mint in the same words the withholding uses. The control
+re-checks the reading at the click as well, which puts the reason on screen
+without waiting for that refusal.
 
 ### Expiry is its own state, never routed through attack framing
 
@@ -1707,7 +1738,9 @@ which from the file in front of them. The import therefore separates the two: a
 file whose bytes do not parse leaves only the file itself to check, while a
 document the schema rejects names the version difference first and states both
 ways past it, reloading the page for the current version or exporting the backup
-again from the device that wrote the file.
+again from the device that wrote the file. A backup written in the app's
+previous artifact format is the one case with neither way out: it is refused as
+an older file, and the way on is a new exchange set up with the partner.
 
 **The import says which grants this browser does not hold.** An artifact holds the
 exchange, not the two pointers into this device that the record also keeps: the
