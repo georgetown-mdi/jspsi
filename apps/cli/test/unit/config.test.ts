@@ -4698,18 +4698,28 @@ function namedRuleSetTerms(
   };
 }
 
-/** The terms of a configuration file written with `terms` as its linkage
- *  terms, read back through the config reader. */
-function loadNamedRuleSetConfig(terms: Record<string, unknown>): LinkageTerms {
+/** A configuration file written with `terms` as its linkage terms and
+ *  `alsoAtTopLevel` beside that block, at the document's own top level. */
+function writeNamedRuleSetConfig(
+  terms: Record<string, unknown>,
+  alsoAtTopLevel: Record<string, unknown> = {},
+): string {
   const configPath = path.join(dir, "psilink.yaml");
   fs.writeFileSync(
     configPath,
     YAML.stringify({
       connection: { channel: "filedrop", path: "/mnt/share" },
       linkage_terms: terms,
+      ...alsoAtTopLevel,
     }),
   );
-  const source = loadConfigLinkageSource(configPath);
+  return configPath;
+}
+
+/** The terms of a configuration file written with `terms` as its linkage
+ *  terms, read back through the config reader. */
+function loadNamedRuleSetConfig(terms: Record<string, unknown>): LinkageTerms {
+  const source = loadConfigLinkageSource(writeNamedRuleSetConfig(terms));
   expect(source).toBeDefined();
   return source!.linkageTerms;
 }
@@ -4825,6 +4835,44 @@ test("a named set beside one of the two rule lists is refused", () => {
   expect(() =>
     linkageTermsWithNamedRuleSetRules(halfWritten, "psilink.yaml"),
   ).toThrow("writes linkage_keys but no linkage_fields");
+});
+
+// A rule list un-indented out of linkage_terms lands at the document's top
+// level, leaving the block it came from with no rules of its own. Both
+// spellings the reader accepts elsewhere are recognized there.
+const MISPLACED_RULE_LISTS: Array<[string, Record<string, unknown>]> = [
+  ["snake_case", { linkage_keys: [{ name: "SSN", elements: [] }] }],
+  ["camelCase", { linkageKeys: [{ name: "SSN", elements: [] }] }],
+];
+
+test.each(MISPLACED_RULE_LISTS)(
+  "a rule list at the top level of the file refuses the named set: %s",
+  (_label, misplaced) => {
+    const configPath = writeNamedRuleSetConfig(
+      namedRuleSetTerms(DEFAULT_LINKAGE_RULE_SET.reference),
+      misplaced,
+    );
+    const written = Object.keys(misplaced)[0]!;
+    expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
+    // Where the list was found, and where it belongs.
+    expect(() => loadConfigLinkageSource(configPath)).toThrow(
+      `writes ${written} at the top level of the file`,
+    );
+    expect(() => loadConfigLinkageSource(configPath)).toThrow(
+      "Indent it under linkage_terms",
+    );
+  },
+);
+
+test("both rule lists misplaced are named together in the refusal", () => {
+  const raw = {
+    linkage_terms: namedRuleSetTerms(DEFAULT_LINKAGE_RULE_SET.reference),
+    linkage_fields: [{ name: "ssn", type: "ssn" }],
+    linkage_keys: [{ name: "SSN", elements: [{ field: "ssn" }] }],
+  };
+  expect(() => configWithNamedRuleSetRules(raw, "psilink.yaml")).toThrow(
+    "writes linkage_fields and linkage_keys at the top level of the file",
+  );
 });
 
 test("a citation written in some other shape is left for the schema", () => {

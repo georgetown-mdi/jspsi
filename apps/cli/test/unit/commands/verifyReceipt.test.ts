@@ -10,6 +10,7 @@ import YAML from "yaml";
 import {
   buildExchangeRecord,
   computeCertificateFingerprint,
+  DEFAULT_LINKAGE_RULE_SET,
   EXCHANGE_RECORD_VERSION,
   generateSigningIdentity,
   getDefaultLinkageTerms,
@@ -1130,6 +1131,64 @@ describe("handler", () => {
     // rather than reporting it as an unusable invitation source.
     expect(stderr).not.toContain("invitation");
     expect(stdout).toBe("");
+  });
+
+  test("a --partner-terms file naming a rule set is not filled in from it", async () => {
+    // A citation in the partner's document is text the partner wrote about the
+    // partner's own rules. Substituting this build's content under it would
+    // hash rules that party never sent, so the file is read as written and a
+    // document writing no rules fails the schema.
+    const { recordPath } = await exchangeArtifacts();
+    const {
+      linkageFields: _fields,
+      linkageKeys: _keys,
+      ...withoutRules
+    } = baseInputs.partnerTerms;
+    const { stdout, stderr, exits } = await runVerify({
+      record: recordPath,
+      "partner-terms": writeYaml(
+        YAML.stringify({
+          linkage_terms: {
+            ...withoutRules,
+            linkage_rule_set: DEFAULT_LINKAGE_RULE_SET.reference,
+          },
+        }),
+        "partner.yaml",
+      ),
+    });
+    expect(exits).toEqual([64]);
+    expect(stderr).toContain("has invalid linkage_terms");
+    expect(stderr).toContain("linkage_fields");
+    // The set was not looked up, so nothing reports on what this build ships.
+    expect(stderr).not.toContain("ships");
+    expect(stdout).toBe("");
+  });
+
+  test("a --partner-terms file citing a set this build lacks still verifies", async () => {
+    // The same rule from the other side: an unresolvable citation beside the
+    // partner's own written-out rules stops nothing, because nothing here
+    // resolves it.
+    const partnerTerms: LinkageTerms = {
+      ...baseInputs.partnerTerms,
+      linkageRuleSet: {
+        fieldSet: { name: "partner-fields", version: "9.9.9" },
+        keySet: { name: "partner-keys", version: "9.9.9" },
+      },
+    };
+    const { recordPath } = await exchangeArtifacts({ partnerTerms });
+    const { stdout, exits, exitCode } = await runVerify({
+      record: recordPath,
+      "config-file": writeYaml(
+        YAML.stringify({ linkage_terms: baseInputs.localTerms }),
+      ),
+      "partner-terms": writeYaml(
+        YAML.stringify({ linkage_terms: partnerTerms }),
+        "partner.yaml",
+      ),
+    });
+    expect(exits).toEqual([]);
+    expect(stdout).toContain("agreed-terms hash: re-derives and matches");
+    expect(exitCode).toBe(0);
   });
 
   test("a --config-file holding only the pin is accepted for it", async () => {

@@ -1958,6 +1958,20 @@ function describeSchemaIssues(
 }
 
 /**
+ * Whether a read takes a `linkage_terms` block's rules from the rule set the
+ * block names ({@link linkageTermsWithNamedRuleSetRules}), for a block that
+ * names one and writes no rules of its own.
+ *
+ * Only a document THIS party wrote is read `"from-the-named-set"`. A
+ * partner-authored terms document is read `"as-written"`, the default: the
+ * citation in it is text that party wrote about its own rules, so filling
+ * this build's content in under it would hash rules the partner never sent,
+ * and a name this build does not ship would stop a verification the
+ * partner's file is not at fault for.
+ */
+export type NamedRuleSetRules = "from-the-named-set" | "as-written";
+
+/**
  * Read the linkage-terms source from a config file, reporting a missing file
  * and a config that defines no `linkage_terms` as distinct outcomes, so each
  * caller attributes them in its own terms.
@@ -1970,9 +1984,14 @@ function describeSchemaIssues(
  * is treated as intentional, so a broken one is reported for the user to
  * fix. Top-level keys are read as either the written snake_case form or
  * their camelCase spelling.
+ *
+ * @param rules whether a rule-set citation is resolved into this build's own
+ * rules; see {@link NamedRuleSetRules}, whose default leaves the document as
+ * its author wrote it.
  */
 export function readConfigLinkageSource(
   configPath: string,
+  rules: NamedRuleSetRules = "as-written",
 ): ConfigLinkageSourceResult {
   // Read, then parse through the sensitive-file chokepoint. A read failure
   // holds only a path and errno (ENOENT means no config, not an error here); a
@@ -2009,7 +2028,15 @@ export function readConfigLinkageSource(
   // Rules the block names a set for instead of writing out are taken from that
   // set before validation: the schema requires both lists, and a mint from this
   // config declares what it resolved to, citation and all.
-  const terms = linkageTermsWithNamedRuleSetRules(rawTerms, configPath);
+  const terms =
+    rules === "from-the-named-set"
+      ? linkageTermsWithNamedRuleSetRules(
+          rawTerms,
+          configPath,
+          BUILT_IN_LINKAGE_RULE_SETS,
+          obj,
+        )
+      : rawTerms;
 
   // Read through the entry point whose refusals address the party who WROTE
   // the document: this block is the operator's own, and the file is open to
@@ -2130,11 +2157,15 @@ function readRetainFilesDeclaration(config: Record<string, unknown>): boolean {
  * invitation's linkage terms, so one that defines none cannot serve as that
  * source and is a {@link UsageError} rather than a silent fall-through to
  * input inference.
+ *
+ * The file here is this party's own configuration, so a rule set it names
+ * instead of writing the rules out is resolved (see
+ * {@link NamedRuleSetRules}).
  */
 export function loadConfigLinkageSource(
   configPath: string,
 ): ConfigLinkageSource | undefined {
-  const result = readConfigLinkageSource(configPath);
+  const result = readConfigLinkageSource(configPath, "from-the-named-set");
   if (result.status === "no-config-file") return undefined;
   if (result.status === "no-linkage-terms")
     throw configFileRefusal(
@@ -2218,6 +2249,36 @@ function declaresKey(
   return Object.hasOwn(block, written) || Object.hasOwn(block, camelized);
 }
 
+/** The two rule lists, each as the pair of spellings a raw read accepts. */
+const RULE_LIST_SPELLINGS: ReadonlyArray<readonly [string, string]> = [
+  ["linkage_fields", "linkageFields"],
+  ["linkage_keys", "linkageKeys"],
+];
+
+/**
+ * The rule lists `document` writes at its own top level, spelled as it writes
+ * them. A list un-indented out of `linkage_terms` lands exactly there, and the
+ * block it left then holds no rules at all.
+ *
+ * The top level and nothing deeper: that is where the mis-indentation puts a
+ * list. A list under a key spelled some third way is outside what any read
+ * here can see, a limit docs/EXCHANGE_REFERENCE.md states.
+ */
+function ruleListsWrittenAtTopLevel(document: unknown): Array<string> {
+  if (
+    document === null ||
+    typeof document !== "object" ||
+    Array.isArray(document)
+  )
+    return [];
+  const top = document as Record<string, unknown>;
+  return RULE_LIST_SPELLINGS.flatMap(([written, camelized]) => {
+    if (Object.hasOwn(top, written)) return [written];
+    if (Object.hasOwn(top, camelized)) return [camelized];
+    return [];
+  });
+}
+
 /**
  * What this build ships, as the sentence the unknown-set refusal states it in.
  * A build shipping none says so rather than trailing an empty list: the
@@ -2257,17 +2318,25 @@ function shippedRuleSets(
  * - One list written and the other not: refused. A key set is built from its
  *   own fields, so filling in the missing half would compose the rules of one
  *   exchange from two sources under one name.
+ * - Neither list written in the block, but one of them written at the top
+ *   level of the document around it: refused, naming where it was found and
+ *   where it belongs. A list un-indented out of the block is an editing
+ *   mistake, not a file asking to run the whole set.
  *
  * A citation written in some other shape is left for the schema, which names
  * the field and the issue.
  *
  * @param ruleSets the sets a citation is looked up in, this build's own
  * ({@link BUILT_IN_LINKAGE_RULE_SETS}) by default.
+ * @param enclosingDocument the raw document the block was read out of, where
+ * the caller holds it, for the misplacement check above. Omitting it checks
+ * the block alone.
  */
 export function linkageTermsWithNamedRuleSetRules(
   rawTerms: unknown,
   configPath: string,
   ruleSets: ReadonlyArray<BuiltInLinkageRuleSet> = BUILT_IN_LINKAGE_RULE_SETS,
+  enclosingDocument?: unknown,
 ): unknown {
   if (
     rawTerms === null ||
@@ -2296,6 +2365,20 @@ export function linkageTermsWithNamedRuleSetRules(
         `writes ${written} but no ${missing}. psilink takes both lists from ` +
         `a named set or neither: remove ${written} to run the set's own ` +
         `rules, or write ${missing} out beside it.`,
+    );
+  }
+
+  const misplaced = ruleListsWrittenAtTopLevel(enclosingDocument);
+  if (misplaced.length > 0) {
+    const names = misplaced.join(" and ");
+    const them = misplaced.length === 1 ? "it" : "them";
+    throw configFileRefusal(
+      configPath,
+      `names the rule set ${cited} in linkage_terms.linkage_rule_set and ` +
+        "writes no linkage_fields or linkage_keys inside that block, but " +
+        `writes ${names} at the top level of the file. Indent ${them} under ` +
+        `linkage_terms to run the rules the file holds, or delete ${them} ` +
+        "to run the named set's own rules.",
     );
   }
 
@@ -2353,6 +2436,7 @@ export function configWithNamedRuleSetRules(
     config[key],
     configPath,
     ruleSets,
+    config,
   );
   return filled === config[key] ? rawConfig : { ...config, [key]: filled };
 }
