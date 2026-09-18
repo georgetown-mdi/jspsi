@@ -13,6 +13,7 @@ import {
   handler as exchangeHandler,
 } from "../../../src/commands/exchange";
 import { saveConfig } from "../../../src/config";
+import { PERSISTENCE_LOSS_EXIT_CODE } from "../../../src/eventStream";
 import { saveKeyFile } from "../../../src/keyFile";
 import { captureFd3 } from "../../eventStreamTestSupport";
 
@@ -31,6 +32,10 @@ import { captureFd3 } from "../../eventStreamTestSupport";
  * wrong way round tells one of them the opposite of what it needs. The lone
  * party below reads the other sink an operator may have, `--log-file`, which
  * replaces stderr rather than standing beside it.
+ *
+ * The clause about what is on disk is driven at both settings, since a run
+ * that lost an artifact non-fatally reaches the notice as any other completed
+ * run does.
  *
  * The expiry is injected rather than provoked. `closeWithinCeiling` is
  * replaced with one that still drives the real close -- so the poller stops
@@ -134,6 +139,7 @@ function partyArgs(
   party: "a" | "b",
   extra: string[],
   peerTimeout = PEER_TIMEOUT,
+  recordFlags: string[] = ["--no-record"],
 ): string[] {
   return [
     "exchange",
@@ -145,7 +151,7 @@ function partyArgs(
     path.join(work, `${party}.key`),
     "--identity",
     `party-${party}`,
-    "--no-record",
+    ...recordFlags,
     "--peer-timeout",
     peerTimeout,
     ...extra,
@@ -297,6 +303,63 @@ test(
     expect(notices[0]).toContain("[ERROR]");
     expect(notices[0]).toContain("exit status are unchanged");
     expect(notices[0]).not.toContain("on disk");
+  },
+  CASE_TIMEOUT_MS,
+);
+
+test(
+  "a run that lost an artifact claims nothing about what is on disk",
+  async () => {
+    // The record path's parent is a regular file, so the record cannot be
+    // written and the run loses it non-fatally: the exchange and the result
+    // stand, the loss is reported, and the notice must not then tell the
+    // operator every file the run writes is there. The partner keeps no
+    // record, so its own notice still states the clause; that is what tells
+    // the two apart, since both parties run in this process.
+    writeExchangeFixture();
+    const recordInsideAFile = path.join(work, "a-input.csv", "record.json");
+    const logArgs = ["--log-level", "error"];
+
+    const { value: stderrText, lines } = await captureFd3(async () => {
+      const { text } = await captureStderr(async () => {
+        const results = await Promise.allSettled([
+          runCli(
+            partyArgs("a", ["--event-stream", ...logArgs], PEER_TIMEOUT, [
+              "--record-file",
+              recordInsideAFile,
+            ]),
+          ),
+          runCli(partyArgs("b", logArgs)),
+        ]);
+        const failures = results.filter((r) => r.status === "rejected");
+        if (failures.length > 0)
+          throw new AggregateError(
+            failures.map((r) => (r as PromiseRejectedResult).reason),
+            "a party failed",
+          );
+      });
+      return text;
+    });
+
+    const types = lines.map((line) => line["type"]);
+    expect(types[types.length - 1]).toBe("result");
+    expect(
+      lines
+        .filter((line) => line["type"] === "warning")
+        .map((line) => line["source"]),
+    ).toEqual(["persistenceLoss"]);
+    expect(process.exitCode).toBe(PERSISTENCE_LOSS_EXIT_CODE);
+    expect(exitSpy).not.toHaveBeenCalled();
+
+    const notices = stderrText
+      .split("\n")
+      .filter((line) => line.includes("the transport did not finish closing"));
+    expect(notices).toHaveLength(2);
+    expect(
+      notices.filter((line) =>
+        line.includes("everything it writes is already on disk"),
+      ),
+    ).toHaveLength(1);
   },
   CASE_TIMEOUT_MS,
 );

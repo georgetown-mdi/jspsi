@@ -1198,11 +1198,11 @@ interface RunLifecycle {
    */
   exchangeComplete: boolean;
   /**
-   * Set once the output stage returned, so the local artifacts a run owes --
-   * the result file, the exchange record, the receipt -- are on disk. A run
-   * that entered the stage and failed inside it wrote some or none of them, so
-   * nothing told to the operator about what is on disk keys on the stage being
-   * reached.
+   * Set once the output stage returned with every local artifact a run owes --
+   * the result file, the exchange record, the receipt -- on disk. A run that
+   * entered the stage and failed inside it, and one that lost an artifact
+   * non-fatally, each wrote some or none of them, so nothing told to the
+   * operator about what is on disk keys on the stage being reached.
    */
   outputsWritten: boolean;
   /**
@@ -1620,6 +1620,11 @@ type ExchangeOutcome = Awaited<ReturnType<typeof runExchange>>;
  * write that failed: the exchange disclosed, and what it disclosed is owed its
  * record whether or not this party got to keep the result
  * (docs/notes/record-durability-point.md).
+ *
+ * Returns whether every artifact it owed reached disk: false once any of the
+ * non-fatal losses above has been reported, so what the run tells the operator
+ * afterwards about its files keys on the artifacts rather than on this stage
+ * returning.
  */
 async function writeExchangeOutputs(params: {
   outcome: ExchangeOutcome;
@@ -1631,7 +1636,7 @@ async function writeExchangeOutputs(params: {
   log: ReturnType<typeof getLogger>;
   eventStream: EventStreamEmitter | undefined;
   onOutputComplete: FileSyncRuntimeOptions["onOutputComplete"];
-}): Promise<void> {
+}): Promise<boolean> {
   const {
     outcome,
     prepared,
@@ -1812,6 +1817,8 @@ async function writeExchangeOutputs(params: {
   for (const missing of missingArtifacts)
     reportPersistenceLoss(missing, eventStream);
 
+  let everyArtifactOnDisk = missingArtifacts.length === 0;
+
   // The result went nowhere, so the run fails on it and the caller's own
   // persistence below does not run: it writes configuration for a run whose
   // operator never received the result.
@@ -1843,8 +1850,11 @@ async function writeExchangeOutputs(params: {
           "logged beside this notice names the step",
         eventStream,
       );
+      everyArtifactOnDisk = false;
     }
   }
+
+  return everyArtifactOnDisk;
 }
 
 /**
@@ -2336,7 +2346,7 @@ export async function runProtocol(
       matching,
       resolvedRole,
     } = outcome;
-    await writeExchangeOutputs({
+    run.outputsWritten = await writeExchangeOutputs({
       outcome,
       prepared,
       output,
@@ -2347,7 +2357,6 @@ export async function runProtocol(
       eventStream,
       onOutputComplete: fileSyncRuntime.onOutputComplete,
     });
-    run.outputsWritten = true;
 
     // onAuthenticatedError is set only when a post-handshake hook failed
     // but the exchange above still succeeded (a hook failure followed by
@@ -2367,11 +2376,11 @@ export async function runProtocol(
     // same footing.
     // The metrics summary precedes it so the terminal event stays last.
     //
-    // Both are emitted before cleanup: every local artifact the run owes is on
-    // disk above, so the outcome is decided, and a consumer of this stream
-    // learns it without waiting on a close that may run to its ceiling. The
-    // transport is torn down after, and what that costs goes to the operator
-    // log alone.
+    // Both are emitted before cleanup: every local artifact the run owes was
+    // written above, or its loss reported there, so the outcome is decided,
+    // and a consumer of this stream learns it without waiting on a close that
+    // may run to its ceiling. The transport is torn down after, and what that
+    // costs goes to the operator log alone.
     emitMetrics();
     emit((e) =>
       e.result(

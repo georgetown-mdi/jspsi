@@ -82,11 +82,12 @@ export interface ExchangeFileDisposition {
   /** Whether the run keeps those files as a transcript instead of deleting them. */
   retainFiles: boolean;
   /**
-   * Whether the output stage returned, so the result, the exchange record and
-   * the receipt are on disk. A run that never reached that stage -- an
-   * interrupt, or a failure in the exchange itself -- and a run that failed
-   * inside it both leave this false, since neither wrote the whole set the
-   * notice would otherwise account for.
+   * Whether the output stage returned with the result, the exchange record and
+   * the receipt all on disk. A run that never reached that stage -- an
+   * interrupt, or a failure in the exchange itself -- a run that failed inside
+   * it, and a run that lost one of those artifacts non-fatally all leave this
+   * false, since none of them wrote the whole set the notice would otherwise
+   * account for.
    */
   outputsWritten: boolean;
 }
@@ -101,10 +102,12 @@ export interface ExchangeFileDisposition {
  * machine-interface stream.
  *
  * The on-disk half of that second sentence is stated only by a run whose
- * output stage returned. `doCleanup` also runs from the interrupt paths, from
- * a failure ahead of that stage, and from a failure inside it -- a result file
- * that could not be written among them -- and telling the operator everything
- * the run writes is on disk would name artifacts they will not find.
+ * output stage returned with every artifact it owed written. `doCleanup` also
+ * runs from the interrupt paths, from a failure ahead of that stage, from a
+ * failure inside it -- a result file that could not be written among them --
+ * and from a run that lost the exchange record or the receipt non-fatally, and
+ * telling the operator everything the run writes is on disk would name
+ * artifacts they will not find.
  *
  * A run deleting its protocol files gets one more sentence, naming the one
  * thing the abandoned close leaves for the operator: on the file channels that
