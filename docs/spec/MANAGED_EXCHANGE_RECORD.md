@@ -1245,11 +1245,14 @@ accepts.
   that no run has happened on the other machine, so either route can leave the record
   holding a secret the partner has moved past: an `auth` failure at the next run
   tiers as **imported**, whose recovery is the re-invite, until a run succeeds and
-  the rotation clears the marker. The instant differs with the route: a key file's
-  install stamps the re-take instant, and a re-take that chose no key file stamps the
-  hand-off's own `spentAt`, the point from which this device's copy may have fallen
-  behind. A re-take needing no key leaves the backup marker where it stands, the
-  stored secret still being the one that backup holds.
+  the rotation clears the marker.
+  The instant differs with what the re-take did to the secret: a key file whose
+  secret differs from the stored one stamps the re-take instant; a re-take that
+  left the stored secret in place, whether it chose no key file or one holding
+  the same secret, stamps the hand-off's own `spentAt`, the point from which this
+  device's copy may have fallen behind. A re-take that leaves the secret in place
+  also leaves the backup marker where it stands, the stored secret still being
+  the one that backup holds.
 - **The hand-off's own refusal is consumed.** A `lastRun` recording the
   `handed-off` refusal -- a run that came due while this copy was spent -- is
   dropped in the same transaction, with or without a key: the take-back ends the
