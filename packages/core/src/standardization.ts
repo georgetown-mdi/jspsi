@@ -1621,10 +1621,13 @@ export function applyStep(
       // here rather than after one more invocation.
       chargeTransformWork(work, v.length, site, provenance);
       const r = step.fn(v);
+      // Noted before the produced units are charged, so a crossing decided on
+      // this invocation reads the provenance this invocation established, as
+      // the accumulating charge below does.
+      noteFanOutProducer(r, step.isListedFanOutFunction, provenance);
       chargeTransformWork(work, producedCodeUnits(r), site, provenance);
       if (r === null) continue;
       if (r instanceof Set) {
-        noteFanOutProducer(r, step.isListedFanOutFunction, provenance);
         for (const sv of r) accumulated += addCandidate(out, sv);
       } else {
         accumulated += addCandidate(out, r);
@@ -1650,8 +1653,8 @@ export function applyStep(
 
   chargeTransformWork(work, current.length, site, provenance);
   const result = step.fn(current);
-  chargeTransformWork(work, producedCodeUnits(result), site, provenance);
   noteFanOutProducer(result, step.isListedFanOutFunction, provenance);
+  chargeTransformWork(work, producedCodeUnits(result), site, provenance);
   return result;
 }
 
@@ -3075,6 +3078,32 @@ export function buildKeyStrings(
   );
 }
 
+/**
+ * The transform work one row spends deriving one key, in UTF-16 code units --
+ * the total {@link MAX_TRANSFORM_WORK_PER_ROW} bounds, read off the same row
+ * read {@link buildKeyStrings} runs. A row that crosses the budget throws
+ * instead, stating its own total in the refusal.
+ *
+ * @internal exported so what a pipeline spends is measured by the tests that
+ * pin it rather than computed from the charge rule.
+ */
+export function transformWorkSpentDerivingKey(
+  key: LinkageKey,
+  dataset: StandardizedDataset,
+  index: number,
+): number {
+  const work = openTransformWorkMeter();
+  readRowUnderPlan(
+    key,
+    planKeyRead(key, dataset, false, undefined),
+    dataset,
+    index,
+    undefined,
+    work,
+  );
+  return work.spent;
+}
+
 // The row build under a plan the caller already holds. Unexported, and the
 // entry point above takes no plan: a caller-supplied fate would be a lever for
 // reading a key this build classifies `refuse` as a `drop` instead.
@@ -3090,7 +3119,17 @@ function buildKeyStringsUnderPlan(
   keyIndex: number | undefined,
 ): Set<string> | null {
   try {
-    return readRowUnderPlan(key, plan, dataset, index, keyIndex);
+    // One meter for the whole (record, key): what the key's elements spend
+    // accumulates across them, since the element count is a partner-authored
+    // multiplier like the step count.
+    return readRowUnderPlan(
+      key,
+      plan,
+      dataset,
+      index,
+      keyIndex,
+      openTransformWorkMeter(),
+    );
   } catch (err) {
     if (!(err instanceof TransformWorkBudgetCrossed)) throw err;
     return dropRowFromKeyRound(
@@ -3119,11 +3158,8 @@ function readRowUnderPlan(
   dataset: StandardizedDataset,
   index: number,
   keyIndex: number | undefined,
+  work: TransformWorkMeter,
 ): Set<string> | null {
-  // One meter for the whole (record, key): what the key's elements spend
-  // accumulates across them, since the element count is a partner-authored
-  // multiplier like the step count.
-  const work = openTransformWorkMeter();
   const elementValues: string[][] = [];
   // Whether a fuzzy expansion this party applies actually widened the row, which
   // is what routes the width bound below to its refusal. Measured on the
