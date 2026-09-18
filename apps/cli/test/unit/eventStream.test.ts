@@ -793,6 +793,36 @@ test("a broken pipe stops the writer without throwing into the exchange", () => 
   const emitter = openEventStreamWithFdWired();
   expect(() => emitter.result(true, ONE_TO_ONE)).not.toThrow();
   // A later emit does not retry the write once the stream is marked broken.
-  emitter.result(false, ONE_TO_ONE);
+  emitter.warning("termsExchange", "raised after the broken write");
   expect(calls).toBe(1);
+});
+
+test("no event is written after the terminal event", () => {
+  // A consumer may stop reading at the terminal event, so the stream ends
+  // there. The transport teardown runs after it, and anything that or a later
+  // site raises would land where nobody is bound to look; the writer refuses
+  // it and the run states it on the operator log instead.
+  const cap = captureFd3Writes();
+  const emitter = openEventStreamWithFdWired();
+  emitter.warning("termsExchange", "raised before the outcome");
+  emitter.result(true, ONE_TO_ONE);
+  emitter.warning("termsExchange", "raised while the transport closed");
+  emitter.metrics(1, 0, 0);
+  emitter.error(new Error("a fault raised during teardown"), "output");
+
+  expect(cap.lines().map((l) => (JSON.parse(l) as StreamEvent).type)).toEqual([
+    "warning",
+    "result",
+  ]);
+});
+
+test("a terminal error closes the stream as a terminal result does", () => {
+  const cap = captureFd3Writes();
+  const emitter = openEventStreamWithFdWired();
+  emitter.error(new Error("the exchange failed"), "run");
+  emitter.warning("termsExchange", "raised while the transport closed");
+
+  expect(cap.lines().map((l) => (JSON.parse(l) as StreamEvent).type)).toEqual([
+    "error",
+  ]);
 });

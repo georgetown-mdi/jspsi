@@ -6,6 +6,7 @@ import {
   UsageError,
   WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
   causeChainSome,
+  getLogger,
   redactAndSanitizeForDisplay,
   sanitizeErrorForDisplay,
 } from "@psilink/core";
@@ -14,6 +15,8 @@ import type {
   ExchangeStageDefinition,
   ResolvedMatching,
 } from "@psilink/core";
+
+const log = getLogger("event-stream");
 
 /**
  * The fixed file descriptor the opt-in machine-readable event stream is written
@@ -88,7 +91,6 @@ export const WARNING_SOURCES = [
   "signingWithoutRecord",
   "terminatedRunRecord",
   "persistenceLoss",
-  "transportTeardown",
 ] as const;
 
 /** One {@link WARNING_SOURCES} value; see that list. */
@@ -546,13 +548,30 @@ export function assertEventStreamFdOpen(): void {
  * a supervisor that closed its read end must not crash the exchange, and the
  * absence of further events plus the exit code is a defined supervisor signal
  * (see docs/spec/CLI_EVENTS.md).
+ *
+ * The terminal event ends the stream. A consumer may stop reading at it, so an
+ * event raised afterwards -- by the transport teardown that follows it, or by
+ * anything added beside that -- is refused here rather than written where
+ * nobody is bound to look. What the refused event had to say reaches the
+ * operator through the log call beside its own site; the debug line here names
+ * only which type was dropped.
  */
 class EventStreamWriter {
   private broken = false;
+  private terminated = false;
 
   /** Serialize `event` to one NDJSON line and flush it to fd 3. */
   emit(event: StreamEvent): void {
     if (this.broken) return;
+    if (this.terminated) {
+      log.debug(
+        `a ${event.type} event was raised after this run's terminal event ` +
+          "and was not written to the machine-interface stream",
+      );
+      return;
+    }
+    if (event.type === "result" || event.type === "error")
+      this.terminated = true;
     const line = JSON.stringify(event) + "\n";
     const buf = Buffer.from(line, "utf8");
     let offset = 0;

@@ -82,26 +82,29 @@ export interface ExchangeFileDisposition {
   /** Whether the run keeps those files as a transcript instead of deleting them. */
   retainFiles: boolean;
   /**
-   * Whether the run reached its output stage, where the result, the exchange
-   * record and the receipt are written. A run cut short before it -- an
-   * interrupt, or a failure in the exchange itself -- wrote no local files for
-   * the notice to account for.
+   * Whether the output stage returned, so the result, the exchange record and
+   * the receipt are on disk. A run that never reached that stage -- an
+   * interrupt, or a failure in the exchange itself -- and a run that failed
+   * inside it both leave this false, since neither wrote the whole set the
+   * notice would otherwise account for.
    */
-  reachedOutputStage: boolean;
+  outputsWritten: boolean;
 }
 
 /**
- * The notice a run states -- on the operator log and on the machine-interface
- * stream -- when its transport did not finish closing inside the ceiling: how
- * long it waited and which resource kinds were still armed. The exit status is
- * the exchange's own outcome either way, which the second sentence says so an
- * unattended supervisor does not read the notice as a failure to retry.
+ * The notice a run states on the operator log when its transport did not
+ * finish closing inside the ceiling: how long it waited and which resource
+ * kinds were still armed. The exit status is the exchange's own outcome either
+ * way, which the second sentence says so an unattended supervisor does not
+ * read the notice as a failure to retry. The teardown runs after the run's
+ * terminal event, so this text reaches the operator alone and never the
+ * machine-interface stream.
  *
- * The on-disk half of that second sentence is stated only by a run that
- * reached its output stage. `doCleanup` also runs from the interrupt paths and
- * from a failure ahead of that stage, where the run wrote no local files at
- * all and telling the operator everything it writes is on disk would name
- * artifacts they will not find.
+ * The on-disk half of that second sentence is stated only by a run whose
+ * output stage returned. `doCleanup` also runs from the interrupt paths, from
+ * a failure ahead of that stage, and from a failure inside it -- a result file
+ * that could not be written among them -- and telling the operator everything
+ * the run writes is on disk would name artifacts they will not find.
  *
  * A run deleting its protocol files gets one more sentence, naming the one
  * thing the abandoned close leaves for the operator: on the file channels that
@@ -125,7 +128,7 @@ export function teardownCeilingNotice(
         `left there; deleting them is the part of the close that did not ` +
         `finish, and passing --sweep-exchange-files to the next run removes ` +
         `them before it meets the partner.`;
-  const onDisk = files.reachedOutputStage
+  const onDisk = files.outputsWritten
     ? `, and everything it writes is already on disk`
     : "";
   return (

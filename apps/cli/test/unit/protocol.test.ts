@@ -5253,6 +5253,54 @@ test("a close that throws on a completed run still emits the terminal result eve
   expect(process.exitCode).toBeUndefined();
 }, 20_000);
 
+test("the terminal event is on the stream before the transport close begins", async () => {
+  // The ordering the stream's terminal-event guarantee rests on: the outcome
+  // reaches a consumer without waiting on a close that has a ceiling of its
+  // own, and everything the close then reports goes to the operator log alone
+  // (docs/spec/CLI_EVENTS.md, Terminal-event guarantees). One party waits for a
+  // partner who never arrives, so one connection is closed and the snapshot
+  // below is that close's own.
+  const realClose = FileSyncConnection.prototype.close;
+  let streamAtClose: string | undefined;
+  FileSyncConnection.prototype.close = function (
+    this: FileSyncConnection,
+  ): Promise<void> {
+    streamAtClose ??= Buffer.concat(fd3Chunks).toString("utf8");
+    return realClose.call(this);
+  };
+  mockFd3Open();
+  try {
+    await runProtocol({
+      connection: {
+        channel: "filedrop",
+        path: dropDir,
+        options: {
+          pollIntervalMs: 1,
+          peerTimeoutMs: LONE_PARTY_PEER_BUDGET_MS,
+        },
+      },
+      auth: null,
+      prepared: minimalPrepared,
+      output: undefined,
+      verbosity: -1,
+      loggerName: "test",
+      fileSyncRuntime: { eventStream: true },
+    }).catch(() => undefined);
+  } finally {
+    FileSyncConnection.prototype.close = realClose;
+    vi.mocked(fs.fstatSync).mockRestore();
+  }
+
+  const typesAtClose = (streamAtClose ?? "")
+    .split("\n")
+    .filter((line) => line.length > 0)
+    .map((line) => (JSON.parse(line) as { type: string }).type);
+  expect(typesAtClose[typesAtClose.length - 1]).toBe("error");
+  expect(typesAtClose[typesAtClose.length - 2]).toBe("metrics");
+  // The close added nothing to what the outcome already said.
+  expect(takeFd3Lines().map((line) => line.type)).toEqual(typesAtClose);
+}, 20_000);
+
 test("a count-only run's terminal event includes the count beside resultWritten:false", async () => {
   // The outcome a supervisor reading only fd 3 would otherwise misreport: a
   // count-only run writes no result file, so its terminal event has the same
