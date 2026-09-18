@@ -689,7 +689,9 @@ export const PERSISTENCE_LOSS_EXIT_CODE = 73;
  * not survivable -- a result file that could not be written -- reports as the
  * terminal `error` event instead, at the same exit code: `runProtocol` stamps
  * it at that write, so a partner-shaped fault elsewhere in the same output
- * stage is not mistaken for a local write loss.
+ * stage is not mistaken for a local write loss. The post-output persistence
+ * that loss skips still reports through here, so that one warning stands
+ * beside a terminal `error` rather than a `result`.
  *
  * `notice` is this party's own prose naming what was lost and what the operator
  * should do; the cause stays on the human log beside this call, escaped once
