@@ -37,6 +37,7 @@ import {
   safeParseManagedExchangeRecord,
   standingCompromiseResponse,
 } from "./managedExchangeRecord";
+import { foldElapsedWindowsUnderResponse } from "./managedSchedule";
 import { parseManagedLocalState } from "./managedLocalStateShape";
 
 import type {
@@ -1140,27 +1141,38 @@ export async function recordManagedExchangeLastRun(
 
 /**
  * Clear the stored record's standing condition -- the operator's explicit
- * clear-and-acknowledge -- advancing only that field through
- * {@link applyManagedExchangeStandingConditionCleared} inside one
+ * clear-and-acknowledge -- advancing that field and the schedule bookkeeping the
+ * response it holds earned ({@link foldElapsedWindowsUnderResponse}) inside one
  * strict-durability readwrite transaction, so the acknowledgement cannot carry a
  * stale secret or a stale document back over a concurrent rotation write.
  *
- * This is the only clear that is not part of another write: a re-invite drops the
- * condition in its own rotation transaction, and deleting the exchange takes it
- * with the record (docs/spec/MANAGED_EXCHANGE_RECORD.md, the `standingCondition`
- * row).
+ * The fold and the clear are one write because the fold is only computable while
+ * the answer is still on the record: every window that elapsed under the response
+ * is recorded skipped here, so the next wake -- reading a record the answer has
+ * left -- cannot count those windows as the partner's misses and tell the
+ * operator to check with them. It is the acknowledgement that folds them because
+ * it is the clearer a standing response admits: the re-invite's own write refuses
+ * while one stands, and deleting the exchange takes the schedule with the record
+ * (docs/spec/MANAGED_EXCHANGE_RECORD.md, the `standingCondition` row).
  *
+ * This is the only clear that is not part of another write.
+ *
+ * @param now The clearing instant, UTC milliseconds, which the fold walks the
+ *   schedule up to; defaults to the clock.
  * @throws {Error} if no record with `id` exists.
  * @throws {ZodError} if the stored value or the resulting record is invalid.
  */
 export async function clearManagedExchangeStandingCondition(
   id: string,
+  now: number = Date.now(),
 ): Promise<ManagedExchangeRecord> {
   return readModifyWriteRecord(id, (stored) => {
     if (stored === undefined)
       throw new Error(`no managed exchange with id ${id}`);
     const existing = parseManagedExchangeRecord(stored);
-    return applyManagedExchangeStandingConditionCleared(existing);
+    return applyManagedExchangeStandingConditionCleared(
+      foldElapsedWindowsUnderResponse(existing, now),
+    );
   });
 }
 

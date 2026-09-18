@@ -70,6 +70,7 @@ import {
 import { betweenVisitNotice } from "./betweenVisitNotice";
 
 import {
+  getManagedExchange,
   listReadableManagedExchanges,
   persistManagedExchangeScheduleAdvance,
 } from "./managedExchangeStore";
@@ -232,6 +233,7 @@ export function browserScheduleTickSeams(
   return {
     now: () => Date.now(),
     listRecords: listReadableManagedExchanges,
+    readRecord: getManagedExchange,
     listLocalState: listManagedLocalState,
     persistAdvance: persistManagedExchangeScheduleAdvance,
     delay: (ms) => delayUntilAborted(ms, signal),

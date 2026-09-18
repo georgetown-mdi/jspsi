@@ -1193,6 +1193,26 @@ describe("a compromise response the operator gave at an earlier visit", () => {
     expect((await getManagedExchange(id))?.sharedSecret).toBe(secretBefore);
   });
 
+  test("leaves the attended run control live, under the standing alert", async () => {
+    // Only the unattended path is held by the answer: an attended run is the
+    // operator's own act, taken with the warning in front of them.
+    const id = await answerStandingGate();
+    app.unmount();
+
+    app.render(createElement(ManagedRunSurface, { id }));
+    const alert = page.getByText(COMPROMISE_RESPONSE_TITLE);
+    await expect.element(alert).toBeInTheDocument();
+    const runButton = page.getByRole("button", { name: "Run exchange" });
+    await expect.element(runButton).toBeEnabled();
+    expect(app.container.textContent).toContain(COMPROMISE_RESPONSE_STANDS);
+    // The warning stands ABOVE the control rather than after it, so it is read
+    // before the run is reached.
+    expect(
+      alert.element().compareDocumentPosition(runButton.element()) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeGreaterThan(0);
+  });
+
   test("a benign no-show later in the same visit does not take it", async () => {
     // The run stamps a no-show, which records no failure kind at all, and nothing
     // refreshes the page's own copy of the record. The answer is not a reading of

@@ -380,9 +380,16 @@ with the condition. A run never writes it, and a run never clears it.
   under it is not attempted: nothing connects and nothing rotates, and the window
   records its own `"skipped"` outcome rather than a partner's absence (see [A due
   window under the operator's compromise
-  response](#a-due-window-under-the-operators-compromise-response)). The attended
-  run is untouched -- it is the operator's own act, taken with the response's
-  warning in front of them.
+  response](#a-due-window-under-the-operators-compromise-response)). A scheduled
+  attempt reads the record again before it connects, so an answer written while a
+  window is being occupied stops the attempts after it as well as the windows
+  after it. The attended run is untouched -- it is the operator's own act, taken
+  with the response's warning in front of them.
+- **The clear-and-acknowledge folds the windows it held.** The acknowledgement
+  applies the [catch-up](#catch-up-on-wake) a wake applies, at the clearing
+  instant and in the same write that removes the answer, so every window that
+  elapsed under it is recorded `"skipped"` there rather than counted a miss by
+  the next wake, which would read a record the answer has left.
 - **While it stands, no control offers a fresh invitation.** Neither gate is put
   again, no failure recovery mints, and the configuration section's re-invite on
   the same terms is withheld. The in-app re-invite is reachable only after the
@@ -698,9 +705,9 @@ already found the partner absent before it still folds to `"missed"` under the
 table below.
 
 The window's disposition folds every attempt it took, written once for the window
-rather than once per attempt. A further disposition, `"skipped"`, is decided
-before any attempt and so never reaches this fold (see [A due window under the
-operator's compromise
+rather than once per attempt. A further disposition, `"skipped"`, is decided by
+the record rather than by an attempt and so never reaches this fold (see [A due
+window under the operator's compromise
 response](#a-due-window-under-the-operators-compromise-response)):
 
 | Disposition | The window | `consecutiveMisses` | Advance has a `lastRun` |
@@ -756,26 +763,30 @@ whether it runs at all, are `apps/web/src/psi/managed/managedScheduleRuntime.ts`
 
 A window that falls due while the record's standing condition holds the
 operator's [response](#the-operators-response-to-it) is **skipped**, decided
-before anything is attempted and read off the stored record rather than
+before each attempt connects and read off the stored record rather than
 re-derived from a failure. The operator has said the secret may be in someone
 else's hands; a scheduled run would put exactly that secret on exactly that
 channel again, with nobody present to see it happen.
 
-A skipped window makes no connection and rotates nothing. Its bookkeeping is the
-same single conditioned write every other window takes:
+A skipped window rotates nothing, and connects to nobody from the answer
+forward: an answer standing when the window falls due leaves it unattempted
+altogether, and one written while it is being occupied ends the occupancy where
+it lands. Its bookkeeping is the same single conditioned write every other window
+takes:
 
 - `nextWindow` advances past it, so the runner meets the next agreed window and
   nothing re-decides this one.
-- `consecutiveMisses` is left where it stood. Nobody waited for the partner, so
-  the window is no evidence about whether the two runners are still meeting, and
-  it must not carry the coordination prompt a pattern of absences earns (see
+- `consecutiveMisses` is left where it stood: the window ended on this device's
+  own withhold rather than on a partner's absence, so it is no evidence about
+  whether the two runners are still meeting, and it must not carry the
+  coordination prompt a pattern of absences earns (see
   [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md#retry-and-repeated-misses)).
 - The advance carries a `lastRun` of `{"outcome": "skipped"}`, stamped at the
-  instant the window was skipped. No run wrote one, and it is what the exchange's
-  page and the between-visit notification read the skip from.
+  instant the window was skipped. It is what the exchange's page and the
+  between-visit notification read the skip from.
 - No standing condition is raised or altered. The condition the answer rides on
-  is the one an earlier failure raised, and a window nothing was attempted in
-  adds no evidence to it.
+  is the one an earlier failure raised, which the window's write leaves as it
+  found it.
 
 A window that opened under the response and was already elapsed when the runner
 woke folds the same way in [catch-up](#catch-up-on-wake): it counts no miss, and

@@ -150,6 +150,9 @@ function harness(options: {
    * advance lands, standing in for another tab's edit between this tick's
    * snapshot and its write. */
   concurrentEdit?: (record: ManagedExchangeRecord) => ManagedExchangeRecord;
+  /** A write applied to the stored record as each attempt runs, standing in for
+   * another tab's write landing while the window is being occupied. */
+  writeDuringAttempt?: (record: ManagedExchangeRecord) => ManagedExchangeRecord;
 }): Harness {
   const script = options.script ?? [];
   const stored = new Map(
@@ -177,6 +180,7 @@ function harness(options: {
         records: [...stored.values()],
         unreadableIds: options.unreadableIds ?? [],
       }),
+    readRecord: (id) => Promise.resolve(stored.get(id)),
     listLocalState: () =>
       Promise.resolve(
         options.localState ?? new Map<string, ManagedLocalState>(),
@@ -203,6 +207,10 @@ function harness(options: {
         startedAtMs: clockMs,
       });
       noteFirstAttempt();
+      const duringAttempt = options.writeDuringAttempt;
+      const held = stored.get(attempt.record.id);
+      if (duringAttempt !== undefined && held !== undefined)
+        stored.set(attempt.record.id, duringAttempt(held));
       // The last scripted step repeats; a tick that attempts anything with no
       // script at all is a test that meant to supply one.
       const step = script.at(Math.min(attempts.length - 1, script.length - 1));
@@ -859,6 +867,41 @@ describe("a due window under the operator's compromise response", () => {
     expect(storedRecord(runner, record.id).lastRun).toEqual({
       at: "2026-01-27T14:30:00.000Z",
       outcome: "skipped",
+    });
+  });
+
+  test("stops the window's own attempts once the answer lands mid-window", async () => {
+    // The answer is written while the first attempt runs, as another tab's
+    // acknowledgement gate would write it. The window is three hours wide and
+    // the failure retryable, so nothing but the answer ends the occupancy here.
+    const record = recordWith();
+    const runner = harness({
+      records: [record],
+      startAt: "2026-01-06T14:00:00.000Z",
+      script: [{ kind: "fail", error: new Error("the channel dropped") }],
+      writeDuringAttempt: (held) =>
+        applyManagedExchangeCompromiseResponse(
+          held,
+          "2026-01-06T14:00:30.000Z",
+        ),
+    });
+
+    const [entry] = await tickManagedSchedules(runner.seams);
+
+    expect(entry).toMatchObject({ attempts: 1, disposition: "skipped" });
+    expect(runner.attempts).toHaveLength(1);
+    const stored = storedRecord(runner, record.id);
+    expect(stored.sharedSecret).toBe(record.sharedSecret);
+    expect(stored.lastRun).toEqual({
+      at: "2026-01-06T14:01:00.000Z",
+      outcome: "skipped",
+    });
+    // The window is accounted for where it stopped rather than left open: one
+    // write, the plan past it, and no miss for a partner nobody waited on.
+    expect(runner.advances).toHaveLength(1);
+    expect(stored.schedule).toMatchObject({
+      nextWindow: "2026-01-13T14:00:00.000Z",
+      consecutiveMisses: 0,
     });
   });
 

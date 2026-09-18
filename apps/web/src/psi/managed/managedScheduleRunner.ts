@@ -30,10 +30,12 @@
  *   has said the secret may be in someone else's hands, so the window connects
  *   to nobody and rotates nothing. It is the window's own outcome rather than a
  *   partner absence, so it counts no miss, and the next window is attempted as
- *   soon as one of the three acts clears the response. A window that opened
- *   under the response and elapsed while nothing was running folds the same way
- *   in the catch-up walk, so a machine asleep across several of them wakes with
- *   the miss count where it stood.
+ *   soon as one of the three acts clears the response. The answer is read off
+ *   the store before every attempt's connect, so one written mid-window ends the
+ *   occupancy on the same skipped outcome. A window that opened under the
+ *   response and elapsed while nothing was running folds the same way in the
+ *   catch-up walk, so a machine asleep across several of them wakes with the
+ *   miss count where it stood.
  *
  * Two properties of the loop are not visible from the criteria they serve
  * (docs/spec/MANAGED_EXCHANGE_RECORD.md, "Occupying a due window"):
@@ -153,6 +155,13 @@ export interface ManagedScheduleTickSeams {
    * scheduled runs instead of every exchange's (see
    * {@link ManagedExchangeReadableRecords}). */
   listRecords: () => Promise<ManagedExchangeReadableRecords>;
+  /** Read one stored record afresh. The window's attempts read the operator's
+   * compromise response through it before every connect, so an answer written
+   * while the window is being occupied is met by the attempt after it rather
+   * than only by the next window. A read that rejects ends the tick's
+   * bookkeeping, leaving the window unaccounted: an attempt whose answer cannot
+   * be read does not connect. */
+  readRecord: (id: string) => Promise<ManagedExchangeRecord | undefined>;
   /** Each record's local sibling state, read once per tick. Its `spent` marker
    * keeps a handed-off copy from being attempted: a migration export sets it so
    * neither the operator nor the schedule runs the record again. This read is
@@ -382,6 +391,17 @@ async function occupyDueWindow(
     ),
     fromNextWindow: planned.nextWindow,
     fromConsecutiveMisses: planned.consecutiveMisses,
+    // A window the answer stopped mid-occupancy takes the same stamp as one the
+    // answer stood over from the start: the attempt it stopped never connected,
+    // so it wrote no `lastRun` of its own.
+    ...(occupancy.disposition === "skipped"
+      ? {
+          lastRun: {
+            at: new Date(seams.now()).toISOString(),
+            outcome: "skipped" as const,
+          },
+        }
+      : {}),
     ...(occupancy.standingCondition !== undefined
       ? { standingCondition: occupancy.standingCondition }
       : {}),
@@ -402,6 +422,10 @@ interface WindowOccupancy {
 
 /**
  * Occupy one open window with bounded re-attempts.
+ *
+ * Each attempt re-reads the stored record before it connects and ends the
+ * occupancy as `"skipped"` where the operator's compromise response stands, so
+ * an answer given while the window is open holds the attempts after it.
  *
  * Each attempt waits for the partner up to {@link ATTEMPT_PEER_WAIT_MS},
  * clamped to what is left of the window; a retryable failure starts another
@@ -443,6 +467,18 @@ async function occupyWindow(
     const startedAtMs = seams.now();
     const remainingMs = window.closesAtMs - startedAtMs;
     if (remainingMs <= 0 || attempts >= MAX_WINDOW_ATTEMPTS) break;
+    // The operator's answer is read off the store before every connect, as the
+    // run+rotate lock re-reads the sibling spent state before every run
+    // ({@link ./managedExchangeRun.ts}): an answer written while this window is
+    // being occupied must stop the attempt after it, not just the next window.
+    // The answer rides on a raised condition, so the window's write has no
+    // evidence of its own to carry here.
+    const stored = await seams.readRecord(record.id);
+    if (
+      stored !== undefined &&
+      standingCompromiseResponse(stored) !== undefined
+    )
+      return { attempts, disposition: "skipped" };
     attempts += 1;
     let dataExchangeStarted = false;
     try {

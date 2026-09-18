@@ -5,6 +5,7 @@ import {
   advanceManagedScheduleAfterWindow,
   catchUpManagedSchedule,
   firstUnclosedManagedScheduleWindow,
+  foldElapsedWindowsUnderResponse,
   localCadenceFromAnchor,
   managedScheduleWindow,
   managedScheduleWindowStateAt,
@@ -13,14 +14,17 @@ import {
   resolveLocalCadenceAnchor,
 } from "@psi/managed/managedSchedule";
 import {
+  applyManagedExchangeCompromiseResponse,
   buildManagedExchangeRecord,
   composeManagedExchangeFile,
+  parseManagedExchangeRecord,
   scheduleSchema,
 } from "@psi/managed/managedExchangeRecord";
 import {
   encodeManagedExchangeArtifact,
   reconstructRecordFromArtifact,
 } from "@psi/managed/managedExchangeArtifact";
+import { repeatedMissCoordination } from "@psi/managed/managedFailureCopy";
 import { withTimeZone } from "../../utils/hostTimeZone";
 
 import type {
@@ -913,6 +917,121 @@ describe("catch-up on the import path", () => {
     expect(caught.schedule.nextWindow).toBe("2026-02-03T14:00:00.000Z");
     expect(caught.missedWindows).toBe(3);
     expect(caught.schedule.consecutiveMisses).toBe(2);
+  });
+});
+
+describe("folding the windows a compromise response held", () => {
+  const linkageTerms = getDefaultLinkageTerms("County Health Dept");
+
+  /** A record whose standing condition holds the operator's answer, given at
+   * `respondedAt`. */
+  function respondedRecord(options: {
+    schedule: ManagedExchangeSchedule;
+    lastRun?: ManagedExchangeRecord["lastRun"];
+    respondedAt?: string;
+  }): ManagedExchangeRecord {
+    const built = buildManagedExchangeRecord({
+      label: "Riverbend quarterly",
+      exchangeFile: composeManagedExchangeFile({
+        connection: { channel: "webrtc", host: "signaling.example.org" },
+        linkageTerms,
+      }),
+      side: "inviter",
+      sharedSecret: generateSharedSecret(),
+      schedule: options.schedule,
+      ...(options.lastRun !== undefined ? { lastRun: options.lastRun } : {}),
+    });
+    return applyManagedExchangeCompromiseResponse(
+      parseManagedExchangeRecord({
+        ...built,
+        standingCondition: { since: "2026-01-06T08:00:00.000Z", kind: "auth" },
+      }),
+      options.respondedAt ?? "2026-01-06T09:00:00.000Z",
+    );
+  }
+
+  test("records every window the answer held as skipped, leaving the count", () => {
+    // The runner skipped one window and stamped it; two more elapsed with
+    // nothing running, and the clear is where those two are accounted for.
+    const record = respondedRecord({
+      schedule: { ...weekly, nextWindow: "2026-01-13T14:00:00.000Z" },
+      lastRun: { at: "2026-01-06T14:30:00.000Z", outcome: "skipped" },
+    });
+
+    const folded = foldElapsedWindowsUnderResponse(
+      record,
+      at("2026-01-27T12:00:00.000Z"),
+    );
+
+    const schedule = requireSchedule(folded);
+    expect(schedule.nextWindow).toBe("2026-01-27T14:00:00.000Z");
+    expect(schedule.consecutiveMisses).toBe(0);
+    expect(folded.lastRun).toEqual({
+      at: "2026-01-20T17:00:00.000Z",
+      outcome: "skipped",
+    });
+    // The count never moved, so the next visit puts no line about checking with
+    // the partner over windows this device withheld -- which counting the same
+    // two windows as misses would have reached.
+    expect(repeatedMissCoordination(schedule)).toBeUndefined();
+    expect(
+      repeatedMissCoordination({ ...schedule, consecutiveMisses: 2 }),
+    ).toBeDefined();
+    // The fold is bookkeeping alone: the answer is still there for the clear
+    // that follows it to remove.
+    expect(folded.standingCondition).toEqual(record.standingCondition);
+  });
+
+  test("leaves a record with nothing elapsed exactly as it stands", () => {
+    const record = respondedRecord({ schedule: weekly });
+
+    expect(
+      foldElapsedWindowsUnderResponse(record, at("2026-01-06T15:00:00.000Z")),
+    ).toEqual(record);
+  });
+
+  test("folds nothing where no answer stands", () => {
+    const record = buildManagedExchangeRecord({
+      label: "Riverbend quarterly",
+      exchangeFile: composeManagedExchangeFile({
+        connection: { channel: "webrtc", host: "signaling.example.org" },
+        linkageTerms,
+      }),
+      side: "inviter",
+      sharedSecret: generateSharedSecret(),
+      schedule: { ...weekly, nextWindow: "2026-01-13T14:00:00.000Z" },
+    });
+
+    // Two windows elapsed, and they are the runner's to count as misses at its
+    // own wake: the fold is the answer's bookkeeping and nothing else's.
+    expect(
+      foldElapsedWindowsUnderResponse(record, at("2026-01-27T12:00:00.000Z")),
+    ).toEqual(record);
+  });
+
+  test("leaves the record alone where the walk cannot read the schedule", () => {
+    // The window after this one falls past the last instant a stored record
+    // holds. The operator's clear is not the act to refuse over that.
+    const record = respondedRecord({
+      schedule: {
+        ...weekly,
+        anchor: "9999-12-31T14:00:00.000Z",
+        nextWindow: "9999-12-31T14:00:00.000Z",
+      },
+      respondedAt: "9999-12-30T09:00:00.000Z",
+    });
+
+    expect(() =>
+      catchUpManagedSchedule(
+        requireSchedule(record),
+        record.lastRun,
+        at("9999-12-31T18:00:00.000Z"),
+        at("9999-12-30T09:00:00.000Z"),
+      ),
+    ).toThrow(RangeError);
+    expect(
+      foldElapsedWindowsUnderResponse(record, at("9999-12-31T18:00:00.000Z")),
+    ).toEqual(record);
   });
 });
 

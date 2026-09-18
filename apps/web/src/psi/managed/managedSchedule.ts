@@ -19,11 +19,14 @@
 import {
   MAX_SCHEDULE_INTERVAL_DAYS,
   MAX_SCHEDULE_WINDOW_SECONDS,
+  applyManagedExchangeScheduleAdvance,
   parseStoredInstant,
+  standingCompromiseResponse,
 } from "./managedExchangeRecord";
 
 import type {
   ManagedExchangeLastRun,
+  ManagedExchangeRecord,
   ManagedExchangeRunOutcome,
   ManagedExchangeSchedule,
 } from "./managedExchangeRecord";
@@ -492,6 +495,53 @@ export function catchUpManagedSchedule(
         }
       : {}),
   };
+}
+
+/**
+ * Fold the windows that elapsed under the operator's compromise response into
+ * the record's schedule, which is what a clearer applies before the answer
+ * leaves the record (docs/spec/MANAGED_EXCHANGE_RECORD.md, "The operator's
+ * response to it").
+ *
+ * It is {@link catchUpManagedSchedule} at the clearing instant, read with the
+ * response's own `at`, applied through the store's conditioned schedule write:
+ * every window the answer held is recorded `"skipped"` here, where the answer is
+ * still readable, rather than counted as a partner's miss by the wake that finds
+ * those windows elapsed with the answer gone.
+ *
+ * A record with no schedule, or one holding no response, comes back unchanged,
+ * as does one whose lattice the walk cannot read: the operator's act of clearing
+ * is not the one to refuse over schedule arithmetic, and a wake reports that as
+ * the unusable stored schedule it is.
+ *
+ * @throws {ZodError} if the folded record is invalid.
+ */
+export function foldElapsedWindowsUnderResponse(
+  record: ManagedExchangeRecord,
+  nowMs: number,
+): ManagedExchangeRecord {
+  const schedule = record.schedule;
+  const response = standingCompromiseResponse(record);
+  if (schedule === undefined || response === undefined) return record;
+  let caughtUp: ManagedScheduleCatchUp;
+  try {
+    caughtUp = catchUpManagedSchedule(
+      schedule,
+      record.lastRun,
+      nowMs,
+      parseStoredInstant(response.at),
+    );
+  } catch {
+    return record;
+  }
+  return applyManagedExchangeScheduleAdvance(record, {
+    schedule: caughtUp.schedule,
+    fromNextWindow: caughtUp.fromNextWindow,
+    fromConsecutiveMisses: caughtUp.fromConsecutiveMisses,
+    ...(caughtUp.caughtUpLastRun !== undefined
+      ? { lastRun: caughtUp.caughtUpLastRun }
+      : {}),
+  });
 }
 
 /**
