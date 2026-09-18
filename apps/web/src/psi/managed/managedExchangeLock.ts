@@ -6,10 +6,11 @@
  * It is a module of its own because BOTH sides of the mutual exclusion take it and
  * they sit on opposite sides of the store: the run's critical section
  * ({@link ./managedExchangeRun.ts}) and the secret-touching writes the record store
- * owns ({@link ./managedExchangeStore.ts}, `spendManagedExchangeIfCurrent` and
- * `persistManagedExchangeReinvite`). The run module already imports the store, so a
- * lock defined there could not be reached from the store without an import cycle. Nothing here imports anything: the lock is
- * a name and a platform call.
+ * owns ({@link ./managedExchangeStore.ts}, `spendManagedExchangeIfCurrent`,
+ * `retakeHandedOffManagedExchange`, and `persistManagedExchangeReinvite`). The run
+ * module already imports the store, so a lock defined there could not be reached
+ * from the store without an import cycle. Nothing here imports anything: the lock
+ * is a name and a platform call.
  *
  * The lock is a same-profile **liveness guard**, not a persistent claim: it is
  * auto-released when the holding tab or worker is destroyed, and it is taken WITHOUT

@@ -71,6 +71,8 @@ interface ManagedReinviteResult {
  * @throws {Error} if the record is not the inviter side.
  * @throws {ZodError} if the assembled token fails validation at encode, or the
  *   rotation is invalid.
+ * @throws {ManagedExchangeLockUnavailableError} if a run of the record holds the lock.
+ * @throws {ManagedReinviteWithheldError} if the record holds a standing compromise.
  */
 export async function reinviteManagedExchange(
   record: ManagedExchangeRecord,
