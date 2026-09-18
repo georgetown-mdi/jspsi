@@ -1573,7 +1573,9 @@ function addCandidate(out: Set<string>, candidate: string): number {
  * `site` is supplied on the partner-authored element-transform path alone: the
  * magnitude bound below is the one the agreed terms make necessary, and the
  * operator's own standardization pipeline -- its config and its data both local
- * -- runs without it (docs/notes/bound-transformed-value.md).
+ * -- runs without it (docs/notes/bound-transformed-value.md). `work` is the
+ * budget on what the partner's steps may SPEND, charged wherever this runs one
+ * of them: the probe pipelines open a meter of their own.
  *
  * @internal run by the probe pipelines in `linkageSatisfiability.ts`.
  */
@@ -1582,10 +1584,21 @@ export function applyStep(
   step: CompiledStep,
   provenance?: FanOutProvenance,
   site?: CandidateAccumulationSite,
+  work?: TransformWorkMeter,
 ): FieldValue {
   if (step.kind === "coalesce") {
     if (current === null || (current instanceof Set && current.size === 0)) {
-      return step.default ?? null;
+      const substituted = step.default ?? null;
+      // A pass-through costs nothing to charge for: `coalesce` reads whether the
+      // value is there, not what it holds, and returns the same object. Only the
+      // default it substitutes is produced work.
+      chargeTransformWork(
+        work,
+        producedCodeUnits(substituted),
+        site,
+        provenance,
+      );
+      return substituted;
     }
     return current;
   }
@@ -1604,10 +1617,17 @@ export function applyStep(
     // crosses.
     let accumulated = 0;
     for (const v of current) {
+      // The read is charged before the step runs, so a row out of budget stops
+      // here rather than after one more invocation.
+      chargeTransformWork(work, v.length, site, provenance);
       const r = step.fn(v);
+      // Noted before the produced units are charged, so a crossing decided on
+      // this invocation reads the provenance this invocation established, as
+      // the accumulating charge below does.
+      noteFanOutProducer(r, step.isListedFanOutFunction, provenance);
+      chargeTransformWork(work, producedCodeUnits(r), site, provenance);
       if (r === null) continue;
       if (r instanceof Set) {
-        noteFanOutProducer(r, step.isListedFanOutFunction, provenance);
         for (const sv of r) accumulated += addCandidate(out, sv);
       } else {
         accumulated += addCandidate(out, r);
@@ -1631,8 +1651,10 @@ export function applyStep(
     return out.size === 0 ? null : out;
   }
 
+  chargeTransformWork(work, current.length, site, provenance);
   const result = step.fn(current);
   noteFanOutProducer(result, step.isListedFanOutFunction, provenance);
+  chargeTransformWork(work, producedCodeUnits(result), site, provenance);
   return result;
 }
 
@@ -2226,6 +2248,7 @@ function applyElementTransform(
   provenance: FanOutProvenance,
   site: CandidateAccumulationSite,
   columnElementIndex: number,
+  work: TransformWorkMeter,
 ): string[] {
   // The magnitude ceiling's base case, ahead of the no-steps early return so it
   // also binds an element that declares no transform at all and passes a raw
@@ -2243,7 +2266,7 @@ function applyElementTransform(
   const compiled = compiledElementSteps(steps);
   let current: FieldValue = value;
   for (const [stepIndex, step] of compiled.entries()) {
-    current = applyStep(current, step, provenance, site);
+    current = applyStep(current, step, provenance, site, work);
     const over = valueOverCeiling(current);
     if (over !== undefined)
       throw transformStepValueTooLongRefusal(
@@ -2571,6 +2594,131 @@ class AccumulatedCandidatesDrop extends Error {
     super("a declared fan-out expansion crossed the row's key-string bound");
     this.accumulated = accumulated;
   }
+}
+
+/**
+ * The hard cap on the transform WORK one row may spend on a single key -- the
+ * work limb beside the count limb ({@link MAX_KEY_STRINGS_PER_ROW}) and the
+ * byte limb ({@link MAX_ASSEMBLED_KEY_LENGTH_PER_ROW}).
+ *
+ * Both limbs beside it charge what a row RETAINS, which is a bound on the bytes
+ * the row holds and not on the work that produced them: a step that expands its
+ * candidates toward the byte limb and a later step that collapses them onto one
+ * string leave the row holding almost nothing while the engine allocated and
+ * scanned the whole expansion, once per step and once per element, on every row
+ * of the dataset. This limb charges what the row's steps PRODUCE and READ,
+ * gross and monotone, so a collapse returns nothing to the budget.
+ *
+ * It is eight times the byte limb, so the two move together from one number.
+ * The multiple is what leaves the byte limb reachable: the measured row that
+ * limb's boundary is pinned on spends five times the byte cap retaining it,
+ * since every character it keeps was produced, read into a following step, and
+ * produced again. What an honest pipeline spends against this limb, and the
+ * residual per-row CPU the limb leaves, are measured in
+ * docs/spec/CHANNEL_SECURITY.md rather than argued here. A row over it takes the
+ * fate its key already has ({@link keyAccumulationFate}), like the byte limb.
+ */
+const MAX_TRANSFORM_WORK_PER_ROW = 8 * MAX_ASSEMBLED_KEY_LENGTH_PER_ROW;
+
+/**
+ * The transform work one (record, key) has spent so far, in UTF-16 code units.
+ *
+ * One meter per (record, key) on the exchange path, and one per grading pass on
+ * the display-time measurement, which shares the compiled pipeline
+ * (`linkageSatisfiability.ts`). Monotone: a crossing is decided on the gross
+ * total, so no collapse, dedupe or filter credits work back.
+ *
+ * @internal exported for the display-time grading pass, which opens one of its
+ * own ({@link openTransformWorkMeter}).
+ */
+export interface TransformWorkMeter {
+  spent: number;
+}
+
+/**
+ * A meter for one (record, key) or one display-time grading pass.
+ *
+ * @internal read by `linkageSatisfiability.ts`.
+ */
+export function openTransformWorkMeter(): TransformWorkMeter {
+  return { spent: 0 };
+}
+
+// The code units a step invocation produced: the value it returned, or every
+// candidate of the set it expanded into, whether or not the accumulating set
+// keeps them.
+function producedCodeUnits(result: FieldValue): number {
+  if (result === null) return 0;
+  if (typeof result === "string") return result.length;
+  return totalCandidateCharacters([...result]);
+}
+
+// The crossing raised where the budget runs out: the drop a key classified
+// `drop` takes, and the only outcome the display-time measurement has, since
+// that pass blanks the probe it was running and reports a breadth it could not
+// measure. On the exchange path it reaches {@link buildKeyStrings}, which owns
+// the row's fate for the key round; like the drop beside it, it reports no fault
+// of the terms and so is not a UsageError.
+class TransformWorkBudgetCrossed extends Error {
+  readonly spent: number;
+
+  constructor(spent: number) {
+    super("the row's transform work crossed the per-row budget");
+    this.spent = spent;
+  }
+}
+
+// The work limb's refusal. The spent total and the row index are derived
+// integers and the path locates the element the crossing landed at, so the
+// message echoes neither this party's value nor the partner's free text, like
+// the limbs beside it.
+function transformWorkBudgetRefusal(
+  site: CandidateAccumulationSite,
+  spent: number,
+): UsageError {
+  return new UsageError(
+    `a linkage key spent ${spent} code units of transform work on row ` +
+      `${site.rowIndex} of this party's data ` +
+      `(${keyElementPath(site.keyIndex, site.elementIndex)}), above the ` +
+      `${MAX_TRANSFORM_WORK_PER_ROW} one row may spend deriving one key. ` +
+      "Every step is charged what it reads and what it produces, so a step " +
+      "that expands a value and a later step that collapses the expansion " +
+      "both spend from the budget however little the row keeps, and each of " +
+      "the key's elements spends from the same total. Nothing can be " +
+      "shortened to fit: both parties must derive byte-identical keys. The " +
+      "exchange is refused instead. Remove or narrow the expanding step in " +
+      "the agreed linkage terms, or declare fewer steps on the key's " +
+      "elements.",
+  );
+}
+
+// Charge `units` to the row's budget and stop its work where the budget runs
+// out. Called at each site where a value is read or produced, so the crossing
+// lands inside the step that spent it rather than once the element finishes.
+//
+// A meter with no `site` is the display-time measurement's: that pass runs no
+// row and refuses nothing, so every crossing there is the blanked probe
+// TransformWorkBudgetCrossed stands for. On the exchange path the fate is the
+// key's own, read exactly as the byte limb reads it, so a row's outcome does not
+// turn on which limb or which site the crossing landed at.
+function chargeTransformWork(
+  work: TransformWorkMeter | undefined,
+  units: number,
+  site: CandidateAccumulationSite | undefined,
+  provenance: FanOutProvenance | undefined,
+): void {
+  if (work === undefined) return;
+  work.spent += units;
+  if (work.spent <= MAX_TRANSFORM_WORK_PER_ROW) return;
+  if (
+    site === undefined ||
+    accumulationFateAtCharge(
+      site.fate,
+      provenance?.fromUnlistedFunction === true,
+    ) === "drop"
+  )
+    throw new TransformWorkBudgetCrossed(work.spent);
+  throw transformWorkBudgetRefusal(site, work.spent);
 }
 
 /**
@@ -2930,10 +3078,72 @@ export function buildKeyStrings(
   );
 }
 
+/**
+ * The transform work one row spends deriving one key, in UTF-16 code units --
+ * the total {@link MAX_TRANSFORM_WORK_PER_ROW} bounds, read off the same row
+ * read {@link buildKeyStrings} runs. A row that crosses the budget throws
+ * instead, stating its own total in the refusal.
+ *
+ * @internal exported so what a pipeline spends is measured by the tests that
+ * pin it rather than computed from the charge rule.
+ */
+export function transformWorkSpentDerivingKey(
+  key: LinkageKey,
+  dataset: StandardizedDataset,
+  index: number,
+): number {
+  const work = openTransformWorkMeter();
+  readRowUnderPlan(
+    key,
+    planKeyRead(key, dataset, false, undefined),
+    dataset,
+    index,
+    undefined,
+    work,
+  );
+  return work.spent;
+}
+
 // The row build under a plan the caller already holds. Unexported, and the
 // entry point above takes no plan: a caller-supplied fate would be a lever for
 // reading a key this build classifies `refuse` as a `drop` instead.
+//
+// The work limb's drop is caught here rather than inside the read below, so a
+// crossing at any of the sites that charge it leaves the row by the one path a
+// dropped row leaves by.
 function buildKeyStringsUnderPlan(
+  key: LinkageKey,
+  plan: KeyReadPlan,
+  dataset: StandardizedDataset,
+  index: number,
+  keyIndex: number | undefined,
+): Set<string> | null {
+  try {
+    // One meter for the whole (record, key): what the key's elements spend
+    // accumulates across them, since the element count is a partner-authored
+    // multiplier like the step count.
+    return readRowUnderPlan(
+      key,
+      plan,
+      dataset,
+      index,
+      keyIndex,
+      openTransformWorkMeter(),
+    );
+  } catch (err) {
+    if (!(err instanceof TransformWorkBudgetCrossed)) throw err;
+    return dropRowFromKeyRound(
+      plan.drops,
+      key,
+      index,
+      `spends ${err.spent} code units of transform work on this key's ` +
+        `declared fan-out, more than the ${MAX_TRANSFORM_WORK_PER_ROW} one ` +
+        "row may spend deriving one key",
+    );
+  }
+}
+
+function readRowUnderPlan(
   key: LinkageKey,
   {
     elements,
@@ -2948,6 +3158,7 @@ function buildKeyStringsUnderPlan(
   dataset: StandardizedDataset,
   index: number,
   keyIndex: number | undefined,
+  work: TransformWorkMeter,
 ): Set<string> | null {
   const elementValues: string[][] = [];
   // Whether a fuzzy expansion this party applies actually widened the row, which
@@ -3009,12 +3220,17 @@ function buildKeyStringsUnderPlan(
     const transformed = new Set<string>();
     try {
       for (const v of raw) {
+        // The cell the element reads is the work its steps are handed, and it is
+        // the whole of an element's work where the element declares no step at
+        // all.
+        chargeTransformWork(work, v.length, site, provenance);
         const realized = applyElementTransform(
           v,
           element.transform,
           provenance,
           site,
           columnElementIndex,
+          work,
         );
         // Added one at a time, never spread into a call: a spread passes the
         // candidates as arguments, and a field realizing one candidate per value
@@ -3105,9 +3321,14 @@ function buildKeyStringsUnderPlan(
     rowCandidateCharacters -= totalCandidateCharacters(candidates);
     const expanded: string[] = [];
     for (const value of candidates) {
+      // The expansion is charged what it reads and what it produces, like a
+      // step: it replicates the element's work once per candidate the earlier
+      // producers left, which is the same multiplier a step runs under.
+      chargeTransformWork(work, value.length, site, provenance);
       for (const candidate of expandFuzzyComparisons(value, fuzzy)) {
         expanded.push(candidate);
         rowCandidateCharacters += candidate.length;
+        chargeTransformWork(work, candidate.length, site, provenance);
       }
       if (rowCandidateCharacters > MAX_ASSEMBLED_KEY_LENGTH_PER_ROW) {
         if (

@@ -3805,3 +3805,41 @@ describe("assessLinkageSatisfiability matches buildStandardizedDataset", () => {
     },
   );
 });
+
+// --- the grading pass's transform-work budget --------------------------------
+
+describe("the grading pass under the transform-work budget", () => {
+  // The measurement runs the same partner-authored steps the exchange runs,
+  // over four probe dates, so an amplifying pipeline spends here too. A pass
+  // that runs out of budget blanks the probes it was carrying, which is the
+  // can't-measure outcome an unreadable probe already has: the header still
+  // renders, and only ever with the wider breadth word.
+
+  // Each pair expands a probe to the per-value ceiling and slices the date back
+  // out of it, so the probes stay distinct -- a determinate coarsening, which is
+  // NOT the collapse word -- while the pair spends 8,208 code units per probe.
+  const amplifyingPairs = (pairs: number): TransformStep[] => [
+    {
+      function: "parse_date",
+      params: { inputFormat: "MM/DD/YYYY", outputFormat: "YYYYMMDD" },
+    },
+    ...Array.from({ length: pairs }, () => [
+      { function: "pad_left", params: { length: 4096, char: "0" } },
+      { function: "substring", params: { start: 4089, length: 8 } },
+    ]).flat(),
+  ];
+
+  test("a pass inside the budget reads the probes it carries", () => {
+    const steps = amplifyingPairs(1000);
+    expect(pipelineCollapsesParsedDateToConstant(steps)).toBe(false);
+    expect(pipelineAlwaysDrops(steps)).toBe(false);
+  });
+
+  test("a pass that runs out of budget reports the wider breadth word", () => {
+    // The same pipeline, past the budget: the probes go unread, which resolves
+    // up to the collapse word rather than throwing to the caller.
+    const steps = amplifyingPairs(1023);
+    expect(pipelineCollapsesParsedDateToConstant(steps)).toBe(true);
+    expect(pipelineAlwaysDrops(steps)).toBe(false);
+  });
+});
