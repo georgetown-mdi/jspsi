@@ -158,9 +158,10 @@ export interface ManagedScheduleTickSeams {
   /** Read one stored record afresh. The window's attempts read the operator's
    * compromise response through it before every connect, so an answer written
    * while the window is being occupied is met by the attempt after it rather
-   * than only by the next window. A read that rejects ends the tick's
-   * bookkeeping, leaving the window unaccounted: an attempt whose answer cannot
-   * be read does not connect. */
+   * than only by the next window. A read returning nothing is the record
+   * deleted, which ends the occupancy the same way. A read that rejects ends the
+   * tick's bookkeeping, leaving the window unaccounted: an attempt whose answer
+   * cannot be read does not connect. */
   readRecord: (id: string) => Promise<ManagedExchangeRecord | undefined>;
   /** Each record's local sibling state, read once per tick. Its `spent` marker
    * keeps a handed-off copy from being attempted: a migration export sets it so
@@ -192,6 +193,7 @@ type ManagedScheduleSkipReason =
   | "no-input-handle"
   | "plan-moved"
   | "window-closed"
+  | "deleted"
   | "stopped"
   | "bookkeeping-failed";
 
@@ -379,6 +381,7 @@ async function occupyDueWindow(
 
   const occupancy = await occupyWindow(claimed, handle, due, seams);
   entry.attempts = occupancy.attempts;
+  if (occupancy.recordDeleted === true) return { ...entry, skipped: "deleted" };
   if (occupancy.disposition === undefined)
     return { ...entry, skipped: seams.stopped() ? "stopped" : "window-closed" };
   entry.disposition = occupancy.disposition;
@@ -418,6 +421,10 @@ interface WindowOccupancy {
   /** The first standing condition an attempt raised, carried into the window's
    * own write; absent when none did. */
   standingCondition?: ManagedStandingCondition;
+  /** Set where an attempt found the record gone from the store. There is
+   * nothing left to write the window's bookkeeping onto, so the caller records
+   * the window nowhere rather than attempting a write that would fail. */
+  recordDeleted?: true;
 }
 
 /**
@@ -425,7 +432,10 @@ interface WindowOccupancy {
  *
  * Each attempt re-reads the stored record before it connects and ends the
  * occupancy as `"skipped"` where the operator's compromise response stands, so
- * an answer given while the window is open holds the attempts after it.
+ * an answer given while the window is open holds the attempts after it. The
+ * same read ends the occupancy where the record is no longer there at all: a
+ * deletion mid-window stops the attempts after it and leaves the window
+ * recorded nowhere, there being no record left to write it onto.
  *
  * Each attempt waits for the partner up to {@link ATTEMPT_PEER_WAIT_MS},
  * clamped to what is left of the window; a retryable failure starts another
@@ -474,10 +484,12 @@ async function occupyWindow(
     // The answer rides on a raised condition, so the window's write has no
     // evidence of its own to carry here.
     const stored = await seams.readRecord(record.id);
-    if (
-      stored !== undefined &&
-      standingCompromiseResponse(stored) !== undefined
-    )
+    // A record deleted mid-window is the same stop. A later attempt would run
+    // the snapshot the window was claimed on against a store holding no record
+    // of it -- rotating a secret it could not persist -- and the window's own
+    // write has nothing left to land on.
+    if (stored === undefined) return { attempts, recordDeleted: true };
+    if (standingCompromiseResponse(stored) !== undefined)
       return { attempts, disposition: "skipped" };
     attempts += 1;
     let dataExchangeStarted = false;

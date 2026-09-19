@@ -151,8 +151,11 @@ function harness(options: {
    * snapshot and its write. */
   concurrentEdit?: (record: ManagedExchangeRecord) => ManagedExchangeRecord;
   /** A write applied to the stored record as each attempt runs, standing in for
-   * another tab's write landing while the window is being occupied. */
-  writeDuringAttempt?: (record: ManagedExchangeRecord) => ManagedExchangeRecord;
+   * another tab's write landing while the window is being occupied. Returning
+   * `undefined` removes the record instead, as the operator's delete does. */
+  writeDuringAttempt?: (
+    record: ManagedExchangeRecord,
+  ) => ManagedExchangeRecord | undefined;
 }): Harness {
   const script = options.script ?? [];
   const stored = new Map(
@@ -209,8 +212,11 @@ function harness(options: {
       noteFirstAttempt();
       const duringAttempt = options.writeDuringAttempt;
       const held = stored.get(attempt.record.id);
-      if (duringAttempt !== undefined && held !== undefined)
-        stored.set(attempt.record.id, duringAttempt(held));
+      if (duringAttempt !== undefined && held !== undefined) {
+        const written = duringAttempt(held);
+        if (written === undefined) stored.delete(attempt.record.id);
+        else stored.set(attempt.record.id, written);
+      }
       // The last scripted step repeats; a tick that attempts anything with no
       // script at all is a test that meant to supply one.
       const step = script.at(Math.min(attempts.length - 1, script.length - 1));
@@ -1386,6 +1392,32 @@ describe("the runtime going away mid-window", () => {
     expect(entry.skipped).toBe("stopped");
     expect(runner.advances).toHaveLength(0);
     expect(runner.stored.get(record.id)?.schedule).toEqual(weekly);
+  });
+});
+
+describe("a record deleted mid-window", () => {
+  test("stops the window's remaining attempts, reporting no failed write", async () => {
+    // The delete lands while the first attempt runs. The window is three hours
+    // wide and the failure retryable, so a record left standing would be
+    // attempted again inside it.
+    const record = recordWith();
+    const runner = harness({
+      records: [record],
+      startAt: "2026-01-06T14:00:00.000Z",
+      script: [{ kind: "fail", error: new Error("the channel dropped") }],
+      writeDuringAttempt: () => undefined,
+    });
+
+    const [entry] = await tickManagedSchedules(runner.seams);
+
+    expect(entry).toMatchObject({ attempts: 1, skipped: "deleted" });
+    expect(runner.attempts).toHaveLength(1);
+    // The window is recorded nowhere: there is no record to advance, so no write
+    // is attempted and none fails.
+    expect(entry.disposition).toBeUndefined();
+    expect(entry.error).toBeUndefined();
+    expect(runner.advances).toHaveLength(0);
+    expect(runner.stored.has(record.id)).toBe(false);
   });
 });
 
