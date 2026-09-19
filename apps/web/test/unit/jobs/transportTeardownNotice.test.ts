@@ -2,7 +2,10 @@ import fs from "node:fs";
 
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { WARNING_MESSAGE_MAX_DISPLAY_LENGTH } from "@psilink/core";
+import {
+  TEARDOWN_LEFTOVER_FILES_CLAUSE,
+  WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
+} from "@psilink/core";
 
 import {
   createServerJobExchangeDriver,
@@ -112,17 +115,17 @@ const RESULT_EVENT = { v: 1, type: "result", resultWritten: true };
  * The CLI's teardown notice as it writes it on a file-channel run that deleted
  * nothing (`teardownCeilingNotice`, apps/cli/src/transportTeardown.ts), behind
  * the log line's own prefix. Its last sentence is the one the console reads: the
- * notice holds it exactly when the abandoned close may have left this party's
- * protocol files behind.
+ * notice holds {@link TEARDOWN_LEFTOVER_FILES_CLAUSE} exactly when the abandoned
+ * close may have left this party's protocol files behind.
  */
 const TEARDOWN_NOTICE_WITH_LEFTOVERS =
   "[2026-09-18T00:00:00.000Z] [ERROR] [protocol] the transport did not " +
   "finish closing within 90s, so this run stopped waiting on it; still held " +
   "by: socket. The exchange's own outcome and exit status are unchanged, and " +
   "everything it writes is already on disk. Check the exchange directory and " +
-  "remove any protocol files this run left there; deleting them is the part " +
-  "of the close that did not finish, and passing --sweep-exchange-files to " +
-  "the next run removes them before it meets the partner.\n";
+  `${TEARDOWN_LEFTOVER_FILES_CLAUSE}; deleting them is the part of the close ` +
+  "that did not finish, and passing --sweep-exchange-files to the next run " +
+  "removes them before it meets the partner.\n";
 
 /**
  * The same notice as a run with no protocol files to leave writes it -- a WebRTC
@@ -196,9 +199,7 @@ describe("the job's status states what the run reported about its close", () => 
     expect(record.status).toBe("failed");
     const terminal = record.events[record.events.length - 1].event;
     expect(terminal.type).toBe("error");
-    expect(JSON.stringify(terminal)).toContain(
-      "remove any protocol files this run left there",
-    );
+    expect(JSON.stringify(terminal)).toContain(TEARDOWN_LEFTOVER_FILES_CLAUSE);
   });
 });
 
@@ -214,16 +215,28 @@ function driverConfig(): ServerJobExchangeDriverConfig {
   };
 }
 
-/** A client whose stream is one result frame and whose post-terminal read
- * answers `final`, recording how many times it was asked. */
-function resultThenStatus(final: FinalRunStatus | Array<FinalRunStatus>) {
+/** The run's own terminal event when it failed rather than delivered. */
+const ERROR_EVENT = {
+  v: 1,
+  type: "error",
+  category: "exchange",
+  message: "the partner never arrived",
+};
+
+/** A client whose stream is one terminal frame -- `terminal`, a result by
+ * default -- and whose post-terminal read answers `final`, recording how many
+ * times it was asked. */
+function terminalThenStatus(
+  final: FinalRunStatus | Array<FinalRunStatus>,
+  terminal: unknown = RESULT_EVENT,
+) {
   const answers = Array.isArray(final) ? [...final] : [final];
   const asks: Array<string> = [];
   const client: JobApiClient = {
     createJob: () => Promise.resolve("job-1"),
     openEventStream: async function* () {
       await Promise.resolve();
-      yield { v: 1, type: "result", resultWritten: true };
+      yield terminal as RelayEvent;
     },
     cancelJob: () => Promise.resolve(),
     deleteJob: () => Promise.resolve(),
@@ -250,7 +263,7 @@ function finalStatus(overrides: Partial<FinalRunStatus> = {}): FinalRunStatus {
 
 describe("the console reads that report off the job's status", () => {
   test("a final status holding the report puts the notice in run state", async () => {
-    const { client } = resultThenStatus(
+    const { client } = terminalThenStatus(
       finalStatus({ transportTeardownOverran: true }),
     );
     const warnings: Array<string> = [];
@@ -282,7 +295,7 @@ describe("the console reads that report off the job's status", () => {
   });
 
   test("a final status without the report raises no notice", async () => {
-    const { client, asks } = resultThenStatus(finalStatus());
+    const { client, asks } = terminalThenStatus(finalStatus());
     const warnings: Array<string> = [];
 
     await createServerJobExchangeDriver(driverConfig(), client).run({
@@ -299,11 +312,57 @@ describe("the console reads that report off the job's status", () => {
     expect(asks).toEqual(["job-1"]);
   });
 
+  test("a run that failed is told about the files its close left too", async () => {
+    // The close is abandoned whichever way the run ended, and the files it
+    // would have removed outlive the failure, so the notice follows the failure
+    // alert rather than being held back by it.
+    const { client } = terminalThenStatus(
+      finalStatus({ transportTeardownOverran: true }),
+      ERROR_EVENT,
+    );
+    const sequence: Array<string> = [];
+    const warnings: Array<string> = [];
+
+    await createServerJobExchangeDriver(driverConfig(), client).run({
+      signal: new AbortController().signal,
+      onStages: () => undefined,
+      onStage: () => undefined,
+      onResult: () => undefined,
+      onError: () => sequence.push("error"),
+      onWarning: (message) => {
+        sequence.push("warning");
+        warnings.push(message);
+      },
+    });
+
+    expect(sequence).toEqual(["error", "warning"]);
+    expect(warnings[0]).toContain("protocol files");
+  });
+
+  test("a run that failed and reported no overrun is told nothing extra", async () => {
+    const { client, asks } = terminalThenStatus(finalStatus(), ERROR_EVENT);
+    const warnings: Array<string> = [];
+    const errors: Array<unknown> = [];
+
+    await createServerJobExchangeDriver(driverConfig(), client).run({
+      signal: new AbortController().signal,
+      onStages: () => undefined,
+      onStage: () => undefined,
+      onResult: () => undefined,
+      onError: (failure) => errors.push(failure),
+      onWarning: (message) => warnings.push(message),
+    });
+
+    expect(errors).toHaveLength(1);
+    expect(warnings).toEqual([]);
+    expect(asks).toEqual(["job-1"]);
+  });
+
   test("a read that landed before the exit is asked again", async () => {
     // The CLI reports its outcome before it closes the transport, so the read
     // that follows the result frame usually finds the child still closing: the
     // report exists only once the console has reconciled its exit.
-    const { client, asks } = resultThenStatus([
+    const { client, asks } = terminalThenStatus([
       finalStatus({ exitReconciled: false }),
       finalStatus({ exitReconciled: false }),
       finalStatus({ transportTeardownOverran: true }),
@@ -326,7 +385,7 @@ describe("the console reads that report off the job's status", () => {
 
   test("an abort while waiting stops the asks and says nothing", async () => {
     const controller = new AbortController();
-    const { client, asks } = resultThenStatus(
+    const { client, asks } = terminalThenStatus(
       finalStatus({ exitReconciled: false }),
     );
     const warnings: Array<string> = [];
@@ -349,7 +408,7 @@ describe("the console reads that report off the job's status", () => {
 
   test("a child that never settles is given up on, not asked forever", async () => {
     vi.useFakeTimers();
-    const { client, asks } = resultThenStatus(
+    const { client, asks } = terminalThenStatus(
       finalStatus({ exitReconciled: false }),
     );
     const warnings: Array<string> = [];
@@ -374,7 +433,7 @@ describe("the console reads that report off the job's status", () => {
   });
 
   test("a run with no warning sink asks nothing at all", async () => {
-    const { client, asks } = resultThenStatus(
+    const { client, asks } = terminalThenStatus(
       finalStatus({ transportTeardownOverran: true, exitReconciled: false }),
     );
 

@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 
 import {
+  TEARDOWN_LEFTOVER_FILES_CLAUSE,
   WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
   createPrivateKeyStreamRedactor,
   parseBoundedJson,
@@ -225,26 +226,6 @@ export function resolveCliBinaryPath(
  * the manager composes what it shows.
  */
 const STDERR_TAIL_CAP = 8192;
-
-/**
- * The clause the CLI's transport-teardown notice holds exactly when that
- * teardown may have left this party's protocol files in the shared exchange
- * directory (`teardownCeilingNotice` in apps/cli/src/transportTeardown.ts).
- *
- * The clause rather than the notice's opening, so the console inherits the
- * CLI's own classification of what the abandoned close left rather than
- * re-deriving it: a WebRTC run has no protocol files and a retain-mode run
- * keeps its own as a transcript, and the notice states the clause for neither.
- *
- * Mirrored here rather than imported -- the CLI is a separate workspace this
- * server drives as a subprocess, as the fd-3 vocabulary above is. Each side
- * pins the clause against its own suite: `apps/cli/test/unit/transportTeardown.test.ts`
- * that the notice states it, and
- * `apps/web/test/unit/jobs/transportTeardownNotice.test.ts` that this read
- * finds it in a tail holding the notice as the CLI writes it.
- */
-const TEARDOWN_LEFTOVER_FILES_CLAUSE =
-  "remove any protocol files this run left there";
 
 /**
  * The maximum length buffered on the fd-3 line reader, in UTF-16 code units,

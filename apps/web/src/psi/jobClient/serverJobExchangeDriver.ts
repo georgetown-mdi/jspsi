@@ -1425,12 +1425,23 @@ async function consumeJobStream(
           );
           return;
         }
-        case "error":
+        case "error": {
           onError({
             category: errorCategoryOf(event),
             error: relayedTerminalErrorOf(event),
           });
+          // A failed run's abandoned close leaves the same files behind, and
+          // its report arrives on the same delay, so the notice follows the
+          // failure alert as it follows a result.
+          await raiseTeardownLeftoverFilesNotice(
+            client,
+            jobId,
+            undefined,
+            signal,
+            onWarning,
+          );
           return;
+        }
         default:
           // `stageEnd` and `metrics` are recognized progress/summary events
           // (in RELAY_EVENT_TYPES so the relay does not degrade them) that the
@@ -1513,22 +1524,27 @@ function realDelay(ms: number): Promise<void> {
 
 /**
  * Tell the operator about protocol files the run's transport close may have
- * left, waiting for the console to reconcile the child's exit when the
- * post-terminal read landed ahead of it.
+ * left, waiting for the console to reconcile the child's exit when the read it
+ * is told from landed ahead of it.
  *
- * It runs after `onResult`, which is where a notice raised during teardown
- * belongs (the in-browser lifecycle raises its own close notice there too, see
- * `runExchangeLifecycle`): the CLI reports its outcome before it closes the
- * transport, so the report this reads does not exist when the result arrives. A
- * run with no warning sink asks nothing at all, and an abort -- the operator
- * leaving the surface -- stops the asks silently.
+ * It runs after the run's own terminal delivery -- `onResult` or `onError` --
+ * which is where a notice raised during teardown belongs (the in-browser
+ * lifecycle raises its own close notice there too, see `runExchangeLifecycle`):
+ * the CLI reports its outcome before it closes the transport, so the report
+ * this reads does not exist when the terminal arrives. A run with no warning
+ * sink asks nothing at all, and an abort -- the operator leaving the surface --
+ * stops the asks silently.
+ *
+ * `final` is the post-terminal read the caller has already made; a caller with
+ * none -- the failure path, which reads the status body for nothing else --
+ * passes undefined and the first read happens here.
  *
  * @internal exported for the unit test, which drives the wait with its own delay.
  */
 export async function raiseTeardownLeftoverFilesNotice(
   client: JobApiClient,
   jobId: string,
-  final: FinalRunStatus,
+  final: FinalRunStatus | undefined,
   signal: AbortSignal,
   onWarning: ((message: string) => void) | undefined,
   delay: (ms: number) => Promise<void> = realDelay,
@@ -1537,7 +1553,8 @@ export async function raiseTeardownLeftoverFilesNotice(
   // Read the live abort state through a call so the re-checks across each await
   // are not narrowed to a constant by the first guard (the drivers' idiom).
   const aborted = () => signal.aborted;
-  let status = final;
+  let status = final ?? (await queryFinalRunStatus(client, jobId, signal));
+  if (aborted()) return;
   const deadline = Date.now() + TEARDOWN_REPORT_WAIT_BUDGET_MS;
   while (!status.transportTeardownOverran && !status.exitReconciled) {
     if (Date.now() >= deadline) return;
