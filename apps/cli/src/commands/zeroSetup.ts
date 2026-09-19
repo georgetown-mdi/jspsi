@@ -773,6 +773,7 @@ export async function handler(argv: Arguments): Promise<void> {
                 keyFile: options.keyFile,
                 log,
               });
+              return { persisted: true };
             } catch (err) {
               // The exchange already succeeded and wrote its output, so a failure
               // here cannot undo the linkage -- what is lost is the recurring-
@@ -790,6 +791,7 @@ export async function handler(argv: Arguments): Promise<void> {
               });
               log.error(`${notice}: ${sanitizeErrorForDisplay(err)}`);
               reportPersistenceLoss(notice, eventStreamEmitter);
+              return { persisted: false };
             }
           },
         },

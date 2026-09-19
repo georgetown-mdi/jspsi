@@ -2611,6 +2611,82 @@ test("runOnlineBootstrap reports a lost observed-payload write on fd 3 and in th
   }
 });
 
+/** runProtocol's post-output hook as it is declared, result type included. The
+ *  `runtimeOptionsArg` accessor above widens that result away to void, so a
+ *  case that reads what the hook reported cannot be built on it. */
+type OutputCompleteHook = NonNullable<
+  NonNullable<RunProtocolOptions["fileSyncRuntime"]>["onOutputComplete"]
+>;
+
+/** Drive a successful exchange the way `mockSuccessfulExchange` above does,
+ *  KEEPING what the post-output hook reported: that stub awaits the hook and
+ *  discards its result, so nothing built on it can see the difference between a
+ *  write that reached disk and one the hook caught the loss of. The returned
+ *  array holds one entry per hook call the driven run made. */
+function captureOutputCompleteResults(
+  observed: string[],
+  betweenStages?: () => void,
+): Awaited<ReturnType<OutputCompleteHook>>[] {
+  const reported: Awaited<ReturnType<OutputCompleteHook>>[] = [];
+  vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
+    await onAuthenticatedArg(callArgs)();
+    betweenStages?.();
+    const hook = optionsArg(callArgs).fileSyncRuntime?.onOutputComplete;
+    expect(hook).toBeTypeOf("function");
+    reported.push(
+      await (hook as OutputCompleteHook)({
+        observedReceivedPayloadColumns: observed,
+      }),
+    );
+    return { observedReceivedPayloadColumns: observed };
+  }) as never);
+  return reported;
+}
+
+test("runOnlineBootstrap's post-output hook reports the write it lost", async () => {
+  // The same lost second write as the two cases above, read where runProtocol
+  // reads it. The catch warns, reports the persistence loss and returns
+  // normally, so the result is the only thing that tells the output stage the
+  // write did not land -- and the stage lowers its every-artifact-on-disk flag
+  // off nothing else, which is what the overrun notice tells the operator.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+  const configPath = path.join(dir, "psilink.yaml");
+  const reported = captureOutputCompleteResults(["dob", "zip"], () => {
+    fs.rmSync(configPath); // swap the acceptance hook's file for a directory
+    fs.mkdirSync(configPath); // so the second saveConfig's rename throws (EISDIR)
+  });
+  try {
+    await runOnlineBootstrap({
+      ...onlineBootstrapParams(configPath),
+      persistObservedReceivedPayload: true,
+    });
+    expect(reported).toEqual([{ persisted: false }]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runOnlineBootstrap's post-output hook reports the write that landed", async () => {
+  // The other half of the pair: the same opted-in run with nothing in the way
+  // of the write reports a complete persistence, and the config on disk holds
+  // the commitment that report is about -- so `persisted: true` is the answer
+  // to a write that happened rather than a constant.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+  const configPath = path.join(dir, "psilink.yaml");
+  const reported = captureOutputCompleteResults(["dob", "zip"]);
+  try {
+    await runOnlineBootstrap({
+      ...onlineBootstrapParams(configPath),
+      persistObservedReceivedPayload: true,
+    });
+    expect(reported).toEqual([{ persisted: true }]);
+    const written = YAML.parse(fs.readFileSync(configPath, "utf8"));
+    expect(written.expected_payload_columns).toEqual(["dob", "zip"]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("runOnlineBootstrap hands runProtocol the emitter it opened itself, not the flag", async () => {
   // The other side of the fusion the warning above depends on: this bootstrap
   // opens the stream because it reports persistence it loses from outside

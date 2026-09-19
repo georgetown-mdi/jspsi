@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -30,6 +31,10 @@ const mockState = vi.hoisted(() => ({
   // The key-file path whose post-handshake save must fail, for the case that
   // drives the refusal naming it. Every other save runs for real.
   unwritableKeyFilePath: undefined as string | undefined,
+  // Whether the transport close reports the ceiling as reached, for the case
+  // that reads the notice a run states about its own files. Every other test
+  // gets the real close and its real outcome.
+  expireTeardown: false,
 }));
 
 // Keep FileSyncConnection and authenticateConnection real so the key exchange runs over a
@@ -168,6 +173,28 @@ vi.mock("../../src/keyFile", async (importActual) => {
       if (keyFilePath === mockState.unwritableKeyFilePath)
         throw new Error("EACCES: permission denied");
       actual.saveKeyFile(keyFilePath, file);
+    },
+  };
+});
+
+// The close's own outcome, real unless a test asks for the ceiling. An expiry
+// is injected rather than provoked: the real close still runs, so the poller
+// stops and the drop directory is left as any other run leaves it, and what
+// `closeWithinCeiling` does with a close that never returns is
+// test/unit/transportTeardown.test.ts.
+vi.mock("../../src/transportTeardown", async (importActual) => {
+  const actual =
+    await importActual<typeof import("../../src/transportTeardown")>();
+  return {
+    ...actual,
+    closeWithinCeiling: async (
+      ceilingMs: number,
+      close: () => Promise<void>,
+    ) => {
+      if (!mockState.expireTeardown)
+        return actual.closeWithinCeiling(ceilingMs, close);
+      await close();
+      return { finished: false, elapsedMs: 180_000, heldBy: ["TCPSocketWrap"] };
     },
   };
 });
@@ -418,6 +445,7 @@ beforeEach(() => {
   mockState.runExchangeEntries = 0;
   mockState.lastSftpAdapterOptions = undefined;
   mockState.unwritableKeyFilePath = undefined;
+  mockState.expireTeardown = false;
   fs.mkdirSync(dropDir);
 
   fd3Chunks = [];
@@ -5253,6 +5281,199 @@ test("a close that throws on a completed run still emits the terminal result eve
   expect(process.exitCode).toBeUndefined();
 }, 20_000);
 
+// Which run a callback belongs to, for the close hook below. A two-party case
+// closes two connections in one process while only one of the parties writes to
+// fd 3, and the async context is what tells them apart: every continuation of a
+// party's runProtocol call, its teardown close included, carries the store the
+// call was entered with.
+const closeWatchParty = new AsyncLocalStorage<string>();
+
+/**
+ * Capture what fd 3 held when `party`'s own transport close began, reading it
+ * back as the event types written to that point. The party's run is entered
+ * through `closeWatchParty.run(party, ...)`; another party's close in the same
+ * case is left alone.
+ */
+function snapshotStreamAtClose(party: string): {
+  eventTypesAtClose: () => string[];
+  restore: () => void;
+} {
+  const realClose = FileSyncConnection.prototype.close;
+  let streamAtClose: string | undefined;
+  FileSyncConnection.prototype.close = function (
+    this: FileSyncConnection,
+  ): Promise<void> {
+    if (closeWatchParty.getStore() === party)
+      streamAtClose ??= Buffer.concat(fd3Chunks).toString("utf8");
+    return realClose.call(this);
+  };
+  return {
+    eventTypesAtClose: () =>
+      (streamAtClose ?? "")
+        .split("\n")
+        .filter((line) => line.length > 0)
+        .map((line) => (JSON.parse(line) as { type: string }).type),
+    restore: () => {
+      FileSyncConnection.prototype.close = realClose;
+    },
+  };
+}
+
+test("the terminal event is on the stream before the transport close begins", async () => {
+  // The ordering the stream's terminal-event guarantee rests on: the outcome
+  // reaches a consumer without waiting on a close that has a ceiling of its
+  // own, and everything the close then reports goes to the operator log alone
+  // (docs/spec/CLI_EVENTS.md, Terminal-event guarantees). One party waits for a
+  // partner who never arrives, so one connection is closed and the snapshot
+  // below is that close's own.
+  const watched = snapshotStreamAtClose("lone");
+  mockFd3Open();
+  try {
+    await closeWatchParty.run("lone", () =>
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: {
+            pollIntervalMs: 1,
+            peerTimeoutMs: LONE_PARTY_PEER_BUDGET_MS,
+          },
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        output: undefined,
+        verbosity: -1,
+        loggerName: "test",
+        fileSyncRuntime: { eventStream: true },
+      }).catch(() => undefined),
+    );
+  } finally {
+    watched.restore();
+    vi.mocked(fs.fstatSync).mockRestore();
+  }
+
+  const typesAtClose = watched.eventTypesAtClose();
+  expect(typesAtClose[typesAtClose.length - 1]).toBe("error");
+  expect(typesAtClose[typesAtClose.length - 2]).toBe("metrics");
+  // The close added nothing to what the outcome already said.
+  expect(takeFd3Lines().map((line) => line.type)).toEqual(typesAtClose);
+}, 20_000);
+
+test("a completed exchange states its result before its own close begins", async () => {
+  // The same ordering on the path that has an outcome to state: two parties
+  // complete the exchange, and the metrics and result of the party reading fd 3
+  // are already on the stream when its close starts -- the close that on this
+  // channel deletes its protocol files and can run to the teardown ceiling
+  // (docs/spec/CLI_EVENTS.md, Terminal-event guarantees).
+  const watched = snapshotStreamAtClose("a");
+  mockFd3Open();
+  try {
+    await Promise.all([
+      closeWatchParty.run("a", () =>
+        runProtocol({
+          connection: {
+            channel: "filedrop",
+            path: dropDir,
+            options: TWO_PARTY_OPTIONS,
+          },
+          auth: null,
+          prepared: minimalPrepared,
+          output: path.join(tmpDir, "close-after-result.csv"),
+          verbosity: -1,
+          loggerName: "test-a",
+          fileSyncRuntime: { eventStream: true },
+        }),
+      ),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        output: path.join(tmpDir, "close-after-result-b.csv"),
+        verbosity: -1,
+        loggerName: "test-b",
+      }),
+    ]);
+  } finally {
+    watched.restore();
+    vi.mocked(fs.fstatSync).mockRestore();
+  }
+
+  const typesAtClose = watched.eventTypesAtClose();
+  expect(typesAtClose.slice(-2)).toEqual(["metrics", "result"]);
+  // The close added nothing to what the outcome already said.
+  expect(takeFd3Lines().map((line) => line.type)).toEqual(typesAtClose);
+}, 20_000);
+
+test("a failure after the handshake states its error before the close begins", async () => {
+  // The failure path's own ordering, on the fault that has a handshake behind
+  // it: both parties rotate their token and then fail in the exchange, so this
+  // party reaches teardown holding a session, an armed abort marker and files
+  // of its own in the directory -- and its error is on the stream before any of
+  // that is closed (docs/spec/CLI_EVENTS.md, Terminal-event guarantees).
+  const keyFileA = path.join(tmpDir, "a.key");
+  const keyFileB = path.join(tmpDir, "b.key");
+  saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
+  saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
+  async function waitForRotationThenThrow(): Promise<never> {
+    await waitForBothKeysRotated(keyFileA, keyFileB);
+    throw new Error("simulated transport error after token rotation");
+  }
+  vi.mocked(runExchange)
+    .mockImplementationOnce(waitForRotationThenThrow)
+    .mockImplementationOnce(waitForRotationThenThrow);
+
+  const watched = snapshotStreamAtClose("a");
+  mockFd3Open();
+  try {
+    const settled = await Promise.allSettled([
+      closeWatchParty.run("a", () =>
+        runProtocol({
+          connection: {
+            channel: "filedrop",
+            path: dropDir,
+            options: TWO_PARTY_OPTIONS,
+          },
+          auth: { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
+          prepared: minimalPrepared,
+          output: undefined,
+          verbosity: -1,
+          loggerName: "test-a",
+          fileSyncRuntime: { eventStream: true },
+        }),
+      ),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
+        prepared: minimalPrepared,
+        output: undefined,
+        verbosity: -1,
+        loggerName: "test-b",
+      }),
+    ]);
+    expect(settled.map((outcome) => outcome.status)).toEqual([
+      "rejected",
+      "rejected",
+    ]);
+  } finally {
+    watched.restore();
+    vi.mocked(fs.fstatSync).mockRestore();
+  }
+
+  const typesAtClose = watched.eventTypesAtClose();
+  expect(typesAtClose[typesAtClose.length - 1]).toBe("error");
+  expect(typesAtClose[typesAtClose.length - 2]).toBe("metrics");
+  // The close added nothing to what the outcome already said.
+  expect(takeFd3Lines().map((line) => line.type)).toEqual(typesAtClose);
+}, 20_000);
+
 test("a count-only run's terminal event includes the count beside resultWritten:false", async () => {
   // The outcome a supervisor reading only fd 3 would otherwise misreport: a
   // count-only run writes no result file, so its terminal event has the same
@@ -5499,7 +5720,7 @@ function mockExchangeObserving(columns: string[]): void {
   }) as never);
 }
 
-test("a loss reported from the pre-terminal hook precedes the metrics and terminal events", async () => {
+test("a loss reported from the pre-terminal hook precedes the terminal events and drops the on-disk claim", async () => {
   // The ordering the whole hook exists for, measured on the REAL stream. The
   // online bootstrap's last write -- crystallizing the observed
   // received-payload set -- can fail, and the warning naming that loss is
@@ -5508,6 +5729,11 @@ test("a loss reported from the pre-terminal hook precedes the metrics and termin
   // it (apps/web's job manager drops post-terminal events outright). Driven
   // as the bootstrap drives it: the caller opens the stream and hands
   // runProtocol the emitter.
+  //
+  // The hook catches its own failure, as both real hooks do, so the run learns
+  // of the loss from what the hook reports back and from nothing else: the
+  // teardown notice each party states below is where that shows.
+  mockState.expireTeardown = true;
   mockExchangeObserving(OBSERVED_PARTNER_COLUMNS);
   const emitter = openEventStreamWithFdWired();
   let seen: string[] | undefined;
@@ -5529,6 +5755,7 @@ test("a loss reported from the pre-terminal hook precedes the metrics and termin
           onOutputComplete: ({ observedReceivedPayloadColumns }) => {
             seen = observedReceivedPayloadColumns;
             reportPersistenceLoss("the lock-in was not recorded", emitter);
+            return { persisted: false };
           },
         },
       }),
@@ -5558,6 +5785,20 @@ test("a loss reported from the pre-terminal hook precedes the metrics and termin
     "metrics",
     "result",
   ]);
+
+  // What each party's abandoned close then tells its operator about the files
+  // on disk. The party whose hook lost its write claims nothing; its partner,
+  // which lost nothing, still claims everything -- and that difference is what
+  // tells the two notices apart, both runs sharing this process and this log.
+  const notices = mockState.errors.filter((line) =>
+    line.includes("the transport did not finish closing"),
+  );
+  expect(notices).toHaveLength(2);
+  expect(
+    notices.filter((line) =>
+      line.includes("everything it writes is already on disk"),
+    ),
+  ).toHaveLength(1);
 }, 20_000);
 
 test("a throw from the pre-terminal hook does not fail the completed exchange", async () => {

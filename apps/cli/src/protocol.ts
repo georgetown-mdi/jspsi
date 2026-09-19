@@ -415,8 +415,27 @@ export interface FileSyncRuntimeOptions {
    * a local write, so it is logged at error level and reported as a
    * persistence loss on both machine channels rather than shown as a clean
    * success.
+   *
+   * The hook states what became of its own writes on
+   * {@link OutputCompleteResult}. A hook that catches its own failure and
+   * reports it returns `persisted: false`, which is the only way that loss
+   * reaches what the run afterwards tells the operator about its files: a
+   * caught failure throws nothing for this frame to see.
    */
-  onOutputComplete?: (context: OutputCompleteContext) => void | Promise<void>;
+  onOutputComplete?: (
+    context: OutputCompleteContext,
+  ) => OutputCompleteResult | Promise<OutputCompleteResult>;
+}
+
+/** What a {@link FileSyncRuntimeOptions.onOutputComplete} hook reports back. */
+export interface OutputCompleteResult {
+  /**
+   * Whether everything this hook owed disk reached it. A hook with nothing to
+   * write for this run returns true; one that caught a write failure and
+   * reported it as a persistence loss returns false, so the run no longer
+   * claims every file it writes is on disk (`teardownCeilingNotice`).
+   */
+  persisted: boolean;
 }
 
 /** What {@link FileSyncRuntimeOptions.onOutputComplete} is handed. */
@@ -1198,6 +1217,15 @@ interface RunLifecycle {
    */
   exchangeComplete: boolean;
   /**
+   * Set once the output stage returned with every local artifact a run owes --
+   * the result file, the exchange record, the receipt, and whatever the
+   * caller's own post-exchange step writes -- on disk. A run that entered the
+   * stage and failed inside it, and one that lost an artifact non-fatally,
+   * each wrote some or none of them, so nothing told to the operator about
+   * what is on disk keys on the stage being reached.
+   */
+  outputsWritten: boolean;
+  /**
    * Set synchronously at the top of a signal handler, before any await, so an
    * in-flight failure caused by signal-driven cleanup is told apart from an
    * organic one and the exit code is left to the handler.
@@ -1612,6 +1640,12 @@ type ExchangeOutcome = Awaited<ReturnType<typeof runExchange>>;
  * write that failed: the exchange disclosed, and what it disclosed is owed its
  * record whether or not this party got to keep the result
  * (docs/notes/record-durability-point.md).
+ *
+ * Returns whether every artifact it owed reached disk: false once any of the
+ * non-fatal losses above has been reported, the caller's own persistence
+ * included -- whether that step threw or caught its failure and reported
+ * `persisted: false` -- so what the run tells the operator afterwards about
+ * its files keys on the artifacts rather than on this stage returning.
  */
 async function writeExchangeOutputs(params: {
   outcome: ExchangeOutcome;
@@ -1623,7 +1657,7 @@ async function writeExchangeOutputs(params: {
   log: ReturnType<typeof getLogger>;
   eventStream: EventStreamEmitter | undefined;
   onOutputComplete: FileSyncRuntimeOptions["onOutputComplete"];
-}): Promise<void> {
+}): Promise<boolean> {
   const {
     outcome,
     prepared,
@@ -1804,6 +1838,8 @@ async function writeExchangeOutputs(params: {
   for (const missing of missingArtifacts)
     reportPersistenceLoss(missing, eventStream);
 
+  let everyArtifactOnDisk = missingArtifacts.length === 0;
+
   // The result went nowhere, so the run fails on it and the caller's own
   // persistence below does not run: it writes configuration for a run whose
   // operator never received the result.
@@ -1815,10 +1851,11 @@ async function writeExchangeOutputs(params: {
   // supervisor that stops reading at the terminal event can observe.
   if (onOutputComplete !== undefined) {
     try {
-      await onOutputComplete({
+      const hookOutcome = await onOutputComplete({
         observedReceivedPayloadColumns: partnerPayload.columns,
         bootstrap,
       });
+      if (!hookOutcome.persisted) everyArtifactOnDisk = false;
     } catch (hookErr) {
       // The hook reports its own losses; reaching here means one escaped it.
       // The exchange is already complete and cannot be undone by a local
@@ -1835,8 +1872,11 @@ async function writeExchangeOutputs(params: {
           "logged beside this notice names the step",
         eventStream,
       );
+      everyArtifactOnDisk = false;
     }
   }
+
+  return everyArtifactOnDisk;
 }
 
 /**
@@ -2075,6 +2115,7 @@ export async function runProtocol(
     authStarted: false,
     tokenRotated: false,
     exchangeComplete: false,
+    outputsWritten: false,
     signalReceived: undefined,
     onAuthenticatedError: undefined,
   };
@@ -2102,25 +2143,23 @@ export async function runProtocol(
         log,
         ceilingMs: transportTeardownCeilingMs(connection.channel),
       });
-      // The one bounded obligation reached its bound. Reported on both machine
-      // channels the run has -- the operator log and the event stream -- and
-      // before the terminal event, which is why cleanup runs ahead of the
-      // emission sites rather than in the finally alone. It changes no exit
-      // code: the teardown is housekeeping, and a supervisor that saw the
-      // status move would retry a run that already disclosed.
-      if (!teardown.finished) {
-        const notice = teardownCeilingNotice(teardown, {
-          channel: connection.channel,
-          retainFiles:
-            connection.channel !== "webrtc" &&
-            connection.options?.retainFiles === true,
-          // The output stage opens where this flag is set, so a run holding it
-          // has written its local artifacts or failed somewhere inside them.
-          reachedOutputStage: run.exchangeComplete,
-        });
-        log.warn(notice);
-        emit((e) => e.warning("transportTeardown", notice));
-      }
+      // The one bounded obligation reached its bound. Cleanup runs after the
+      // terminal event, so this goes to the operator log alone -- at error
+      // level, the one level an unattended run is certain to keep -- and never
+      // to the machine-interface stream, which a consumer may stop reading at
+      // the terminal event. It changes no exit code: the teardown is
+      // housekeeping, and a supervisor that saw the status move would retry a
+      // run that already disclosed.
+      if (!teardown.finished)
+        log.error(
+          teardownCeilingNotice(teardown, {
+            channel: connection.channel,
+            retainFiles:
+              connection.channel !== "webrtc" &&
+              connection.options?.retainFiles === true,
+            outputsWritten: run.outputsWritten,
+          }),
+        );
       logTransportCounters(build.client, log);
     } finally {
       process.off("SIGINT", onSigint);
@@ -2329,7 +2368,7 @@ export async function runProtocol(
       matching,
       resolvedRole,
     } = outcome;
-    await writeExchangeOutputs({
+    run.outputsWritten = await writeExchangeOutputs({
       outcome,
       prepared,
       output,
@@ -2359,22 +2398,11 @@ export async function runProtocol(
     // same footing.
     // The metrics summary precedes it so the terminal event stays last.
     //
-    // Cleanup is awaited first, so the terminal event states a run that owes
-    // nothing further: every local artifact is on disk above, and the
-    // transport is closed or has reached its ceiling and said so on this
-    // stream. The finally below re-enters doCleanup and returns at its guard.
-    // A close that throws past its own per-layer catch is logged at debug, as
-    // the failure path below does with it: the run's result, record and
-    // receipt are on disk, so a teardown fault must not turn a completed run
-    // into a terminal error event.
-    try {
-      await doCleanup();
-    } catch (cleanupErr: unknown) {
-      log.debug(
-        "cleanup threw after the run completed:",
-        sanitizeErrorForDisplay(cleanupErr),
-      );
-    }
+    // Both are emitted before cleanup: every local artifact the run owes was
+    // written above, or its loss reported there, so the outcome is decided,
+    // and a consumer of this stream learns it without waiting on a close that
+    // may run to its ceiling. The transport is torn down after, and what that
+    // costs goes to the operator log alone.
     emitMetrics();
     emit((e) =>
       e.result(
@@ -2392,6 +2420,19 @@ export async function runProtocol(
         entityClusters,
       ),
     );
+    // A close that throws past its own per-layer catch is logged at debug, as
+    // the failure path below does with it: the run's result, record and
+    // receipt are on disk and its outcome is already on the stream, so a
+    // teardown fault must not become the run's own. The finally below
+    // re-enters doCleanup and returns at its guard.
+    try {
+      await doCleanup();
+    } catch (cleanupErr: unknown) {
+      log.debug(
+        "cleanup threw after the run completed:",
+        sanitizeErrorForDisplay(cleanupErr),
+      );
+    }
     return { onAuthenticatedError: run.onAuthenticatedError };
   } catch (err) {
     // tokenRotated=true means this party's saveKeyFile succeeded; the
@@ -2652,12 +2693,14 @@ export async function runProtocol(
     // The metrics summary (with whatever counts the run accrued before the fault)
     // precedes it so the terminal event stays last on the stream.
     //
-    // Cleanup is awaited first, as on the success path above and after the
-    // abort marker this catch may have written, so a teardown that reaches
-    // its ceiling states that on the stream before the outcome does. A close
+    // Both are emitted before cleanup, as on the success path above and after
+    // the abort marker this catch may have written, so the fault reaches a
+    // consumer without waiting on a close that may run to its ceiling. A close
     // that throws past its own per-layer catch is logged at debug, as the
     // interrupt paths do, rather than propagating: it must not displace the
-    // original fault nor skip the terminal event this path owes.
+    // original fault.
+    emitMetrics();
+    emit((e) => e.error(err, terminalPhase));
     try {
       await doCleanup();
     } catch (cleanupErr: unknown) {
@@ -2666,8 +2709,6 @@ export async function runProtocol(
         sanitizeErrorForDisplay(cleanupErr),
       );
     }
-    emitMetrics();
-    emit((e) => e.error(err, terminalPhase));
     // The error is rethrown holding whatever exit code its own thrower
     // gave it, and nothing is stamped here: only the result-file write
     // above is the local write loss 73 names, while the rest of the
