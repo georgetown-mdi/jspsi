@@ -25,6 +25,7 @@ import {
   discardServerJob,
   writeAttachment,
 } from "@psi/jobClient/consoleJobAttachment";
+import { CSV_DELIMITER_SINGLE_COLUMN_REMEDY } from "@components/csvDelimiterChoice";
 import { HANDSHAKE_ROLE_FOR_SIDE } from "@psi/handshakeRole";
 import { SIGNING_IDENTITY_IN_RENDEZVOUS_REFUSAL } from "@jobs/jobCreateRefusal";
 import { consoleJobColumnRefusalAlert } from "@psi/columnNames";
@@ -131,6 +132,7 @@ export function failureFor(
   channel?: Transport,
   seat: ExchangeSeat = "inviter",
   identityLocationPicked = false,
+  singleColumnInput = false,
 ): RunFailure {
   // The console already holds an exchange (its single slot is occupied), so the
   // create was rejected 409 -- the driver categorizes it retryable `exchange`. The
@@ -269,6 +271,11 @@ export function failureFor(
     // verdict on the columns step, not from this alert. Classified `config`, so
     // the alert offers start-over rather than a retry -- the same file refuses
     // identically however many times it runs.
+    //
+    // A file whose whole header read as one column takes the delimiter remedy
+    // too: that reading holds every field in one column, and its remedy is the
+    // delimiter this party chose rather than the terms the rest of this copy
+    // names.
     return {
       category: "config",
       title: "This file cannot supply the linkage keys you agreed to",
@@ -277,7 +284,8 @@ export function failureFor(
         "your file cannot supply them all, so it stopped before connecting " +
         "and nothing left this device. Start over with a file whose columns " +
         "cover the agreed keys, or settle new terms with your partner over " +
-        "the keys both of your files can supply.",
+        "the keys both of your files can supply." +
+        (singleColumnInput ? ` ${CSV_DELIMITER_SINGLE_COLUMN_REMEDY}` : ""),
     };
   }
   if (category === "config") {
@@ -722,7 +730,8 @@ export function useInviterExchange({
     // Raise a failure's alert and freeze the run: the terminal path for every
     // error except a busy (409) create, which re-attaches instead. Whether a
     // location was picked is the draft's own field, never anything the refusal
-    // reports, and it chooses that refusal's copy.
+    // reports, and it chooses that refusal's copy. So does whether this party's
+    // own file read as a single column, taken from the columns the mint bound.
     const raiseFailure = (category: ExchangeErrorCategory, error: unknown) => {
       setFailure(
         failureFor(
@@ -732,6 +741,7 @@ export function useInviterExchange({
           channel,
           "inviter",
           receipts?.signing?.identityLocation !== undefined,
+          minted.columns.length === 1,
         ),
       );
       setRun((current) => runWithFailure(current));

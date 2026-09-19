@@ -2,6 +2,7 @@ import Papa from "papaparse";
 
 import type { LocalFile } from "papaparse";
 
+import { CSV_DELIMITER_DETECT, DEFAULT_CSV_DELIMITER } from "./csvDelimiter.js";
 import { UsageError } from "./errors.js";
 import { stripNameControlChars } from "./utils/nameControls.js";
 
@@ -375,17 +376,23 @@ const SHARED_CSV_PARSE_CONFIG = {
 
 /**
  * The `delimiter` option every read in this module hands PapaParse, from the
- * field delimiter the party chose or `undefined` for none.
+ * field delimiter choice the party made or `undefined` for none.
+ *
+ * A read given no choice takes {@link DEFAULT_CSV_DELIMITER}: a file separated
+ * by something else then reaches the caller's column check as one column,
+ * which the operator can act on, rather than being read by a character nobody
+ * named.
  *
  * `""` is PapaParse's own value for "detect the delimiter from the file"
- * (driven and confirmed against the parser), and it is what a read with no
- * chosen delimiter takes. A party that names one is read by that character
- * alone: the detection can otherwise settle on another candidate for a file
- * whose rows make one look more consistent, and a read that disagrees with the
- * write would not round-trip.
+ * (driven and confirmed against the parser), and only the explicit
+ * {@link CSV_DELIMITER_DETECT} choice takes it. A party that names a character
+ * is read by that character alone: the detection can otherwise settle on
+ * another candidate for a file whose rows make one look more consistent, and a
+ * read that disagrees with the write would not round-trip.
  */
 function papaParseDelimiter(delimiter: string | undefined): string {
-  return delimiter ?? "";
+  if (delimiter === CSV_DELIMITER_DETECT) return "";
+  return delimiter ?? DEFAULT_CSV_DELIMITER;
 }
 
 /**
@@ -582,8 +589,9 @@ async function runSharedCSVParse(
  * pathological line, not a memory saving for well-formed input. The whole-file
  * streaming counterpart that retains NOTHING is {@link streamCSVRows}.
  *
- * `delimiter` is the field delimiter to read the file by; omit it to have
- * PapaParse detect one (see {@link papaParseDelimiter}).
+ * `delimiter` is the field delimiter to read the file by; omit it to read by a
+ * comma, or pass {@link CSV_DELIMITER_DETECT} to have PapaParse detect one (see
+ * {@link papaParseDelimiter}).
  *
  * Caveat on `meta`: only `meta.fields` and `meta.sanitizedColumnPositions` are
  * whole-file-stable (see the runner); every current consumer reads only `data`
@@ -676,8 +684,9 @@ export async function streamCSVRows(
  * re-opening the source, is what lets the same read serve a non-rewindable
  * stdin stream.
  *
- * `delimiter` reads the file by that field delimiter; omit it to have PapaParse
- * detect one, as the loaders above do.
+ * `delimiter` reads the file by that field delimiter; omit it to read by a
+ * comma, or pass {@link CSV_DELIMITER_DETECT} to have PapaParse detect one, as
+ * the loaders above do.
  *
  * The sample holds only non-empty (after-trim) values, capped at `sampleLimit`.
  * Set the cap to {@link inferDateFormat}'s own non-empty-value scan cap and the

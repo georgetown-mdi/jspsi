@@ -491,6 +491,7 @@ describe("benignRerunOutcome", () => {
         new ManagedInputError({
           reason: "columns",
           unsatisfied: [{ name: "ssn", type: "ssn" }],
+          singleColumn: false,
         }),
         true,
       ),
@@ -850,6 +851,7 @@ describe("a run refused for terms this file cannot satisfy", () => {
     const columns = new ManagedInputError({
       reason: "columns",
       unsatisfied: [],
+      singleColumn: false,
     });
     expect(benignRerunOutcome(columns, false)).toBe("terms-shortfall");
     expect(managedInputFailureKind(columns.rejection)).toBe("terms-shortfall");

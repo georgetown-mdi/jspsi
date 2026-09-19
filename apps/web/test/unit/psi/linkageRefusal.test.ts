@@ -6,6 +6,7 @@ import {
   inferMetadata,
 } from "@psilink/core";
 
+import { CSV_DELIMITER_SINGLE_COLUMN_REMEDY } from "@components/csvDelimiterChoice";
 import { unlinkableFileAlert } from "@components/UnlinkableFileAlert";
 
 import { linkageRefusalFor } from "@psi/linkageRefusal";
@@ -43,7 +44,7 @@ describe("linkageRefusalFor", () => {
     );
     expect(verdict.fullySatisfied).toBe(true);
     expect(
-      linkageRefusalFor(verdict, verdict.unsatisfiedFields),
+      linkageRefusalFor(verdict, verdict.unsatisfiedFields, columns),
     ).toBeUndefined();
   });
 
@@ -59,7 +60,7 @@ describe("linkageRefusalFor", () => {
       columns,
       getDefaultLinkageTerms("x"),
     ).unsatisfiedFields;
-    const refusal = linkageRefusalFor(verdict, missing);
+    const refusal = linkageRefusalFor(verdict, missing, columns);
     expect(refusal?.kind).toBe("no-linkable-key");
     if (refusal?.kind !== "no-linkable-key") throw new Error("unreachable");
     expect(refusal.missingFields).toBe(missing);
@@ -70,10 +71,41 @@ describe("linkageRefusalFor", () => {
       ["notes"],
       termsNamed("k", "first_name"),
     );
-    const refusal = linkageRefusalFor(verdict, verdict.unsatisfiedFields);
+    const refusal = linkageRefusalFor(verdict, verdict.unsatisfiedFields, [
+      "notes",
+    ]);
     expect(refusal?.kind).toBe("shortfall");
     if (refusal?.kind !== "shortfall") throw new Error("unreachable");
     expect(refusal.verdict).toBe(verdict);
+  });
+
+  test("a one-column read is carried on either shape, and a wider one is not", () => {
+    // A file separated by something other than the delimiter it was read by comes
+    // out as one mashed column, which satisfies no key and narrows derived terms to
+    // none -- so both shapes carry the reading the delimiter remedy rests on.
+    const mashed = ["first_name|last_name"];
+    const narrowed = getDefaultLinkageTerms("x", inferMetadata(mashed, []));
+    expect(
+      linkageRefusalFor(decideLinkageTermsVerdict(mashed, narrowed), [], mashed)
+        ?.singleColumn,
+    ).toBe(true);
+    expect(
+      linkageRefusalFor(
+        decideLinkageTermsVerdict(mashed, termsNamed("k", "first_name")),
+        [],
+        mashed,
+      )?.singleColumn,
+    ).toBe(true);
+    expect(
+      linkageRefusalFor(
+        decideLinkageTermsVerdict(
+          ["notes", "county"],
+          termsNamed("k", "first_name"),
+        ),
+        [],
+        ["notes", "county"],
+      )?.singleColumn,
+    ).toBe(false);
   });
 });
 
@@ -86,6 +118,7 @@ describe("unlinkableFileAlert", () => {
         columns,
         getDefaultLinkageTerms("x"),
       ).unsatisfiedFields,
+      singleColumn: false,
     });
     expect(alert.title).toBe("This file cannot be linked");
     expect(alert.message).toContain("cannot satisfy any default linkage key");
@@ -101,7 +134,11 @@ describe("unlinkableFileAlert", () => {
       ["notes"],
       termsNamed("partner-key-name", "partner_field_name"),
     );
-    const alert = unlinkableFileAlert({ kind: "shortfall", verdict });
+    const alert = unlinkableFileAlert({
+      kind: "shortfall",
+      verdict,
+      singleColumn: false,
+    });
     expect(alert.title).toBe("This file cannot satisfy the linkage terms");
     expect(alert.message).toContain(
       "the one linkage key cannot be produced from this input's columns",
@@ -118,6 +155,34 @@ describe("unlinkableFileAlert", () => {
     // The unsatisfied FIELDS are named, as the missing-types guidance every seat
     // gives -- escaped at this sink, since they are terms content on an accept.
     expect(alert.message).toContain("partner_field_name");
+  });
+
+  test("a one-column read adds the delimiter remedy to either shape", () => {
+    // With the comma the delimiter a read takes when nobody chooses, the operator
+    // who reaches these refusals is the one whose file is separated another way:
+    // the copy names the control they have rather than the terms they would
+    // otherwise go and renegotiate.
+    const verdict = decideLinkageTermsVerdict(
+      ["first_name|last_name"],
+      termsNamed("k", "first_name"),
+    );
+    expect(
+      unlinkableFileAlert({ kind: "shortfall", verdict, singleColumn: true })
+        .message,
+    ).toContain(CSV_DELIMITER_SINGLE_COLUMN_REMEDY);
+    expect(
+      unlinkableFileAlert({
+        kind: "no-linkable-key",
+        missingFields: [],
+        singleColumn: true,
+      }).message,
+    ).toContain(CSV_DELIMITER_SINGLE_COLUMN_REMEDY);
+    // A file with columns to spare falls short for a reason the delimiter cannot
+    // fix, so the remedy stays off it.
+    expect(
+      unlinkableFileAlert({ kind: "shortfall", verdict, singleColumn: false })
+        .message,
+    ).not.toContain("single column");
   });
 
   test("a dead key's shortfall names the cleaning, not the columns", () => {
@@ -140,7 +205,11 @@ describe("unlinkableFileAlert", () => {
     };
     const verdict = decideLinkageTermsVerdict(["date_of_birth"], deadTerms);
     expect(verdict.deadKeys).toHaveLength(1);
-    const alert = unlinkableFileAlert({ kind: "shortfall", verdict });
+    const alert = unlinkableFileAlert({
+      kind: "shortfall",
+      verdict,
+      singleColumn: false,
+    });
     expect(alert.message).toContain(
       "the cleaning declared for the one linkage key drops every record",
     );

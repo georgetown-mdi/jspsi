@@ -16,7 +16,7 @@ import {
   quoteTermsValueList,
 } from "./config/compatibilityMessage.js";
 import type { OutboundPayloadConsent } from "./config/outboundPayloadConsent.js";
-import { DEFAULT_CSV_DELIMITER } from "./csvDelimiter.js";
+import { DEFAULT_CSV_DELIMITER, isCsvDelimiter } from "./csvDelimiter.js";
 import { readRowColumn } from "./file.js";
 import type { CSVRow } from "./file.js";
 import type { CommittedPayload } from "./records/exchangeRecord.js";
@@ -1087,6 +1087,14 @@ export function buildOutputTable(
   includeOwnColumns?: OwnColumnSelection,
   delimiter: string = DEFAULT_CSV_DELIMITER,
 ): { headers: string[]; rows: Array<Array<string>> } {
+  // The escaping holds only against a single character: a caller that passed a
+  // party's choice unresolved -- the reserved detect word above all -- would
+  // quote every cell against a string no join could split back on.
+  if (!isCsvDelimiter(delimiter))
+    throw new Error(
+      "result delimiter is not a single accepted character: resolve the " +
+        "party's choice through resultCsvDelimiter before building the table",
+    );
   const quote = (value: string): string => quoteCsvField(value, delimiter);
   if (associationTable[0].length !== associationTable[1].length) {
     throw new Error(

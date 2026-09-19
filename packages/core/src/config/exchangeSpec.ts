@@ -12,7 +12,7 @@ import {
 } from "./linkageTermsSchema.js";
 import {
   csvDelimiterRefusal,
-  isCsvDelimiter,
+  isCsvDelimiterChoice,
   normalizeCsvDelimiter,
 } from "../csvDelimiter.js";
 import { AuthenticationSchema, ConnectionConfigSchema } from "./connection.js";
@@ -172,15 +172,15 @@ export const ExchangeSpecSchema = z
     // local like the fields above -- never exchanged, cross-validated, or
     // folded into the agreed-terms hash, and not a linkage term: the two
     // parties' files need not agree on it, and neither reads the other's.
-    // Written as the character itself, or `tab` / `\t` for a tab, and resolved
-    // to the single character before the accepted-set rule grades it, so a
-    // configuration and a command line take the same spellings. Absent reads
-    // by the delimiter the file itself shows and writes commas.
+    // Written as the character itself, `tab` / `\t` for a tab, or `detect` to
+    // take the delimiter from the file itself, and resolved before the
+    // accepted-set rule grades it, so a configuration and a command line take
+    // the same spellings. Absent reads and writes commas.
     csvDelimiter: z
       .string()
       .transform(normalizeCsvDelimiter)
       .superRefine((value, ctx) => {
-        if (isCsvDelimiter(value)) return;
+        if (isCsvDelimiterChoice(value)) return;
         ctx.addIssue({ code: "custom", message: csvDelimiterRefusal(value) });
       })
       .optional(),

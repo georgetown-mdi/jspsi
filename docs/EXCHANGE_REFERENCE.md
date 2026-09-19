@@ -1246,21 +1246,26 @@ Purely local, like [`include_own_columns`](#include_own_columns) and [`retention
 
 ### `csv_delimiter`
 
-*Type:* string (one character, or `tab`)  
+*Type:* string (one character, `tab`, or `detect`)  
 *Required:* no  
+*Default:* a comma  
 *Consistency:* none (per-party; not exchanged)
 
 One character: a tab, or a printable ASCII character other than the double quote (`"`), which is the character RFC 4180 quotes a field with. Anything else -- more than one character, an empty value, the double quote, a line break, a character outside ASCII -- is refused when the configuration is read, before any credential, terms, or data are sent. Write a tab as `tab` or `\t`, or as a literal tab in a double-quoted YAML string.
+
+`detect` is the one accepted value that is not a character: it takes the delimiter from the file itself, among the six the parser considers -- the comma, tab, pipe, and semicolon, plus the ASCII record and unit separators -- and a file separated by anything else is read with commas. A detected run's result file is comma-separated, since detection names no character for the write to follow.
 
 ```yaml
 csv_delimiter: "|"
 ```
 
-There is no separate setting for the result file: it is written with the same delimiter the input was read by, so it can be fed straight back to the system the input came from. A field holding the delimiter, a double quote, or a line break is quoted on the way out, so the result reads back through the same delimiter.
+There is no separate setting for the result file: it is written with the delimiter this key names, so it can be fed straight back to the system the input came from. Under `detect`, and with the key absent, it is written with commas. A field holding the delimiter, a double quote, or a line break is quoted on the way out, so the result reads back through the same delimiter.
 
-With the key absent, psilink reads a file by the delimiter the file itself shows and writes the result with commas. A `--csv-delimiter` on a command reading this configuration replaces the key for that run, and `psilink init --csv-delimiter` writes the key into the template it produces; see [CLI.md](CLI.md#the-field-delimiter).
+With the key absent, psilink reads the file with commas and writes the result with commas. A `--csv-delimiter` on a command reading this configuration replaces the key for that run, and `psilink init --csv-delimiter` writes the key into the template it produces; see [CLI.md](CLI.md#the-field-delimiter).
 
-The key is read by the CLI and by the console when it runs a config file. The web application offers the same choice at each of its file steps -- the invite paths, the acceptor's file step, and the re-supplied files on the verify page -- as a control beside the file picker: name the separator, or leave it to be detected from the file (the comma, tab, pipe, and semicolon, plus the ASCII record and unit separators). It is local to each party there as it is here: the choice stays in the browser, no invitation contains it, and a recurring exchange stores it with its own document so an unattended run reads the file the way the operator chose. The console build offers no such control: an exchange composed there reads its input by detection and writes a comma-separated result, and naming a delimiter for it means running the command-line tool on a configuration file that states `csv_delimiter`.
+A file read with the wrong delimiter is not refused by the read. It parses as a single column, and the refusal comes from the linkage-terms column check -- the input cannot satisfy the keys the terms declare -- which states the remedy: name your file's separator as the delimiter, or `detect` to take it from the file.
+
+The key is read by the CLI and by the console when it runs a config file. The web application offers the same choice at each of its file steps -- the invite paths, the acceptor's file step, and the re-supplied files on the verify page -- as a control beside the file picker, starting on the comma: name the separator, or choose to have it detected from the file. It is local to each party there as it is here: the choice stays in the browser, no invitation contains it, and a recurring exchange stores it with its own document -- the character, or the `detect` choice as a value of its own -- so an unattended run reads the file the way the operator chose. The console build offers no such control: an exchange composed there reads its input with commas and writes a comma-separated result, and reading an input separated another way means running the command-line tool on a configuration file that states `csv_delimiter`.
 
 ---
 

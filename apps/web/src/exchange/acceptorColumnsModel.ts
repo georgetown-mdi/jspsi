@@ -6,6 +6,8 @@ import {
   sanitizeForDisplay,
 } from "@psilink/core";
 
+import { CSV_DELIMITER_SINGLE_COLUMN_REMEDY } from "@components/csvDelimiterChoice";
+
 import {
   SEMANTIC_TYPE_LABELS,
   disclosedColumnNames,
@@ -193,6 +195,13 @@ export interface AcceptorVerdictViewModel {
    * self-defeating rule in the adopted terms). A count only -- never the
    * partner-controlled key names. */
   deadKeyCount: number;
+  /** The delimiter remedy this verdict states beneath its title, or the empty
+   * string. Non-empty where the graded read yielded exactly ONE column and the
+   * coverage is short: that is the shape a file separated by something other than
+   * the delimiter it was read by comes out as, and the delimiter is a control on
+   * this screen while the adopted terms this copy otherwise sends the operator to
+   * are the partner's. */
+  delimiterRemedy: string;
   /** Whether this file may be run under the adopted terms at all: core's own
    * grading, which the launch gate reads rather than re-deriving a threshold from
    * the counts above. `false` on any shortfall -- an unproducible key, a dead one,
@@ -210,6 +219,12 @@ export interface AcceptorVerdictViewModel {
  * The three display kinds are a reading of coverage, not the launch decision: the
  * gate is `fullySatisfied`, core's own, which an all-clear coverage reading can
  * still fail when a covered key's declared cleaning drops every record.
+ *
+ * A short verdict over a file whose whole header read as one column carries
+ * {@link CSV_DELIMITER_SINGLE_COLUMN_REMEDY} as well, for the step to state beside
+ * the column mapper: a file read by the wrong delimiter puts every field in that
+ * one column, and the remedy for it is this screen's delimiter control rather than
+ * a remap or the partner's terms.
  */
 export function acceptorVerdict(
   columns: Array<string>,
@@ -248,6 +263,10 @@ export function acceptorVerdict(
     totalKeys,
     announcement,
     deadKeyCount: verdict.deadKeys.length,
+    delimiterRemedy:
+      kind !== "allClear" && columns.length === 1
+        ? CSV_DELIMITER_SINGLE_COLUMN_REMEDY
+        : "",
     fullySatisfied: verdict.fullySatisfied,
   };
 }

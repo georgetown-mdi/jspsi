@@ -225,9 +225,9 @@ interface ExchangeSpecAssembly {
   includeOwnColumns?: OwnColumnSelection;
   /**
    * The field delimiter this party reads its own CSV by and writes its result
-   * file with. Per-party and local like {@link retentionDisposition}: the two
-   * parties' files need not agree on it, and neither reads the other's. Omit
-   * the field to read by the delimiter the file itself shows and write commas.
+   * file with, or `detect` to take it from the file itself. Per-party and local
+   * like {@link retentionDisposition}: the two parties' files need not agree on
+   * it, and neither reads the other's. Omit the field to read and write commas.
    *
    * Graded by the spec schema against the accepted set (`csvDelimiter.ts`), so
    * an assembly holding a value outside it throws here.

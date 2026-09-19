@@ -7,6 +7,7 @@ import {
   LinkageTermsUnsatisfiableError,
   MAX_ERROR_CAUSE_DEPTH,
   redactAndSanitizeForDisplay,
+  singleColumnDelimiterClause,
   summarizeLinkageShortfall,
 } from "@psilink/core";
 import type {
@@ -115,7 +116,10 @@ function fitDetailLinks(details: string[], overflowNoun: string): string[] {
  * offline accept and mint paths call no prepare, so here is the only place the
  * refusal lands for them. `messaging` supplies the accept, exchange, and invite
  * paths' source-specific wording so they cannot drift apart; the shortfall
- * itself is phrased by {@link summarizeLinkageShortfall}.
+ * itself is phrased by {@link summarizeLinkageShortfall}, and a CSV whose whole
+ * header read as one column takes core's delimiter clause as well -- the shape
+ * a file separated by something other than the delimiter the read took reaches
+ * this check as.
  *
  * @param standardization The committed config's explicit standardization, when
  *   any: an explicit column remap satisfies a field whose semantic type is
@@ -197,6 +201,7 @@ export function checkLinkageSatisfiability(
   throw new LinkageTermsUnsatisfiableError(
     `this CSV cannot satisfy every linkage key the ${messaging.source} ` +
       `declares: ${summarizeLinkageShortfall(verdict, messaging.termsStanding)}. ` +
+      singleColumnDelimiterClause(columns.length) +
       messaging.blockConsequence,
     {
       cause: chainDetailCauses([

@@ -21,7 +21,7 @@ import {
 } from "@psilink/core";
 
 import {
-  DETECTED_CSV_DELIMITER_CHOICE,
+  INITIAL_CSV_DELIMITER_CHOICE,
   resolveCsvDelimiter,
 } from "@components/csvDelimiterChoice";
 import { CsvDelimiterField } from "@components/CsvDelimiterField";
@@ -330,10 +330,12 @@ export function VerifyReceiptScreen() {
   // to text now and rewrapped into a fresh File at each run.
   const [inputCsv, setInputCsv] = useState<File>();
   const [resultCsv, setResultCsv] = useState<File>();
-  // The delimiter both re-supplied files are read by: the result was written
-  // with the input's own delimiter, so one choice covers the pair.
+  // The delimiter both re-supplied files are read by: when a character is
+  // named, one choice covers the pair, since the result was written with the
+  // input's own delimiter. Under Detect, the input is read by detection and
+  // the result is comma-separated, since that is what it was written with.
   const [delimiterChoice, setDelimiterChoice] = useState(
-    DETECTED_CSV_DELIMITER_CHOICE,
+    INITIAL_CSV_DELIMITER_CHOICE,
   );
   const [localTerms, setLocalTerms] = useState<LinkageTerms>();
   const [partnerTerms, setPartnerTerms] = useState<LinkageTerms>();

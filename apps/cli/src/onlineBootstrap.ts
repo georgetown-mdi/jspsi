@@ -391,9 +391,9 @@ export function expiresFromNow(durationSeconds: number): string {
  * `exchange`, and `zero-setup` support `-`, and `accept` rejects it unless
  * `--consent-to-terms` skips the confirmation prompt that otherwise owns stdin.
  * Defaults to stdin disabled so the shared loader never enables it
- * unconditionally. `csvDelimiter` is the field delimiter the party chose for
- * this run, from its `--csv-delimiter` or its configuration; omitted, the read
- * takes the delimiter the file itself shows.
+ * unconditionally. `csvDelimiter` is the field-delimiter choice the party made
+ * for this run, from its `--csv-delimiter` or its configuration; omitted, the
+ * read takes a comma.
  *
  * A row-level parse fault rejects inside `loadCSVFile` (a `CsvRowParseError`,
  * which is a `UsageError` -> exit 64). A dataset with no data rows is refused
@@ -788,9 +788,10 @@ export async function runOnlineBootstrap(params: {
   output: string | undefined;
   /**
    * The field delimiter this run's result CSV is written with -- the one its
-   * input was read by. Omit it to write commas. The configuration this
-   * bootstrap saves records it through `dataSpec`, so a later recurring
-   * `psilink exchange` reads and writes by the same delimiter with no flag.
+   * input was read by. Omit it, or choose detection, to write commas. The
+   * configuration this bootstrap saves records it through `dataSpec`, so a
+   * later recurring `psilink exchange` reads and writes by the same delimiter
+   * with no flag.
    */
   csvDelimiter?: string;
   verbosity: number;

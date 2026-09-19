@@ -67,6 +67,25 @@ describe("assessManagedInputColumns: the standing-terms guard", () => {
     expect(rejection?.reason).toBe("columns");
   });
 
+  test("carries the one-column reading a wrong delimiter produces", () => {
+    // A stored record reads its input by the delimiter it was set up with, so an
+    // extract separated another way arrives as one mashed column. The rejection
+    // carries that reading for the launch surface to state the delimiter remedy on,
+    // instead of sending the operator to renegotiate terms with their partner.
+    const mashed = assessManagedInputColumns(standingExchangeFile(), [
+      standingColumns.join("\t"),
+    ]);
+    expect(mashed?.reason).toBe("columns");
+    if (mashed?.reason === "columns") expect(mashed.singleColumn).toBe(true);
+    const shortfall = assessManagedInputColumns(
+      standingExchangeFile(),
+      standingColumns.slice(1),
+    );
+    expect(shortfall?.reason).toBe("columns");
+    if (shortfall?.reason === "columns")
+      expect(shortfall.singleColumn).toBe(false);
+  });
+
   test("rejects a file short of one agreed key, not only the no-key case", () => {
     // A file that dropped its SSN column still satisfies the name-and-DOB keys, and
     // the run boundary refuses it all the same: an exchange runs every key both

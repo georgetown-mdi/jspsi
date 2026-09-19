@@ -26,6 +26,8 @@ import {
   acceptorWidenableDeclaredColumnCount,
 } from "@exchange/acceptorColumnsModel";
 
+import { CSV_DELIMITER_SINGLE_COLUMN_REMEDY } from "@components/csvDelimiterChoice";
+
 import {
   CONFIG_EXCHANGE_FILES,
   EXCHANGE_FILES_DEFAULT,
@@ -186,6 +188,25 @@ describe("acceptor verdict (re-shown, not re-derived)", () => {
     expect(verdict.announcement).toBe(
       "All 2 linkage keys can be satisfied by your columns.",
     );
+  });
+
+  test("a file that read as one column states the delimiter remedy", () => {
+    // One column holding the whole header is what a file separated by something
+    // other than the delimiter it was read by comes out as, and that delimiter is
+    // a control on this screen -- unlike the adopted terms.
+    const mashed = ["first_name\tlast_name"];
+    const { editorState } = editorFor(mashed, nameTerms);
+    const verdict = acceptorVerdict(mashed, nameTerms, editorState);
+    expect(verdict.fullySatisfied).toBe(false);
+    expect(verdict.delimiterRemedy).toBe(CSV_DELIMITER_SINGLE_COLUMN_REMEDY);
+  });
+
+  test("a shortfall over several columns states no delimiter remedy", () => {
+    const columns = ["first_name", "notes"];
+    const { editorState } = editorFor(columns, nameTerms);
+    const verdict = acceptorVerdict(columns, nameTerms, editorState);
+    expect(verdict.fullySatisfied).toBe(false);
+    expect(verdict.delimiterRemedy).toBe("");
   });
 
   test("a self-defeating adopted rule shows all-clear on coverage yet is not satisfied", () => {

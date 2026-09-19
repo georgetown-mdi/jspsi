@@ -4038,13 +4038,15 @@ test("readConfigLinkageSource returns the source a config defines", () => {
 // a command grading an input against this config reads the file the same way.
 // The spellings and the accepted set are core's own, shared with the schema the
 // run path parses the same key through.
-test("readConfigLinkageSource reads the config's csv_delimiter, tab spellings and all", () => {
+test("readConfigLinkageSource reads the config's csv_delimiter, tab and detect spellings and all", () => {
   const configPath = path.join(dir, "psilink.yaml");
   const terms = getDefaultLinkageTerms("Agency A");
   for (const [written, resolved] of [
     ["|", "|"],
     ["tab", "\t"],
     ["\\t", "\t"],
+    ["detect", "detect"],
+    ["DETECT", "detect"],
   ]) {
     saveConfig(configPath, {
       connection: { channel: "filedrop", path: "/mnt/share" },

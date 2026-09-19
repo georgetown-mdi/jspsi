@@ -20,6 +20,7 @@ import {
 } from "@psi/managed/managedFailureCopy";
 import {
   ManagedExchangeExpiredError,
+  ManagedInputError,
   benignRerunOutcome,
 } from "@psi/managed/managedRun";
 import {
@@ -252,6 +253,43 @@ const TERMS_SHORTFALL_FAILURE: ManagedRunFailureAlert = {
     "files can supply.",
   recovery: "restate",
 };
+
+/** The shortfall state for an input whose whole header read as ONE column: the
+ * shape a file separated by something other than the delimiter this exchange
+ * reads it by comes out as ({@link ../psi/managed/managedInputGuard.ts}). The
+ * terms are not the operator's problem here, so the copy states the reading and
+ * the two ways out of it -- a file separated the way this exchange reads, or a
+ * fresh setup naming the separator -- rather than the agreed keys. A record's
+ * delimiter is fixed for the partnership, so neither way is a retry, and the
+ * state keeps the shortfall tier's recovery.
+ *
+ * Reached from the live launch error, which holds the reading; a shortfall read
+ * back from a record holds only the tier, and renders
+ * {@link TERMS_SHORTFALL_FAILURE}. */
+const SINGLE_COLUMN_SHORTFALL_FAILURE: ManagedRunFailureAlert = {
+  kind: "terms-shortfall",
+  title: TERMS_SHORTFALL_FAILURE_TITLE,
+  message:
+    "The run stopped before connecting because your input file read as a " +
+    "single column, which cannot supply every linkage key this exchange " +
+    "agreed to match on, and nothing left this device. Its fields may be " +
+    "separated by a character other than the one this exchange reads it with. " +
+    "Save the input file with the separator this exchange was set up to read, " +
+    "or set the exchange up again with your partner and choose your file's " +
+    "separator at its file step.",
+  recovery: "restate",
+};
+
+/** Which shortfall state a launch error lands on: the single-column reading where
+ * the input guard's own rejection holds it, the fixed shortfall copy otherwise --
+ * the run boundary's refusal reports no column count for this state to read. */
+function shortfallFailure(error: unknown): ManagedRunFailureAlert {
+  return error instanceof ManagedInputError &&
+    error.rejection.reason === "columns" &&
+    error.rejection.singleColumn
+    ? SINGLE_COLUMN_SHORTFALL_FAILURE
+    : TERMS_SHORTFALL_FAILURE;
+}
 
 /** The benign disclosure-refusal state: a send-side gate refused before connecting
  * because what this run would send is not the set the exchange recorded agreeing to
@@ -659,7 +697,7 @@ function classifyLaunchState(
   if (benign === "handed-off") return HANDED_OFF_FAILURE;
   if (benign === "custody-unreadable") return CUSTODY_UNREADABLE_FAILURE;
   if (benign === "input") return INPUT_FAILURE;
-  if (benign === "terms-shortfall") return TERMS_SHORTFALL_FAILURE;
+  if (benign === "terms-shortfall") return shortfallFailure(error);
   if (benign === "missed") return missedFailure(records.atLaunch, local, now);
   const { afterRun } = records;
   const tier = deriveManagedFailureTier(afterRun, local, now);

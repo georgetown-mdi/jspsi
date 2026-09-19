@@ -106,8 +106,8 @@ export function addCsvDelimiterOption(cmd: Argv): Argv {
     type: "string",
     describe:
       "field delimiter of the CSV this run reads, and of the result it " +
-      "writes: one character, or `tab`; default=the delimiter the input " +
-      "file itself shows, writing commas",
+      "writes: one character, `tab`, or `detect` to take it from the input " +
+      "file; default=comma",
   });
 }
 

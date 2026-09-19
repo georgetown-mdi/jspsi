@@ -32,7 +32,7 @@ async function parseAndReply(
 ): Promise<void> {
   try {
     // loadCSVFile applies its own byteCeiling default when this is undefined, and
-    // detects the field delimiter when `delimiter` is. It runs
+    // reads by a comma when `delimiter` is. It runs
     // to completion here -- including the non-string-header guard -- BEFORE any batch is
     // posted, so a parse failure throws into the catch below and posts the serialized
     // error as the only message.

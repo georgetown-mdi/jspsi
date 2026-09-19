@@ -1,7 +1,7 @@
 import {
-  DEFAULT_CSV_DELIMITER,
   buildOutputTable,
   countIsPartnerReported,
+  resultCsvDelimiter,
   serializeExchangeRecord,
   serializeVerificationKeys,
 } from "@psilink/core";
@@ -58,11 +58,12 @@ export function recordFileStamp(createdAt: string): string {
  * (`include_own_columns`), which changes only this file: the exchange sent
  * nothing extra, and nothing here reaches the partner.
  *
- * `csvDelimiter` is the field delimiter this party read its own input by; the
- * table is escaped against it and joined with it -- one delimiter for both, or
- * a value holding it would be quoted against one character and split on another
- * -- so the file reads back the way the input did. A party that named none
- * writes commas.
+ * `csvDelimiter` is the field-delimiter choice this party read its own input
+ * under; the table is escaped against the character it resolves to and joined
+ * with it -- one delimiter for both, or a value holding it would be quoted
+ * against one character and split on another -- so the file reads back the way
+ * the input did. A party that named none, or chose detection, writes commas
+ * ({@link resultCsvDelimiter}).
  *
  * If anything throws after a URL was
  * created, every already-created URL is revoked before the error propagates:
@@ -73,8 +74,9 @@ export function buildRunOutputs(
   result: ExchangeResult,
   prepared: PreparedExchange,
   urls: ObjectUrls,
-  csvDelimiter: string = DEFAULT_CSV_DELIMITER,
+  csvDelimiter?: string,
 ): RunOutputs {
+  const writeDelimiter = resultCsvDelimiter(csvDelimiter);
   const created: Array<string> = [];
   const trackedUrl = (blob: Blob): string => {
     const url = urls.create(blob);
@@ -110,12 +112,12 @@ export function buildRunOutputs(
                 prepared.metadata,
                 result.partnerPayload,
                 prepared.includeOwnColumns,
-                csvDelimiter,
+                writeDelimiter,
               );
               const csv =
-                headers.join(csvDelimiter) +
+                headers.join(writeDelimiter) +
                 "\n" +
-                rows.map((r) => r.join(csvDelimiter) + "\n").join("");
+                rows.map((r) => r.join(writeDelimiter) + "\n").join("");
               return {
                 kind: "matched" as const,
                 resultsUrl: trackedUrl(new Blob([csv], { type: "text/csv" })),

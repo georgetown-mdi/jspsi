@@ -12,6 +12,7 @@ import {
   RelayedSelfExplainingError,
   RelayedTerminalError,
 } from "@psi/jobClient/serverJobExchangeDriver";
+import { CSV_DELIMITER_SINGLE_COLUMN_REMEDY } from "@components/csvDelimiterChoice";
 import { failureFor } from "@exchange/useInviterExchange";
 
 import type { CSVRow, LinkageTerms, Metadata } from "@psilink/core";
@@ -414,5 +415,27 @@ describe("failureFor", () => {
     expect(failure.message).not.toContain("agreed linkage keys cannot be");
     expect(failure.message).toContain("nothing left this device");
     expect(failure.message).toContain("settle new terms with your partner");
+    // The same refusal over a file that read as several columns states no
+    // delimiter remedy: the shortfall is the terms', not the reading's.
+    expect(failure.message).not.toContain(CSV_DELIMITER_SINGLE_COLUMN_REMEDY);
+  });
+
+  test("the run-boundary refusal over a file that read as one column states the delimiter remedy", () => {
+    // A file separated by something other than the delimiter this party chose
+    // reaches the run boundary as one column, and that delimiter is the
+    // operator's own -- unlike the agreed terms the rest of this copy names.
+    const failure = failureFor(
+      "config",
+      new LinkageTermsUnsatisfiableError(
+        "this input cannot satisfy every linkage key the agreed terms declare: " +
+          "2 of the 2 agreed linkage keys cannot be produced",
+      ),
+      WORK_FILE,
+      undefined,
+      "inviter",
+      false,
+      true,
+    );
+    expect(failure.message).toContain(CSV_DELIMITER_SINGLE_COLUMN_REMEDY);
   });
 });

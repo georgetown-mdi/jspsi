@@ -19,6 +19,15 @@
 
 import type { LinkageField, LinkageTermsVerdict } from "@psilink/core";
 
+/** Carried by every refusal shape, since a file separated by something other than
+ * the delimiter it was read by reaches either of them: it reads as one column,
+ * which satisfies no key and can narrow derived terms to none. */
+interface SingleColumnReading {
+  /** Whether the graded read yielded exactly one column, so the copy adds the
+   * delimiter remedy ({@link ../components/csvDelimiterChoice.ts}). */
+  singleColumn: boolean;
+}
+
 /**
  * Why a seat refuses to launch, discriminated so its copy is total over the
  * blocking shapes:
@@ -33,19 +42,21 @@ import type { LinkageField, LinkageTermsVerdict } from "@psilink/core";
  *   cleaning drops every record. The remedy is a conforming input or terms fixed
  *   with the partner out of band.
  */
-export type LinkageRefusal =
-  | {
-      kind: "no-linkable-key";
-      /** The linkage fields to name as missing, so the copy can say which field
-       * types a conforming file holds. */
-      missingFields: ReadonlyArray<LinkageField>;
-    }
-  | {
-      kind: "shortfall";
-      /** The verdict the shortfall is phrased from, so the counts a seat states
-       * come from core's grading rather than a re-derivation. */
-      verdict: LinkageTermsVerdict;
-    };
+export type LinkageRefusal = SingleColumnReading &
+  (
+    | {
+        kind: "no-linkable-key";
+        /** The linkage fields to name as missing, so the copy can say which field
+         * types a conforming file holds. */
+        missingFields: ReadonlyArray<LinkageField>;
+      }
+    | {
+        kind: "shortfall";
+        /** The verdict the shortfall is phrased from, so the counts a seat states
+         * come from core's grading rather than a re-derivation. */
+        verdict: LinkageTermsVerdict;
+      }
+  );
 
 /**
  * The refusal a verdict holds, or `undefined` when it permits the run.
@@ -55,13 +66,18 @@ export type LinkageRefusal =
  * cannot produce, so the verdict reports none, and the seat passes the fields the
  * UNNARROWED rule set declares -- the field types a conforming file would hold.
  * A seat grading terms it did not derive passes `verdict.unsatisfiedFields`.
+ *
+ * `columns` are the columns the verdict was graded over, read for the
+ * {@link SingleColumnReading} the copy states the delimiter remedy on.
  */
 export function linkageRefusalFor(
   verdict: LinkageTermsVerdict,
   missingFields: ReadonlyArray<LinkageField>,
+  columns: ReadonlyArray<string>,
 ): LinkageRefusal | undefined {
   if (verdict.fullySatisfied) return undefined;
+  const singleColumn = columns.length === 1;
   return verdict.keys.length === 0
-    ? { kind: "no-linkable-key", missingFields }
-    : { kind: "shortfall", verdict };
+    ? { kind: "no-linkable-key", missingFields, singleColumn }
+    : { kind: "shortfall", verdict, singleColumn };
 }

@@ -23,10 +23,11 @@ import {
   clipToRenderedCost,
   compatibilityMessage,
   COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
+  CSV_DELIMITER_DETECT,
   csvDelimiterRefusal,
   DISPLAY_TRUNCATION_MARKER,
   findBuiltInLinkageRuleSet,
-  isCsvDelimiter,
+  isCsvDelimiterChoice,
   isDrawnFromLinkageRuleSet,
   keepFirstPartyLineBreaks,
   keepOperatorSuppliedText,
@@ -1886,7 +1887,7 @@ export interface ConfigLinkageSource {
   retainsFiles: boolean;
   /**
    * The config's `csv_delimiter`, resolved through the same spellings and
-   * graded by the same accepted-set rule the schema applies, and absent when
+   * graded by the same accepted-value rule the schema applies, and absent when
    * the config sets none. Read so a command that checks an input against this
    * config reads the file by the delimiter the exchange this config governs
    * will read it by.
@@ -2136,7 +2137,7 @@ function readCsvDelimiterDeclaration(
         '`csv_delimiter: "|"`',
     );
   const resolved = normalizeCsvDelimiter(declared);
-  if (!isCsvDelimiter(resolved))
+  if (!isCsvDelimiterChoice(resolved))
     throw configFileRefusal(
       configPath,
       "has an invalid csv_delimiter: " + csvDelimiterRefusal(declared),
@@ -2223,13 +2224,30 @@ export function loadConfigLinkageSource(
 }
 
 /**
- * A field delimiter as a message states it: the character in quotes, escaped
- * for the sink that shows it, or the word a tab is written as on a command
- * line and in a config, since a literal tab renders as blank space where the
- * operator reads it.
+ * A field-delimiter choice as a message states it: the character in quotes,
+ * escaped for the sink that shows it, or the word it is written as on a command
+ * line and in a config -- `tab`, since a literal tab renders as blank space
+ * where the operator reads it, and `detect`, which names no character at all.
  */
 function csvDelimiterLabel(delimiter: string): string {
-  return delimiter === "\t" ? "tab" : `"${sanitizeForDisplay(delimiter)}"`;
+  if (delimiter === "\t") return "tab";
+  if (delimiter === CSV_DELIMITER_DETECT) return CSV_DELIMITER_DETECT;
+  return `"${sanitizeForDisplay(delimiter)}"`;
+}
+
+/**
+ * What a configuration's recorded `csv_delimiter` does to every later run over
+ * that file, as {@link csvDelimiterForRun}'s report states it: a character is
+ * both read and written, while {@link CSV_DELIMITER_DETECT} is read by detection
+ * and written as a comma -- the value core's `resultCsvDelimiter` resolves for
+ * it.
+ */
+function recordedCsvDelimiterEffect(configured: string): string {
+  return configured === CSV_DELIMITER_DETECT
+    ? `follows the csv_delimiter (${CSV_DELIMITER_DETECT}) that file records: ` +
+        "it takes the delimiter from the file itself and writes commas"
+    : "reads and writes by the csv_delimiter " +
+        `(${csvDelimiterLabel(configured)}) that file records`;
 }
 
 /**
@@ -2244,7 +2262,7 @@ function csvDelimiterLabel(delimiter: string): string {
  * to repeat. A flag naming what the file already records describes the run and
  * is not reported, and neither is one over a file recording no delimiter --
  * there is no recorded value for the run to disagree with, and a file recording
- * none reads each CSV by the delimiter it shows.
+ * none reads and writes commas.
  *
  * `configPath` is the configuration this command read and leaves in place. A
  * caller whose configuration governs no later run -- one that writes the
@@ -2265,8 +2283,8 @@ export function csvDelimiterForRun(params: {
     );
     warn(
       `--csv-delimiter ${csvDelimiterLabel(supplied)} applies to this run; ` +
-        `every later exchange over ${named} reads and writes by the ` +
-        `csv_delimiter (${csvDelimiterLabel(configured)}) that file records. ` +
+        `every later exchange over ${named} ` +
+        `${recordedCsvDelimiterEffect(configured)}. ` +
         `Edit csv_delimiter in ${named} to change it.`,
     );
   }

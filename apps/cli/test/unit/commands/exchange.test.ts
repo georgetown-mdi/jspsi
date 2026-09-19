@@ -1387,11 +1387,13 @@ test("handler suppresses the advisory when a successful exchange refreshes the t
 // util/resultCsvDelimiter.test.ts's; what is measured here is the precedence and
 // that the resolved value reaches the run.
 
-/** Seed a pipe-delimited input and a config holding `configured`, run the
- * handler with `flag`, and return the delimiter runProtocol was handed. */
+/** Seed an input separated by `separator` (a pipe unless another is named) and a
+ * config holding `configured`, run the handler with `flag`, and return the
+ * delimiter runProtocol was handed. */
 async function delimiterReachingTheRun(
   configured: string | undefined,
   flag: string | undefined,
+  separator = "|",
 ): Promise<string | undefined> {
   fs.writeFileSync(
     configFile,
@@ -1402,7 +1404,7 @@ async function delimiterReachingTheRun(
   );
   saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
   const input = path.join(dir, "in.csv");
-  fs.writeFileSync(input, "ssn|note\n123456789|hello\n");
+  fs.writeFileSync(input, `ssn${separator}note\n123456789${separator}hello\n`);
 
   vi.mocked(runProtocol).mockReset();
   vi.mocked(runProtocol).mockResolvedValueOnce({});
@@ -1435,6 +1437,23 @@ test("handler: --csv-delimiter replaces the configuration's value for that run",
   expect(reported[0]).toContain(configFile);
 });
 
+test("handler: the report over a detect configuration states detection, not a write by the word", async () => {
+  // A detect configuration's later runs take the delimiter from the file and
+  // write commas, so the report must not promise a write by a word that names no
+  // character. The recorded value comes first, before what it does, so the
+  // sentence reads in one pass.
+  expect(await delimiterReachingTheRun("detect", "|")).toBe("|");
+  const reported = mockState.warnings.filter((m) =>
+    m.includes("--csv-delimiter"),
+  );
+  expect(reported).toHaveLength(1);
+  expect(reported[0]).toContain(
+    "follows the csv_delimiter (detect) that file records: it takes the " +
+      "delimiter from the file itself and writes commas",
+  );
+  expect(reported[0]).not.toContain("reads and writes by");
+});
+
 test("handler: a flag the configuration agrees with is not reported", async () => {
   expect(await delimiterReachingTheRun("|", "|")).toBe("|");
   expect(
@@ -1445,28 +1464,60 @@ test("handler: a flag the configuration agrees with is not reported", async () =
 test("handler: the flag alone governs a configuration that sets none", async () => {
   expect(await delimiterReachingTheRun(undefined, "|")).toBe("|");
   // Nothing to disagree with: a configuration recording no delimiter leaves
-  // every later run reading the delimiter each file shows.
+  // every later run reading and writing commas.
   expect(
     mockState.warnings.filter((m) => m.includes("--csv-delimiter")),
   ).toEqual([]);
 });
 
-test("handler: neither one leaves the run with no chosen delimiter", async () => {
-  expect(await delimiterReachingTheRun(undefined, undefined)).toBeUndefined();
+test("handler: neither one leaves the run with no chosen delimiter, which reads commas", async () => {
+  expect(
+    await delimiterReachingTheRun(undefined, undefined, ","),
+  ).toBeUndefined();
+});
+
+test("handler: naming nothing reads commas, so a pipe file refuses and names the remedy", async () => {
+  // A pipe-separated file is one column under the comma default, which cannot
+  // satisfy the terms, so the run refuses before anything is sent and the
+  // refusal names the delimiter and the detect choice.
+  const exitSpy = captureProcessExit();
+  try {
+    await expect(delimiterReachingTheRun(undefined, undefined)).rejects.toThrow(
+      "exit:64",
+    );
+    expect(vi.mocked(runProtocol)).not.toHaveBeenCalled();
+    const reported = mockState.errors.join("\n");
+    expect(reported).toContain("single column");
+    expect(reported).toContain("CSV delimiter");
+    expect(reported).toContain("detect");
+  } finally {
+    exitSpy.mockRestore();
+  }
+});
+
+test("handler: the configured detect choice reads the file's own delimiter", async () => {
+  // The discriminating case for a setting that reached the read: the same
+  // pipe-delimited file the refusal above runs, read by detection because the
+  // configuration named it, runs through to the exchange.
+  expect(await delimiterReachingTheRun("detect", undefined)).toBe("detect");
 });
 
 test("handler: the configured delimiter is the only one the input is read by", async () => {
   // The same pipe-delimited file the cases above run, configured to be read by
   // commas: it parses as one column, which cannot satisfy the terms, so the run
-  // refuses before anything is sent. With no setting the read takes the file's
-  // own delimiter and the run proceeds, so this is the discriminating case for
-  // a setting that never reached the read.
+  // refuses before anything is sent.
   const exitSpy = captureProcessExit();
   try {
     await expect(delimiterReachingTheRun(",", undefined)).rejects.toThrow(
       "exit:64",
     );
     expect(vi.mocked(runProtocol)).not.toHaveBeenCalled();
+    // The comma was named here, so the refusal states what the read produced
+    // and the remedy, never that no delimiter was named.
+    const reported = mockState.errors.join("\n");
+    expect(reported).toContain("single column");
+    expect(reported).toContain("CSV delimiter");
+    expect(reported).not.toContain("no delimiter");
   } finally {
     exitSpy.mockRestore();
   }

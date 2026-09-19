@@ -1,4 +1,5 @@
 import {
+  CSV_DELIMITER_DETECT,
   DEFAULT_LINKAGE_KEY_SET_NAME,
   connectionFromLocator,
   generateSharedSecret,
@@ -147,9 +148,23 @@ describe("the stored field delimiter", () => {
     );
   });
 
-  test("a record written before the field existed reads back with none", () => {
-    // Every stored record predating the choice holds no delimiter; it must read
-    // back unchanged, leaving its runs to detect one as they always have.
+  test("the detect choice is stored as its own value, distinct from the field being absent", () => {
+    const record = buildManagedExchangeRecord(
+      newExchange({
+        exchangeFile: composeManagedExchangeFile({
+          connection: webrtcLocator,
+          linkageTerms,
+          csvDelimiter: CSV_DELIMITER_DETECT,
+        }),
+      }),
+    );
+    expect(record.exchangeFile.csvDelimiter).toBe(CSV_DELIMITER_DETECT);
+    expect(parseManagedExchangeRecord(record).exchangeFile.csvDelimiter).toBe(
+      CSV_DELIMITER_DETECT,
+    );
+  });
+
+  test("a record holding no delimiter reads back with none, which its runs read as a comma", () => {
     const record = buildManagedExchangeRecord(newExchange());
     expect(record.exchangeFile).not.toHaveProperty("csvDelimiter");
     expect(parseManagedExchangeRecord(record)).toEqual(record);

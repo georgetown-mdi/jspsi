@@ -420,10 +420,10 @@ export async function generateInvitation(params: {
    * parse boundary). The terms are derived from its columns. Exactly one of `file`
    * or `profiledColumns` is set. */
   file?: InvitationCSVInput;
-  /** The field delimiter `file` is read by -- the one the intake step read it by,
-   * so the columns this mint binds are the columns the operator saw. Omitted to
-   * read by the delimiter the file itself shows. Unused on the profiled-columns
-   * path, which parses nothing here. */
+  /** The field-delimiter choice `file` is read under -- the one the intake step
+   * read it by, so the columns this mint binds are the columns the operator saw.
+   * Omitted to read by a comma. Unused on the profiled-columns path, which
+   * parses nothing here. */
   csvDelimiter?: string;
   /**
    * The column names profiled server-side for a console server-job transport
@@ -628,7 +628,11 @@ export async function generateInvitation(params: {
       params.standardization,
       params.metadata,
     );
-    const refusal = linkageRefusalFor(verdict, verdict.unsatisfiedFields);
+    const refusal = linkageRefusalFor(
+      verdict,
+      verdict.unsatisfiedFields,
+      columns,
+    );
     if (refusal !== undefined)
       throw new InvitationFileError({ kind: "unlinkable", refusal });
     // Reject a payload.send that does not match the disclosed set before the
@@ -666,6 +670,7 @@ export async function generateInvitation(params: {
       decideLinkageTermsVerdict(columns, linkageTerms, undefined, metadata),
       assessLinkageSatisfiability(columns, getDefaultLinkageTerms(inviterName))
         .unsatisfied,
+      columns,
     );
     if (refusal !== undefined)
       throw new InvitationFileError({ kind: "unlinkable", refusal });

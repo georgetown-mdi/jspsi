@@ -45,7 +45,7 @@ import { isConsoleBuild, psilinkVersion } from "@utils/clientConfig";
 import { whenDiagnostic } from "@utils/diagnostics";
 
 import {
-  DETECTED_CSV_DELIMITER_CHOICE,
+  INITIAL_CSV_DELIMITER_CHOICE,
   resolveCsvDelimiter,
 } from "@components/csvDelimiterChoice";
 import {
@@ -353,7 +353,7 @@ export function InviterScreen() {
   // component state rather than reducer state: nothing derived from the read
   // depends on it, and every consumer takes the resolved character.
   const [delimiterChoice, setDelimiterChoice] = useState<CsvDelimiterChoice>(
-    DETECTED_CSV_DELIMITER_CHOICE,
+    INITIAL_CSV_DELIMITER_CHOICE,
   );
   const delimiterResolution = resolveCsvDelimiter(delimiterChoice);
   const csvDelimiter = delimiterResolution.ok
@@ -880,7 +880,7 @@ export function InviterScreen() {
   // a sample inviter name so step 1 lands complete. The mint path stays
   // demo-free -- from here the visitor drives every real step by hand.
   function loadSample() {
-    setDelimiterChoice(DETECTED_CSV_DELIMITER_CHOICE);
+    setDelimiterChoice(INITIAL_CSV_DELIMITER_CHOICE);
     void readFile(sampleInviterFile(), undefined, {
       name: SAMPLE_INVITER_NAME,
     });

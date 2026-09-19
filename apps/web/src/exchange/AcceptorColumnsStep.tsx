@@ -358,6 +358,7 @@ export function AcceptorColumnsStep({
               None of the agreed linkage keys can be satisfied by your columns,
               so no matches are possible. Set the columns below to the missing
               field types, then this will clear.
+              {verdict.delimiterRemedy !== "" && ` ${verdict.delimiterRemedy}`}
             </Alert>
           ) : verdict.kind === "partial" ? (
             <Alert
@@ -371,6 +372,7 @@ export function AcceptorColumnsStep({
               to run on these terms with this file. Map more columns below to
               cover the missing keys, or agree terms with your partner over the
               keys both files can supply.
+              {verdict.delimiterRemedy !== "" && ` ${verdict.delimiterRemedy}`}
             </Alert>
           ) : (
             <Alert
