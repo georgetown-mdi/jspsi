@@ -13,7 +13,9 @@ import { jobEmptyResponse, jobJsonResponse } from "@jobs/gate";
  * its own `outcome`, and its certificate-mismatch marker when it is, and why it
  * is withheld when it is not), and -- for the diagnostic log and the dual-signed
  * receipt alike -- whether this run asked for the artifact and whether it is on
- * disk. DELETE kills a still-running
+ * disk. It also reports whether the run told this console that its transport
+ * close left protocol files behind, which is the one report a client cannot read
+ * off the event stream. DELETE kills a still-running
  * child, marks the exchange deleted, and removes the disk; for a workdir named by
  * a valid id but orphaned by a server restart it removes the disk-only directory.
  */
@@ -56,6 +58,7 @@ export const Route = createFileRoute("/api/jobs/$jobId/")({
           logAvailable: view.logAvailable,
           receiptRequested: view.receiptRequested,
           receiptAvailable: view.receiptAvailable,
+          transportTeardownOverran: view.transportTeardownOverran,
         });
       },
       DELETE: async ({ request, params }) => {

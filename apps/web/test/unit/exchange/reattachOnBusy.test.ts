@@ -9,6 +9,7 @@ import { failureFor } from "@exchange/useInviterExchange";
 import { writeAttachment } from "@psi/jobClient/consoleJobAttachment";
 
 import type {
+  FinalRunStatus,
   JobApiClient,
   JobStatusProbe,
 } from "@psi/jobClient/serverJobExchangeDriver";
@@ -16,6 +17,15 @@ import type { ExchangeDriverEvents } from "@psi/exchangeDriver";
 import type { ExchangeErrorCategory } from "@psi/exchangeLifecycle";
 import type { RelayEvent } from "@jobs/cliDriver";
 import type { RunOutputs } from "@psi/runOutputs";
+
+/** What the post-terminal status read answers for a run these tests do not
+ * exercise it on: no record pair, no teardown report, and the exit already
+ * reconciled so the driver asks once and stops. */
+const SETTLED_WITH_NOTHING: FinalRunStatus = {
+  record: { available: false },
+  transportTeardownOverran: false,
+  exitReconciled: true,
+};
 
 const STORAGE_KEY = "psilink-console-last-job";
 
@@ -76,7 +86,7 @@ function reattachClient(args: {
       statusIds.push(jobId);
       return Promise.resolve(args.probe);
     },
-    fetchRecordAvailability: () => Promise.resolve({ available: false }),
+    fetchFinalRunStatus: () => Promise.resolve(SETTLED_WITH_NOTHING),
   };
   return { client, statusIds, streamedIds };
 }

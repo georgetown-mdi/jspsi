@@ -8,10 +8,20 @@ import {
 } from "@psi/jobClient/consoleJobAttachment";
 
 import type {
+  FinalRunStatus,
   JobApiClient,
   JobStatusProbe,
 } from "@psi/jobClient/serverJobExchangeDriver";
 import type { ConsoleJobAttachment } from "@psi/jobClient/consoleJobAttachment";
+
+/** What the post-terminal status read answers for a run these tests do not
+ * exercise it on: no record pair, no teardown report, and the exit already
+ * reconciled so the driver asks once and stops. */
+const SETTLED_WITH_NOTHING: FinalRunStatus = {
+  record: { available: false },
+  transportTeardownOverran: false,
+  exitReconciled: true,
+};
 
 const KEY = "psilink-console-last-job";
 
@@ -62,7 +72,7 @@ function scriptedDiscardClient(statuses: Array<JobStatusProbe>) {
       call++;
       return Promise.resolve(status);
     },
-    fetchRecordAvailability: () => Promise.resolve({ available: false }),
+    fetchFinalRunStatus: () => Promise.resolve(SETTLED_WITH_NOTHING),
   };
   return { client, order };
 }
@@ -201,7 +211,7 @@ describe("discardServerJob", () => {
       deleteJob: () => Promise.reject(new Error("delete failed")),
       fetchJobStatus: () =>
         Promise.resolve({ kind: "live", status: "succeeded" }),
-      fetchRecordAvailability: () => Promise.resolve({ available: false }),
+      fetchFinalRunStatus: () => Promise.resolve(SETTLED_WITH_NOTHING),
     };
 
     await discardServerJob(client, "job-x", NO_DELAY);

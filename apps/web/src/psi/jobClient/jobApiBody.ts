@@ -74,7 +74,7 @@ export const MAX_JOB_LISTING_RESPONSE_BYTES = 8 * 1024 ** 2;
  * `parseBoundedJson` enforces. The message is fixed text holding no body bytes.
  * Most callers catch it into their own
  * "unanswered"/"error" state; the two that let it propagate (`createJob` and
- * `fetchRecordAvailability` in serverJobExchangeDriver) already handle the
+ * `fetchFinalRunStatus` in serverJobExchangeDriver) already handle the
  * `SyntaxError` an unreadable body threw before, and classify this the same way.
  */
 export class JobApiBodyError extends Error {

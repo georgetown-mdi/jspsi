@@ -5,6 +5,8 @@
 // bounds is the close here and, where the result goes to stdout instead of a
 // path, the drain that hands it to the reader (util/dataIo).
 
+import { TEARDOWN_LEFTOVER_FILES_CLAUSE } from "@psilink/core";
+
 import type { ConnectionConfig } from "@psilink/core";
 
 import { settleWithinCeiling, type CeilingOutcome } from "./util/ceiling";
@@ -127,10 +129,10 @@ export function teardownCeilingNotice(
   const leftBehind =
     files.channel === "webrtc" || files.retainFiles
       ? ""
-      : ` Check the exchange directory and remove any protocol files this run ` +
-        `left there; deleting them is the part of the close that did not ` +
-        `finish, and passing --sweep-exchange-files to the next run removes ` +
-        `them before it meets the partner.`;
+      : ` Check the exchange directory and ${TEARDOWN_LEFTOVER_FILES_CLAUSE}; ` +
+        `deleting them is the part of the close that did not finish, and ` +
+        `passing --sweep-exchange-files to the next run removes them before ` +
+        `it meets the partner.`;
   const onDisk = files.outputsWritten
     ? `, and everything it writes is already on disk`
     : "";

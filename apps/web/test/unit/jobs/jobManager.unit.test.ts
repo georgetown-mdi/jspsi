@@ -51,7 +51,11 @@ import {
 } from "../../utils/jobFixtures";
 
 import type { BufferedEvent, JobRecord } from "@jobs/jobManager";
-import type { CliDriverHandlers, RelayEvent } from "@jobs/cliDriver";
+import type {
+  CliDriverHandlers,
+  CliRunDiagnostics,
+  RelayEvent,
+} from "@jobs/cliDriver";
 import type {
   JobFiledropExchangeIntent,
   JobInputFileReference,
@@ -224,6 +228,12 @@ async function waitForFile(filePath: string, timeoutMs = 5000): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
 }
+
+/** What a hand-driven terminal delivers for a run with no stderr of its own. */
+const NO_DIAGNOSTICS: CliRunDiagnostics = {
+  stderrTail: null,
+  transportTeardownOverran: false,
+};
 
 const RESULT_EVENT = { v: 1, type: "result", resultWritten: true };
 const ERROR_EVENT = {
@@ -520,7 +530,12 @@ describe("a synthesized persistence-loss terminal reaches the operator's alert",
       cancelJob: () => Promise.resolve(),
       deleteJob: () => Promise.resolve(),
       fetchJobStatus: () => Promise.resolve({ kind: "live", status: "failed" }),
-      fetchRecordAvailability: () => Promise.resolve({ available: false }),
+      fetchFinalRunStatus: () =>
+        Promise.resolve({
+          record: { available: false },
+          transportTeardownOverran: false,
+          exitReconciled: true,
+        }),
     };
     const failures: Array<{
       category: ExchangeErrorCategory;
@@ -696,7 +711,7 @@ describe("event cap fails the job", () => {
 
     handlers.onTerminal(
       { outcome: "succeeded", exitCode: 0, signal: null },
-      { stderrTail: null },
+      NO_DIAGNOSTICS,
     );
     expect(record.status).toBe("failed");
     const terminal = record.events[record.events.length - 1].event;
@@ -1798,7 +1813,7 @@ describe("the single exchange slot", () => {
     // The child's close frees the slot; a successor create then succeeds.
     handlersRef.current!.onTerminal(
       { outcome: "failed", exitCode: null, signal: "SIGKILL" },
-      { stderrTail: null },
+      NO_DIAGNOSTICS,
     );
     const secondId = await manager.createJob(validIntent());
     expect(secondId).not.toBe(firstId);
@@ -1867,7 +1882,7 @@ describe("occupiedSlotId reports the slot occupant", () => {
     // The child's close frees the slot; the probe then reads free.
     handlersRef.current!.onTerminal(
       { outcome: "failed", exitCode: null, signal: "SIGKILL" },
-      { stderrTail: null },
+      NO_DIAGNOSTICS,
     );
     expect(manager.occupiedSlotId()).toBeNull();
   });

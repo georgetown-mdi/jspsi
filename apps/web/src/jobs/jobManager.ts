@@ -263,6 +263,11 @@ interface JobView {
   receiptRequested: boolean;
   /** Whether this run wrote a dual-signed receipt and the file is on disk. */
   receiptAvailable: boolean;
+  /** Whether the run reported that its transport close left this party's
+   * protocol files in the shared exchange directory. False until the child's
+   * exit is reconciled, since the report comes after the run's own terminal
+   * event ({@link JobRecord.transportTeardownOverran}). */
+  transportTeardownOverran: boolean;
   /** The five servable file paths (result, record, keys, log, receipt) inside the
    * workdir. `logPath` is null for a run that captured no log, `receiptPath` for
    * one that signed nothing. */
@@ -309,6 +314,17 @@ export interface JobRecord {
   events: Array<BufferedEvent>;
   /** True once a terminal event has been buffered; the SSE stream closes after it. */
   terminalEmitted: boolean;
+  /**
+   * Whether the run reported protocol files its transport close left in the
+   * shared exchange directory ({@link CliRunDiagnostics.transportTeardownOverran}).
+   *
+   * Set when the child's exit is reconciled and only for a run that emitted its
+   * own terminal event: the report reaches this console on the stderr tail after
+   * that event, which for a synthesized terminal already rides its cause link.
+   * A client learns it from the status body, since the run's own terminal has
+   * closed the event stream by the time the report exists.
+   */
+  transportTeardownOverran: boolean;
   /** The reconciled terminal state, once the child has exited. */
   terminal: JobTerminalState | null;
   handle: CliDriverHandle | null;
@@ -975,6 +991,7 @@ export class JobManager {
       status: "running",
       events: [],
       terminalEmitted: false,
+      transportTeardownOverran: false,
       terminal: null,
       handle: null,
       listeners: new Set(),
@@ -1313,6 +1330,14 @@ export class JobManager {
    * run that emitted its own terminal event is synthesized nothing at all, so
    * no diagnosis reaches the operator twice.
    *
+   * A run that terminated itself and then reported protocol files left by an
+   * unfinished transport close puts that report on
+   * {@link JobRecord.transportTeardownOverran}, for the status body to hand a
+   * client: the report is on the tail this run's own terminal left unread, and
+   * that terminal has closed the event stream. A run whose terminal was
+   * synthesized states nothing there -- that terminal's cause link already holds
+   * the end of the tail, the report among it.
+   *
    * The only slot-release point besides the pre-spawn create failure: fires
    * on the child's `close` (or a spawn `error`), so a killed child is
    * confirmed dead before {@link maybeFreeSlot} frees the slot for a
@@ -1374,7 +1399,8 @@ export class JobManager {
             diagnostics.stderrTail,
           ),
         );
-    }
+    } else
+      record.transportTeardownOverran = diagnostics.transportTeardownOverran;
 
     this.maybeFreeSlot(record);
   }
@@ -1823,6 +1849,7 @@ function liveJobView(record: JobRecord): JobView {
     receiptRequested: record.receiptPath !== null,
     receiptAvailable:
       record.receiptPath !== null && jobFileExists(record.receiptPath),
+    transportTeardownOverran: record.transportTeardownOverran,
     outputPath: record.outputPath,
     recordPath: record.recordPath,
     keysPath: record.keysPath,

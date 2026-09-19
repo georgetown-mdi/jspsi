@@ -75,6 +75,10 @@ export type {
 // whether a path handed to safeDelete is the protocol's own in-flight temp
 // write.
 export { isProtocolTempName } from "./connection/fileSyncNames";
+// The teardown notice's leftover-files clause. Barrelled because both apps
+// outside this package handle it: the CLI writes the notice holding it, and the
+// console matches a run's stderr tail against it.
+export { TEARDOWN_LEFTOVER_FILES_CLAUSE } from "./transportTeardownNotice";
 export {
   ConnectionError,
   QueuedMessageConnection,
