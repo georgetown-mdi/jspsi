@@ -704,6 +704,11 @@ refusal itself is non-retryable and counts no partner miss, but a window that
 already found the partner absent before it still folds to `"missed"` under the
 table below.
 
+The record's own presence is read on that same per-attempt cadence: a record
+deleted while its window is being occupied stops the attempts after the delete,
+and that window is accounted for nowhere, there being no record left to write
+its bookkeeping onto.
+
 The window's disposition folds every attempt it took, written once for the window
 rather than once per attempt. A further disposition, `"skipped"`, is decided by
 the record rather than by an attempt and so never reaches this fold (see [A due
