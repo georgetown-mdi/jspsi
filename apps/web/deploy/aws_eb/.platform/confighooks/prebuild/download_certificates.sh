@@ -18,6 +18,13 @@ set -euo pipefail
 # .platform/hooks/prebuild/download_certificates.sh and
 # .platform/confighooks/prebuild/download_certificates.sh. Edit both copies
 # together.
+#
+# The confighooks copy covers that certificate-load failure on the
+# configuration-deployment path; it is not the route for installing a
+# certificate replaced in the bucket. A configuration-only deployment completed
+# cleanly and left the origin serving the certificate it already had (measured
+# 2026-09-17), so a replacement is installed by an application deployment --
+# docs/DEPLOYMENT.md, "Reinstalling the origin certificate", has the commands.
 
 echo "Downloading SSL certificates"
 
