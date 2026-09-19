@@ -4,9 +4,17 @@ import { spawnSync } from "node:child_process";
 
 import { describe, expect, it } from "vitest";
 
-import { redactConfigurationSettings } from "./redact.mjs";
+import { redactConfigurationSettings } from "../apps/web/deploy/aws_eb_saved_configurations/redact.mjs";
 
-const REDACT = join(dirname(fileURLToPath(import.meta.url)), "redact.mjs");
+const REDACT = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "apps",
+  "web",
+  "deploy",
+  "aws_eb_saved_configurations",
+  "redact.mjs",
+);
 
 const ACCOUNT_ID = "123456789012";
 

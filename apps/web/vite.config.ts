@@ -216,11 +216,6 @@ export default defineConfig((_configEnv) => {
             include: [
               "test/unit/**/*.{test,spec}.ts",
               "test/**/*.unit.{test,spec}.ts",
-              // The deploy tree's own scripts are tested beside the script
-              // rather than under test/, so the file a maintainer reads to
-              // learn what an export is rewritten into is the file that pins
-              // it.
-              "deploy/**/*.test.mjs",
             ],
             name: "unit",
             environment: "node",
