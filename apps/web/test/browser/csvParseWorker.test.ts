@@ -40,6 +40,27 @@ describe("CSV worker parse (real Vite-native worker)", () => {
     ]);
   });
 
+  test("the chosen delimiter reaches the worker and splits the fields", async () => {
+    // A caret is outside the set the parse detects from, so two fields come back
+    // only because the delimiter travelled to the worker and was applied there.
+    const csv = "id^value\n0^alpha\n1^beta\n";
+    const viaWorker = await loadCSVFileOffMainThread(
+      new File([csv], "data.csv", { type: "text/csv" }),
+      { spawnWorker: defaultSpawnCSVParseWorker, delimiter: "^" },
+    );
+    expect(viaWorker.meta.fields).toEqual(["id", "value"]);
+    expect(viaWorker.data).toEqual([
+      { id: "0", value: "alpha" },
+      { id: "1", value: "beta" },
+    ]);
+
+    const detected = await loadCSVFileOffMainThread(
+      new File([csv], "data.csv", { type: "text/csv" }),
+      { spawnWorker: defaultSpawnCSVParseWorker },
+    );
+    expect(detected.meta.fields).toEqual(["id^value"]);
+  });
+
   test("a core guard (the single-line byte ceiling) rejects inside the worker path", async () => {
     // A real core guard fires INSIDE the worker (loadCSVFile runs there unchanged) and
     // its rejection is serialized back and rebuilt into an Error -- so a malformed parse

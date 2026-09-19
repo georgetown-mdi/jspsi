@@ -231,6 +231,10 @@ export interface AcceptorLaunch {
    * for the same reason and unused on the browser path, which produces no CLI
    * config and signs no receipt. */
   receipts?: ReceiptsIntentFields;
+  /** The field delimiter this party's file was read by at the consent gate,
+   * written into its own result file so that file reads back the way its input
+   * did. Undefined writes commas, core's default for a party that named none. */
+  csvDelimiter?: string;
 }
 
 /** Resolve an {@link AcceptorLaunchSource} to the driver's {@link JobInputSource}:
@@ -391,10 +395,15 @@ export function useAcceptorExchange({
     // mid-build revokes its own partial URLs (see buildRunOutputs).
     const generateOutput: GenerateOutput<RunOutputs> = (result, prepared) => {
       log.info("linkage complete, generating results and record files");
-      return buildRunOutputs(result, prepared, {
-        create: (blob) => window.URL.createObjectURL(blob),
-        revoke: (url) => window.URL.revokeObjectURL(url),
-      });
+      return buildRunOutputs(
+        result,
+        prepared,
+        {
+          create: (blob) => window.URL.createObjectURL(blob),
+          revoke: (url) => window.URL.revokeObjectURL(url),
+        },
+        current.csvDelimiter,
+      );
     };
 
     // The acceptor is the PSI initiator: it awaits the WASM library EARLY, to

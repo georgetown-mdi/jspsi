@@ -156,6 +156,8 @@ export interface ExchangeFileInput {
   retentionDisposition?: string;
   /** See {@link ExchangeSpecAssembly.includeOwnColumns}. */
   includeOwnColumns?: OwnColumnSelection;
+  /** See {@link ExchangeSpecAssembly.csvDelimiter}. */
+  csvDelimiter?: string;
 }
 
 /**
@@ -221,6 +223,16 @@ interface ExchangeSpecAssembly {
    * than at the run.
    */
   includeOwnColumns?: OwnColumnSelection;
+  /**
+   * The field delimiter this party reads its own CSV by and writes its result
+   * file with. Per-party and local like {@link retentionDisposition}: the two
+   * parties' files need not agree on it, and neither reads the other's. Omit
+   * the field to read by the delimiter the file itself shows and write commas.
+   *
+   * Graded by the spec schema against the accepted set (`csvDelimiter.ts`), so
+   * an assembly holding a value outside it throws here.
+   */
+  csvDelimiter?: string;
 }
 
 /**
@@ -268,6 +280,9 @@ export function assembleExchangeSpec(
       : {}),
     ...(input.includeOwnColumns !== undefined
       ? { includeOwnColumns: input.includeOwnColumns }
+      : {}),
+    ...(input.csvDelimiter !== undefined
+      ? { csvDelimiter: input.csvDelimiter }
       : {}),
   };
   return ExchangeSpecSchema.parse(assembled);

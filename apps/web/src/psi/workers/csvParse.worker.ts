@@ -28,13 +28,15 @@ const scope = globalThis as unknown as WorkerScope;
 async function parseAndReply(
   file: File,
   byteCeiling: number | undefined,
+  delimiter: string | undefined,
 ): Promise<void> {
   try {
-    // loadCSVFile applies its own byteCeiling default when this is undefined. It runs
+    // loadCSVFile applies its own byteCeiling default when this is undefined, and
+    // detects the field delimiter when `delimiter` is. It runs
     // to completion here -- including the non-string-header guard -- BEFORE any batch is
     // posted, so a parse failure throws into the catch below and posts the serialized
     // error as the only message.
-    const result = await loadCSVFile(file, byteCeiling);
+    const result = await loadCSVFile(file, byteCeiling, delimiter);
     // Stream the rows back in batches so the main thread deserializes the reply in many
     // small, interruptible steps rather than one clone of the whole array. loadCSVFile
     // stays the parse boundary; only its already-complete result is chunked for transit.
@@ -69,6 +71,6 @@ async function parseAndReply(
 }
 
 scope.onmessage = (event) => {
-  const { file, byteCeiling } = event.data;
-  void parseAndReply(file, byteCeiling);
+  const { file, byteCeiling, delimiter } = event.data;
+  void parseAndReply(file, byteCeiling, delimiter);
 };

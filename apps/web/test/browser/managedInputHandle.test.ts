@@ -60,10 +60,11 @@ const linkageTerms = getDefaultLinkageTerms(
 );
 
 /** The standing exchange-file document a managed record persists. */
-function standingExchangeFile(): ExchangeSpec {
+function standingExchangeFile(csvDelimiter?: string): ExchangeSpec {
   return assembleExchangeSpec({
     connection: connectionFromLocator(webrtcLocator),
     linkageTerms,
+    ...(csvDelimiter !== undefined ? { csvDelimiter } : {}),
   });
 }
 
@@ -280,6 +281,35 @@ describe("acquireValidatedManagedInput: column-shape guard on each path", () => 
       },
     );
     expect(acquired.columns[0]).toBe("ssn");
+  });
+
+  test("reads a run's input by the delimiter the stored document states", async () => {
+    // The delimiter is a caret, outside the set the parse detects from, so the
+    // columns satisfy the standing terms only because the stored value reached
+    // the read -- what an unattended run depends on, with nobody to choose.
+    const handle = await trackedOpfsFile(
+      "managed-input-caret.csv",
+      "ssn^first_name^last_name^date_of_birth\n" +
+        "123456789^ADA^LOVELACE^01/01/1990\n",
+    );
+    const acquired = await acquireValidatedManagedInput(
+      standingExchangeFile("^"),
+      { kind: "handle", handle, attendance: "unattended" },
+    );
+    expect(acquired.columns).toEqual([
+      "ssn",
+      "first_name",
+      "last_name",
+      "date_of_birth",
+    ]);
+    expect(acquired.rows).toEqual([
+      {
+        ssn: "123456789",
+        first_name: "ADA",
+        last_name: "LOVELACE",
+        date_of_birth: "01/01/1990",
+      },
+    ]);
   });
 
   test("rejects a drifted file read through a handle (columns rejection)", async () => {

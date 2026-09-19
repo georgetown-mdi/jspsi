@@ -159,6 +159,14 @@ export interface ManagedExchangeDocumentParts {
    * where the terms leave it nothing to act on.
    */
   includeOwnColumns?: ExchangeSpec["includeOwnColumns"];
+  /**
+   * The field delimiter this party read its own file by at the file step,
+   * held verbatim so a scheduled re-run reads the same file the same way and
+   * writes its result the same way. Local: it moves no term, and the
+   * partner's own file is read by whatever that party chose. Absent where
+   * the operator left the delimiter to detection.
+   */
+  csvDelimiter?: ExchangeSpec["csvDelimiter"];
 }
 
 /**
@@ -210,6 +218,9 @@ export function composeManagedDocument(
     ...(outboundPayloadConsent !== undefined ? { outboundPayloadConsent } : {}),
     ...(parts.includeOwnColumns !== undefined
       ? { includeOwnColumns: parts.includeOwnColumns }
+      : {}),
+    ...(parts.csvDelimiter !== undefined
+      ? { csvDelimiter: parts.csvDelimiter }
       : {}),
   });
 }

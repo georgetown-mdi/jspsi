@@ -130,6 +130,42 @@ describe("composeManagedExchangeFile", () => {
   });
 });
 
+describe("the stored field delimiter", () => {
+  test("a chosen delimiter is composed into the stored document and survives a read", () => {
+    const record = buildManagedExchangeRecord(
+      newExchange({
+        exchangeFile: composeManagedExchangeFile({
+          connection: webrtcLocator,
+          linkageTerms,
+          csvDelimiter: "|",
+        }),
+      }),
+    );
+    expect(record.exchangeFile.csvDelimiter).toBe("|");
+    expect(parseManagedExchangeRecord(record).exchangeFile.csvDelimiter).toBe(
+      "|",
+    );
+  });
+
+  test("a record written before the field existed reads back with none", () => {
+    // Every stored record predating the choice holds no delimiter; it must read
+    // back unchanged, leaving its runs to detect one as they always have.
+    const record = buildManagedExchangeRecord(newExchange());
+    expect(record.exchangeFile).not.toHaveProperty("csvDelimiter");
+    expect(parseManagedExchangeRecord(record)).toEqual(record);
+  });
+
+  test("a delimiter outside the accepted set is refused at composition", () => {
+    expect(() =>
+      composeManagedExchangeFile({
+        connection: webrtcLocator,
+        linkageTerms,
+        csvDelimiter: '"',
+      }),
+    ).toThrow();
+  });
+});
+
 describe("buildManagedExchangeRecord", () => {
   test("assigns a fresh id and the v1 schemaVersion", () => {
     const record = buildManagedExchangeRecord(newExchange());

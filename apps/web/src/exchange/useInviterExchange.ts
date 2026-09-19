@@ -469,6 +469,7 @@ export function useInviterExchange({
   invitation,
   inviterName,
   channel,
+  csvDelimiter,
   inputSource,
   sftpConfigured,
   options,
@@ -481,6 +482,10 @@ export function useInviterExchange({
    * this run builds. A live run only ever starts for a channel the selector maps
    * to a live kind; the owner withholds the invitation for a save-file channel. */
   channel: Transport;
+  /** The field delimiter this party chose for its own file, written into its own
+   * result file so that file reads back the way its input did. Undefined writes
+   * commas, core's default for a party that named none. */
+  csvDelimiter?: string;
   /** Where the console reads this party's input from on a server-job run
    * ({@link JobInputSource}): the console picker's mounted-file reference. Undefined
    * on the browser path, which re-parses the retained rows off the minted invitation
@@ -600,10 +605,15 @@ export function useInviterExchange({
     // mid-build revokes its own partial URLs (see buildRunOutputs).
     const generateOutput: GenerateOutput<RunOutputs> = (result, prepared) => {
       log.info("linkage complete, generating results and record files");
-      return buildRunOutputs(result, prepared, {
-        create: (blob) => window.URL.createObjectURL(blob),
-        revoke: (url) => window.URL.revokeObjectURL(url),
-      });
+      return buildRunOutputs(
+        result,
+        prepared,
+        {
+          create: (blob) => window.URL.createObjectURL(blob),
+          revoke: (url) => window.URL.revokeObjectURL(url),
+        },
+        csvDelimiter,
+      );
     };
 
     // The inviter is the PSI responder: it must attach its inbound listener

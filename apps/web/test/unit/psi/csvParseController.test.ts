@@ -104,6 +104,19 @@ describe("loadCSVFileOffMainThread: inline fallback", () => {
     expect(result.data).toEqual([{ a: "1", b: "2" }]);
     expect(result.meta.fields).toEqual(["a", "b"]);
   });
+
+  test("splits fields on the chosen delimiter rather than detecting one", async () => {
+    // A caret is outside the set the parse detects from, so the same source
+    // reads as two fields only because the delimiter was named.
+    const source = "a^b\n1^2\n";
+    const chosen = await loadCSVFileOffMainThread(Readable.from(source), {
+      delimiter: "^",
+    });
+    expect(chosen.meta.fields).toEqual(["a", "b"]);
+    expect(chosen.data).toEqual([{ a: "1", b: "2" }]);
+    const detected = await loadCSVFileOffMainThread(Readable.from(source));
+    expect(detected.meta.fields).toEqual(["a^b"]);
+  });
 });
 
 describe("shouldParseOffThread: the routing predicate", () => {
@@ -147,9 +160,25 @@ describe("loadCSVFileOffMainThread: worker dispatch", () => {
       byteCeiling: 4096,
     });
     expect(out).toEqual(OK_RESULT);
-    expect(fake.received).toEqual([{ file, byteCeiling: 4096 }]);
+    expect(fake.received).toEqual([
+      { file, byteCeiling: 4096, delimiter: undefined },
+    ]);
     // One-shot: the worker is torn down as soon as the terminal message arrives.
     expect(fake.terminated).toBe(true);
+  });
+
+  test("posts the chosen delimiter, so the off-thread parse splits on it", async () => {
+    const fake = new FakeCSVParseWorker(
+      streamedReply(OK_RESULT, [OK_RESULT.data]),
+    );
+    const file = new File(["a^b\n1^2\n"], "d.csv", { type: "text/csv" });
+    await loadCSVFileOffMainThread(file, {
+      spawnWorker: () => fake,
+      delimiter: "^",
+    });
+    expect(fake.received).toEqual([
+      { file, byteCeiling: undefined, delimiter: "^" },
+    ]);
   });
 
   test("reassembles a multi-batch reply to the same rows and fields as a single batch", async () => {

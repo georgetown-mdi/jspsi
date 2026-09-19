@@ -1,4 +1,11 @@
-import { Fragment, useEffect, useMemo, useReducer, useRef } from "react";
+import {
+  Fragment,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from "react";
 
 import { Alert, VisuallyHidden } from "@mantine/core";
 import { IconAlertCircle } from "@tabler/icons-react";
@@ -37,6 +44,10 @@ import { loadCSVFileOffMainThread } from "@psi/workers/csvParseController";
 import { isConsoleBuild, psilinkVersion } from "@utils/clientConfig";
 import { whenDiagnostic } from "@utils/diagnostics";
 
+import {
+  DETECTED_CSV_DELIMITER_CHOICE,
+  resolveCsvDelimiter,
+} from "@components/csvDelimiterChoice";
 import {
   coverageProvider,
   useNonEmptyRates,
@@ -164,6 +175,7 @@ import type {
 import type { AlertContent } from "@components/csvIntake";
 import type { CliTransport } from "./saveExchangeModel";
 import type { CoverageInput } from "@components/useNonEmptyRates";
+import type { CsvDelimiterChoice } from "@components/csvDelimiterChoice";
 import type { JobInputSource } from "@psi/jobClient/serverJobExchangeDriver";
 import type { ProfiledJobInput } from "@psi/jobClient/workInputClient";
 
@@ -337,6 +349,29 @@ export function InviterScreen() {
     sourceHandle,
   } = screenState;
 
+  // How this party's own file is read and its own result file written. Local
+  // component state rather than reducer state: nothing derived from the read
+  // depends on it, and every consumer takes the resolved character.
+  const [delimiterChoice, setDelimiterChoice] = useState<CsvDelimiterChoice>(
+    DETECTED_CSV_DELIMITER_CHOICE,
+  );
+  const delimiterResolution = resolveCsvDelimiter(delimiterChoice);
+  const csvDelimiter = delimiterResolution.ok
+    ? delimiterResolution.delimiter
+    : undefined;
+
+  // A file already read is read again by the new delimiter: its rows, columns,
+  // and the terms derived from them all come out of the parse, so keeping the
+  // previous reading would mint terms for columns the run does not see. A
+  // refused choice reads nothing -- the field states the refusal and the intake
+  // is closed until it resolves.
+  function changeDelimiter(choice: CsvDelimiterChoice) {
+    setDelimiterChoice(choice);
+    const resolution = resolveCsvDelimiter(choice);
+    if (!resolution.ok || sourceFile === undefined) return;
+    void readFile(sourceFile, resolution.delimiter);
+  }
+
   // Fetch the console's authored SFTP connection once on a console build; one
   // fetch per console serves the session, and the default transport reads its
   // presence (SFTP when authored, else the filedrop save-a-file card). The helper
@@ -431,6 +466,7 @@ export function InviterScreen() {
     options: runOptions,
     runDiagnostics: runDiagnosticsIntentFields(runDiagnostics),
     receipts: receiptsIntentFields(receipts),
+    ...(csvDelimiter !== undefined ? { csvDelimiter } : {}),
   });
 
   // The coverage input, unified across builds: the browser's parsed rows on the
@@ -554,6 +590,7 @@ export function InviterScreen() {
               ...(invitation.includeOwnColumns !== undefined
                 ? { includeOwnColumns: invitation.includeOwnColumns }
                 : {}),
+              ...(csvDelimiter !== undefined ? { csvDelimiter } : {}),
             },
             connection,
             sharedSecret: invitation.sharedSecret,
@@ -698,7 +735,14 @@ export function InviterScreen() {
     mounted.current = true;
   }, [section]);
 
-  async function readFile(file: File, seed?: { name: string }) {
+  // The delimiter is a parameter rather than read off state inside: a re-read
+  // fired from the control itself runs with the choice that fired it, not with
+  // whatever the state had settled to by the time the read began.
+  async function readFile(
+    file: File,
+    delimiter: string | undefined,
+    seed?: { name: string },
+  ) {
     const id = ++parseId.current;
     parseAbort.current?.abort();
     const controller = new AbortController();
@@ -711,6 +755,7 @@ export function InviterScreen() {
     try {
       const result = await loadCSVFileOffMainThread(file, {
         signal: controller.signal,
+        ...(delimiter !== undefined ? { delimiter } : {}),
       });
       if (id !== parseId.current) return;
       const columns = result.meta.fields ?? [];
@@ -835,7 +880,10 @@ export function InviterScreen() {
   // a sample inviter name so step 1 lands complete. The mint path stays
   // demo-free -- from here the visitor drives every real step by hand.
   function loadSample() {
-    void readFile(sampleInviterFile(), { name: SAMPLE_INVITER_NAME });
+    setDelimiterChoice(DETECTED_CSV_DELIMITER_CHOICE);
+    void readFile(sampleInviterFile(), undefined, {
+      name: SAMPLE_INVITER_NAME,
+    });
   }
 
   // Clear the sample back to a fresh exchange: drop the read, the derived terms,
@@ -973,6 +1021,7 @@ export function InviterScreen() {
         metadata: editor.draft.metadata,
         standardization: editor.draft.standardization,
         includeOwnColumns: editor.draft.includeOwnColumns ?? "none",
+        ...(csvDelimiter !== undefined ? { csvDelimiter } : {}),
         ...(connectionEndpoint !== undefined ? { connectionEndpoint } : {}),
         retainsFiles: declaresRetainedFiles,
       });
@@ -1070,14 +1119,16 @@ export function InviterScreen() {
         metadata: editor.draft.metadata,
         standardization: editor.draft.standardization,
         includeOwnColumns: editor.draft.includeOwnColumns ?? "none",
+        ...(csvDelimiter !== undefined ? { csvDelimiter } : {}),
         connectionEndpoint: endpointRequestFor(cliTransport, saveFields),
       });
       // Mint the config from the SAME invitation the code came from; a
       // ZodError here (a malformed locator the endpoint schema also rejects)
       // aborts before any download, so a code is never displayed with no file.
-      const yaml = mintExchangeFile(
-        exchangeFileInputFor(cliTransport, saveFields, minted),
-      );
+      const yaml = mintExchangeFile({
+        ...exchangeFileInputFor(cliTransport, saveFields, minted),
+        ...(csvDelimiter !== undefined ? { csvDelimiter } : {}),
+      });
       const fileName = exchangeFileName(new Date());
       triggerBlobDownload(fileName, yaml, "application/yaml");
       dispatch({
@@ -1279,7 +1330,9 @@ export function InviterScreen() {
           <YourFileSection
             name={name}
             onNameChange={updateName}
-            onFile={(file) => void readFile(file)}
+            onFile={(file) => void readFile(file, csvDelimiter)}
+            delimiter={delimiterChoice}
+            onDelimiterChange={changeDelimiter}
             reading={reading}
             acquired={acquired}
             linkable={linkable}

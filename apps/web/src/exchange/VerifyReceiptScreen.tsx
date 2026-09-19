@@ -20,6 +20,11 @@ import {
   verifyExchangeRecord,
 } from "@psilink/core";
 
+import {
+  DETECTED_CSV_DELIMITER_CHOICE,
+  resolveCsvDelimiter,
+} from "@components/csvDelimiterChoice";
+import { CsvDelimiterField } from "@components/CsvDelimiterField";
 import { DisclosureSection } from "@components/DisclosureSection";
 import { MAX_CSV_FILE_BYTES } from "@components/csvIntake";
 import { importLinkageTerms } from "@psi/linkageTermsIO";
@@ -325,6 +330,11 @@ export function VerifyReceiptScreen() {
   // to text now and rewrapped into a fresh File at each run.
   const [inputCsv, setInputCsv] = useState<File>();
   const [resultCsv, setResultCsv] = useState<File>();
+  // The delimiter both re-supplied files are read by: the result was written
+  // with the input's own delimiter, so one choice covers the pair.
+  const [delimiterChoice, setDelimiterChoice] = useState(
+    DETECTED_CSV_DELIMITER_CHOICE,
+  );
   const [localTerms, setLocalTerms] = useState<LinkageTerms>();
   const [partnerTerms, setPartnerTerms] = useState<LinkageTerms>();
 
@@ -459,8 +469,17 @@ export function VerifyReceiptScreen() {
   const signedReady = signedRecord?.record !== undefined;
   // A malformed pin gates the run rather than reaching the verification, where
   // it would be reported as a partner certificate that does not match.
+  // A delimiter the rule refuses gates the run rather than reading the files by
+  // a delimiter nobody chose, which would report every commitment as unopened.
+  const delimiterResolution = resolveCsvDelimiter(delimiterChoice);
+  const csvDelimiter = delimiterResolution.ok
+    ? delimiterResolution.delimiter
+    : undefined;
   const canVerify =
-    (recordReady || signedReady) && pinProblem === undefined && !verifying;
+    (recordReady || signedReady) &&
+    pinProblem === undefined &&
+    delimiterResolution.ok &&
+    !verifying;
 
   async function runVerify() {
     if (!recordReady && !signedReady) return;
@@ -484,8 +503,10 @@ export function VerifyReceiptScreen() {
         let data: Awaited<ReturnType<typeof reconstructCommittedData>>["data"] =
           {};
         if (inputCsv !== undefined && resultCsv !== undefined) {
-          const inputParse = await loadCSVFileOffMainThread(inputCsv);
-          const resultParse = await loadCSVFileOffMainThread(resultCsv);
+          const readBy =
+            csvDelimiter !== undefined ? { delimiter: csvDelimiter } : {};
+          const inputParse = await loadCSVFileOffMainThread(inputCsv, readBy);
+          const resultParse = await loadCSVFileOffMainThread(resultCsv, readBy);
           const result = toRetainedResult(resultParse);
           const ourIdColumn = deriveOurIdColumn(
             result.headers,
@@ -739,6 +760,13 @@ export function VerifyReceiptScreen() {
               hint="The result file you retained from this exchange"
               chosen={resultCsv}
               onFile={(file) => onCsvFile(file, setResultCsv)}
+            />
+            <CsvDelimiterField
+              choice={delimiterChoice}
+              onChange={(choice) => {
+                invalidateVerdicts();
+                setDelimiterChoice(choice);
+              }}
             />
             {oneCsvSupplied && <OneCsvWarning />}
             {/* Keyed by the exchange: a new record or keys file remounts these,

@@ -420,6 +420,11 @@ export async function generateInvitation(params: {
    * parse boundary). The terms are derived from its columns. Exactly one of `file`
    * or `profiledColumns` is set. */
   file?: InvitationCSVInput;
+  /** The field delimiter `file` is read by -- the one the intake step read it by,
+   * so the columns this mint binds are the columns the operator saw. Omitted to
+   * read by the delimiter the file itself shows. Unused on the profiled-columns
+   * path, which parses nothing here. */
+  csvDelimiter?: string;
   /**
    * The column names profiled server-side for a console server-job transport
    * -- the alternative to `file`. When supplied, the invitation binds to
@@ -516,6 +521,7 @@ export async function generateInvitation(params: {
   const {
     inviterName,
     file,
+    csvDelimiter,
     profiledColumns,
     location,
     lifetimeSeconds = INVITATION_LIFETIME_SECONDS,
@@ -562,7 +568,9 @@ export async function generateInvitation(params: {
   let sanitizedPositions: Array<number> = [];
   if (file !== undefined) {
     try {
-      const csvResult = await loadCSVFileOffMainThread(file);
+      const csvResult = await loadCSVFileOffMainThread(file, {
+        ...(csvDelimiter !== undefined ? { delimiter: csvDelimiter } : {}),
+      });
       rawRows = csvResult.data;
       columns = csvResult.meta.fields ?? [];
       sanitizedPositions = csvResult.meta.sanitizedColumnPositions;

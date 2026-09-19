@@ -13,6 +13,7 @@ import "@mantine/core/styles.css";
 
 import {
   CONFIRMING_PROTOCOL_STAGE_ID,
+  csvDelimiterRefusal,
   encodeInvitation,
   generateSharedSecret,
   getDefaultLinkageTerms,
@@ -222,4 +223,76 @@ test("acceptor journey reaches Done with a downloadable result driven only throu
   // driver to the stub.
   expect(settledRun.capturedSignal).toBeDefined();
   expect(settledRun.capturedSignal?.aborted).toBe(false);
+});
+
+test("a file the operator names a delimiter for runs the same journey to a result", async () => {
+  window.location.hash = await encodeRunToken();
+  app.render(createElement(AcceptorScreen));
+
+  await userEvent.click(
+    page.getByRole("button", { name: "Continue: consent & your file" }),
+  );
+
+  // A caret is outside the set the parse detects from, so this file reaches the
+  // columns step as two columns only because the operator named its separator
+  // at the intake -- and the run reaches Done on it.
+  await userEvent.selectOptions(
+    page.getByRole("combobox", { name: "How your file separates fields" }),
+    "other",
+  );
+  await userEvent.fill(page.getByLabelText("Field separator character"), "^");
+  const fileInput = document.querySelector('input[type="file"]');
+  await userEvent.upload(
+    page.elementLocator(fileInput as HTMLElement),
+    csvFile("first_name^last_name\nAlice^Smith\n"),
+  );
+  await userEvent.click(page.getByRole("checkbox"));
+  await userEvent.fill(page.getByLabelText("Your name"), "Sam Alvarez");
+  await userEvent.click(
+    page.getByRole("button", { name: "Accept and continue" }),
+  );
+
+  await expect
+    .element(page.getByRole("heading", { name: "Confirm your columns" }))
+    .toBeInTheDocument();
+  await expect
+    .element(page.getByText("All 2 keys can match"))
+    .toBeInTheDocument();
+
+  await userEvent.click(
+    page.getByRole("button", { name: "Start the exchange" }),
+  );
+
+  await expect
+    .element(page.getByRole("heading", { level: 1 }))
+    .toHaveTextContent("Exchange complete");
+  const resultLink = Array.from(
+    document.querySelectorAll<HTMLAnchorElement>("a[download]"),
+  ).find((link) => link.textContent === "results.csv");
+  expect(resultLink?.getAttribute("href")).toBe(journeyResultsUrl);
+});
+
+test("a separator the rule refuses holds the accept and states the rule", async () => {
+  window.location.hash = await encodeRunToken();
+  app.render(createElement(AcceptorScreen));
+
+  await userEvent.click(
+    page.getByRole("button", { name: "Continue: consent & your file" }),
+  );
+  await userEvent.selectOptions(
+    page.getByRole("combobox", { name: "How your file separates fields" }),
+    "other",
+  );
+  await userEvent.fill(page.getByLabelText("Field separator character"), '"');
+  await userEvent.click(page.getByRole("checkbox"));
+  await userEvent.fill(page.getByLabelText("Your name"), "Sam Alvarez");
+
+  // The refusal is the one core states, and the accept is held rather than
+  // failing later as a file that cannot back the terms.
+  await expect
+    .element(page.getByText(csvDelimiterRefusal('"'), { exact: false }))
+    .toBeInTheDocument();
+  await expect
+    .element(page.getByRole("button", { name: "Accept and continue" }))
+    .toBeDisabled();
 });
