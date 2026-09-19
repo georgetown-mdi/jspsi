@@ -98,13 +98,13 @@ These are the instance's own disk copies. A deployment that streams the same log
 
 The project runs one public deployment of the web application, for evaluation and demonstration rather than production exchanges of real records; [SHARED_RESPONSIBILITY.md](SHARED_RESPONSIBILITY.md#responsibility-split-hosted-web-application) states what operating it takes on. This section is about that deployment alone. An agency deploying the web application itself configures the reference above and owns every setting in it.
 
-Two environments run the same application, a staging one and a production one, each a single Elastic Beanstalk instance behind a Cloudflare front. Their environment configuration is kept in the repository as an exported saved configuration per environment, under [`apps/web/deploy/aws_eb_saved_configurations/`](../apps/web/deploy/aws_eb_saved_configurations/README.md), so a console change that nobody wrote down is a diff rather than a discovery. That directory's README holds the export route, the file expected for each environment, and the form the inbound rules take. The settings no export carries -- everything on the Cloudflare side, and the rule list of the shared security group -- are recorded below instead.
+Two environments run the same application, a staging one and a production one, each a single Elastic Beanstalk instance behind a Cloudflare front. Their environment configuration is kept in the repository as one exported file per environment -- `production.json` and `staging.json` under [`apps/web/deploy/aws_eb_saved_configurations/`](../apps/web/deploy/aws_eb_saved_configurations/README.md) -- so a console change that nobody wrote down is a diff rather than a discovery. Each file is an `aws elasticbeanstalk describe-configuration-settings` response rewritten by the `redact.mjs` script beside it, which replaces the account id, the application and environment names, the notification address and the EC2 key name and keeps every other value as exported; that directory's README holds the refresh commands, what each placeholder replaces, and the form the inbound rules take. The settings no export carries -- everything on the Cloudflare side, and the rule list of the shared security group -- are recorded below instead.
 
 ### Refreshing the configuration after a console change
 
 A setting changed in a console, or by an `update-environment` call, is invisible to the repository until someone exports it. So a console change is finished when the repository states it:
 
-1. Re-export the saved configuration for every environment the change touched, by the route in that README, and commit the result. A change to something the two environments share -- the instance profile, the shared security group, the certificate objects -- touches both.
+1. Re-export every environment the change touched, run it through `redact.mjs`, commit the result, and read the diff -- the commands are in that README. A change to something the two environments share -- the instance profile, the shared security group, the certificate objects -- touches both.
 2. Update the recorded values below for anything an export does not carry, and move its measurement date to the date the change landed.
 3. For a Cloudflare-side change there is nothing to export: the recorded values below are the whole record, and updating them is the step.
 
@@ -112,7 +112,8 @@ A setting changed in a console, or by an `update-environment` call, is invisible
 
 Applying means replaying a checked-in configuration onto an environment -- after recreating one, or to put a drifted one back. It is a separate path from deploying the application: [`eb_deploy.yaml`](../.github/workflows/eb_deploy.yaml) creates an application version from the pushed commit and calls `update-environment --version-label`, and reads nothing from the saved-configuration directory.
 
-- A saved configuration is applied by uploading it as a configuration template for the application and then updating the environment against that template. No apply has been run from this repository yet, so the first one is also the verification of the exact commands: run it against staging, and correct the README with what the tool accepted.
+- The option settings of a committed file are applied either as a configuration template for the application that the environment is then updated against, or as the option settings of an `update-environment` call. No apply has been run from this repository yet, so the first one is also the verification of the exact commands: run it against staging, and correct the README with what the tool accepted.
+- Substitute the replaced identifiers back before applying. A committed file states them as placeholders, which no AWS call accepts.
 - Read the file before applying it. An export is a snapshot of the whole environment configuration, so applying an older one replays every other setting that has changed since as well.
 - Applying a configuration is a configuration deployment, which does not reinstall the origin certificate. That route is below.
 
@@ -131,7 +132,7 @@ That measured behavior bounds what the second copy of the hook is good for. `dow
 
 Three measurement passes on 2026-09-17 established the values this document and the assurance documents rest on: a pass that measured the environment against the responsibility rows, a pass that took the public path to HTTPS end to end, and a pass that put the log window in force. Their records are maintainer notes held outside this repository; each row below names the pass it comes from, and a later measurement replaces the row and its date rather than being added beside it.
 
-Identifiers the deploy workflow keeps as a secret or a variable -- the AWS account id, the application and environment names, the region, the public names, and the ids of the security groups and instance profile -- are deliberately not recorded here. What the assurance documents rest on is the settings.
+The identifiers the deploy workflow keeps as a secret or a variable -- the AWS account id, the application and environment names, and the public names -- are not recorded here, and the committed configuration files replace the account id and the two names wherever an export states them. What the assurance documents rest on is the settings.
 
 | Setting                    | Recorded value, measured 2026-09-17                                                                                                                                                                                                                     | Pass                     |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
