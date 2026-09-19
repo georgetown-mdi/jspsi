@@ -67,7 +67,7 @@ export function CsvDelimiterField({
           mt="xs"
           w="20rem"
           label="Field separator character"
-          description="One character; write a tab as tab."
+          description="One character; write a tab as tab, or detect to take it from the file."
           value={choice.other}
           disabled={disabled}
           error={resolution.ok ? undefined : resolution.refusal}

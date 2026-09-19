@@ -2244,8 +2244,8 @@ function csvDelimiterLabel(delimiter: string): string {
  */
 function recordedCsvDelimiterEffect(configured: string): string {
   return configured === CSV_DELIMITER_DETECT
-    ? "takes the delimiter from the file itself and writes commas, the " +
-        `csv_delimiter (${CSV_DELIMITER_DETECT}) that file records`
+    ? `follows the csv_delimiter (${CSV_DELIMITER_DETECT}) that file records: ` +
+        "it takes the delimiter from the file itself and writes commas"
     : "reads and writes by the csv_delimiter " +
         `(${csvDelimiterLabel(configured)}) that file records`;
 }

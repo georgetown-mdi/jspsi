@@ -1440,16 +1440,17 @@ test("handler: --csv-delimiter replaces the configuration's value for that run",
 test("handler: the report over a detect configuration states detection, not a write by the word", async () => {
   // A detect configuration's later runs take the delimiter from the file and
   // write commas, so the report must not promise a write by a word that names no
-  // character.
+  // character. The recorded value comes first, before what it does, so the
+  // sentence reads in one pass.
   expect(await delimiterReachingTheRun("detect", "|")).toBe("|");
   const reported = mockState.warnings.filter((m) =>
     m.includes("--csv-delimiter"),
   );
   expect(reported).toHaveLength(1);
   expect(reported[0]).toContain(
-    "takes the delimiter from the file itself and writes commas",
+    "follows the csv_delimiter (detect) that file records: it takes the " +
+      "delimiter from the file itself and writes commas",
   );
-  expect(reported[0]).toContain("csv_delimiter (detect)");
   expect(reported[0]).not.toContain("reads and writes by");
 });
 

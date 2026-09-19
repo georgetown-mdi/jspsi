@@ -39,6 +39,7 @@ import {
   parseSignedRecordDocument,
   pinnedFingerprintProblem,
   signedVerdictViewModel,
+  singleColumnReadNotes,
   verdictViewModel,
   verifySignedRecord,
 } from "./verifyReceiptModel";
@@ -519,7 +520,13 @@ export function VerifyReceiptScreen() {
             ourIdColumn,
           });
           data = reconstructed.data;
-          recordWarnings = reconstructed.warnings;
+          recordWarnings = [
+            ...reconstructed.warnings,
+            ...singleColumnReadNotes(
+              inputParse.meta.fields ?? [],
+              result.headers,
+            ),
+          ];
         }
         recordReport = await verifyExchangeRecord(parsedRecord, keys.keys, {
           data,
