@@ -275,6 +275,30 @@ test("the mint seat's keyless refusal asks the operator to declare, not to agree
   );
 });
 
+test("a keyless refusal over a one-column CSV states the delimiter remedy", () => {
+  const links = refusalLinks(["given,family,dob"], {
+    ...dobTerms(),
+    linkageKeys: [],
+  });
+  expect(links[0]).toContain("declare no linkage key");
+  expect(links[0]).toContain("single column");
+  expect(links[0]).toContain("CSV delimiter");
+  expect(links[0]).toContain("detect");
+  // The clause closes the message, so the link it is joined to must not carry
+  // the space the clause leaves for a following sentence.
+  expect(links[0]).not.toMatch(/ $/);
+});
+
+test("a keyless refusal over a multi-column CSV states no delimiter remedy", () => {
+  const links = refusalLinks(["given", "family", "dob"], {
+    ...dobTerms(),
+    linkageKeys: [],
+  });
+  expect(links[0]).toContain("declare no linkage key");
+  expect(links[0]).not.toContain("single column");
+  expect(links[0]).not.toContain("detect");
+});
+
 test("terms declaring no linkage key at all are refused", () => {
   // A key-count threshold passes this vacuously; the terms derivation reaches it
   // by narrowing the built-in rule set all the way down.

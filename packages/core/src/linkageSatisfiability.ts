@@ -1773,9 +1773,10 @@ export function summarizeLinkageShortfall(
  * input refuses identically every time.
  *
  * An input whose whole header read as one column takes
- * {@link singleColumnDelimiterClause} as well: that shape is what a file
- * separated by something other than the delimiter the read took reaches this
- * check as, and the clause states the remedy for it.
+ * {@link singleColumnDelimiterClause} as well, on either refusal above: that
+ * shape is what a file separated by something other than the delimiter the read
+ * took reaches this check as, and a seat deriving its terms from that one mashed
+ * column reaches the keyless refusal rather than the shortfall one.
  *
  * The summary is stated on the `"agreed"` standing: this is the boundary of a run,
  * and a run is held to the terms its partner is held to, whoever authored them.
@@ -1810,7 +1811,9 @@ export function assertLinkageTermsSatisfiable(
     throw new LinkageTermsUnsatisfiableError(
       "the agreed linkage terms declare no linkage key, so this exchange has " +
         "nothing to match on and is refused before any credential, terms, or " +
-        "data are sent. Run it with an input whose columns can supply at " +
+        "data are sent. " +
+        singleColumnDelimiterClause(columns.length) +
+        "Run it with an input whose columns can supply at " +
         "least one linkage key, or agree terms declaring one with your " +
         "partner and run the exchange under those.",
     );

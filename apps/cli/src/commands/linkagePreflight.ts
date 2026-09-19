@@ -145,10 +145,16 @@ export function checkLinkageSatisfiability(
   if (verdict.fullySatisfied) return;
 
   if (verdict.keys.length === 0)
+    // The clause closes this message instead of leading into another sentence
+    // -- the remedy rides the cause link below -- so the trailing space it
+    // leaves for one is dropped before the renderer joins the links.
     throw new LinkageTermsUnsatisfiableError(
-      `the ${messaging.source}'s linkage terms declare no linkage key, so this ` +
+      (
+        `the ${messaging.source}'s linkage terms declare no linkage key, so this ` +
         "exchange has nothing to match on and would produce a result " +
-        "indistinguishable from a legitimately empty intersection.",
+        "indistinguishable from a legitimately empty intersection. " +
+        singleColumnDelimiterClause(columns.length)
+      ).trimEnd(),
       {
         cause: chainDetailCauses([
           // Declaring a key is an agreement on the seats a partner is already

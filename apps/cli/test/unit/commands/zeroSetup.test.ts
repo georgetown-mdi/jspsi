@@ -822,6 +822,48 @@ test("handler: a header the strip emptied names the removal, not the header row"
   }
 });
 
+test("handler: a pipe file read with no named delimiter names the remedy", async () => {
+  // A zero-setup run derives its terms from the columns its own read returned,
+  // so a pipe-separated file read by the comma default gives one mashed column
+  // and terms declaring no linkage key -- a different refusal from the one a
+  // configured run with declared terms reaches, owing the same remedy.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zerodelim-"));
+  const stderrChunks: string[] = [];
+  const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(((
+    chunk: string | Uint8Array,
+  ) => {
+    stderrChunks.push(String(chunk));
+    return true;
+  }) as never);
+  const exitSpy = captureProcessExit();
+  try {
+    const input = path.join(dir, "input.psv");
+    fs.writeFileSync(input, "id|dob|zip\n1|1990-01-02|20001\n");
+
+    await expect(
+      handler({
+        _: [platformLocalhostFileUrl("/drop").href, input],
+        $0: "psilink",
+        "config-file": path.join(dir, "psilink.yaml"),
+        "key-file": path.join(dir, ".psilink.key"),
+        identity: "Tester",
+        record: false,
+        "log-level": "error",
+      } as unknown as Arguments),
+    ).rejects.toThrow("exit:64");
+    const stderr = stderrChunks.join("");
+    expect(stderr).toContain("declare no linkage key");
+    expect(stderr).toContain("single column");
+    expect(stderr).toContain("CSV delimiter");
+    expect(stderr).toContain("detect");
+  } finally {
+    getLogger("psilink").setLevel("silent");
+    stderrSpy.mockRestore();
+    exitSpy.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("handler: a credential @path naming a missing file exits 64 with no host-key probe", async () => {
   // The same invariant over the other local refusal the connect path holds: a
   // `--server-password @path` whose file is not there is decided from this
