@@ -11,6 +11,7 @@ import {
   MANAGED_EXCHANGE_LOCAL_STORE_NAME,
   MANAGED_EXCHANGE_RESULTS_STORE_NAME,
   MANAGED_EXCHANGE_STORE_NAME,
+  clearManagedExchangeStandingCondition,
   clearManagedExchanges,
   createManagedExchange,
   deleteManagedExchange,
@@ -31,6 +32,7 @@ import {
 import {
   MAX_LABEL_LENGTH,
   MAX_SCHEDULE_INTERVAL_DAYS,
+  NO_STANDING_CONDITION,
   composeManagedExchangeFile,
   standingCompromiseResponse,
 } from "@psi/managed/managedExchangeRecord";
@@ -659,6 +661,69 @@ describe("field-scoped compromise response write", () => {
     await expect(
       recordManagedExchangeCompromiseResponse("no-such-record", answeredAt),
     ).rejects.toThrow();
+  });
+});
+
+describe("clearing the answer folds the windows it held", () => {
+  test("advances the schedule past them as the answer leaves the record", async () => {
+    const created = await createManagedExchange(newExchange({ schedule }));
+    const failedAt = "2026-01-06T14:30:00.000Z";
+    await recordManagedExchangeLastRun(
+      created.id,
+      { at: failedAt, outcome: "failed", failureKind: "auth" },
+      Date.parse(failedAt),
+    );
+    await recordManagedExchangeCompromiseResponse(
+      created.id,
+      "2026-01-06T15:00:00.000Z",
+    );
+
+    // Two windows opened and closed under the answer with no runner running, so
+    // the acknowledgement is the only place they can still be read as withheld.
+    const cleared = await clearManagedExchangeStandingCondition(
+      created.id,
+      Date.parse("2026-01-27T12:00:00.000Z"),
+    );
+
+    expect(cleared.standingCondition).toEqual(NO_STANDING_CONDITION);
+    expect(cleared.schedule).toMatchObject({
+      nextWindow: "2026-01-27T14:00:00.000Z",
+      consecutiveMisses: 0,
+    });
+    expect(cleared.lastRun).toEqual({
+      at: "2026-01-20T17:00:00.000Z",
+      outcome: "skipped",
+    });
+    // Both halves landed in the stored record, which is what a later wake reads
+    // instead of recounting those windows against the partner.
+    expect(await getManagedExchange(created.id)).toEqual(cleared);
+  });
+
+  test("leaves the schedule alone when no window elapsed under it", async () => {
+    const created = await createManagedExchange(newExchange({ schedule }));
+    const failedAt = "2026-01-06T14:30:00.000Z";
+    await recordManagedExchangeLastRun(
+      created.id,
+      { at: failedAt, outcome: "failed", failureKind: "auth" },
+      Date.parse(failedAt),
+    );
+    await recordManagedExchangeCompromiseResponse(
+      created.id,
+      "2026-01-06T15:00:00.000Z",
+    );
+
+    const cleared = await clearManagedExchangeStandingCondition(
+      created.id,
+      Date.parse("2026-01-08T09:00:00.000Z"),
+    );
+
+    expect(cleared.standingCondition).toEqual(NO_STANDING_CONDITION);
+    expect(cleared.schedule).toEqual(schedule);
+    expect(cleared.lastRun).toEqual({
+      at: failedAt,
+      outcome: "failed",
+      failureKind: "auth",
+    });
   });
 });
 

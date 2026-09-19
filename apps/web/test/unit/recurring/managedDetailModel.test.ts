@@ -207,6 +207,19 @@ describe("runHistoryEntries renders around the most recent run", () => {
     expect(entries[0].disclosure).not.toMatch(/\d+ (rows|matches|records)/);
   });
 
+  test("a skipped window states that no run was started at all", () => {
+    // The no-disclosure line the failures take speaks of a run that stopped; this
+    // window had none to stop.
+    const lastRun: ManagedExchangeLastRun = {
+      at: "2026-07-01T09:00:00.000Z",
+      outcome: "skipped",
+    };
+    const entries = runHistoryEntries(record("acceptor", { lastRun }));
+    expect(entries[0].outcome).toBe("Skipped");
+    expect(entries[0].disclosure).toContain("no run was started");
+    expect(entries[0].disclosure).not.toContain("the run stopped");
+  });
+
   // The disclosure line is mapped conservatively from where a failure fires in the
   // run lifecycle (input guard -> handshake -> rotation persist -> data exchange). A
   // run that provably stopped before any data left this party asserts nothing was
@@ -366,6 +379,7 @@ describe("lastRunMayHaveSentPayload matches the run history's own line", () => {
   test.each([
     { outcome: "missed" as const, failureKind: undefined },
     { outcome: "desynced" as const, failureKind: undefined },
+    { outcome: "skipped" as const, failureKind: undefined },
     { outcome: "failed" as const, failureKind: "auth" as const },
     { outcome: "failed" as const, failureKind: "input" as const },
     { outcome: "failed" as const, failureKind: "consent" as const },

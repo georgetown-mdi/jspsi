@@ -396,6 +396,12 @@ pattern is real -- rather than a standing warning the operator clicks through
 (the same discipline the backup surfaces follow; see [Moment-anchored backup
 surfaces](#moment-anchored-backup-surfaces)).
 
+One thing does stop the attempts, and it is not a heuristic: the operator's own
+"something does not add up" answer at a failure gate holds every window after it
+until they clear it (see [Telling a desync from an
+attack](#telling-a-desync-from-an-attack)). Those windows are recorded as skipped
+rather than missed, so they never build the pattern the coordination prompt reads.
+
 The operator retains an explicit, manual control either way: deleting the
 exchange stops all attempts (see [Deleting a managed
 exchange](#deleting-a-managed-exchange)). A pause control and in-place schedule
@@ -505,7 +511,7 @@ runs, the one surface that reaches an operator who is not looking at a browser
 tab. It introduces no status of its own: it reads the same run bookkeeping the
 next-visit surfaces read and says the same things, just sooner.
 
-Five moments are worth a notification, and each maps to a state the design
+Six moments are worth a notification, and each maps to a state the design
 already defines:
 
 - **This ran, and your backup is now stale.** An unattended run rotates the
@@ -530,6 +536,12 @@ already defines:
   misses stop firing individually while that state stands (the in-app state
   holds it), so a dead partnership on a short cadence does not become a daily
   nag.
+- **This did not run: the window was skipped.** While a compromise response
+  stands on the exchange, every due window is skipped rather than attempted (see
+  [Telling a desync from an attack](#telling-a-desync-from-an-attack)), so the
+  notification names what stopped the runs and the acknowledgement that starts
+  them again. It reports a standing state rather than an occurrence, so the
+  windows after the first say nothing further while it stands.
 - **This needs you: the input file is missing or was rejected.** A benign
   pre-run input failure on an unattended run -- the handle's file gone at run
   start, or a refresh that cannot satisfy the standing terms -- means no
@@ -1123,6 +1135,11 @@ for a handshake that ran and failed closed. The recovery is another attempt
 with both parties present: the next agreed window's automatic retry, or the
 operator running the exchange again once their partner is ready.
 
+A window the runner skipped is not a no-show either, and is not recorded as one:
+nothing waited for the partner, because the operator's own answer at a failure
+gate held the window (see [Telling a desync from an
+attack](#telling-a-desync-from-an-attack)).
+
 A no-show is no evidence of a desync -- and no evidence against one. Both
 rendezvous ids derive from the shared secret, so two sides holding different
 secrets wait on addresses the other is not using, and each records a no-show,
@@ -1288,6 +1305,22 @@ terms -- since minting one on that channel is the act the response names as the
 wrong one. A page left open from before the answer was given is held by the same
 rule: the write that would rotate the secret reads the exchange itself and
 refuses, so a second tab cannot mint past an answer it never saw.
+
+The schedule is held by it as well. A window that falls due while the response
+stands is **skipped**: the runner connects to nobody and rotates nothing, since a
+scheduled run would put the secret the operator flagged back on the channel they
+flagged it over, with nobody present to see it. The skip is recorded as the
+window's own outcome rather than a partner's absence, so it counts toward no miss
+pattern and reaches no coordination prompt (see [Retry and repeated
+misses](#retry-and-repeated-misses)); the exchange's page names it in the run
+history, and the between-visit notification says it once while the answer stands.
+The schedule resumes at the next due window the moment one of the three acts
+below clears the answer.
+
+Running the exchange from the page is left available under the response, with its
+warning standing over the control. The difference is who decides: an attended run
+is the operator's own act, taken with what the response says in front of them,
+while a scheduled one would be taken by a machine with nobody watching.
 
 It is kept where the standing condition is kept, so exactly the three acts that
 clear a standing condition clear it too, and nothing else does. The one the

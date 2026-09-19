@@ -130,11 +130,14 @@ export interface ManagedExchangeSchedule {
   consecutiveMisses: number;
 }
 
-/** The outcome of a run. Closed enum: a benign `"missed"` window (a no-show on
- * either side) is distinct from a handshake that ran and failed
- * (`"failed"`/`"desynced"`). */
+/** The outcome of a run, or of an agreed window no run occupied. Closed enum: a
+ * benign `"missed"` window (a no-show on either side) is distinct from a
+ * handshake that ran and failed (`"failed"`/`"desynced"`), and both are distinct
+ * from `"skipped"` -- a due window the scheduled runner declined to open while
+ * the operator's compromise response stood, which connected to nobody and
+ * rotated nothing. */
 export type ManagedExchangeRunOutcome =
-  "succeeded" | "failed" | "desynced" | "missed";
+  "succeeded" | "failed" | "desynced" | "missed" | "skipped";
 
 /** For a non-succeeded outcome, the kind of failure. Closed enum: the five benign
  * pre-run problems -- an `"input"` problem (the file missing, unreadable, or gone
@@ -328,14 +331,15 @@ export function parseStoredInstant(value: string): number {
 }
 
 /** The canonical `lastRun` validator. Exported so the export/import artifact
- * reuses it rather than re-declaring a laxer copy. Every earlier `failureKind`
- * remains a member of the enum, so a record written before a kind was added
- * still reads and tiers exactly as it did. An artifact holding a kind this
- * reader does not know is refused whole rather than read with the kind
+ * reuses it rather than re-declaring a laxer copy. Every earlier `outcome` and
+ * `failureKind` remains a member of its enum, so a record written before a value
+ * was added still reads and tiers exactly as it did, and neither enum growing
+ * moves {@link MANAGED_EXCHANGE_SCHEMA_VERSION}. An artifact holding a value
+ * this reader does not know is refused whole rather than read with the value
  * dropped -- the reader-rejects-unknown rule. */
 export const lastRunSchema: ZodType<ManagedExchangeLastRun> = z.object({
   at: z.iso.datetime(),
-  outcome: z.enum(["succeeded", "failed", "desynced", "missed"]),
+  outcome: z.enum(["succeeded", "failed", "desynced", "missed", "skipped"]),
   failureKind: z
     .enum([
       "auth",
@@ -986,8 +990,9 @@ export interface ManagedExchangeScheduleAdvance {
  * -- the window did close, whatever landed afterwards -- while a bookkeeping
  * entry staler than the stored one is dropped rather than masking a newer
  * outcome. The entry an advance carries is the catch-up walk's, stamped at an
- * already-closed window rather than by a run in flight, so the monotonic rule
- * is what holds a newer success off it and there is no run start to state.
+ * already-closed window, or a skipped window's own, rather than a run in
+ * flight, so the monotonic rule is what holds a newer success off it and there
+ * is no run start to state.
  * Both stamps are read through {@link parseStoredInstant} rather than
  * `Date.parse`, so a stamp having no UTC designator compares as no run at all,
  * letting the window's own bookkeeping land over it.

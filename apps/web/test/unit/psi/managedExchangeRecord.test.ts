@@ -285,6 +285,35 @@ describe("parseManagedExchangeRecord reader-rejects-unknown", () => {
     }
   });
 
+  test("reads back every recorded outcome, the skipped window included", () => {
+    // A record written before an outcome was added holds one of the others, and
+    // widening the enum leaves every one of them reading as it did.
+    const outcomes: Array<ManagedExchangeLastRun["outcome"]> = [
+      "succeeded",
+      "failed",
+      "desynced",
+      "missed",
+      "skipped",
+    ];
+    for (const outcome of outcomes) {
+      const record = buildManagedExchangeRecord(
+        newExchange({ lastRun: { at: "2026-07-14T09:00:00.000Z", outcome } }),
+      );
+      expect(parseManagedExchangeRecord(record).lastRun?.outcome).toBe(outcome);
+    }
+  });
+
+  test("rejects an outcome it does not recognize rather than dropping the entry", () => {
+    const future = {
+      ...buildManagedExchangeRecord(newExchange()),
+      lastRun: {
+        at: "2026-07-14T09:00:00.000Z",
+        outcome: "outcome-from-a-later-build",
+      },
+    };
+    expect(safeParseManagedExchangeRecord(future).success).toBe(false);
+  });
+
   test("a record written before a kind existed still reads unchanged", () => {
     // Widening the enum only adds members, so a stored entry an earlier build
     // wrote -- a linkage shortfall recorded as "input" -- loads and reads as it did.

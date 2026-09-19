@@ -25,6 +25,17 @@
  *   occupied by bounded re-attempts while it is open, and a window that closes
  *   with no completed handshake advances to the NEXT window -- never a backoff,
  *   never an off-schedule retry.
+ * - **A due window is skipped while the operator's compromise response stands**
+ *   (docs/MANAGED_EXCHANGE.md, "Telling a desync from an attack"): the operator
+ *   has said the secret may be in someone else's hands, so the window connects
+ *   to nobody and rotates nothing. It is the window's own outcome rather than a
+ *   partner absence, so it counts no miss, and the next window is attempted as
+ *   soon as one of the three acts clears the response. The answer is read off
+ *   the store before every attempt's connect, so one written mid-window ends the
+ *   occupancy on the same skipped outcome. A window that opened under the
+ *   response and elapsed while nothing was running folds the same way in the
+ *   catch-up walk, so a machine asleep across several of them wakes with the
+ *   miss count where it stood.
  *
  * Two properties of the loop are not visible from the criteria they serve
  * (docs/spec/MANAGED_EXCHANGE_RECORD.md, "Occupying a due window"):
@@ -58,11 +69,14 @@ import {
   advanceManagedScheduleAfterWindow,
   catchUpManagedSchedule,
 } from "./managedSchedule";
+import {
+  parseStoredInstant,
+  standingCompromiseResponse,
+} from "./managedExchangeRecord";
 import { ManagedExchangeExpiredError } from "./managedExpiry";
 import { ManagedExchangeLockUnavailableError } from "./managedExchangeLock";
 import { ManagedInputError } from "./managedInputGuard";
 import { RotationPersistError } from "./managedRunRotate";
-import { parseStoredInstant } from "./managedExchangeRecord";
 
 import type {
   ManagedExchangeReadableRecords,
@@ -141,6 +155,13 @@ export interface ManagedScheduleTickSeams {
    * scheduled runs instead of every exchange's (see
    * {@link ManagedExchangeReadableRecords}). */
   listRecords: () => Promise<ManagedExchangeReadableRecords>;
+  /** Read one stored record afresh. The window's attempts read the operator's
+   * compromise response through it before every connect, so an answer written
+   * while the window is being occupied is met by the attempt after it rather
+   * than only by the next window. A read that rejects ends the tick's
+   * bookkeeping, leaving the window unaccounted: an attempt whose answer cannot
+   * be read does not connect. */
+  readRecord: (id: string) => Promise<ManagedExchangeRecord | undefined>;
   /** Each record's local sibling state, read once per tick. Its `spent` marker
    * keeps a handed-off copy from being attempted: a migration export sets it so
    * neither the operator nor the schedule runs the record again. This read is
@@ -185,12 +206,15 @@ export interface ManagedScheduleTickEntry {
   /** Fully-elapsed windows the catch-up walk counted as missed before any
    * attempt. */
   caughtUpMisses: number;
+  /** Fully-elapsed windows the catch-up walk held back over the operator's
+   * compromise response, counted as neither an attempt nor a miss. */
+  caughtUpSkips: number;
   /** Attempts made inside the due window. */
   attempts: number;
-  /** The window's disposition, absent when no window was occupied. It stands
-   * alongside a `"bookkeeping-failed"` skip: the window was occupied and its
-   * disposition determined, and the write that would have recorded it is what
-   * failed. */
+  /** The window's disposition, absent where the wake neither occupied nor
+   * skipped a window. It stands alongside a `"bookkeeping-failed"` skip: the
+   * window's disposition was determined, and the write that would have recorded
+   * it is what failed. */
   disposition?: ManagedScheduleWindowDisposition;
   /** Why nothing was attempted, absent when a window was occupied and its
    * bookkeeping landed. */
@@ -229,6 +253,7 @@ export async function tickManagedSchedules(
     (id) => ({
       id,
       caughtUpMisses: 0,
+      caughtUpSkips: 0,
       attempts: 0,
       skipped: "unreadable" as const,
     }),
@@ -239,6 +264,7 @@ export async function tickManagedSchedules(
         return {
           id: record.id,
           caughtUpMisses: 0,
+          caughtUpSkips: 0,
           attempts: 0,
           skipped: "in-flight" as const,
         };
@@ -266,6 +292,7 @@ async function tickManagedScheduleRecord(
   const entry: ManagedScheduleTickEntry = {
     id: record.id,
     caughtUpMisses: 0,
+    caughtUpSkips: 0,
     attempts: 0,
   };
   const schedule = record.schedule;
@@ -290,8 +317,18 @@ async function occupyDueWindow(
   entry: ManagedScheduleTickEntry,
   seams: ManagedScheduleTickSeams,
 ): Promise<ManagedScheduleTickEntry> {
-  const catchUp = catchUpManagedSchedule(stored, record.lastRun, seams.now());
+  // The response is read off the tick's own snapshot because the walk decides
+  // windows that closed before this wake: the answer in force across them is the
+  // stored one, not whatever the catch-up write returns below.
+  const response = standingCompromiseResponse(record);
+  const catchUp = catchUpManagedSchedule(
+    stored,
+    record.lastRun,
+    seams.now(),
+    response === undefined ? undefined : parseStoredInstant(response.at),
+  );
   entry.caughtUpMisses = catchUp.missedWindows;
+  entry.caughtUpSkips = catchUp.skippedWindows;
 
   // The catch-up bookkeeping is written BEFORE anything is attempted, so an
   // attempt that never finishes still leaves the elapsed windows counted.
@@ -302,8 +339,8 @@ async function occupyDueWindow(
       schedule: catchUp.schedule,
       fromNextWindow: catchUp.fromNextWindow,
       fromConsecutiveMisses: catchUp.fromConsecutiveMisses,
-      ...(catchUp.missedLastRun !== undefined
-        ? { lastRun: catchUp.missedLastRun }
+      ...(catchUp.caughtUpLastRun !== undefined
+        ? { lastRun: catchUp.caughtUpLastRun }
         : {}),
     });
     // The write is conditioned on the plan it was computed from: a record some
@@ -319,6 +356,20 @@ async function occupyDueWindow(
   if (due === undefined) return { ...entry, skipped: "not-due" };
   if (parseStoredInstant(planned.nextWindow) !== due.opensAtMs)
     return { ...entry, skipped: "plan-moved" };
+
+  // The operator's answer that nothing added up, read off the record the store
+  // holds: while it stands, this window connects to nobody and rotates nothing,
+  // and the plan advances past it on the window's own skipped outcome.
+  if (standingCompromiseResponse(claimed) !== undefined) {
+    entry.disposition = "skipped";
+    await seams.persistAdvance(record.id, {
+      schedule: advanceManagedScheduleAfterWindow(planned, due, "skipped"),
+      fromNextWindow: planned.nextWindow,
+      fromConsecutiveMisses: planned.consecutiveMisses,
+      lastRun: { at: new Date(seams.now()).toISOString(), outcome: "skipped" },
+    });
+    return { ...entry };
+  }
 
   const handle = claimed.inputFileHandle;
   // Without a persisted handle there is no unattended read of the input at all
@@ -340,6 +391,17 @@ async function occupyDueWindow(
     ),
     fromNextWindow: planned.nextWindow,
     fromConsecutiveMisses: planned.consecutiveMisses,
+    // A window the answer stopped mid-occupancy takes the same stamp as one the
+    // answer stood over from the start: the attempt it stopped never connected,
+    // so it wrote no `lastRun` of its own.
+    ...(occupancy.disposition === "skipped"
+      ? {
+          lastRun: {
+            at: new Date(seams.now()).toISOString(),
+            outcome: "skipped" as const,
+          },
+        }
+      : {}),
     ...(occupancy.standingCondition !== undefined
       ? { standingCondition: occupancy.standingCondition }
       : {}),
@@ -360,6 +422,10 @@ interface WindowOccupancy {
 
 /**
  * Occupy one open window with bounded re-attempts.
+ *
+ * Each attempt re-reads the stored record before it connects and ends the
+ * occupancy as `"skipped"` where the operator's compromise response stands, so
+ * an answer given while the window is open holds the attempts after it.
  *
  * Each attempt waits for the partner up to {@link ATTEMPT_PEER_WAIT_MS},
  * clamped to what is left of the window; a retryable failure starts another
@@ -401,6 +467,18 @@ async function occupyWindow(
     const startedAtMs = seams.now();
     const remainingMs = window.closesAtMs - startedAtMs;
     if (remainingMs <= 0 || attempts >= MAX_WINDOW_ATTEMPTS) break;
+    // The operator's answer is read off the store before every connect, as the
+    // run+rotate lock re-reads the sibling spent state before every run
+    // ({@link ./managedExchangeRun.ts}): an answer written while this window is
+    // being occupied must stop the attempt after it, not just the next window.
+    // The answer rides on a raised condition, so the window's write has no
+    // evidence of its own to carry here.
+    const stored = await seams.readRecord(record.id);
+    if (
+      stored !== undefined &&
+      standingCompromiseResponse(stored) !== undefined
+    )
+      return { attempts, disposition: "skipped" };
     attempts += 1;
     let dataExchangeStarted = false;
     try {

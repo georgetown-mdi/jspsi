@@ -83,7 +83,13 @@ function record(
 function entry(
   overrides: Partial<ManagedScheduleTickEntry> = {},
 ): ManagedScheduleTickEntry {
-  return { id: ID, caughtUpMisses: 0, attempts: 1, ...overrides };
+  return {
+    id: ID,
+    caughtUpMisses: 0,
+    caughtUpSkips: 0,
+    attempts: 1,
+    ...overrides,
+  };
 }
 
 /** The notification boundary, holding what each wake was handed. */

@@ -1325,6 +1325,50 @@ describe("managed exchange detail run schedule", () => {
   });
 });
 
+describe("managed exchange detail run history", () => {
+  test("a window the schedule skipped is named on the page, with no run to account for", async () => {
+    app.render(
+      createElement(ManagedExchangeDetail, {
+        record: record("inviter", {
+          lastRun: { at: "2026-07-01T09:00:00.000Z", outcome: "skipped" },
+        }),
+        parkedResultsRead: { kind: "none" },
+        accountingRead: { kind: "none" },
+        onResetAccounting: () => Promise.resolve(),
+        onRetryAccountingRead: () => undefined,
+        onRetryParkedResultsRead: () => undefined,
+        onClearParkedResults: () => Promise.resolve(),
+        onGrantOutputFolder: () => Promise.resolve(),
+        onStopUsingOutputFolder: () => Promise.resolve(),
+        onSaveLocalFields: () => Promise.resolve(),
+        onReinviteToChangeTerms: () => undefined,
+        canReinvite: true,
+        reinviting: false,
+        reinviteFailed: false,
+        compromiseResponse: true,
+        runInFlight: false,
+        runHoldsReinvite: false,
+        unfiledDisclosureRead: { kind: "none" },
+        unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
+        onFileUnfiledDisclosures: () => Promise.resolve(),
+      }),
+    );
+
+    await expect
+      .element(page.getByRole("heading", { name: "Run history" }))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("Skipped", { exact: false }))
+      .toBeInTheDocument();
+    // The window had no run to stop, so the page says that rather than the
+    // stopped-run line every failed run takes.
+    await expect
+      .element(page.getByText("no run was started", { exact: false }))
+      .toBeInTheDocument();
+  });
+});
+
 describe("managed exchange detail accounting of disclosures", () => {
   test("frames the accounting as self-attested and unsigned, never a signed receipt", async () => {
     app.render(

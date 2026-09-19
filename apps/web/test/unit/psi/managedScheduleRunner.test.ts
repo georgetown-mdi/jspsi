@@ -17,9 +17,12 @@ import {
 } from "@psi/managed/managedExchangeRun";
 import {
   NO_STANDING_CONDITION,
+  applyManagedExchangeCompromiseResponse,
   applyManagedExchangeLastRun,
   applyManagedExchangeLocalEdits,
+  applyManagedExchangeReinviteRotation,
   applyManagedExchangeScheduleAdvance,
+  applyManagedExchangeStandingConditionCleared,
   buildManagedExchangeRecord,
   composeManagedExchangeFile,
   parseManagedExchangeRecord,
@@ -34,6 +37,7 @@ import { ManagedInputError } from "@psi/managed/managedInputGuard";
 import { PartnerNoShowError } from "@psi/transport/waitForConnection";
 import { RotationPersistError } from "@psi/managed/managedRunRotate";
 import { managedScheduleWindow } from "@psi/managed/managedSchedule";
+import { repeatedMissCoordination } from "@psi/managed/managedFailureCopy";
 
 import type {
   ManagedExchangeRecord,
@@ -146,6 +150,9 @@ function harness(options: {
    * advance lands, standing in for another tab's edit between this tick's
    * snapshot and its write. */
   concurrentEdit?: (record: ManagedExchangeRecord) => ManagedExchangeRecord;
+  /** A write applied to the stored record as each attempt runs, standing in for
+   * another tab's write landing while the window is being occupied. */
+  writeDuringAttempt?: (record: ManagedExchangeRecord) => ManagedExchangeRecord;
 }): Harness {
   const script = options.script ?? [];
   const stored = new Map(
@@ -173,6 +180,7 @@ function harness(options: {
         records: [...stored.values()],
         unreadableIds: options.unreadableIds ?? [],
       }),
+    readRecord: (id) => Promise.resolve(stored.get(id)),
     listLocalState: () =>
       Promise.resolve(
         options.localState ?? new Map<string, ManagedLocalState>(),
@@ -199,6 +207,10 @@ function harness(options: {
         startedAtMs: clockMs,
       });
       noteFirstAttempt();
+      const duringAttempt = options.writeDuringAttempt;
+      const held = stored.get(attempt.record.id);
+      if (duringAttempt !== undefined && held !== undefined)
+        stored.set(attempt.record.id, duringAttempt(held));
       // The last scripted step repeats; a tick that attempts anything with no
       // script at all is a test that meant to supply one.
       const step = script.at(Math.min(attempts.length - 1, script.length - 1));
@@ -708,6 +720,251 @@ describe("a window whose run raised a standing condition", () => {
   });
 });
 
+describe("a due window under the operator's compromise response", () => {
+  /** A week in milliseconds: the cadence's own period, so a wake after one lands
+   * on the next window at the same wall clock. */
+  const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+  /** A record carrying an unanswered failure the operator has since answered
+   * "something does not add up" at. */
+  function respondedRecord(
+    respondedAt = "2026-01-05T11:00:00.000Z",
+  ): ManagedExchangeRecord {
+    return applyManagedExchangeCompromiseResponse(
+      parseManagedExchangeRecord({
+        ...recordWith(),
+        standingCondition: { since: "2026-01-05T10:00:00.000Z", kind: "auth" },
+      }),
+      respondedAt,
+    );
+  }
+
+  function storedRecord(runner: Harness, id: string): ManagedExchangeRecord {
+    const stored = runner.stored.get(id);
+    if (stored === undefined) throw new Error("the record went missing");
+    return stored;
+  }
+
+  function storedSchedule(
+    runner: Harness,
+    id: string,
+  ): ManagedExchangeSchedule {
+    const { schedule } = storedRecord(runner, id);
+    if (schedule === undefined) throw new Error("the schedule went missing");
+    return schedule;
+  }
+
+  test("connects to nobody, rotates nothing, and advances on the window's own outcome", async () => {
+    const record = respondedRecord();
+    const runner = harness({
+      records: [record],
+      startAt: "2026-01-06T14:30:00.000Z",
+    });
+
+    const [entry] = await tickManagedSchedules(runner.seams);
+
+    expect(entry).toMatchObject({
+      id: record.id,
+      attempts: 0,
+      disposition: "skipped",
+    });
+    expect(runner.attempts).toHaveLength(0);
+    const stored = storedRecord(runner, record.id);
+    expect(stored.lastRun).toEqual({
+      at: "2026-01-06T14:30:00.000Z",
+      outcome: "skipped",
+    });
+    expect(stored.sharedSecret).toBe(record.sharedSecret);
+    expect(stored.schedule).toMatchObject({
+      nextWindow: "2026-01-13T14:00:00.000Z",
+      consecutiveMisses: 0,
+    });
+  });
+
+  test("counts no miss at the windows it holds, and adds nothing to the evidence", async () => {
+    const record = respondedRecord();
+    const runner = harness({
+      records: [record],
+      startAt: "2026-01-06T14:30:00.000Z",
+    });
+
+    await tickManagedSchedules(runner.seams);
+    runner.advanceClock(WEEK_MS);
+    await tickManagedSchedules(runner.seams);
+
+    const stored = storedRecord(runner, record.id);
+    // Two windows held, and the coordination prompt the second consecutive miss
+    // would have earned is not reached: no partner was absent from either.
+    expect(stored.schedule).toMatchObject({
+      nextWindow: "2026-01-20T14:00:00.000Z",
+      consecutiveMisses: 0,
+    });
+    expect(runner.attempts).toHaveLength(0);
+    expect(stored.standingCondition).toEqual({
+      since: "2026-01-05T10:00:00.000Z",
+      kind: "auth",
+      response: { kind: "compromise", at: "2026-01-05T11:00:00.000Z" },
+    });
+  });
+
+  test("holds every window that elapsed under the answer, counting no miss", async () => {
+    const record = parseManagedExchangeRecord({
+      ...respondedRecord(),
+      schedule: { ...weekly, consecutiveMisses: 1 },
+    });
+    // Three windows opened and closed while the machine slept, and the wake
+    // lands inside the fourth.
+    const runner = harness({
+      records: [record],
+      startAt: "2026-01-27T14:30:00.000Z",
+    });
+
+    const [entry] = await tickManagedSchedules(runner.seams);
+
+    expect(entry).toMatchObject({
+      caughtUpMisses: 0,
+      caughtUpSkips: 3,
+      attempts: 0,
+      disposition: "skipped",
+    });
+    expect(runner.attempts).toHaveLength(0);
+    const schedule = storedSchedule(runner, record.id);
+    expect(schedule).toMatchObject({
+      nextWindow: "2026-02-03T14:00:00.000Z",
+      consecutiveMisses: 1,
+    });
+    expect(storedRecord(runner, record.id).lastRun).toEqual({
+      at: "2026-01-27T14:30:00.000Z",
+      outcome: "skipped",
+    });
+    // The miss count stands where it did, so the coordination prompt a run of
+    // absences earns is not put beside the answer's own message.
+    expect(repeatedMissCoordination(schedule)).toBeUndefined();
+  });
+
+  test("counts the window that elapsed before the answer, and only that one", async () => {
+    // The operator answered in the gap after the first window closed, so that
+    // window was a partner's absence and the two after it were this device's
+    // own withhold.
+    const record = respondedRecord("2026-01-10T09:00:00.000Z");
+    const runner = harness({
+      records: [record],
+      startAt: "2026-01-27T14:30:00.000Z",
+    });
+
+    const [entry] = await tickManagedSchedules(runner.seams);
+
+    expect(entry).toMatchObject({
+      caughtUpMisses: 1,
+      caughtUpSkips: 2,
+      attempts: 0,
+      disposition: "skipped",
+    });
+    expect(storedSchedule(runner, record.id)).toMatchObject({
+      nextWindow: "2026-02-03T14:00:00.000Z",
+      consecutiveMisses: 1,
+    });
+    expect(storedRecord(runner, record.id).lastRun).toEqual({
+      at: "2026-01-27T14:30:00.000Z",
+      outcome: "skipped",
+    });
+  });
+
+  test("stops the window's own attempts once the answer lands mid-window", async () => {
+    // The answer is written while the first attempt runs, as another tab's
+    // acknowledgement gate would write it. The window is three hours wide and
+    // the failure retryable, so nothing but the answer ends the occupancy here.
+    const record = recordWith();
+    const runner = harness({
+      records: [record],
+      startAt: "2026-01-06T14:00:00.000Z",
+      script: [{ kind: "fail", error: new Error("the channel dropped") }],
+      writeDuringAttempt: (held) =>
+        applyManagedExchangeCompromiseResponse(
+          held,
+          "2026-01-06T14:00:30.000Z",
+        ),
+    });
+
+    const [entry] = await tickManagedSchedules(runner.seams);
+
+    expect(entry).toMatchObject({ attempts: 1, disposition: "skipped" });
+    expect(runner.attempts).toHaveLength(1);
+    const stored = storedRecord(runner, record.id);
+    expect(stored.sharedSecret).toBe(record.sharedSecret);
+    expect(stored.lastRun).toEqual({
+      at: "2026-01-06T14:01:00.000Z",
+      outcome: "skipped",
+    });
+    // The window is accounted for where it stopped rather than left open: one
+    // write, the plan past it, and no miss for a partner nobody waited on.
+    expect(runner.advances).toHaveLength(1);
+    expect(stored.schedule).toMatchObject({
+      nextWindow: "2026-01-13T14:00:00.000Z",
+      consecutiveMisses: 0,
+    });
+  });
+
+  test("resumes at the next window once the acknowledgement clears the answer", async () => {
+    const record = respondedRecord();
+    const runner = harness({
+      records: [record],
+      startAt: "2026-01-06T14:30:00.000Z",
+      script: [{ kind: "succeed" }],
+    });
+
+    await tickManagedSchedules(runner.seams);
+    runner.stored.set(
+      record.id,
+      applyManagedExchangeStandingConditionCleared(
+        storedRecord(runner, record.id),
+      ),
+    );
+    runner.advanceClock(WEEK_MS);
+    const [entry] = await tickManagedSchedules(runner.seams);
+
+    expect(entry).toMatchObject({ attempts: 1, disposition: "succeeded" });
+  });
+
+  test("resumes at the next window once a re-invite clears the answer", async () => {
+    const record = respondedRecord();
+    const runner = harness({
+      records: [record],
+      startAt: "2026-01-06T14:30:00.000Z",
+      script: [{ kind: "succeed" }],
+    });
+
+    await tickManagedSchedules(runner.seams);
+    runner.stored.set(
+      record.id,
+      applyManagedExchangeReinviteRotation(storedRecord(runner, record.id), {
+        sharedSecret: generateSharedSecret(),
+        expires: null,
+      }),
+    );
+    runner.advanceClock(WEEK_MS);
+    const [entry] = await tickManagedSchedules(runner.seams);
+
+    expect(entry).toMatchObject({ attempts: 1, disposition: "succeeded" });
+  });
+
+  test("has no window to resume at once the exchange is deleted", async () => {
+    const record = respondedRecord();
+    const runner = harness({
+      records: [record],
+      startAt: "2026-01-06T14:30:00.000Z",
+      script: [{ kind: "succeed" }],
+    });
+
+    await tickManagedSchedules(runner.seams);
+    runner.stored.delete(record.id);
+    runner.advanceClock(WEEK_MS);
+
+    expect(await tickManagedSchedules(runner.seams)).toEqual([]);
+    expect(runner.attempts).toHaveLength(0);
+  });
+});
+
 describe("a window the single-writer lock was held through", () => {
   test("records neither an attempt nor a miss, and advances past it", async () => {
     const record = recordWith();
@@ -1067,6 +1324,7 @@ describe("a stored entry the read could not parse", () => {
     expect(entries).toContainEqual({
       id: "legacy-out-of-bounds",
       caughtUpMisses: 0,
+      caughtUpSkips: 0,
       attempts: 0,
       skipped: "unreadable",
     });

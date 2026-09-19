@@ -70,6 +70,7 @@ import {
 import { betweenVisitNotice } from "./betweenVisitNotice";
 
 import {
+  getManagedExchange,
   listReadableManagedExchanges,
   persistManagedExchangeScheduleAdvance,
 } from "./managedExchangeStore";
@@ -232,6 +233,7 @@ export function browserScheduleTickSeams(
   return {
     now: () => Date.now(),
     listRecords: listReadableManagedExchanges,
+    readRecord: getManagedExchange,
     listLocalState: listManagedLocalState,
     persistAdvance: persistManagedExchangeScheduleAdvance,
     delay: (ms) => delayUntilAborted(ms, signal),
@@ -627,6 +629,7 @@ function reportTick(entries: Array<ManagedScheduleTickEntry>): void {
     log.debug(
       `scheduled managed exchange ${entry.id}: ` +
         `${String(entry.caughtUpMisses)} caught-up miss(es), ` +
+        `${String(entry.caughtUpSkips)} caught-up skip(s), ` +
         `${String(entry.attempts)} attempt(s), ` +
         `${entry.disposition ?? entry.skipped ?? "nothing"}`,
     );

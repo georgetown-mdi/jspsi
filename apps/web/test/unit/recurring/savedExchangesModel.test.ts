@@ -68,6 +68,17 @@ describe("savedExchangeRow", () => {
     expect(row.status).toMatch(/^Last run succeeded /);
   });
 
+  test("a skipped window whose answer has been settled names the skip, not a run", () => {
+    const row = savedExchangeRow(
+      record({
+        lastRun: { at: "2026-07-10T09:00:00.000Z", outcome: "skipped" },
+      }),
+      undefined,
+      NOW,
+    );
+    expect(row.status).toMatch(/^A scheduled run was skipped /);
+  });
+
   test("an unexplained auth failure displays as a check-with-partner line, never attack framing", () => {
     const row = savedExchangeRow(
       record({

@@ -241,6 +241,7 @@ const OUTCOME_LABELS: Record<ManagedExchangeLastRun["outcome"], string> = {
   failed: "Failed",
   desynced: "Out of sync",
   missed: "Partner did not arrive",
+  skipped: "Skipped",
 };
 
 /** The disclosure line for a succeeded run. */
@@ -251,6 +252,12 @@ const SUCCEEDED_DISCLOSURE =
  * party (a no-show, or a failure that fired before the data exchange began). */
 const NOTHING_DISCLOSED =
   "Nothing was disclosed -- the run stopped before any data was exchanged.";
+
+/** The disclosure line for an agreed window the schedule skipped: no run began
+ * at all, so the sentence above, which speaks of a run that stopped, would
+ * overstate what happened. */
+const SKIPPED_DISCLOSURE =
+  "Nothing was disclosed -- no run was started, and this exchange's secret is unchanged.";
 
 /**
  * What neither the run bookkeeping nor the accounting can say about a run that
@@ -298,12 +305,16 @@ function disclosurePrecedesExchange(
 /**
  * Whether a run the bookkeeping did not stamp `"succeeded"` leaves open that this
  * party's payload was sent. A no-show and a rotation-desync both mean no handshake
- * completed, so no data was exchanged; a `"failed"` outcome defers to the
- * `failureKind`'s position in the run lifecycle
- * ({@link disclosurePrecedesExchange}).
+ * completed, so no data was exchanged, and a skipped window connected to nobody;
+ * a `"failed"` outcome defers to the `failureKind`'s position in the run
+ * lifecycle ({@link disclosurePrecedesExchange}).
  */
 function sendNotRuledOut(lastRun: ManagedExchangeLastRun): boolean {
-  if (lastRun.outcome === "missed" || lastRun.outcome === "desynced")
+  if (
+    lastRun.outcome === "missed" ||
+    lastRun.outcome === "desynced" ||
+    lastRun.outcome === "skipped"
+  )
     return false;
   return !disclosurePrecedesExchange(lastRun.failureKind);
 }
@@ -332,7 +343,9 @@ export function runHistoryEntries(
   const disclosure =
     lastRun.outcome === "succeeded"
       ? SUCCEEDED_DISCLOSURE
-      : nonSucceededDisclosure(lastRun);
+      : lastRun.outcome === "skipped"
+        ? SKIPPED_DISCLOSURE
+        : nonSucceededDisclosure(lastRun);
   return [
     {
       at: lastRun.at,

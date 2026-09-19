@@ -89,6 +89,7 @@ function scheduleTickSeams(attempt: {
   return {
     now: Date.now,
     listRecords: listReadableManagedExchanges,
+    readRecord: getManagedExchange,
     listLocalState: listManagedLocalState,
     persistAdvance: persistManagedExchangeScheduleAdvance,
     delay: () => Promise.resolve(),
