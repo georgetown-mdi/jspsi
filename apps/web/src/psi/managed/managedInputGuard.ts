@@ -53,6 +53,11 @@ type ManagedInputRejection =
       /** The standing terms' linkage fields the read columns cannot produce, so
        * the caller can name the missing field types. */
       unsatisfied: Array<LinkageField>;
+      /** Whether the read yielded exactly one column -- the shape a file
+       * separated by something other than the delimiter this record reads it by
+       * comes out as -- so the caller states the delimiter remedy rather than
+       * sending the operator to renegotiate terms. */
+      singleColumn: boolean;
     };
 
 /**
@@ -114,7 +119,8 @@ export function managedInputFailureKind(
  * looser pre-check the boundary can still overturn.
  *
  * Returns `undefined` when the input may run; returns a `"columns"`
- * {@link ManagedInputRejection} holding the unproducible linkage fields otherwise.
+ * {@link ManagedInputRejection} holding the unproducible linkage fields and
+ * whether the read came out as one column otherwise.
  * The grade is over column SHAPE, not row values, with the one value-independent
  * exception core's dead-key detection covers (see
  * {@link decideLinkageTermsVerdict}): it can only over-accept a same-shaped wrong
@@ -131,5 +137,9 @@ export function assessManagedInputColumns(
     exchangeFile.metadata,
   );
   if (verdict.fullySatisfied) return undefined;
-  return { reason: "columns", unsatisfied: verdict.unsatisfiedFields };
+  return {
+    reason: "columns",
+    unsatisfied: verdict.unsatisfiedFields,
+    singleColumn: columns.length === 1,
+  };
 }

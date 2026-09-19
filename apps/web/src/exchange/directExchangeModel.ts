@@ -280,6 +280,7 @@ export function previewInferredTerms(
     decideLinkageTermsVerdict(columns, linkageTerms, undefined, metadata),
     assessLinkageSatisfiability(columns, getDefaultLinkageTerms(identity))
       .unsatisfied,
+    columns,
   );
   return {
     linkageTerms,

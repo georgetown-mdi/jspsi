@@ -628,7 +628,11 @@ export async function generateInvitation(params: {
       params.standardization,
       params.metadata,
     );
-    const refusal = linkageRefusalFor(verdict, verdict.unsatisfiedFields);
+    const refusal = linkageRefusalFor(
+      verdict,
+      verdict.unsatisfiedFields,
+      columns,
+    );
     if (refusal !== undefined)
       throw new InvitationFileError({ kind: "unlinkable", refusal });
     // Reject a payload.send that does not match the disclosed set before the
@@ -666,6 +670,7 @@ export async function generateInvitation(params: {
       decideLinkageTermsVerdict(columns, linkageTerms, undefined, metadata),
       assessLinkageSatisfiability(columns, getDefaultLinkageTerms(inviterName))
         .unsatisfied,
+      columns,
     );
     if (refusal !== undefined)
       throw new InvitationFileError({ kind: "unlinkable", refusal });

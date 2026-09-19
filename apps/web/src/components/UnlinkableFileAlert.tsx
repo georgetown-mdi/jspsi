@@ -1,5 +1,7 @@
 import { sanitizeForDisplay, summarizeLinkageShortfall } from "@psilink/core";
 
+import { CSV_DELIMITER_SINGLE_COLUMN_REMEDY } from "@components/csvDelimiterChoice";
+
 import type { LinkageField } from "@psilink/core";
 
 import type { AlertContent } from "@components/csvIntake";
@@ -46,11 +48,20 @@ function missingFieldsDetail(fields: ReadonlyArray<LinkageField>): string {
  * that renders this alert holds terms no partner has agreed to, so the shortfall
  * is counted against draft keys rather than agreed ones.
  *
+ * A refusal over a file that read as ONE column adds
+ * {@link CSV_DELIMITER_SINGLE_COLUMN_REMEDY} to either shape: that reading is what a
+ * file separated by something other than the delimiter it was read by produces, and
+ * the delimiter is the operator's to change here, unlike the terms this copy
+ * otherwise sends them to.
+ *
  * The return shape is the structural {@link AlertContent} (`{ title, message }`)
  * every caller assigns into its error state and renders through the shared alert
  * slot.
  */
 export function unlinkableFileAlert(refusal: LinkageRefusal): AlertContent {
+  const delimiterRemedy = refusal.singleColumn
+    ? ` ${CSV_DELIMITER_SINGLE_COLUMN_REMEDY}`
+    : "";
   if (refusal.kind === "no-linkable-key")
     return {
       title: "This file cannot be linked",
@@ -58,7 +69,8 @@ export function unlinkableFileAlert(refusal: LinkageRefusal): AlertContent {
         "Your CSV cannot satisfy any default linkage key" +
         missingFieldsDetail(refusal.missingFields) +
         ". No matches would be possible. Choose a file that includes columns " +
-        "for the required field types (for example name, date of birth, or SSN).",
+        "for the required field types (for example name, date of birth, or SSN)." +
+        delimiterRemedy,
     };
   return {
     title: "This file cannot satisfy the linkage terms",
@@ -68,6 +80,7 @@ export function unlinkableFileAlert(refusal: LinkageRefusal): AlertContent {
       missingFieldsDetail(refusal.verdict.unsatisfiedFields) +
       ". It would be refused before any data left this device. Choose a file " +
       "that satisfies every linkage key in the terms, or set terms that " +
-      "declare only the keys the files on both sides can supply.",
+      "declare only the keys the files on both sides can supply." +
+      delimiterRemedy,
   };
 }

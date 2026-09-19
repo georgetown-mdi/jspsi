@@ -177,6 +177,7 @@ describe("classifyManagedRunFailure: pre-connection benign states from the error
       new ManagedInputError({
         reason: "columns",
         unsatisfied: [{ name: "ssn", type: "ssn" }],
+        singleColumn: false,
       }),
       new LinkageTermsUnsatisfiableError("refused at the run boundary"),
     ]) {
@@ -193,6 +194,44 @@ describe("classifyManagedRunFailure: pre-connection benign states from the error
       expect(failure.message).not.toMatch(/ssn/);
       expect(failure.message).toMatch(/every linkage key/);
     }
+  });
+
+  test("a one-column input states the delimiter, not the agreed keys", () => {
+    // The record reads its input by the delimiter it was set up with, so an extract
+    // separated another way arrives as one column and fails every scheduled run.
+    // The remedy is the separator, and copy sending the operator to renegotiate
+    // terms with their partner would not reach it.
+    const failure = classifyAgainstOneRecord(
+      new ManagedInputError({
+        reason: "columns",
+        unsatisfied: [{ name: "ssn", type: "ssn" }],
+        singleColumn: true,
+      }),
+      record(),
+      undefined,
+      NOW,
+      false,
+    );
+    expect(failure.kind).toBe("terms-shortfall");
+    expect(failure.recovery).toBe("restate");
+    expect(failure.message).toMatch(/read as a single column/);
+    expect(failure.message).toMatch(/separated by a character other than/);
+    // The state still attests what this run did not do, as every pre-connection
+    // state does.
+    expect(failure.message).toMatch(/nothing left this device/);
+    // And a shortfall over a wider file keeps the agreed-keys copy.
+    const wider = classifyAgainstOneRecord(
+      new ManagedInputError({
+        reason: "columns",
+        unsatisfied: [{ name: "ssn", type: "ssn" }],
+        singleColumn: false,
+      }),
+      record(),
+      undefined,
+      NOW,
+      false,
+    );
+    expect(wider.message).not.toMatch(/single column/);
   });
 
   test("a run in progress elsewhere is the benign already-running state", () => {

@@ -2236,6 +2236,21 @@ function csvDelimiterLabel(delimiter: string): string {
 }
 
 /**
+ * What a configuration's recorded `csv_delimiter` does to every later run over
+ * that file, as {@link csvDelimiterForRun}'s report states it: a character is
+ * both read and written, while {@link CSV_DELIMITER_DETECT} is read by detection
+ * and written as a comma -- the value core's `resultCsvDelimiter` resolves for
+ * it.
+ */
+function recordedCsvDelimiterEffect(configured: string): string {
+  return configured === CSV_DELIMITER_DETECT
+    ? "takes the delimiter from the file itself and writes commas, the " +
+        `csv_delimiter (${CSV_DELIMITER_DETECT}) that file records`
+    : "reads and writes by the csv_delimiter " +
+        `(${csvDelimiterLabel(configured)}) that file records`;
+}
+
+/**
  * The field delimiter one run reads its CSV by and writes its result with:
  * `--csv-delimiter` where the command line gives it, the configuration's
  * `csv_delimiter` otherwise -- the precedence every command that reads a CSV
@@ -2268,8 +2283,8 @@ export function csvDelimiterForRun(params: {
     );
     warn(
       `--csv-delimiter ${csvDelimiterLabel(supplied)} applies to this run; ` +
-        `every later exchange over ${named} reads and writes by the ` +
-        `csv_delimiter (${csvDelimiterLabel(configured)}) that file records. ` +
+        `every later exchange over ${named} ` +
+        `${recordedCsvDelimiterEffect(configured)}. ` +
         `Edit csv_delimiter in ${named} to change it.`,
     );
   }

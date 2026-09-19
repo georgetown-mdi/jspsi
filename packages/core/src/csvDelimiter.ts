@@ -111,9 +111,11 @@ export function resultCsvDelimiter(choice: string | undefined): string {
  *
  * Stated without naming a flag, a key, or a control, and without naming how the
  * delimiter was chosen -- a party who named one reaches this the same way a
- * party who named none does. The copy is shared by the command line's
- * pre-flight and the run boundary both applications reach, and each surface's
- * own name for the choice is in its documentation.
+ * party who named none does. Two refusals render it: the command line's linkage
+ * pre-flight, and the run-boundary refusal `assertLinkageTermsSatisfiable`
+ * raises. The browser's pre-launch gates apply the same column rule and state
+ * the remedy in the web app's own words, naming the control the operator has on
+ * the surface they are reading.
  */
 export function singleColumnDelimiterClause(columnCount: number): string {
   if (columnCount !== 1) return "";
