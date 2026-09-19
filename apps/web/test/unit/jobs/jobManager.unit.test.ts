@@ -530,7 +530,12 @@ describe("a synthesized persistence-loss terminal reaches the operator's alert",
       cancelJob: () => Promise.resolve(),
       deleteJob: () => Promise.resolve(),
       fetchJobStatus: () => Promise.resolve({ kind: "live", status: "failed" }),
-      fetchRecordAvailability: () => Promise.resolve({ available: false }),
+      fetchFinalRunStatus: () =>
+        Promise.resolve({
+          record: { available: false },
+          transportTeardownOverran: false,
+          exitReconciled: true,
+        }),
     };
     const failures: Array<{
       category: ExchangeErrorCategory;

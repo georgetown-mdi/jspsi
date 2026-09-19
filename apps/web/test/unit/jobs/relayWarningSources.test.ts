@@ -128,13 +128,6 @@ const FD3_LINE_CAP = 1_048_576;
 /** The value the filedrop rendezvous preflight's notices are stamped with. */
 const PREFLIGHT_SOURCE: RelayWarningSource = "relayRendezvousPreflight";
 
-/**
- * The value the transport-teardown notice is stamped with, raised for a run that
- * reported its own outcome and then reported leftover protocol files on its log
- * (driven in apps/web/test/unit/jobs/transportTeardownNotice.test.ts).
- */
-const TEARDOWN_SOURCE: RelayWarningSource = "relayTransportTeardownOverrun";
-
 /** One degradation site, the fault that reaches it, and the value it claims. */
 const DEGRADATION_SITES: Array<{
   site: string;
@@ -199,7 +192,7 @@ describe("the relay stamps its own source on each degradation", () => {
 
   test("every declared source has a site pinned above", () => {
     const pinned = [...DEGRADATION_SITES.map((entry) => entry.source)];
-    expect([...pinned, PREFLIGHT_SOURCE, TEARDOWN_SOURCE].sort()).toEqual(
+    expect([...pinned, PREFLIGHT_SOURCE].sort()).toEqual(
       [...RELAY_WARNING_SOURCES].sort(),
     );
   });

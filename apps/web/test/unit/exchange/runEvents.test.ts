@@ -7,12 +7,22 @@ import { JobApiRequestError } from "@psi/jobClient/serverJobExchangeDriver";
 import { buildRunEvents } from "@exchange/runEvents";
 
 import type {
+  FinalRunStatus,
   JobApiClient,
   JobRunStatus,
   JobStatusProbe,
 } from "@psi/jobClient/serverJobExchangeDriver";
 import type { RelayEvent } from "@jobs/cliDriver";
 import type { RunOutputs } from "@psi/runOutputs";
+
+/** What the post-terminal status read answers for a run these tests do not
+ * exercise it on: no record pair, no teardown report, and the exit already
+ * reconciled so the driver asks once and stops. */
+const SETTLED_WITH_NOTHING: FinalRunStatus = {
+  record: { available: false },
+  transportTeardownOverran: false,
+  exitReconciled: true,
+};
 
 /** Install an in-memory localStorage: the busy (409) re-attach reads and writes
  * the console's persisted attachment through it. */
@@ -56,7 +66,7 @@ function reattachClient(probe: JobStatusProbe) {
     cancelJob: () => Promise.resolve(),
     deleteJob: () => Promise.resolve(),
     fetchJobStatus: () => Promise.resolve(probe),
-    fetchRecordAvailability: () => Promise.resolve({ available: false }),
+    fetchFinalRunStatus: () => Promise.resolve(SETTLED_WITH_NOTHING),
   };
   return { client, streamedIds };
 }

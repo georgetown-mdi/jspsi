@@ -169,10 +169,10 @@ describe("a status body over its cap fails the reader safely", () => {
     ).resolves.toEqual({ kind: "live", status: "running" });
   });
 
-  test("a record-availability query raises rather than reporting the record available", async () => {
+  test("a post-terminal status read raises rather than reporting a bare run", async () => {
     const client = createFetchJobApiClient(answering(OVER_STATUS_CAP));
     await expect(
-      client.fetchRecordAvailability("job-1", new AbortController().signal),
+      client.fetchFinalRunStatus("job-1", new AbortController().signal),
     ).rejects.toThrow();
   });
 

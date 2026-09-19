@@ -11,6 +11,7 @@ import {
   MAX_SFTP_CONNECTION_RESPONSE_BYTES,
   readBoundedJson,
 } from "@psi/jobClient/jobApiBody";
+import { SWEEP_CONTROL_LABEL } from "@psi/runDiagnosticsModel";
 import { isJobCreateRefusalReason } from "@jobs/jobCreateRefusal";
 import { jobCreateIntentSchema } from "@jobs/intentSchemas";
 import { jobRecordDownloads } from "@psi/jobClient/jobExchangeRecord";
@@ -182,13 +183,34 @@ export interface JobApiClient {
     jobId: string,
     signal: AbortSignal,
   ) => Promise<JobStatusProbe>;
-  /** `GET /api/jobs/:id`, reading `recordAvailable`/`recordCreatedAt` off the
-   * status body. A graceful-degrade metadata fetch: the driver delivers the
-   * result without the record pair if this fails or aborts. */
-  fetchRecordAvailability: (
+  /** `GET /api/jobs/:id`, read once a terminal event has arrived for the
+   * metadata that is not on the event stream. A graceful-degrade fetch: the
+   * driver delivers the result without the record pair, and raises no teardown
+   * notice, if this fails or aborts. */
+  fetchFinalRunStatus: (
     jobId: string,
     signal: AbortSignal,
-  ) => Promise<RecordAvailability>;
+  ) => Promise<FinalRunStatus>;
+}
+
+/**
+ * What the post-terminal read of `GET /api/jobs/:id` tells the driver: the
+ * record pair's availability, whether the run reported protocol files its
+ * transport close left behind, and whether the console has reconciled the
+ * child's exit yet.
+ *
+ * `exitReconciled` is what makes the teardown report readable at all. The CLI
+ * reports its outcome before it closes its transport, so the terminal event that
+ * ends the event stream arrives while the child is still closing, and the report
+ * of a close that overran its ceiling reaches the console minutes later
+ * (`transportTeardownCeilingMs` in apps/cli/src/transportTeardown.ts). Until the
+ * exit is reconciled -- `terminal` present in the status body -- a false
+ * `transportTeardownOverran` says only that nothing has been reported yet.
+ */
+export interface FinalRunStatus {
+  record: RecordAvailability;
+  transportTeardownOverran: boolean;
+  exitReconciled: boolean;
 }
 
 /** The exchange's live run status, read off `GET /api/jobs/:id`. `running` is a
@@ -371,21 +393,17 @@ export function createFetchJobApiClient(
         return { kind: "live", status: "running" };
       }
     },
-    fetchRecordAvailability: async (jobId, signal) => {
+    fetchFinalRunStatus: async (jobId, signal) => {
       const response = await fetchImpl(`/api/jobs/${jobId}`, {
         method: "GET",
         signal,
       });
-      if (!response.ok) return { available: false };
+      if (!response.ok) return NOTHING_MORE_TO_READ;
       const body: unknown = await readBoundedJson(
         response,
         MAX_JOB_STATUS_RESPONSE_BYTES,
       );
-      const available = (body as { recordAvailable?: unknown }).recordAvailable;
-      const createdAt = (body as { recordCreatedAt?: unknown }).recordCreatedAt;
-      if (available !== true || typeof createdAt !== "string")
-        return { available: false };
-      return { available: true, createdAt };
+      return finalRunStatusOf(body);
     },
   };
 }
@@ -424,6 +442,41 @@ async function readBodyRefusalReason(
   } catch {
     return undefined;
   }
+}
+
+/**
+ * What a read that answered nothing resolves to: no record pair, no teardown
+ * report, and the exit treated as reconciled so a watch for that report stops.
+ * A body this client cannot read is not a run it can keep asking about.
+ */
+const NOTHING_MORE_TO_READ: FinalRunStatus = {
+  record: { available: false },
+  transportTeardownOverran: false,
+  exitReconciled: true,
+};
+
+/** Read the post-terminal fields off a `GET /api/jobs/:id` body. The record pair
+ * is offered only with the `createdAt` the download filenames are stamped from,
+ * and `terminal` -- null until the child exits -- is what says whether the
+ * teardown report has had its chance to arrive. A body holding no `terminal` at
+ * all answers nothing about the exit, and is not one to keep asking. */
+function finalRunStatusOf(body: unknown): FinalRunStatus {
+  if (body === null || typeof body !== "object") return NOTHING_MORE_TO_READ;
+  const read = body as {
+    recordAvailable?: unknown;
+    recordCreatedAt?: unknown;
+    transportTeardownOverran?: unknown;
+    terminal?: unknown;
+  };
+  const createdAt = read.recordCreatedAt;
+  return {
+    record:
+      read.recordAvailable === true && typeof createdAt === "string"
+        ? { available: true, createdAt }
+        : { available: false },
+    transportTeardownOverran: read.transportTeardownOverran === true,
+    exitReconciled: read.terminal !== null,
+  };
 }
 
 /** Read the run status off a `GET /api/jobs/:id` body, defaulting a missing or
@@ -1356,17 +1409,20 @@ async function consumeJobStream(
         }
         case "result": {
           const outputs = baseResultOutputs(event, jobId);
-          const availability = await queryRecordAvailability(
-            client,
-            jobId,
-            signal,
-          );
+          const final = await queryFinalRunStatus(client, jobId, signal);
           // Re-check after the await: a caller-initiated abort mid-query
           // stays silent, matching the browser lifecycle.
           if (aborted()) return;
-          if (availability.available)
-            withRecordDownloads(outputs, jobId, availability.createdAt);
+          if (final.record.available)
+            withRecordDownloads(outputs, jobId, final.record.createdAt);
           onResult(outputs);
+          await raiseTeardownLeftoverFilesNotice(
+            client,
+            jobId,
+            final,
+            signal,
+            onWarning,
+          );
           return;
         }
         case "error":
@@ -1398,23 +1454,100 @@ async function consumeJobStream(
   }
 }
 
-/** Query the job's record availability as a graceful-degrade step: any failure
- * or abort resolves to unavailable so the run still delivers its primary
- * artifact (the result CSV) rather than failing on a metadata fetch. The
+/** Read the job's post-terminal status as a graceful-degrade step: any failure
+ * or abort resolves to nothing more to read, so the run still delivers its
+ * primary artifact (the result CSV) rather than failing on a metadata fetch. The
  * diagnostic is dev-gated like the driver's other server-influenced logs. */
-async function queryRecordAvailability(
+async function queryFinalRunStatus(
   client: JobApiClient,
   jobId: string,
   signal: AbortSignal,
-): Promise<RecordAvailability> {
+): Promise<FinalRunStatus> {
   try {
-    return await client.fetchRecordAvailability(jobId, signal);
+    return await client.fetchFinalRunStatus(jobId, signal);
   } catch (error) {
     whenDiagnostic(() =>
-      log.warn("server job record availability query failed:", error),
+      log.warn("server job final status query failed:", error),
     );
-    return { available: false };
+    return NOTHING_MORE_TO_READ;
   }
+}
+
+/**
+ * What the operator is told about a transport close that did not finish: the
+ * protocol files it may have left in the shared exchange directory, the refusal
+ * they would otherwise meet as the next run's, and the console's own sweep
+ * control that clears them.
+ *
+ * The control is quoted from the label the run form renders
+ * ({@link SWEEP_CONTROL_LABEL}) rather than from the CLI flag behind it, which a
+ * console operator has no way to pass. It states no directory: the CLI holds the
+ * protocol-file grammar and this browser does not know which of a split
+ * rendezvous's legs, or which remote directory, the close was working on.
+ */
+const TEARDOWN_LEFTOVER_FILES_NOTICE =
+  "this run may have left its own protocol files in the shared exchange " +
+  "directory: closing the transport did not finish. The next run refuses to " +
+  `start on them, so turn on "${SWEEP_CONTROL_LABEL}" for it; your own ` +
+  "input and results are not what it sweeps.";
+
+/** The gap between asks while the console has not reconciled the child's exit,
+ * matching the log watch's cadence on the same endpoint (`jobDiagnosticLog`). */
+const TEARDOWN_REPORT_ASK_INTERVAL_MS = 2_000;
+
+/**
+ * How long the driver keeps asking for a run's teardown report before giving up.
+ *
+ * The report lands when the close reaches its ceiling -- three minutes on the
+ * file channels (`TRANSPORT_TEARDOWN_CEILING_MS` in
+ * apps/cli/src/transportTeardown.ts) -- so this sits above that with room for
+ * the exit that follows it. A WebRTC run's ceiling is longer and such a run has
+ * no protocol files to leave, so giving up first costs that run no notice.
+ */
+const TEARDOWN_REPORT_WAIT_BUDGET_MS = 4 * 60_000;
+
+/** Resolve after `ms`; the default wait between asks. */
+function realDelay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Tell the operator about protocol files the run's transport close may have
+ * left, waiting for the console to reconcile the child's exit when the
+ * post-terminal read landed ahead of it.
+ *
+ * It runs after `onResult`, which is where a notice raised during teardown
+ * belongs (the in-browser lifecycle raises its own close notice there too, see
+ * `runExchangeLifecycle`): the CLI reports its outcome before it closes the
+ * transport, so the report this reads does not exist when the result arrives. A
+ * run with no warning sink asks nothing at all, and an abort -- the operator
+ * leaving the surface -- stops the asks silently.
+ *
+ * @internal exported for the unit test, which drives the wait with its own delay.
+ */
+export async function raiseTeardownLeftoverFilesNotice(
+  client: JobApiClient,
+  jobId: string,
+  final: FinalRunStatus,
+  signal: AbortSignal,
+  onWarning: ((message: string) => void) | undefined,
+  delay: (ms: number) => Promise<void> = realDelay,
+): Promise<void> {
+  if (onWarning === undefined) return;
+  // Read the live abort state through a call so the re-checks across each await
+  // are not narrowed to a constant by the first guard (the drivers' idiom).
+  const aborted = () => signal.aborted;
+  let status = final;
+  const deadline = Date.now() + TEARDOWN_REPORT_WAIT_BUDGET_MS;
+  while (!status.transportTeardownOverran && !status.exitReconciled) {
+    if (Date.now() >= deadline) return;
+    await delay(TEARDOWN_REPORT_ASK_INTERVAL_MS);
+    if (aborted()) return;
+    status = await queryFinalRunStatus(client, jobId, signal);
+    if (aborted()) return;
+  }
+  if (status.transportTeardownOverran)
+    onWarning(TEARDOWN_LEFTOVER_FILES_NOTICE);
 }
 
 /** Categorize a `createJob` failure: a 400 is a rejected/invalid intent, which

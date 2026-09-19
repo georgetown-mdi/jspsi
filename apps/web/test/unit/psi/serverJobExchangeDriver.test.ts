@@ -26,6 +26,7 @@ import {
 
 import type { ExchangeResult, Metadata, Standardization } from "@psilink/core";
 import type {
+  FinalRunStatus,
   JobApiClient,
   RecordAvailability,
   ServerJobExchangeDriverConfig,
@@ -61,6 +62,15 @@ function driverEvents(signal: AbortSignal) {
   };
 }
 
+/** What the post-terminal status read answers where a test drives neither the
+ * record pair nor the teardown report: nothing to offer, and the exit already
+ * reconciled so the driver asks once and stops. */
+const SETTLED_WITH_NOTHING: FinalRunStatus = {
+  record: { available: false },
+  transportTeardownOverran: false,
+  exitReconciled: true,
+};
+
 /** Wrap a scripted RelayEvent sequence in an async iterable so a run consumes it
  * exactly as it would a live stream. */
 async function* scriptedStream(
@@ -77,12 +87,15 @@ async function* scriptedStream(
 /** A {@link JobApiClient} whose event stream is a fixed script, capturing the
  * intent it was asked to create and each cancel it received. The record
  * availability defaults to unavailable; a test that exercises the record set
- * passes an availability (or a function that throws to script a failed query). */
+ * passes an availability (or a function that throws to script a failed query).
+ * The post-terminal read reports no teardown leftovers and a reconciled exit
+ * unless `teardown` says otherwise. */
 function scriptedClient(
   events: Array<RelayEvent>,
   availability: RecordAvailability | (() => Promise<RecordAvailability>) = {
     available: false,
   },
+  teardown: Partial<Omit<FinalRunStatus, "record">> = {},
 ) {
   const createdIntents: Array<unknown> = [];
   const cancelledIds: Array<string> = [];
@@ -102,10 +115,14 @@ function scriptedClient(
       return Promise.resolve();
     },
     fetchJobStatus: () => Promise.resolve({ kind: "live", status: "running" }),
-    fetchRecordAvailability: () =>
-      typeof availability === "function"
-        ? availability()
-        : Promise.resolve(availability),
+    fetchFinalRunStatus: async () => ({
+      record:
+        typeof availability === "function"
+          ? await availability()
+          : availability,
+      transportTeardownOverran: teardown.transportTeardownOverran === true,
+      exitReconciled: teardown.exitReconciled !== false,
+    }),
   };
   return { client, createdIntents, cancelledIds, deletedIds };
 }
@@ -1044,7 +1061,7 @@ describe("createServerJobExchangeDriver intent and cancellation", () => {
       deleteJob: () => Promise.resolve(),
       fetchJobStatus: () =>
         Promise.resolve({ kind: "live", status: "running" }),
-      fetchRecordAvailability: () => Promise.resolve({ available: false }),
+      fetchFinalRunStatus: () => Promise.resolve(SETTLED_WITH_NOTHING),
     };
     const config: ServerJobExchangeDriverConfig = {
       ...driverConfig(),
@@ -1086,7 +1103,7 @@ describe("createServerJobExchangeDriver intent and cancellation", () => {
       deleteJob: () => Promise.resolve(),
       fetchJobStatus: () =>
         Promise.resolve({ kind: "live", status: "running" }),
-      fetchRecordAvailability: () => Promise.resolve({ available: false }),
+      fetchFinalRunStatus: () => Promise.resolve(SETTLED_WITH_NOTHING),
     };
     const driver = createServerJobExchangeDriver(driverConfig(), client);
     const events = driverEvents(controller.signal);
@@ -1111,7 +1128,7 @@ describe("createServerJobExchangeDriver intent and cancellation", () => {
       cancelJob: () => Promise.resolve(),
       deleteJob: () => Promise.resolve(),
       fetchJobStatus: () => Promise.resolve({ kind: "gone" }),
-      fetchRecordAvailability: () => Promise.resolve({ available: false }),
+      fetchFinalRunStatus: () => Promise.resolve(SETTLED_WITH_NOTHING),
     };
     const driver = createServerJobExchangeDriver(driverConfig(), failingClient);
     const events = driverEvents(new AbortController().signal);
@@ -1130,7 +1147,7 @@ describe("createServerJobExchangeDriver intent and cancellation", () => {
       cancelJob: () => Promise.resolve(),
       deleteJob: () => Promise.resolve(),
       fetchJobStatus: () => Promise.resolve({ kind: "gone" }),
-      fetchRecordAvailability: () => Promise.resolve({ available: false }),
+      fetchFinalRunStatus: () => Promise.resolve(SETTLED_WITH_NOTHING),
     };
     const driver = createServerJobExchangeDriver(driverConfig(), client);
     const events = driverEvents(new AbortController().signal);
@@ -1401,7 +1418,7 @@ describe("createFetchJobApiClient over an injected fetch", () => {
     }
   });
 
-  test("fetchRecordAvailability reads recordAvailable and recordCreatedAt", async () => {
+  test("fetchFinalRunStatus reads the record pair, the report, and the exit", async () => {
     const statusResponse =
       (body: unknown): typeof fetch =>
       () =>
@@ -1418,33 +1435,59 @@ describe("createFetchJobApiClient over an injected fetch", () => {
         statusResponse({
           recordAvailable: true,
           recordCreatedAt: "2026-07-08T14:32:00.000Z",
+          transportTeardownOverran: true,
+          terminal: { outcome: "succeeded", exitCode: 0, signal: null },
         }),
-      ).fetchRecordAvailability("job-1", signal),
+      ).fetchFinalRunStatus("job-1", signal),
     ).resolves.toEqual({
-      available: true,
-      createdAt: "2026-07-08T14:32:00.000Z",
+      record: { available: true, createdAt: "2026-07-08T14:32:00.000Z" },
+      transportTeardownOverran: true,
+      exitReconciled: true,
     });
 
-    // recordAvailable false, a missing createdAt, and a non-2xx all resolve to
-    // unavailable.
+    // recordAvailable false and a missing createdAt alike withhold the pair; a
+    // null `terminal` is the child still running, so the teardown report has not
+    // had its chance to arrive.
+    await expect(
+      createFetchJobApiClient(
+        statusResponse({ recordAvailable: false, terminal: null }),
+      ).fetchFinalRunStatus("job-1", signal),
+    ).resolves.toEqual({
+      record: { available: false },
+      transportTeardownOverran: false,
+      exitReconciled: false,
+    });
+    await expect(
+      createFetchJobApiClient(
+        statusResponse({ recordAvailable: true, terminal: null }),
+      ).fetchFinalRunStatus("job-1", signal),
+    ).resolves.toEqual({
+      record: { available: false },
+      transportTeardownOverran: false,
+      exitReconciled: false,
+    });
+    // A body holding no `terminal` answers nothing about the exit, so it is not
+    // one to keep asking either.
     await expect(
       createFetchJobApiClient(
         statusResponse({ recordAvailable: false }),
-      ).fetchRecordAvailability("job-1", signal),
-    ).resolves.toEqual({ available: false });
-    await expect(
-      createFetchJobApiClient(
-        statusResponse({ recordAvailable: true }),
-      ).fetchRecordAvailability("job-1", signal),
-    ).resolves.toEqual({ available: false });
+      ).fetchFinalRunStatus("job-1", signal),
+    ).resolves.toEqual({
+      record: { available: false },
+      transportTeardownOverran: false,
+      exitReconciled: true,
+    });
+    // A non-2xx is nothing more to read: no pair, no report, and no run left to
+    // keep asking about.
     const notFound: typeof fetch = () =>
       Promise.resolve(new Response(null, { status: 404 }));
     await expect(
-      createFetchJobApiClient(notFound).fetchRecordAvailability(
-        "job-1",
-        signal,
-      ),
-    ).resolves.toEqual({ available: false });
+      createFetchJobApiClient(notFound).fetchFinalRunStatus("job-1", signal),
+    ).resolves.toEqual({
+      record: { available: false },
+      transportTeardownOverran: false,
+      exitReconciled: true,
+    });
   });
 });
 
@@ -1793,7 +1836,7 @@ describe("createServerJobReattachDriver", () => {
       cancelJob: () => Promise.resolve(),
       deleteJob: () => Promise.resolve(),
       fetchJobStatus: () => Promise.resolve({ kind: "gone" }),
-      fetchRecordAvailability: () => Promise.resolve({ available: false }),
+      fetchFinalRunStatus: () => Promise.resolve(SETTLED_WITH_NOTHING),
     };
     const events = driverEvents(new AbortController().signal);
 

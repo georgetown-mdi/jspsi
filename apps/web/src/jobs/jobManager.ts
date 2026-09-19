@@ -7,7 +7,6 @@ import {
 } from "@psilink/core";
 
 import { ERROR_MESSAGE_CHAIN_FIELD } from "@psi/relayErrorChain";
-import { SWEEP_CONTROL_LABEL } from "@psi/runDiagnosticsModel";
 
 import {
   zeroSetupFiledropArgv,
@@ -264,6 +263,11 @@ interface JobView {
   receiptRequested: boolean;
   /** Whether this run wrote a dual-signed receipt and the file is on disk. */
   receiptAvailable: boolean;
+  /** Whether the run reported that its transport close left this party's
+   * protocol files in the shared exchange directory. False until the child's
+   * exit is reconciled, since the report comes after the run's own terminal
+   * event ({@link JobRecord.transportTeardownOverran}). */
+  transportTeardownOverran: boolean;
   /** The five servable file paths (result, record, keys, log, receipt) inside the
    * workdir. `logPath` is null for a run that captured no log, `receiptPath` for
    * one that signed nothing. */
@@ -310,6 +314,17 @@ export interface JobRecord {
   events: Array<BufferedEvent>;
   /** True once a terminal event has been buffered; the SSE stream closes after it. */
   terminalEmitted: boolean;
+  /**
+   * Whether the run reported protocol files its transport close left in the
+   * shared exchange directory ({@link CliRunDiagnostics.transportTeardownOverran}).
+   *
+   * Set when the child's exit is reconciled and only for a run that emitted its
+   * own terminal event: the report reaches this console on the stderr tail after
+   * that event, which for a synthesized terminal already rides its cause link.
+   * A client learns it from the status body, since the run's own terminal has
+   * closed the event stream by the time the report exists.
+   */
+  transportTeardownOverran: boolean;
   /** The reconciled terminal state, once the child has exited. */
   terminal: JobTerminalState | null;
   handle: CliDriverHandle | null;
@@ -976,6 +991,7 @@ export class JobManager {
       status: "running",
       events: [],
       terminalEmitted: false,
+      transportTeardownOverran: false,
       terminal: null,
       handle: null,
       listeners: new Set(),
@@ -1315,11 +1331,12 @@ export class JobManager {
    * no diagnosis reaches the operator twice.
    *
    * A run that terminated itself and then reported protocol files left by an
-   * unfinished transport close takes the notice for that
-   * ({@link TEARDOWN_LEFTOVER_FILES_NOTICE}) as a warning of its own, since
-   * nothing else delivers it: the report is on the tail this run's own terminal
-   * left unread. A run whose terminal was synthesized is not told twice -- that
-   * terminal's cause link already holds the end of the tail, the report among it.
+   * unfinished transport close puts that report on
+   * {@link JobRecord.transportTeardownOverran}, for the status body to hand a
+   * client: the report is on the tail this run's own terminal left unread, and
+   * that terminal has closed the event stream. A run whose terminal was
+   * synthesized states nothing there -- that terminal's cause link already holds
+   * the end of the tail, the report among it.
    *
    * The only slot-release point besides the pre-spawn create failure: fires
    * on the child's `close` (or a spawn `error`), so a killed child is
@@ -1382,34 +1399,10 @@ export class JobManager {
             diagnostics.stderrTail,
           ),
         );
-    } else if (diagnostics.transportTeardownOverran)
-      this.appendPostTerminalEvent(
-        record,
-        buildSynthesizedWarningEvent(
-          "relayTransportTeardownOverrun",
-          TEARDOWN_LEFTOVER_FILES_NOTICE,
-        ),
-      );
+    } else
+      record.transportTeardownOverran = diagnostics.transportTeardownOverran;
 
     this.maybeFreeSlot(record);
-  }
-
-  /**
-   * Buffer an event the run produced after its own terminal event, the one
-   * route past {@link appendEvent}'s terminal stop.
-   *
-   * It appends and notifies only: the status, the terminal state and the
-   * terminal-emitted mark are the run's own and stay as the terminal left them,
-   * so a completed run still reports completed. An event past the buffer cap is
-   * dropped rather than failing the job as {@link appendEvent} does -- the run
-   * is already classified, and failing it here would rewrite the outcome the
-   * operator was given.
-   */
-  private appendPostTerminalEvent(record: JobRecord, event: RelayEvent): void {
-    if (record.events.length >= this.eventBufferCap) return;
-    const entry: BufferedEvent = { id: record.events.length + 1, event };
-    record.events.push(entry);
-    this.notifyListeners(record, entry);
   }
 
   /**
@@ -1617,24 +1610,6 @@ function liveRecordAvailability(record: JobRecord):
 
 /** How the cause link naming the child's stderr introduces it. */
 const STDERR_CAUSE_LABEL = "the CLI last wrote on stderr: ";
-
-/**
- * What the operator is told about a transport close that did not finish: the
- * protocol files it may have left in the shared exchange directory, the refusal
- * they would otherwise meet as the next run's, and the console's own sweep
- * control that clears them.
- *
- * The control is quoted from the label the run form renders
- * ({@link SWEEP_CONTROL_LABEL}) rather than from the CLI flag behind it, which
- * a console operator has no way to pass. It states no directory: the CLI holds
- * the protocol-file grammar and this console does not know which of a split
- * rendezvous's legs, or which remote directory, the close was working on.
- */
-const TEARDOWN_LEFTOVER_FILES_NOTICE =
-  "this run may have left its own protocol files in the shared exchange " +
-  "directory: closing the transport did not finish. The next run refuses to " +
-  `start on them, so turn on "${SWEEP_CONTROL_LABEL}" for it; your own ` +
-  "input and results are not what it sweeps.";
 
 /**
  * A synthesized terminal naming what the CLI printed on stderr, so an operator
@@ -1874,6 +1849,7 @@ function liveJobView(record: JobRecord): JobView {
     receiptRequested: record.receiptPath !== null,
     receiptAvailable:
       record.receiptPath !== null && jobFileExists(record.receiptPath),
+    transportTeardownOverran: record.transportTeardownOverran,
     outputPath: record.outputPath,
     recordPath: record.recordPath,
     keysPath: record.keysPath,
