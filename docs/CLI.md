@@ -148,7 +148,7 @@ The identity question follows that decision, so a run that leaves the existing f
 ## Zero-setup exchange
 
 ```sh
-psilink [--identity IDENTITY] [--save] [--linkage-strategy STRATEGY] [--deduplicate] [--sweep-exchange-files [--force-retain-sweep]] URL INPUT_FILE [OUTPUT_FILE]
+psilink [--identity IDENTITY] [--save] [--linkage-strategy STRATEGY] [--deduplicate] [--csv-delimiter DELIM] [--sweep-exchange-files [--force-retain-sweep]] URL INPUT_FILE [OUTPUT_FILE]
 ```
 
 Both parties run this command against the same server. Linkage terms, metadata, and data standardizing transformations are inferred from each party's input file; if the inferred terms disagree, the exchange fails with an error. Users are expected to prepare files with matching schemas before running. The server coordinates their connection and the exchange proceeds immediately without any prior configuration. By default, no configuration files are written. This mode is suitable for one-off exchanges and for onboarding sessions where both parties are in direct communication. Security relies on the transport authentication layer and file system controls rather than a pre-shared secret. If there is no end-to-end encryption (e.g. SFTP or file-drop), then implicitly trust is placed in the server administrator.

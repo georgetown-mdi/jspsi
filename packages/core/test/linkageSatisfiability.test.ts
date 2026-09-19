@@ -48,6 +48,7 @@ import {
   UnknownStandardizationFunctionError,
   UsageError,
 } from "../src/errors";
+import { CSV_DELIMITER_DETECT } from "../src/csvDelimiter";
 import { sanitizeForDisplay } from "../src/utils/sanitizeForDisplay";
 import { sanitizeErrorForDisplay } from "../src/utils/sanitizeErrorForDisplay";
 import { inferMetadata } from "../src/config/metadata";
@@ -3428,6 +3429,43 @@ describe("assertLinkageTermsSatisfiable", () => {
     expect(raised).toBeInstanceOf(LinkageTermsUnsatisfiableError);
     expect((raised as Error).cause).toBeUndefined();
     expect(sanitizeErrorForDisplay(raised)).toContain("declare no linkage key");
+  });
+
+  test("keyless terms over a one-column read state the delimiter remedy", () => {
+    // A file separated by something other than the delimiter the read took
+    // reads as one mashed column, and terms derived from that column declare
+    // no key at all -- so this refusal, not the shortfall one, is where a run
+    // over such a file lands, and it owes the operator the same remedy.
+    let raised: unknown;
+    try {
+      assertLinkageTermsSatisfiable(["id|dob|zip"], {
+        ...oneKeyTerms("SSN"),
+        linkageKeys: [],
+      });
+    } catch (err) {
+      raised = err;
+    }
+    const rendered = sanitizeErrorForDisplay(raised);
+    expect(rendered).toContain("declare no linkage key");
+    expect(rendered).toContain("single column");
+    expect(rendered).toContain("CSV delimiter");
+    expect(rendered).toContain(CSV_DELIMITER_DETECT);
+  });
+
+  test("keyless terms over a multi-column read state no delimiter remedy", () => {
+    let raised: unknown;
+    try {
+      assertLinkageTermsSatisfiable(["id", "dob", "zip"], {
+        ...oneKeyTerms("SSN"),
+        linkageKeys: [],
+      });
+    } catch (err) {
+      raised = err;
+    }
+    const rendered = sanitizeErrorForDisplay(raised);
+    expect(rendered).toContain("declare no linkage key");
+    expect(rendered).not.toContain("single column");
+    expect(rendered).not.toContain(CSV_DELIMITER_DETECT);
   });
 
   test("a partner-authored key name spends only its own display budget", () => {
