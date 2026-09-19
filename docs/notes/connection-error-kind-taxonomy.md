@@ -18,6 +18,14 @@ fault are tagged, and the conditions under which each would be revisited.
 `ConnectionErrorKind` is a transport-contract concern spanning every channel
 (SFTP, file-drop, WebRTC) and is part of the core library's public API.
 
+Those two are the whole of what this note records. The other kinds took no
+decision worth a record: `usage` and `security` are the caller-misuse and
+tampering classifications the type itself defines, and `protocol` is the one
+every partner-deviation refusal takes -- a frame that fails validation, a
+partner-supplied index outside the agreed range, an inbound frame past a
+transport bound, a payload disclosure other than the one consented to -- each
+specified where its own control is, so nothing about the kind is open here.
+
 It does not cover the channels, synchronization, message-delivery contract, or
 supporting services (see [COMMUNICATION.md](../COMMUNICATION.md)), the
 channel-security construction (see
