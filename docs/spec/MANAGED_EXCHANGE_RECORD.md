@@ -975,9 +975,13 @@ record's `id` is likewise not included: it is a device-local record
   re-export after each rotation.
 - **Top-level shape.** The artifact is a JSON document with an `artifactVersion`
 tag and three parts that keep the two CLI halves separable from the browser-only
-fields. The tag is its own reader-rejects-unknown literal, distinct from the
-record's `schemaVersion`: the on-disk artifact format versions independently of
-the stored record. `exchangeDocument` embeds the exchange-file document as a
+fields. The tag is its own reader-rejects-unknown literal --
+`psilink-managed-exchange-backup/v2`, the single value this build accepts, and
+the only one it writes -- distinct from the record's `schemaVersion`: the on-disk
+artifact format versions independently of the stored record. Every other value
+is refused on the literal rather than migrated, the superseded
+`psilink-managed-exchange-backup/v1` being recognized only far enough to say so
+(below). `exchangeDocument` embeds the exchange-file document as a
 valid `psilink.yaml` (the snake_case YAML the CLI loads, serialized through the
 same discipline the mint layer applies to a validated spec). `key` is the
 `.psilink.key` pair (`sharedSecret` and, when a bound is in force, `expires`).
