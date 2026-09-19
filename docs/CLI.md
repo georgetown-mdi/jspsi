@@ -602,6 +602,22 @@ A crashed or mismatched prior run can leave protocol files in an `sftp`/`filedro
 
 `--force-retain-sweep` is DANGEROUS and exists only to escalate a sweep the guard refuses. A directory that is, or whose peer is, in retain mode holds an audit transcript, so `--sweep-exchange-files` alone refuses there; `--force-retain-sweep` permits the deletion, and **the prior transcript is permanently lost**. It requires `--sweep-exchange-files` and is rejected on its own. Use it only when discarding the transcript is the intent.
 
+## The result file
+
+An exchange writes its matched records to the `OUTPUT_FILE` path it was given, and to `stdout` when it was given none -- on `psilink exchange`, the zero-setup form, an online `psilink invite`, and an [acceptance that runs its own exchange](#accepting-and-running-a-webrtc-exchange) alike. What that file holds, left to right:
+
+- **Your own matched record comes first.** The first column holds the identifier value of the record that matched, under the name of the column your metadata flags as the identifier.
+- **`row_id` holds your partner's 0-based row index** for that match -- the position of the matched record in the input your partner supplied, on every run and not only on an identifier-free one. Your own row index is absent: with an identifier column the first column names the record instead.
+- **The partner's payload columns follow**, each under its own name, and after them the columns of your own input [`include_own_columns`](EXCHANGE_REFERENCE.md#include_own_columns) selects, if any. Every header is distinct, so a name already taken is written as `their_<name>` or `own_<name>`, then numbered.
+- **An input that declares no identifier column shifts both index columns.** The first column is then headed `row_id` and holds your own 0-based row index, and your partner's index moves to `their_row_id` beside it.
+- **There is one row per matched pair**, which is one row per matched record under `one-to-one` matching, and more than one where a deduplicating cardinality pairs several records on one side.
+
+How the headers are derived, what fixes the column order, and how a deduplicating cardinality shapes the row count are in [PROTOCOL.md](spec/PROTOCOL.md#output).
+
+**A value holding a comma, a quote, or a line break survives the round trip.** Every header and value is written as an RFC 4180 field: one holding the [field delimiter](#the-field-delimiter), a double quote, CR, or LF is wrapped in double quotes with its embedded quotes doubled, and any other value is written bare. So a payload cell holding an address with commas, or a whole JSON document, comes back byte-identical when the file is read again -- which is what lets `psilink verify-receipt` re-supply the result and reproduce what the exchange committed to. A committed null and a committed empty string are the one exception: both are written as an empty cell and both read back as an empty string (see [Verifying a receipt](#verifying-a-receipt)).
+
+**One CSV line may not exceed 8 MiB.** psilink reads a CSV a line at a time and refuses any single logical line -- a data row, or the whole header -- past that ceiling, naming the limit rather than growing to the span. The bound is on the reads: your input file, on every command that reads one, and the result file `psilink verify-receipt` re-supplies. What it guards, and why 8 MiB, are in [CHANNEL_SECURITY.md](spec/CHANNEL_SECURITY.md#csv-read-single-line-byte-ceiling).
+
 ## Signing identity and the agreed terms
 
 Setting a partnership up to sign for the first time is a sequence of its own, from provisioning the identity to checking the receipt: [From a zero-setup exchange to signed receipts](#from-a-zero-setup-exchange-to-signed-receipts). This section and the ones it points at are the reference behind each step.
@@ -1117,6 +1133,12 @@ Most of what lands on 64 is caught before anything is dialed -- a bad flag, a ma
 - **A row cannot be passed through the agreed terms.** A key element that reads or produces a value above the per-value ceiling, or a row whose assembled key strings cross the per-row bound with no declared fan-out producer to account for the width. The message names the element, the step position, and the row; the remedy is to bind the element to a shorter column, or to shorten the field in this party's own standardization before the key element reads it. Under single-pass, also a record contributing more candidates than one record may contribute to one key, a party's rows expanding past the width its own terms and standardization account for, or two datasets whose declared sizes cross the single-pass ceiling.
 - **The partner's build is incompatible.** A message file whose wire envelope holds a version byte this build does not recognize.
 - **A guard on psilink's own use of the connection fired.** These stand against a fault in psilink or in how it was packaged rather than against anything you configured: a session key of the wrong length, a value with no JSON representation handed to a send, a send or receive against a closed connection, or an installed WebRTC dependency that does not expose what the transport's flushing close depends on. Report one with the message it printed.
+
+### Exit 69 on a file-drop path
+
+A `file://` directory that does not exist, and one that exists but the run cannot write, both exit 69. psilink reads a file-drop path as a network mount: an absent directory and a refused permission are what a share whose mount or permissions are still settling looks like, so the connect retries within [`max_reconnect_attempts`](EXCHANGE_REFERENCE.md#connectionoptions) and then reports the path and the reason as an availability failure a later attempt may clear. Nothing is sent and nothing local is written.
+
+A path that is permanently wrong -- a typo, a share that was never mounted -- therefore reports the same code every attempt, and what stops the loop is the supervisor's own retry cap rather than the exit code (cap it as below). Read the error, which names the directory it could not reach. The shared directory's state among the [exit 64 mid-run](#exit-64-mid-run-a-refusal-the-next-attempt-repeats) refusals is a different condition: that one is about what appears in a rendezvous directory the run already reached.
 
 ### Exit 73: the exchange completed, a local write did not
 
