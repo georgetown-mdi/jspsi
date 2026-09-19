@@ -10,7 +10,7 @@ import {
   exchangeRecordOwedButUnbuilt,
   countIsPartnerReported,
   buildOutputTable,
-  DEFAULT_CSV_DELIMITER,
+  resultCsvDelimiter,
   describeEntityClusters,
   describeResolvedMatching,
   describeResolvedRunShape,
@@ -1734,8 +1734,9 @@ async function writeExchangeOutputs(params: {
     // terminal event's `output` category, which covers the whole stage.
     // One delimiter for the escaping and the join: buildOutputTable quotes
     // each field against it and writeOutput joins the fields with it, so the
-    // file reads back through the delimiter this party chose.
-    const resultDelimiter = csvDelimiter ?? DEFAULT_CSV_DELIMITER;
+    // file reads back through the delimiter this party chose. A party that
+    // named none, or chose detection, gets a comma-separated result.
+    const resultDelimiter = resultCsvDelimiter(csvDelimiter);
     const { headers, rows } = buildOutputTable(
       associationTable,
       prepared.rawRows,

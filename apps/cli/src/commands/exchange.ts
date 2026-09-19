@@ -1052,9 +1052,9 @@ export async function handler(argv: Arguments): Promise<void> {
 
     // The field delimiter this run reads and writes by: --csv-delimiter for
     // this one run, else the configuration's own csv_delimiter, else none --
-    // which reads the delimiter the file itself shows and writes commas. Both
-    // values came through the same accepted-set rule, so neither can be a
-    // character the reader and the writer would disagree on.
+    // which reads and writes commas. Both values came through the same
+    // accepted-value rule, so neither can be a character the reader and the
+    // writer would disagree on.
     const csvDelimiter = csvDelimiterForRun({
       configured: exchangeDataSpec.csvDelimiter,
       supplied: csvDelimiterArg,

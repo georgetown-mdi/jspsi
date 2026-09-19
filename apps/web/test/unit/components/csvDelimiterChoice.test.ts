@@ -1,31 +1,40 @@
 import { describe, expect, test } from "vitest";
 
-import { csvDelimiterRefusal } from "@psilink/core";
+import { CSV_DELIMITER_DETECT, csvDelimiterRefusal } from "@psilink/core";
 
 import {
-  CSV_DELIMITER_AUTO,
   CSV_DELIMITER_OPTIONS,
   CSV_DELIMITER_OTHER,
+  INITIAL_CSV_DELIMITER_CHOICE,
   resolveCsvDelimiter,
 } from "@components/csvDelimiterChoice";
 
-// The delimiter choice the intake surfaces offer, resolved to the character a
-// read and a result write take. The accepted set and its refusal are core's; what
-// is pinned here is that this surface reaches for them rather than restating
-// them, and that a refused choice yields no delimiter at all.
+// The delimiter choice the intake surfaces offer, resolved to the value a read
+// and a result write take. The accepted set and its refusal are core's; what is
+// pinned here is that this surface reaches for them rather than restating them,
+// that the surface starts on the comma, and that a refused choice yields no
+// delimiter at all.
 
 describe("resolving the delimiter choice", () => {
-  test("the starting choice reads by detection, naming no delimiter", () => {
-    const resolution = resolveCsvDelimiter({
-      option: CSV_DELIMITER_AUTO,
-      other: "",
+  test("the starting choice is the comma, not detection", () => {
+    expect(resolveCsvDelimiter(INITIAL_CSV_DELIMITER_CHOICE)).toEqual({
+      ok: true,
+      delimiter: ",",
     });
-    expect(resolution).toEqual({ ok: true, delimiter: undefined });
+  });
+
+  test("detection is an option of its own, resolving to core's reserved value", () => {
+    expect(CSV_DELIMITER_OPTIONS.map((option) => option.value)).toContain(
+      CSV_DELIMITER_DETECT,
+    );
+    expect(
+      resolveCsvDelimiter({ option: CSV_DELIMITER_DETECT, other: "" }),
+    ).toEqual({ ok: true, delimiter: CSV_DELIMITER_DETECT });
   });
 
   test("each named option resolves to its own character", () => {
     for (const option of CSV_DELIMITER_OPTIONS) {
-      if (option.value === CSV_DELIMITER_AUTO) continue;
+      if (option.value === CSV_DELIMITER_DETECT) continue;
       if (option.value === CSV_DELIMITER_OTHER) continue;
       expect(resolveCsvDelimiter({ option: option.value, other: "" })).toEqual({
         ok: true,
@@ -36,7 +45,8 @@ describe("resolving the delimiter choice", () => {
 
   test("the named options are the four common characters", () => {
     const named = CSV_DELIMITER_OPTIONS.map((option) => option.value).filter(
-      (value) => value !== CSV_DELIMITER_AUTO && value !== CSV_DELIMITER_OTHER,
+      (value) =>
+        value !== CSV_DELIMITER_DETECT && value !== CSV_DELIMITER_OTHER,
     );
     expect(named.sort()).toEqual([",", ";", "\t", "|"].sort());
   });

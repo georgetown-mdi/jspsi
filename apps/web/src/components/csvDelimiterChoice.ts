@@ -1,4 +1,6 @@
 import {
+  CSV_DELIMITER_DETECT,
+  DEFAULT_CSV_DELIMITER,
   csvDelimiterRefusal,
   isCsvDelimiter,
   normalizeCsvDelimiter,
@@ -15,33 +17,30 @@ import {
  * their own.
  */
 
-/** The select value standing for no chosen delimiter: the read detects one from the
- * file, among the six the parser considers: the four {@link CSV_DELIMITER_OPTIONS}
- * names, plus the ASCII record and unit separators. */
-export const CSV_DELIMITER_AUTO = "auto";
-
 /** The select value revealing the free-text field, for a delimiter outside the
  * named options. */
 export const CSV_DELIMITER_OTHER = "other";
 
 /** One entry of the delimiter select: the value it stores and the label it shows.
  * The named characters are the four common ones; detection reaches past them, which
- * is what {@link CSV_DELIMITER_AUTO}'s own label states. */
+ * is what the {@link CSV_DELIMITER_DETECT} entry's own label states. */
 export interface CsvDelimiterOption {
   value: string;
   label: string;
 }
 
-/** The delimiter select's options, in the order they are offered. */
+/** The delimiter select's options, in the order they are offered: the comma a read
+ * takes when nobody chooses, the other common characters, detection, and the
+ * free-text field. */
 export const CSV_DELIMITER_OPTIONS: ReadonlyArray<CsvDelimiterOption> = [
-  {
-    value: CSV_DELIMITER_AUTO,
-    label: "Detect (comma, tab, pipe, semicolon, and others)",
-  },
-  { value: ",", label: "Comma" },
+  { value: DEFAULT_CSV_DELIMITER, label: "Comma" },
   { value: "\t", label: "Tab" },
   { value: "|", label: "Pipe" },
   { value: ";", label: "Semicolon" },
+  {
+    value: CSV_DELIMITER_DETECT,
+    label: "Detect (comma, tab, pipe, semicolon, and others)",
+  },
   { value: CSV_DELIMITER_OTHER, label: "Other" },
 ];
 
@@ -53,9 +52,11 @@ export interface CsvDelimiterChoice {
   other: string;
 }
 
-/** The choice an intake surface starts on: detection, with nothing typed. */
-export const DETECTED_CSV_DELIMITER_CHOICE: CsvDelimiterChoice = {
-  option: CSV_DELIMITER_AUTO,
+/** The choice an intake surface starts on: the comma, with nothing typed. Detection
+ * is offered beside it as a choice the operator makes rather than one they are
+ * started on, so a file read a way nobody chose is not the default. */
+export const INITIAL_CSV_DELIMITER_CHOICE: CsvDelimiterChoice = {
+  option: DEFAULT_CSV_DELIMITER,
   other: "",
 };
 
@@ -65,20 +66,19 @@ export const DETECTED_CSV_DELIMITER_CHOICE: CsvDelimiterChoice = {
  * to show and an action to block.
  */
 export type CsvDelimiterResolution =
-  { ok: true; delimiter: string | undefined } | { ok: false; refusal: string };
+  { ok: true; delimiter: string } | { ok: false; refusal: string };
 
 /**
- * Resolve `choice` into the delimiter a read and the result write take: `undefined`
- * for detection, the character itself for a named option, and for
- * {@link CSV_DELIMITER_OTHER} the typed value resolved through
+ * Resolve `choice` into the delimiter a read and the result write take: the
+ * character itself for a named option, {@link CSV_DELIMITER_DETECT} for the detect
+ * option -- the value core's read takes for detection and a record stores for it --
+ * and for {@link CSV_DELIMITER_OTHER} the typed value resolved through
  * {@link normalizeCsvDelimiter} (so the tab spellings are taken here as they are on
  * the command line) and graded by {@link isCsvDelimiter}.
  */
 export function resolveCsvDelimiter(
   choice: CsvDelimiterChoice,
 ): CsvDelimiterResolution {
-  if (choice.option === CSV_DELIMITER_AUTO)
-    return { ok: true, delimiter: undefined };
   if (choice.option !== CSV_DELIMITER_OTHER)
     return { ok: true, delimiter: choice.option };
   const resolved = normalizeCsvDelimiter(choice.other);

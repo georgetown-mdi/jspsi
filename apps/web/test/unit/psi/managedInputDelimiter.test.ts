@@ -1,4 +1,5 @@
 import {
+  CSV_DELIMITER_DETECT,
   assembleExchangeSpec,
   connectionFromLocator,
   getDefaultLinkageTerms,
@@ -42,7 +43,8 @@ const webrtcLocator: WebRTCExchangeLocator = {
 const standingColumns = ["ssn", "first_name", "last_name", "date_of_birth"];
 
 /** The stored document, with or without a chosen delimiter -- the second being
- * every record written before the field existed. */
+ * every record written before the field existed, and every record whose operator
+ * left the field out. */
 function storedDocument(csvDelimiter?: string): ExchangeSpec {
   return assembleExchangeSpec({
     connection: connectionFromLocator(webrtcLocator),
@@ -73,7 +75,15 @@ describe("the delimiter a managed run re-reads its input by", () => {
     expect(parseCalls).toEqual([{ delimiter: "|" }]);
   });
 
-  test("a document written before the field existed reads by detection", async () => {
+  test("the stored detect choice reaches the read as its own value", async () => {
+    await acquireValidatedManagedInput(
+      storedDocument(CSV_DELIMITER_DETECT),
+      reselected,
+    );
+    expect(parseCalls).toEqual([{ delimiter: CSV_DELIMITER_DETECT }]);
+  });
+
+  test("a document storing no delimiter names none, which core's read takes as a comma", async () => {
     await acquireValidatedManagedInput(storedDocument(), reselected);
     expect(parseCalls).toEqual([{}]);
   });

@@ -526,14 +526,20 @@ export {
   CsvLineByteCeilingError,
   CsvRowParseError,
 } from "./file";
-// The one accepted-character rule behind every CSV field delimiter psilink
-// reads or writes with: the spelling resolver, the predicate, and the refusal
-// the CLI flag and the configuration schema both state.
+// The one accepted-value rule behind every CSV field delimiter psilink reads or
+// writes with: the default, the reserved detect choice, the spelling resolver,
+// the two predicates, the write-side resolution, the refusal the CLI flag and
+// the configuration schema both state, and the clause a column refusal adds for
+// a header that read as one column.
 export {
+  CSV_DELIMITER_DETECT,
   DEFAULT_CSV_DELIMITER,
   csvDelimiterRefusal,
   isCsvDelimiter,
+  isCsvDelimiterChoice,
   normalizeCsvDelimiter,
+  resultCsvDelimiter,
+  singleColumnDelimiterClause,
 } from "./csvDelimiter.js";
 export type { CSVRow, CSVParseMeta } from "./file";
 // The characters no name may hold, the text-direction half of that class, and

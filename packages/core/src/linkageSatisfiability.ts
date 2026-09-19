@@ -16,6 +16,7 @@ import {
   StandardizationTermsError,
   UsageError,
 } from "./errors.js";
+import { singleColumnDelimiterClause } from "./csvDelimiter.js";
 import type { Standardization } from "./config/standardizationSchema.js";
 import type {
   LinkageField,
@@ -1771,6 +1772,11 @@ export function summarizeLinkageShortfall(
  * therefore stated as new terms or a conforming input, never as a retry: the same
  * input refuses identically every time.
  *
+ * An input whose whole header read as one column takes
+ * {@link singleColumnDelimiterClause} as well: that shape is what a file
+ * separated by something other than a comma reaches this check as when no
+ * delimiter was named, and the clause states the remedy for it.
+ *
  * The summary is stated on the `"agreed"` standing: this is the boundary of a run,
  * and a run is held to the terms its partner is held to, whoever authored them.
  * The seats that hold terms no partner has yet state the same shortfall in their
@@ -1843,7 +1849,9 @@ export function assertLinkageTermsSatisfiable(
 
   throw new LinkageTermsUnsatisfiableError(
     `this input cannot satisfy every linkage key the agreed terms declare: ` +
-      `${summarizeLinkageShortfall(verdict, "agreed")}. The exchange is ` +
+      `${summarizeLinkageShortfall(verdict, "agreed")}. ` +
+      singleColumnDelimiterClause(columns.length) +
+      "The exchange is " +
       "refused before any credential, terms, or data are sent: it would match " +
       "on fewer keys than both parties agreed to while its exchange record " +
       "still names every field those terms declare. Settle the shortfall with " +

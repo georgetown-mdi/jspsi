@@ -3,10 +3,14 @@ import { Readable } from "node:stream";
 import { expect, test } from "vitest";
 
 import {
+  CSV_DELIMITER_DETECT,
   csvDelimiterRefusal,
   DEFAULT_CSV_DELIMITER,
   isCsvDelimiter,
+  isCsvDelimiterChoice,
   normalizeCsvDelimiter,
+  resultCsvDelimiter,
+  singleColumnDelimiterClause,
 } from "../src/csvDelimiter";
 import {
   CSV_LINE_BYTE_CEILING,
@@ -62,15 +66,33 @@ test("isCsvDelimiter refuses everything the read and the write could not agree o
   expect(isCsvDelimiter(String.fromCharCode(127))).toBe(false);
 });
 
-test("normalizeCsvDelimiter resolves the tab spellings and leaves everything else", () => {
+test("normalizeCsvDelimiter resolves the tab and detect spellings and leaves everything else", () => {
   expect(normalizeCsvDelimiter("tab")).toBe("\t");
   expect(normalizeCsvDelimiter("TAB")).toBe("\t");
   expect(normalizeCsvDelimiter(" tab ")).toBe("\t");
   expect(normalizeCsvDelimiter("\\t")).toBe("\t");
   expect(normalizeCsvDelimiter("\t")).toBe("\t");
   expect(normalizeCsvDelimiter("|")).toBe("|");
+  for (const spelling of ["detect", "DETECT", " Detect "])
+    expect(normalizeCsvDelimiter(spelling)).toBe(CSV_DELIMITER_DETECT);
   // A space is itself a delimiter, so it is not trimmed away.
   expect(normalizeCsvDelimiter(" ")).toBe(" ");
+});
+
+test("the detect choice is accepted where a choice is authored, not where a character is needed", () => {
+  expect(isCsvDelimiterChoice(CSV_DELIMITER_DETECT)).toBe(true);
+  expect(ACCEPTED.every(isCsvDelimiterChoice)).toBe(true);
+  // A multi-character value cannot be a delimiter, which is what keeps the
+  // reserved word from colliding with a character a party names.
+  expect(isCsvDelimiter(CSV_DELIMITER_DETECT)).toBe(false);
+  expect(isCsvDelimiterChoice("detected")).toBe(false);
+});
+
+test("a result is written with the chosen character, and with a comma for none or detection", () => {
+  for (const delimiter of ACCEPTED)
+    expect(resultCsvDelimiter(delimiter)).toBe(delimiter);
+  expect(resultCsvDelimiter(undefined)).toBe(DEFAULT_CSV_DELIMITER);
+  expect(resultCsvDelimiter(CSV_DELIMITER_DETECT)).toBe(DEFAULT_CSV_DELIMITER);
 });
 
 test("the refusal names the rule and the shape, never the value", () => {
@@ -153,11 +175,84 @@ test("a chosen delimiter is the only one honoured, whatever the file suggests", 
   expect(result.meta.fields).toEqual(["id|name"]);
 });
 
-test("a read given no delimiter takes the file's own", async () => {
+test("a read given no delimiter takes a comma, whatever the file separates on", async () => {
   const comma = await loadCSVFile(streamOf("id,name\n1,alice\n"));
   expect(comma.meta.fields).toEqual(["id", "name"]);
+  // A pipe-separated file is one column under the default: the mismatch reaches
+  // the caller's column check, which is what the operator can act on, rather
+  // than being read by a character nobody named.
   const pipe = await loadCSVFile(streamOf("id|name\n1|alice\n"));
-  expect(pipe.meta.fields).toEqual(["id", "name"]);
+  expect(pipe.meta.fields).toEqual(["id|name"]);
+  // A tab-separated file comes out as one column too, its name minus the tab:
+  // the header transform strips the control characters a column name may not
+  // hold, and reports the position it changed.
+  const tab = await loadCSVFile(streamOf("id\tname\n1\talice\n"));
+  expect(tab.meta.fields).toEqual(["idname"]);
+  expect(tab.meta.sanitizedColumnPositions).toEqual([1]);
+});
+
+// --- The explicit detect choice ----------------------------------------------
+
+// The candidate set is the parser's own, driven here rather than transcribed
+// from its documentation: a file separated by one of these is read as its
+// columns under the detect choice, and a file separated by anything else falls
+// back to the comma (PapaParse's `UndetectableDelimiter`, the one fault code the
+// read treats as benign) and comes out as a single column.
+const DETECTED = [",", "\t", "|", ";", "\u001e", "\u001f"];
+const NOT_DETECTED = [":", "^", " "];
+
+test("the detect choice reads every delimiter the parser detects", async () => {
+  for (const delimiter of DETECTED) {
+    const result = await loadCSVFile(
+      streamOf(`id${delimiter}name\n1${delimiter}alice\n`),
+      undefined,
+      CSV_DELIMITER_DETECT,
+    );
+    expect(result.meta.fields).toEqual(["id", "name"]);
+  }
+});
+
+test("the detect choice does not reach a delimiter the parser leaves out", async () => {
+  for (const delimiter of NOT_DETECTED) {
+    const result = await loadCSVFile(
+      streamOf(`id${delimiter}name\n1${delimiter}alice\n`),
+      undefined,
+      CSV_DELIMITER_DETECT,
+    );
+    expect(result.meta.fields).toEqual([`id${delimiter}name`]);
+  }
+});
+
+test("the streaming and sampling reads take the detect choice too", async () => {
+  const pipe = "id|dob\n1|1990-01-02\n";
+  const rows: Array<CSVRow> = [];
+  const streamed = await streamCSVRows(
+    streamOf(pipe),
+    (chunk) => rows.push(...chunk),
+    undefined,
+    CSV_DELIMITER_DETECT,
+  );
+  expect(streamed.columns).toEqual(["id", "dob"]);
+  expect(rows).toEqual([{ id: "1", dob: "1990-01-02" }]);
+
+  const sampled = await loadCSVColumnSample(
+    streamOf(pipe),
+    (columns) => columns[1],
+    10,
+    undefined,
+    CSV_DELIMITER_DETECT,
+  );
+  expect(sampled.columns).toEqual(["id", "dob"]);
+  expect(sampled.sample).toEqual(["1990-01-02"]);
+});
+
+test("the one-column clause states the remedy, and only for a one-column header", () => {
+  const clause = singleColumnDelimiterClause(1);
+  expect(clause).toContain("single column");
+  expect(clause).toContain("CSV delimiter");
+  expect(clause).toContain(CSV_DELIMITER_DETECT);
+  for (const count of [0, 2, 7])
+    expect(singleColumnDelimiterClause(count)).toBe("");
 });
 
 // --- The header defenses, under a non-comma delimiter ------------------------
@@ -295,8 +390,21 @@ test("csv_delimiter refuses a value outside the accepted set, in the shared word
   }
 });
 
-test("an absent csv_delimiter leaves the spec with none", () => {
+test("csv_delimiter takes the detect choice as a value of its own", () => {
+  for (const spelling of ["detect", "DETECT"]) {
+    const parsed = safeParseExchangeSpec({
+      ...baseSpec,
+      csv_delimiter: spelling,
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success)
+      expect(parsed.data.csvDelimiter).toBe(CSV_DELIMITER_DETECT);
+  }
+});
+
+test("an absent csv_delimiter leaves the spec with none, which reads and writes a comma", () => {
   const parsed = safeParseExchangeSpec(baseSpec);
   expect(parsed.success).toBe(true);
   if (parsed.success) expect(parsed.data.csvDelimiter).toBeUndefined();
+  expect(resultCsvDelimiter(undefined)).toBe(DEFAULT_CSV_DELIMITER);
 });

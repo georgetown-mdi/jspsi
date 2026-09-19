@@ -1,8 +1,24 @@
 /**
  * The field delimiter a CSV write uses when the party chose none, and the one
- * every reader assumes for a file it was given no delimiter for.
+ * every read takes for a file it was given no delimiter for.
  */
 export const DEFAULT_CSV_DELIMITER = ",";
+
+/**
+ * The reserved value a party names to have a read take the delimiter from the
+ * file itself instead of reading by {@link DEFAULT_CSV_DELIMITER}. Accepted
+ * wherever a delimiter is authored -- the CLI flag, the configuration and
+ * exchange-document field, the browser's control -- and stored as this word, so
+ * naming detection is a value distinct from naming nothing.
+ *
+ * A delimiter is a single character ({@link isCsvDelimiter}), so no file can be
+ * delimited by this word and it cannot collide with a character a party names.
+ *
+ * A result file is written with {@link DEFAULT_CSV_DELIMITER} under this choice:
+ * a detected read names no character the write could follow
+ * ({@link resultCsvDelimiter}).
+ */
+export const CSV_DELIMITER_DETECT = "detect";
 
 /**
  * The spellings a delimiter of tab may be written as, for the command lines and
@@ -12,18 +28,22 @@ export const DEFAULT_CSV_DELIMITER = ",";
 const TAB_SPELLINGS: ReadonlySet<string> = new Set(["tab", "\\t"]);
 
 /**
- * Resolve the spellings of a delimiter a party may write where the character
- * itself is awkward to type: a tab is `tab` or `\t`. Every other value is
- * returned unchanged -- not trimmed, since a space is itself an acceptable
- * delimiter and trimming one away would silently read a file by a delimiter the
- * party did not choose.
+ * Resolve the words a party may write where the character itself is awkward to
+ * type or there is no character to type: a tab is `tab` or `\t`, and detection
+ * is {@link CSV_DELIMITER_DETECT}. Both are matched case-insensitively after
+ * trimming. Every other value is returned unchanged -- not trimmed, since a
+ * space is itself an acceptable delimiter and trimming one away would silently
+ * read a file by a delimiter the party did not choose.
  *
  * Applied at both boundaries a delimiter is authored at (the CLI flag and the
  * configuration schema) so the two take the same spellings, and applied BEFORE
- * {@link isCsvDelimiter}, which grades the resolved character.
+ * {@link isCsvDelimiterChoice}, which grades the resolved value.
  */
 export function normalizeCsvDelimiter(value: string): string {
-  return TAB_SPELLINGS.has(value.trim().toLowerCase()) ? "\t" : value;
+  const word = value.trim().toLowerCase();
+  if (TAB_SPELLINGS.has(word)) return "\t";
+  if (word === CSV_DELIMITER_DETECT) return CSV_DELIMITER_DETECT;
+  return value;
 }
 
 /**
@@ -51,6 +71,57 @@ export function isCsvDelimiter(value: string): boolean {
   if (value === '"') return false;
   const code = value.charCodeAt(0);
   return code === 0x09 || (code >= 0x20 && code <= 0x7e);
+}
+
+/**
+ * Whether `value` is a delimiter choice a party may author: a character
+ * {@link isCsvDelimiter} accepts, or {@link CSV_DELIMITER_DETECT}. This is the
+ * grade every authoring boundary applies -- the CLI flag, the configuration
+ * schema, the browser's control -- while {@link isCsvDelimiter} grades the
+ * character a read or a write takes.
+ *
+ * Grades a value already through {@link normalizeCsvDelimiter}.
+ */
+export function isCsvDelimiterChoice(value: string): boolean {
+  return value === CSV_DELIMITER_DETECT || isCsvDelimiter(value);
+}
+
+/**
+ * The delimiter a result file is written with, from the party's choice: the
+ * character they named, and {@link DEFAULT_CSV_DELIMITER} both where they named
+ * none and where they chose {@link CSV_DELIMITER_DETECT} -- a detected read
+ * names no character, and the reserved word is not one the write could escape
+ * against or join with.
+ *
+ * Every write site resolves its party's choice through this, so the character
+ * the table is escaped against is the character the file is joined with.
+ */
+export function resultCsvDelimiter(choice: string | undefined): string {
+  if (choice === undefined || choice === CSV_DELIMITER_DETECT)
+    return DEFAULT_CSV_DELIMITER;
+  return choice;
+}
+
+/**
+ * The clause a refusal over an input's columns adds when the whole header came
+ * out as ONE column: a file separated by something other than a comma, read
+ * with no delimiter named, reaches a column check that way rather than as a
+ * wrong result. Empty for any other column count, so a refusal over a file that
+ * really does hold one column and a genuine shortfall read the same.
+ *
+ * Stated without naming a flag, a key, or a control: the copy is shared by the
+ * command line's pre-flight and the run boundary both applications reach, and
+ * each surface's own name for the choice is in its documentation.
+ */
+export function singleColumnDelimiterClause(columnCount: number): string {
+  if (columnCount !== 1) return "";
+  return (
+    "This input read as a single column, so its fields may be separated by " +
+    "something other than a comma, which is what a read takes when no " +
+    "delimiter is named: name your file's separator as the CSV delimiter, or " +
+    `name \`${CSV_DELIMITER_DETECT}\` to take it from the file, and run ` +
+    "again. "
+  );
 }
 
 /**
@@ -85,6 +156,7 @@ export function csvDelimiterRefusal(value: string): string {
   return (
     `a CSV field delimiter must be a single character -- a tab (write it ` +
     `\`tab\`), or a printable ASCII character other than the double quote -- ` +
-    `and this is ${csvDelimiterShape(value)}`
+    `or \`${CSV_DELIMITER_DETECT}\` to take the delimiter from the file ` +
+    `itself, and this is ${csvDelimiterShape(value)}`
   );
 }

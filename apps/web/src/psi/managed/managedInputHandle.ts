@@ -258,9 +258,9 @@ export type ManagedInputSource =
  * permission, or an unreadable file. The `File` is read at THIS run start and
  * never retained across runs. On the handle path, permission is secured first.
  *
- * `csvDelimiter` is the field delimiter the record stored for this input;
- * omit it to read by the delimiter the file itself shows, as a record written
- * with none does.
+ * `csvDelimiter` is the field-delimiter choice the record stored for this
+ * input; omit it to read by a comma, which is what a record storing none is read
+ * by.
  *
  * @throws {ManagedInputError} an `"acquire"` rejection holding the underlying
  *   error, so the runner records the benign `"input"` failure and knows no

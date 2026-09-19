@@ -21,7 +21,7 @@ import {
 } from "@psilink/core";
 
 import {
-  DETECTED_CSV_DELIMITER_CHOICE,
+  INITIAL_CSV_DELIMITER_CHOICE,
   resolveCsvDelimiter,
 } from "@components/csvDelimiterChoice";
 import { CsvDelimiterField } from "@components/CsvDelimiterField";
@@ -333,7 +333,7 @@ export function VerifyReceiptScreen() {
   // The delimiter both re-supplied files are read by: the result was written
   // with the input's own delimiter, so one choice covers the pair.
   const [delimiterChoice, setDelimiterChoice] = useState(
-    DETECTED_CSV_DELIMITER_CHOICE,
+    INITIAL_CSV_DELIMITER_CHOICE,
   );
   const [localTerms, setLocalTerms] = useState<LinkageTerms>();
   const [partnerTerms, setPartnerTerms] = useState<LinkageTerms>();

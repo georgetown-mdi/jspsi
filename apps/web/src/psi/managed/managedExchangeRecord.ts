@@ -601,10 +601,10 @@ export interface ManagedExchangeFileComposition {
    * re-run writes the same file the one-shot run did. Absent where the
    * operator chose nothing, or the terms leave it nothing to act on. */
   includeOwnColumns?: ExchangeSpec["includeOwnColumns"];
-  /** The field delimiter this party's input file is read by and its result
-   * file written with, chosen at the file step and held verbatim so a run
-   * with nobody present reads the file the way the operator does. Absent
-   * reads by the delimiter the file itself shows and writes commas. */
+  /** The field-delimiter choice this party's input file is read under and its
+   * result file written with -- a character, or the reserved detect word --
+   * chosen at the file step and held verbatim so a run with nobody present reads
+   * the file the way the operator does. Absent reads and writes commas. */
   csvDelimiter?: ExchangeSpec["csvDelimiter"];
 }
 

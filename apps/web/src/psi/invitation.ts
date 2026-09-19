@@ -420,10 +420,10 @@ export async function generateInvitation(params: {
    * parse boundary). The terms are derived from its columns. Exactly one of `file`
    * or `profiledColumns` is set. */
   file?: InvitationCSVInput;
-  /** The field delimiter `file` is read by -- the one the intake step read it by,
-   * so the columns this mint binds are the columns the operator saw. Omitted to
-   * read by the delimiter the file itself shows. Unused on the profiled-columns
-   * path, which parses nothing here. */
+  /** The field-delimiter choice `file` is read under -- the one the intake step
+   * read it by, so the columns this mint binds are the columns the operator saw.
+   * Omitted to read by a comma. Unused on the profiled-columns path, which
+   * parses nothing here. */
   csvDelimiter?: string;
   /**
    * The column names profiled server-side for a console server-job transport

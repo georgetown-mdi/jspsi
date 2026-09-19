@@ -6,7 +6,7 @@ import type { Arguments } from "yargs";
 
 import {
   csvDelimiterRefusal,
-  isCsvDelimiter,
+  isCsvDelimiterChoice,
   MAX_TIMEOUT_SECONDS,
   normalizeCsvDelimiter,
   sanitizeErrorForDisplay,
@@ -173,12 +173,13 @@ export function nonNegativeIntFlag(
 }
 
 /**
- * Read `--csv-delimiter` from parsed `Arguments` as the single field-delimiter
- * character the run reads its CSV input by and writes its result with,
- * returning `undefined` when the flag was absent.
+ * Read `--csv-delimiter` from parsed `Arguments` as the field-delimiter choice
+ * the run reads its CSV input by and writes its result with -- a single
+ * character, or `detect` to take the delimiter from the file itself -- returning
+ * `undefined` when the flag was absent, which reads and writes commas.
  *
- * The spelling resolution and the accepted-set rule are core's own
- * ({@link normalizeCsvDelimiter}, {@link isCsvDelimiter}), shared with the
+ * The spelling resolution and the accepted-value rule are core's own
+ * ({@link normalizeCsvDelimiter}, {@link isCsvDelimiterChoice}), shared with the
  * configuration schema so a value one refuses the other refuses in the same
  * words. Rejected here, at parse time, as a {@link UsageError} (exit 64) --
  * before any credential, terms, or data are sent -- rather than as a confusing
@@ -192,7 +193,7 @@ export function csvDelimiterFlag(argv: Arguments): string | undefined {
   const raw = singleValue(argv, "csv-delimiter");
   if (raw === undefined) return undefined;
   const resolved = normalizeCsvDelimiter(String(raw));
-  if (!isCsvDelimiter(resolved))
+  if (!isCsvDelimiterChoice(resolved))
     throw new UsageError(
       `--csv-delimiter: ${csvDelimiterRefusal(String(raw))}`,
     );

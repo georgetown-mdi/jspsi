@@ -43,7 +43,7 @@ import {
   CsvDelimiterField,
 } from "@components/CsvDelimiterField";
 import {
-  DETECTED_CSV_DELIMITER_CHOICE,
+  INITIAL_CSV_DELIMITER_CHOICE,
   resolveCsvDelimiter,
 } from "@components/csvDelimiterChoice";
 
@@ -258,7 +258,7 @@ export function AcceptorScreen() {
   // component state rather than reducer state: the consent gate resolves it to
   // a character, and only that character reaches the parse and the run.
   const [delimiterChoice, setDelimiterChoice] = useState<CsvDelimiterChoice>(
-    DETECTED_CSV_DELIMITER_CHOICE,
+    INITIAL_CSV_DELIMITER_CHOICE,
   );
   const delimiterResolution = resolveCsvDelimiter(delimiterChoice);
   const csvDelimiter = delimiterResolution.ok

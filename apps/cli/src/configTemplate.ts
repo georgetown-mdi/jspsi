@@ -328,10 +328,10 @@ export const OPTIONAL_SECTIONS = `# --- Optional sections (uncomment and edit to
 //
 // @internal exported so the section-coverage test reads it from one place.
 export const CSV_DELIMITER_HINT = `# csv_delimiter: the field delimiter of the CSV you link and of the result
-# psilink writes -- one character, or 'tab'. Local to you: your partner reads
-# and writes its own files however it likes, and nothing about this is sent.
-# Omit the field to have psilink take the delimiter the input file itself shows
-# and write the result with commas.
+# psilink writes -- one character, 'tab', or 'detect' to take it from the input
+# file. Local to you: your partner reads and writes its own files however it
+# likes, and nothing about this is sent. Omit the field to read and write
+# commas.
 # csv_delimiter: "|"
 `;
 

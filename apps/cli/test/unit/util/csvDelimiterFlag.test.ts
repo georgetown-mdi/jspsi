@@ -1,6 +1,10 @@
 import { afterEach, expect, test, vi } from "vitest";
 import type { Arguments } from "yargs";
-import { csvDelimiterRefusal, UsageError } from "@psilink/core";
+import {
+  CSV_DELIMITER_DETECT,
+  csvDelimiterRefusal,
+  UsageError,
+} from "@psilink/core";
 
 import { csvDelimiterFlag } from "../../../src/util/flags";
 import { buildCli } from "../../../src/cliParser";
@@ -22,6 +26,13 @@ test("csvDelimiterFlag returns the character for each accepted value", () => {
 test("csvDelimiterFlag takes the tab spellings a command line can type", () => {
   for (const spelling of ["tab", "TAB", "\\t", "\t"])
     expect(csvDelimiterFlag(argv({ "csv-delimiter": spelling }))).toBe("\t");
+});
+
+test("csvDelimiterFlag takes the detect choice, the one value that is not a character", () => {
+  for (const spelling of ["detect", "DETECT", " detect "])
+    expect(csvDelimiterFlag(argv({ "csv-delimiter": spelling }))).toBe(
+      CSV_DELIMITER_DETECT,
+    );
 });
 
 test("csvDelimiterFlag refuses a value outside the accepted set, naming the flag", () => {

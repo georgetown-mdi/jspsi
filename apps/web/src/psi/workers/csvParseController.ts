@@ -54,7 +54,7 @@ export const CSV_WORKER_FILE_BYTE_THRESHOLD = 4 * 1024 * 1024;
 
 /** Worker request: parse this File, bounding a single logical line at `byteCeiling`
  * (undefined lets core apply its own default) and splitting fields on `delimiter`
- * (undefined lets core's read detect one from the file). A File is the only input the
+ * (undefined lets core's read take a comma). A File is the only input the
  * worker takes -- it is structured-cloneable and read via FileReader in the worker,
  * which a Node stream is not. */
 export interface CSVParseRequest {
@@ -166,7 +166,7 @@ export function shouldParseOffThread(file: CSVParseInput): boolean {
  * omits it.
  *
  * `delimiter` is the field delimiter to split on, taken either way -- on the
- * worker path it rides the request. Omit it to have core's read detect one.
+ * worker path it rides the request. Omit it to have core's read take a comma.
  */
 export async function loadCSVFileOffMainThread(
   file: CSVParseInput,
