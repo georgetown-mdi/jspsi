@@ -39,6 +39,37 @@ before any content is written, then atomically renamed into place, mirroring the
 Windows create-then-restrict discipline below: a symlink planted at the temp
 path cannot redirect the write to another file.
 
+**Create-if-absent is a second final step, not a second write path.** The writer
+takes one option, and under it the temp file is `link`ed to the destination
+instead of being renamed onto it. `link()` refuses an existing destination, so
+the write either creates the file or fails, and the failure is its own refusal
+naming the path rather than an overwrite; an `EPERM` from a filesystem that does
+not support the call, where the destination exists, is read as that same
+refusal. The temp name is then unlinked best-effort, the destination already
+being correct, and a failure to unlink it does not undo the creation.
+Everything ahead of the final step is identical, so the mode, the exclusive
+non-following temp create, and the `fsync` ordering below hold for both steps.
+Three artifacts take create-if-absent: a signing identity being created for the
+first time, a key file provisioned from an invitation, and a `psilink init`
+config the operator asked to create rather than replace. The rename is what a
+rotating key file, a regenerated signing identity, a rewritten config, an
+exchange record, and a receipt take, each overwriting by design.
+
+**The symlink refusal has a residual window.** What the exclusive non-following
+create closes is a redirected *write*: the content goes into the temp inode
+through the descriptor that create returned, so no planted link can steer the
+bytes into another file. What it does not close is the interval between that
+descriptor's close and the rename or link that follows. A party with write
+permission on the containing directory can replace the temp name with a symlink
+inside that interval, and the rename or link then leaves the destination name a
+link that redirects a later *reader*. It exposes no secret -- the bytes were
+written to the real inode, never through a link -- and the next write of the
+same artifact heals the name. Closing it needs `renameat2(RENAME_NOREPLACE)` or
+`O_TMPFILE`, neither of which Node's `fs` exposes, so this format records the
+window rather than claiming it shut. What bounds it is that the directory
+holding a credential is the operator's own: a party that can plant the link can
+already replace the file.
+
 Each of those three properties is POSIX.1-2017 (IEEE Std 1003.1-2017) behavior,
 and portable as such. `open()` makes the existence check and the creation atomic
 against another thread opening the same name with `O_CREAT | O_EXCL`, and fails
@@ -269,6 +300,39 @@ parent for reading, so a write-only (mode `0o300`) parent that passes a naive
 writability check would still fail the durability flush after rotation. The
 pre-flight therefore rejects a writable-but-not-readable parent up front.
 
+The parent's permissions are the last of what it establishes, and not all of it.
+In order, over the trimmed path (the trimmed form is what the caller must then
+write with):
+
+1. **A path that is not a non-empty string** is rejected.
+2. **The key path itself is examined without following a link.** A path that
+   exists as a directory, or as any other non-regular entry, is rejected: the
+   write replaces the final component in place, so a directory there would fail
+   after the handshake. A symlink is accepted, including one to a directory, the
+   write acting on the link itself.
+3. **An errno the checks below cannot reproduce is raised as it stands.** Only
+   `ENOENT`, `ENOTDIR`, `EACCES`, and `ELOOP` continue the pre-flight; anything
+   else -- `ENAMETOOLONG` above all -- ends it there, because a pre-flight that
+   passed on such a path would leave the write to fail after the secret had
+   rotated.
+4. **The parent directory is created when it is absent**, recursively, mirroring
+   what the write itself would do. This is a side effect the pre-flight does not
+   unwind: the creation is logged and stays even where the handshake or the
+   exchange then fails.
+5. **A parent that exists and is not a directory** is rejected.
+6. **Writability is established by creating and removing a probe file**, not by
+   an access check: `access()` reports only the read-only attribute on Windows
+   and can misreport under Linux capabilities such as `CAP_DAC_OVERRIDE`. The
+   probe is named `.psilink-write-probe-<pid>-<8 hex>`, created exclusively, and
+   removed in a `finally`; a stale probe left by an earlier run is swept first,
+   and every failure of that sweep is ignored as cosmetic.
+7. **Readability is established by opening the parent for reading**, on POSIX
+   only -- on Windows opening a directory fails outright and the parent flush is
+   skipped, so there is no read requirement to verify there.
+
+Each rejection states the remedy and that the write would otherwise fail after a
+successful key exchange, which is what the pre-flight exists to prevent.
+
 ## Windows write discipline and load check
 
 The CLI enforces ACLs on write: it creates an empty placeholder file, narrows
@@ -324,9 +388,10 @@ still exits successfully with nothing listed.
 The load check has three results:
 
 - The access list was checked and grants no principal other than the owner and
-  the two exempt ones read access, across the entries the tier that checked it
-  inspects -- inherited and explicit ones for the PowerShell tier, explicit
-  allow entries alone for `icacls`. Nothing is logged.
+  the two exempt ones the access that tier judges, across the entries it
+  inspects -- read access over inherited and explicit entries for the
+  PowerShell tier, any access at all over explicit allow entries for `icacls`
+  (the two differ; see below). Nothing is logged.
 - It was checked and does grant another principal read access. The
   over-permissive warning names the file, the secret it holds, and the
   remediation.
@@ -356,6 +421,18 @@ On a host where a new file's SYSTEM and Administrators entries are explicit
 rather than inherited, the tier names them too: its warning says what it did not
 inspect, and a warning about a file that is in fact narrowed is the direction
 that does not hide one that is not.
+
+**The fallback judges the principal, not the rights.** The PowerShell tier masks
+the rights an entry grants -- `FILE_READ_DATA`, `GENERIC_READ`, or `GENERIC_ALL`,
+on Allow entries only -- so what it warns about is read access specifically. The
+`icacls` tier inspects no rights at all: that tool's rights notation is complex
+and locale-adjacent, so the tier compares each surviving entry's principal
+against the current user, case-folded, and warns where any of them differs
+whatever the entry grants. A write-only grant on a credential file therefore
+warns here and not in the tier above. That is the safe direction for an advisory
+check -- a grant a secret file should not hold either way -- and the warning
+states that inherited entries and specific rights were not inspected rather than
+claiming the entry grants read.
 
 The tier is read whole or not at all as well: `icacls` failing to run, and
 output holding no line of an entry's `principal:(flags)` shape, both count as a
@@ -388,6 +465,33 @@ directory-inherited ACE that the `0600` mode would not, before the file is
 truncated. That strip resolves the output path rather than acting on the entry
 named, so where the path is a symlink it clears the ACL of the target the rows
 go to, matching the `fchmod` on the descriptor.
+
+**The order of those steps is what the guarantee rests on.** On POSIX the
+destination is opened `O_WRONLY | O_CREAT`, without `O_TRUNC` by design;
+the mode is then forced to exactly `0600` on that descriptor; the extended-ACL
+strip runs; and only then is the file truncated. Each step precedes the one that
+could expose something: an existing file is not emptied before its mode is
+secured, and no row is written before the ACL is cleared. A destination another
+user owns therefore fails at the `fchmod` with `EPERM`, which propagates as it
+stands and ends the run -- no row is written at relaxed permissions, and the
+existing file's content is left intact, the truncate never having run. The
+descriptor is closed on every such failure. On Windows the sequence differs
+because narrowing cannot remove a foreign principal's explicit entry from an
+existing file: any existing destination is unlinked, a fresh file is created on
+an exclusive descriptor, its ACL is narrowed, and the stream then truncates the
+empty file it opens.
+
+**What a refusal leaves on disk differs from the credential writers.** A
+credential write that cannot narrow its file leaves nothing behind: the empty
+pre-narrowing file is the temp path rather than the destination, the failure path
+removes it, and the destination -- a previous key file included -- is untouched,
+so no key material is written. The result CSV has no temp path, so its
+pre-narrowing file IS the destination: a refusal leaves an empty file at the
+output path, and on Windows it leaves one where the previous run's result used to
+be, that file having been unlinked before the narrowing was attempted. Both
+writers raise one and the same text, which names the path and the manual remedy
+and states neither the leftover nor the removed prior result, so the divergence
+is recorded here.
 
 Unlike the credential writers, the CSV is streamed directly to the output path
 (the result set may be large) rather than written through the
