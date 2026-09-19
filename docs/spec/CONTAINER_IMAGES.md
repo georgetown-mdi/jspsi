@@ -175,7 +175,7 @@ setup-time probe, over a share the operator is testing, never by the CLI or the
 console during a run.
 
 Two checks bound it. `scripts/dockerfile-freeze.test.mjs` holds every
-`apk`/`apt`/`apt-get`/`dnf`/`microdnf`/`yum`/`pip` instruction in the file to a
+`apk`/`apt`/`apt-get`/`dnf`/`microdnf`/`yum`/`pip`/`pip3` instruction in the file to a
 per-file list of literals, the way it holds the `.npmrc` COPY, so a second
 install or a wider spec on one of those lines reddens rather than shipping. It
 reads the whole file rather than the runtime stage alone, because both images

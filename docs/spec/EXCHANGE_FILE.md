@@ -32,12 +32,21 @@ statement of it. Intended readers are security auditors and implementors.
 A minted exchange file is an ordinary `psilink.yaml`. There is no web-specific
 format, no parallel schema, and no field a CLI-authored config could not also
 hold. The web mint layer (`mintExchangeFile` in
-`packages/core/src/config/exchangeFile.ts`) assembles the exchange on the
-camelCase side, validates it through the same `ExchangeSpecSchema`
-(`packages/core/src/config/exchangeSpec.ts`) both applications share, and
-serializes the parse result -- not the pre-validation input -- through the same
-`snakeizeKeys` + YAML `stringify` discipline the CLI's `saveConfig`
-(`apps/cli/src/config.ts`) uses. The output is `snake_case` on disk, the
+`packages/core/src/config/exchangeFile.ts`) expands the credential-free locator
+into a connection block and serializes the parse result -- not the
+pre-validation input -- through the same `snakeizeKeys` + YAML `stringify`
+discipline the CLI's `saveConfig` (`apps/cli/src/config.ts`) uses.
+
+Assembly and validation are one function below the mint, `assembleExchangeSpec`
+in the same module: it builds the exchange from the camelCase parts, attaching
+each optional key only where the caller supplied a value, and returns what
+`ExchangeSpecSchema` (`packages/core/src/config/exchangeSpec.ts`) -- the schema
+both applications share -- parsed rather than what it was handed. That single
+assembly rule, and not the mint, is what more than one artifact rests on: the
+web app's managed-record composer (`apps/web/src/psi/managed/managedExchangeRecord.ts`)
+assembles the exchange document it persists through the same function. So the
+downloadable file and the browser-persisted record cannot become two shapes of
+one exchange, and the guarantees below hold for both. The output is `snake_case` on disk, the
 convention every hand-authored config follows, and the CLI's `loadConfig`
 (`apps/cli/src/commands/exchange.ts`) reads it through `parseExchangeSpec`
 (which `camelizeKeys` then re-validates through the identical schema) with no
@@ -56,6 +65,18 @@ The schema is the shared contract; the mint layer adds three guarantees a
 hand-authored config is not obligated to meet. They are guarantees about what a
 minted file cannot contain; the commitments it does hold, and what enforces
 them, are in [Payload-disclosure consent](#payload-disclosure-consent) below.
+
+Three of the keys assembly attaches to a minted file are those commitments --
+`disclosed_payload_columns`, `expected_payload_columns`, and
+`outbound_payload_consent` -- and the mint guarantees nothing about their
+content. Each is written exactly as the calling surface supplied it and omitted
+where it supplied none, so an absent key states that the caller held no
+commitment rather than that the mint dropped one, which is the absent-is-lazy
+reading the consent section makes normative. `outbound_payload_consent` is the
+one to be careful with: assembly holds it verbatim and neither derives it from
+the `metadata` assembled beside it nor checks it against that metadata, so
+naming the set the operator was actually shown is the calling surface's
+obligation, not a property of the artifact.
 
 - **No `authentication` block.** The mint layer never assembles the top-level
   `authentication` block at all. The schema makes that block optional and gives
