@@ -31,7 +31,7 @@ The two names match the deployment environments `eb_deploy.yaml` maps a branch o
 
 3. Commit the result and read the diff: a line that changed is a setting that changed.
 
-`redact.mjs` exits non-zero and names the value it could not find rather than writing a file, so an export shaped differently than the ones above stops the refresh instead of committing an identifier. `redact.test.mjs` beside it drives that refusal and each replacement against a synthetic export; it runs in the web app's unit project.
+`redact.mjs` exits non-zero and names the value it could not find rather than writing a file, so an export shaped differently than the ones above stops the refresh instead of committing an identifier. `scripts/eb-saved-configuration-redact.test.mjs` drives that refusal and each replacement against a synthetic export; it runs with `npm run test:scripts`.
 
 ## What the redaction replaces
 
@@ -51,7 +51,7 @@ Everything else is kept as exported, including the security group, subnet and VP
 
 A security-group rule created or removed by an `authorize-security-group-ingress` or `revoke-security-group-ingress` call is not part of the environment configuration, so an operation that recreates an environment's own groups from its CloudFormation stack does not replay it. An option setting is part of the configuration. The inbound posture therefore belongs in these files rather than in a remembered sequence of revokes, as far as an option setting can express it:
 
-- **No inbound `:22`.** Elastic Beanstalk carries the SSH ingress it creates as `SSHSourceRestriction`, in the `aws:autoscaling:launchconfiguration` namespace. The recorded posture is no inbound `:22` at all, with Session Manager as the only shell route. Which value of that option expresses that is read from the committed files rather than asserted here.
+- **Inbound `:22`.** Elastic Beanstalk creates the SSH ingress from `SSHSourceRestriction`, in the `aws:autoscaling:launchconfiguration` namespace, whenever `EC2KeyName` is set. The committed files record that option as the platform applies it when it recreates the environment's groups; the rule set measured on the live groups is recorded separately in `docs/DEPLOYMENT.md`, and the two are not the same fact. The recorded posture, Session Manager as the only shell route, is expressed at the option level by clearing `EC2KeyName` or by restricting `SSHSourceRestriction`, and confirming which the environment holds is part of the verification below.
 - **`:443` from Cloudflare's ranges only.** That rule lives in a security group the platform did not create, shared by both environments, so its rule list is not an option setting of either environment. What the configuration can carry is the attachment of that group to the instances (`SecurityGroups`, same namespace). The rule's contents stay recorded as values in `docs/DEPLOYMENT.md`; applying them from the repository is the later infrastructure-as-code step.
 - **No inbound `:80`.** Which option setting, if any, expresses that on a single-instance environment is unrecorded; the committed files are where to read it.
 
