@@ -1708,6 +1708,131 @@ test("validateInvite: --identity over a reused config is reported, not applied",
   }
 });
 
+// --- the CSV field delimiter on a config-as-source mint ----------------------
+// A mint given no flag reads its input by the config's csv_delimiter, so the
+// check made at mint time reads the CSV the way the exchange that config
+// governs will; a flag reads this run instead and reports what that config
+// still holds. The accepted set and the round trip are core's own.
+
+/** A config holding `csvDelimiter` (or none) beside a pipe-delimited input: the
+ *  shape a party whose source system exports pipes runs. */
+function withDelimiterConfig(csvDelimiter: string | undefined): {
+  dir: string;
+  configPath: string;
+  keyPath: string;
+  input: string;
+} {
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-delim-"));
+  const configPath = path.join(dir, "psilink.yaml");
+  saveConfig(configPath, {
+    connection: { channel: "filedrop", path: "/mnt/share" },
+    linkageTerms: defaultTerms(),
+    ...(csvDelimiter !== undefined && { csvDelimiter }),
+  });
+  const input = path.join(dir, "input.csv");
+  fs.writeFileSync(
+    input,
+    "first_name|last_name|dob|ssn\nAlice|Smith|1990-01-02|123456789\n",
+  );
+  return { dir, configPath, keyPath: path.join(dir, ".psilink.key"), input };
+}
+
+test("validateInvite: the config's csv_delimiter reads the input its terms are checked against", async () => {
+  const log = getLogger("invite-delimiter-config-test");
+  log.setLevel("silent");
+  const pipes = withDelimiterConfig("|");
+  try {
+    const ready = await validateInvite({
+      resolved: { mode: "offline", input: pipes.input },
+      options: testOptions({
+        configFile: pipes.configPath,
+        keyFile: pipes.keyPath,
+      }),
+      acceptTimeout: 900,
+      log,
+    });
+    expect(ready.mode).toBe("offlineFromConfig");
+  } finally {
+    fs.rmSync(pipes.dir, { recursive: true, force: true });
+  }
+  // The discriminating case: the same file under a config that reads commas
+  // parses as one column, which satisfies no linkage key, so the mint refuses.
+  // A read that ignored the config would take the file's own delimiter and mint
+  // an invitation the exchange this config governs then refuses to run.
+  const commas = withDelimiterConfig(",");
+  try {
+    await expect(
+      validateInvite({
+        resolved: { mode: "offline", input: commas.input },
+        options: testOptions({
+          configFile: commas.configPath,
+          keyFile: commas.keyPath,
+        }),
+        acceptTimeout: 900,
+        log,
+      }),
+    ).rejects.toThrow("this configuration's own exchange refuses to run");
+  } finally {
+    fs.rmSync(commas.dir, { recursive: true, force: true });
+  }
+});
+
+test("validateInvite: --csv-delimiter reads this mint's input over the config's value", async () => {
+  // The flag governs the run it is given on, here and on every other command.
+  // The config persists unchanged, so the delimiter every exchange run from it
+  // takes is reported beside the one this run used. The mint succeeding is
+  // what shows the flag's pipe read, not the config's semicolon, reached the
+  // input: a semicolon read of this file parses as one column and refuses.
+  const { dir, configPath, keyPath, input } = withDelimiterConfig(";");
+  const log = getLogger("invite-delimiter-flag-test");
+  log.setLevel("silent");
+  const warnSpy = vi.spyOn(log, "warn");
+  try {
+    const ready = await validateInvite({
+      resolved: { mode: "offline", input },
+      options: testOptions({ configFile: configPath, keyFile: keyPath }),
+      acceptTimeout: 900,
+      csvDelimiter: "|",
+      log,
+    });
+    expect(ready.mode).toBe("offlineFromConfig");
+    const reported = warnSpy.mock.calls
+      .map((call) => String(call[0]))
+      .filter((message) => message.includes("--csv-delimiter"));
+    expect(reported).toHaveLength(1);
+    expect(reported[0]).toContain('--csv-delimiter "|" applies to this run');
+    expect(reported[0]).toContain('csv_delimiter (";")');
+    expect(reported[0]).toContain(configPath);
+  } finally {
+    warnSpy.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("validateInvite: a --csv-delimiter the config already records is not reported", async () => {
+  const { dir, configPath, keyPath, input } = withDelimiterConfig("|");
+  const log = getLogger("invite-delimiter-match-test");
+  log.setLevel("silent");
+  const warnSpy = vi.spyOn(log, "warn");
+  try {
+    await validateInvite({
+      resolved: { mode: "offline", input },
+      options: testOptions({ configFile: configPath, keyFile: keyPath }),
+      acceptTimeout: 900,
+      csvDelimiter: "|",
+      log,
+    });
+    expect(
+      warnSpy.mock.calls
+        .map((call) => String(call[0]))
+        .filter((message) => message.includes("--csv-delimiter")),
+    ).toEqual([]);
+  } finally {
+    warnSpy.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("validateInvite: a config still holding the init placeholder is refused, minting nothing", async () => {
   // The template's identity is a well-formed label every schema accepts, so an
   // operator who fills in the connection block and passes over this field would

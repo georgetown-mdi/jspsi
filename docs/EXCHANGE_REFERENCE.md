@@ -19,7 +19,7 @@ An exchange specification has four top-level components:
 | `metadata` | no | Descriptions of input fields and their roles |
 | `standardization` | no | Data cleaning and standardizing transformations applied before linkage |
 
-Beside them sit the optional top-level blocks documented below -- [`authentication`](#authentication), [`signing`](#signing), [`retention_disposition`](#retention_disposition), [`include_own_columns`](#include_own_columns) -- the three payload enforcement records (`outbound_payload_consent`, `disclosed_payload_columns`, `expected_payload_columns`), under the rules in [`linkage_terms.payload`](#linkage_termspayload), and the terms enforcement record [`expected_partner_deduplicate`](#expected_partner_deduplicate). psilink writes and refreshes all four for you on an online invite or accept, and you may also author them by hand in a recurring configuration. Any other top-level key is rejected at config-parse time with a user-facing error naming it, and no exchange runs until it is corrected: those enforcement records are optional, and an absent one means "nothing to enforce", so a misspelling that was quietly dropped would disable a consent or disclosure check with no signal. Unrecognized keys *inside* `linkage_terms`, `connection`, `metadata`, and `standardization` are dropped instead -- see [EXCHANGE_FILE.md](spec/EXCHANGE_FILE.md) for what each behavior means when a file minted by a newer web application is loaded by an older CLI.
+Beside them sit the optional top-level blocks documented below -- [`authentication`](#authentication), [`signing`](#signing), [`retention_disposition`](#retention_disposition), [`include_own_columns`](#include_own_columns), [`csv_delimiter`](#csv_delimiter) -- the three payload enforcement records (`outbound_payload_consent`, `disclosed_payload_columns`, `expected_payload_columns`), under the rules in [`linkage_terms.payload`](#linkage_termspayload), and the terms enforcement record [`expected_partner_deduplicate`](#expected_partner_deduplicate). psilink writes and refreshes all four for you on an online invite or accept, and you may also author them by hand in a recurring configuration. Any other top-level key is rejected at config-parse time with a user-facing error naming it, and no exchange runs until it is corrected: those enforcement records are optional, and an absent one means "nothing to enforce", so a misspelling that was quietly dropped would disable a consent or disclosure check with no signal. Unrecognized keys *inside* `linkage_terms`, `connection`, `metadata`, and `standardization` are dropped instead -- see [EXCHANGE_FILE.md](spec/EXCHANGE_FILE.md) for what each behavior means when a file minted by a newer web application is loaded by an older CLI.
 
 ## File references
 
@@ -1218,11 +1218,37 @@ Your own columns are not covered by the exchange record's commitments, which bin
 
 ---
 
+## The field delimiter of your files
+
+Optional. The field delimiter psilink reads your input CSV by and writes your result file with.
+
+Purely local, like [`include_own_columns`](#include_own_columns) and [`retention_disposition`](#retention_disposition): it is not a linkage term, nothing about it is sent to your partner or folded into the agreed-terms hash, and the two parties need not use the same one. Your partner reads and writes its own files however it likes.
+
+### `csv_delimiter`
+
+*Type:* string (one character, or `tab`)  
+*Required:* no  
+*Consistency:* none (per-party; not exchanged)
+
+One character: a tab, or a printable ASCII character other than the double quote (`"`), which is the character RFC 4180 quotes a field with. Anything else -- more than one character, an empty value, the double quote, a line break, a character outside ASCII -- is refused when the configuration is read, before any credential, terms, or data are sent. Write a tab as `tab` or `\t`, or as a literal tab in a double-quoted YAML string.
+
+```yaml
+csv_delimiter: "|"
+```
+
+There is no separate setting for the result file: it is written with the same delimiter the input was read by, so it can be fed straight back to the system the input came from. A field holding the delimiter, a double quote, or a line break is quoted on the way out, so the result reads back through the same delimiter.
+
+With the key absent, psilink reads a file by the delimiter the file itself shows and writes the result with commas. A `--csv-delimiter` on a command reading this configuration replaces the key for that run, and `psilink init --csv-delimiter` writes the key into the template it produces; see [CLI.md](CLI.md#the-field-delimiter).
+
+The key is read by the CLI and by the console when it runs a config file. The web application offers no control for it: it reads a file by the delimiter the file itself shows, and writes commas.
+
+---
+
 ## Input metadata
 
 Optional field-level descriptions of the input dataset. If omitted, semantic types are inferred from column names. If no identifier columns are specified, output row indices reference positions in the input file.
 
-When metadata is inferred (no explicit `metadata` block), an empty (zero-length) column name in the input is rejected at intake with a clear error, the same way an explicit `metadata` `name` is rejected at config parse (see the `name` field below). A trailing comma, a blank cell, or a leading delimiter in a CSV header row produces such an unnamed column; because an empty name cannot be used for linkage, identification, or payload, the file is refused up front rather than silently dropping the column's audit record during the exchange. Name the column or remove the empty header field. The web app shows the same rejection at its file-intake surfaces (the quick and Advanced invite paths and the acceptor's file step).
+When metadata is inferred (no explicit `metadata` block), an empty (zero-length) column name in the input is rejected at intake with a clear error, the same way an explicit `metadata` `name` is rejected at config parse (see the `name` field below). A trailing delimiter, a blank cell, or a leading delimiter in a CSV header row produces such an unnamed column; because an empty name cannot be used for linkage, identification, or payload, the file is refused up front rather than silently dropping the column's audit record during the exchange. Name the column or remove the empty header field. The web app shows the same rejection at its file-intake surfaces (the quick and Advanced invite paths and the acceptor's file step).
 
 A column name that holds invisible control characters -- a tab, a NUL, an escape, or one of the text-direction characters among them -- loses them at every read (see [CSV header sanitation](spec/CHANNEL_SECURITY.md#csv-header-sanitation-at-ingestion)), and the seat that read the file states which column positions changed. Two consequences reach this block. A name made only of those characters comes back empty and meets the refusal above, which states the removal as the cause instead of the header-row causes. And a name written as the header was typed -- a `metadata` `name`, a `linkage_fields` `name`, or a `standardization` output -- does not name a column of the file: write it as the column without those characters, which is the name `psilink init` writes into a configuration it authors from that file.
 

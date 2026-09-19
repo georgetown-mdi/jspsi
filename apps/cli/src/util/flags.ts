@@ -5,7 +5,10 @@
 import type { Arguments } from "yargs";
 
 import {
+  csvDelimiterRefusal,
+  isCsvDelimiter,
   MAX_TIMEOUT_SECONDS,
+  normalizeCsvDelimiter,
   sanitizeErrorForDisplay,
   UsageError,
 } from "@psilink/core";
@@ -167,6 +170,33 @@ export function nonNegativeIntFlag(
       `--${name} must not exceed ${maxValue}; got ${String(raw)}`,
     );
   return raw;
+}
+
+/**
+ * Read `--csv-delimiter` from parsed `Arguments` as the single field-delimiter
+ * character the run reads its CSV input by and writes its result with,
+ * returning `undefined` when the flag was absent.
+ *
+ * The spelling resolution and the accepted-set rule are core's own
+ * ({@link normalizeCsvDelimiter}, {@link isCsvDelimiter}), shared with the
+ * configuration schema so a value one refuses the other refuses in the same
+ * words. Rejected here, at parse time, as a {@link UsageError} (exit 64) --
+ * before any credential, terms, or data are sent -- rather than as a confusing
+ * one-column read later.
+ *
+ * The option is declared `type: "string"`, so a value that looks numeric stays
+ * a string and a bare `--csv-delimiter` yields the empty string, which the rule
+ * refuses.
+ */
+export function csvDelimiterFlag(argv: Arguments): string | undefined {
+  const raw = singleValue(argv, "csv-delimiter");
+  if (raw === undefined) return undefined;
+  const resolved = normalizeCsvDelimiter(String(raw));
+  if (!isCsvDelimiter(resolved))
+    throw new UsageError(
+      `--csv-delimiter: ${csvDelimiterRefusal(String(raw))}`,
+    );
+  return resolved;
 }
 
 /**

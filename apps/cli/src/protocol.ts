@@ -10,6 +10,7 @@ import {
   exchangeRecordOwedButUnbuilt,
   countIsPartnerReported,
   buildOutputTable,
+  DEFAULT_CSV_DELIMITER,
   describeEntityClusters,
   describeResolvedMatching,
   describeResolvedRunShape,
@@ -1651,6 +1652,7 @@ async function writeExchangeOutputs(params: {
   outcome: ExchangeOutcome;
   prepared: PreparedExchange;
   output: string | undefined;
+  csvDelimiter: string | undefined;
   recordOutput: RecordOutput | undefined;
   signing: SigningPersist | null;
   loggerName: string;
@@ -1662,6 +1664,7 @@ async function writeExchangeOutputs(params: {
     outcome,
     prepared,
     output,
+    csvDelimiter,
     recordOutput,
     signing,
     loggerName,
@@ -1729,15 +1732,20 @@ async function writeExchangeOutputs(params: {
     // faults, and 73's published meaning is that what failed is a local
     // write on this machine. They stay 69, distinguished by the
     // terminal event's `output` category, which covers the whole stage.
+    // One delimiter for the escaping and the join: buildOutputTable quotes
+    // each field against it and writeOutput joins the fields with it, so the
+    // file reads back through the delimiter this party chose.
+    const resultDelimiter = csvDelimiter ?? DEFAULT_CSV_DELIMITER;
     const { headers, rows } = buildOutputTable(
       associationTable,
       prepared.rawRows,
       prepared.metadata,
       partnerPayload,
       prepared.includeOwnColumns,
+      resultDelimiter,
     );
     try {
-      await writeOutput(output, headers, rows, log);
+      await writeOutput(output, headers, rows, log, undefined, resultDelimiter);
     } catch (err) {
       // The result did not reach where it was owed -- a file that did
       // not reach disk, or a stdout reader that stopped taking it before
@@ -1899,6 +1907,11 @@ export interface RunProtocolOptions {
    * no omitted state: every caller states which it means.
    */
   output: string | undefined;
+  /**
+   * The field delimiter this party's result CSV is written with -- the one its
+   * input was read by. Omit it to write commas.
+   */
+  csvDelimiter?: string;
   /** The `-v` count, forwarded to the transport's own diagnostics. */
   verbosity: number;
   /** The name of the logger this run's diagnostics are written through. */
@@ -1998,6 +2011,7 @@ export async function runProtocol(
     auth,
     prepared,
     output,
+    csvDelimiter,
     verbosity,
     loggerName,
     logFile,
@@ -2372,6 +2386,7 @@ export async function runProtocol(
       outcome,
       prepared,
       output,
+      csvDelimiter,
       recordOutput,
       signing,
       loggerName,

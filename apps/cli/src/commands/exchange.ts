@@ -27,6 +27,7 @@ import {
   assertPartnerFingerprintRecordable,
   assertRetainSweepGuard,
   configWithNamedRuleSetRules,
+  csvDelimiterForRun,
   DEFAULT_CONFIG_PATH,
   linkageTermsStandingOf,
   warnOnLinkageRuleSetCitationDrift,
@@ -51,11 +52,12 @@ import { confirmOutboundPayloadConsent } from "../outboundPayloadConsent";
 import { parseSensitiveYaml } from "../sensitiveFile";
 import { resolveAtSignRefs, resolveExchangeSpecRefs } from "../util/atSignRefs";
 import { exitCodeForError, exitWithError } from "../util/exit";
-import { parseOrExit, singleValue } from "../util/flags";
+import { csvDelimiterFlag, parseOrExit, singleValue } from "../util/flags";
 import { configureLogging } from "../util/logging";
 import { loadInputRows } from "../onlineBootstrap";
 import {
   addCommonBootstrapOptions,
+  addCsvDelimiterOption,
   connectionOverridesFrom,
   parseCommonBootstrapArgs,
   warnConnectionPerPollShortInterval,
@@ -79,7 +81,7 @@ import type { SigningConfig } from "@psilink/core";
 
 export function builder(cmd: Argv): Argv {
   return addCommonBootstrapOptions(
-    cmd
+    addCsvDelimiterOption(cmd)
       .usage("Usage: $0 exchange [options] INPUT_FILE [OUTPUT_FILE]")
       .positional("input", {
         type: "string",
@@ -192,6 +194,11 @@ export function builder(cmd: Argv): Argv {
 interface ExchangeArgs extends CommonBootstrapOptions {
   input: string;
   output?: string;
+  // The field delimiter this run reads its input by and writes its result
+  // with, from --csv-delimiter. Excluded from ExchangeOptions below so it
+  // never reaches loadConfig; the handler layers it over the configuration's
+  // own csv_delimiter.
+  csvDelimiter?: string;
   // CLI-only sweep controls (see protocol.FileSyncRuntimeOptions). Excluded from
   // ExchangeOptions below so they never reach loadConfig / the config schema.
   sweepExchangeFiles: boolean;
@@ -206,6 +213,7 @@ type ExchangeOptions = Omit<
   ExchangeArgs,
   | "input"
   | "output"
+  | "csvDelimiter"
   | "logLevel"
   | "logFile"
   | "verbosity"
@@ -219,6 +227,16 @@ type ExchangeOptions = Omit<
 
 /** @internal exported for testing */
 export function parseArgs(argv: Arguments): ExchangeArgs {
+  // Graded ahead of every flag whose parse opens a file -- the @-file host-key
+  // fingerprint parseCommonBootstrapArgs resolves, and the @-file credential
+  // references below -- so a value either one refuses ends the run at usage
+  // with no file read for a run that cannot start.
+  const csvDelimiter = csvDelimiterFlag(argv);
+  // Kept verbatim: unlike the server-* credential flags below, the invitation is
+  // NOT @-resolved here. Its @-file form is read at decode time by
+  // decodeAndValidateInvitation (via provisionKeyFileFromInvitation), so the
+  // code stays out of process argv even when supplied as `@code.txt`.
+  const invitation = singleValue(argv, "invitation") as string | undefined;
   // Parse the common options through the shared parser (the same singleValue
   // repeat-rejection and log-level validation invite/accept use), then layer the
   // exchange-specific handling on top.
@@ -243,6 +261,7 @@ export function parseArgs(argv: Arguments): ExchangeArgs {
     serverPrivateKeyPassphrase: resolveAtSignRefs(
       common.serverPrivateKeyPassphrase,
     ) as string | undefined,
+    csvDelimiter,
     // exchange-specific positionals; not repeatable flags, so they stay plain.
     input: expandTilde(argv["input"] as string),
     output: expandTilde(argv["output"] as string | undefined),
@@ -252,11 +271,7 @@ export function parseArgs(argv: Arguments): ExchangeArgs {
       (argv["sweep-exchange-files"] as boolean | undefined) ?? false,
     forceRetainSweep:
       (argv["force-retain-sweep"] as boolean | undefined) ?? false,
-    // Kept verbatim: unlike the server-* credential flags above, the
-    // invitation is NOT @-resolved here. Its @-file form is read at decode time
-    // by decodeAndValidateInvitation (via provisionKeyFileFromInvitation), so the
-    // code stays out of process argv even when supplied as `@code.txt`.
-    invitation: singleValue(argv, "invitation") as string | undefined,
+    invitation,
   };
 }
 
@@ -729,12 +744,13 @@ export async function prepareDataset(
   identity: string | undefined,
   input: string,
   outboundConsent: OutboundConsentContext,
+  csvDelimiter?: string,
 ): Promise<PreparedExchange> {
   const log = getLogger("exchange");
 
   const { rawRows, columns, sanitizedColumnPositions } = await loadInputRows(
     input,
-    { allowStdin: true },
+    { allowStdin: true, csvDelimiter },
   );
 
   // Resolve the metadata this run transmits, carrying the positions this read
@@ -974,6 +990,7 @@ export async function handler(argv: Arguments): Promise<void> {
   const {
     input,
     output,
+    csvDelimiter: csvDelimiterArg,
     logLevel,
     logFile,
     verbosity,
@@ -1032,6 +1049,18 @@ export async function handler(argv: Arguments): Promise<void> {
       );
     }
     const { connection, authentication, ...exchangeDataSpec } = configResult;
+
+    // The field delimiter this run reads and writes by: --csv-delimiter for
+    // this one run, else the configuration's own csv_delimiter, else none --
+    // which reads the delimiter the file itself shows and writes commas. Both
+    // values came through the same accepted-set rule, so neither can be a
+    // character the reader and the writer would disagree on.
+    const csvDelimiter = csvDelimiterForRun({
+      configured: exchangeDataSpec.csvDelimiter,
+      supplied: csvDelimiterArg,
+      configPath: options.configFile,
+      warn: (message) => log.warn(message),
+    });
 
     // A certificate-mode run naming no signing identity is unrunnable from the
     // parsed configuration alone, so it is refused here: ahead of the dataset
@@ -1108,10 +1137,13 @@ export async function handler(argv: Arguments): Promise<void> {
 
     let prepared: PreparedExchange;
     try {
-      prepared = await prepareDataset(exchangeDataSpec, termsIdentity, input, {
-        configPath: options.configFile,
-        logFile,
-      });
+      prepared = await prepareDataset(
+        exchangeDataSpec,
+        termsIdentity,
+        input,
+        { configPath: options.configFile, logFile },
+        csvDelimiter,
+      );
     } catch (err) {
       // A usage error (exit 64) -- the `-`-at-an-interactive-terminal rejection
       // openInputSource raises is a UsageError with no exitCode -- must map to
@@ -1173,6 +1205,7 @@ export async function handler(argv: Arguments): Promise<void> {
         auth: authentication,
         prepared,
         output,
+        csvDelimiter,
         verbosity,
         loggerName: "exchange",
         logFile,

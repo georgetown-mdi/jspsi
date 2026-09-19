@@ -30,6 +30,7 @@ import type {
 import {
   applyConnectionOverrides,
   configWithNamedRuleSetRules,
+  csvDelimiterForRun,
   diffLinkageTerms,
   linkageTermsStandingOf,
   persistExpectedPartnerDeduplicate,
@@ -57,7 +58,7 @@ import {
   type ConsentSurfaceSink,
 } from "../invitationDisplay";
 import { runOrExit } from "../util/exit";
-import { assertNoUnknownOptions } from "../util/flags";
+import { assertNoUnknownOptions, csvDelimiterFlag } from "../util/flags";
 import { configureLogging } from "../util/logging";
 import { promptConfirm } from "../util/prompt";
 import { resolveRecordOutput } from "../recordFile";
@@ -81,6 +82,7 @@ import { withWebRTCPeerRole } from "../webrtcPeerRole";
 import { diffConnectionAgainstTarget } from "../reconcile";
 import {
   addCommonBootstrapOptions,
+  addCsvDelimiterOption,
   connectionOverridesFrom,
   parseCommonBootstrapArgs,
   warnConnectionPerPollShortInterval,
@@ -104,7 +106,7 @@ import {
 
 export function builder(cmd: Argv): Argv {
   return addCommonBootstrapOptions(
-    cmd
+    addCsvDelimiterOption(cmd)
       // Capture all positionals into `args` (rather than relying on the global
       // `_`) and treat an unknown `-`-leading token as a positional, so an
       // invitation string beginning with `-` (a valid base64url character) is
@@ -357,6 +359,15 @@ export async function validateAccept(params: {
    * no-identity refusal rather than blocking on a read no one answers.
    */
   askIdentity?: () => Promise<string>;
+  /**
+   * The field delimiter this run reads its input by and, where the acceptance
+   * runs the exchange itself, writes its result with. Recorded in the
+   * configuration this acceptance writes so the recurring exchange it governs
+   * needs no flag of its own; absent, an acceptance that keeps a configuration
+   * already at the path reads by that file's own (see
+   * {@link csvDelimiterForRun}).
+   */
+  csvDelimiter?: string;
 }): Promise<AcceptReady> {
   const {
     resolved,
@@ -364,6 +375,7 @@ export async function validateAccept(params: {
     log,
     consentToTerms = false,
     askIdentity,
+    csvDelimiter: csvDelimiterArg,
   } = params;
 
   // Validate (checksum, schema, expiry) first, so the user is never prompted for
@@ -408,6 +420,18 @@ export async function validateAccept(params: {
       : resolveIdentity(
           await identityFromFlagOrPrompt(options.identity, askIdentity),
         );
+  // A kept file reads this acceptance's input where the command line names no
+  // delimiter, and a flag naming a different one is reported: that file, not
+  // this acceptance, runs every later exchange. The report goes on the logger
+  // rather than the consent surface -- the delimiter is a local file-format
+  // choice, not a term this acceptance agrees to.
+  const csvDelimiter = csvDelimiterForRun({
+    configured: keptConfig?.csvDelimiter,
+    supplied: csvDelimiterArg,
+    configPath: options.configFile,
+    warn: (message) => log.warn(message),
+  });
+  const delimiterSection = csvDelimiter !== undefined ? { csvDelimiter } : {};
   // Adopt the invitation's agreed linkage fields/keys/algorithm, but record this
   // party's own identity (the invitation's identity is the inviter's) and MIRROR
   // the output direction rather than copying it: validateCompatibility compares
@@ -497,17 +521,19 @@ export async function validateAccept(params: {
     // also take the CSV there -- unless `--consent-to-terms` skips that prompt,
     // which frees stdin for the CSV. Gate `-` on it: rejected when the prompt
     // would run, allowed when it is bypassed (see the consentToTerms doc above).
-    const rows = await loadInputRows(input, { allowStdin: consentToTerms });
+    const rows = await loadInputRows(input, {
+      allowStdin: consentToTerms,
+      csvDelimiter,
+    });
     checkLinkageSatisfiability(
       rows.columns,
       myTerms,
       INVITATION_PREFLIGHT_MESSAGING,
     );
-    const dataSpec = buildDataSpec({
-      terms: myTerms,
-      identity: myIdentity,
-      rows,
-    });
+    const dataSpec = {
+      ...buildDataSpec({ terms: myTerms, identity: myIdentity, rows }),
+      ...delimiterSection,
+    };
     // Fail closed on a count-only invitation this party's own columns would
     // transmit a column under: the algorithm has no payload in either
     // direction, so the marked columns are neither dropped to bring the run into
@@ -581,7 +607,10 @@ export async function validateAccept(params: {
   // it for the CSV.
   const rows =
     resolved.input !== undefined
-      ? await loadInputRows(resolved.input, { allowStdin: consentToTerms })
+      ? await loadInputRows(resolved.input, {
+          allowStdin: consentToTerms,
+          csvDelimiter,
+        })
       : undefined;
   // The connection this acceptance can run the exchange on itself, rather than
   // writing a configuration for a later `psilink exchange`: only a webrtc
@@ -638,11 +667,10 @@ export async function validateAccept(params: {
       myTerms,
       INVITATION_PREFLIGHT_MESSAGING,
     );
-  const dataSpec = buildDataSpec({
-    terms: myTerms,
-    identity: myIdentity,
-    rows,
-  });
+  const dataSpec = {
+    ...buildDataSpec({ terms: myTerms, identity: myIdentity, rows }),
+    ...delimiterSection,
+  };
   // The offline half of the count-only metadata refusal above. A no-op when this
   // acceptance was given no input file, which leaves this party's transmitted set
   // unresolved rather than empty.
@@ -1038,6 +1066,7 @@ export async function handler(argv: Arguments): Promise<void> {
       // it) is a definite false rather than undefined. A boolean option may be
       // repeated, so it is read directly, not via singleValue.
       const consentToTerms = argv["consent-to-terms"] === true;
+      const csvDelimiter = csvDelimiterFlag(argv);
       // All validation runs before the prompt: the user is never asked to confirm
       // an invitation, URL, or input file that has not validated, and the prompt
       // itself runs inside runOrExit so a stdin error exits cleanly rather than
@@ -1047,6 +1076,7 @@ export async function handler(argv: Arguments): Promise<void> {
         resolved,
         options,
         consentToTerms,
+        csvDelimiter,
         log,
         // The identity question is asked exactly where the consent question is:
         // at a terminal, and only where --consent-to-terms has not declared the
@@ -1183,6 +1213,9 @@ export async function handler(argv: Arguments): Promise<void> {
           keyPath: options.keyFile,
           configPath: options.configFile,
           output: ready.output,
+          // The delimiter the acceptance settled on: the flag's, or a kept
+          // configuration's where the command line named none.
+          csvDelimiter: ready.dataSpec.csvDelimiter,
           verbosity: options.verbosity,
           loggerName: "accept",
           logFile: options.logFile,

@@ -336,8 +336,8 @@ export const ALIAS_TYPE_META_MAP = DEFAULT_COLUMN_TYPES_AND_ALIASES.reduce(
  * `sanitizedPositions` are the 1-based positions the parse removed control
  * characters from (`CSVParseMeta.sanitizedColumnPositions`, `packages/core/src/file.ts`).
  * An empty position among them held nothing but those characters, so the
- * trailing-comma cause is wrong for it and the removal is stated instead; an
- * empty list gives the trailing-comma cause for every position.
+ * header-row cause is wrong for it and the removal is stated instead; an
+ * empty list gives the header-row cause for every position.
  */
 function assertColumnNamesNonEmpty(
   columnNames: ReadonlyArray<string>,
@@ -356,8 +356,8 @@ function assertColumnNamesNonEmpty(
   const strippedPlural = strippedEmpty.length > 1;
   const cause =
     strippedEmpty.length === 0
-      ? `a trailing comma, a blank cell, or a leading delimiter in the CSV ` +
-        `header row produces an unnamed column. Name the ` +
+      ? `a trailing delimiter, a blank cell, or a leading delimiter in the ` +
+        `CSV header row produces an unnamed column. Name the ` +
         `column${plural ? "s" : ""}, or remove the empty header ` +
         `field${plural ? "s" : ""}.`
       : strippedEmpty.length === emptyPositions.length
@@ -367,9 +367,9 @@ function assertColumnNamesNonEmpty(
           `ordinary characters, and run again.`
         : `column${strippedPlural ? "s" : ""} ${strippedEmpty.join(", ")} ` +
           `held nothing but invisible control characters, which this ` +
-          `read removes, and a trailing comma, a blank cell, or a leading ` +
-          `delimiter in the CSV header row produces the rest. Name every ` +
-          `column with ordinary characters, and run again.`;
+          `read removes, and a trailing delimiter, a blank cell, or a ` +
+          `leading delimiter in the CSV header row produces the rest. Name ` +
+          `every column with ordinary characters, and run again.`;
   throw new UsageError(
     `input column${plural ? "s" : ""} ${emptyPositions.join(", ")} ` +
       `${plural ? "have" : "has"} an empty name. A column used for linkage, ` +

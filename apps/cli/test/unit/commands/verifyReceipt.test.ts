@@ -1483,6 +1483,93 @@ describe("handler", () => {
     expect(exitCode).toBe(0);
   });
 
+  // --- the delimiter the retained files are re-read by ------------------------
+  // The files a verification re-reads are the ones an exchange wrote, so the
+  // configuration that ran it names how to read them back.
+
+  /** An exchange record whose commitments the retained files below reproduce,
+   *  with those two files written with `delimiter`. */
+  async function retainedRun(delimiter: string): Promise<{
+    recordPath: string;
+    inputPath: string;
+    resultPath: string;
+  }> {
+    const { recordPath } = await exchangeArtifacts({
+      associationTable: [[0], [0]],
+      resultSize: 1,
+      partnerPayloadReceived: { columns: ["status"], rows: [["active"]] },
+    });
+    const dir = tmp();
+    const inputPath = join(dir, "input.csv");
+    writeFileSync(inputPath, `pid${delimiter}dose\nP0${delimiter}10mg\n`);
+    const resultPath = join(dir, "result.csv");
+    writeFileSync(
+      resultPath,
+      `pid${delimiter}row_id${delimiter}status\n` +
+        `P0${delimiter}0${delimiter}active\n`,
+    );
+    return { recordPath, inputPath, resultPath };
+  }
+
+  test("the configuration's csv_delimiter re-reads the files an exchange wrote", async () => {
+    const { recordPath, inputPath, resultPath } = await retainedRun("|");
+    const shared = {
+      record: recordPath,
+      "input-file": inputPath,
+      "result-file": resultPath,
+    };
+    const configured = await runVerify({
+      ...shared,
+      "config-file": writeYaml(
+        YAML.stringify({
+          linkage_terms: baseInputs.localTerms,
+          csv_delimiter: "|",
+        }),
+      ),
+    });
+    expect(configured.exits).toEqual([]);
+    expect(configured.stdout).toContain(
+      "commitment localPayloadSent: opened and matches",
+    );
+    // The discriminating case: the same files under a configuration that names
+    // commas are re-read as one column apiece and reproduce nothing. Left to
+    // PapaParse's own detection both runs would read the pipes and pass, so
+    // this is what shows the configured value reached the read.
+    const commas = await runVerify({
+      ...shared,
+      "config-file": writeYaml(
+        YAML.stringify({
+          linkage_terms: baseInputs.localTerms,
+          csv_delimiter: ",",
+        }),
+        "commas.yaml",
+      ),
+    });
+    expect(commas.stdout).not.toContain(
+      "commitment localPayloadSent: opened and matches",
+    );
+  });
+
+  test("--csv-delimiter re-reads the files whatever the configuration names", async () => {
+    // The paths are named on this command line and need not be the files that
+    // configuration's own exchange wrote, so the flag governs over its value.
+    const { recordPath, inputPath, resultPath } = await retainedRun("|");
+    const { stdout, exits } = await runVerify({
+      record: recordPath,
+      "input-file": inputPath,
+      "result-file": resultPath,
+      "csv-delimiter": "|",
+      "config-file": writeYaml(
+        YAML.stringify({
+          linkage_terms: baseInputs.localTerms,
+          csv_delimiter: ",",
+        }),
+      ),
+    });
+    expect(exits).toEqual([]);
+    expect(stdout).toContain("commitment localPayloadSent: opened and matches");
+  });
+
   test("a --partner-terms file is what governs when the receipt holds terms too", async () => {
     // The receipt is verified on its own, so the agreed-terms hash is re-derived
     // from the two terms documents rather than read off an exchange record:

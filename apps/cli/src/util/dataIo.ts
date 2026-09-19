@@ -5,6 +5,7 @@
 import fs from "node:fs";
 
 import {
+  DEFAULT_CSV_DELIMITER,
   keepOperatorSuppliedText,
   messageWithOperatorText,
   operatorSuppliedText,
@@ -205,6 +206,7 @@ async function writeResultToStdout(
   headers: string[],
   rows: Array<Array<string>>,
   idleCeilingMs: number,
+  delimiter: string,
 ): Promise<void> {
   // Both assigned by the executor inside the wait below, which runs
   // synchronously before that call returns.
@@ -228,8 +230,8 @@ async function writeResultToStdout(
               const isLast = next === rows.length;
               const line =
                 next === 0
-                  ? headers.join(",") + "\n"
-                  : rows[next - 1].join(",") + "\n";
+                  ? headers.join(delimiter) + "\n"
+                  : rows[next - 1].join(delimiter) + "\n";
               next += 1;
               const accepted = process.stdout.write(
                 line,
@@ -273,10 +275,12 @@ async function writeResultToStdout(
  * {@link createOwnerOnlyWriteStream}).
  *
  * `headers` and `rows` arrive as RFC 4180 FIELDS, not as raw values: core's
- * `buildOutputTable` quotes any cell containing a comma, a double quote, CR
- * or LF and doubles that cell's embedded quotes. Both branches join the
- * fields with commas and escape nothing themselves -- a second pass here
- * would double-escape and break the verify path's re-supply. Pinned by the
+ * `buildOutputTable` quotes any cell containing `delimiter`, a double quote,
+ * CR or LF and doubles that cell's embedded quotes. Both branches join the
+ * fields with `delimiter` and escape nothing themselves -- a second pass here
+ * would double-escape and break the verify path's re-supply. The caller must
+ * pass the delimiter it built the table under: escaping against one delimiter
+ * and joining with another writes a file that does not read back. Pinned by the
  * write-then-read round trip in `test/unit/util/resultCsvEscaping.test.ts`.
  *
  * The file path is owned end to end: the returned promise resolves on the
@@ -321,6 +325,7 @@ export function writeOutput(
   rows: Array<Array<string>>,
   log: { error: (message: string) => void },
   idleCeilingMs: number = STDOUT_RESULT_IDLE_CEILING_MS,
+  delimiter: string = DEFAULT_CSV_DELIMITER,
 ): Promise<void> {
   if (output === undefined) {
     if (stdoutIsRedirectedFile())
@@ -332,7 +337,7 @@ export function writeOutput(
           "redirecting stdout with `>` to have psilink create the result " +
           "owner-only.",
       );
-    return writeResultToStdout(headers, rows, idleCeilingMs);
+    return writeResultToStdout(headers, rows, idleCeilingMs, delimiter);
   }
   return new Promise<void>((resolve, reject) => {
     // createOwnerOnlyWriteStream is inside the executor so a synchronous failure
@@ -341,8 +346,8 @@ export function writeOutput(
     const out = createOwnerOnlyWriteStream(output);
     out.on("error", reject);
     out.on("close", () => resolve());
-    out.write(headers.join(",") + "\n");
-    for (const row of rows) out.write(row.join(",") + "\n");
+    out.write(headers.join(delimiter) + "\n");
+    for (const row of rows) out.write(row.join(delimiter) + "\n");
     out.end();
   });
 }

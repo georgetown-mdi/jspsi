@@ -56,9 +56,10 @@ import type {
 import {
   readConfigLinkageSource,
   warnOnLinkageRuleSetCitationDrift,
+  type ConfigLinkageSource,
 } from "../config";
 import { expandTilde } from "../fileUtils";
-import { addLoggingOptions } from "../optionDefinitions";
+import { addCsvDelimiterOption, addLoggingOptions } from "../optionDefinitions";
 import { keysPathFor } from "../recordFile";
 import { parseSensitiveJson, parseSensitiveYaml } from "../sensitiveFile";
 import { loadSigningCertificate } from "../signingIdentityFile";
@@ -68,7 +69,7 @@ import {
   exitWithError,
   RECEIPT_VERIFICATION_FAILED_EXIT_CODE,
 } from "../util/exit";
-import { parseOrExit, singleValue } from "../util/flags";
+import { csvDelimiterFlag, parseOrExit, singleValue } from "../util/flags";
 import { configureLogging, logLevelFlag } from "../util/logging";
 
 // `psilink verify-receipt` reports whether a stored exchange artifact holds up. It
@@ -102,7 +103,7 @@ import { configureLogging, logLevelFlag } from "../util/logging";
 // short of verified rather than failed.
 
 export function builder(cmd: Argv): Argv {
-  const beforeLogging = cmd
+  const beforeLogging = addCsvDelimiterOption(cmd)
     .usage(
       "Usage: $0 verify-receipt <record> [input-file] [result-file] [options]",
     )
@@ -782,21 +783,22 @@ export function formatSignedRecordReport(
 // --- Handler -----------------------------------------------------------------
 
 /**
- * This party's linkage terms, from the config named by `--config-file`,
- * which also supplies `signing.partner_fingerprint` and
+ * What the config named by `--config-file` supplies this verification: this
+ * party's linkage terms and the `csv_delimiter` its files were read and
+ * written by. That file also supplies `signing.partner_fingerprint` and
  * `signing.identity_file` -- so a config that defines no `linkage_terms` is
- * accepted rather than refused. A path that does not exist is a usage error
- * (this command never auto-loads a config). The rule-set citation is
- * checked here, not in the reader shared with `--partner-terms`: this
- * party's config load has no standing to report on the PARTNER's own
- * citation of its rules. For the same reason only this side resolves a
- * citation into rules, which is what the run being verified did with the
- * same file.
+ * accepted rather than refused, reported here as no source at all. A path
+ * that does not exist is a usage error (this command never auto-loads a
+ * config). The rule-set citation is checked here, not in the reader shared
+ * with `--partner-terms`: this party's config load has no standing to report
+ * on the PARTNER's own citation of its rules. For the same reason only this
+ * side resolves a citation into rules, which is what the run being verified
+ * did with the same file.
  */
-function configFileTerms(
+function configFileSource(
   configFile: string | undefined,
   log: { warn: (message: string) => void },
-): LinkageTerms | undefined {
+): ConfigLinkageSource | undefined {
   if (configFile === undefined) return undefined;
   const source = readConfigLinkageSource(
     expandTilde(configFile),
@@ -816,7 +818,7 @@ function configFileTerms(
     source.source.linkageTermsStanding,
     "decline-to-reuse",
   );
-  return source.source.linkageTerms;
+  return source.source;
 }
 
 /**
@@ -1113,6 +1115,12 @@ export async function handler(argv: Arguments): Promise<void> {
     if (recordPath === undefined || recordPath.length === 0)
       throw new UsageError("a record file to verify is required");
     const inputFile = singleValue(argv, "input-file") as string | undefined;
+    // Both CSVs this command re-reads are the party's own files, written and
+    // read by one delimiter, so one flag governs both. Read here, ahead of any
+    // file, so a value outside the accepted set stops the command at once; what
+    // it resolves against the configuration's own csv_delimiter is settled
+    // below, once that file has been read.
+    const csvDelimiterArg = csvDelimiterFlag(argv);
     const resultFile = singleValue(argv, "result-file") as string | undefined;
     const keysArg = singleValue(argv, "keys") as string | undefined;
     const configFile = singleValue(argv, "config-file") as string | undefined;
@@ -1154,7 +1162,14 @@ export async function handler(argv: Arguments): Promise<void> {
       }
     }
 
-    const localTerms = configFileTerms(configFile, log);
+    const localSource = configFileSource(configFile, log);
+    const localTerms = localSource?.linkageTerms;
+    // The flag governs this verification and the configuration's csv_delimiter
+    // a verification given none, the precedence every command reading a CSV
+    // applies: the files being verified are the ones that configuration's own
+    // exchange wrote, and the paths named here need not be those files.
+    // Nothing later reads by this value, so a difference is not reported.
+    const csvDelimiter = csvDelimiterArg ?? localSource?.csvDelimiter;
     const suppliedPartnerTerms = partnerTermsFrom(partnerTermsFile);
     const signedRecord =
       artifact.kind === "signed"
@@ -1202,8 +1217,14 @@ export async function handler(argv: Arguments): Promise<void> {
       if (inputFile !== undefined && resultFile !== undefined) {
         const inputParse = await loadCSVFile(
           openInputSource(inputFile, { allowStdin: true }),
+          undefined,
+          csvDelimiter,
         );
-        const resultParse = await loadCSVFile(openInputSource(resultFile));
+        const resultParse = await loadCSVFile(
+          openInputSource(resultFile),
+          undefined,
+          csvDelimiter,
+        );
         const result = toRetainedResult(resultParse);
         const ourIdColumn = deriveOurIdColumn(
           result.headers,

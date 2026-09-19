@@ -7,6 +7,7 @@ import YAML from "yaml";
 import { UsageError } from "@psilink/core";
 import {
   DEFAULT_LINKAGE_RULE_SET,
+  csvDelimiterRefusal,
   encodeInvitation,
   generateSigningIdentity,
   getDefaultLinkageTerms,
@@ -1376,6 +1377,161 @@ test("handler suppresses the advisory when a successful exchange refreshes the t
     );
     expect(exitSpy).not.toHaveBeenCalled();
   } finally {
+    exitSpy.mockRestore();
+  }
+});
+
+// --- handler: the CSV field delimiter ----------------------------------------
+// The setting and the flag reach one value, which reads the input and writes the
+// result. The accepted set and the round trip are core's and
+// util/resultCsvDelimiter.test.ts's; what is measured here is the precedence and
+// that the resolved value reaches the run.
+
+/** Seed a pipe-delimited input and a config holding `configured`, run the
+ * handler with `flag`, and return the delimiter runProtocol was handed. */
+async function delimiterReachingTheRun(
+  configured: string | undefined,
+  flag: string | undefined,
+): Promise<string | undefined> {
+  fs.writeFileSync(
+    configFile,
+    YAML.stringify({
+      ...minimalFiledropConfig,
+      ...(configured !== undefined ? { csv_delimiter: configured } : {}),
+    }),
+  );
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
+  const input = path.join(dir, "in.csv");
+  fs.writeFileSync(input, "ssn|note\n123456789|hello\n");
+
+  vi.mocked(runProtocol).mockReset();
+  vi.mocked(runProtocol).mockResolvedValueOnce({});
+  await handler({
+    _: [],
+    $0: "psilink",
+    input,
+    "config-file": configFile,
+    "key-file": keyFile,
+    "log-level": "silent",
+    ...(flag !== undefined ? { "csv-delimiter": flag } : {}),
+  } as unknown as Arguments);
+  return vi.mocked(runProtocol).mock.calls[0][0].csvDelimiter;
+}
+
+test("handler: the configuration's csv_delimiter governs a run with no flag", async () => {
+  expect(await delimiterReachingTheRun("|", undefined)).toBe("|");
+});
+
+test("handler: --csv-delimiter replaces the configuration's value for that run", async () => {
+  expect(await delimiterReachingTheRun(";", "|")).toBe("|");
+  // The configuration runs every later exchange and is not rewritten here, so
+  // the value it still holds is reported beside the one this run took.
+  const reported = mockState.warnings.filter((m) =>
+    m.includes("--csv-delimiter"),
+  );
+  expect(reported).toHaveLength(1);
+  expect(reported[0]).toContain('--csv-delimiter "|" applies to this run');
+  expect(reported[0]).toContain('csv_delimiter (";")');
+  expect(reported[0]).toContain(configFile);
+});
+
+test("handler: a flag the configuration agrees with is not reported", async () => {
+  expect(await delimiterReachingTheRun("|", "|")).toBe("|");
+  expect(
+    mockState.warnings.filter((m) => m.includes("--csv-delimiter")),
+  ).toEqual([]);
+});
+
+test("handler: the flag alone governs a configuration that sets none", async () => {
+  expect(await delimiterReachingTheRun(undefined, "|")).toBe("|");
+  // Nothing to disagree with: a configuration recording no delimiter leaves
+  // every later run reading the delimiter each file shows.
+  expect(
+    mockState.warnings.filter((m) => m.includes("--csv-delimiter")),
+  ).toEqual([]);
+});
+
+test("handler: neither one leaves the run with no chosen delimiter", async () => {
+  expect(await delimiterReachingTheRun(undefined, undefined)).toBeUndefined();
+});
+
+test("handler: the configured delimiter is the only one the input is read by", async () => {
+  // The same pipe-delimited file the cases above run, configured to be read by
+  // commas: it parses as one column, which cannot satisfy the terms, so the run
+  // refuses before anything is sent. With no setting the read takes the file's
+  // own delimiter and the run proceeds, so this is the discriminating case for
+  // a setting that never reached the read.
+  const exitSpy = captureProcessExit();
+  try {
+    await expect(delimiterReachingTheRun(",", undefined)).rejects.toThrow(
+      "exit:64",
+    );
+    expect(vi.mocked(runProtocol)).not.toHaveBeenCalled();
+  } finally {
+    exitSpy.mockRestore();
+  }
+});
+
+test("handler: a delimiter outside the accepted set stops the run before anything is sent", async () => {
+  fs.writeFileSync(configFile, YAML.stringify(minimalFiledropConfig));
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
+  const input = path.join(dir, "in.csv");
+  fs.writeFileSync(input, "ssn\n123456789\n");
+  vi.mocked(runProtocol).mockReset();
+  const exitSpy = captureProcessExit();
+  try {
+    await expect(
+      handler({
+        _: [],
+        $0: "psilink",
+        input,
+        "config-file": configFile,
+        "key-file": keyFile,
+        "log-level": "silent",
+        "csv-delimiter": "::",
+      } as unknown as Arguments),
+    ).rejects.toThrow("exit:64");
+    expect(vi.mocked(runProtocol)).not.toHaveBeenCalled();
+  } finally {
+    exitSpy.mockRestore();
+  }
+});
+
+test("handler: a refused delimiter stops the run before an @-file credential is read", async () => {
+  // The delimiter is a usage question answerable with nothing open, so it is
+  // graded ahead of the @-reference resolution the credential flags take: the
+  // password reference here names a file that does not exist, and a run
+  // reporting the delimiter instead of the unreadable reference never read it.
+  fs.writeFileSync(configFile, YAML.stringify(minimalFiledropConfig));
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
+  const input = path.join(dir, "in.csv");
+  fs.writeFileSync(input, "ssn\n123456789\n");
+  const passwordRef = path.join(dir, "absent-sftp-password");
+  expect(fs.existsSync(passwordRef)).toBe(false);
+  vi.mocked(runProtocol).mockReset();
+  const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  const exitSpy = captureProcessExit();
+  try {
+    await expect(
+      handler({
+        _: [],
+        $0: "psilink",
+        input,
+        "config-file": configFile,
+        "key-file": keyFile,
+        "log-level": "silent",
+        "csv-delimiter": "::",
+        "server-password": `@${passwordRef}`,
+      } as unknown as Arguments),
+    ).rejects.toThrow("exit:64");
+    const reported = errSpy.mock.calls
+      .map((call) => String(call[0]))
+      .join("\n");
+    expect(reported).toContain(`--csv-delimiter: ${csvDelimiterRefusal("::")}`);
+    expect(reported).not.toContain(passwordRef);
+    expect(vi.mocked(runProtocol)).not.toHaveBeenCalled();
+  } finally {
+    errSpy.mockRestore();
     exitSpy.mockRestore();
   }
 });

@@ -779,7 +779,7 @@ test("handler: an input the prepare refuses exits 64 with no host-key probe", as
   }
 });
 
-test("handler: a header the strip emptied names the removal, not the trailing comma", async () => {
+test("handler: a header the strip emptied names the removal, not the header row", async () => {
   // The zero-setup run resolves its metadata from the columns its own read
   // returned, so that read's changed positions travel with them: the operator's
   // header held neither a trailing comma nor a blank cell, and the remedy for a
@@ -813,7 +813,7 @@ test("handler: a header the strip emptied names the removal, not the trailing co
     const stderr = stderrChunks.join("");
     expect(stderr).toContain("input column 2 has an empty name");
     expect(stderr).toContain("nothing but invisible control characters");
-    expect(stderr).not.toContain("trailing comma");
+    expect(stderr).not.toContain("trailing delimiter");
   } finally {
     getLogger("psilink").setLevel("silent");
     stderrSpy.mockRestore();

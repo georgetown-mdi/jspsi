@@ -2661,6 +2661,144 @@ describe("reconciling a pre-existing config", () => {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  // --- the CSV field delimiter over a kept configuration ---------------------
+  // The kept file runs every later exchange, so its csv_delimiter reads this
+  // acceptance's input where the command line names none, and is reported
+  // where a flag reads the run another way.
+
+  /** A configuration already at the path holding `csvDelimiter` (or none),
+   *  beside a pipe-delimited input file. */
+  function keptDelimiterConfig(csvDelimiter: string | undefined): {
+    dir: string;
+    configFile: string;
+    keyFile: string;
+    input: string;
+  } {
+    const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-accept-delim-"));
+    const configFile = path.join(dir, "psilink.yaml");
+    saveConfig(configFile, {
+      connection: { channel: "filedrop", path: "/mnt/share" },
+      linkageTerms: sampleTerms("Acceptor Org"),
+      ...(csvDelimiter !== undefined && { csvDelimiter }),
+    });
+    const input = path.join(dir, "input.csv");
+    fs.writeFileSync(
+      input,
+      "first_name|last_name|dob|ssn\nAlice|Smith|1990-01-02|123456789\n",
+    );
+    return { dir, configFile, keyFile: path.join(dir, ".psilink.key"), input };
+  }
+
+  test("validateAccept: the kept configuration's csv_delimiter reads this acceptance's input", async () => {
+    const pipes = keptDelimiterConfig("|");
+    try {
+      const ready = await validateAccept({
+        resolved: {
+          mode: "offline",
+          invitation: await encodeInvitation(sampleToken(FUTURE())),
+          input: pipes.input,
+        },
+        options: testOptions({
+          configFile: pipes.configFile,
+          keyFile: pipes.keyFile,
+          identity: undefined,
+        }),
+        log: silentLog,
+      });
+      expect(ready.reuseExistingConfig).toBe(true);
+      // What the run reads and writes by, with no flag anywhere on the command
+      // line: the kept file's own value.
+      expect(ready.dataSpec.csvDelimiter).toBe("|");
+    } finally {
+      fs.rmSync(pipes.dir, { recursive: true, force: true });
+    }
+    // The discriminating case: the same file under a kept config that reads
+    // commas parses as one column, which satisfies no linkage key. An
+    // acceptance that ignored the file would read the pipes it shows and accept
+    // terms the exchange that file governs cannot satisfy.
+    const commas = keptDelimiterConfig(",");
+    try {
+      await expect(
+        validateAccept({
+          resolved: {
+            mode: "offline",
+            invitation: await encodeInvitation(sampleToken(FUTURE())),
+            input: commas.input,
+          },
+          options: testOptions({
+            configFile: commas.configFile,
+            keyFile: commas.keyFile,
+            identity: undefined,
+          }),
+          log: silentLog,
+        }),
+      ).rejects.toThrow(UsageError);
+    } finally {
+      fs.rmSync(commas.dir, { recursive: true, force: true });
+    }
+  });
+
+  test("validateAccept: --csv-delimiter reads this acceptance's input over the kept configuration's value", async () => {
+    const { dir, configFile, keyFile, input } = keptDelimiterConfig(";");
+    const log = getLogger("accept-kept-delimiter-test");
+    log.setLevel("silent");
+    const warnSpy = vi.spyOn(log, "warn");
+    try {
+      const ready = await validateAccept({
+        resolved: {
+          mode: "offline",
+          invitation: await encodeInvitation(sampleToken(FUTURE())),
+          input,
+        },
+        options: testOptions({ configFile, keyFile, identity: undefined }),
+        csvDelimiter: "|",
+        log,
+      });
+      // The run proceeds under the flag -- a semicolon read of this input, what
+      // the kept file alone would have taken, refuses on the satisfiability
+      // check above.
+      expect(ready.dataSpec.csvDelimiter).toBe("|");
+      const reported = warnSpy.mock.calls
+        .map((call) => String(call[0]))
+        .filter((message) => message.includes("--csv-delimiter"));
+      expect(reported).toHaveLength(1);
+      expect(reported[0]).toContain('--csv-delimiter "|" applies to this run');
+      expect(reported[0]).toContain('csv_delimiter (";")');
+      expect(reported[0]).toContain(configFile);
+    } finally {
+      warnSpy.mockRestore();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("validateAccept: a --csv-delimiter the kept configuration already records is not reported", async () => {
+    const { dir, configFile, keyFile, input } = keptDelimiterConfig("|");
+    const log = getLogger("accept-kept-delimiter-match-test");
+    log.setLevel("silent");
+    const warnSpy = vi.spyOn(log, "warn");
+    try {
+      const ready = await validateAccept({
+        resolved: {
+          mode: "offline",
+          invitation: await encodeInvitation(sampleToken(FUTURE())),
+          input,
+        },
+        options: testOptions({ configFile, keyFile, identity: undefined }),
+        csvDelimiter: "|",
+        log,
+      });
+      expect(ready.dataSpec.csvDelimiter).toBe("|");
+      expect(
+        warnSpy.mock.calls
+          .map((call) => String(call[0]))
+          .filter((message) => message.includes("--csv-delimiter")),
+      ).toEqual([]);
+    } finally {
+      warnSpy.mockRestore();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 // --- online accept: invitation-endpoint split directories --------------------

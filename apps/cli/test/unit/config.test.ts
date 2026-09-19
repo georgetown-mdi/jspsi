@@ -4034,6 +4034,51 @@ test("readConfigLinkageSource returns the source a config defines", () => {
   });
 });
 
+// The delimiter the exchange this config governs reads and writes by, lifted so
+// a command grading an input against this config reads the file the same way.
+// The spellings and the accepted set are core's own, shared with the schema the
+// run path parses the same key through.
+test("readConfigLinkageSource reads the config's csv_delimiter, tab spellings and all", () => {
+  const configPath = path.join(dir, "psilink.yaml");
+  const terms = getDefaultLinkageTerms("Agency A");
+  for (const [written, resolved] of [
+    ["|", "|"],
+    ["tab", "\t"],
+    ["\\t", "\t"],
+  ]) {
+    saveConfig(configPath, {
+      connection: { channel: "filedrop", path: "/mnt/share" },
+      linkageTerms: terms,
+      csvDelimiter: written,
+    });
+    expect(readConfigLinkageSource(configPath)).toMatchObject({
+      status: "loaded",
+      source: { csvDelimiter: resolved },
+    });
+  }
+});
+
+// Refused here rather than read past: a command that graded the operator's
+// input by a delimiter no run of this config will ever use would report a
+// verdict about a file nobody reads that way.
+test("readConfigLinkageSource refuses a csv_delimiter outside the accepted set", () => {
+  const configPath = path.join(dir, "psilink.yaml");
+  for (const written of ["::", '"', 9]) {
+    fs.writeFileSync(
+      configPath,
+      YAML.stringify({
+        connection: { channel: "filedrop", path: "/mnt/share" },
+        linkage_terms: snakeizeKeys(getDefaultLinkageTerms("Agency A")),
+        csv_delimiter: written,
+      }),
+    );
+    expect(() => readConfigLinkageSource(configPath)).toThrow(UsageError);
+    expect(() => readConfigLinkageSource(configPath)).toThrow(
+      "invalid csv_delimiter",
+    );
+  }
+});
+
 // A config writes its params in snake_case and the function library reads them
 // in camelCase, so the block is camelized on the way in, as the `psilink
 // exchange` run path's own read of it (`parseExchangeSpec`) does. Without that

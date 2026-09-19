@@ -13,7 +13,9 @@ import { stripNameControlChars } from "./utils/nameControls.js";
  * enormous field, or a multi-megabyte header) would otherwise drive memory and
  * CPU linearly-to-quadratically with that span. This ceiling bounds the bytes
  * pulled from the source between row terminators, so those shapes fail fast
- * with a clear error instead.
+ * with a clear error instead. Both guards below count a line by scanning for LF
+ * and CR alone, so the field delimiter a read was given never enters the count
+ * and the bound is the same under every delimiter.
  *
  * 8 MiB sits comfortably above any realistic operator CSV's single line and
  * well below the hundred-MiB-plus spans that drove the gigabyte-scale memory
@@ -372,6 +374,21 @@ const SHARED_CSV_PARSE_CONFIG = {
 } as const;
 
 /**
+ * The `delimiter` option every read in this module hands PapaParse, from the
+ * field delimiter the party chose or `undefined` for none.
+ *
+ * `""` is PapaParse's own value for "detect the delimiter from the file"
+ * (driven and confirmed against the parser), and it is what a read with no
+ * chosen delimiter takes. A party that names one is read by that character
+ * alone: the detection can otherwise settle on another candidate for a file
+ * whose rows make one look more consistent, and a read that disagrees with the
+ * write would not round-trip.
+ */
+function papaParseDelimiter(delimiter: string | undefined): string {
+  return delimiter ?? "";
+}
+
+/**
  * The header transform every CSV read in this module applies: each column name
  * goes through {@link stripNameControlChars}, and the 1-based position of a name
  * that lost a character is appended to `strippedPositions`. What it removes is
@@ -443,6 +460,7 @@ function sanitizingHeaderTransform(
 async function runSharedCSVParse(
   file: LocalFile,
   byteCeiling: number,
+  delimiter: string | undefined,
   consumeChunk: (
     rows: Array<CSVRow>,
     errors: Array<Papa.ParseError>,
@@ -469,6 +487,7 @@ async function runSharedCSVParse(
 
     Papa.parse(file, {
       ...SHARED_CSV_PARSE_CONFIG,
+      delimiter: papaParseDelimiter(delimiter),
       transformHeader: sanitizingHeaderTransform(sanitizedColumnPositions),
       chunk: (results, parser) => {
         // Refuse the whole read on the first row-level fault, BEFORE the chunk
@@ -563,6 +582,9 @@ async function runSharedCSVParse(
  * pathological line, not a memory saving for well-formed input. The whole-file
  * streaming counterpart that retains NOTHING is {@link streamCSVRows}.
  *
+ * `delimiter` is the field delimiter to read the file by; omit it to have
+ * PapaParse detect one (see {@link papaParseDelimiter}).
+ *
  * Caveat on `meta`: only `meta.fields` and `meta.sanitizedColumnPositions` are
  * whole-file-stable (see the runner); every current consumer reads only `data`
  * and those two.
@@ -570,12 +592,14 @@ async function runSharedCSVParse(
 export async function loadCSVFile(
   file: LocalFile,
   byteCeiling: number = CSV_LINE_BYTE_CEILING,
+  delimiter?: string,
 ): Promise<Omit<Papa.ParseResult<CSVRow>, "meta"> & { meta: CSVParseMeta }> {
   const data: Array<CSVRow> = [];
   const errors: Array<Papa.ParseError> = [];
   const meta = await runSharedCSVParse(
     file,
     byteCeiling,
+    delimiter,
     (rows, chunkErrors) => {
       for (const row of rows) data.push(row);
       for (const error of chunkErrors) errors.push(error);
@@ -594,13 +618,14 @@ export async function loadCSVFile(
  * the header column list (`meta.fields`, stable across chunks) so a consumer can
  * key per-column state without a separate read.
  *
- * Shares {@link runSharedCSVParse}'s config, single-line byte ceiling, row
- * normalization, and row-level fault gate with {@link loadCSVFile} -- one
- * config, two drivers -- so a streaming server pass and a browser worker
- * wrapping loadCSVFile parse identically. Resolves with the header column list
- * and the positions the header transform stripped ({@link CSVParseMeta}) once
- * the parse settles; rejects the same way as loadCSVFile: a
- * ceiling trip with {@link CsvLineByteCeilingError}, a row-level fault with
+ * Shares {@link runSharedCSVParse}'s config, `delimiter` handling, single-line
+ * byte ceiling, row normalization, and row-level fault gate with
+ * {@link loadCSVFile} -- one config, two drivers -- so a streaming server pass
+ * and a browser worker wrapping loadCSVFile parse identically. Resolves with
+ * the header column list and the positions the header transform stripped
+ * ({@link CSVParseMeta}) once the parse settles; rejects the same way as
+ * loadCSVFile: a ceiling trip with {@link CsvLineByteCeilingError}, a
+ * row-level fault with
  * {@link CsvRowParseError}. The fault gate refuses the read before the
  * faulting chunk reaches `consumeChunk`, so a consumer never accumulates rows
  * the file does not contain -- but chunks BEFORE the fault have already been
@@ -611,6 +636,7 @@ export async function streamCSVRows(
   file: LocalFile,
   consumeChunk: (rows: Array<CSVRow>, columns: Array<string>) => void,
   byteCeiling: number = CSV_LINE_BYTE_CEILING,
+  delimiter?: string,
 ): Promise<{
   columns: Array<string>;
   sanitizedColumnPositions: Array<number>;
@@ -618,6 +644,7 @@ export async function streamCSVRows(
   const meta = await runSharedCSVParse(
     file,
     byteCeiling,
+    delimiter,
     (rows, _errors, chunkMeta) => consumeChunk(rows, chunkMeta.fields ?? []),
   );
   return {
@@ -649,6 +676,9 @@ export async function streamCSVRows(
  * re-opening the source, is what lets the same read serve a non-rewindable
  * stdin stream.
  *
+ * `delimiter` reads the file by that field delimiter; omit it to have PapaParse
+ * detect one, as the loaders above do.
+ *
  * The sample holds only non-empty (after-trim) values, capped at `sampleLimit`.
  * Set the cap to {@link inferDateFormat}'s own non-empty-value scan cap and the
  * sampled inference matches a full-column scan: that scan never consumes past the
@@ -668,6 +698,7 @@ export function loadCSVColumnSample(
   selectColumn: (columns: Array<string>) => string | undefined,
   sampleLimit: number,
   byteCeiling: number = CSV_LINE_BYTE_CEILING,
+  delimiter?: string,
 ): Promise<{
   columns: Array<string>;
   sanitizedColumnPositions: Array<number>;
@@ -696,6 +727,7 @@ export function loadCSVColumnSample(
       worker: false,
       header: true,
       skipEmptyLines: true,
+      delimiter: papaParseDelimiter(delimiter),
       // The same header transform the shared runner applies, so the column names
       // this read hands to config authoring are the names the exchange's own read
       // of the file will key its rows by, and the positions it changed reach this
