@@ -1774,8 +1774,8 @@ export function summarizeLinkageShortfall(
  *
  * An input whose whole header read as one column takes
  * {@link singleColumnDelimiterClause} as well: that shape is what a file
- * separated by something other than a comma reaches this check as when no
- * delimiter was named, and the clause states the remedy for it.
+ * separated by something other than the delimiter the read took reaches this
+ * check as, and the clause states the remedy for it.
  *
  * The summary is stated on the `"agreed"` standing: this is the boundary of a run,
  * and a run is held to the terms its partner is held to, whoever authored them.

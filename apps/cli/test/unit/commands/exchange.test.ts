@@ -1495,6 +1495,12 @@ test("handler: the configured delimiter is the only one the input is read by", a
       "exit:64",
     );
     expect(vi.mocked(runProtocol)).not.toHaveBeenCalled();
+    // The comma was named here, so the refusal states what the read produced
+    // and the remedy, never that no delimiter was named.
+    const reported = mockState.errors.join("\n");
+    expect(reported).toContain("single column");
+    expect(reported).toContain("CSV delimiter");
+    expect(reported).not.toContain("no delimiter");
   } finally {
     exitSpy.mockRestore();
   }

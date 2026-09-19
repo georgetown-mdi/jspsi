@@ -64,6 +64,25 @@ describe("resolving the delimiter choice", () => {
       ).toEqual({ ok: true, delimiter: "\t" });
   });
 
+  test("the detect word typed into the field is the detect choice", () => {
+    // The refusal offers the word, so the field it sends the operator to takes
+    // it: typing it there is the same choice the select's own entry makes.
+    for (const spelling of ["detect", "DETECT", " Detect "])
+      expect(
+        resolveCsvDelimiter({ option: CSV_DELIMITER_OTHER, other: spelling }),
+      ).toEqual({ ok: true, delimiter: CSV_DELIMITER_DETECT });
+  });
+
+  test("a word that is not the detect choice is still refused", () => {
+    const resolution = resolveCsvDelimiter({
+      option: CSV_DELIMITER_OTHER,
+      other: "ab",
+    });
+    expect(resolution.ok).toBe(false);
+    if (!resolution.ok)
+      expect(resolution.refusal).toBe(csvDelimiterRefusal("ab"));
+  });
+
   test("a refused character yields the rule's own words and no delimiter", () => {
     for (const value of ['"', "", "::", "\n", "§"]) {
       const resolution = resolveCsvDelimiter({

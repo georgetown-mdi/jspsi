@@ -118,8 +118,8 @@ function fitDetailLinks(details: string[], overflowNoun: string): string[] {
  * paths' source-specific wording so they cannot drift apart; the shortfall
  * itself is phrased by {@link summarizeLinkageShortfall}, and a CSV whose whole
  * header read as one column takes core's delimiter clause as well -- the shape
- * a file separated by something other than a comma reaches this check as when
- * no delimiter was named.
+ * a file separated by something other than the delimiter the read took reaches
+ * this check as.
  *
  * @param standardization The committed config's explicit standardization, when
  *   any: an explicit column remap satisfies a field whose semantic type is

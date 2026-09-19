@@ -2,7 +2,7 @@ import {
   CSV_DELIMITER_DETECT,
   DEFAULT_CSV_DELIMITER,
   csvDelimiterRefusal,
-  isCsvDelimiter,
+  isCsvDelimiterChoice,
   normalizeCsvDelimiter,
 } from "@psilink/core";
 
@@ -10,11 +10,11 @@ import {
  * The field-delimiter choice an intake surface offers beside its file picker, and
  * the resolution of that choice into the delimiter a read and a result write take.
  *
- * The accepted characters are core's ({@link isCsvDelimiter}), stated in core's own
- * words ({@link csvDelimiterRefusal}), so this app and the command line refuse the
- * same values with the same sentence. The choice is local to this party: it is not
- * a linkage term, rides no invitation, and the partner reads their own file by
- * their own.
+ * The accepted values are core's ({@link isCsvDelimiterChoice}), stated in core's
+ * own words ({@link csvDelimiterRefusal}), so this app and the command line refuse
+ * the same values with the same sentence. The choice is local to this party: it
+ * is not a linkage term, rides no invitation, and the partner reads their own
+ * file by their own.
  */
 
 /** The select value revealing the free-text field, for a delimiter outside the
@@ -73,8 +73,10 @@ export type CsvDelimiterResolution =
  * character itself for a named option, {@link CSV_DELIMITER_DETECT} for the detect
  * option -- the value core's read takes for detection and a record stores for it --
  * and for {@link CSV_DELIMITER_OTHER} the typed value resolved through
- * {@link normalizeCsvDelimiter} (so the tab spellings are taken here as they are on
- * the command line) and graded by {@link isCsvDelimiter}.
+ * {@link normalizeCsvDelimiter} (so the tab spellings and the detect word are taken
+ * here as they are on the command line) and graded by
+ * {@link isCsvDelimiterChoice}, which is the grade every authoring boundary
+ * applies.
  */
 export function resolveCsvDelimiter(
   choice: CsvDelimiterChoice,
@@ -82,7 +84,7 @@ export function resolveCsvDelimiter(
   if (choice.option !== CSV_DELIMITER_OTHER)
     return { ok: true, delimiter: choice.option };
   const resolved = normalizeCsvDelimiter(choice.other);
-  return isCsvDelimiter(resolved)
+  return isCsvDelimiterChoice(resolved)
     ? { ok: true, delimiter: resolved }
     : { ok: false, refusal: csvDelimiterRefusal(choice.other) };
 }

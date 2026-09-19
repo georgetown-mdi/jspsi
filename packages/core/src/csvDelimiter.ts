@@ -104,23 +104,24 @@ export function resultCsvDelimiter(choice: string | undefined): string {
 
 /**
  * The clause a refusal over an input's columns adds when the whole header came
- * out as ONE column: a file separated by something other than a comma, read
- * with no delimiter named, reaches a column check that way rather than as a
- * wrong result. Empty for any other column count, so a refusal over a file that
- * really does hold one column and a genuine shortfall read the same.
+ * out as ONE column: a file separated by something other than the delimiter the
+ * read took reaches a column check that way rather than as a wrong result.
+ * Empty for any other column count, so a refusal over a file that really does
+ * hold one column and a genuine shortfall read the same.
  *
- * Stated without naming a flag, a key, or a control: the copy is shared by the
- * command line's pre-flight and the run boundary both applications reach, and
- * each surface's own name for the choice is in its documentation.
+ * Stated without naming a flag, a key, or a control, and without naming how the
+ * delimiter was chosen -- a party who named one reaches this the same way a
+ * party who named none does. The copy is shared by the command line's
+ * pre-flight and the run boundary both applications reach, and each surface's
+ * own name for the choice is in its documentation.
  */
 export function singleColumnDelimiterClause(columnCount: number): string {
   if (columnCount !== 1) return "";
   return (
-    "This input read as a single column, so its fields may be separated by " +
-    "something other than a comma, which is what a read takes when no " +
-    "delimiter is named: name your file's separator as the CSV delimiter, or " +
-    `name \`${CSV_DELIMITER_DETECT}\` to take it from the file, and run ` +
-    "again. "
+    "This input read as a single column with the delimiter in effect, so its " +
+    "fields may be separated by a different character: name your file's " +
+    "separator as the CSV delimiter, or name " +
+    `\`${CSV_DELIMITER_DETECT}\` to take it from the file, and run again. `
   );
 }
 

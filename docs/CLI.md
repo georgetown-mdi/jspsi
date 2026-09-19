@@ -100,7 +100,7 @@ The row check applies to every command that reads a CSV to set up or run an exch
 - **Leaving it out.** Given no delimiter, psilink reads the file with commas and writes the result with commas.
 - **Having it detected.** `--csv-delimiter detect` takes the delimiter from the file itself, among the six the parser considers: the comma, tab, pipe, and semicolon, plus the ASCII record and unit separators. A file separated by anything else is read with commas. The result file of a detected run is comma-separated -- detection names no character for the write to follow -- so name the separator where the result must come back the way the input arrived.
 
-A file read with the wrong delimiter parses as a single column, which shows up as linkage terms the input cannot satisfy rather than as a wrong result. That refusal names the delimiter and the `detect` choice, since a file the comma default reads as one column is the case it fits.
+A file read with the wrong delimiter parses as a single column, which shows up as linkage terms the input cannot satisfy rather than as a wrong result. That refusal names the delimiter and the `detect` choice, whatever delimiter the run read the file by.
 
 Durations on the command line are written as a positive integer followed by a single-character unit -- `s` (seconds), `m` (minutes), `h` (hours), or `d` (days); for example `45s`, `30m`, `2h`, or `1d`. The unit suffix is required: a bare number such as `30` is not a valid duration and is rejected with the suffixed form to use (`30s`) rather than silently read as seconds. This applies to every duration-valued option, including `--expires-in`, `--accept-timeout`, `--connection-timeout`, and `--peer-timeout`.
 

@@ -251,6 +251,9 @@ test("the one-column clause states the remedy, and only for a one-column header"
   expect(clause).toContain("single column");
   expect(clause).toContain("CSV delimiter");
   expect(clause).toContain(CSV_DELIMITER_DETECT);
+  // The same clause is emitted whether or not the party named a delimiter, so
+  // it states what the read produced and never how the delimiter was chosen.
+  expect(clause).not.toContain("no delimiter");
   for (const count of [0, 2, 7])
     expect(singleColumnDelimiterClause(count)).toBe("");
 });
@@ -339,6 +342,23 @@ test("buildOutputTable quotes against the chosen delimiter, not against the comm
   // an ordinary character under this delimiter and is left bare.
   expect(rows[0][0]).toBe('"a|b"');
   expect(rows[0][2]).toBe("x,y");
+});
+
+test("buildOutputTable refuses a delimiter that is not a single character", () => {
+  // The escaping holds against one character only, so a caller that handed the
+  // party's choice over unresolved -- the reserved word above all -- is stopped
+  // rather than quoting every cell against a string no join splits back on.
+  for (const unresolved of [CSV_DELIMITER_DETECT, "::"])
+    expect(() =>
+      buildOutputTable(
+        associationTable,
+        [{ pid: "a" }],
+        metadata,
+        { columns: ["note"], rowIndices: [0], rows: [["x"]] },
+        undefined,
+        unresolved,
+      ),
+    ).toThrow(/^result delimiter is not a single accepted character/);
 });
 
 // --- The configuration field --------------------------------------------------
