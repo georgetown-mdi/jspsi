@@ -1,9 +1,10 @@
 // Rewrites an `aws elasticbeanstalk describe-configuration-settings` export
 // into the form committed beside this file: the account id, the application
-// and environment names, the notification endpoint and the EC2 key name
-// replaced with placeholders, the volatile members dropped, and the option
-// settings sorted. Every other value is kept as exported. The procedure and
-// the placeholder list are in README.md beside this file.
+// and environment names, the notification endpoint and the EC2 key name --
+// the last of these only when the export states one -- replaced with
+// placeholders, the volatile members dropped, and the option settings sorted.
+// Every other value is kept as exported. The procedure and the placeholder
+// list are in README.md beside this file.
 
 import { fileURLToPath } from "node:url";
 import { readFileSync } from "node:fs";
@@ -32,6 +33,9 @@ const REDACTED_OPTIONS = [
     namespace: "aws:autoscaling:launchconfiguration",
     optionName: "EC2KeyName",
     placeholder: "<ec2-key-name>",
+    // An environment with no key pair states the option with no value, which is
+    // the posture the deployment documents record: there is nothing to replace.
+    absenceIsIntended: true,
   },
 ];
 
@@ -66,12 +70,19 @@ function replacementsFor(settings) {
       throw new Error(`the export states no ${member} to redact`);
     replacements.push({ value, placeholder });
   }
-  for (const { namespace, optionName, placeholder } of REDACTED_OPTIONS) {
+  for (const {
+    namespace,
+    optionName,
+    placeholder,
+    absenceIsIntended,
+  } of REDACTED_OPTIONS) {
     const value = optionValue(settings, namespace, optionName);
-    if (value === undefined)
+    if (value === undefined) {
+      if (absenceIsIntended) continue;
       throw new Error(
         `the export states no ${namespace} / ${optionName} value to redact`,
       );
+    }
     replacements.push({ value, placeholder });
   }
   const accountIds = accountIdsIn(settings);

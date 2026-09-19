@@ -31,7 +31,7 @@ The two names match the deployment environments `eb_deploy.yaml` maps a branch o
 
 3. Commit the result and read the diff: a line that changed is a setting that changed.
 
-`redact.mjs` exits non-zero and names the value it could not find rather than writing a file, so an export shaped differently than the ones above stops the refresh instead of committing an identifier. `scripts/eb-saved-configuration-redact.test.mjs` drives that refusal and each replacement against a synthetic export; it runs with `npm run test:scripts`.
+`redact.mjs` exits non-zero and names the value it could not find rather than writing a file, so an export shaped differently than the ones above stops the refresh instead of committing an identifier. The `EC2KeyName` option is the one value it accepts an export without: an environment with no key pair states that option with no value at all. `scripts/eb-saved-configuration-redact.test.mjs` drives that refusal and each replacement against a synthetic export; it runs with `npm run test:scripts`.
 
 ## What the redaction replaces
 
@@ -41,7 +41,7 @@ The two names match the deployment environments `eb_deploy.yaml` maps a branch o
 | `<application-name>`      | The `ApplicationName` value, wherever it appears                                             |
 | `<environment-name>`      | The `EnvironmentName` value, wherever it appears, inside the notification topic ARN included  |
 | `<notification-endpoint>` | The `aws:elasticbeanstalk:sns:topics` / `Notification Endpoint` address                       |
-| `<ec2-key-name>`          | The `EC2KeyName` value                                                                       |
+| `<ec2-key-name>`          | The `EC2KeyName` value, when the export states one                                            |
 
 Each replacement is made by matching the value the export itself states, so the script holds no secret of its own. It also drops the members that change on every export -- `DateCreated`, `DateUpdated`, `DeploymentStatus` -- and sorts the option settings by namespace and then option name, so two exports diff against each other rather than against their ordering.
 
@@ -51,7 +51,7 @@ Everything else is kept as exported, including the security group, subnet and VP
 
 A security-group rule created or removed by an `authorize-security-group-ingress` or `revoke-security-group-ingress` call is not part of the environment configuration, so an operation that recreates an environment's own groups from its CloudFormation stack does not replay it. An option setting is part of the configuration. The inbound posture therefore belongs in these files rather than in a remembered sequence of revokes, as far as an option setting can express it:
 
-- **Inbound `:22`.** Elastic Beanstalk creates the SSH ingress from `SSHSourceRestriction`, in the `aws:autoscaling:launchconfiguration` namespace, whenever `EC2KeyName` is set. The committed files record that option as the platform applies it when it recreates the environment's groups; the rule set measured on the live groups is recorded separately in `docs/DEPLOYMENT.md`, and the two are not the same fact. The recorded posture, Session Manager as the only shell route, is expressed at the option level by clearing `EC2KeyName` or by restricting `SSHSourceRestriction`, and confirming which the environment holds is part of the verification below.
+- **Inbound `:22`.** Elastic Beanstalk creates the SSH ingress from `SSHSourceRestriction`, in the `aws:autoscaling:launchconfiguration` namespace, only when `EC2KeyName` is set. The committed files record `EC2KeyName` absent, so the platform creates no SSH ingress when it recreates an environment's groups, and the `SSHSourceRestriction` the files carry, still the platform default, is inert. Session Manager is the shell route; the rule set measured on the live groups is recorded separately in `docs/DEPLOYMENT.md`, and the two are not the same fact.
 - **`:443` from Cloudflare's ranges only.** That rule lives in a security group the platform did not create, shared by both environments, so its rule list is not an option setting of either environment. What the configuration can carry is the attachment of that group to the instances (`SecurityGroups`, same namespace). The rule's contents stay recorded as values in `docs/DEPLOYMENT.md`; applying them from the repository is the later infrastructure-as-code step.
 - **No inbound `:80`.** Which option setting, if any, expresses that on a single-instance environment is unrecorded; the committed files are where to read it.
 

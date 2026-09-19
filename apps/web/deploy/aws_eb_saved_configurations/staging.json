@@ -61,8 +61,7 @@
         {
           "ResourceName": "AWSEBEC2LaunchTemplate",
           "Namespace": "aws:autoscaling:launchconfiguration",
-          "OptionName": "EC2KeyName",
-          "Value": "<ec2-key-name>"
+          "OptionName": "EC2KeyName"
         },
         {
           "ResourceName": "AWSEBEC2LaunchTemplate",

@@ -45,6 +45,7 @@ function exportFixture() {
             Value: "sg-0123456789abcdef0",
           },
           {
+            ResourceName: "AWSEBEC2LaunchTemplate",
             Namespace: "aws:autoscaling:launchconfiguration",
             OptionName: "EC2KeyName",
             Value: "An Example Key Pair",
@@ -128,6 +129,31 @@ describe("the saved-configuration redaction", () => {
     ]);
   });
 
+  it("keeps an EC2KeyName entry that states no key pair", () => {
+    const document = exportFixture();
+    const exported = document.ConfigurationSettings[0].OptionSettings.find(
+      (option) => option.OptionName === "EC2KeyName",
+    );
+    delete exported.Value;
+    const settings =
+      redactConfigurationSettings(document).ConfigurationSettings[0];
+    expect(
+      settings.OptionSettings.find(
+        (option) => option.OptionName === "EC2KeyName",
+      ),
+    ).toEqual({
+      ResourceName: "AWSEBEC2LaunchTemplate",
+      Namespace: "aws:autoscaling:launchconfiguration",
+      OptionName: "EC2KeyName",
+    });
+    const run = spawnSync(process.execPath, [REDACT], {
+      input: JSON.stringify(document),
+      encoding: "utf8",
+    });
+    expect(run.status).toBe(0);
+    expect(run.stderr).toBe("");
+  });
+
   it("refuses an export missing a value it must redact", () => {
     const document = exportFixture();
     delete document.ConfigurationSettings[0].EnvironmentName;
@@ -141,5 +167,16 @@ describe("the saved-configuration redaction", () => {
     expect(run.status).not.toBe(0);
     expect(run.stderr).toContain("EnvironmentName");
     expect(run.stdout).toBe("");
+  });
+
+  it("refuses an export missing the notification endpoint", () => {
+    const document = exportFixture();
+    const exported = document.ConfigurationSettings[0].OptionSettings.find(
+      (option) => option.OptionName === "Notification Endpoint",
+    );
+    delete exported.Value;
+    expect(() => redactConfigurationSettings(document)).toThrow(
+      /Notification Endpoint/,
+    );
   });
 });
