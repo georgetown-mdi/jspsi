@@ -7,6 +7,7 @@ import {
 } from "@psilink/core";
 
 import { ERROR_MESSAGE_CHAIN_FIELD } from "@psi/relayErrorChain";
+import { SWEEP_CONTROL_LABEL } from "@psi/runDiagnosticsModel";
 
 import {
   zeroSetupFiledropArgv,
@@ -1313,6 +1314,13 @@ export class JobManager {
    * run that emitted its own terminal event is synthesized nothing at all, so
    * no diagnosis reaches the operator twice.
    *
+   * A run that terminated itself and then reported protocol files left by an
+   * unfinished transport close takes the notice for that
+   * ({@link TEARDOWN_LEFTOVER_FILES_NOTICE}) as a warning of its own, since
+   * nothing else delivers it: the report is on the tail this run's own terminal
+   * left unread. A run whose terminal was synthesized is not told twice -- that
+   * terminal's cause link already holds the end of the tail, the report among it.
+   *
    * The only slot-release point besides the pre-spawn create failure: fires
    * on the child's `close` (or a spawn `error`), so a killed child is
    * confirmed dead before {@link maybeFreeSlot} frees the slot for a
@@ -1374,9 +1382,34 @@ export class JobManager {
             diagnostics.stderrTail,
           ),
         );
-    }
+    } else if (diagnostics.transportTeardownOverran)
+      this.appendPostTerminalEvent(
+        record,
+        buildSynthesizedWarningEvent(
+          "relayTransportTeardownOverrun",
+          TEARDOWN_LEFTOVER_FILES_NOTICE,
+        ),
+      );
 
     this.maybeFreeSlot(record);
+  }
+
+  /**
+   * Buffer an event the run produced after its own terminal event, the one
+   * route past {@link appendEvent}'s terminal stop.
+   *
+   * It appends and notifies only: the status, the terminal state and the
+   * terminal-emitted mark are the run's own and stay as the terminal left them,
+   * so a completed run still reports completed. An event past the buffer cap is
+   * dropped rather than failing the job as {@link appendEvent} does -- the run
+   * is already classified, and failing it here would rewrite the outcome the
+   * operator was given.
+   */
+  private appendPostTerminalEvent(record: JobRecord, event: RelayEvent): void {
+    if (record.events.length >= this.eventBufferCap) return;
+    const entry: BufferedEvent = { id: record.events.length + 1, event };
+    record.events.push(entry);
+    this.notifyListeners(record, entry);
   }
 
   /**
@@ -1584,6 +1617,24 @@ function liveRecordAvailability(record: JobRecord):
 
 /** How the cause link naming the child's stderr introduces it. */
 const STDERR_CAUSE_LABEL = "the CLI last wrote on stderr: ";
+
+/**
+ * What the operator is told about a transport close that did not finish: the
+ * protocol files it may have left in the shared exchange directory, the refusal
+ * they would otherwise meet as the next run's, and the console's own sweep
+ * control that clears them.
+ *
+ * The control is quoted from the label the run form renders
+ * ({@link SWEEP_CONTROL_LABEL}) rather than from the CLI flag behind it, which
+ * a console operator has no way to pass. It states no directory: the CLI holds
+ * the protocol-file grammar and this console does not know which of a split
+ * rendezvous's legs, or which remote directory, the close was working on.
+ */
+const TEARDOWN_LEFTOVER_FILES_NOTICE =
+  "this run may have left its own protocol files in the shared exchange " +
+  "directory: closing the transport did not finish. The next run refuses to " +
+  `start on them, so turn on "${SWEEP_CONTROL_LABEL}" for it; your own ` +
+  "input and results are not what it sweeps.";
 
 /**
  * A synthesized terminal naming what the CLI printed on stderr, so an operator

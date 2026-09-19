@@ -57,6 +57,7 @@ export const RELAY_WARNING_SOURCES = [
   "relayUnknownEvent",
   "relayProcessError",
   "relayRendezvousPreflight",
+  "relayTransportTeardownOverrun",
 ] as const;
 
 /** One {@link RELAY_WARNING_SOURCES} value; see that list. */
@@ -145,6 +146,18 @@ export interface CliRunDiagnostics {
    * (CONTRIBUTING.md, Operator-facing escaping).
    */
   stderrTail: PartnerOriginText | null;
+  /**
+   * Whether that tail holds the CLI's report that its transport close left this
+   * party's protocol files in the shared exchange directory
+   * ({@link TEARDOWN_LEFTOVER_FILES_CLAUSE}).
+   *
+   * Read where the tail is still a plain string, since the branded type answers
+   * nothing about its own bytes, and read from the tail because the report
+   * takes no other channel: the CLI writes it on its operator log after the
+   * run's terminal event, and nothing goes on fd 3 past that
+   * (docs/spec/CLI_EVENTS.md, Terminal-event guarantees).
+   */
+  transportTeardownOverran: boolean;
 }
 
 /** Callbacks the job manager wires into a driven run. */
@@ -213,6 +226,26 @@ export function resolveCliBinaryPath(
  * the manager composes what it shows.
  */
 const STDERR_TAIL_CAP = 8192;
+
+/**
+ * The clause the CLI's transport-teardown notice holds exactly when that
+ * teardown may have left this party's protocol files in the shared exchange
+ * directory (`teardownCeilingNotice` in apps/cli/src/transportTeardown.ts).
+ *
+ * The clause rather than the notice's opening, so the console inherits the
+ * CLI's own classification of what the abandoned close left rather than
+ * re-deriving it: a WebRTC run has no protocol files and a retain-mode run
+ * keeps its own as a transcript, and the notice states the clause for neither.
+ *
+ * Mirrored here rather than imported -- the CLI is a separate workspace this
+ * server drives as a subprocess, as the fd-3 vocabulary above is. Each side
+ * pins the clause against its own suite: `apps/cli/test/unit/transportTeardown.test.ts`
+ * that the notice states it, and
+ * `apps/web/test/unit/jobs/transportTeardownNotice.test.ts` that this read
+ * finds it in a tail holding the notice as the CLI writes it.
+ */
+const TEARDOWN_LEFTOVER_FILES_CLAUSE =
+  "remove any protocol files this run left there";
 
 /**
  * The maximum length buffered on the fd-3 line reader, in UTF-16 code units,
@@ -407,8 +440,7 @@ function runCliChild(
   });
 
   attachFd3Reader(child, handlers);
-  const stderrTail = attachStderrTail(child);
-  attachTerminalReconciliation(child, handlers, stderrTail);
+  attachTerminalReconciliation(child, handlers, attachStderrTail(child));
 
   return {
     signal: (signal) => {
@@ -636,12 +668,15 @@ function sanitizeValue(value: unknown): unknown {
  * so `end` flushes the remainder into the window rather than leaving the
  * child's last line short of what it wrote.
  *
- * A caller that reads `get` before stderr's `end` -- the spawn-error path in
- * {@link attachTerminalReconciliation} -- is short by up to a marker's
+ * A caller that reads the window before stderr's `end` -- the spawn-error path
+ * in {@link attachTerminalReconciliation} -- is short by up to a marker's
  * lookahead (`PRIVATE_KEY_MARKER_LOOKAHEAD` code units) of the last delivery.
+ *
+ * Both diagnostics come off one read of the window, so the tail an operator is
+ * shown and the teardown report read out of it are the same bytes.
  */
 function attachStderrTail(child: ChildProcess): {
-  get: () => PartnerOriginText | null;
+  read: () => CliRunDiagnostics;
 } {
   let tail = "";
   const redactor = createPrivateKeyStreamRedactor();
@@ -658,14 +693,19 @@ function attachStderrTail(child: ChildProcess): {
       retain(redactor.close());
     });
   }
-  // Trimmed and tested for emptiness HERE, the last place the bytes are a
-  // plain string: past the brand nothing can read a length or a boundary off
-  // them, and a run whose child wrote nothing must carry no cause link rather
-  // than an empty one.
+  // Trimmed, tested for emptiness and searched for the teardown clause HERE,
+  // the last place the bytes are a plain string: past the brand nothing can
+  // read a length, a boundary or a substring off them, and a run whose child
+  // wrote nothing must carry no cause link rather than an empty one.
   return {
-    get: () => {
+    read: () => {
       const trimmed = tail.trim();
-      return trimmed.length === 0 ? null : partnerOriginText(trimmed);
+      return {
+        stderrTail: trimmed.length === 0 ? null : partnerOriginText(trimmed),
+        transportTeardownOverran: trimmed.includes(
+          TEARDOWN_LEFTOVER_FILES_CLAUSE,
+        ),
+      };
     },
   };
 }
@@ -682,24 +722,22 @@ function attachStderrTail(child: ChildProcess): {
  *
  * Whether the CLI emitted its own terminal fd-3 event is the manager's concern
  * (it synthesizes one when a non-interrupt exit produced none); this layer only
- * classifies the exit and hands the retained stderr tail along with it, so the
- * manager can name the cause in a terminal it had to synthesize. The tail rides
- * the terminal delivery on every path, the spawn-failure one included, so it
+ * classifies the exit and hands the run's diagnostics along with it, so the
+ * manager can name the cause in a terminal it had to synthesize. They ride the
+ * terminal delivery on every path, the spawn-failure one included, so the tail
  * reaches the operator through one sink and a run that emitted its own terminal
  * event does not read its diagnosis twice.
  */
 function attachTerminalReconciliation(
   child: ChildProcess,
   handlers: CliDriverHandlers,
-  stderrTail: { get: () => PartnerOriginText | null },
+  diagnostics: { read: () => CliRunDiagnostics },
 ): void {
   let delivered = false;
   const deliver = (exitCode: number | null, signal: NodeJS.Signals | null) => {
     if (delivered) return;
     delivered = true;
-    handlers.onTerminal(classifyExit(exitCode, signal), {
-      stderrTail: stderrTail.get(),
-    });
+    handlers.onTerminal(classifyExit(exitCode, signal), diagnostics.read());
   };
   // "close", not "exit": close fires only after every stdio stream has drained,
   // so the CLI's own terminal fd-3 event is always parsed before the exit is

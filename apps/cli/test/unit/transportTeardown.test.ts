@@ -145,6 +145,12 @@ test("a run whose output stage did not return claims nothing about disk", () => 
 test("a delete-mode run is pointed at the files the abandoned close left", () => {
   // The close is what removes this party's own protocol files, so an expiry
   // leaves them in the shared directory for the operator to clear.
+  //
+  // The console reads this clause out of the retained stderr tail to raise its
+  // own notice for a run that reported its outcome and then overran
+  // (`TEARDOWN_LEFTOVER_FILES_CLAUSE` in apps/web/src/jobs/cliDriver.ts, which
+  // apps/web cannot import from here), so rewording it means rewording that
+  // mirror as well.
   const notice = teardownCeilingNotice(EXPIRED, {
     channel: "sftp",
     retainFiles: false,
