@@ -1850,8 +1850,25 @@ async function writeExchangeOutputs(params: {
 
   // The result went nowhere, so the run fails on it and the caller's own
   // persistence below does not run: it writes configuration for a run whose
-  // operator never received the result.
-  if (undelivered !== undefined) throw undelivered.error;
+  // operator never received the result. What it would have saved is named
+  // before the throw, on the same two channels every other completed-run loss
+  // takes, since the partner may hold the recurring setup this side skipped
+  // and the terminal error alone names only the result.
+  if (undelivered !== undefined) {
+    if (onOutputComplete !== undefined) {
+      const skipped =
+        "the result was not delivered, so the post-exchange persistence " +
+        "step did not run: what this run would have saved after the result " +
+        "-- a configuration, a key file, or the payload set recorded for a " +
+        "later run -- did not reach disk, and your partner may have saved a " +
+        "recurring exchange this side did not. The exchange itself " +
+        "completed, so do not re-run it; confirm with your partner what " +
+        "each side saved before setting up a recurring exchange.";
+      log.error(skipped);
+      reportPersistenceLoss(skipped, eventStream);
+    }
+    throw undelivered.error;
+  }
 
   // The caller's own last persistence, run here rather than after this function
   // returns so that whatever it loses is reported BEFORE the terminal event
