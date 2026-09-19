@@ -531,33 +531,6 @@ const SIGNATURE_NOTE_WITH_SIGNED_RECORD =
   "Partner receipt signatures are checked separately below, against the " +
   "dual-signed record you loaded.";
 
-// The note for a re-supplied file whose whole header read as ONE column: the
-// shape a file separated by something other than the delimiter this page read it
-// by comes out as, which reconstructs the committed values out of the wrong
-// cells. It names the control on this page rather than the record, and hedges: a
-// file that really holds one column reads the same way.
-const SINGLE_COLUMN_READ_NOTE =
-  "a file you re-supplied read as a single column, so its fields may be " +
-  "separated by a character other than the one it was read with, and a " +
-  "commitment reported as not matching may be that reading rather than the " +
-  'record. Set "How your file separates fields" to your files\' ' +
-  "separator, or choose Detect to take it from the file, then verify again.";
-
-/**
- * The single-column reading note for a run's re-supplied pair, as the notes to
- * add to the same sink the reconstruction warnings go to: one note where either
- * file's header read as one column, and none otherwise. The two files share one
- * delimiter choice on this page, so one note covers the pair.
- */
-export function singleColumnReadNotes(
-  inputColumns: ReadonlyArray<string>,
-  resultColumns: ReadonlyArray<string>,
-): Array<string> {
-  return inputColumns.length === 1 || resultColumns.length === 1
-    ? [SINGLE_COLUMN_READ_NOTE]
-    : [];
-}
-
 /**
  * Build the verdict view-model from a {@link RecordVerificationReport} and any
  * reconstruction warnings. Each warning is sanitized here (it interpolates a

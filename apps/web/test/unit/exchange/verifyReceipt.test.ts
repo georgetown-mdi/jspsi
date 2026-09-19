@@ -25,7 +25,6 @@ import {
   parseSignedRecordDocument,
   pinnedFingerprintProblem,
   signedVerdictViewModel,
-  singleColumnReadNotes,
   verdictViewModel,
   verifySignedRecord,
 } from "@exchange/verifyReceiptModel";
@@ -363,38 +362,6 @@ describe("verdictViewModel: warnings are sanitized", () => {
     ]);
     expect(view.warnings).toHaveLength(1);
     expect(view.warnings[0]).not.toContain(esc);
-  });
-});
-
-// A re-supplied file read by the wrong delimiter comes out as one column, and the
-// committed values are then reconstructed out of the wrong cells, so the page
-// states the reading beside its verdict rather than leaving a mismatch looking
-// like the record's fault.
-describe("the re-supplied single-column reading", () => {
-  test("either file read as one column is noted, naming the delimiter control", () => {
-    const [note] = singleColumnReadNotes(["id\tfirst_name"], ["id", "matched"]);
-    expect(note).toContain("read as a single column");
-    expect(note).toContain("How your file separates fields");
-    expect(singleColumnReadNotes(["id", "first_name"], ["id_matched"])).toEqual(
-      [note],
-    );
-  });
-
-  test("a pair that both read as several columns is not noted", () => {
-    expect(
-      singleColumnReadNotes(["id", "first_name"], ["id", "matched"]),
-    ).toEqual([]);
-  });
-
-  test("the note reaches the verdict's own sink, sanitized with the rest", async () => {
-    const { record, keys } = await fixtures();
-    const report = await verifyExchangeRecord(record, keys, {});
-    const view = verdictViewModel(
-      report,
-      singleColumnReadNotes(["id\tfirst_name"], ["id", "matched"]),
-    );
-    expect(view.warnings).toHaveLength(1);
-    expect(view.warnings[0]).toContain("read as a single column");
   });
 });
 
