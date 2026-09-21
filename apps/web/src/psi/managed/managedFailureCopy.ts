@@ -2,7 +2,8 @@
  * Notification copy shared between the next-visit alert and the unattended
  * runner's between-visit notification: the repeated-miss coordination state
  * (threshold, title, and the two phrasings every surface that reports repeated
- * misses holds), and the title over each recorded failure tier.
+ * misses holds), the title over each recorded failure tier, and the
+ * single-column shortfall's delimiter remedy.
  *
  * It sits below the product directories because two readers need it and they are
  * in different layers: the saved-exchanges list and the per-exchange detail view
@@ -80,3 +81,21 @@ export const CONSENT_FAILURE_TITLE =
 /** The title over the Tier-2 unexplained failure tier. */
 export const UNEXPLAINED_FAILURE_TITLE =
   "This run failed and needs you to check with your partner";
+
+/**
+ * The remedy for a shortfall whose input file read as ONE column, in the words
+ * every managed surface states it in: the next-visit alert
+ * ({@link ../../recurring/managedRunLaunchModel.ts}) and the between-visit
+ * notification ({@link ./betweenVisitNotice.ts}).
+ *
+ * It names a file saved with the separator this exchange reads, or a fresh setup
+ * where the separator is chosen, rather than the delimiter field the intake
+ * surfaces offer ({@link ../../components/csvDelimiterChoice.ts}): a record's
+ * delimiter is fixed for the partnership, so no surface reading this copy has
+ * that field on it.
+ */
+export const SINGLE_COLUMN_DELIMITER_REMEDY =
+  "Its fields may be separated by a character other than the one this " +
+  "exchange reads it with. Save the input file with the separator this " +
+  "exchange was set up to read, or set the exchange up again with your " +
+  "partner and choose your file's separator at its file step.";

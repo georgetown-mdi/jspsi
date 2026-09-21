@@ -19,7 +19,10 @@
 
 import { decideLinkageTermsVerdict } from "@psilink/core";
 
+import { failedRun } from "./managedRunRotate";
+
 import type { ExchangeSpec, LinkageField } from "@psilink/core";
+import type { ManagedExchangeLastRun } from "./managedExchangeRecord";
 
 /**
  * Why the run-start input could not back the standing terms. Both variants are a
@@ -101,6 +104,24 @@ export function managedInputFailureKind(
   rejection: ManagedInputRejection,
 ): "input" | "terms-shortfall" {
   return rejection.reason === "columns" ? "terms-shortfall" : "input";
+}
+
+/**
+ * The `lastRun` bookkeeping a rejection records: the kind
+ * {@link managedInputFailureKind} derives, plus the one-column reading where the
+ * columns rejection holds it. The reading is stamped because the record is all a
+ * later visit has -- the launch error that held it is gone by then -- and without
+ * it the next visit's summary and the between-visit notice send the operator to
+ * renegotiate terms over what is a delimiter the file does not use.
+ */
+export function managedInputLastRun(
+  rejection: ManagedInputRejection,
+  at: number,
+): ManagedExchangeLastRun {
+  const lastRun = failedRun(at, "failed", managedInputFailureKind(rejection));
+  return rejection.reason === "columns" && rejection.singleColumn
+    ? { ...lastRun, singleColumnInput: true }
+    : lastRun;
 }
 
 /**

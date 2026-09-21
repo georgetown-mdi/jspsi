@@ -29,6 +29,7 @@ import {
   CONSENT_FAILURE_TITLE,
   INPUT_FAILURE_TITLE,
   REPEATED_MISS_TITLE,
+  SINGLE_COLUMN_DELIMITER_REMEDY,
   TERMS_SHORTFALL_FAILURE_TITLE,
   UNEXPLAINED_FAILURE_TITLE,
   repeatedMissCoordination,
@@ -179,7 +180,14 @@ export function betweenVisitNotice(
 /** The notice a failed window earns from the tier its bookkeeping resolves to.
  * The tier is read exactly as the next visit reads it, so a failure a benign
  * state explains -- a restore since the last success, a rotation this device
- * could not save -- stays as quiet here as it is there. */
+ * could not save -- stays as quiet here as it is there.
+ *
+ * The shortfall splits on the stamp's own `singleColumnInput`, the same split
+ * the next visit's alert makes ({@link ../../recurring/managedRunLaunchModel.ts}).
+ * The reading rides the tag as well as the body: the two readings are different
+ * standing states with different remedies, so a shortfall that becomes a
+ * one-column reading says so rather than being suppressed as the state already
+ * reported. */
 function failureNotice(
   record: ManagedExchangeRecord,
   local: ManagedLocalState | undefined,
@@ -198,18 +206,27 @@ function failureNotice(
         `in place; every later window stops the same way until you do.`,
       tag: noticeTag(record.id, "input"),
     };
-  if (tier === "terms-shortfall")
+  if (tier === "terms-shortfall") {
+    const singleColumn = record.lastRun?.singleColumnInput === true;
     return {
       kind: "terms-shortfall",
       title: NOTICE_TITLES["terms-shortfall"],
-      body:
-        `${name} stopped before connecting because its input file cannot ` +
-        `supply every linkage key this exchange agreed to match on, and ` +
-        `nothing left this device. Open this app and run it with a file that ` +
-        `covers every agreed key, or set the exchange up again with your ` +
-        `partner.`,
-      tag: noticeTag(record.id, "terms-shortfall"),
+      body: singleColumn
+        ? `${name} stopped before connecting because its input file read as ` +
+          `a single column, which cannot supply every linkage key this ` +
+          `exchange agreed to match on, and nothing left this device. ` +
+          SINGLE_COLUMN_DELIMITER_REMEDY
+        : `${name} stopped before connecting because its input file cannot ` +
+          `supply every linkage key this exchange agreed to match on, and ` +
+          `nothing left this device. Open this app and run it with a file ` +
+          `that covers every agreed key, or set the exchange up again with ` +
+          `your partner.`,
+      tag: noticeTag(
+        record.id,
+        singleColumn ? "terms-shortfall:single-column" : "terms-shortfall",
+      ),
     };
+  }
   if (tier === "consent")
     return {
       kind: "consent",

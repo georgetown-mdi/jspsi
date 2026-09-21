@@ -6,7 +6,10 @@ import {
   NO_STANDING_CONDITION,
   composeManagedExchangeFile,
 } from "@psi/managed/managedExchangeRecord";
-import { REPEATED_MISS_TITLE } from "@psi/managed/managedFailureCopy";
+import {
+  REPEATED_MISS_TITLE,
+  SINGLE_COLUMN_DELIMITER_REMEDY,
+} from "@psi/managed/managedFailureCopy";
 import { betweenVisitNotice } from "@psi/managed/betweenVisitNotice";
 
 import { managedRunTierFailure } from "@recurring/managedRunLaunchModel";
@@ -298,6 +301,58 @@ describe("betweenVisitNotice: the failures that need the operator", () => {
       })?.tag;
 
     expect(tagFor(RUN_AT)).toBe(tagFor("2026-07-15T09:00:00.000Z"));
+  });
+
+  test("a stamped one-column shortfall states the delimiter remedy", () => {
+    // The generic shortfall copy sends the operator to renegotiate terms with
+    // their partner, which is the wrong move for a file separated by something
+    // other than the delimiter this record reads it by.
+    const notice = betweenVisitNotice({
+      record: record({
+        lastRun: { ...failed("terms-shortfall"), singleColumnInput: true },
+      }),
+      local: undefined,
+      caughtUpMisses: 0,
+      disposition: "failed",
+      now: NOW,
+    });
+
+    expect(notice?.kind).toBe("terms-shortfall");
+    expect(notice?.title).toBe(alertTitle("terms-shortfall"));
+    expect(notice?.body).toContain("read as a single column");
+    expect(notice?.body).toContain(SINGLE_COLUMN_DELIMITER_REMEDY);
+    expect(notice?.body).not.toContain("covers every agreed key");
+  });
+
+  test("a shortfall with no stamped reading keeps the agreed-keys copy", () => {
+    const notice = betweenVisitNotice({
+      record: record({ lastRun: failed("terms-shortfall") }),
+      local: undefined,
+      caughtUpMisses: 0,
+      disposition: "failed",
+      now: NOW,
+    });
+
+    expect(notice?.body).toContain("covers every agreed key");
+    expect(notice?.body).not.toContain(SINGLE_COLUMN_DELIMITER_REMEDY);
+  });
+
+  test("the one-column reading fires its own notice over a plain shortfall", () => {
+    // The two readings are different standing states with different remedies, so
+    // the tag tells them apart: a shortfall that becomes a one-column reading
+    // says so rather than being held to the notice already sent.
+    const tagFor = (lastRun: ManagedExchangeLastRun) =>
+      betweenVisitNotice({
+        record: record({ lastRun }),
+        local: undefined,
+        caughtUpMisses: 0,
+        disposition: "failed",
+        now: NOW,
+      })?.tag;
+
+    expect(
+      tagFor({ ...failed("terms-shortfall"), singleColumnInput: true }),
+    ).not.toBe(tagFor(failed("terms-shortfall")));
   });
 
   test("a failure a restore explains stays as quiet as it is in the app", () => {

@@ -162,8 +162,9 @@ export type ManagedExchangeFailureKind =
   | "cancelled";
 
 /** Run bookkeeping the backup state and the desync UX read. Every field is a
- * timestamp or a closed enum -- no free-text field, so the record structurally
- * cannot hold a match result, a count, or a row value. */
+ * timestamp, a closed enum, or a marker present only as `true` -- no free-text
+ * field, so the record structurally cannot hold a match result, a count, or a
+ * row value. */
 export interface ManagedExchangeLastRun {
   /** ISO 8601 UTC instant of the run. */
   at: string;
@@ -171,6 +172,12 @@ export interface ManagedExchangeLastRun {
   outcome: ManagedExchangeRunOutcome;
   /** For a non-succeeded outcome, the kind of failure; absent on success. */
   failureKind?: ManagedExchangeFailureKind;
+  /** Present only on a `"terms-shortfall"` failure whose input file read as ONE
+   * column -- the shape a file separated by something other than the delimiter
+   * this record reads it by comes out as. The next visit's summary and the
+   * between-visit notice state the delimiter remedy where it is set and the
+   * agreed-keys copy where it is absent. */
+  singleColumnInput?: true;
 }
 
 /** The failure kinds that raise a standing condition: a rotation this device
@@ -336,7 +343,9 @@ export function parseStoredInstant(value: string): number {
  * was added still reads and tiers exactly as it did, and neither enum growing
  * moves {@link MANAGED_EXCHANGE_SCHEMA_VERSION}. An artifact holding a value
  * this reader does not know is refused whole rather than read with the value
- * dropped -- the reader-rejects-unknown rule. */
+ * dropped -- the reader-rejects-unknown rule. `singleColumnInput` is admitted
+ * only as `true`, so the field cannot hold a reading its absence already
+ * states. */
 export const lastRunSchema: ZodType<ManagedExchangeLastRun> = z.object({
   at: z.iso.datetime(),
   outcome: z.enum(["succeeded", "failed", "desynced", "missed", "skipped"]),
@@ -353,6 +362,7 @@ export const lastRunSchema: ZodType<ManagedExchangeLastRun> = z.object({
       "cancelled",
     ])
     .optional(),
+  singleColumnInput: z.literal(true).optional(),
 });
 
 /** The canonical validator for the operator's answer. Strict, so a member a
