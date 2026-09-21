@@ -31,7 +31,12 @@ import type {
 //     receiver from pairing a response element with the request position it
 //     answers -- so its chunk results merge by that order instead;
 //   - an association table holds its pairs in partner-index order, ties broken
-//     by local index.
+//     by local index. That is the library's own order for a response whose
+//     elements are DISTINCT, which is what a conforming partner sends (link.ts
+//     masks distinctValues); for a response repeating an element across
+//     chunks the merged table holds the same pairs as the single call but
+//     orders the ties differently (measured on both backends: the single call
+//     emits [250, 16] before [50, 16], the merge the reverse).
 
 /** A contiguous slice of a value or element list, covered by one chunk. */
 export interface PsiChunkRange {
@@ -188,6 +193,10 @@ export interface PsiAssociationChunk {
 export function mergeAssociationChunks(
   chunks: ReadonlyArray<PsiAssociationChunk>,
 ): [number[], number[]] {
+  // Sorts one [number, number] per matched pair -- ~144 MB of heap at
+  // 2,000,000 pairs in the development container -- while the chunked table
+  // path holds the partner element list beside it. The setup merge's
+  // index-array shape above is not applied here.
   const pairs: Array<[number, number]> = [];
   for (const chunk of chunks)
     for (let index = 0; index < chunk.localIndices.length; index += 1)

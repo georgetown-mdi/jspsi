@@ -154,12 +154,14 @@ Because the bound is on distinct values, the same live memory reaches millions o
 
 The live floor the peak cannot drop below is small and `O(total distinct values)` -- the receiver's match is a full sort-merge join over both sets -- but at a few hundred B/value that floor stays well under a GB even at millions of values, far below the memory wall.
 
-**What splitting a masking operation into chunks costs the peak.** The split (below, "A long masking operation runs as a few chunks") reassembles the chunk results, which holds one list of element references beside the library's own for as long as the merge runs. Measured 2026-09-21 on the WebAssembly backend, aarch64 Linux container under Node 26, three samples per size:
+**What splitting a masking operation into chunks costs the peak.** The split (below, "A long masking operation runs as a few chunks") reassembles the chunk results, which holds one list of element references beside the library's own for as long as the merge runs. Measured 2026-09-21 on the WebAssembly backend, aarch64 Linux container under Node 26, three samples per size, through `scripts/single-pass-bench.mjs` -- its `sweep --gc` mode for the peak and post-GC heap figures, its `rates` mode for the masking rates:
 
 - the receiver's relieved peak sits 20 to 40 MB above the unsplit path at `D` = 28,000 (three chunks) and `D` = 56,000 (five chunks), an offset that does not grow with `D` across those two sizes;
 - the per-value slope of that peak over `D` = 14,000 to 56,000 is ~2.9 KB split against ~2.3 KB unsplit, both inside the 2-4 KB/value band above, and the post-GC live heap moves ~50 B per distinct value either way;
 - the masking rates below are unchanged by the split at these sizes;
-- at `D` = 2,000,000 the setup merge itself holds ~0.1 GB over the element list it orders, measured directly rather than through an exchange. The near-ceiling `D` ~= 2M exchange the cell budget is derived from was not re-measured, so the budget's own headroom rests on the band above holding.
+- at `D` = 2,000,000 the setup merge itself holds ~0.1 GB over the element list it orders, measured in a child process running that merge alone rather than through an exchange. The near-ceiling `D` ~= 2M exchange the cell budget is derived from was not re-measured, so the budget's own headroom rests on the band above holding.
+
+The association-table merge is the cost these figures do not cover: from 16,384 response elements up, the point the split policy stops using a single chunk, it sorts one pair per match beside the partner element list, measured ~144 MB of heap at 2,000,000 pairs and not re-measured at the ceiling through an exchange, so the receiver-peak headroom behind `MAX_SINGLE_PASS_CELLS` is re-established for the setup merge and for the 2.3 to 2.9 KB per value slope above, not for that merge at the ceiling.
 
 **Masking compute is a wall-clock expectation, not a cap.** Masking is one elliptic-curve scalar multiplication per distinct value, exactly linear in `D` (confirmed `D` from 14k to 224k). The rates below are the single-threaded **WebAssembly** backend -- what the browser runs and what `scripts/single-pass-bench.mjs` measures:
 
