@@ -231,7 +231,10 @@ export function addCommonBootstrapOptions(
     .option("connection-timeout", {
       type: "string",
       describe:
-        "how long to wait when connecting to the primary exchange server " +
+        "how long to wait for EACH attempt to connect to the primary " +
+        "exchange server; an unreachable server is re-dialed, so the whole " +
+        "wait is this once per attempt plus a second between attempts -- set " +
+        "--max-reconnect-attempts 0 to spend one " +
         `(maximum: ${MAX_TIMEOUT_SECONDS / 86_400}d). ` +
         DURATION_VALUE_HELP,
     })

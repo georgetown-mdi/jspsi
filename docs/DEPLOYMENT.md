@@ -453,6 +453,8 @@ docker run --rm --network psilink-egress --dns 192.0.2.53 \
   vdorie/psi-link probe-host-key sftp://some.other.host --connect-timeout 10s
 ```
 
+A blocked endpoint answers nothing rather than refusing, so each blocked row takes about its `--connect-timeout` to exit: the probe dials once, and that value is the whole wait.
+
 Probing by name is also the name-resolution check, since it succeeds only if the container both resolved the name and reached the address. A probe that fails by name and succeeds against the address says resolution is what the rules are dropping -- permit the resolver, or pin the server by address.
 
 These steps are executed, not only written: psilink's image smoke workflow (`.github/workflows/image_smoke.yaml`) creates the network, writes these rules into `DOCKER-USER`, and asserts each row above against the image it has just built -- the permitted endpoint read by name, the denied port and the denied host refused, each of the three reached again off the restricted network, and the by-name probe refused once the resolver rules are removed. What that establishes is that the mechanism works as written on a current Docker Engine. Your own subnet, resolver, server address, and port are still yours to check here.
