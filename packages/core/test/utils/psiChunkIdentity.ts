@@ -138,6 +138,7 @@ export async function expectChunkedCountMatchesSingleCall(params: {
       library.dataStructure.Raw,
       [],
     );
+    const wholeRequest = client.createRequest(clientValues);
     const wholeResponse = server.processRequest(
       client.createRequest(clientValues),
     );
@@ -147,6 +148,7 @@ export async function expectChunkedCountMatchesSingleCall(params: {
     expect(setup.setup).toEqual(wholeSetup.serializeBinary());
     expect(setup.permutation).toStrictEqual([]);
     const request = await joiner.createClientRequest(clientValues);
+    expect(request).toEqual(wholeRequest.serializeBinary());
     const response = await starter.processClientRequest(request);
     // The count-only response is sorted rather than answered position by
     // position, so this is where a merge that concatenated the chunks would
