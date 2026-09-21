@@ -37,7 +37,11 @@ export type {
 export { loadPsiBackend } from "./psi/psiBackend";
 export type { PsiBackendOptions, PsiBackendSelection } from "./psi/psiBackend";
 export { InProcessPsiEngine } from "./psi/psiEngine";
-export type { PsiEngine, PsiEngineMode } from "./psi/psiEngine";
+export type {
+  PsiEngine,
+  PsiEngineMode,
+  PsiProcessedElementsReporter,
+} from "./psi/psiEngine";
 export { WorkerPsiEngine, servePsiWorker } from "./psi/psiWorkerEngine";
 export type {
   PsiWorkerHandle,

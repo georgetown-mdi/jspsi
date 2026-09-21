@@ -4,16 +4,16 @@ import { beforeAll, describe, expect, test } from "vitest";
 
 import PSI from "@openmined/psi.js";
 
+import { ShardedPsiDriver } from "./shardedPsiWasmBench";
 import {
-  ShardedPsiDriver,
-  concatShardElements,
-  mergeAssociationShards,
-  mergeSetupShards,
+  chunkRanges,
+  concatChunkElements,
+  mergeAssociationChunks,
+  mergeSetupChunks,
   serializeRequest,
   serializeResponse,
   serializeSetup,
-  shardRanges,
-} from "./shardedPsiWasmBench";
+} from "../../src/psi/psiChunks";
 
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
@@ -95,8 +95,8 @@ describe("sharded PSI masking reassembly", () => {
           wholeResponse,
         );
 
-        const serverRanges = shardRanges(SERVER_VALUES.length, shardCount);
-        const mergedSetup = mergeSetupShards(
+        const serverRanges = chunkRanges(SERVER_VALUES.length, shardCount);
+        const mergedSetup = mergeSetupChunks(
           serverRanges.map((range) => {
             const permutation: number[] = [];
             const setup = server.createSetupMessage(
@@ -118,19 +118,19 @@ describe("sharded PSI masking reassembly", () => {
         );
         expect(mergedSetup.permutation).toEqual(wholePermutation);
 
-        const clientRanges = shardRanges(CLIENT_VALUES.length, shardCount);
-        const mergedRequest = concatShardElements(
+        const clientRanges = chunkRanges(CLIENT_VALUES.length, shardCount);
+        const mergedRequest = concatChunkElements(
           clientRanges.map((range) =>
             client
               .createRequest(CLIENT_VALUES.slice(range.start, range.end))
               .getEncryptedElementsList_asU8(),
           ),
         );
-        expect(serializeRequest(psi, mergedRequest)).toEqual(
-          wholeRequest.serializeBinary(),
-        );
+        expect(
+          serializeRequest(psi, mergedRequest, REVEAL_INTERSECTION),
+        ).toEqual(wholeRequest.serializeBinary());
 
-        const mergedResponse = concatShardElements(
+        const mergedResponse = concatChunkElements(
           clientRanges.map((range) =>
             server
               .processRequest(
@@ -138,6 +138,7 @@ describe("sharded PSI masking reassembly", () => {
                   serializeRequest(
                     psi,
                     mergedRequest.slice(range.start, range.end),
+                    REVEAL_INTERSECTION,
                   ),
                 ),
               )
@@ -148,7 +149,7 @@ describe("sharded PSI masking reassembly", () => {
           wholeResponse.serializeBinary(),
         );
 
-        const mergedTable = mergeAssociationShards(
+        const mergedTable = mergeAssociationChunks(
           clientRanges.map((range) => {
             const table = client.getAssociationTable(
               wholeSetup,
@@ -182,8 +183,8 @@ describe("sharded PSI masking reassembly", () => {
         psi.dataStructure.Raw,
         wholePermutation,
       );
-      const merged = mergeSetupShards(
-        shardRanges(repeated.length, 3).map((range) => {
+      const merged = mergeSetupChunks(
+        chunkRanges(repeated.length, 3).map((range) => {
           const permutation: number[] = [];
           const setup = server.createSetupMessage(
             FALSE_POSITIVE_RATE,
@@ -213,7 +214,7 @@ describe("sharded PSI masking reassembly", () => {
 
   test("the split covers every input exactly once", () => {
     for (const shardCount of SHARD_COUNTS) {
-      const ranges = shardRanges(23, shardCount);
+      const ranges = chunkRanges(23, shardCount);
       expect(ranges).toHaveLength(shardCount);
       expect(ranges[0]!.start).toBe(0);
       expect(ranges.at(-1)!.end).toBe(23);

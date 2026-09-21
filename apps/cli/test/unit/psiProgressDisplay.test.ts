@@ -21,6 +21,15 @@ function started(elements: number): PsiProgress {
   return { operation: "processClientRequest", elements, state: "started" };
 }
 
+function progressed(elements: number, processed: number): PsiProgress {
+  return {
+    operation: "processClientRequest",
+    elements,
+    state: "progress",
+    processed,
+  };
+}
+
 function finished(elements: number, durationMs: number): PsiProgress {
   return {
     operation: "processClientRequest",
@@ -73,6 +82,29 @@ test("the live line names the operation, the count and the elapsed time", () => 
   );
   expect(psiStatusText("createServerSetup", 12, 3000)).toBe(
     "encrypting my data: 12 values, 3s elapsed",
+  );
+});
+
+test("the live line states how far into its set an operation has got", () => {
+  expect(
+    psiStatusText("processClientRequest", 1_204_000, 72_000, 481_600),
+  ).toBe(
+    "doubly-encrypting partner's data: 481,600 of 1,204,000 values (40%), " +
+      "1m 12s elapsed",
+  );
+  // The share is rounded down, so a line reads 99% until the whole set is
+  // through rather than claiming a finish the operation has not reached.
+  expect(psiStatusText("createServerSetup", 1000, 1000, 999)).toBe(
+    "encrypting my data: 999 of 1,000 values (99%), 1s elapsed",
+  );
+});
+
+test("a processed count past the operation's own total holds the line at 100%", () => {
+  expect(psiStatusText("createServerSetup", 10, 1000, 12)).toBe(
+    "encrypting my data: 12 of 10 values (100%), 1s elapsed",
+  );
+  expect(psiStatusText("createServerSetup", 0, 1000, 0)).toBe(
+    "encrypting my data: 0 of 0 values (100%), 1s elapsed",
   );
 });
 
@@ -166,6 +198,73 @@ test("the live line updates on each tick and is dropped when the operation settl
   } finally {
     vi.useRealTimers();
   }
+});
+
+test("a processed count reaches the next redraw, not the terminal directly", () => {
+  vi.useFakeTimers();
+  try {
+    const { line, draws } = recordingStatusLine();
+    let clock = 0;
+    const display = createPsiProgressDisplay({
+      milestone: () => {},
+      statusLine: line,
+      now: () => clock,
+      tickMs: 1000,
+    });
+
+    display.report(started(120_000));
+    // A count arriving before the first tick draws nothing on its own, so an
+    // operation that settles inside the first second still leaves the terminal
+    // untouched.
+    display.report(progressed(120_000, 24_000));
+    expect(draws).toStrictEqual([]);
+
+    clock = 1000;
+    vi.advanceTimersByTime(1000);
+    display.report(progressed(120_000, 48_000));
+    clock = 2000;
+    vi.advanceTimersByTime(1000);
+    expect(draws).toStrictEqual([
+      "doubly-encrypting partner's data: 24,000 of 120,000 values (20%), 1s elapsed",
+      "doubly-encrypting partner's data: 48,000 of 120,000 values (40%), 2s elapsed",
+    ]);
+
+    // The count belongs to the operation that reported it: the next one opens
+    // on its total alone.
+    display.report(finished(120_000, 2000));
+    display.report(started(500));
+    clock = 3000;
+    vi.advanceTimersByTime(1000);
+    expect(draws.at(-1)).toBe(
+      "doubly-encrypting partner's data: 500 values, 1s elapsed",
+    );
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("a processed count with no operation open leaves the display alone", () => {
+  vi.useFakeTimers();
+  try {
+    const { line, draws, clears } = recordingStatusLine();
+    const display = createPsiProgressDisplay({
+      milestone: () => {},
+      statusLine: line,
+      now: () => 0,
+      tickMs: 1000,
+    });
+
+    display.report(progressed(120_000, 24_000));
+    vi.advanceTimersByTime(5000);
+    expect(draws).toStrictEqual([]);
+    expect(clears.count).toBe(0);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("a mid-operation report logs no completion line", () => {
+  expect(psiMilestoneText(progressed(120_000, 24_000))).toBeUndefined();
 });
 
 test("a settled operation that drew nothing clears nothing", () => {

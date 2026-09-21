@@ -3,7 +3,21 @@ import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 import type { Server as PSIServer } from "@openmined/psi.js/implementation/server.d.ts";
 
 import { markNamedDiagnosis } from "../errors";
+import {
+  buildRequest,
+  buildResponse,
+  chunkRangesOfSize,
+  concatChunkElements,
+  mergeAssociationChunks,
+  mergeResponseChunks,
+  mergeSetupChunks,
+  psiChunkRanges,
+  serializeRequest,
+  serializeResponse,
+  serializeSetup,
+} from "./psiChunks";
 
+import type { PsiChunkRange } from "./psiChunks";
 import type { Config } from "../types";
 
 // The deserialized server setup the joiner holds between receiving it and matching
@@ -79,6 +93,15 @@ export function valuesContributedExactlyOnce(
     occurrences.set(value, (occurrences.get(value) ?? 0) + 1);
   return values.filter((value) => occurrences.get(value) === 1);
 }
+
+/**
+ * Takes the running count of elements the operation now in flight has finished
+ * masking or matching. Reported between chunks and never after the last one,
+ * so the figure is always short of the operation's own element count, which
+ * its settle report states. A count and nothing else crosses this boundary: no
+ * element, no value, no index.
+ */
+export type PsiProcessedElementsReporter = (processed: number) => void;
 
 /**
  * The CPU-bound PSI crypto core behind {@link ./participant.PSIParticipant}.
@@ -162,6 +185,14 @@ export interface PsiEngine {
    */
   computeIntersectionCardinality(responseBytes: Uint8Array): Promise<number>;
   /**
+   * Register `report`, taking the running processed-element count while an
+   * operation above is in flight. Optional: an engine that reports nothing
+   * omits it, and the participant then shows an operation's element count and
+   * elapsed time alone. One sink at a time -- a second registration replaces
+   * the first.
+   */
+  observeProcessedElements?(report: PsiProcessedElementsReporter): void;
+  /**
    * Release engine resources. The in-process engine frees the library's server /
    * client objects -- embind wrappers over WASM-heap C++ state, including the
    * generated secret key, which JS garbage collection does NOT reclaim (only their
@@ -172,6 +203,25 @@ export interface PsiEngine {
   dispose(): void;
 }
 
+/** @internal Settings only a test varies. */
+export interface InProcessPsiEngineOptions {
+  /**
+   * @internal
+   *
+   * The chunk size each operation splits at, in place of the measured policy
+   * in psiChunks.ts. The byte-identity suite sets it so the chunked path runs
+   * over a set a unit test can afford, where the policy would take one chunk.
+   */
+  readonly chunkElements?: number;
+}
+
+// The false-positive rate and client-input count every setup message is built
+// with. Both are what selects the Raw data structure the protocol sends and
+// accepts: a rate of 0 admits no false positive, and -1 leaves the library to
+// size the structure from the inputs it was handed.
+const SETUP_FALSE_POSITIVE_RATE = 0.0;
+const SETUP_CLIENT_INPUT_COUNT = -1;
+
 /**
  * The default {@link PsiEngine}: runs the crypto synchronously on the
  * calling thread, wrapping the injected {@link PSILibrary}, extracted
@@ -179,6 +229,14 @@ export interface PsiEngine {
  * disturbing {@link ./participant.PSIParticipant} or its callers. The
  * browser and every test use it directly; the CLI wraps a worker-backed
  * engine around the same per-thread logic.
+ *
+ * Each operation over a set large enough to split runs as a sequence of
+ * chunks, reporting the running processed count between them, so a display has
+ * a figure that moves through an operation the library would otherwise run as
+ * one call lasting minutes. The chunk results reassemble into the bytes the
+ * single call produces (psiChunks.ts states the merge rules and the sizing
+ * policy); a set at or below the chunk floor takes one chunk and runs the
+ * single call unchanged.
  */
 export class InProcessPsiEngine implements PsiEngine {
   private readonly library: PSILibrary;
@@ -192,6 +250,10 @@ export class InProcessPsiEngine implements PsiEngine {
   // Latched by dispose() so freeing the library objects is idempotent: their
   // embind delete() is not safe to call twice.
   private disposed = false;
+  // The sink the running processed count goes to, undefined while nothing
+  // watches (see observeProcessedElements).
+  private onProcessed: PsiProcessedElementsReporter | undefined;
+  private readonly chunkElements: number | undefined;
 
   constructor(
     library: PSILibrary,
@@ -204,10 +266,12 @@ export class InProcessPsiEngine implements PsiEngine {
     // by forgetting: a revealing round run under count-only terms is the
     // substitution the mode exists to prevent.
     mode: PsiEngineMode,
+    options: InProcessPsiEngineOptions = {},
   ) {
     this.library = library;
     this.id = id;
     this.revealsIdentifiers = modeRevealsIdentifiers(mode);
+    this.chunkElements = options.chunkElements;
     // Generate the fresh secret key for this exchange, held inside the
     // library's server / client object. An unresolved ("either") role
     // creates neither; the role-guarded methods below then reject.
@@ -216,6 +280,58 @@ export class InProcessPsiEngine implements PsiEngine {
     } else if (role === "joiner") {
       this.client = library.client!.createWithNewKey(this.revealsIdentifiers);
     }
+  }
+
+  observeProcessedElements(report: PsiProcessedElementsReporter): void {
+    this.onProcessed = report;
+  }
+
+  // How one operation over `total` elements is split: the measured policy,
+  // unless a test set a chunk size of its own.
+  private rangesFor(total: number): PsiChunkRange[] {
+    return this.chunkElements === undefined
+      ? psiChunkRanges(total)
+      : chunkRangesOfSize(total, this.chunkElements);
+  }
+
+  // Runs `maskChunk` over each range in turn, reporting the running processed
+  // count BETWEEN chunks -- never after the last, whose figure is the one the
+  // operation's own settle report states.
+  private overChunks<T>(
+    ranges: ReadonlyArray<PsiChunkRange>,
+    maskChunk: (range: PsiChunkRange) => T,
+  ): Array<T> {
+    const results: Array<T> = [];
+    for (let index = 0; index < ranges.length; index += 1) {
+      const range = ranges[index]!;
+      results.push(maskChunk(range));
+      if (index < ranges.length - 1) this.onProcessed?.(range.end);
+    }
+    return results;
+  }
+
+  // One chunk's masked setup. The Raw check reads back what the call above
+  // asked for: without it, a setup that is not Raw reaches the merge as an
+  // absent element list and fails as a type error rather than a named
+  // condition.
+  private maskSetupChunk(
+    server: PSIServer,
+    values: ReadonlyArray<string>,
+  ): { elements: Array<Uint8Array>; permutation: Array<number> } {
+    const permutation: Array<number> = [];
+    const setup = server.createSetupMessage(
+      SETUP_FALSE_POSITIVE_RATE,
+      SETUP_CLIENT_INPUT_COUNT,
+      values,
+      this.library.dataStructure.Raw,
+      permutation,
+    );
+    const raw = setup.getRaw();
+    if (!raw)
+      throw engineRefusal(
+        `${this.id}: the PSI library returned a server setup that is not a Raw data structure`,
+      );
+    return { elements: raw.getEncryptedElementsList_asU8(), permutation };
   }
 
   createServerSetup(
@@ -227,17 +343,39 @@ export class InProcessPsiEngine implements PsiEngine {
         `${this.id}: createServerSetup requires the server role`,
       );
     const countOnly = !this.revealsIdentifiers;
-    const sortingPermutation: Array<number> = [];
-    const setup = server.createSetupMessage(
-      0.0,
-      -1,
-      countOnly ? valuesContributedExactlyOnce(values) : values,
-      this.library.dataStructure.Raw,
-      sortingPermutation,
+    const contributed = countOnly
+      ? valuesContributedExactlyOnce(values)
+      : values;
+    const ranges = this.rangesFor(contributed.length);
+    // One chunk is the single call this operation has always been: the
+    // library's own message goes out as it serialized it, with no element list
+    // materialized beside it and no merge to reproduce its sort.
+    if (ranges.length === 1) {
+      const sortingPermutation: Array<number> = [];
+      const setup = server.createSetupMessage(
+        SETUP_FALSE_POSITIVE_RATE,
+        SETUP_CLIENT_INPUT_COUNT,
+        contributed,
+        this.library.dataStructure.Raw,
+        sortingPermutation,
+      );
+      return Promise.resolve({
+        setup: setup.serializeBinary(),
+        permutation: countOnly ? [] : sortingPermutation,
+      });
+    }
+    const merged = mergeSetupChunks(
+      this.overChunks(ranges, (range) => ({
+        start: range.start,
+        ...this.maskSetupChunk(
+          server,
+          contributed.slice(range.start, range.end),
+        ),
+      })),
     );
     return Promise.resolve({
-      setup: setup.serializeBinary(),
-      permutation: countOnly ? [] : sortingPermutation,
+      setup: serializeSetup(this.library, merged.elements),
+      permutation: countOnly ? [] : merged.permutation,
     });
   }
 
@@ -261,7 +399,29 @@ export class InProcessPsiEngine implements PsiEngine {
           `${modeName(request.getRevealIntersection())} mode, where this ` +
           `exchange runs ${modeName(this.revealsIdentifiers)}`,
       );
-    return Promise.resolve(server.processRequest(request).serializeBinary());
+    const ranges = this.rangesFor(request.getEncryptedElementsList().length);
+    // One chunk is the single call: the partner's request is re-encrypted as
+    // the library deserialized it, so nothing materializes its element list.
+    if (ranges.length === 1)
+      return Promise.resolve(server.processRequest(request).serializeBinary());
+    const inbound = request.getEncryptedElementsList_asU8();
+    const masked = this.overChunks(ranges, (range) =>
+      server
+        .processRequest(
+          buildRequest(
+            this.library,
+            inbound.slice(range.start, range.end),
+            this.revealsIdentifiers,
+          ),
+        )
+        .getEncryptedElementsList_asU8(),
+    );
+    return Promise.resolve(
+      serializeResponse(
+        this.library,
+        mergeResponseChunks(masked, this.revealsIdentifiers),
+      ),
+    );
   }
 
   createClientRequest(values: ReadonlyArray<string>): Promise<Uint8Array> {
@@ -273,7 +433,23 @@ export class InProcessPsiEngine implements PsiEngine {
     const contributed = this.revealsIdentifiers
       ? values
       : valuesContributedExactlyOnce(values);
-    return Promise.resolve(client.createRequest(contributed).serializeBinary());
+    const ranges = this.rangesFor(contributed.length);
+    if (ranges.length === 1)
+      return Promise.resolve(
+        client.createRequest(contributed).serializeBinary(),
+      );
+    const masked = this.overChunks(ranges, (range) =>
+      client
+        .createRequest(contributed.slice(range.start, range.end))
+        .getEncryptedElementsList_asU8(),
+    );
+    return Promise.resolve(
+      serializeRequest(
+        this.library,
+        concatChunkElements(masked),
+        this.revealsIdentifiers,
+      ),
+    );
   }
 
   receiveServerSetup(setupBytes: Uint8Array): Promise<void> {
@@ -327,8 +503,27 @@ export class InProcessPsiEngine implements PsiEngine {
       "identifier-revealing",
     );
     const response = this.library.response.deserializeBinary(responseBytes);
-    const table = client.getAssociationTable(setup, response);
-    return Promise.resolve([table[0], table[1]]);
+    const ranges = this.rangesFor(response.getEncryptedElementsList().length);
+    if (ranges.length === 1) {
+      const table = client.getAssociationTable(setup, response);
+      return Promise.resolve([table[0], table[1]]);
+    }
+    const elements = response.getEncryptedElementsList_asU8();
+    return Promise.resolve(
+      mergeAssociationChunks(
+        this.overChunks(ranges, (range) => {
+          const table = client.getAssociationTable(
+            setup,
+            buildResponse(this.library, elements.slice(range.start, range.end)),
+          );
+          return {
+            start: range.start,
+            localIndices: table[0]!,
+            partnerIndices: table[1]!,
+          };
+        }),
+      ),
+    );
   }
 
   computeIntersectionCardinality(responseBytes: Uint8Array): Promise<number> {
@@ -337,7 +532,20 @@ export class InProcessPsiEngine implements PsiEngine {
       "count-only",
     );
     const response = this.library.response.deserializeBinary(responseBytes);
-    return Promise.resolve(client.getIntersectionSize(setup, response));
+    const ranges = this.rangesFor(response.getEncryptedElementsList().length);
+    if (ranges.length === 1)
+      return Promise.resolve(client.getIntersectionSize(setup, response));
+    const elements = response.getEncryptedElementsList_asU8();
+    // Each response element is matched against the held setup on its own, and
+    // a count-only round contributes values occurring exactly once, so no
+    // element can be counted under two chunks and the chunk sizes add up.
+    const sizes = this.overChunks(ranges, (range) =>
+      client.getIntersectionSize(
+        setup,
+        buildResponse(this.library, elements.slice(range.start, range.end)),
+      ),
+    );
+    return Promise.resolve(sizes.reduce((total, size) => total + size, 0));
   }
 
   dispose(): void {

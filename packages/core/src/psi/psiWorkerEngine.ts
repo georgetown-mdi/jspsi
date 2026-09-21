@@ -3,8 +3,10 @@ import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 import { isNamedDiagnosis, markNamedDiagnosis } from "../errors";
 import {
   InProcessPsiEngine,
+  type InProcessPsiEngineOptions,
   type PsiEngine,
   type PsiEngineMode,
+  type PsiProcessedElementsReporter,
 } from "./psiEngine";
 import type { PSIParticipant } from "./participant";
 
@@ -61,9 +63,15 @@ export interface PsiWorkerRequest {
   body: PsiWorkerRequestBody;
 }
 
-/** A worker -> host reply, correlated to a request by its id. */
+/**
+ * A worker -> host reply, correlated to a request by its id. The variant with
+ * neither `ok` nor `error` is a mid-operation progress tick: two integers and
+ * nothing else, posted while the request it names is still running, so no
+ * element, value, or index reaches the host ahead of the operation's result.
+ */
 export type PsiWorkerResponse =
   | { id: number; ok: true; result: unknown }
+  | { id: number; processed: number }
   | {
       id: number;
       ok: false;
@@ -142,6 +150,7 @@ export class WorkerPsiEngine implements PsiEngine {
   >();
   private disposed = false;
   private terminalError: Error | undefined;
+  private onProcessed: PsiProcessedElementsReporter | undefined;
 
   constructor(handle: PsiWorkerHandle) {
     this.handle = handle;
@@ -151,11 +160,21 @@ export class WorkerPsiEngine implements PsiEngine {
     });
   }
 
+  observeProcessedElements(report: PsiProcessedElementsReporter): void {
+    this.onProcessed = report;
+  }
+
   private onResponse(response: PsiWorkerResponse): void {
     const entry = this.pending.get(response.id);
     // A reply with no pending entry (a late reply after dispose, or a duplicate)
     // is ignored: dispose already rejected it, so there is nothing to settle.
     if (entry === undefined) return;
+    // A progress tick leaves the call outstanding: it reports how far the
+    // operation has got, not that it settled.
+    if (!("ok" in response)) {
+      this.onProcessed?.(response.processed);
+      return;
+    }
     this.pending.delete(response.id);
     if (response.ok) entry.resolve(response.result);
     else entry.reject(rebuildWorkerFailure(response));
@@ -248,16 +267,27 @@ export class WorkerPsiEngine implements PsiEngine {
  * generated and lives entirely inside the worker) and returns a handler that
  * answers each {@link PsiWorkerRequest} by calling the matching
  * engine method and posting the result -- or the error message -- back through
- * `post`. The worker's thread runs the blocking crypto; the host's stays
- * responsive. The CLI / browser worker entry point loads the appropriate backend,
- * calls this once, and routes its message events into the returned handler.
+ * `post`. An operation over a set large enough to split also posts a
+ * processed-count tick between chunks, which reaches the host while the
+ * worker's thread is still inside the crypto. The worker's thread runs the
+ * blocking crypto; the host's stays responsive. The CLI / browser worker entry
+ * point loads the appropriate backend, calls this once, and routes its message
+ * events into the returned handler.
  */
 export function servePsiWorker(
   library: PSILibrary,
   init: PsiWorkerInit,
   post: (response: PsiWorkerResponse) => void,
+  /** @internal Settings only a test varies; see {@link InProcessPsiEngineOptions}. */
+  options: InProcessPsiEngineOptions = {},
 ): (request: PsiWorkerRequest) => void {
-  const engine = new InProcessPsiEngine(library, init.role, init.id, init.mode);
+  const engine = new InProcessPsiEngine(
+    library,
+    init.role,
+    init.id,
+    init.mode,
+    options,
+  );
   const run = (body: PsiWorkerRequestBody): Promise<unknown> => {
     switch (body.method) {
       case "createServerSetup":
@@ -275,6 +305,13 @@ export function servePsiWorker(
     }
   };
   return (request: PsiWorkerRequest): void => {
+    // Bind the engine's processed-count sink to the request now starting, so a
+    // tick carries the id of the call it belongs to. The worker's thread is
+    // inside the crypto when it posts, which is exactly when the host, whose
+    // own thread is free, needs it.
+    engine.observeProcessedElements((processed) =>
+      post({ id: request.id, processed }),
+    );
     // run() may throw synchronously (an engine role guard) or reject; either way it
     // becomes a `{ ok: false }` reply, never an unhandled rejection in the worker.
     void Promise.resolve()

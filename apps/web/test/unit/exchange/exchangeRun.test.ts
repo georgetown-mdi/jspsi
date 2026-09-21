@@ -647,6 +647,73 @@ describe("PSI progress", () => {
     ).toBeUndefined();
   });
 
+  test("a mid-operation count states how far into the set the run is", () => {
+    const run = running(
+      SINGLE_PASS_STAGE_IDS.encryptingOwnData,
+      "createServerSetup",
+      10_000,
+    );
+    const advanced = runWithPsiProgress(
+      run,
+      {
+        operation: "createServerSetup",
+        elements: 10_000,
+        state: "progress",
+        processed: 4000,
+      },
+      secondsLater(9),
+    );
+    expect(psiProgressLabel(advanced, secondsLater(9))).toBe(
+      "4,000 of 10,000 values (40%), 9s elapsed",
+    );
+    // The elapsed figure still runs from the operation's own start, so a count
+    // arriving mid-operation does not restart it.
+    expect(psiProgressLabel(advanced, secondsLater(72))).toBe(
+      "4,000 of 10,000 values (40%), 1m 12s elapsed",
+    );
+  });
+
+  test("the next operation opens on its own total, with no count carried over", () => {
+    const run = runWithPsiProgress(
+      running(
+        SINGLE_PASS_STAGE_IDS.encryptingOwnData,
+        "createServerSetup",
+        10_000,
+      ),
+      {
+        operation: "createServerSetup",
+        elements: 10_000,
+        state: "progress",
+        processed: 4000,
+      },
+      secondsLater(9),
+    );
+    const next = runWithPsiProgress(
+      run,
+      started("processClientRequest", 990),
+      secondsLater(30),
+    );
+    expect(psiProgressLabel(next, secondsLater(32))).toBe(
+      "Encrypting your partner's data: 990 values, 2s elapsed",
+    );
+  });
+
+  test("a mid-operation count with no line open leaves the run untouched", () => {
+    const run = initialRun();
+    expect(
+      runWithPsiProgress(
+        run,
+        {
+          operation: "createServerSetup",
+          elements: 1204,
+          state: "progress",
+          processed: 400,
+        },
+        startedAt,
+      ),
+    ).toBe(run);
+  });
+
   test("a second operation restarts the elapsed figure", () => {
     const first = running(
       SINGLE_PASS_STAGE_IDS.encryptingOwnData,

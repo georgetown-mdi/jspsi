@@ -7,6 +7,18 @@ import type { Client as PSIClient } from "@openmined/psi.js/implementation/clien
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 import type { Server as PSIServer } from "@openmined/psi.js/implementation/server.d.ts";
 
+import {
+  chunkRanges,
+  concatChunkElements,
+  mergeAssociationChunks,
+  mergeSetupChunks,
+  serializeRequest,
+  serializeResponse,
+  serializeSetup,
+} from "../../src/psi/psiChunks";
+
+import type { MergedPsiSetup, PsiChunkRange } from "../../src/psi/psiChunks";
+
 // Evaluation prototype for parallelizing the single-threaded WebAssembly PSI
 // engine by splitting the value set across worker_threads workers, each holding
 // its own WASM instance built from the SAME key via createFromKey. Nothing here
@@ -23,120 +35,9 @@ import type { Server as PSIServer } from "@openmined/psi.js/implementation/serve
 //   node packages/core/test/bench/shardedPsiWasmBench.ts \
 //     --rows 12000 --workers 1,2,4,8 --repeats 3
 //
-// The merge rules each reassembly below implements, established by driving the
-// vendored engine rather than read off its source:
-//
-//   - a Raw server setup holds its masked elements sorted by their bytes, and
-//     the sorting permutation maps each sorted position to the input index; the
-//     engine's sort is not stable, so which input index a REPEATED value's
-//     position takes is an artifact of that sort and a merge cannot reproduce
-//     it. The protocol masks distinct values (link.ts masks distinctValues),
-//     which is the condition under which the merged permutation is the engine's;
-//   - a request and a response hold their elements in input order, so shard
-//     results concatenate;
-//   - an association table holds its pairs in partner-index order, ties broken
-//     by local index.
-
-/** A contiguous slice of a value set, handed to one shard. */
-export interface ShardRange {
-  readonly start: number;
-  readonly end: number;
-}
-
-/**
- * Splits `total` items into `shardCount` contiguous ranges whose sizes differ by
- * at most one. Contiguous rather than strided so every merge below can restore
- * an original index from a shard offset alone.
- */
-export function shardRanges(total: number, shardCount: number): ShardRange[] {
-  const ranges: ShardRange[] = [];
-  let start = 0;
-  for (let shard = 0; shard < shardCount; shard += 1) {
-    const size = Math.floor((total - start) / (shardCount - shard));
-    ranges.push({ start, end: start + size });
-    start += size;
-  }
-  return ranges;
-}
-
-/** Orders two masked elements the way the engine's setup sort does. */
-export function compareElementBytes(a: Uint8Array, b: Uint8Array): number {
-  const shared = Math.min(a.length, b.length);
-  for (let index = 0; index < shared; index += 1) {
-    const difference = a[index]! - b[index]!;
-    if (difference !== 0) return difference;
-  }
-  return a.length - b.length;
-}
-
-/** One shard's masked setup: its own sorted elements and sorting permutation. */
-export interface SetupShard {
-  readonly start: number;
-  readonly elements: ReadonlyArray<Uint8Array>;
-  readonly permutation: ReadonlyArray<number>;
-}
-
-/** A setup reassembled from shards: the element order and its permutation. */
-export interface MergedSetup {
-  readonly elements: Uint8Array[];
-  readonly permutation: number[];
-}
-
-/**
- * Reassembles a server setup from shard results, reproducing the element order
- * and the sorting permutation a single engine emits for the same key and inputs.
- */
-export function mergeSetupShards(
-  shards: ReadonlyArray<SetupShard>,
-): MergedSetup {
-  const pairs: Array<{ element: Uint8Array; inputIndex: number }> = [];
-  for (const shard of shards)
-    for (let position = 0; position < shard.elements.length; position += 1)
-      pairs.push({
-        element: shard.elements[position]!,
-        inputIndex: shard.start + shard.permutation[position]!,
-      });
-  pairs.sort(
-    (a, b) =>
-      compareElementBytes(a.element, b.element) || a.inputIndex - b.inputIndex,
-  );
-  return {
-    elements: pairs.map((pair) => pair.element),
-    permutation: pairs.map((pair) => pair.inputIndex),
-  };
-}
-
-/** One shard's association result, indexed within the shard's own slice. */
-export interface AssociationShard {
-  readonly start: number;
-  readonly localIndices: ReadonlyArray<number>;
-  readonly partnerIndices: ReadonlyArray<number>;
-}
-
-/**
- * Reassembles an association table from shard results, reproducing the pair
- * order a single engine emits: partner index ascending, ties by local index.
- */
-export function mergeAssociationShards(
-  shards: ReadonlyArray<AssociationShard>,
-): [number[], number[]] {
-  const pairs: Array<[number, number]> = [];
-  for (const shard of shards)
-    for (let index = 0; index < shard.localIndices.length; index += 1)
-      pairs.push([
-        shard.start + shard.localIndices[index]!,
-        shard.partnerIndices[index]!,
-      ]);
-  pairs.sort((a, b) => a[1] - b[1] || a[0] - b[0]);
-  return [pairs.map((pair) => pair[0]), pairs.map((pair) => pair[1])];
-}
-
-/** Concatenates shard element lists, which the engine emits in input order. */
-export function concatShardElements(
-  shards: ReadonlyArray<ReadonlyArray<Uint8Array>>,
-): Uint8Array[] {
-  return shards.flatMap((shard) => [...shard]);
-}
+// The ranges the split runs on and the merge rules each reassembly below
+// follows live beside the shipped engine that chunks one operation for the
+// same reasons: packages/core/src/psi/psiChunks.ts, whose header states them.
 
 /** The keys a shard worker builds its own engine instances from. */
 export interface ShardKeys {
@@ -174,43 +75,6 @@ type ShardReply =
 const REVEAL_INTERSECTION = true;
 const SETUP_FALSE_POSITIVE_RATE = 0.0;
 const SETUP_CLIENT_INPUT_COUNT = -1;
-
-function toElementList(elements: ReadonlyArray<Uint8Array>): Uint8Array[] {
-  return [...elements];
-}
-
-/** Builds the serialized Raw server setup a merged element list stands for. */
-export function serializeSetup(
-  psi: PSILibrary,
-  elements: ReadonlyArray<Uint8Array>,
-): Uint8Array {
-  const raw = new psi.serverSetup.RawInfo();
-  raw.setEncryptedElementsList(toElementList(elements));
-  const setup = new psi.serverSetup();
-  setup.setRaw(raw);
-  return setup.serializeBinary();
-}
-
-/** Builds the serialized request a merged element list stands for. */
-export function serializeRequest(
-  psi: PSILibrary,
-  elements: ReadonlyArray<Uint8Array>,
-): Uint8Array {
-  const request = new psi.request();
-  request.setRevealIntersection(REVEAL_INTERSECTION);
-  request.setEncryptedElementsList(toElementList(elements));
-  return request.serializeBinary();
-}
-
-/** Builds the serialized response a merged element list stands for. */
-export function serializeResponse(
-  psi: PSILibrary,
-  elements: ReadonlyArray<Uint8Array>,
-): Uint8Array {
-  const response = new psi.response();
-  response.setEncryptedElementsList(toElementList(elements));
-  return response.serializeBinary();
-}
 
 function deserializeElements(
   psi: PSILibrary,
@@ -259,7 +123,7 @@ function serveShardWorker(
         };
       case "reMaskElements": {
         const shardRequest = library.request.deserializeBinary(
-          serializeRequest(library, request.elements),
+          serializeRequest(library, request.elements, REVEAL_INTERSECTION),
         );
         return {
           elements: server!
@@ -467,7 +331,7 @@ export class ShardedPsiDriver {
   }
 
   private broadcast(
-    body: (range: ShardRange) => ShardRequestBody,
+    body: (range: PsiChunkRange) => ShardRequestBody,
   ): Promise<ShardResult[]> {
     return Promise.all(
       this.handles.map((handle, shard) =>
@@ -478,21 +342,21 @@ export class ShardedPsiDriver {
 
   // The split the operation in flight is using, read back when its shard
   // results are merged.
-  private ranges: ShardRange[] = [];
+  private ranges: PsiChunkRange[] = [];
 
-  private rangesFor(shard: number): ShardRange {
+  private rangesFor(shard: number): PsiChunkRange {
     return this.ranges[shard]!;
   }
 
   /** Masks the starter's values across the shards, merged into one setup. */
-  maskServerValues(values: ReadonlyArray<string>): Promise<MergedSetup> {
+  maskServerValues(values: ReadonlyArray<string>): Promise<MergedPsiSetup> {
     return this.runExclusive(async () => {
-      this.ranges = shardRanges(values.length, this.shardCount);
+      this.ranges = chunkRanges(values.length, this.shardCount);
       const results = await this.broadcast((range) => ({
         op: "maskServerValues",
         values: values.slice(range.start, range.end),
       }));
-      return mergeSetupShards(
+      return mergeSetupChunks(
         results.map((result, shard) => ({
           start: this.ranges[shard]!.start,
           elements: (result as { elements: Uint8Array[] }).elements,
@@ -505,12 +369,12 @@ export class ShardedPsiDriver {
   /** Masks the joiner's values across the shards, merged in input order. */
   maskClientValues(values: ReadonlyArray<string>): Promise<Uint8Array[]> {
     return this.runExclusive(async () => {
-      this.ranges = shardRanges(values.length, this.shardCount);
+      this.ranges = chunkRanges(values.length, this.shardCount);
       const results = await this.broadcast((range) => ({
         op: "maskClientValues",
         values: values.slice(range.start, range.end),
       }));
-      return concatShardElements(
+      return concatChunkElements(
         results.map(
           (result) => (result as { elements: Uint8Array[] }).elements,
         ),
@@ -521,12 +385,12 @@ export class ShardedPsiDriver {
   /** Re-masks the partner's request elements across the shards. */
   reMaskElements(elements: ReadonlyArray<Uint8Array>): Promise<Uint8Array[]> {
     return this.runExclusive(async () => {
-      this.ranges = shardRanges(elements.length, this.shardCount);
+      this.ranges = chunkRanges(elements.length, this.shardCount);
       const results = await this.broadcast((range) => ({
         op: "reMaskElements",
         elements: elements.slice(range.start, range.end),
       }));
-      return concatShardElements(
+      return concatChunkElements(
         results.map(
           (result) => (result as { elements: Uint8Array[] }).elements,
         ),
@@ -550,12 +414,12 @@ export class ShardedPsiDriver {
     elements: ReadonlyArray<Uint8Array>,
   ): Promise<[number[], number[]]> {
     return this.runExclusive(async () => {
-      this.ranges = shardRanges(elements.length, this.shardCount);
+      this.ranges = chunkRanges(elements.length, this.shardCount);
       const results = await this.broadcast((range) => ({
         op: "matchResponseElements",
         elements: elements.slice(range.start, range.end),
       }));
-      return mergeAssociationShards(
+      return mergeAssociationChunks(
         results.map((result, shard) => ({
           start: this.ranges[shard]!.start,
           localIndices: (result as { localIndices: number[] }).localIndices,
@@ -726,7 +590,11 @@ async function measureSharded(
     );
 
     const request = await timed(() => driver.maskClientValues(clientValues));
-    const requestBytes = serializeRequest(psi, request.value);
+    const requestBytes = serializeRequest(
+      psi,
+      request.value,
+      REVEAL_INTERSECTION,
+    );
     requireIdentical(
       "client request",
       sameBytes(requestBytes, baseline.requestBytes),
