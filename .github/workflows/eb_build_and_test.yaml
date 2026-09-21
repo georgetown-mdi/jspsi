@@ -7,17 +7,18 @@ on:
   # PR validation only, scoped by path to web/core-affecting changes. Deploys
   # build through eb_deploy.yaml's workflow_call, so there is no standalone push
   # trigger here -- it would double-run with the pull_request event on a feature
-  # branch that already has an open PR. If this job becomes a required status
-  # check, configure branch protection so a path-skipped run does not block an
-  # unrelated PR -- a skipped required check otherwise stays pending.
+  # branch that already has an open PR. If the terminal `build-and-test` job
+  # becomes a required status check, configure branch protection so a
+  # path-skipped run does not block an unrelated PR -- a skipped required check
+  # otherwise stays pending.
   #
   # Note: this PR filter diverges from the push filter in eb_deploy.yaml on test
   # sources -- it uses the broad apps/web/** and packages/core/** globs so a
   # test-only PR (deleting or weakening assertions, or changing vitest config)
-  # still runs the full suite, including the core tests this gate runs via `npm
-  # run -w packages/core test`. The deploy filter stays scoped to
-  # deploy-affecting sources only and omits the test/** trees. The two filters
-  # cannot share a single list because of this intentional difference.
+  # still runs the full suite, including the core tests this gate runs on its
+  # `core` leg. The deploy filter stays scoped to deploy-affecting sources only
+  # and omits the test/** trees. The two filters cannot share a single list
+  # because of this intentional difference.
   # packages/core/** matches the sibling cli_build_and_test.yaml, and
   # packages/peerjs-broker/** is here because the web app consumes the signaling
   # broker from that workspace and bundles it into the deployed server.
@@ -46,7 +47,7 @@ on:
     outputs:
       artifactName:
         description: "Name of the uploaded artifact"
-        value: ${{jobs.build-and-test.outputs.artifactName}}
+        value: ${{jobs.package.outputs.artifactName}}
 
 # Cancel a superseded PR run when a newer commit lands on the same PR/branch.
 # NOT keyed on github.workflow: in a workflow_call invocation the github context
@@ -69,20 +70,23 @@ env:
   ARTIFACT_NAME: ${{format('{0}-{1}', vars.EB_APPLICATION_NAME, github.sha)}}
 
 jobs:
-  build-and-test:
+  # The deploy artifact's producer. A job of its own rather than a leg of the
+  # suite matrix below because it carries the workflow_call output eb_deploy.yaml
+  # reads, and because the matrix legs run in parallel with it rather than behind
+  # it.
+  #
+  # The upload does not wait on the suite legs, so an artifact exists for a sha
+  # whose tests went red. Nothing deploys such an artifact: eb_deploy.yaml's
+  # deploy job needs the caller job wrapping this whole workflow, every job of it
+  # included.
+  package:
+    name: Package the deploy artifact
     runs-on: ubuntu-latest
-    # Bound the job: this is the one CI job that drives a real browser and a live
-    # WebRTC exchange through a spawned dev server -- workloads that can wedge in
-    # ways the suite's own 60s timeouts do not all catch (a stuck browser or
-    # teardown, a stalled data channel). Without this the default 6h timeout
-    # applies, and since eb_deploy.yaml gates its deploy on this job via
-    # workflow_call, a hang would also stall a production deploy. 30 min sits far
-    # above a normal run (install + builds + tests + browser provisioning) yet
-    # cuts a true hang short. It must also clear the worst case the browser
-    # provisioning step below is allowed: its 22 min plus the ~4 min the rest of
-    # the job measures, so an upstream stall there ends on that step's own named
-    # failure rather than on this cap, which GitHub reports as a cancellation.
-    timeout-minutes: 30
+    # Bound the job: eb_deploy.yaml gates its deploy on this workflow through
+    # workflow_call, so a stalled install or build here holds a production deploy
+    # rather than only a pull request. 15 min sits far above a normal run
+    # (install + the web build + the zip) yet cuts a true hang short.
+    timeout-minutes: 15
     outputs:
       artifactName: ${{steps.artifact-name.outputs.artifactName}}
     steps:
@@ -91,8 +95,6 @@ jobs:
       # Pins Node, installs from the lockfile, and builds @psilink/core.
       - name: Set up and build core
         uses: ./.github/actions/setup
-      - name: Build server
-        run: npm run -w apps/web build
       # eb_deploy.yaml's push filter is narrower than the trees it names, on the
       # assumption that what it leaves out is in no deployed import graph. This
       # holds that assumption against a real build: every repository source the
@@ -101,49 +103,151 @@ jobs:
       # Here rather than in the repo-wide static checks because that gate is
       # unfiltered and this needs a web build, while this workflow is already
       # scoped to the trees that can break the assumption and has the
-      # dependencies installed. It runs its own instrumented build (the recorder
-      # in apps/web/vite.config.ts adds no hook that can change a chunk), and
-      # runs before the tests so the artifact packaged below is the build whose
-      # graph was read.
+      # dependencies installed.
+      #
+      # Its instrumented build (the recorder in apps/web/vite.config.ts adds no
+      # hook that can change a chunk) is also the web build this job packages:
+      # the check runs `npm run build -w apps/web` into apps/web/.output, the
+      # directory the zip below reads, so gating or removing the check takes the
+      # artifact's build with it. scripts/check-deploy-trigger-graph.test.mjs
+      # holds the check and the upload in one job.
       - name: Deploy trigger coverage
         run: npm run check:deploy-trigger-graph
-      - name: Run tests
+      - name: Package for Elastic Beanstalk
         run: |
-          npm run -w packages/core test
-      # The web suites below skip the legs whose environment prerequisites are
-      # absent (a loopback TLS certificate, which needs `openssl`), and
+          cp -a apps/web/deploy/aws_eb/. apps/web/.output
+          touch apps/web/.output/.env
+          (cd apps/web/.output && zip -r ../../../${{github.sha}}.zip .)
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{env.ARTIFACT_NAME}}
+          path: ${{github.sha}}.zip
+          compression-level: 0
+      - name: Output artifact name
+        id: artifact-name
+        run: echo "artifactName=${{env.ARTIFACT_NAME}}" >> "$GITHUB_OUTPUT"
+
+  # The four suites this gate runs share no mutable state, so they run as
+  # parallel legs of one matrix rather than as serial steps of one job, and the
+  # gate's wall time is its slowest suite rather than their sum. Each leg is a
+  # runner of its own, and within a leg each suite stands up everything it
+  # touches: the integration and browser projects share one self-managing vitest
+  # globalSetup that spawns the dev server and tears it down
+  # (apps/web/test/devServer/globalSetup.ts), and the cross-runtime suite's whole
+  # world is a temporary file-drop directory. Nothing crosses a leg boundary.
+  #
+  # The terminal `build-and-test` job below holds one stable name for a required
+  # status check to name, since each leg's own check-run name carries its leg
+  # values.
+  suite:
+    name: Test (${{ matrix.suite }})
+    runs-on: ubuntu-latest
+    # Bound every leg: the integration and browser leg drives a real browser and
+    # a live WebRTC exchange through a spawned dev server -- workloads that can
+    # wedge in ways the suite's own 60s timeouts do not all catch (a stuck
+    # browser or teardown, a stalled data channel). Without this the default 6h
+    # timeout applies, and since eb_deploy.yaml gates its deploy on this workflow
+    # via workflow_call, a hang would also stall a production deploy. 30 min sits
+    # far above a normal leg yet cuts a true hang short. It must also clear the
+    # worst case the browser provisioning step below is allowed: its 22 min plus
+    # the few minutes the rest of that leg measures, so an upstream stall there
+    # ends on that step's own named failure rather than on this cap, which GitHub
+    # reports as a cancellation.
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The core unit suite runs on this gate because the deployed server
+          # bundles @psilink/core. test:unit is the same vitest project as
+          # `npm test -w packages/core` without that script's pretest rebuild:
+          # the setup action has already restored or built packages/core/dist and
+          # restamped its mtimes, so the rebuild would only repeat it.
+          - suite: core
+            command: npm run test:unit -w packages/core
+          # Web unit tests run in the node environment against the already-built
+          # @psilink/core -- no dev server, browser, or Docker (the integration
+          # and browser projects are the ones that stand up a server), so the
+          # shared setup is all this leg needs.
+          - suite: web unit
+            command: npm run test:unit -w apps/web
+            web-suite: "true"
+          # The cross-runtime suite drives the real `psilink` program against a
+          # party built from this app's own exchange modules, so it needs the CLI
+          # built -- no other leg here does. It stands up no server and no
+          # browser: its whole world is a temporary file-drop directory.
+          #
+          # It runs here AND on the CLI workflow's own leg: the drift it exists
+          # to catch can land on either runtime, and each workflow's path filter
+          # sees only its own.
+          - suite: cross-runtime interop
+            command: npm run test:interop -w apps/web
+            web-suite: "true"
+            build-cli: "true"
+          # Integration and browser tests both stand up the web dev server
+          # through the shared globalSetup described above (integration hits the
+          # HTTP/SSE routes in node, browser drives Chromium). Running both
+          # projects in ONE vitest process lets that setup start the server once
+          # and the second project reuse it, rather than two invocations each
+          # paying a full cold start -- so keep them combined via the dedicated
+          # test:integration:browser script (which names both projects
+          # explicitly). Splitting them into separate test:integration +
+          # test:browser commands reintroduces the second cold start. vitest
+          # still reports per project/file, so a failure names the suite that
+          # broke.
+          #
+          # The integration project gates the web deploy on the app's own
+          # behavior (independent of the CLI, whose tests live in release.yaml);
+          # the browser project covers the security-relevant accept-screen
+          # controls (the consent gate over the PII exchange and the decode-error
+          # escaping) plus the live PSI exchange and cross-implementation vectors
+          # -- behavior no other CI job covers, since it needs a DOM the node
+          # projects lack, so a browser-only regression would otherwise ship
+          # unnoticed. Both run on the PR gate and this workflow's push/deploy
+          # path, so the deploy artifact is gated on them too.
+          - suite: integration and browser
+            command: npm run test:integration:browser -w apps/web
+            web-suite: "true"
+            build-web: "true"
+            playwright: "true"
+    steps:
+      - uses: actions/checkout@v7
+      # Pins Node, installs from the lockfile, and builds @psilink/core. Those
+      # two are what every leg would otherwise repeat; the action restores both
+      # from content-keyed caches, so they are paid once per lockfile and
+      # core-source state across the whole repository rather than once per leg.
+      - uses: ./.github/actions/setup
+      # The web suites skip the legs whose environment prerequisites are absent
+      # (a loopback TLS certificate, which needs `openssl`), and
       # apps/web/test/requireTestPrerequisites.ts turns such a skip into a
-      # failure only where CI marks an environment provisioned to a spec. GitHub
-      # Actions sets CI on every job, so the gate is armed here -- asserted
-      # rather than assumed, because if that ever stopped holding the gate would
-      # go quiet with nothing failing. The expression is the guard's own
-      # predicate: set, and not the string "false".
+      # failure only where CI marks an environment provisioned to a spec. That
+      # guard is registered at the root test block of apps/web/vite.config.ts, so
+      # it gates every project this workflow's web legs run. GitHub Actions sets
+      # CI on every job, so the gate is armed here -- asserted rather than
+      # assumed, because if that ever stopped holding the gate would go quiet
+      # with nothing failing. The expression is the guard's own predicate: set,
+      # and not the string "false".
       - name: Assert the test-prerequisite gate is armed
+        if: matrix.web-suite == 'true'
         run: test "${CI:-false}" != "false"
-      # Web unit tests run in the node environment against the already-built
-      # @psilink/core -- no dev server or Docker (the integration and browser
-      # projects are the ones that stand up a server), so the shared setup above
-      # is all they need. Kept a discrete step from the core "Run tests" above so
-      # a web-unit regression gives a clear failure signal of its own.
-      - name: Web unit tests
-        run: npm run test:unit -w apps/web
-      # The cross-runtime suite drives the real `psilink` program against a party
-      # built from this app's own exchange modules, so it needs the CLI built --
-      # nothing else in this workflow does, which is why the build is a step of
-      # this pair rather than of the shared setup. It stands up no server and no
-      # browser: its whole world is a temporary file-drop directory.
-      #
-      # It runs here AND on the CLI workflow's own leg: the drift it exists to
-      # catch can land on either runtime, and each workflow's path filter sees
-      # only its own.
       - name: Build the CLI for the cross-runtime suite
+        if: matrix.build-cli == 'true'
         run: npm run build -w apps/cli
-      - name: CLI/web cross-runtime interop
-        run: npm run test:interop -w apps/web
+      # The integration project's globalSetup
+      # (apps/web/test/integration/requireProdBuild.ts) fails the run when
+      # apps/web/.output is absent rather than letting the suites that drive the
+      # built server skip, so this leg builds the web app for itself. Taking the
+      # `package` job's build through the deploy artifact instead would serialize
+      # the slowest leg behind that job for a build of about half a minute.
+      - name: Build the web app for the integration suites
+        if: matrix.build-web == 'true'
+        run: npm run build -w apps/web
       # apt applies no network timeout of its own, so a mirror connection that
       # goes quiet hangs the --with-deps install below with nothing to time it
       # out.
       - name: Bound apt network stalls
+        if: matrix.playwright == 'true'
         run: |
           echo 'Acquire::Retries "3";' | sudo tee /etc/apt/apt.conf.d/99-ci-retry
           echo 'Acquire::http::Timeout "15";' | sudo tee -a /etc/apt/apt.conf.d/99-ci-retry
@@ -154,6 +258,7 @@ jobs:
       # dependency, so a layout that stops hoisting playwright to the repository
       # root still finds it.
       - name: Resolve the installed Playwright version
+        if: matrix.playwright == 'true'
         id: playwright
         working-directory: apps/web
         run: |
@@ -171,6 +276,7 @@ jobs:
       # then never archived under this key, whose entry no later run of the same
       # playwright version could replace.
       - name: Restore the Playwright browser build
+        if: matrix.playwright == 'true'
         id: browser-cache
         uses: actions/cache/restore@v6
         with:
@@ -180,11 +286,11 @@ jobs:
       # cost this cache exists to remove -- so fail on the empty restore instead of
       # paying it unremarked.
       - name: Verify the restored browser build
-        if: steps.browser-cache.outputs.cache-hit == 'true'
+        if: matrix.playwright == 'true' && steps.browser-cache.outputs.cache-hit == 'true'
         run: test -n "$(ls -A ~/.cache/ms-playwright)"
-      # The browser project (below) drives real Chromium; the stock ubuntu-latest
-      # runner ships none, so provision it and the apt libraries it links against
-      # here, before that project runs. --with-deps installs those apt libraries;
+      # The browser project drives real Chromium; the stock ubuntu-latest runner
+      # ships none, so provision it and the apt libraries it links against here,
+      # before that project runs. --with-deps installs those apt libraries;
       # on Node 26 this needs playwright >= 1.60 (earlier versions hang extracting
       # the browser archive, microsoft/playwright#40724) -- the lockfile pins
       # >= 1.61, so do not downgrade. (The dev container provisions Chromium
@@ -201,6 +307,7 @@ jobs:
       # bound is what fires and names the failure, and timeout-minutes fits
       # inside the job bound above.
       - name: Install Playwright Chromium
+        if: matrix.playwright == 'true'
         timeout-minutes: 22
         run: |
           attempts=2
@@ -224,44 +331,31 @@ jobs:
           echo "::error::Playwright provisioning failed on all $attempts attempts; the last one $outcome"
           exit "$status"
       - name: Save the Playwright browser build
-        if: steps.browser-cache.outputs.cache-hit != 'true'
+        if: matrix.playwright == 'true' && steps.browser-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{runner.os}}-${{runner.arch}}-${{steps.playwright.outputs.version}}
-      # Integration and browser tests both stand up the web dev server through a
-      # shared, self-managing vitest globalSetup (it spawns the server, waits for
-      # readiness, reuses a running one, and tears it down -- no manual step and no
-      # Docker; integration hits the HTTP/SSE routes in node, browser drives
-      # Chromium). Running both projects in ONE vitest process lets that setup
-      # start the server once and the second project reuse it, rather than two
-      # invocations each paying a full cold start -- so keep them combined via the
-      # dedicated test:integration:browser script (which names both projects
-      # explicitly). Splitting back into separate test:integration + test:browser
-      # steps reintroduces the second cold start. vitest still reports per
-      # project/file, so a failure names the suite that broke.
-      #
-      # The integration project gates the web deploy on the app's own behavior
-      # (independent of the CLI, whose tests live in release.yaml); the browser
-      # project covers the security-relevant accept-screen controls (the consent
-      # gate over the PII exchange and the decode-error escaping) plus the live PSI
-      # exchange and cross-implementation vectors -- behavior no other CI job
-      # covers, since it needs a DOM the node projects lack, so a browser-only
-      # regression would otherwise ship unnoticed. Both run on the PR gate and this
-      # workflow's push/deploy path, so the deploy artifact is gated on them too.
-      - name: Web integration and browser tests
-        run: npm run test:integration:browser -w apps/web
-      - name: Package for Elastic Beanstalk
+      - name: Run the ${{ matrix.suite }} suite
+        run: ${{ matrix.command }}
+
+  # The one job name a required status check can name, standing for the package
+  # job and every suite leg above. `if: always()` is what makes it usable as one:
+  # without it a failed job leaves this one skipped, and a skipped required check
+  # stays pending rather than red, so the pull request would be unmergeable with
+  # nothing red to show for it.
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [package, suite]
+    if: always()
+    steps:
+      - name: Report the job results
+        env:
+          PACKAGE: ${{ needs.package.result }}
+          SUITE: ${{ needs.suite.result }}
         run: |
-          cp -a apps/web/deploy/aws_eb/. apps/web/.output
-          touch apps/web/.output/.env
-          (cd apps/web/.output && zip -r ../../../${{github.sha}}.zip .)
-      - name: Upload artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: ${{env.ARTIFACT_NAME}}
-          path: ${{github.sha}}.zip
-          compression-level: 0
-      - name: Output artifact name
-        id: artifact-name
-        run: echo "artifactName=${{env.ARTIFACT_NAME}}" >> "$GITHUB_OUTPUT"
+          echo "package: $PACKAGE"
+          echo "suite legs: $SUITE"
+          test "$PACKAGE" = success
+          test "$SUITE" = success
