@@ -431,6 +431,22 @@ describe("every authorable option graduates into the hand-off", () => {
         .linkage_terms.linkage_strategy,
     ).toBe("single-pass");
   });
+
+  test("the tab delimiter renders as the word `tab` on the zero-setup command line", () => {
+    // A literal tab is invisible in a copied command and a paste can drop it,
+    // so the hand-off spells it as the word the CLI reads back as the
+    // character (`normalizeCsvDelimiter`, packages/core/src/csvDelimiter.ts).
+    const intent = maximalZeroSetupIntent();
+    intent.csvDelimiter = "\t";
+    const handoff = buildJobHandoff(intent, testSftpServerEntry(), {
+      credentialPasted: false,
+      filedropSplit: false,
+    });
+    if (handoff.template.kind !== "command")
+      throw new Error("a zero-setup hand-off composed no command template");
+    expect(handoff.template.argv).toContain("--csv-delimiter=tab");
+    expect(maximalZeroSetupArgv()).toContain("--csv-delimiter=|");
+  });
 });
 
 describe("the composed config stays one format with one validator", () => {

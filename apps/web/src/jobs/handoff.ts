@@ -280,12 +280,19 @@ function buildZeroSetupHandoffTemplate(
       : []),
     ...(intent.deduplicate === true ? ["--deduplicate"] : []),
     ...(intent.csvDelimiter !== undefined
-      ? [`--csv-delimiter=${intent.csvDelimiter}`]
+      ? [`--csv-delimiter=${handoffCsvDelimiterSpelling(intent.csvDelimiter)}`]
       : []),
     HANDOFF_INPUT_NAME,
     HANDOFF_OUTPUT_NAME,
   ];
   return { kind: "command", argv };
+}
+
+/** The delimiter as the copyable command spells it: a tab is the word `tab`,
+ * which the CLI reads back as the character, since a literal tab is invisible
+ * in copied text and a paste can drop it. Every other choice is itself. */
+function handoffCsvDelimiterSpelling(csvDelimiter: string): string {
+  return csvDelimiter === "\t" ? "tab" : csvDelimiter;
 }
 
 /**

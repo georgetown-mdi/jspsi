@@ -709,9 +709,8 @@ describe("direct exchange confirm and run", () => {
   });
 
   test("a recovered job stays offered under a refused read, and clears once the file is accepted", async () => {
-    // The refusal above still stores the file (Edit 1's reason for being), so
-    // the recovery panel must key off the refusal itself, not just an
-    // uncommitted file, to stay on screen through it.
+    // A refused read is still a stored file, so the recovery panel keys off the
+    // refusal itself, not only an uncommitted file, to stay on screen through it.
     persistAttachment("job-7");
     stubJobApi({
       sftp: CONFIGURED_SFTP,
