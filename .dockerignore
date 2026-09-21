@@ -23,7 +23,7 @@ dist
 coverage
 **/coverage
 **/__screenshots__
-**/.vitest-attachments
+**/.vitest
 scratch
 test_data
 *.csv

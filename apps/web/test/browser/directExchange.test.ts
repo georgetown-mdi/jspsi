@@ -488,12 +488,12 @@ describe("direct exchange confirm and run", () => {
     api.emitEvent({ v: 1, type: "stage", id: "confirming protocol" });
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Exchange in progress");
+      .toMatchTextContent("Exchange in progress");
     api.emitEvent({ v: 1, type: "result", resultWritten: true });
     api.closeEvents();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Exchange complete");
+      .toMatchTextContent("Exchange complete");
   });
 
   test("a header the strip emptied is refused by that cause, notice beside it", async () => {
@@ -1158,7 +1158,7 @@ describe("console direct re-attaches on a busy create", () => {
       .toBeVisible();
     await expect
       .element(page.getByTestId("reattach-announcement"))
-      .toHaveTextContent(
+      .toMatchTextContent(
         "You are back on an exchange this console already holds.",
       );
     // Body text unique to the visible notice, absent from the hidden
@@ -1239,7 +1239,7 @@ describe("console direct re-attaches on a busy create", () => {
       .toBeInTheDocument();
     await expect
       .element(page.getByTestId("reattach-announcement"))
-      .toHaveTextContent(
+      .toMatchTextContent(
         "Reconnecting to the exchange this console already holds",
       );
     // The visible notice holds no live role of its own: the region announces,
@@ -1719,7 +1719,7 @@ describe("the re-attachment announcement", () => {
     );
     await expect
       .element(region)
-      .toHaveTextContent(
+      .toMatchTextContent(
         "Reconnecting to the exchange this console already holds",
       );
     expect(region.element()).toBe(mounted);
@@ -1733,7 +1733,7 @@ describe("the re-attachment announcement", () => {
     );
     await expect
       .element(region)
-      .toHaveTextContent(
+      .toMatchTextContent(
         "You are back on an exchange this console already holds.",
       );
     expect(region.element()).toBe(mounted);

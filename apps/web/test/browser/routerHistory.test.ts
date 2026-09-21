@@ -87,7 +87,7 @@ describe("exchange steps under the router's patched history", () => {
         .click();
       await expect
         .element(page.getByRole("heading", { level: 1 }))
-        .toHaveTextContent("Review & create");
+        .toMatchTextContent("Review & create");
 
       // Each step push advanced the router's index by one and minted a fresh
       // entry key, exactly as the router's own pushes do, and the router
@@ -103,7 +103,7 @@ describe("exchange steps under the router's patched history", () => {
       window.history.back();
       await expect
         .element(page.getByRole("heading", { level: 1 }))
-        .toHaveTextContent("Matching & sharing");
+        .toMatchTextContent("Matching & sharing");
       await vi.waitFor(() => expect(actions).toContain("BACK"));
       expect(actions).not.toContain("GO");
       expect(routerIndex()).toBe(baseIndex + 1);
@@ -113,7 +113,7 @@ describe("exchange steps under the router's patched history", () => {
       window.history.forward();
       await expect
         .element(page.getByRole("heading", { level: 1 }))
-        .toHaveTextContent("Review & create");
+        .toMatchTextContent("Review & create");
       await vi.waitFor(() => expect(actions).toContain("FORWARD"));
       expect(actions).not.toContain("GO");
       expect(routerIndex()).toBe(baseIndex + 2);

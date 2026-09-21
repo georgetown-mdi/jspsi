@@ -71,11 +71,11 @@
     "node": ">=26"
   },
   "devDependencies": {
-    "@vitest/coverage-v8": "^4.1.11",
+    "@vitest/coverage-v8": "^5.0.0",
     "eslint": "^10.10.0",
     "prettier": "^3.9.7",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.9",
+    "vitest": "^5.0.0",
     "yaml": "^2.9.1"
   },
   "overrides": {

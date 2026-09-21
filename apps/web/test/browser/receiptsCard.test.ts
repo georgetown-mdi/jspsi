@@ -263,7 +263,7 @@ describe("ReceiptsCard: asking the console for this party's fingerprint", () => 
 
     await expect
       .element(page.getByLabelText("Your certificate fingerprint"))
-      .toHaveTextContent(FINGERPRINT);
+      .toMatchTextContent(FINGERPRINT);
     expect(app.container.textContent).toContain(
       "Your signing identity was created",
     );
@@ -290,7 +290,7 @@ describe("ReceiptsCard: asking the console for this party's fingerprint", () => 
 
     await expect
       .element(page.getByLabelText("Your certificate fingerprint"))
-      .toHaveTextContent(FINGERPRINT);
+      .toMatchTextContent(FINGERPRINT);
     expect(JSON.parse(stub.bodies[0])).toEqual({ identity: asTheTermsStateIt });
   });
 
@@ -303,7 +303,7 @@ describe("ReceiptsCard: asking the console for this party's fingerprint", () => 
 
     await expect
       .element(page.getByLabelText("Your certificate fingerprint"))
-      .toHaveTextContent(FINGERPRINT);
+      .toMatchTextContent(FINGERPRINT);
     expect(app.container.textContent).toContain(
       "Your signing identity was already set up",
     );
@@ -342,7 +342,7 @@ describe("ReceiptsCard: asking the console for this party's fingerprint", () => 
 
     await expect
       .element(page.getByLabelText("Your certificate fingerprint"))
-      .toHaveTextContent(FINGERPRINT);
+      .toMatchTextContent(FINGERPRINT);
     await drainSettledResponse();
     expect(app.container.textContent).not.toContain(
       SIGNING_IDENTITY_DIVERGENCE_POINTER,
@@ -361,7 +361,7 @@ describe("ReceiptsCard: asking the console for this party's fingerprint", () => 
 
     await expect
       .element(page.getByLabelText("Your certificate fingerprint"))
-      .toHaveTextContent(FINGERPRINT);
+      .toMatchTextContent(FINGERPRINT);
     expect(app.container.textContent).toContain(
       `Your public certificate is in ${CERTIFICATE_FILE}.`,
     );
@@ -391,7 +391,7 @@ describe("ReceiptsCard: asking the console for this party's fingerprint", () => 
 
     await expect
       .element(page.getByLabelText("Your certificate fingerprint"))
-      .toHaveTextContent(FINGERPRINT);
+      .toMatchTextContent(FINGERPRINT);
     expect(JSON.parse(stub.bodies[0])).toEqual({
       identity: IDENTITY,
       identityLocation: { mount: "secrets", subPath: [PICKED_IDENTITY] },
@@ -430,7 +430,7 @@ describe("ReceiptsCard: asking the console for this party's fingerprint", () => 
 
     await expect
       .element(page.getByLabelText("Your certificate fingerprint"))
-      .toHaveTextContent(FINGERPRINT);
+      .toMatchTextContent(FINGERPRINT);
     expect(app.container.textContent).toContain(
       `(${REORDERING_IDENTITY_SHOWN} in your secrets folder)`,
     );
@@ -553,7 +553,7 @@ describe("ReceiptsCard: a request that resolves while the operator edits", () =>
 
     await expect
       .element(page.getByLabelText("Your certificate fingerprint"))
-      .toHaveTextContent(FINGERPRINT);
+      .toMatchTextContent(FINGERPRINT);
     await expect.element(retentionNote()).toHaveValue(NOTE);
     expect(latestDraft.retentionDisposition).toBe(NOTE);
     expect(latestDraft.ownFingerprint).toBe(FINGERPRINT);
@@ -722,7 +722,7 @@ describe("ReceiptsCard: a failed request", () => {
     await createButton().click();
     await expect
       .element(page.getByLabelText("Your certificate fingerprint"))
-      .toHaveTextContent(FINGERPRINT);
+      .toMatchTextContent(FINGERPRINT);
     expect(app.container.textContent).not.toContain(BUSY_FAILURE);
   });
 });

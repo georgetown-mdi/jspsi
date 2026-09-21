@@ -96,10 +96,10 @@ describe("the Cleaning surfaces' coverage-unavailable banner", () => {
     // The banner itself, not the live region beside it, which announces the
     // same sentence.
     const banner = page.getByRole("note");
-    await expect.element(banner).toHaveTextContent("Column 2");
+    await expect.element(banner).toMatchTextContent("Column 2");
     await expect
       .element(banner)
-      .not.toHaveTextContent("this check just did not run");
+      .not.toMatchTextContent("this check just did not run");
   });
 
   test("AcceptorCleaningStep shows the banner when coverage is unavailable", async () => {

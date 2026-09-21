@@ -798,7 +798,7 @@ describe("console acceptor server-job keep-open callout", () => {
     // is holding, the same copy the inviter's server-job run shows.
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Exchange in progress");
+      .toMatchTextContent("Exchange in progress");
     await expect
       .element(page.getByText(SERVER_JOB_KEEP_OPEN_BODY))
       .toBeInTheDocument();
@@ -810,7 +810,7 @@ describe("console acceptor server-job keep-open callout", () => {
     api.closeEvents();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Exchange complete");
+      .toMatchTextContent("Exchange complete");
     expect(page.getByText(SERVER_JOB_KEEP_OPEN_BODY).query()).toBeNull();
   });
 });
@@ -859,7 +859,7 @@ describe("console acceptor re-attaches on a busy create", () => {
       .toBeVisible();
     await expect
       .element(page.getByTestId("reattach-announcement"))
-      .toHaveTextContent(
+      .toMatchTextContent(
         "You are back on an exchange this console already holds.",
       );
     // Body text unique to the visible notice, absent from the hidden
@@ -1013,7 +1013,7 @@ describe("console acceptor run warnings", () => {
     api.closeEvents();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Exchange complete");
+      .toMatchTextContent("Exchange complete");
     await expect.element(page.getByText(NOT_EMPTY_LEAD)).toBeInTheDocument();
   });
 
@@ -1043,7 +1043,7 @@ describe("console acceptor run warnings", () => {
       .toBeVisible();
     await expect
       .element(page.getByTestId("run-warnings-announcement"))
-      .toHaveTextContent("The exchange reported a warning");
+      .toMatchTextContent("The exchange reported a warning");
     await expect.element(page.getByText(NOT_EMPTY_LEAD)).toBeInTheDocument();
   });
 });

@@ -172,7 +172,7 @@ test("acceptor journey reaches Done with a downloadable result driven only throu
   // then Accept pressed for the columns step to receive it.
   await expect
     .element(page.getByRole("heading", { level: 1 }))
-    .toHaveTextContent("Consent & your file");
+    .toMatchTextContent("Consent & your file");
   const fileInput = document.querySelector('input[type="file"]');
   await userEvent.upload(
     page.elementLocator(fileInput as HTMLElement),
@@ -205,7 +205,7 @@ test("acceptor journey reaches Done with a downloadable result driven only throu
   // The composed journey reaches Done.
   await expect
     .element(page.getByRole("heading", { level: 1 }))
-    .toHaveTextContent("Exchange complete");
+    .toMatchTextContent("Exchange complete");
   await expect
     .element(page.getByText(/1,847.*matched records/))
     .toBeInTheDocument();
@@ -265,7 +265,7 @@ test("a file the operator names a delimiter for runs the same journey to a resul
 
   await expect
     .element(page.getByRole("heading", { level: 1 }))
-    .toHaveTextContent("Exchange complete");
+    .toMatchTextContent("Exchange complete");
   const resultLink = Array.from(
     document.querySelectorAll<HTMLAnchorElement>("a[download]"),
   ).find((link) => link.textContent === "results.csv");

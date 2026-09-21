@@ -84,7 +84,7 @@ describe("StandardizationPreview renders each pipeline outcome distinctly", () =
     );
     await expect
       .element(page.getByTestId("outcome-value"))
-      .toHaveTextContent("MARY");
+      .toMatchTextContent("MARY");
   });
 
   test("a dropped (null) value", async () => {
@@ -98,7 +98,7 @@ describe("StandardizationPreview renders each pipeline outcome distinctly", () =
     );
     await expect
       .element(page.getByTestId("outcome-dropped"))
-      .toHaveTextContent("dropped");
+      .toMatchTextContent("dropped");
   });
 
   test("a fan-out (Set) into several candidates", async () => {
@@ -111,7 +111,7 @@ describe("StandardizationPreview renders each pipeline outcome distinctly", () =
       }),
     );
     const fanout = page.getByTestId("outcome-fanout");
-    await expect.element(fanout).toHaveTextContent("splits into 3 values");
+    await expect.element(fanout).toMatchTextContent("splits into 3 values");
     for (const value of ["A", "B", "C"])
       await expect
         .element(fanout.getByText(value, { exact: true }))
@@ -132,7 +132,7 @@ describe("StandardizationPreview renders each pipeline outcome distinctly", () =
     // the grey "dropped" chip.
     await expect
       .element(page.getByTestId("outcome-value"))
-      .toHaveTextContent("empty value");
+      .toMatchTextContent("empty value");
     expect(page.getByTestId("outcome-dropped").elements()).toHaveLength(0);
   });
 
@@ -232,7 +232,7 @@ describe("StandardizationStepEditor", () => {
     // The pipeline now yields the substituted value.
     await expect
       .element(page.getByTestId("outcome-value"))
-      .toHaveTextContent("Z");
+      .toMatchTextContent("Z");
     expect(page.getByTestId("outcome-dropped").elements()).toHaveLength(0);
   });
 
@@ -254,7 +254,7 @@ describe("StandardizationStepEditor", () => {
     );
     await expect
       .element(page.getByTestId("inert-coalesce-advice"))
-      .toHaveTextContent("no step before it can leave a value empty");
+      .toMatchTextContent("no step before it can leave a value empty");
 
     await userEvent.click(
       page.getByRole("button", { name: "Move Null if earlier" }),
@@ -364,7 +364,7 @@ describe("StandardizationStepEditor", () => {
     // Empty pipeline: the value passes through unchanged.
     await expect
       .element(page.getByTestId("outcome-value"))
-      .toHaveTextContent("mary");
+      .toMatchTextContent("mary");
 
     await userEvent.click(page.getByRole("button", { name: "Add a step" }));
     await userEvent.click(page.getByRole("menuitem", { name: "Uppercase" }));
@@ -373,7 +373,7 @@ describe("StandardizationStepEditor", () => {
     await expect.element(page.getByText("Uppercase")).toBeInTheDocument();
     await expect
       .element(page.getByTestId("outcome-value"))
-      .toHaveTextContent("MARY");
+      .toMatchTextContent("MARY");
 
     await userEvent.click(
       page.getByRole("button", { name: "Remove Uppercase" }),
@@ -381,7 +381,7 @@ describe("StandardizationStepEditor", () => {
     expect(page.getByText("Uppercase").elements()).toHaveLength(0);
     await expect
       .element(page.getByTestId("outcome-value"))
-      .toHaveTextContent("mary");
+      .toMatchTextContent("mary");
   });
 });
 
@@ -459,7 +459,7 @@ describe("StandardizationStepEditor raw-pattern authoring (per-party, ungated)",
     await userEvent.fill(pattern, "^m");
     await expect
       .element(page.getByTestId("outcome-value"))
-      .toHaveTextContent("mary");
+      .toMatchTextContent("mary");
   });
 
   test("an out-of-dialect pattern shows the dialect error inline", async () => {
@@ -698,6 +698,6 @@ describe("preview outcomes reach assistive tech by text/label, not color alone",
     );
     await expect
       .element(page.getByTestId("outcome-dropped"))
-      .toHaveTextContent("dropped");
+      .toMatchTextContent("dropped");
   });
 });

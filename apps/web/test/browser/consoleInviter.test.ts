@@ -350,7 +350,7 @@ async function reachReviewCreate() {
     .click();
   await expect
     .element(page.getByRole("heading", { level: 1 }))
-    .toHaveTextContent("Review & create");
+    .toMatchTextContent("Review & create");
 }
 
 /** Open the file-handling card on Review & create. Its accessible name holds the
@@ -671,7 +671,7 @@ describe("console inviter file-handling gate", () => {
     // The terms are unsealed: the step still stands, with no invitation minted.
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Review & create");
+      .toMatchTextContent("Review & create");
 
     // Restoring the implied toggle clears the problem and the gate together.
     await userEvent.selectOptions(
@@ -799,7 +799,7 @@ describe("console inviter split-rendezvous retain gate", () => {
     // The terms stay unsealed: no invitation was minted.
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Review & create");
+      .toMatchTextContent("Review & create");
   });
 });
 
@@ -825,7 +825,7 @@ describe("console inviter mint and run", () => {
     await page.getByRole("button", { name: "Create the invitation" }).click();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Your invitation is ready");
+      .toMatchTextContent("Your invitation is ready");
 
     // A server-job run: the keep-open callout names the console running the
     // exchange and that leaving leaves it running (the console re-attaches), never
@@ -887,7 +887,7 @@ describe("console inviter mint and run", () => {
     api.emitEvent({ v: 1, type: "stage", id: "confirming protocol" });
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Exchange in progress");
+      .toMatchTextContent("Exchange in progress");
     await expect
       .element(
         page.getByText(
@@ -918,7 +918,7 @@ describe("console inviter mint and run", () => {
       .toBeVisible();
     await expect
       .element(warningsRegion)
-      .toHaveTextContent("The exchange reported a warning");
+      .toMatchTextContent("The exchange reported a warning");
     // The region announces the headline alone; the Alert holding the message has
     // no live role that would voice it a second time.
     expect(
@@ -933,7 +933,7 @@ describe("console inviter mint and run", () => {
     api.closeEvents();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Exchange complete");
+      .toMatchTextContent("Exchange complete");
   });
 
   test("a filedrop invitation holds the shared folder's name the console reported", async () => {
@@ -955,7 +955,7 @@ describe("console inviter mint and run", () => {
     await page.getByRole("button", { name: "Create the invitation" }).click();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Your invitation is ready");
+      .toMatchTextContent("Your invitation is ready");
 
     await page.getByRole("button", { name: "Show full code" }).click();
     const encoded = (
@@ -1027,7 +1027,7 @@ describe("console inviter never renders the recurring-save offer", () => {
     await page.getByRole("button", { name: "Create the invitation" }).click();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Your invitation is ready");
+      .toMatchTextContent("Your invitation is ready");
     expect(page.getByText("Save as a recurring exchange").query()).toBeNull();
 
     await vi.waitFor(() =>
@@ -1038,14 +1038,14 @@ describe("console inviter never renders the recurring-save offer", () => {
     api.emitEvent({ v: 1, type: "stage", id: "confirming protocol" });
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Exchange in progress");
+      .toMatchTextContent("Exchange in progress");
     expect(page.getByText("Save as a recurring exchange").query()).toBeNull();
 
     api.emitEvent({ v: 1, type: "result", resultWritten: true });
     api.closeEvents();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Exchange complete");
+      .toMatchTextContent("Exchange complete");
     expect(page.getByText("Save as a recurring exchange").query()).toBeNull();
   });
 });
@@ -1060,7 +1060,7 @@ describe("console inviter run teardown and abandonment", () => {
     await page.getByRole("button", { name: "Create the invitation" }).click();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Your invitation is ready");
+      .toMatchTextContent("Your invitation is ready");
     await vi.waitFor(() =>
       expect(api.captured.some((r) => r.url === "/api/jobs/job-7/events")).toBe(
         true,
@@ -1069,7 +1069,7 @@ describe("console inviter run teardown and abandonment", () => {
     api.emitEvent({ v: 1, type: "stage", id: "confirming protocol" });
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Exchange in progress");
+      .toMatchTextContent("Exchange in progress");
   }
 
   test("leaving the page does not cancel the console run", async () => {
@@ -1426,7 +1426,7 @@ describe("console inviter re-attaches on a busy create", () => {
       .toBeVisible();
     await expect
       .element(page.getByTestId("reattach-announcement"))
-      .toHaveTextContent(
+      .toMatchTextContent(
         "You are back on an exchange this console already holds.",
       );
     // Body text unique to the visible notice, absent from the hidden
@@ -1583,7 +1583,7 @@ describe("console inviter partner accept kit", () => {
       await page.getByRole("button", { name: "Create the invitation" }).click();
       await expect
         .element(page.getByRole("heading", { level: 1 }))
-        .toHaveTextContent("Your invitation is ready");
+        .toMatchTextContent("Your invitation is ready");
 
       await page.getByRole("button", { name: ACCEPT_KIT_BUTTON }).click();
       const sheet = await capturedSheet(downloads);
@@ -1633,7 +1633,7 @@ describe("console inviter partner accept kit", () => {
       await page.getByRole("button", { name: "Create the invitation" }).click();
       await expect
         .element(page.getByRole("heading", { level: 1 }))
-        .toHaveTextContent("Your invitation is ready");
+        .toMatchTextContent("Your invitation is ready");
 
       await page.getByRole("button", { name: ACCEPT_KIT_BUTTON }).click();
       const sheet = await capturedSheet(downloads);
@@ -1668,7 +1668,7 @@ describe("console inviter partner accept kit", () => {
       await page.getByRole("button", { name: "Create the invitation" }).click();
       await expect
         .element(page.getByRole("heading", { level: 1 }))
-        .toHaveTextContent("Your invitation is ready");
+        .toMatchTextContent("Your invitation is ready");
 
       await page.getByRole("button", { name: ACCEPT_KIT_BUTTON }).click();
       const sheet = await capturedSheet(downloads);
@@ -1703,7 +1703,7 @@ describe("console inviter partner accept kit", () => {
       await page.getByRole("button", { name: "Create the invitation" }).click();
       await expect
         .element(page.getByRole("heading", { level: 1 }))
-        .toHaveTextContent("Your invitation is ready");
+        .toMatchTextContent("Your invitation is ready");
 
       await page.getByRole("button", { name: ACCEPT_KIT_BUTTON }).click();
       const sheet = await capturedSheet(downloads);
@@ -1738,7 +1738,7 @@ describe("console inviter partner accept kit", () => {
       await page.getByRole("button", { name: "Create the invitation" }).click();
       await expect
         .element(page.getByRole("heading", { level: 1 }))
-        .toHaveTextContent("Your invitation is ready");
+        .toMatchTextContent("Your invitation is ready");
 
       await page.getByRole("button", { name: ACCEPT_KIT_BUTTON }).click();
       const sheet = await capturedSheet(downloads);
@@ -1775,7 +1775,7 @@ describe("console inviter recurring hand-off availability", () => {
     await page.getByRole("button", { name: "Create the invitation" }).click();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Your invitation is ready");
+      .toMatchTextContent("Your invitation is ready");
 
     // Still on the share screen, before any protocol stage: the hand-off the
     // console composed at job creation is already reachable, behind a
@@ -1800,7 +1800,7 @@ describe("console inviter recurring hand-off availability", () => {
     api.closeEvents();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Exchange complete");
+      .toMatchTextContent("Exchange complete");
     await expect
       .element(
         page.getByRole("heading", { name: "Run this exchange on a schedule" }),

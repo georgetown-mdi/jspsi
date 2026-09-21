@@ -150,7 +150,7 @@ describe("leaving the page during a live browser exchange", () => {
     // run's own guard.
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Your invitation is ready");
+      .toMatchTextContent("Your invitation is ready");
     await vi.waitFor(() => expect(lifecycleHarness.calls).toHaveLength(1));
     expect(unloadWouldBeConfirmed()).toBe(true);
 
@@ -162,7 +162,7 @@ describe("leaving the page during a live browser exchange", () => {
 
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Exchange complete");
+      .toMatchTextContent("Exchange complete");
     expect(unloadWouldBeConfirmed()).toBe(false);
   });
 
@@ -204,7 +204,7 @@ describe("leaving the page during a live browser exchange", () => {
     await vi.waitFor(() => expect(lifecycleHarness.calls).toHaveLength(1));
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Exchange in progress");
+      .toMatchTextContent("Exchange in progress");
     expect(unloadWouldBeConfirmed()).toBe(true);
 
     // A terminal failure ends the run without unmounting the seat, so the guard

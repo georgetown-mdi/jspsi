@@ -179,7 +179,7 @@ describe("StepListEditor: an unrecognized function marks the step", () => {
     expect(alerts.elements()).toHaveLength(1);
     await expect
       .element(alerts)
-      .toHaveTextContent(
+      .toMatchTextContent(
         /psilink does not recognize this step's function.*Remove the step\./,
       );
     // Its params still show, read-only: the operator sees what the step
@@ -231,7 +231,7 @@ describe("StepListEditor: a null_if declaring both params marks the step", () =>
     await expect.element(alert).toBeInTheDocument();
     await expect
       .element(alert)
-      .toHaveTextContent(
+      .toMatchTextContent(
         /both a single value and a list of values.*Remove this step/,
       );
   });

@@ -98,7 +98,7 @@ describe("KeysTab: the guided-list dead-key badge", () => {
       name: "This key's cleaning can never produce a value; review the transform",
     });
     await expect.element(badge).toBeInTheDocument();
-    await expect.element(badge).toHaveTextContent("won't match");
+    await expect.element(badge).toMatchTextContent("won't match");
   });
 });
 
@@ -145,16 +145,20 @@ describe("KeysTab: the dropped-citation notice", () => {
     // user is not read the whole body twice -- once live, once in reading order.
     await expect
       .element(page.getByRole("note"))
-      .toHaveTextContent("The imported rule-set citation will not be included");
+      .toMatchTextContent(
+        "The imported rule-set citation will not be included",
+      );
     await expect
       .element(page.getByRole("note"))
-      .toHaveTextContent("the citation cannot be verified");
+      .toMatchTextContent("the citation cannot be verified");
     await expect
       .element(page.getByRole("status"))
-      .toHaveTextContent("The imported rule-set citation will not be included");
+      .toMatchTextContent(
+        "The imported rule-set citation will not be included",
+      );
     await expect
       .element(page.getByRole("status"))
-      .not.toHaveTextContent("the citation cannot be verified");
+      .not.toMatchTextContent("the citation cannot be verified");
   });
 
   test("is absent -- and its live region silent, not unmounted -- while the citation stands", async () => {

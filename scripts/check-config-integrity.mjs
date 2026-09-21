@@ -89,15 +89,16 @@ export const GUARDED_TSCONFIGS = [
  * test:scripts` cover the scripts and hooks outside the workspaces; a workspace
  * entry names the projects its own config splits its suites into. A project
  * name is the config's `name` where it sets one, and the package name where it
- * does not; the browser project's name includes its instance.
+ * does not; a workspace project listed by a root run is named
+ * "<package> (<name>)", and a browser project's name includes its instance.
  */
 export const GUARDED_VITEST_CONFIGS = [
   {
     directory: ".",
     projects: [
-      "@psilink/core",
-      "psilink",
-      "jspsi",
+      "@psilink/core (unit)",
+      "psilink (unit)",
+      "jspsi (unit)",
       "harness",
       "scripts",
       "hooks",
