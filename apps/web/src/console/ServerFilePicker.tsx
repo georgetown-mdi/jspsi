@@ -65,6 +65,15 @@ const PROFILE_UNAVAILABLE_COPY: Record<
   },
 };
 
+/**
+ * What a parent did with the profile the confirm stage offered it. `"refused"`
+ * holds that stage open on the file, which is what lets a delimiter change re-read
+ * the very file the refusal is about. A parent that returns nothing closes the
+ * stage, which is where a refusal telling the operator to choose the file again
+ * leaves them.
+ */
+export type FileCommitOutcome = "committed" | "refused";
+
 /** The listing settle copy for the aria-live status region. */
 function listingLiveMessage(listing: JobInputsResult | "loading"): string {
   if (listing === "loading") return "";
@@ -110,8 +119,14 @@ function profileLiveMessage(
  * delimiter in effect when it was opened, and a commitment the run would not
  * reproduce is worse than a second confirmation. A file already committed is voided
  * at the same moment ({@link onInvalidate}). A choice the rule refuses closes the
- * row actions and the parent's gate but leaves an open confirm stage as it was; the
- * commit made there is voided once the choice resolves.
+ * row actions and the parent's gate but leaves an open confirm stage as it was;
+ * what a commit made there stores is the parent's own rule, and a stored one is
+ * voided once the choice resolves.
+ *
+ * A commit the parent will not take ({@link FileCommitOutcome}) leaves the confirm
+ * stage open on that file, so it is still the file on screen: the delimiter change
+ * above re-profiles the very file the refusal is about, and the commit that
+ * follows answers it, with no trip through the listing in between.
  */
 export function ServerFilePicker({
   committed,
@@ -126,8 +141,10 @@ export function ServerFilePicker({
    * resolved it. Omitted where the surface offers no control, which reads commas;
    * a refused choice selects no file, as the hosted build's dropzone closes. */
   delimiter?: CsvDelimiterResolution;
-  /** Commit a profiled file to the console -- the second stage's "Use this file". */
-  onUse: (profile: ProfiledJobInput) => void;
+  /** Commit a profiled file to the console -- the second stage's "Use this file".
+   * Return `"refused"` where the parent stores nothing, to hold the confirm stage
+   * open on that file; returning nothing closes it. */
+  onUse: (profile: ProfiledJobInput) => FileCommitOutcome | void;
   /** The committed file's columns were read by a delimiter that no longer applies:
    * the parent drops the commit and everything derived from it, and holds its own
    * Continue until a fresh "Use this file". */
@@ -205,7 +222,7 @@ export function ServerFilePicker({
   }
 
   function useProfiled(profiled: ProfiledJobInput) {
-    onUse(profiled);
+    if (onUse(profiled) === "refused") return;
     cancelSelection();
   }
 

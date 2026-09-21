@@ -70,6 +70,7 @@ import type {
 import type { ConnectionTuningDraft } from "@console/connectionTuningModel";
 import type { CsvDelimiterChoice } from "@components/csvDelimiterChoice";
 import type { ExchangeFilesDraft } from "@console/exchangeFilesModel";
+import type { FileCommitOutcome } from "@console/ServerFilePicker";
 import type { LinkageStrategy } from "@psilink/core";
 import type { RailStep } from "@psi/rail";
 import type { RunDiagnosticsDraft } from "@psi/runDiagnosticsModel";
@@ -221,17 +222,19 @@ export function DirectExchangeScreen() {
     setStep(next);
   }
 
-  // A fresh file drops the trust affirmation, so the operator re-affirms for
-  // the new context before the server step. A refused delimiter holds this
-  // step, the gate the picker leaves to its parent (the invitation steps
-  // withhold Continue), and the file profiled under the previous choice is
-  // voided when the refusal resolves, so no run reads columns nobody chose.
-  function commitFile(profile: ProfiledJobInput) {
+  // A fresh file drops the trust affirmation, so the operator re-affirms for the
+  // new context before the server step. Nothing is stored while the delimiter
+  // choice is refused -- the step states that refusal beside the control -- and a
+  // commit this step refuses keeps the picker on the file, so changing the choice
+  // re-reads it.
+  function commitFile(profile: ProfiledJobInput): FileCommitOutcome {
+    if (!delimiterResolution.ok) return "refused";
     const committed = directFileCommit(profile);
     setFile(committed);
-    if (committed.source === undefined) return;
+    if (committed.source === undefined) return "refused";
     setAffirmed(false);
-    if (delimiterResolution.ok) goTo("server");
+    goTo("server");
+    return "committed";
   }
 
   // The delimiter moved under the committed file: its columns are this party's

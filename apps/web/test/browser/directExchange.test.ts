@@ -11,6 +11,7 @@ import "@mantine/core/styles.css";
 
 import {
   CONSENT_FACTS,
+  CSV_DELIMITER_DETECT,
   DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
   DEDUPLICATE_PARTNER_DECLARED_DISCLOSURE_STATEMENT,
   DEDUPLICATE_PARTNER_DECLARED_SIDE_NOTE,
@@ -602,6 +603,15 @@ describe("direct exchange confirm and run", () => {
     await expect
       .element(page.getByRole("heading", { level: 1, name: "Your file" }))
       .toBeInTheDocument();
+
+    // It also stores nothing: the columns behind that click were read by a
+    // choice the operator has moved off, and the one in force is refused, so the
+    // step holds no file until a delimiter it can read by is set.
+    await page.getByRole("button", { name: "Choose another file" }).click();
+    await expect
+      .element(page.getByRole("button", { name: "Select clients.csv" }))
+      .toBeInTheDocument();
+    expect(app.container.textContent).not.toContain("Selected");
   });
 
   test("a one-column read is refused on the step that holds the control", async () => {
@@ -609,7 +619,7 @@ describe("direct exchange confirm and run", () => {
     // back as one column. The remedy for that reading is the delimiter control,
     // so the step refuses the file where the control is rather than passing it
     // to the confirm preview, whose screen has no such control.
-    stubJobApi({
+    const api = stubJobApi({
       sftp: CONFIGURED_SFTP,
       profileByDelimiter: (read) =>
         read === "|" ? CLIENTS_PROFILE : ONE_COLUMN_PROFILE,
@@ -627,18 +637,95 @@ describe("direct exchange confirm and run", () => {
       .element(page.getByRole("heading", { level: 1, name: "Your file" }))
       .toBeInTheDocument();
 
-    // The file's own separator reads its five columns, and the step takes it.
+    // The alert names this control, so setting the file's own separator re-reads
+    // THAT file where the refusal was raised, rather than sending the operator
+    // back through the file list to say the same thing again.
     await userEvent.selectOptions(
       page.getByLabelText("How your file separates fields"),
       "|",
     );
-    await page.getByRole("button", { name: "Select clients.csv" }).click();
+    await expect
+      .element(
+        page.getByText("client_id, first_name, last_name, dob, program_code"),
+      )
+      .toBeInTheDocument();
     await page.getByRole("button", { name: "Use this file" }).click();
     await expect
       .element(
         page.getByRole("heading", { level: 1, name: "The agreed server" }),
       )
       .toBeInTheDocument();
+
+    // And the run reads the file by the choice the step settled on, so the
+    // columns this party confirmed are the columns it runs.
+    await page
+      .getByRole("button", { name: "Continue to confirm and run" })
+      .click();
+    await trustAffirmation().click();
+    await page.getByRole("button", { name: "Run the exchange" }).click();
+    await vi.waitFor(() => {
+      expect(
+        api.captured.some(
+          (request) => request.url === "/api/jobs" && request.method === "POST",
+        ),
+      ).toBe(true);
+    });
+    const post = api.captured.find(
+      (request) => request.url === "/api/jobs" && request.method === "POST",
+    );
+    expect(
+      (JSON.parse(post?.body ?? "{}") as Record<string, unknown>).csvDelimiter,
+    ).toBe("|");
+  });
+
+  test("a one-column detect read is refused, and a named separator answers it", async () => {
+    // Detection reads the file itself, so a file it cannot split comes back as
+    // the same single column a mis-set separator produces -- and the remedy is
+    // the same control. The refusal has to clear on the reading that answers it,
+    // or the operator is left acting on an alert they have already acted on.
+    stubJobApi({
+      sftp: CONFIGURED_SFTP,
+      profileByDelimiter: (read) =>
+        read === "|" ? CLIENTS_PROFILE : ONE_COLUMN_PROFILE,
+    });
+    app.render(createElement(DirectExchangeScreen));
+    await userEvent.selectOptions(
+      page.getByLabelText("How your file separates fields"),
+      CSV_DELIMITER_DETECT,
+    );
+    await page.getByRole("button", { name: "Select clients.csv" }).click();
+    await page.getByRole("button", { name: "Use this file" }).click();
+    await expect
+      .element(
+        page.getByText(CSV_DELIMITER_SINGLE_COLUMN_REMEDY, { exact: false }),
+      )
+      .toBeInTheDocument();
+
+    await userEvent.selectOptions(
+      page.getByLabelText("How your file separates fields"),
+      "|",
+    );
+    await expect
+      .element(
+        page.getByText("client_id, first_name, last_name, dob, program_code"),
+      )
+      .toBeInTheDocument();
+    await page.getByRole("button", { name: "Use this file" }).click();
+    await expect
+      .element(
+        page.getByRole("heading", { level: 1, name: "The agreed server" }),
+      )
+      .toBeInTheDocument();
+
+    // The refusal went with the reading that produced it: the step it was shown
+    // on no longer states it.
+    await page.getByRole("button", { name: "Back" }).click();
+    await expect
+      .element(page.getByRole("heading", { level: 1, name: "Your file" }))
+      .toBeInTheDocument();
+    expect(app.container.textContent).not.toContain(
+      CSV_DELIMITER_SINGLE_COLUMN_REMEDY,
+    );
   });
 
   test("names the header positions the console's parse stripped", async () => {
