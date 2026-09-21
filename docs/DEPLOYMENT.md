@@ -130,7 +130,7 @@ That measured behavior bounds what the second copy of the hook is good for. `dow
 
 ### Checking for certificate and range drift
 
-Two values the exports do not carry decide whether the origin keeps answering the edge: the certificate it serves, an expired one answering `Full (strict)` with a 526 on both public names, and its port-443 rule list, a range Cloudflare adds and the rules do not admit showing as an intermittent edge error. `check-origin-drift.mjs` in the saved-configuration directory compares the deployed certificate against a margin and the rules against Cloudflare's published lists; that directory's [README](../apps/web/deploy/aws_eb_saved_configurations/README.md#checking-the-origin-certificate-and-the-cloudflare-ranges) holds its arguments, its exit codes, the read permissions it needs and the values it records.
+Two values the exports do not carry decide whether the origin keeps answering the edge: the certificate it serves, an expired one answering `Full (strict)` with a 526 on both public names, and its port-443 rule list, a range Cloudflare adds and the rules do not admit showing as an intermittent edge error. `check-origin-drift.mjs` in the saved-configuration directory compares the deployed certificate against a margin and the rules against Cloudflare's published lists; that directory's [README](../apps/web/deploy/aws_eb_saved_configurations/README.md#checking-the-origin-certificate-and-the-cloudflare-ranges) holds its arguments, its exit codes, the read permissions it needs and the recorded values it compares against.
 
 Run it monthly, and after any change to the origin certificate, the shared security group, or the Cloudflare configuration:
 
@@ -140,11 +140,8 @@ node apps/web/deploy/aws_eb_saved_configurations/check-origin-drift.mjs
 
 The run needs read credentials for the AWS account, which no CI job and no development container holds, so it is the maintainer's to run outside the container. What to do with each result:
 
-- **The certificate is inside the margin.** Issue a replacement Origin CA certificate, install it by the route above, then re-record its expiry with `--record` and commit the result.
-- **The deployed certificate is not the recorded one.** Someone installed a replacement without recording it. Re-record with `--record` and commit, after checking that the installed certificate is the one intended.
-- **A published range is not admitted, or an admitted range is not published.** Authorize the missing ranges on the shared security group and revoke the ones Cloudflare no longer publishes, re-record the snapshot with `--record`, and commit it. Authorize before revoking: a revoke first drops live requests from the range being replaced.
-- **The recorded snapshot differs from the published list while the rules match it.** Only the record is stale: re-record with `--record` and commit.
-- **A comparison could not run.** The run had no credentials for the account or no route to `cloudflare.com`, so one side of a comparison was the recorded value rather than the deployed one. It exits 2 rather than 0, and the lines it printed for that comparison are the recorded value alone; fix the run rather than reading them as agreement.
+- **A comparison found a difference.** Correct the account first where it is the account that is wrong: issue a replacement Origin CA certificate and install it by the route above when the expiry is inside the margin, and authorize a published range the rules do not admit and revoke a range Cloudflare no longer publishes -- authorize before revoking, since a revoke first drops live requests from the range being replaced. Then re-run the check and commit the record it prints, which is what the account and Cloudflare now hold. Where the account is already right, the record alone is stale, and committing that block is the whole fix.
+- **A comparison could not run.** The run had no credentials for the account, no route to `cloudflare.com`, or an answer it could not read, so a value it compares was never read. It exits 2 rather than 0 and compares nothing in place of what it could not read, so fix the run and repeat it rather than reading a 2 as agreement.
 
 ### Recorded settings and their source
 

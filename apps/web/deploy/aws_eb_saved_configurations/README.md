@@ -64,16 +64,15 @@ Two values decide whether the origin keeps answering the edge, and neither is an
 ```sh
 node check-origin-drift.mjs            # compare, using a 30-day expiry margin
 node check-origin-drift.mjs --margin-days 60
-node check-origin-drift.mjs --record   # rewrite the recorded values below
 ```
 
-| Exit | What it means                                                                            |
-| ---- | ---------------------------------------------------------------------------------------- |
-| 0    | Both comparisons ran and agreed                                                            |
-| 1    | A comparison found a difference: the certificate is inside the margin, or a rule differs    |
-| 2    | A comparison could not run -- no credentials, no route to `cloudflare.com`, or no record    |
+| Exit | What it means                                                                                             |
+| ---- | --------------------------------------------------------------------------------------------------------- |
+| 0    | Both comparisons ran and agreed                                                                           |
+| 1    | A comparison found a difference: the certificate is inside the margin, a rule differs, or the record does |
+| 2    | A comparison could not run -- no credentials, no route to `cloudflare.com`, or an unreadable answer       |
 
-A run that falls back to a recorded value exits 2 as well: the expiry `recorded-origin.json` holds when the account is unreadable, or the range snapshot it holds when `cloudflare.com` is unreachable. Those lines still print, and they state the recorded value alone rather than the deployed one. `--record` exits 2 on the same footing when it could not refresh every value; it writes what it did read.
+Every value it compares is read live. A read that fails -- the certificate from the account, the security group, or either published list -- ends that comparison there: the line names what could not be read and why, the run exits 2, and nothing is compared against `recorded-origin.json` in its place, so a 0 is only ever a run that read both sides. A run that finds any live value differing from the record prints the record as it would now read, ready to paste into `recorded-origin.json`; a run that agrees prints nothing to paste. The script writes no file of its own.
 
 It reads the account through the `aws` CLI, as the refresh commands above do, so it runs from a machine holding read credentials for the account: `sts:GetCallerIdentity`, `s3:GetObject` on the deployment bucket's `cert/` prefix, and `ec2:DescribeSecurityGroups`. No CI job and no development container holds those, so the run is the maintainer's; the cadence and what to do about each result are in [docs/DEPLOYMENT.md](../../../../docs/DEPLOYMENT.md#checking-for-certificate-and-range-drift). The script prints no account id and no bucket name of its own, but an AWS CLI error it passes through can name either. Every call it makes is bounded -- 30 seconds for a published list, 2 minutes for an `aws` call, which is given no standard input -- so an unreachable host or a CLI waiting on a prompt ends as a value the run could not read rather than as a run that never returns.
 
@@ -81,12 +80,12 @@ What it reads comes from the committed files beside it rather than from a typed-
 
 ## The recorded values
 
-`recorded-origin.json` is what the check compares against when the account or `cloudflare.com` is unreachable, and what a reviewer reads a drift out of a diff from:
+`recorded-origin.json` is the committed copy of what the account and Cloudflare held when it was last written, and what a reviewer reads a drift out of a diff from:
 
-- `origin_certificate` -- the expiry of the certificate the origin serves, and when that was recorded. A run that reads the account compares the deployed certificate against this date as well as against the margin, so a replacement installed without a commit here fails the check.
-- `cloudflare_ranges` -- the two published lists, the date they were fetched, and the URLs they were fetched from. `fetched: null` states that no snapshot has been taken yet: until one is, a run with no route to `cloudflare.com` has nothing to compare the rules against and exits 2.
+- `origin_certificate` -- the expiry of the certificate the origin serves, and when that was recorded. The check compares the deployed certificate against this date as well as against the margin, so a replacement installed without a commit here fails the check.
+- `cloudflare_ranges` -- the two published lists, the date they were fetched, and the URLs they are fetched from. The check reads those URLs and compares the rules against both the published lists and these. `fetched: null` states that no snapshot has been taken yet, which the check reports as a difference to commit.
 
-`--record` fetches both lists, writes them under the run's date, and takes the deployed certificate's expiry when the account answers. A run the account does not answer keeps the recorded expiry, writes the lists it fetched, and exits 2. Commit the result: the diff is the record of what Cloudflare changed.
+It is updated by hand, from the block a differing run prints: replace the file with that block and commit it, after checking that what changed is what was meant to change. The diff is the record of what Cloudflare changed, or of which certificate the origin now serves.
 
 ## The verification this directory still needs
 

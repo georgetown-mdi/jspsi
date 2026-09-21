@@ -1,8 +1,15 @@
-import { readFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
   CERTIFICATE_BUCKET_PREFIX,
@@ -10,6 +17,8 @@ import {
   EXIT_AGREES,
   EXIT_DRIFTED,
   EXIT_UNCHECKED,
+  aws,
+  awsEffects,
   canonicalCidr,
   certificateExpiry,
   certificateVerdict,
@@ -17,7 +26,6 @@ import {
   ingressOfGroup,
   parsePublishedRanges,
   rangeVerdict,
-  recordOrigin,
   regionOf,
   sharedSecurityGroupId,
 } from "../apps/web/deploy/aws_eb_saved_configurations/check-origin-drift.mjs";
@@ -147,6 +155,13 @@ function runCheck(overrides = {}) {
   });
 }
 
+const PASTE_HEADING = "Paste this into recorded-origin.json and commit it:";
+
+function pastedRecord(lines) {
+  const heading = lines.indexOf(PASTE_HEADING);
+  return heading < 0 ? undefined : JSON.parse(lines[heading + 1]);
+}
+
 describe("reading a published range list", () => {
   it("takes one CIDR per line and ignores blank lines", () => {
     expect(parsePublishedRanges("198.51.100.0/24\n\n2001:DB8::/32\n")).toEqual([
@@ -254,13 +269,13 @@ describe("reading a security group", () => {
 });
 
 describe("comparing ranges against rules", () => {
-  it("names a published range no rule admits and an admitted range that is not published", () => {
+  it("names an expected range no rule admits and an admitted range that is not expected", () => {
     expect(
       rangeVerdict({
-        published: ["198.51.100.0/24", "203.0.113.0/24"],
+        expected: ["198.51.100.0/24", "203.0.113.0/24"],
         admitted: ["198.51.100.0/24", "192.0.2.0/24"],
       }),
-    ).toEqual({ missing: ["203.0.113.0/24"], unpublished: ["192.0.2.0/24"] });
+    ).toEqual({ unadmitted: ["203.0.113.0/24"], unstated: ["192.0.2.0/24"] });
   });
 });
 
@@ -336,8 +351,10 @@ describe("the drift check", () => {
     expect(lines.join("\n")).toContain(
       "compared the certificate the deployment bucket holds",
     );
-    expect(lines.join("\n")).toContain(
-      "against the list Cloudflare publishes; it admits 2 range(s)",
+    expect(lines.join("\n")).toContain("it admits 2 range(s) on port 443");
+    expect(pastedRecord(lines)).toBeUndefined();
+    expect(lines.at(-1)).toBe(
+      "Both comparisons ran and agreed with the recorded values.",
     );
   });
 
@@ -346,7 +363,20 @@ describe("the drift check", () => {
       now: new Date("2041-09-01T00:00:00Z"),
     });
     expect(exitCode).toBe(EXIT_DRIFTED);
+    expect(lines.join("\n")).toContain("it expires 2041-09-16, 15 day(s) away");
     expect(lines.join("\n")).toContain("inside the 30-day margin");
+    expect(lines.at(-1)).toBe("A comparison found a difference.");
+    expect(pastedRecord(lines)).toBeUndefined();
+  });
+
+  it("says an expired certificate expired rather than counting down past zero", async () => {
+    const { lines, exitCode } = await runCheck({
+      now: new Date("2041-09-30T00:00:00Z"),
+    });
+    expect(exitCode).toBe(EXIT_DRIFTED);
+    expect(lines.join("\n")).toContain("it expired 2041-09-16, 14 day(s) ago");
+    expect(lines.join("\n")).toContain("it has expired. Issue a replacement");
+    expect(lines.join("\n")).not.toMatch(/-\d+ day/);
   });
 
   it("fails when the deployed certificate is not the recorded one", async () => {
@@ -354,10 +384,25 @@ describe("the drift check", () => {
     record.origin_certificate.not_after = "2030-01-01";
     const { lines, exitCode } = await runCheck({ record });
     expect(exitCode).toBe(EXIT_DRIFTED);
-    expect(lines.join("\n")).toContain("records 2030-01-01");
+    expect(lines.join("\n")).toContain(
+      "recorded-origin.json records 2030-01-01, not the expiry the deployment bucket holds",
+    );
+    expect(pastedRecord(lines)).toEqual({
+      origin_certificate: {
+        not_after: CERTIFICATE_EXPIRY,
+        recorded: "2026-09-21",
+        source: `read from the deployment bucket's ${CERTIFICATE_KEY}`,
+      },
+      cloudflare_ranges: {
+        fetched: "2026-09-21",
+        source: recordFixture().cloudflare_ranges.source,
+        ipv4: PUBLISHED.ipv4,
+        ipv6: PUBLISHED.ipv6,
+      },
+    });
   });
 
-  it("falls back to the recorded expiry when the account is unreadable", async () => {
+  it("compares nothing when the deployed certificate is unreadable", async () => {
     const { lines, exitCode } = await runCheck({
       effects: {
         readOriginCertificate: async () => {
@@ -365,34 +410,48 @@ describe("the drift check", () => {
         },
       },
     });
+    expect(exitCode).toBe(EXIT_UNCHECKED);
     expect(lines.join("\n")).toContain(
-      "compared the expiry recorded-origin.json records, the account being unreadable (no credentials)",
+      "the certificate the deployment bucket holds could not be read (no credentials), so nothing was compared",
     );
-    expect(lines.join("\n")).toContain(`it expires ${CERTIFICATE_EXPIRY}`);
-    expect(lines.join("\n")).toContain("the recorded expiry alone was checked");
-    expect(lines.join("\n")).toContain(
+    expect(lines.join("\n")).not.toContain("expires");
+    expect(lines.join("\n")).not.toContain("records 2041");
+    expect(pastedRecord(lines)).toBeUndefined();
+    expect(lines.at(-1)).toBe(
       "A comparison could not run, so this run does not state that the values agree.",
     );
-    expect(exitCode).toBe(EXIT_UNCHECKED);
   });
 
-  it("reports a difference alongside a comparison that could not run", async () => {
+  it("compares nothing when the published list is unreadable", async () => {
     const { lines, exitCode } = await runCheck({
       effects: {
-        readOriginCertificate: async () => {
-          throw new Error("no credentials");
+        fetchText: async () => {
+          throw new Error("no route to host");
         },
-        describeSecurityGroup: async () =>
-          groupFixture([httpsPermission({ ipv4: PUBLISHED.ipv4 })]),
       },
     });
-    expect(exitCode).toBe(EXIT_DRIFTED);
+    expect(exitCode).toBe(EXIT_UNCHECKED);
     expect(lines.join("\n")).toContain(
-      "2001:db8::/32 is published and not admitted",
+      "the published ranges could not be read (no route to host), so nothing was compared",
     );
+    expect(lines.join("\n")).not.toContain("port 443");
+    expect(pastedRecord(lines)).toBeUndefined();
+  });
+
+  it("compares nothing when the security group is unreadable", async () => {
+    const { lines, exitCode } = await runCheck({
+      effects: {
+        describeSecurityGroup: async () => {
+          throw new Error("not authorized");
+        },
+      },
+    });
+    expect(exitCode).toBe(EXIT_UNCHECKED);
     expect(lines.join("\n")).toContain(
-      "A comparison found a difference, and another could not run.",
+      "security group sg-shared could not be read (not authorized), so no rule was compared",
     );
+    expect(lines.join("\n")).not.toContain("is admitted and not recorded");
+    expect(pastedRecord(lines)).toBeUndefined();
   });
 
   it("fails when a published range is not admitted", async () => {
@@ -406,6 +465,10 @@ describe("the drift check", () => {
     expect(lines.join("\n")).toContain(
       "2001:db8::/32 is published and not admitted",
     );
+    expect(lines.join("\n")).toContain(
+      "2001:db8::/32 is recorded and not admitted",
+    );
+    expect(pastedRecord(lines)).toBeUndefined();
   });
 
   it("fails when an admitted range is not published", async () => {
@@ -426,28 +489,23 @@ describe("the drift check", () => {
     );
   });
 
-  it("fails when the recorded snapshot differs from the published list", async () => {
+  it("fails when the recorded snapshot is not the published list", async () => {
     const record = recordFixture();
     record.cloudflare_ranges.ipv4 = ["203.0.113.0/24"];
     const { lines, exitCode } = await runCheck({ record });
     expect(exitCode).toBe(EXIT_DRIFTED);
     expect(lines.join("\n")).toContain(
-      "fetched 2026-09-17, differs from the published list",
+      "203.0.113.0/24 is recorded and not admitted",
     );
-  });
-
-  it("compares against the recorded snapshot when the published list is unreadable", async () => {
-    const { lines, exitCode } = await runCheck({
-      effects: {
-        fetchText: async () => {
-          throw new Error("no route to host");
-        },
-      },
-    });
-    expect(exitCode).toBe(EXIT_UNCHECKED);
     expect(lines.join("\n")).toContain(
-      "the snapshot recorded-origin.json records, fetched 2026-09-17, the published list being unreadable (no route to host)",
+      "the snapshot recorded-origin.json records, fetched 2026-09-17, is not the list Cloudflare publishes now",
     );
+    expect(pastedRecord(lines).cloudflare_ranges).toEqual({
+      fetched: "2026-09-21",
+      source: record.cloudflare_ranges.source,
+      ipv4: PUBLISHED.ipv4,
+      ipv6: PUBLISHED.ipv6,
+    });
   });
 
   it("agrees when a rule spells an admitted range differently", async () => {
@@ -470,11 +528,14 @@ describe("the drift check", () => {
       effects: {
         describeSecurityGroup: async () =>
           groupFixture([
-            httpsPermission({ ipv4: [...PUBLISHED.ipv4, "198.51.100/24"] }),
+            httpsPermission({
+              ...PUBLISHED,
+              ipv4: [...PUBLISHED.ipv4, "198.51.100/24"],
+            }),
           ]),
       },
     });
-    expect(exitCode).toBe(EXIT_DRIFTED);
+    expect(exitCode).toBe(EXIT_UNCHECKED);
     expect(lines.join("\n")).toContain(
       "the group admits 198.51.100/24, which is no CIDR this check can compare",
     );
@@ -484,88 +545,103 @@ describe("the drift check", () => {
     const record = recordFixture();
     record.cloudflare_ranges.ipv4 = ["198.51.100/24"];
     const { lines, exitCode } = await runCheck({ record });
-    expect(exitCode).toBe(EXIT_UNCHECKED);
+    expect(exitCode).toBe(EXIT_DRIFTED);
     expect(lines.join("\n")).toContain(
       "recorded-origin.json records 198.51.100/24, which is no CIDR",
     );
+    expect(pastedRecord(lines).cloudflare_ranges.ipv4).toEqual(PUBLISHED.ipv4);
   });
 
-  it("reports nothing compared when neither the published list nor a snapshot is readable", async () => {
-    const record = recordFixture();
-    record.cloudflare_ranges.fetched = null;
-    const { lines, exitCode } = await runCheck({
-      record,
-      effects: {
-        fetchText: async () => {
-          throw new Error("no route to host");
-        },
-      },
-    });
-    expect(exitCode).toBe(EXIT_UNCHECKED);
-    expect(lines.join("\n")).toContain(
-      "records no snapshot to compare against",
-    );
-  });
-
-  it("reports nothing compared when the security group is unreadable", async () => {
-    const { lines, exitCode } = await runCheck({
-      effects: {
-        describeSecurityGroup: async () => {
-          throw new Error("not authorized");
-        },
-      },
-    });
-    expect(exitCode).toBe(EXIT_UNCHECKED);
-    expect(lines.join("\n")).toContain(
-      "security group sg-shared is unreadable (not authorized)",
-    );
-  });
-
-  it("asks for a snapshot when the record holds none", async () => {
+  it("prints the record to paste when none has been taken", async () => {
     const record = recordFixture();
     record.cloudflare_ranges.fetched = null;
     record.cloudflare_ranges.ipv4 = [];
     record.cloudflare_ranges.ipv6 = [];
     const { lines, exitCode } = await runCheck({ record });
-    expect(exitCode).toBe(EXIT_UNCHECKED);
-    expect(lines.join("\n")).toContain("--record");
+    expect(exitCode).toBe(EXIT_DRIFTED);
+    expect(lines.join("\n")).toContain(
+      "recorded-origin.json records no range snapshot",
+    );
+    expect(pastedRecord(lines).cloudflare_ranges.fetched).toBe("2026-09-21");
   });
 });
 
-describe("recording the origin values", () => {
-  it("writes the published ranges under the run's date and the deployed expiry", async () => {
-    const { record, reads } = await recordOrigin({
-      record: recordFixture(),
-      configurations: CONFIGURATIONS,
-      effects: effectsFixture(),
-      now: new Date("2026-09-21T00:00:00Z"),
-    });
-    expect(record.cloudflare_ranges).toMatchObject({
-      fetched: "2026-09-21",
-      ipv4: PUBLISHED.ipv4,
-      ipv6: PUBLISHED.ipv6,
-    });
-    expect(record.origin_certificate).toMatchObject({
-      not_after: CERTIFICATE_EXPIRY,
-      recorded: "2026-09-21",
-    });
-    expect(reads).toEqual({ publishedRanges: true, originCertificate: true });
+describe("the aws boundary", () => {
+  const inheritedPath = process.env.PATH;
+  let stubDirectory;
+
+  beforeEach(() => {
+    stubDirectory = mkdtempSync(join(tmpdir(), "psilink-aws-stub-"));
   });
 
-  it("keeps the recorded expiry when the account is unreadable", async () => {
-    const { record, lines, reads } = await recordOrigin({
-      record: recordFixture(),
-      configurations: CONFIGURATIONS,
-      effects: effectsFixture({
-        readOriginCertificate: async () => {
-          throw new Error("no credentials");
-        },
+  afterEach(() => {
+    process.env.PATH = inheritedPath;
+    rmSync(stubDirectory, { recursive: true, force: true });
+  });
+
+  function stubAws(script) {
+    const executable = join(stubDirectory, "aws");
+    writeFileSync(executable, script, "utf8");
+    chmodSync(executable, 0o755);
+    process.env.PATH = `${stubDirectory}:${inheritedPath}`;
+  }
+
+  it("states the first line of a failing call's standard error", () => {
+    stubAws(
+      "#!/bin/sh\necho 'An error occurred (AccessDenied)' >&2\necho 'call the administrator' >&2\nexit 254\n",
+    );
+    expect(() => aws(["sts", "get-caller-identity"])).toThrow(
+      "An error occurred (AccessDenied)",
+    );
+  });
+
+  it("states what failed when a failing call writes no standard error", () => {
+    stubAws("#!/bin/sh\nexit 1\n");
+    expect(() => aws(["s3", "cp", "-"])).toThrow(/Command failed/);
+  });
+
+  it("states the bound when the call does not answer within it", () => {
+    stubAws("#!/bin/sh\nsleep 2\n");
+    expect(() =>
+      aws(["ec2", "describe-security-groups"], { timeoutMs: 250 }),
+    ).toThrow("the aws CLI did not answer within 0.25 seconds");
+  });
+
+  it("states that the CLI is not installed when the PATH holds none", () => {
+    process.env.PATH = stubDirectory;
+    expect(() => aws(["sts", "get-caller-identity"])).toThrow(
+      "the aws CLI is not installed",
+    );
+  });
+
+  it("reads the certificate from the bucket the account and region name", async () => {
+    stubAws(
+      '#!/bin/sh\ncase "$1" in\n  sts) echo 123456789012 ;;\n  s3) echo "$3" ;;\nesac\n',
+    );
+    expect(
+      await awsEffects.readOriginCertificate({ region: "us-west-2" }),
+    ).toBe(
+      `s3://${CERTIFICATE_BUCKET_PREFIX}-us-west-2-123456789012/${CERTIFICATE_KEY}\n`,
+    );
+  });
+
+  it("takes the described group, and refuses an answer describing none", async () => {
+    stubAws(
+      '#!/bin/sh\necho \'{"SecurityGroups":[{"GroupId":"sg-shared"}]}\'\n',
+    );
+    expect(
+      await awsEffects.describeSecurityGroup({
+        region: "us-west-2",
+        groupId: "sg-shared",
       }),
-      now: new Date("2026-09-21T00:00:00Z"),
-    });
-    expect(record.origin_certificate.recorded).toBe("2026-09-17");
-    expect(lines.join("\n")).toContain("Kept the recorded certificate expiry");
-    expect(reads).toEqual({ publishedRanges: true, originCertificate: false });
+    ).toEqual({ GroupId: "sg-shared" });
+    stubAws("#!/bin/sh\necho '{\"SecurityGroups\":[]}'\n");
+    await expect(
+      awsEffects.describeSecurityGroup({
+        region: "us-west-2",
+        groupId: "sg-shared",
+      }),
+    ).rejects.toThrow("the account describes no such group");
   });
 });
 

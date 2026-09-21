@@ -7,12 +7,15 @@
 // The account is read through the `aws` CLI, as the refresh procedure and the
 // prebuild certificate hook are. Nothing here prints the account id or the
 // deployment bucket; an AWS CLI error passed through can name either.
+//
+// Nothing here writes: a run that finds a difference prints the record to
+// paste, and the operator commits it.
 
-import { readFileSync, writeFileSync } from "node:fs";
 import { X509Certificate } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { isIP } from "node:net";
+import { readFileSync } from "node:fs";
 
 /** Every comparison ran and agreed. */
 export const EXIT_AGREES = 0;
@@ -20,7 +23,7 @@ export const EXIT_AGREES = 0;
 /** A comparison ran and found a difference. */
 export const EXIT_DRIFTED = 1;
 
-/** A comparison could not run: the account, the published list, or a record. */
+/** A comparison could not run: the account or a published list was unread. */
 export const EXIT_UNCHECKED = 2;
 
 /** How close to expiry the certificate may come before a run fails. */
@@ -271,16 +274,17 @@ export function ingressOfGroup(group) {
 }
 
 /**
- * Returns the published ranges no rule admits, and the reverse, comparing the
- * ranges as addresses and naming each one as the side that states it spells it.
+ * Returns the expected ranges no rule admits, and the admitted ranges the
+ * expected list does not state, comparing the ranges as addresses and naming
+ * each one as the side that states it spells it.
  */
-export function rangeVerdict({ published, admitted }) {
+export function rangeVerdict({ expected, admitted }) {
   const byAddress = (cidrs) => {
     const ranges = new Map();
     for (const cidr of cidrs) ranges.set(canonicalOrThrow(cidr), cidr);
     return ranges;
   };
-  const publishedRanges = byAddress(published);
+  const expectedRanges = byAddress(expected);
   const admittedRanges = byAddress(admitted);
   const statedBy = (ranges, other) =>
     [...ranges]
@@ -288,8 +292,8 @@ export function rangeVerdict({ published, admitted }) {
       .map(([, cidr]) => cidr)
       .sort();
   return {
-    missing: statedBy(publishedRanges, admittedRanges),
-    unpublished: statedBy(admittedRanges, publishedRanges),
+    unadmitted: statedBy(expectedRanges, admittedRanges),
+    unstated: statedBy(admittedRanges, expectedRanges),
   };
 }
 
@@ -309,23 +313,32 @@ export function certificateExpiry(pem) {
   return notAfter;
 }
 
+/**
+ * Returns the expiry the record states, or undefined when it states none: a
+ * record the check cannot read is a difference from the account to report,
+ * not a comparison that could not run.
+ */
 function recordedExpiry(record) {
   const stated = record.origin_certificate?.not_after;
   const notAfter =
     typeof stated === "string" ? new Date(`${stated}T00:00:00Z`) : undefined;
   if (notAfter === undefined || Number.isNaN(notAfter.getTime()))
-    throw new Error(`${RECORD_FILE} records no origin certificate expiry`);
+    return undefined;
   return notAfter;
 }
 
-function recordedRanges(record) {
+/**
+ * Returns the range snapshot the record states: the date it was fetched, the
+ * ranges it holds, and the first of them that is no CIDR.
+ */
+function recordedSnapshot(record) {
   const ranges = record.cloudflare_ranges ?? {};
-  if (typeof ranges.fetched !== "string") return undefined;
-  const published = [...(ranges.ipv4 ?? []), ...(ranges.ipv6 ?? [])];
-  for (const cidr of published)
-    if (canonicalCidr(cidr) === undefined)
-      throw new Error(`${RECORD_FILE} records ${cidr}, which is no CIDR`);
-  return { fetched: ranges.fetched, published };
+  const stated = [...(ranges.ipv4 ?? []), ...(ranges.ipv6 ?? [])];
+  return {
+    fetched: typeof ranges.fetched === "string" ? ranges.fetched : undefined,
+    stated,
+    unreadable: stated.find((cidr) => canonicalCidr(cidr) === undefined),
+  };
 }
 
 function sameRanges(left, right) {
@@ -335,29 +348,34 @@ function sameRanges(left, right) {
 
 async function fetchPublishedRanges(record, effects) {
   const sources = record.cloudflare_ranges?.source ?? {};
-  const published = [];
+  const published = { ipv4: [], ipv6: [] };
   for (const family of ["ipv4", "ipv6"]) {
     const url = sources[family];
     if (typeof url !== "string")
       throw new Error(`${RECORD_FILE} records no ${family} source`);
-    published.push(...parsePublishedRanges(await effects.fetchText(url)));
+    published[family] = parsePublishedRanges(await effects.fetchText(url));
   }
-  return published;
+  return { ...published, all: [...published.ipv4, ...published.ipv6] };
+}
+
+function describeExpiry(notAfter, daysRemaining) {
+  return daysRemaining < 0
+    ? `it expired ${utcDate(notAfter)}, ${-daysRemaining} day(s) ago`
+    : `it expires ${utcDate(notAfter)}, ${daysRemaining} day(s) away`;
 }
 
 async function certificateLeg({ record, effects, region, now, marginDays }) {
   const lines = [];
   let notAfter;
-  let readLive = true;
-  let read = "the certificate the deployment bucket holds";
   try {
     notAfter = certificateExpiry(
       await effects.readOriginCertificate({ region }),
     );
   } catch (error) {
-    readLive = false;
-    notAfter = recordedExpiry(record);
-    read = `the expiry ${RECORD_FILE} records, the account being unreadable (${error.message})`;
+    lines.push(
+      `origin certificate: the certificate the deployment bucket holds could not be read (${error.message}), so nothing was compared.`,
+    );
+    return { lines, drifted: false, unchecked: true };
   }
   const { daysRemaining, withinMargin } = certificateVerdict({
     notAfter,
@@ -365,84 +383,55 @@ async function certificateLeg({ record, effects, region, now, marginDays }) {
     marginDays,
   });
   lines.push(
-    `origin certificate: compared ${read}; it expires ${utcDate(notAfter)}, ${daysRemaining} day(s) away.`,
+    `origin certificate: compared the certificate the deployment bucket holds; ${describeExpiry(notAfter, daysRemaining)}.`,
   );
-  if (!readLive)
-    lines.push(
-      "origin certificate: the deployed certificate itself was not read, so the recorded expiry alone was checked.",
-    );
-  let drifted = withinMargin;
   if (withinMargin)
     lines.push(
-      `origin certificate: inside the ${marginDays}-day margin. Issue a replacement and install it -- docs/DEPLOYMENT.md, "Reinstalling the origin certificate".`,
+      `origin certificate: ${daysRemaining < 0 ? "it has expired" : `inside the ${marginDays}-day margin`}. Issue a replacement and install it -- docs/DEPLOYMENT.md, "Reinstalling the origin certificate".`,
     );
-  if (readLive) {
-    const recorded = utcDate(recordedExpiry(record));
-    if (recorded !== utcDate(notAfter)) {
-      drifted = true;
-      lines.push(
-        `origin certificate: ${RECORD_FILE} records ${recorded}. Record the deployed expiry and commit it.`,
-      );
-    }
-  }
-  return { lines, drifted, unchecked: !readLive };
+  const recorded = recordedExpiry(record);
+  const differs =
+    recorded === undefined || utcDate(recorded) !== utcDate(notAfter);
+  if (recorded === undefined)
+    lines.push(`origin certificate: ${RECORD_FILE} records no expiry.`);
+  else if (differs)
+    lines.push(
+      `origin certificate: ${RECORD_FILE} records ${utcDate(recorded)}, not the expiry the deployment bucket holds.`,
+    );
+  return {
+    lines,
+    drifted: withinMargin || differs,
+    unchecked: false,
+    notAfter,
+    differs,
+  };
 }
 
 async function rangeLeg({ record, effects, region, groupId }) {
   const lines = [];
-  let drifted = false;
-  let unchecked = false;
-  let snapshot;
-  try {
-    snapshot = recordedRanges(record);
-  } catch (error) {
-    lines.push(
-      `port-443 ingress: ${error.message}, so no snapshot was compared. Run this script with --record and commit the result.`,
-    );
-    return { lines, drifted, unchecked: true };
-  }
   let published;
-  let read;
   try {
     published = await fetchPublishedRanges(record, effects);
-    read = "the list Cloudflare publishes";
-    if (snapshot === undefined) {
-      unchecked = true;
-      lines.push(
-        `port-443 ingress: ${RECORD_FILE} records no range snapshot to compare the published list against. Run this script with --record and commit the result.`,
-      );
-    } else if (!sameRanges(snapshot.published, published)) {
-      drifted = true;
-      lines.push(
-        `port-443 ingress: the snapshot ${RECORD_FILE} records, fetched ${snapshot.fetched}, differs from the published list. Run this script with --record and commit the result.`,
-      );
-    }
   } catch (error) {
-    if (snapshot === undefined) {
-      lines.push(
-        `port-443 ingress: the published list is unreadable (${error.message}) and ${RECORD_FILE} records no snapshot to compare against instead.`,
-      );
-      return { lines, drifted, unchecked: true };
-    }
-    unchecked = true;
-    published = snapshot.published;
-    read = `the snapshot ${RECORD_FILE} records, fetched ${snapshot.fetched}, the published list being unreadable (${error.message})`;
+    lines.push(
+      `port-443 ingress: the published ranges could not be read (${error.message}), so nothing was compared.`,
+    );
+    return { lines, drifted: false, unchecked: true };
   }
-
   let group;
   try {
     group = await effects.describeSecurityGroup({ region, groupId });
   } catch (error) {
     lines.push(
-      `port-443 ingress: security group ${groupId} is unreadable (${error.message}), so no rule was compared.`,
+      `port-443 ingress: security group ${groupId} could not be read (${error.message}), so no rule was compared.`,
     );
-    return { lines, drifted, unchecked: true };
+    return { lines, drifted: false, unchecked: true };
   }
-
   const { admitted, unexpected, unreadable } = ingressOfGroup(group);
-  const { missing, unpublished } = rangeVerdict({ published, admitted });
+  let drifted = false;
+  let unchecked = false;
   lines.push(
-    `port-443 ingress: compared security group ${groupId} against ${read}; it admits ${admitted.length} range(s) on port 443.`,
+    `port-443 ingress: compared security group ${groupId} against the list Cloudflare publishes and against ${RECORD_FILE}; it admits ${admitted.length} range(s) on port 443.`,
   );
   for (const source of unreadable) {
     unchecked = true;
@@ -450,17 +439,42 @@ async function rangeLeg({ record, effects, region, groupId }) {
       `port-443 ingress: the group admits ${source}, which is no CIDR this check can compare.`,
     );
   }
-  for (const cidr of missing) {
+  const againstPublished = rangeVerdict({ expected: published.all, admitted });
+  for (const cidr of againstPublished.unadmitted) {
     drifted = true;
     lines.push(
       `port-443 ingress: ${cidr} is published and not admitted. Requests forwarded from it are dropped at the origin.`,
     );
   }
-  for (const cidr of unpublished) {
+  for (const cidr of againstPublished.unstated) {
     drifted = true;
     lines.push(
       `port-443 ingress: ${cidr} is admitted and not published. It reaches the origin past the edge.`,
     );
+  }
+  const snapshot = recordedSnapshot(record);
+  let differs = true;
+  if (snapshot.fetched === undefined || snapshot.stated.length === 0)
+    lines.push(`port-443 ingress: ${RECORD_FILE} records no range snapshot.`);
+  else if (snapshot.unreadable !== undefined)
+    lines.push(
+      `port-443 ingress: ${RECORD_FILE} records ${snapshot.unreadable}, which is no CIDR this check can compare.`,
+    );
+  else {
+    const againstRecord = rangeVerdict({ expected: snapshot.stated, admitted });
+    for (const cidr of againstRecord.unadmitted) {
+      drifted = true;
+      lines.push(`port-443 ingress: ${cidr} is recorded and not admitted.`);
+    }
+    for (const cidr of againstRecord.unstated) {
+      drifted = true;
+      lines.push(`port-443 ingress: ${cidr} is admitted and not recorded.`);
+    }
+    differs = !sameRanges(snapshot.stated, published.all);
+    if (differs)
+      lines.push(
+        `port-443 ingress: the snapshot ${RECORD_FILE} records, fetched ${snapshot.fetched}, is not the list Cloudflare publishes now.`,
+      );
   }
   for (const rule of unexpected) {
     drifted = true;
@@ -468,7 +482,38 @@ async function rangeLeg({ record, effects, region, groupId }) {
       `port-443 ingress: the group admits ${rule}, which the recorded posture has none of.`,
     );
   }
-  return { lines, drifted, unchecked };
+  return {
+    lines,
+    drifted: drifted || differs,
+    unchecked,
+    published,
+    differs,
+  };
+}
+
+/**
+ * Returns the record as the run would have it: the values it read from the
+ * account and from Cloudflare, under today's date, with the sources the
+ * record already states.
+ */
+function recordToPaste({ record, notAfter, published, now }) {
+  return JSON.stringify(
+    {
+      origin_certificate: {
+        not_after: utcDate(notAfter),
+        recorded: utcDate(now),
+        source: `read from the deployment bucket's ${CERTIFICATE_KEY}`,
+      },
+      cloudflare_ranges: {
+        fetched: utcDate(now),
+        source: record.cloudflare_ranges?.source ?? {},
+        ipv4: published.ipv4,
+        ipv6: published.ipv6,
+      },
+    },
+    null,
+    2,
+  );
 }
 
 /**
@@ -484,75 +529,41 @@ export async function checkOriginDrift({
 }) {
   const region = regionOf(configurations);
   const groupId = sharedSecurityGroupId(configurations);
-  const legs = [
-    await certificateLeg({ record, effects, region, now, marginDays }),
-    await rangeLeg({ record, effects, region, groupId }),
-  ];
-  const lines = legs.flatMap((leg) => leg.lines);
-  const drifted = legs.some((leg) => leg.drifted);
-  const unchecked = legs.some((leg) => leg.unchecked);
-  if (drifted && unchecked)
-    lines.push("A comparison found a difference, and another could not run.");
+  const certificate = await certificateLeg({
+    record,
+    effects,
+    region,
+    now,
+    marginDays,
+  });
+  const range = await rangeLeg({ record, effects, region, groupId });
+  const lines = [...certificate.lines, ...range.lines];
+  const drifted = certificate.drifted || range.drifted;
+  const unchecked = certificate.unchecked || range.unchecked;
+  if (
+    (certificate.differs || range.differs) &&
+    certificate.notAfter !== undefined &&
+    range.published !== undefined
+  )
+    lines.push(
+      `Paste this into ${RECORD_FILE} and commit it:`,
+      recordToPaste({
+        record,
+        notAfter: certificate.notAfter,
+        published: range.published,
+        now,
+      }),
+    );
+  if (drifted) lines.push("A comparison found a difference.");
   else if (unchecked)
     lines.push(
       "A comparison could not run, so this run does not state that the values agree.",
     );
-  else if (!drifted)
-    lines.push("Both comparisons ran and agreed with the recorded values.");
+  else lines.push("Both comparisons ran and agreed with the recorded values.");
   return {
     lines,
     exitCode: drifted ? EXIT_DRIFTED : unchecked ? EXIT_UNCHECKED : EXIT_AGREES,
   };
-}
-
-/**
- * Returns the record with the values this run could read -- the published
- * ranges under today's date, and the deployed certificate's expiry when the
- * account answers -- along with which of those reads succeeded. What it could
- * not read it leaves as recorded.
- */
-export async function recordOrigin({ record, configurations, effects, now }) {
-  const updated = structuredClone(record);
-  const lines = [];
-  const reads = { publishedRanges: false, originCertificate: false };
-  const published = { ipv4: [], ipv6: [] };
-  const sources = record.cloudflare_ranges?.source ?? {};
-  for (const family of ["ipv4", "ipv6"]) {
-    const url = sources[family];
-    if (typeof url !== "string")
-      throw new Error(`${RECORD_FILE} records no ${family} source`);
-    published[family] = parsePublishedRanges(await effects.fetchText(url));
-  }
-  reads.publishedRanges = true;
-  updated.cloudflare_ranges = {
-    ...updated.cloudflare_ranges,
-    fetched: utcDate(now),
-    ipv4: published.ipv4,
-    ipv6: published.ipv6,
-  };
-  lines.push(
-    `Recorded ${published.ipv4.length} IPv4 and ${published.ipv6.length} IPv6 published ranges, fetched ${utcDate(now)}.`,
-  );
-  try {
-    const region = regionOf(configurations);
-    const notAfter = certificateExpiry(
-      await effects.readOriginCertificate({ region }),
-    );
-    updated.origin_certificate = {
-      not_after: utcDate(notAfter),
-      recorded: utcDate(now),
-      source: `read from the deployment bucket's ${CERTIFICATE_KEY}`,
-    };
-    reads.originCertificate = true;
-    lines.push(
-      `Recorded the deployed certificate's expiry, ${utcDate(notAfter)}.`,
-    );
-  } catch (error) {
-    lines.push(
-      `Kept the recorded certificate expiry: the account is unreadable (${error.message}).`,
-    );
-  }
-  return { record: updated, lines, reads };
 }
 
 function awsFailure(error) {
@@ -560,12 +571,17 @@ function awsFailure(error) {
   return stderr.length > 0 ? stderr.split("\n")[0] : error.message;
 }
 
-function aws(args) {
+/**
+ * Runs one `aws` call and returns its standard output, mapping every way the
+ * call can fail onto a reason a printed line can state. Exported so a test can
+ * drive it against a stub executable under a timeout short enough to wait for.
+ */
+export function aws(args, { timeoutMs = AWS_TIMEOUT_MS } = {}) {
   try {
     return execFileSync("aws", args, {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
-      timeout: AWS_TIMEOUT_MS,
+      timeout: timeoutMs,
       maxBuffer: 8 * 1024 * 1024,
     });
   } catch (error) {
@@ -573,13 +589,14 @@ function aws(args) {
       throw new Error("the aws CLI is not installed");
     if (error.code === "ETIMEDOUT")
       throw new Error(
-        `the aws CLI did not answer within ${AWS_TIMEOUT_MS / 1000} seconds`,
+        `the aws CLI did not answer within ${timeoutMs / 1000} seconds`,
       );
     throw new Error(awsFailure(error));
   }
 }
 
-const awsEffects = {
+/** Reads the account and the published lists the check compares against. */
+export const awsEffects = {
   async fetchText(url) {
     let response;
     try {
@@ -633,10 +650,9 @@ function readJson(url) {
 }
 
 function parseArguments(argv) {
-  const options = { record: false, marginDays: DEFAULT_MARGIN_DAYS };
+  const options = { marginDays: DEFAULT_MARGIN_DAYS };
   for (let index = 0; index < argv.length; index += 1) {
-    if (argv[index] === "--record") options.record = true;
-    else if (argv[index] === "--margin-days") {
+    if (argv[index] === "--margin-days") {
       const days = Number(argv[index + 1]);
       if (!Number.isInteger(days) || days < 0)
         throw new Error("--margin-days takes a whole number of days");
@@ -649,40 +665,21 @@ function parseArguments(argv) {
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const here = new URL(".", import.meta.url);
-  const recordUrl = new URL(RECORD_FILE, here);
   try {
     const options = parseArguments(process.argv.slice(2));
-    const record = readJson(recordUrl);
+    const record = readJson(new URL(RECORD_FILE, here));
     const configurations = CONFIGURATION_FILES.map((file) =>
       readJson(new URL(file, here)),
     );
-    const now = new Date();
-    if (options.record) {
-      const recorded = await recordOrigin({
-        record,
-        configurations,
-        effects: awsEffects,
-        now,
-      });
-      writeFileSync(
-        recordUrl,
-        `${JSON.stringify(recorded.record, null, 2)}\n`,
-        "utf8",
-      );
-      process.stdout.write(`${recorded.lines.join("\n")}\n`);
-      if (Object.values(recorded.reads).some((succeeded) => !succeeded))
-        process.exitCode = EXIT_UNCHECKED;
-    } else {
-      const { lines, exitCode } = await checkOriginDrift({
-        record,
-        configurations,
-        effects: awsEffects,
-        now,
-        marginDays: options.marginDays,
-      });
-      process.stdout.write(`${lines.join("\n")}\n`);
-      process.exitCode = exitCode;
-    }
+    const { lines, exitCode } = await checkOriginDrift({
+      record,
+      configurations,
+      effects: awsEffects,
+      now: new Date(),
+      marginDays: options.marginDays,
+    });
+    process.stdout.write(`${lines.join("\n")}\n`);
+    process.exitCode = exitCode;
   } catch (error) {
     process.stderr.write(`check-origin-drift.mjs: ${error.message}\n`);
     process.exitCode = EXIT_UNCHECKED;
