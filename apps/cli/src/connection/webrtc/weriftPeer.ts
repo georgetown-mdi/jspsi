@@ -331,8 +331,10 @@ export const WEBRTC_BROKER_PATH_REFUSED =
  * here -- an operator's `psilink.yaml` and the invitation endpoint an offline
  * accept persists -- can hold a partner-supplied value. The rule is core's
  * {@link authorityMovingSignalingField}, shared with the browser acceptor so
- * one locator is refused by both; the refused characters and both routes are
- * recorded in docs/spec/WEBRTC_TRANSPORT.md.
+ * both refuse the same delimiters; the CLI additionally requires a bare
+ * authority (no port or path in the host), which the browser does not check.
+ * The refused characters and both routes are recorded in
+ * docs/spec/WEBRTC_TRANSPORT.md.
  * `key` needs no equivalent refusal: it cannot appear on an invitation
  * endpoint and is encoded as a query parameter.
  *
