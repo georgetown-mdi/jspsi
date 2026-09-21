@@ -833,6 +833,16 @@ export const MAX_STANDARDIZATION_TRANSFORMATIONS = 4096;
  */
 export const MAX_STANDARDIZATION_STEPS = 256;
 
+/**
+ * Upper bound on the code units of a `csvDelimiter` value, applied before core's
+ * resolution of the words a party may write runs over it. The longest value that
+ * resolution accepts is the reserved `detect` word -- six characters, beside the
+ * `tab` and `\t` spellings and the single character itself -- and the rest of the
+ * bound is room for the whitespace the resolution trims, so every spelling a
+ * hand-authored configuration admits is admitted here too.
+ */
+export const MAX_CSV_DELIMITER_LENGTH = 32;
+
 // The size bounds below apply to both union arms through the shared common
 // fields. Each `standardization` step's `params` (a Record<string, unknown>)
 // is unbounded by nature and left uncapped here; the boundary byte cap
@@ -949,9 +959,15 @@ const jobInputFileReferenceSchema: z.ZodType<JobInputFileReference> = z
  * The refusal names the field, so a client that sends one the grade rejects
  * learns which value to correct rather than that its body was rejected. The
  * value itself is never echoed -- core's refusal states its shape.
+ *
+ * Bounded at {@link MAX_CSV_DELIMITER_LENGTH} code units ahead of the
+ * resolution, the way every other bounded string on this surface is, so an
+ * unbounded value is refused on its length rather than trimmed and lowercased
+ * on its way to a grade only one character can pass.
  */
 export const jobCsvDelimiterSchema: z.ZodType<string> = z
   .string()
+  .check(maxCodeUnits(MAX_CSV_DELIMITER_LENGTH))
   .transform(normalizeCsvDelimiter)
   .superRefine((value, ctx) => {
     if (isCsvDelimiterChoice(value)) return;

@@ -1352,6 +1352,7 @@ export function InviterScreen() {
                 : undefined
             }
             onCommit={commitConsoleFile}
+            onInvalidate={() => dispatch({ type: "console-file-voided" })}
             onContinue={() => {
               if (fileReady) goTo("columns");
             }}

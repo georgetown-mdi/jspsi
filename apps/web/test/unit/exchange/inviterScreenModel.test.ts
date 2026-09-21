@@ -371,6 +371,29 @@ describe("the console's mounted-file commit", () => {
     columnSamples: new Map(),
   };
 
+  test("a delimiter change voids the commit and the draft it seeded", () => {
+    const named = inviterScreenReducer(INVITER_SCREEN_INITIAL, {
+      type: "name-changed",
+      name: "Dana Okafor",
+    });
+    const committed = inviterScreenReducer(named, {
+      type: "console-file-seeded",
+      source: PROFILE,
+      acquired: csv,
+      editor: editorFromCsv("Dana Okafor", csv),
+    });
+    const voided = inviterScreenReducer(committed, {
+      type: "console-file-voided",
+    });
+    expect(voided.consoleSource).toBeUndefined();
+    // Step 1's Continue reads `acquired` and the invitation's terms come out of
+    // the editor, so both go with the columns the previous delimiter read.
+    expect(voided.acquired).toBeUndefined();
+    expect(voided.editor).toBeUndefined();
+    // The name is the operator's own, not read from the file: it stands.
+    expect(voided.name).toBe("Dana Okafor");
+  });
+
   test("two consecutive refusals do not share an alert reference", () => {
     expect(unmatchableFileAlert()).not.toBe(unmatchableFileAlert());
     const first = inviterScreenReducer(INVITER_SCREEN_INITIAL, {

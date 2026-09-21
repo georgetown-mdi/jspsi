@@ -131,6 +131,9 @@ const TAB_COLUMNS = ["ssn", "last_name"];
 
 const COMMA = resolveCsvDelimiter({ option: ",", other: "" });
 const TAB = resolveCsvDelimiter({ option: "\t", other: "" });
+// What the control resolves to while the operator is part-way through typing one
+// of their own: no delimiter at all, so nothing is profiled by it.
+const REFUSED = resolveCsvDelimiter({ option: "other", other: "" });
 
 const profileRequests: Array<{ name: string; delimiter: string | null }> = [];
 
@@ -177,15 +180,21 @@ function findProp<T>(node: unknown, name: string): T | undefined {
   return findProp<T>(props.children, name);
 }
 
+/** A stable callback for the renders whose subject is not the invalidation, so a
+ * re-render does not change the effect's dependencies. */
+const NO_INVALIDATE = () => {};
+
 function renderPicker(options: {
   committed?: WorkInputReference;
   delimiter: CsvDelimiterResolution;
+  onInvalidate?: () => void;
 }): unknown {
   return reactHarness.render(() =>
     ServerFilePicker({
       committed: options.committed,
       delimiter: options.delimiter,
       onUse: () => {},
+      onInvalidate: options.onInvalidate ?? NO_INVALIDATE,
     }),
   );
 }
@@ -281,5 +290,65 @@ describe("the delimiter change re-profiles the file on screen", () => {
     renderPicker({ delimiter: TAB });
     await settle();
     expect(profileRequests).toEqual([]);
+  });
+});
+
+describe("the delimiter change voids the commit it was not read by", () => {
+  test("the parent is told the committed file is no longer usable", async () => {
+    const committed: WorkInputReference = { name: "a.csv" };
+    const onInvalidate = vi.fn();
+    renderPicker({ committed, delimiter: COMMA, onInvalidate });
+    await settle();
+    expect(onInvalidate).not.toHaveBeenCalled();
+
+    renderPicker({ committed, delimiter: TAB, onInvalidate });
+    await settle();
+    // The committed columns are this party's linkage terms, and the run reads
+    // the file by the new choice: the second confirmation is the whole point of
+    // re-profiling, so the commit cannot outlive the delimiter that made it.
+    expect(onInvalidate).toHaveBeenCalledTimes(1);
+  });
+
+  test("a file open at the confirm stage voids the commit behind it", async () => {
+    const committed: WorkInputReference = { name: "a.csv" };
+    const onInvalidate = vi.fn();
+    renderPicker({ committed, delimiter: COMMA, onInvalidate });
+    await settle();
+    const listing = renderPicker({ committed, delimiter: COMMA, onInvalidate });
+    findProp<(name: string) => void>(listing, "onSelect")?.("b.csv");
+    await settle();
+
+    renderPicker({ committed, delimiter: TAB, onInvalidate });
+    await settle();
+    expect(onInvalidate).toHaveBeenCalledTimes(1);
+  });
+
+  test("nothing is voided with no file committed", async () => {
+    const onInvalidate = vi.fn();
+    renderPicker({ delimiter: COMMA, onInvalidate });
+    await settle();
+
+    renderPicker({ delimiter: TAB, onInvalidate });
+    await settle();
+    expect(onInvalidate).not.toHaveBeenCalled();
+  });
+
+  test("a refused choice profiles nothing and voids nothing", async () => {
+    const committed: WorkInputReference = { name: "a.csv" };
+    const onInvalidate = vi.fn();
+    renderPicker({ committed, delimiter: COMMA, onInvalidate });
+    await settle();
+
+    renderPicker({ committed, delimiter: REFUSED, onInvalidate });
+    await settle();
+    // Half a typed delimiter is refused on the way to the one the operator
+    // means: the parent's own gate is closed on the refusal meanwhile, and the
+    // commit is voided when the choice resolves into a delimiter to read by.
+    expect(profileRequests).toEqual([]);
+    expect(onInvalidate).not.toHaveBeenCalled();
+
+    renderPicker({ committed, delimiter: TAB, onInvalidate });
+    await settle();
+    expect(onInvalidate).toHaveBeenCalledTimes(1);
   });
 });

@@ -501,6 +501,27 @@ describe("the console's mounted-file commit", () => {
     ]);
   });
 
+  test("a delimiter change voids the commit and the columns it seeded", () => {
+    const committed = acceptorScreenReducer(ACCEPTOR_SCREEN_INITIAL, {
+      type: "console-file-committed",
+      source: PROFILE,
+    });
+    const gatePassed = acceptorScreenReducer(committed, {
+      type: "console-accept-committed",
+      name: "Ida Mensah",
+      acquired: csv,
+    });
+    const voided = acceptorScreenReducer(gatePassed, {
+      type: "console-file-voided",
+    });
+    // "Accept and continue" reads `consoleSource`, so it refuses again until the
+    // operator confirms the file the new delimiter reads.
+    expect(voided.consoleSource).toBeUndefined();
+    expect(voided.columnsState).toBeUndefined();
+    expect(voided.acquired).toBeUndefined();
+    expect(voided.sanitizedColumnPositions).toEqual([]);
+  });
+
   test("a commit clears the refusal the last one left", () => {
     const refused = acceptorScreenReducer(ACCEPTOR_SCREEN_INITIAL, {
       type: "unnameable-columns-refused",

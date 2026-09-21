@@ -1300,6 +1300,7 @@ export function AcceptorScreen() {
                   }
                   delimiter={delimiterResolution}
                   onUse={commitConsoleAcceptFile}
+                  onInvalidate={() => dispatch({ type: "console-file-voided" })}
                 />
               </>
             ) : (

@@ -26,6 +26,7 @@ import {
 
 import {
   JOB_FILE_NAMES,
+  MAX_CSV_DELIMITER_LENGTH,
   MAX_EXPECTED_PAYLOAD_COLUMNS,
   MAX_IDENTITY_LENGTH,
   MAX_INPUT_CSV_LENGTH,
@@ -503,6 +504,25 @@ describe("jobExchangeIntentSchema admits the party's own field delimiter", () =>
       // rule, and this boundary adds only the field name.
       expect(issue?.message).not.toContain(`"${refused}"`);
     }
+  });
+
+  test("rejects a value past the field's bound, at the field's path", () => {
+    // A padded spelling the resolution accepts, at the bound and one code unit
+    // over it: what refuses the second is the bound, not the accepted set.
+    const padding = MAX_CSV_DELIMITER_LENGTH - "detect".length;
+    expect(
+      jobExchangeIntentSchema.safeParse(
+        validIntent({ csvDelimiter: " ".repeat(padding) + "detect" }),
+      ).success,
+    ).toBe(true);
+    const parsed = jobExchangeIntentSchema.safeParse(
+      validIntent({ csvDelimiter: " ".repeat(padding + 1) + "detect" }),
+    );
+    expect(parsed.success).toBe(false);
+    const paths = parsed.success
+      ? []
+      : parsed.error.issues.map((issue) => issue.path);
+    expect(paths).toContainEqual(["csvDelimiter"]);
   });
 
   test("rejects it on the create route's own union too", () => {

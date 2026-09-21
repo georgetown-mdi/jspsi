@@ -45,7 +45,9 @@ const log = getLogger("YourFileSection");
  *
  * Both surfaces offer the delimiter control: the hosted build reads the dropped
  * file by it, and the console hands it to the picker, which profiles the mounted
- * file by it and passes it to the run the console composes.
+ * file by it and passes it to the run the console composes. Changing it voids a
+ * file already committed on the console, so Continue is withheld until the
+ * operator confirms the file the new choice reads.
  */
 export function YourFileSection({
   name,
@@ -60,6 +62,7 @@ export function YourFileSection({
   notice,
   committed,
   onCommit,
+  onInvalidate,
   onContinue,
   onLoadSample,
   onDownloadSamples,
@@ -88,6 +91,9 @@ export function YourFileSection({
   /** Commit a profiled console file to the host (the picker's "Use this file");
    * unused off the console. */
   onCommit?: (profile: ProfiledJobInput) => void;
+  /** Drop the committed console file and the terms derived from it: the delimiter
+   * moved, so its columns are not the ones the run reads. Unused off the console. */
+  onInvalidate?: () => void;
   onContinue: () => void;
   /** Seed the synthetic sample into this exchange in place. Hosted build only -- the
    * console cannot read an in-browser file, so its sample path is download-only. */
@@ -158,6 +164,7 @@ export function YourFileSection({
             committed={committed}
             delimiter={delimiterResolution}
             onUse={(profile) => onCommit?.(profile)}
+            onInvalidate={() => onInvalidate?.()}
           />
           {acquired === undefined && (
             <p className={`${styles.small} ${styles.sub}`}>
