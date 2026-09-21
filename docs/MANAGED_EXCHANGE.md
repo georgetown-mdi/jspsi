@@ -163,6 +163,32 @@ run windows](#the-schedule-and-its-run-windows) below; the record's closed
 field layout for them is in
 [MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md#the-schedule-object).
 
+### Incognito and Guest windows on Chrome 153 through 155
+
+**Do not create or open a recurring exchange in an Incognito or Guest window on
+Chrome 153 through 155.** Use an ordinary window. Opening a saved exchange in
+one of those windows stops the browser itself, closing every window open in
+it -- the other sites' windows included, not just this one.
+
+- **The cause is a browser defect**, not a limit of this application. An
+  Incognito or Guest window holds browser storage in memory, and on those
+  versions reading a stored file pointer back out of memory-held storage
+  terminates the browser process
+  ([crbug 562119515](https://issues.chromium.org/issues/562119515)). Opening a
+  saved exchange is exactly that read: the record keeps a pointer to the input
+  file rather than a copy (see [The input file each
+  run](#the-input-file-each-run)). Chromium 156.0.8064.0 is the first fixed
+  build.
+- **Ordinary windows and the installed app are unaffected**, on every version.
+  Their storage is on disk, and an installed app does not run in an Incognito
+  or Guest profile.
+- **The application cannot warn you before it happens.** No browser interface
+  reports that a window is Incognito or Guest, and a page cannot catch the
+  browser stopping underneath it.
+
+This limit is removed once Chromium 156, or a 154 build holding the fix, is the
+stable channel.
+
 ## Installing the app
 
 The hosted application is installable: it ships a complete web manifest and an
