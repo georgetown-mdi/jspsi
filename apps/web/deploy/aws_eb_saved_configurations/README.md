@@ -1,6 +1,6 @@
 # Elastic Beanstalk saved configurations
 
-This directory holds an exported configuration of each environment of the project's hosted web deployment, one file per environment, so a setting that drifts from what the deployment and assurance documents claim shows up in a diff. The procedure that refreshes and applies these files -- and the settings recorded as prose because no export carries them -- is in [docs/DEPLOYMENT.md](../../../../docs/DEPLOYMENT.md#the-projects-hosted-web-deployment).
+This directory holds an exported configuration of each environment of the project's hosted web deployment, one file per environment, so a setting that drifts from what the deployment and assurance documents claim shows up in a diff. Beside them it holds the two origin values no export carries -- the certificate expiry and Cloudflare's published ranges -- and the check that compares those against the account. The procedure that refreshes and applies these files -- and the settings recorded as prose because no export carries them -- is in [docs/DEPLOYMENT.md](../../../../docs/DEPLOYMENT.md#the-projects-hosted-web-deployment).
 
 It sits beside `aws_eb/` rather than inside it because that tree is the deployed payload: the packaging step in [`eb_build_and_test.yaml`](../../../../.github/workflows/eb_build_and_test.yaml) copies all of it into the application bundle, and [`eb_deploy.yaml`](../../../../.github/workflows/eb_deploy.yaml) redeploys the environment on a push that touches it. A configuration export belongs to neither: nothing on the instance reads it, and re-exporting it is not a reason to redeploy the application.
 
@@ -55,7 +55,36 @@ A security-group rule created or removed by an `authorize-security-group-ingress
 - **`:443` from Cloudflare's ranges only.** That rule lives in a security group the platform did not create, shared by both environments, so its rule list is not an option setting of either environment. What the configuration can carry is the attachment of that group to the instances (`SecurityGroups`, same namespace). The rule's contents stay recorded as values in `docs/DEPLOYMENT.md`; applying them from the repository is the later infrastructure-as-code step.
 - **No inbound `:80`.** Which option setting, if any, expresses that on a single-instance environment is unrecorded; the committed files are where to read it.
 
-Cloudflare publishes its ranges as a list that changes, and nothing reconciles the rule against it. A range Cloudflare adds is dropped at the origin, which shows as an intermittent edge error rather than as an outage.
+Cloudflare publishes its ranges as a list that changes, and a range it adds is dropped at the origin, which shows as an intermittent edge error rather than as an outage. Reconciling the rule against the published list is what the check below does.
+
+## Checking the origin certificate and the Cloudflare ranges
+
+Two values decide whether the origin keeps answering the edge, and neither is an option setting: the origin certificate's expiry -- an expired certificate answers Full (strict) with a 526 on both public names -- and the port-443 rule list against Cloudflare's published ranges. `check-origin-drift.mjs` compares both:
+
+```sh
+node check-origin-drift.mjs            # compare, using a 30-day expiry margin
+node check-origin-drift.mjs --margin-days 60
+node check-origin-drift.mjs --record   # rewrite the recorded values below
+```
+
+| Exit | What it means                                                                            |
+| ---- | ---------------------------------------------------------------------------------------- |
+| 0    | Both comparisons ran and agreed                                                            |
+| 1    | A comparison found a difference: the certificate is inside the margin, or a rule differs    |
+| 2    | A comparison could not run -- no credentials, no route to `cloudflare.com`, or no record    |
+
+It reads the account through the `aws` CLI, as the refresh commands above do, so it runs from a machine holding read credentials for the account: `sts:GetCallerIdentity`, `s3:GetObject` on the deployment bucket's `cert/` prefix, and `ec2:DescribeSecurityGroups`. No CI job and no development container holds those, so the run is the maintainer's; the cadence and what to do about each result are in [docs/DEPLOYMENT.md](../../../../docs/DEPLOYMENT.md#checking-for-certificate-and-range-drift). The script prints no account id and no bucket name of its own, but an AWS CLI error it passes through can name either.
+
+What it reads comes from the committed files beside it rather than from a typed-in identifier: the one security group both environments attach is the shared group that carries the port-443 rule, and the region is the one their ARNs state. The certificate is the object `.platform/hooks/prebuild/download_certificates.sh` installs on the instance, read from the same bucket and key.
+
+## The recorded values
+
+`recorded-origin.json` is what the check compares against when the account or `cloudflare.com` is unreachable, and what a reviewer reads a drift out of a diff from:
+
+- `origin_certificate` -- the expiry of the certificate the origin serves, and when that was recorded. A run that reads the account compares the deployed certificate against this date as well as against the margin, so a replacement installed without a commit here fails the check.
+- `cloudflare_ranges` -- the two published lists, the date they were fetched, and the URLs they were fetched from. `fetched: null` states that no snapshot has been taken yet: until one is, a run with no route to `cloudflare.com` has nothing to compare the rules against and exits 2.
+
+`--record` fetches both lists, writes them under the run's date, and takes the deployed certificate's expiry when the account answers. Commit the result: the diff is the record of what Cloudflare changed.
 
 ## The verification this directory still needs
 
