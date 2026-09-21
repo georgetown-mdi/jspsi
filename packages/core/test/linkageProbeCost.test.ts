@@ -29,8 +29,8 @@ import { getDefaultLinkageTerms } from "../src/defaults/builtInLinkageTerms";
 
 const compileStepsSpy = vi.mocked(compileSteps);
 
-/** Every step handed to `compileSteps` since the last reset, however many calls
- * carried them. The walk compiles one step per call and the tail reading a whole
+/** Every step handed to `compileSteps` since the last reset, across however
+ * many calls. The walk compiles one step per call and the tail reading a whole
  * slice, so the steps rather than the calls are what the cost is counted in. */
 const stepsCompiled = (): number =>
   compileStepsSpy.mock.calls.reduce(

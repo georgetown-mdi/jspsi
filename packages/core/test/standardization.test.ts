@@ -1320,7 +1320,7 @@ describe("buildKeyStrings: NFC normalization of the assembled key", () => {
 describe("buildKeyStrings: element-transform compilation reused across rows", () => {
   // afterEach restores the compileLinearRegex spy even after a test throws
   // mid-body: a skipped per-test restore would leave a stale spy whose call
-  // count carries into the next test, inflating its assertion and masking a
+  // count persists into the next test, inflating its assertion and masking a
   // real regression instead of a clean independent failure.
   afterEach(() => vi.restoreAllMocks());
 
@@ -4435,7 +4435,7 @@ describe("resolveFieldColumns", () => {
 
   test("an explicit standardization naming an ignored column does not bind it into linkage", () => {
     // role: ignored wins over a contradictory explicit transform -- the field
-    // resolves to no column (surfacing as unsatisfiable) rather than silently
+    // resolves to no column (reported as unsatisfiable) rather than silently
     // linking a column the operator marked excluded. Without this, the explicit
     // binding (rule 1) would bypass the type-fallback ignored guard.
     const resolution = resolveFieldColumns(

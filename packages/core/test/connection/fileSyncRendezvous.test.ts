@@ -914,7 +914,7 @@ describe("FileSyncRendezvous identity reset per rejected path", () => {
 describe("FileSyncRendezvous mismatch skip-sweep", () => {
   test("leaves this party's own hello but removes a peer lock on mismatch", async () => {
     const files = new Map<string, Buffer>();
-    // Lock present + a lockless peer hello, both surfacing only after entry: the
+    // Lock present + a lockless peer hello, both appearing only after entry: the
     // lock-detection branch reaches the bilateral check, which deletes the peer
     // lock and then throws, leaving both hellos as the terminal state.
     placePeerHello(files, "zzz", {
@@ -2400,7 +2400,7 @@ describe("FileSyncRendezvous entry temp disposition", () => {
 // --- bounded rendezvous hello read -------------------------------------------
 //
 // A hello body that never resolves must not hold the operator's whole peer
-// budget. The gate still tolerates a genuinely partial body -- that is what it
+// budget. The gate still tolerates a partial body -- that is what it
 // exists for -- so both halves are pinned: what resolves inside the bound is
 // waited for, what does not is terminal well before the TTL.
 

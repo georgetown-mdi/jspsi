@@ -806,7 +806,7 @@ describe("the consent summary's withheld-table register", () => {
 
   // Every case below reads the summary field the surfaces select on, and
   // holds the predicate behind it to the same answer, so a summary that
-  // stopped carrying the resolution fails here rather than at a renderer.
+  // stopped stating the resolution fails here rather than at a renderer.
   const withheld = (overrides: Partial<LinkageTerms>): boolean => {
     const terms = { ...WITHHOLDING_TERMS, ...overrides };
     const carried = summarizeInvitation({

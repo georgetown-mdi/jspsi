@@ -273,7 +273,7 @@ test("decodeInvitation rejects linkage terms holding an out-of-dialect transform
 });
 
 test("decodeInvitation refuses a transform pattern declared as an object", async () => {
-  // `{"toString": "x"}` is JSON, so a crafted token can carry it where a
+  // `{"toString": "x"}` is JSON, so a crafted token can include it where a
   // pattern belongs. Nothing on the decode path renders a declared pattern to
   // a string -- doing so would call an own `toString` the partner set to a
   // value that is not callable, and a TypeError is not the structured refusal
@@ -533,7 +533,7 @@ test("decodeInvitation refuses a transform param over the content bound", async 
 });
 
 test("decodeInvitation refuses a transform param declared as the wrong type", async () => {
-  // A param the step function reads as text is refused at the token decode, so
+  // A param the step function treats as text is refused at the token decode, so
   // an acceptor is never shown -- and never accepts -- terms whose step would
   // run as something other than what the screen states.
   const token = {

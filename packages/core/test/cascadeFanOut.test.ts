@@ -329,7 +329,7 @@ test("a swap key still matches a partner whose fields agree", async () => {
 
 // One key whose single element splits on a space, so the width the agreed terms
 // declare for it is the fan-out factor exactly and a cell of that many parts is
-// the worst case a round of it can carry. The fan-out rides the ELEMENT rather
+// the worst case a round of it can hold. The fan-out rides the ELEMENT rather
 // than the field pipeline, so this party's own standardization declares none and
 // its per-(record, key) bound is that width alone.
 const CAP_KEYS: LinkageTerms["linkageKeys"] = [
@@ -347,7 +347,7 @@ const CAP_KEYS: LinkageTerms["linkageKeys"] = [
 const CAP_TERMS = cascadeTerms(CAP_KEYS);
 const CAP_KEY_WIDTH = declaredKeyWidth(CAP_KEYS[0]);
 
-// The cells below carry the delimiter through to the element transform, so the
+// The cells below pass the delimiter through to the element transform, so the
 // default name pipeline's separator rewriting is replaced by a pass-through.
 const PASS_THROUGH: Standardization = [
   { output: "last_name", input: "last_name", steps: [] },
@@ -590,7 +590,7 @@ describe("each fuzzy comparison kind matches with both parties deduplicating", (
 });
 
 test("a swap key declaring both orders matches with both parties deduplicating", async () => {
-  // The candidate set the shipped default key set carries, under the both-sided
+  // The candidate set the shipped default key set produces, under the both-sided
   // pair: one party's record matches the partner whose fields are reversed and
   // the partner whose fields agree, so the two partner records fall in one
   // cluster with it.

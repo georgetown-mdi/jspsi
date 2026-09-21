@@ -79,7 +79,7 @@ export const PREFLIGHT_INVENTORY: Record<PreflightId, PreflightRow> = {
   linkageSatisfiability: {
     concern:
       "the agreed linkage keys cannot be satisfied by the columns this input " +
-      "carries, so the run would match nothing",
+      "holds, so the run would match nothing",
     weight: "refuses",
     console: {
       kind: "authored",
@@ -145,7 +145,7 @@ export const PREFLIGHT_INVENTORY: Record<PreflightId, PreflightRow> = {
     console: {
       kind: "authored",
       how:
-        "the connection tuning card carries the advisory beside the interval " +
+        "the connection tuning card shows the advisory beside the interval " +
         "field, against core's own threshold constant",
     },
   },
@@ -157,7 +157,7 @@ export const PREFLIGHT_INVENTORY: Record<PreflightId, PreflightRow> = {
     console: {
       kind: "authored",
       how:
-        "the connection tuning card carries the advisory beside the toggle, " +
+        "the connection tuning card shows the advisory beside the toggle, " +
         "against core's own threshold constant",
     },
   },
@@ -194,7 +194,7 @@ export const PREFLIGHT_INVENTORY: Record<PreflightId, PreflightRow> = {
     console: {
       kind: "unreachable",
       because:
-        "the appliance owns the key file's path -- a fixed name inside the " +
+        "the console owns the key file's path -- a fixed name inside the " +
         "job's own working directory -- so no operator-supplied path reaches " +
         "it, and the input listing excludes a dotfile by construction",
     },
@@ -215,7 +215,7 @@ export const PREFLIGHT_INVENTORY: Record<PreflightId, PreflightRow> = {
   identityDivergence: {
     concern:
       "the signing identity is bound to a party name that differs from the " +
-      "one the agreed linkage terms carry",
+      "one the agreed linkage terms state",
     weight: "refuses",
     console: {
       kind: "authored",
@@ -260,8 +260,8 @@ export const PREFLIGHT_INVENTORY: Record<PreflightId, PreflightRow> = {
     console: {
       kind: "pending",
       because:
-        "the console has no advance surface for that gate's verdict, and the " +
-        "seam for one is deliberately not built: it would have to run core's " +
+        "the console has no advance surface for that gate's verdict, and " +
+        "none is built by design: it would have to run core's " +
         "boundary against a composed run before there is a run to compose",
     },
   },

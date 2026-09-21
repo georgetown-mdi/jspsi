@@ -1099,7 +1099,7 @@ test.each([
   ["stuns:", false],
   ["stun: ", false],
   ["stun:?transport=udp", false],
-  // A quoted entry can carry padding; the host requirement is applied to the
+  // A quoted entry can include padding; the host requirement is applied to the
   // trimmed value, so the padding decides nothing.
   ["stun:stun.example.org:3478 ", true],
 ])('STUN URI "%s" is %s', (uri, valid) => {
@@ -1251,7 +1251,7 @@ test("a host-less TURN url is refused with the form it needs", () => {
 test("a padded TURN url names a host, and parses without its padding", () => {
   // Padding reaches the schema only from a quoted value. The host requirement
   // is applied to the trimmed value, and the trimmed value is what the
-  // connection holds, so the url that reaches the ICE layer never carries it.
+  // connection holds, so the url that reaches the ICE layer never includes it.
   const result = safeParseConnectionConfig({
     ...webrtcBase,
     turn: [

@@ -12,8 +12,8 @@ import {
 // Guards the vendored @openmined/psi.js native prebuild tarball against
 // silent drift. The sha256 sidecar (verified in CI before npm ci) proves
 // the bytes match the commit; this proves those bytes still mean what is
-// expected -- platform set, per-platform libc tagging, genuinely
-// musl-linked musl builds, and the glibc floor -- so a bad re-vendor fails
+// expected -- platform set, per-platform libc tagging, musl builds linked
+// against musl, and the glibc floor -- so a bad re-vendor fails
 // here instead of silently degrading to WASM. Contract lives in
 // ./vectors/psi-prebuild-manifest.json.
 

@@ -29,7 +29,7 @@
 // verbatim, so the captured `envelope.abortReasons` is also what the replay feeds
 // back in.
 //
-// `linkageTerms` is carried out of the frames into a `linkageTerms` section at the
+// `linkageTerms` is lifted out of the frames into a `linkageTerms` section at the
 // top and named per frame by party, so the terms document appears once rather than
 // once per frame. Nothing is lost: the consuming suite rebuilds each full frame
 // from `fields`, `envelope`, and `carriesLinkageTerms` and compares that against

@@ -969,7 +969,7 @@ const reasonLabel = (position: number): string =>
 const REASON_LINK = `\ncaused by: ${reasonLabel(1)}`;
 // The opening of the next reason packed on that same link: the escape's own
 // token for the line breaks the elimination places between two reasons, then
-// the label the second reason carries.
+// the label the second reason has.
 const PACKED_REASON = `\\x0a\\x0a${reasonLabel(2)}`;
 const BEGIN_MARKER = "-----BEGIN OPENSSH PRIVATE KEY-----";
 const END_MARKER = "-----END OPENSSH PRIVATE KEY-----";

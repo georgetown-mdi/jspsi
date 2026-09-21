@@ -114,7 +114,7 @@ test("the type refuses every form that composes a partner value into copy", () =
 
 // The measured edge of what the type refuses, held here so the module's stated
 // bound and the compiler cannot drift apart. TypeScript special-cases both
-// conversions -- neither carries an `@ts-expect-error`, so this case fails if a
+// conversions -- neither has an `@ts-expect-error`, so this case fails if a
 // later change makes either an error, and it fails the same way if the doc
 // keeps claiming they are refused.
 test("an explicit conversion is not refused, so it is the review tell", () => {
@@ -325,7 +325,7 @@ test("an oversized value is fitted to the per-value budget", () => {
 
 // The label is first-party, so it is clipped rather than refused; what the
 // clip protects is the arithmetic behind the link, which would otherwise let a
-// long label carry a full pack of values past the renderer's per-link cap and
+// long label push a full pack of values past the renderer's per-link cap and
 // have the renderer cut the last of them.
 test("an oversized label cannot push a link past the per-link budget", () => {
   const links = linksOf(
@@ -390,7 +390,7 @@ test("only the list form leads its label with a position", () => {
 });
 
 // A process's retained output is written diagnosis last, so a cut taken from
-// the front deletes exactly the line the link exists to carry. The option moves
+// the front deletes exactly the line the link exists to show. The option moves
 // the clip and nothing else: the redaction still runs over the whole value, so
 // a block planted ahead of the window it keeps is replaced rather than riding
 // out with the bytes the cut dropped.

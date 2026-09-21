@@ -301,7 +301,7 @@ describe("what an operator-supplied render replaces beyond the control class", (
   });
 
   test("replaces exactly the units the package treats as unpaired", () => {
-    // The class the replacement matches and the one the package reads as
+    // The class the replacement matches and the one the package treats as
     // non-well-formed are the same set, so what a render leaves standing is
     // what the canonical encoder would have taken.
     for (const value of [

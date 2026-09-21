@@ -1513,7 +1513,7 @@ test("a token-sized list of wrong entries is refused with a bounded issue count"
 test("a list far past the issue-spread threshold is refused rather than thrown", () => {
   // Terms are re-parsed off the post-handshake wire as well, under a frame cap
   // orders of magnitude above the token cap, so the property is pinned at a
-  // width no token could carry.
+  // width no token could hold.
   const document = transformStepTerms("null_if", {
     values: Array.from({ length: 200_000 }, () => 0),
   });

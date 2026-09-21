@@ -15,7 +15,7 @@ import type { CSVRow } from "../src/file";
 // online acceptance and its offline preflight (apps/cli/test/unit/commands/),
 // the web's columns step (apps/web/test/unit/acceptorColumns.test.ts) -- and
 // what this file pins is the half none of them can state on its own: a verdict
-// taken at a binding point does not settle the run, so the run guard stays the
+// taken at a binding point does not decide the run, so the run guard stays the
 // binding check.
 
 const inviterTerms: LinkageTerms = {

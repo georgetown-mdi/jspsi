@@ -279,10 +279,9 @@ describe("scanFrameStructure: the cumulative element rule", () => {
 
 describe("scanFrameStructure: the map-key rule", () => {
   // A map key that is not a string on the wire is refused: the property name
-  // `map[key] = value` coerces it to grows with the descendants `unpack`
-  // zero-fills past the end of the buffer, not with the bytes the frame spends
-  // declaring them. The real packer never emits such a key; the differential
-  // suite holds that assumption.
+  // `map[key] = value` coerces it to is not bounded by the bytes the frame
+  // spends declaring the key. The real packer never emits such a key; the
+  // differential suite holds that assumption.
   const refuses = (frame: Uint8Array): boolean =>
     scanRefuses(frame, 256, 1 << 20);
 

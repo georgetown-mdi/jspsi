@@ -901,7 +901,7 @@ describe("a declared width under a strategy that matches one value per record", 
   });
 
   test("the structural reading and the derived width agree on every producer", () => {
-    // The run boundary carries both readings -- the producer list
+    // The run boundary holds both readings -- the producer list
     // (keyDeclaresCandidateSet) and the number (declaredKeyWidth) -- so a key
     // one calls expanding and the other does not would slip past whichever ran
     // second. Driven over each producer and over a key declaring none.
