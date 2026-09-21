@@ -66,6 +66,36 @@ function configFor() {
   });
 }
 
+describe("inviterServerJobConfig carries the party's own field delimiter", () => {
+  // The console reads the operator's mounted file, so the choice made at the file
+  // step only takes effect if it reaches the intent the driver POSTs. Absent, the
+  // run reads and writes commas, so the config states nothing rather than a
+  // default nobody chose.
+  test("holds the operator's choice for the driver to state in the intent", () => {
+    const config = inviterServerJobConfig({
+      minted,
+      inputSource: { kind: "inline", csv: inputCsv },
+      transport: { channel: "filedrop" },
+      csvDelimiter: "\t",
+    });
+    expect(config.csvDelimiter).toBe("\t");
+  });
+
+  test("holds the detect choice as the value of its own", () => {
+    const config = inviterServerJobConfig({
+      minted,
+      inputSource: { kind: "inline", csv: inputCsv },
+      transport: { channel: "filedrop" },
+      csvDelimiter: "detect",
+    });
+    expect(config.csvDelimiter).toBe("detect");
+  });
+
+  test("holds none when the operator named none", () => {
+    expect(configFor().csvDelimiter).toBeUndefined();
+  });
+});
+
 describe("inviterServerJobConfig", () => {
   test("states the inviter side, which is what records NO outbound consent", () => {
     // The composer derives an outbound_payload_consent record for the acceptance

@@ -6,8 +6,6 @@ import {
   normalizeCsvDelimiter,
 } from "@psilink/core";
 
-import { isConsoleBuild } from "@utils/clientConfig";
-
 /**
  * The field-delimiter choice an intake surface offers beside its file picker, and
  * the resolution of that choice into the delimiter a read and a result write take.
@@ -76,30 +74,29 @@ export type CsvDelimiterResolution =
  * the delimiter it was read by reaches a column check that way, so the column
  * refusals state this rather than leaving the operator with terms to renegotiate.
  *
- * `offersDelimiterChoice` is whether the surface reading it has the control: the
- * console's intake reads the operator's mounted file and offers none
- * (docs/CONSOLE.md, the work-input directory), so it names the command line's
- * `csv_delimiter` instead of a field that is not on the screen.
+ * A refusal states the remedy its own screen can offer, so each surface names the
+ * one it has: this sentence where the control ({@link CsvDelimiterField}) is on the
+ * screen -- every hosted file step, and the console's invite and accept steps --
+ * and {@link CSV_DELIMITER_SINGLE_COLUMN_COMMAND_LINE_REMEDY} where it is not.
  */
-export function singleColumnDelimiterRemedy(
-  offersDelimiterChoice: boolean,
-): string {
-  return offersDelimiterChoice
-    ? "This file read as a single column, so its fields may be separated by a " +
-        "character other than the one it was read with. Set " +
-        '"How your file separates fields" to your file\'s separator, or choose ' +
-        "Detect to take it from the file."
-    : "This file read as a single column, so its fields may be separated by a " +
-        "character other than the comma. This console reads your file with " +
-        "commas: to read one separated another way, run the exchange from the " +
-        "command line on a configuration that states csv_delimiter.";
-}
-
-/** The single-column remedy this build states, resolved once: every surface but
- * the console's mounted-file intake offers the delimiter control
- * ({@link CsvDelimiterField}). */
 export const CSV_DELIMITER_SINGLE_COLUMN_REMEDY =
-  singleColumnDelimiterRemedy(!isConsoleBuild());
+  "This file read as a single column, so its fields may be separated by a " +
+  "character other than the one it was read with. Set " +
+  '"How your file separates fields" to your file\'s separator, or choose ' +
+  "Detect to take it from the file.";
+
+/**
+ * The same reading for a surface that offers no delimiter control: the console's
+ * Direct exchange step renders the file picker without one
+ * ({@link ServerFilePicker}), so it reads the mounted file with commas and the
+ * remedy is the command line's `csv_delimiter` rather than a field the operator
+ * cannot find on the screen.
+ */
+export const CSV_DELIMITER_SINGLE_COLUMN_COMMAND_LINE_REMEDY =
+  "This file read as a single column, so its fields may be separated by a " +
+  "character other than the comma. This console reads your file with " +
+  "commas: to read one separated another way, run the exchange from the " +
+  "command line on a configuration that states csv_delimiter.";
 
 /**
  * Resolve `choice` into the delimiter a read and the result write take: the

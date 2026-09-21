@@ -415,6 +415,7 @@ export function inviterServerJobConfig({
   minted,
   inputSource,
   transport,
+  csvDelimiter,
   options,
   runDiagnostics,
   receipts,
@@ -429,6 +430,11 @@ export function inviterServerJobConfig({
   >;
   inputSource: JobInputSource;
   transport: ServerJobExchangeTransport;
+  /** The field delimiter the operator chose at the file step, composed into the
+   * config the console hands the CLI so the run reads the mounted file and writes
+   * its result the way the console profiled it. Absent composes no key, which
+   * reads and writes commas. */
+  csvDelimiter?: string;
   /** The review step's file-handling choices, already resolved through core's
    * retain-mode implication. Absent when the operator changed nothing, so the
    * composed config has no `options` block at all. */
@@ -453,6 +459,7 @@ export function inviterServerJobConfig({
     ...(minted.includeOwnColumns !== undefined
       ? { includeOwnColumns: minted.includeOwnColumns }
       : {}),
+    ...(csvDelimiter !== undefined ? { csvDelimiter } : {}),
     ...(options !== undefined ? { options } : {}),
     ...(runDiagnostics !== undefined ? { runDiagnostics } : {}),
     ...(receipts !== undefined ? { receipts } : {}),
@@ -490,9 +497,11 @@ export function useInviterExchange({
    * this run builds. A live run only ever starts for a channel the selector maps
    * to a live kind; the owner withholds the invitation for a save-file channel. */
   channel: Transport;
-  /** The field delimiter this party chose for its own file, written into its own
-   * result file so that file reads back the way its input did. Undefined writes
-   * commas, core's default for a party that named none. */
+  /** The field delimiter this party chose for its own file: read by it on the
+   * browser path and written into its own result file so that file reads back the
+   * way its input did, and composed into the config a server-job run hands the
+   * CLI. Undefined reads and writes commas, core's default for a party that named
+   * none. */
   csvDelimiter?: string;
   /** Where the console reads this party's input from on a server-job run
    * ({@link JobInputSource}): the console picker's mounted-file reference. Undefined
@@ -703,6 +712,7 @@ export function useInviterExchange({
           minted,
           inputSource,
           transport,
+          ...(csvDelimiter !== undefined ? { csvDelimiter } : {}),
           ...(options !== undefined ? { options } : {}),
           ...(runDiagnostics !== undefined ? { runDiagnostics } : {}),
           ...(receipts !== undefined ? { receipts } : {}),

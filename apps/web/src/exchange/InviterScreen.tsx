@@ -45,6 +45,7 @@ import { isConsoleBuild, psilinkVersion } from "@utils/clientConfig";
 import { whenDiagnostic } from "@utils/diagnostics";
 
 import {
+  CSV_DELIMITER_SINGLE_COLUMN_REMEDY,
   INITIAL_CSV_DELIMITER_CHOICE,
   resolveCsvDelimiter,
 } from "@components/csvDelimiterChoice";
@@ -238,7 +239,10 @@ function invitationFileAlert(failure: InvitationFileFailure): AlertContent {
     case "overlong":
       return overlongColumnsAlert(failure.positions);
     case "unlinkable":
-      return unlinkableFileAlert(failure.refusal);
+      return unlinkableFileAlert(
+        failure.refusal,
+        CSV_DELIMITER_SINGLE_COLUMN_REMEDY,
+      );
   }
 }
 
@@ -476,11 +480,15 @@ export function InviterScreen() {
   // throwing getter there -- so this never touches it on that path.
   const coverageInput = useMemo<CoverageInput>(() => {
     if (consoleSource !== undefined)
-      return { kind: "workFile", reference: { name: consoleSource.name } };
+      return {
+        kind: "workFile",
+        reference: { name: consoleSource.name },
+        ...(csvDelimiter !== undefined ? { csvDelimiter } : {}),
+      };
     if (!isConsoleBuild() && acquired !== undefined)
       return { kind: "rows", rows: acquired.rawRows };
     return EMPTY_COVERAGE_INPUT;
-  }, [acquired, consoleSource]);
+  }, [acquired, consoleSource, csvDelimiter]);
 
   // The per-column preview samples the Cleaning tab's before/after preview reads:
   // computed from the browser rows on the hosted build, read from the server-side
@@ -1344,6 +1352,7 @@ export function InviterScreen() {
                 : undefined
             }
             onCommit={commitConsoleFile}
+            onInvalidate={() => dispatch({ type: "console-file-voided" })}
             onContinue={() => {
               if (fileReady) goTo("columns");
             }}

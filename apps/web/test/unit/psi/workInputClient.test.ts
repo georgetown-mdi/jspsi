@@ -41,8 +41,8 @@ const PROFILE_WIRE = {
   ],
 };
 
-const REFERENCE = {
-  name: "clients.csv",
+const READ = {
+  reference: { name: "clients.csv" },
 };
 
 const STANDARDIZATION: Standardization = [];
@@ -121,7 +121,7 @@ describe("fetchJobInputs", () => {
 describe("fetchJobInputProfile", () => {
   test("returns the validated profile on a 200 and encodes the name", async () => {
     const fetchImpl = vi.fn(() => Promise.resolve(jsonResponse(PROFILE_WIRE)));
-    const result = await fetchJobInputProfile("a b.csv", fetchImpl);
+    const result = await fetchJobInputProfile("a b.csv", undefined, fetchImpl);
     expect(result.kind).toBe("profile");
     if (result.kind !== "profile") throw new Error("expected a profile");
     const { profile } = result;
@@ -134,6 +134,24 @@ describe("fetchJobInputProfile", () => {
     expect(profile.columnSamples.get("dob")).toEqual(["01/02/1990"]);
     expect(fetchImpl).toHaveBeenCalledWith(
       "/api/jobs/inputs/profile?name=a%20b.csv",
+      { method: "GET" },
+    );
+  });
+
+  test("states the party's own delimiter as the delimiter parameter", async () => {
+    const fetchImpl = vi.fn(() => Promise.resolve(jsonResponse(PROFILE_WIRE)));
+    await fetchJobInputProfile("clients.csv", "\t", fetchImpl);
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "/api/jobs/inputs/profile?name=clients.csv&delimiter=%09",
+      { method: "GET" },
+    );
+  });
+
+  test("states no delimiter parameter when the party named none", async () => {
+    const fetchImpl = vi.fn(() => Promise.resolve(jsonResponse(PROFILE_WIRE)));
+    await fetchJobInputProfile("clients.csv", undefined, fetchImpl);
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "/api/jobs/inputs/profile?name=clients.csv",
       { method: "GET" },
     );
   });
@@ -151,7 +169,7 @@ describe("fetchJobInputProfile", () => {
         { column: "prototype", values: ["d"] },
       ],
     };
-    const result = await fetchJobInputProfile("x", () =>
+    const result = await fetchJobInputProfile("x", undefined, () =>
       Promise.resolve(jsonResponse(wire)),
     );
     expect(result.kind).toBe("profile");
@@ -172,7 +190,7 @@ describe("fetchJobInputProfile", () => {
       { ...PROFILE_WIRE, columnSamples: [{ values: ["Ann"] }] },
     ]) {
       expect(
-        await fetchJobInputProfile("x", () =>
+        await fetchJobInputProfile("x", undefined, () =>
           Promise.resolve(jsonResponse(bad)),
         ),
       ).toEqual({ kind: "unavailable", reason: "unknown" });
@@ -195,7 +213,7 @@ describe("fetchJobInputProfile", () => {
       { ...PROFILE_WIRE, sanitizedColumnPositions: [1, 2, 2] },
     ]) {
       expect(
-        await fetchJobInputProfile("x", () =>
+        await fetchJobInputProfile("x", undefined, () =>
           Promise.resolve(jsonResponse(bad)),
         ),
       ).toEqual({ kind: "unavailable", reason: "unknown" });
@@ -215,7 +233,7 @@ describe("fetchJobInputProfile", () => {
       ],
     };
     expect(
-      await fetchJobInputProfile("x", () =>
+      await fetchJobInputProfile("x", undefined, () =>
         Promise.resolve(
           jsonResponse({ ...wide, sanitizedColumnPositions: [1, 2, 2] }),
         ),
@@ -224,7 +242,7 @@ describe("fetchJobInputProfile", () => {
     // The same list without the repeat is admitted, so the rejection above is
     // the uniqueness rule rather than the wider header failing some other check.
     expect(
-      await fetchJobInputProfile("x", () =>
+      await fetchJobInputProfile("x", undefined, () =>
         Promise.resolve(
           jsonResponse({ ...wide, sanitizedColumnPositions: [1, 2, 3] }),
         ),
@@ -233,7 +251,7 @@ describe("fetchJobInputProfile", () => {
   });
 
   test("carries the reported positions through to the seat", async () => {
-    const result = await fetchJobInputProfile("x", () =>
+    const result = await fetchJobInputProfile("x", undefined, () =>
       Promise.resolve(
         jsonResponse({ ...PROFILE_WIRE, sanitizedColumnPositions: [1, 2] }),
       ),
@@ -245,7 +263,7 @@ describe("fetchJobInputProfile", () => {
 
   test("maps a 404 to the not_found reason", async () => {
     expect(
-      await fetchJobInputProfile("x", () =>
+      await fetchJobInputProfile("x", undefined, () =>
         Promise.resolve(new Response(null, { status: 404 })),
       ),
     ).toEqual({ kind: "unavailable", reason: "not_found" });
@@ -254,7 +272,7 @@ describe("fetchJobInputProfile", () => {
   test("reads each closed profile-fault code off a 400 body", async () => {
     for (const reason of ["too_large", "not_a_csv", "parse_failed"] as const) {
       expect(
-        await fetchJobInputProfile("x", () =>
+        await fetchJobInputProfile("x", undefined, () =>
           Promise.resolve(jsonResponse({ error: reason }, 400)),
         ),
       ).toEqual({ kind: "unavailable", reason });
@@ -268,14 +286,16 @@ describe("fetchJobInputProfile", () => {
       new Response(null, { status: 400 }),
     ]) {
       expect(
-        await fetchJobInputProfile("x", () => Promise.resolve(response)),
+        await fetchJobInputProfile("x", undefined, () =>
+          Promise.resolve(response),
+        ),
       ).toEqual({ kind: "unavailable", reason: "unknown" });
     }
   });
 
   test("maps another non-2xx to unknown", async () => {
     expect(
-      await fetchJobInputProfile("x", () =>
+      await fetchJobInputProfile("x", undefined, () =>
         Promise.resolve(new Response(null, { status: 500 })),
       ),
     ).toEqual({ kind: "unavailable", reason: "unknown" });
@@ -297,7 +317,7 @@ describe("postJobInputCoverage", () => {
     const fetchImpl = vi.fn(() => Promise.resolve(jsonResponse({ rates })));
     const controller = new AbortController();
     const result = await postJobInputCoverage(
-      REFERENCE,
+      READ,
       STANDARDIZATION,
       controller.signal,
       fetchImpl,
@@ -308,15 +328,36 @@ describe("postJobInputCoverage", () => {
       RequestInit,
     ];
     expect(JSON.parse(init.body as string)).toEqual({
-      name: REFERENCE.name,
+      name: READ.reference.name,
       standardization: STANDARDIZATION,
+    });
+  });
+
+  test("states the party's own delimiter in the sweep body", async () => {
+    // The sweep reads the same mounted file the run does, so a coverage rate
+    // computed on another reading would report on columns the run never sees.
+    const fetchImpl = vi.fn(() => Promise.resolve(jsonResponse({ rates: [] })));
+    await postJobInputCoverage(
+      { reference: { name: "clients.csv" }, csvDelimiter: ";" },
+      STANDARDIZATION,
+      new AbortController().signal,
+      fetchImpl,
+    );
+    const [, init] = fetchImpl.mock.calls[0] as unknown as [
+      string,
+      RequestInit,
+    ];
+    expect(JSON.parse(init.body as string)).toEqual({
+      name: "clients.csv",
+      standardization: STANDARDIZATION,
+      csvDelimiter: ";",
     });
   });
 
   test("classifies a deterministic non-2xx as unavailable", async () => {
     for (const status of [400, 404, 413]) {
       const result = await postJobInputCoverage(
-        REFERENCE,
+        READ,
         STANDARDIZATION,
         new AbortController().signal,
         () => Promise.resolve(new Response(null, { status })),
@@ -328,7 +369,7 @@ describe("postJobInputCoverage", () => {
   test("classifies a 429 or 5xx as transient", async () => {
     for (const status of [429, 500, 503]) {
       const result = await postJobInputCoverage(
-        REFERENCE,
+        READ,
         STANDARDIZATION,
         new AbortController().signal,
         () => Promise.resolve(new Response(null, { status })),
@@ -340,7 +381,7 @@ describe("postJobInputCoverage", () => {
   test("classifies a network reject as transient, an aborted one as aborted", async () => {
     expect(
       await postJobInputCoverage(
-        REFERENCE,
+        READ,
         STANDARDIZATION,
         new AbortController().signal,
         () => Promise.reject(new Error("network down")),
@@ -350,11 +391,8 @@ describe("postJobInputCoverage", () => {
     const aborted = new AbortController();
     aborted.abort();
     expect(
-      await postJobInputCoverage(
-        REFERENCE,
-        STANDARDIZATION,
-        aborted.signal,
-        () => Promise.reject(new DOMException("aborted", "AbortError")),
+      await postJobInputCoverage(READ, STANDARDIZATION, aborted.signal, () =>
+        Promise.reject(new DOMException("aborted", "AbortError")),
       ),
     ).toEqual({ kind: "aborted" });
   });
@@ -384,7 +422,7 @@ describe("postJobInputCoverage", () => {
       { output: "", input: "first_name", produced: 2, total: 2, rate: 1 },
     ]) {
       const result = await postJobInputCoverage(
-        REFERENCE,
+        READ,
         STANDARDIZATION,
         new AbortController().signal,
         () => Promise.resolve(jsonResponse({ rates: [bad] })),
@@ -395,7 +433,7 @@ describe("postJobInputCoverage", () => {
 
   test("accepts an entry that omits the unavailable flag, defaulting it false", async () => {
     const result = await postJobInputCoverage(
-      REFERENCE,
+      READ,
       STANDARDIZATION,
       new AbortController().signal,
       () =>
@@ -629,7 +667,7 @@ describe("consoleCoverageProvider", () => {
       },
     ];
     vi.stubGlobal("fetch", () => Promise.resolve(jsonResponse({ rates })));
-    const provider = consoleCoverageProvider(REFERENCE);
+    const provider = consoleCoverageProvider(READ);
     await expect(provider.compute(STANDARDIZATION)).resolves.toEqual(rates);
     provider.dispose();
   });
@@ -638,7 +676,7 @@ describe("consoleCoverageProvider", () => {
     vi.stubGlobal("fetch", () =>
       Promise.resolve(new Response(null, { status: 429 })),
     );
-    const provider = consoleCoverageProvider(REFERENCE);
+    const provider = consoleCoverageProvider(READ);
     expect(await race(provider.compute(STANDARDIZATION), 50)).toBe("pending");
     provider.dispose();
   });
@@ -647,7 +685,7 @@ describe("consoleCoverageProvider", () => {
     vi.stubGlobal("fetch", () =>
       Promise.resolve(new Response(null, { status: 400 })),
     );
-    const provider = consoleCoverageProvider(REFERENCE);
+    const provider = consoleCoverageProvider(READ);
     await expect(provider.compute(STANDARDIZATION)).rejects.toThrow();
     provider.dispose();
   });
@@ -664,7 +702,7 @@ describe("consoleCoverageProvider", () => {
         /* never settles on its own */
       });
     });
-    const provider = consoleCoverageProvider(REFERENCE);
+    const provider = consoleCoverageProvider(READ);
     void provider.compute(STANDARDIZATION);
     void provider.compute(STANDARDIZATION);
     expect(signals).toHaveLength(2);

@@ -125,6 +125,7 @@ export function acceptorServerJobConfig({
   inputSource,
   transport,
   deduplicate,
+  csvDelimiter,
   options,
   runDiagnostics,
   receipts,
@@ -139,6 +140,11 @@ export function acceptorServerJobConfig({
    * console hands the CLI, so the run the console conducts presents the value
    * the operator consented to. */
   deduplicate: boolean;
+  /** The field delimiter the operator chose at the file step, composed into the
+   * config the console hands the CLI so the run reads the mounted file and writes
+   * its result the way the console profiled it. Absent composes no key, which
+   * reads and writes commas. */
+  csvDelimiter?: string;
   /** The confirm-columns step's file-handling choices, already resolved through
    * core's retain-mode implication. Absent when the operator changed nothing, so
    * the composed config includes no `options` block at all. */
@@ -153,6 +159,7 @@ export function acceptorServerJobConfig({
   return {
     transport,
     side: "acceptor",
+    ...(csvDelimiter !== undefined ? { csvDelimiter } : {}),
     ...(options !== undefined ? { options } : {}),
     ...(runDiagnostics !== undefined ? { runDiagnostics } : {}),
     ...(receipts !== undefined ? { receipts } : {}),
@@ -233,7 +240,9 @@ export interface AcceptorLaunch {
   receipts?: ReceiptsIntentFields;
   /** The field delimiter this party's file was read by at the consent gate,
    * written into its own result file so that file reads back the way its input
-   * did. Undefined writes commas, core's default for a party that named none. */
+   * did, and composed into the config a server-job accept hands the CLI.
+   * Undefined reads and writes commas, core's default for a party that named
+   * none. */
   csvDelimiter?: string;
 }
 
@@ -382,6 +391,7 @@ export function useAcceptorExchange({
     const { invitation, acceptorName, rawRows, columns, edits, inputSource } =
       current;
     const { options, runDiagnostics, receipts, deduplicate } = current;
+    const { csvDelimiter } = current;
     const { token, endpoint } = invitation;
     // The console transport this endpoint runs over, threaded to failureFor so a
     // console mounted-file create rejection (a workFile 400) names the file cause
@@ -491,6 +501,7 @@ export function useAcceptorExchange({
           inputSource: jobInputSource,
           transport: serverJobTransport,
           deduplicate,
+          ...(csvDelimiter !== undefined ? { csvDelimiter } : {}),
           ...(options !== undefined ? { options } : {}),
           ...(runDiagnostics !== undefined ? { runDiagnostics } : {}),
           ...(receipts !== undefined ? { receipts } : {}),

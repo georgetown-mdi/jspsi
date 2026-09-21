@@ -277,6 +277,10 @@ export type AcceptorScreenAction =
    * columns reseed unless this is a re-profile of the same file with the same
    * columns, which keeps the operator's remaps and cleaning edits. */
   | { type: "console-file-committed"; source: ProfiledJobInput }
+  /** The delimiter moved under the file the console holds: the commit, the
+   * columns seeded from it, and an acquired shape built from it all go, since
+   * those columns were read by the previous choice. */
+  | { type: "console-file-voided" }
   /** A submit slipped past the disabled consent gate and failed the handler
    * re-check. */
   | { type: "consent-refused"; errors: FieldErrors }
@@ -420,6 +424,15 @@ export function acceptorScreenReducer(
             }),
       };
     }
+    case "console-file-voided":
+      return {
+        ...state,
+        consoleSource: undefined,
+        acquired: undefined,
+        columnsState: undefined,
+        sanitizedColumnPositions: [],
+        parseAlert: undefined,
+      };
     case "consent-refused":
       return { ...state, fieldErrors: action.errors };
     case "console-accept-committed":

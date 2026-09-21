@@ -26,6 +26,7 @@ import {
 
 import {
   JOB_FILE_NAMES,
+  MAX_CSV_DELIMITER_LENGTH,
   MAX_EXPECTED_PAYLOAD_COLUMNS,
   MAX_IDENTITY_LENGTH,
   MAX_INPUT_CSV_LENGTH,
@@ -448,6 +449,126 @@ describe("composeConfigDocument forwards the received-payload commitment", () =>
     const yaml = composeConfigDocument(validIntent(), "/srv/jobs/abc/exchange");
     const doc = parseYaml(yaml) as Record<string, unknown>;
     expect(doc.expected_payload_columns).toBeUndefined();
+  });
+});
+
+describe("jobExchangeIntentSchema admits the party's own field delimiter", () => {
+  // The console offers the delimiter control at its file steps, so the choice has
+  // to reach the CLI through this boundary. Core owns the accepted set; what is
+  // pinned here is that this surface reaches for it, that an intent omitting the
+  // field still parses (an older client keeps running at the comma default), and
+  // that a refused value is named by field rather than reaching the subprocess.
+  test("accepts a named delimiter, on both arms", () => {
+    for (const delimiter of ["\t", "|", ";", "detect"]) {
+      expect(
+        jobExchangeIntentSchema.safeParse(
+          validIntent({ csvDelimiter: delimiter }),
+        ).success,
+      ).toBe(true);
+      expect(
+        jobExchangeIntentSchema.safeParse(
+          validSftpIntent({ csvDelimiter: delimiter }),
+        ).success,
+      ).toBe(true);
+    }
+  });
+
+  test("accepts the spellings a party may write where the character is awkward", () => {
+    for (const written of ["tab", "TAB", "\\t", " detect "]) {
+      expect(
+        jobExchangeIntentSchema.safeParse(
+          validIntent({ csvDelimiter: written }),
+        ).success,
+      ).toBe(true);
+    }
+  });
+
+  test("accepts an intent omitting the field", () => {
+    const parsed = jobExchangeIntentSchema.safeParse(validIntent());
+    expect(parsed.success).toBe(true);
+    expect(
+      (parsed.success ? parsed.data : undefined)?.csvDelimiter,
+    ).toBeUndefined();
+  });
+
+  test("rejects a value outside the accepted set, naming the field", () => {
+    for (const refused of ["", '"', "||", "\n"]) {
+      const parsed = jobExchangeIntentSchema.safeParse(
+        validIntent({ csvDelimiter: refused }),
+      );
+      expect(parsed.success).toBe(false);
+      const issue = parsed.success ? undefined : parsed.error.issues[0];
+      expect(issue?.path).toEqual(["csvDelimiter"]);
+      expect(issue?.message).toContain("csvDelimiter");
+      // The refused value is described by shape, never echoed: core states the
+      // rule, and this boundary adds only the field name.
+      expect(issue?.message).not.toContain(`"${refused}"`);
+    }
+  });
+
+  test("rejects a value past the field's bound, at the field's path", () => {
+    // A padded spelling the resolution accepts, at the bound and one code unit
+    // over it: what refuses the second is the bound, not the accepted set.
+    const padding = MAX_CSV_DELIMITER_LENGTH - "detect".length;
+    expect(
+      jobExchangeIntentSchema.safeParse(
+        validIntent({ csvDelimiter: " ".repeat(padding) + "detect" }),
+      ).success,
+    ).toBe(true);
+    const parsed = jobExchangeIntentSchema.safeParse(
+      validIntent({ csvDelimiter: " ".repeat(padding + 1) + "detect" }),
+    );
+    expect(parsed.success).toBe(false);
+    const paths = parsed.success
+      ? []
+      : parsed.error.issues.map((issue) => issue.path);
+    expect(paths).toContainEqual(["csvDelimiter"]);
+  });
+
+  test("rejects it on the create route's own union too", () => {
+    expect(
+      jobCreateIntentSchema.safeParse(validIntent({ csvDelimiter: "||" }))
+        .success,
+    ).toBe(false);
+  });
+});
+
+describe("the composers state the party's own field delimiter", () => {
+  test("forwards a named delimiter as csv_delimiter", () => {
+    const doc = parseYaml(
+      composeConfigDocument(
+        validIntent({ csvDelimiter: "|" }),
+        "/srv/jobs/abc/exchange",
+      ),
+    ) as Record<string, unknown>;
+    expect(doc.csv_delimiter).toBe("|");
+  });
+
+  test("the sftp composer forwards it too", () => {
+    const doc = parseYaml(
+      composeSftpConfigDocument(
+        validSftpIntent({ csvDelimiter: "detect" }),
+        testSftpServerEntry(),
+      ),
+    ) as Record<string, unknown>;
+    expect(doc.csv_delimiter).toBe("detect");
+  });
+
+  test("core resolves the written spelling on the way into the document", () => {
+    const doc = parseYaml(
+      composeConfigDocument(
+        validIntent({ csvDelimiter: "tab" }),
+        "/srv/jobs/abc/exchange",
+      ),
+    ) as Record<string, unknown>;
+    expect(doc.csv_delimiter).toBe("\t");
+  });
+
+  test("omits the key when the intent names no delimiter", () => {
+    const doc = parseYaml(
+      composeConfigDocument(validIntent(), "/srv/jobs/abc/exchange"),
+    ) as Record<string, unknown>;
+    expect(doc.csv_delimiter).toBeUndefined();
   });
 });
 

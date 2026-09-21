@@ -15,8 +15,12 @@ import {
 
 import { linkageRefusalFor } from "@psi/linkageRefusal";
 
+import { CSV_DELIMITER_SINGLE_COLUMN_COMMAND_LINE_REMEDY } from "@components/csvDelimiterChoice";
+import { unlinkableFileAlert } from "@components/UnlinkableFileAlert";
+
 import type { LinkageStrategy, LinkageTerms, Metadata } from "@psilink/core";
 
+import type { AlertContent } from "@components/csvIntake";
 import type { LinkageRefusal } from "@psi/linkageRefusal";
 
 /**
@@ -289,4 +293,22 @@ export function previewInferredTerms(
     overlongDisclosedColumns: overlongDisclosedColumnPositions(metadata),
     ...(refusal !== undefined && { refusal }),
   };
+}
+
+/**
+ * The confirm screen's alert for a file the preview refuses, in the shared words
+ * every seat refuses an unlinkable file with ({@link unlinkableFileAlert}).
+ *
+ * This spine renders the mounted-file picker with no delimiter control, so a
+ * refusal over a file that read as ONE column states the command line's remedy:
+ * the operator changes how their file is read by running the exchange from a
+ * configuration, not by a control this screen does not have.
+ */
+export function directUnlinkableFileAlert(
+  refusal: LinkageRefusal,
+): AlertContent {
+  return unlinkableFileAlert(
+    refusal,
+    CSV_DELIMITER_SINGLE_COLUMN_COMMAND_LINE_REMEDY,
+  );
 }

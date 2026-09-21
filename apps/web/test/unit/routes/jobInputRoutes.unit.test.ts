@@ -28,6 +28,17 @@ function tempDir(label: string): string {
 const FIXTURE_CSV =
   "ssn,last_name,date_of_birth\n111223333,Public,1990-01-02\n222,Cole,1985-11-30\n";
 
+const TAB_FIXTURE_CSV = FIXTURE_CSV.replaceAll(",", "\t");
+
+function inputDirWithTabFixture(name = "tabbed.csv"): {
+  dir: string;
+  name: string;
+} {
+  const dir = tempDir("inputs");
+  fs.writeFileSync(path.join(dir, name), TAB_FIXTURE_CSV);
+  return { dir, name };
+}
+
 function inputDirWithFixture(name = "input.csv"): {
   dir: string;
   name: string;
@@ -82,9 +93,14 @@ function enable(options: { inputDir?: string } = {}): string {
   return dataRoot;
 }
 
-function profileRequest(name: string): Request {
+function profileRequest(name: string, delimiter?: string): Request {
+  const query =
+    `name=${encodeURIComponent(name)}` +
+    (delimiter === undefined
+      ? ""
+      : `&delimiter=${encodeURIComponent(delimiter)}`);
   return new Request(
-    `http://localhost/api/jobs/inputs/profile?name=${encodeURIComponent(name)}`,
+    `http://localhost/api/jobs/inputs/profile?${query}`,
     // A synthetic Request sets no Host; the gate's loopback allowlist needs one.
     { headers: { host: "localhost" } },
   );
@@ -102,8 +118,16 @@ function coverageRequest(body: unknown, headers: Record<string, string> = {}) {
   });
 }
 
-function coverageBody(name: string, standardization = STANDARDIZATION) {
-  return { name, standardization };
+function coverageBody(
+  name: string,
+  standardization = STANDARDIZATION,
+  csvDelimiter?: string,
+) {
+  return {
+    name,
+    standardization,
+    ...(csvDelimiter !== undefined ? { csvDelimiter } : {}),
+  };
 }
 
 async function listing(): Promise<Response> {
@@ -115,9 +139,9 @@ async function listing(): Promise<Response> {
   })) as Response;
 }
 
-async function profile(name: string): Promise<Response> {
+async function profile(name: string, delimiter?: string): Promise<Response> {
   return (await handlersOf(ProfileRoute).GET({
-    request: profileRequest(name),
+    request: profileRequest(name, delimiter),
     params: {},
   })) as Response;
 }
@@ -209,6 +233,36 @@ describe("GET /api/jobs/inputs/profile", () => {
     expect((await profile("../escape")).status).toBe(404);
   });
 
+  test("reads the file by the delimiter the request names", async () => {
+    // The word is one of the spellings a party may write for the character, so
+    // the parameter reaches the parse resolved -- a raw "tab" is no delimiter
+    // any parser splits on, and the header would come back as one column.
+    const { dir, name } = inputDirWithTabFixture();
+    enable({ inputDir: dir });
+    const response = await profile(name, "tab");
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { columns: Array<string> };
+    expect(body.columns).toEqual(["ssn", "last_name", "date_of_birth"]);
+  });
+
+  test("reads the file with commas when the request names no delimiter", async () => {
+    const { dir, name } = inputDirWithTabFixture();
+    enable({ inputDir: dir });
+    const body = (await (await profile(name)).json()) as {
+      columns: Array<string>;
+    };
+    expect(body.columns).toHaveLength(1);
+  });
+
+  test("400 for a delimiter outside the accepted set", async () => {
+    // The refusal is a bare 400: this route answers with no body at all, and the
+    // field the client corrects is named by the schema itself (jobIntent tests).
+    const { dir, name } = inputDirWithFixture();
+    enable({ inputDir: dir });
+    for (const refused of ['"', "||", ""])
+      expect((await profile(name, refused)).status).toBe(400);
+  });
+
   test("400 with the not_a_csv code for a file with no columns", async () => {
     const dir = tempDir("inputs");
     fs.writeFileSync(path.join(dir, "empty.csv"), "");
@@ -261,6 +315,35 @@ describe("POST /api/jobs/inputs/coverage", () => {
     const { dir } = inputDirWithFixture();
     enable({ inputDir: dir });
     expect((await coverage(coverageBody("missing.csv"))).status).toBe(404);
+  });
+
+  test("sweeps by the delimiter the body names", async () => {
+    // The sweep advises a run that reads the same file, so the body's delimiter
+    // reaches the parse resolved as the profile's does: read with commas, the
+    // standardized column is not in the file at all and its coverage collapses.
+    const { dir, name } = inputDirWithTabFixture();
+    enable({ inputDir: dir });
+    const rateFor = async (csvDelimiter?: string) => {
+      const response = await coverage(
+        coverageBody(name, STANDARDIZATION, csvDelimiter),
+      );
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as {
+        rates: Array<{ output: string; produced: number }>;
+      };
+      return body.rates.find((rate) => rate.output === "last_name")?.produced;
+    };
+    expect(await rateFor("tab")).toBe(2);
+    expect(await rateFor()).toBe(0);
+  });
+
+  test("400 for a csvDelimiter outside the accepted set", async () => {
+    const { dir, name } = inputDirWithFixture();
+    enable({ inputDir: dir });
+    for (const refused of ['"', "||", ""])
+      expect(
+        (await coverage(coverageBody(name, STANDARDIZATION, refused))).status,
+      ).toBe(400);
   });
 
   test("400 on a malformed body", async () => {

@@ -5,10 +5,10 @@ import { CSV_DELIMITER_DETECT, csvDelimiterRefusal } from "@psilink/core";
 import {
   CSV_DELIMITER_OPTIONS,
   CSV_DELIMITER_OTHER,
+  CSV_DELIMITER_SINGLE_COLUMN_COMMAND_LINE_REMEDY,
   CSV_DELIMITER_SINGLE_COLUMN_REMEDY,
   INITIAL_CSV_DELIMITER_CHOICE,
   resolveCsvDelimiter,
-  singleColumnDelimiterRemedy,
 } from "@components/csvDelimiterChoice";
 
 // The delimiter choice the intake surfaces offer, resolved to the value a read
@@ -102,8 +102,8 @@ describe("resolving the delimiter choice", () => {
 });
 
 describe("the single-column remedy", () => {
-  test("names the control and its detect option where the surface offers one", () => {
-    expect(singleColumnDelimiterRemedy(true)).toBe(
+  test("names the control and its detect option", () => {
+    expect(CSV_DELIMITER_SINGLE_COLUMN_REMEDY).toBe(
       'This file read as a single column, so its fields may be separated by a character other than the one it was read with. Set "How your file separates fields" to your file\'s separator, or choose Detect to take it from the file.',
     );
     // The option it names is one the control offers, so the copy sends the
@@ -114,14 +114,12 @@ describe("the single-column remedy", () => {
   });
 
   test("names the command line where the surface offers no control", () => {
-    expect(singleColumnDelimiterRemedy(false)).toBe(
+    expect(CSV_DELIMITER_SINGLE_COLUMN_COMMAND_LINE_REMEDY).toBe(
       "This file read as a single column, so its fields may be separated by a character other than the comma. This console reads your file with commas: to read one separated another way, run the exchange from the command line on a configuration that states csv_delimiter.",
     );
-  });
-
-  test("the resolved remedy is the control's, since the hosted build offers it", () => {
-    expect(CSV_DELIMITER_SINGLE_COLUMN_REMEDY).toBe(
-      singleColumnDelimiterRemedy(true),
-    );
+    // The control's own wording names no command line, so a surface that has the
+    // control never sends its operator off the screen to use it.
+    expect(CSV_DELIMITER_SINGLE_COLUMN_REMEDY).not.toContain("command line");
+    expect(CSV_DELIMITER_SINGLE_COLUMN_REMEDY).not.toContain("csv_delimiter");
   });
 });

@@ -83,6 +83,28 @@ function configFor() {
   });
 }
 
+describe("acceptorServerJobConfig carries the party's own field delimiter", () => {
+  // The accepting seat offers the same control the inviting one does, and the
+  // console runs the accept from a config composed at a separate invocation, so a
+  // choice held only in the browser would read the mounted file with commas.
+  test("holds the operator's choice for the driver to state in the intent", () => {
+    const config = acceptorServerJobConfig({
+      deduplicate: false,
+      token,
+      acceptorName: "Accepting Org",
+      edits,
+      inputSource: { kind: "inline", csv: inputCsv },
+      transport: { channel: "filedrop" },
+      csvDelimiter: ";",
+    });
+    expect(config.csvDelimiter).toBe(";");
+  });
+
+  test("holds none when the operator named none", () => {
+    expect(configFor().csvDelimiter).toBeUndefined();
+  });
+});
+
 describe("acceptorServerJobConfig", () => {
   test("runs on the acceptor's OWN-PERSPECTIVE derived terms, not the raw inviter terms", () => {
     const config = configFor();

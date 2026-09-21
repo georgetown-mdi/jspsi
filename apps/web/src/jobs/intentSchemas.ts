@@ -21,8 +21,11 @@ import {
   OwnColumnSelectionSchema,
   SHARED_SECRET_REGEX,
   StandardizationSchema,
+  csvDelimiterRefusal,
   holdsPrivateKeyMaterial,
+  isCsvDelimiterChoice,
   maxCodeUnits,
+  normalizeCsvDelimiter,
   safeParseFileSyncOptions,
 } from "@psilink/core";
 
@@ -556,6 +559,10 @@ export type JobExchangeSide = "inviter" | "acceptor";
  * - `includeOwnColumns` is this party's local output-composition setting: a
  *   closed two-value enum naming no column, contributing one YAML string that
  *   changes only the result file the console writes for this operator.
+ * - `csvDelimiter` is this party's local file-format setting: a single
+ *   character or the reserved `detect` word, graded by core's own rule, that
+ *   contributes one YAML scalar and governs only how this party's own file is
+ *   read and its own result written.
  * - `side` is a closed two-value enum selecting which composition rules apply
  *   to this party; it contributes no value to the composed config.
  * - `diagnosticRun` and `sweepExchangeFiles` are the per-run controls
@@ -625,6 +632,16 @@ interface JobExchangeIntentBase {
    * the partner sees. Absent composes no key.
    */
   includeOwnColumns?: OwnColumnSelection;
+  /**
+   * The field delimiter this party's own input is read by and its own result
+   * file written with -- core's local `csv_delimiter`. A single character or
+   * the reserved `detect` word, graded by {@link jobCsvDelimiterSchema}; it
+   * names no path, host, or credential and contributes one YAML scalar.
+   * Local: the partner reads their own file by their own choice, and nothing
+   * about this one crosses. Absent composes no key, so the run reads and
+   * writes commas.
+   */
+  csvDelimiter?: string;
   /**
    * Which side of the partnership this party runs. The composers read it for
    * one decision: only an acceptance derives an `outbound_payload_consent`
@@ -816,6 +833,16 @@ export const MAX_STANDARDIZATION_TRANSFORMATIONS = 4096;
  */
 export const MAX_STANDARDIZATION_STEPS = 256;
 
+/**
+ * Upper bound on the code units of a `csvDelimiter` value, applied before core's
+ * resolution of the words a party may write runs over it. The longest value that
+ * resolution accepts is the reserved `detect` word -- six characters, beside the
+ * `tab` and `\t` spellings and the single character itself -- and the rest of the
+ * bound is room for the whitespace the resolution trims, so every spelling a
+ * hand-authored configuration admits is admitted here too.
+ */
+export const MAX_CSV_DELIMITER_LENGTH = 32;
+
 // The size bounds below apply to both union arms through the shared common
 // fields. Each `standardization` step's `params` (a Record<string, unknown>)
 // is unbounded by nature and left uncapped here; the boundary byte cap
@@ -911,6 +938,46 @@ const jobInputFileReferenceSchema: z.ZodType<JobInputFileReference> = z
   .strict();
 
 /**
+ * The field delimiter a party's own CSV is read by and its own result file
+ * written with, admitted wherever this surface reads or runs a mounted input.
+ * Graded by core's own rule ({@link isCsvDelimiterChoice}) after core's own
+ * resolution of the words a party may write for a character
+ * ({@link normalizeCsvDelimiter}), so this boundary and the command line accept
+ * the same values and refuse the rest in the same sentence.
+ *
+ * A single character, or the reserved `detect` word -- never a path, host,
+ * credential, or argv fragment. It reaches the CLI as the composed config's
+ * `csv_delimiter` value, and the read it governs is of this party's own mounted
+ * file alone: the partner reads theirs by their own choice, and nothing about it
+ * crosses.
+ *
+ * The parsed value is the RESOLVED one: the transform runs before the grade, so
+ * every reader of it -- the profile pass, the coverage sweep, and the composed
+ * `csv_delimiter` -- takes the character a read can be given rather than the
+ * word a party wrote for it.
+ *
+ * The refusal names the field, so a client that sends one the grade rejects
+ * learns which value to correct rather than that its body was rejected. The
+ * value itself is never echoed -- core's refusal states its shape.
+ *
+ * Bounded at {@link MAX_CSV_DELIMITER_LENGTH} code units ahead of the
+ * resolution, the way every other bounded string on this surface is, so an
+ * unbounded value is refused on its length rather than trimmed and lowercased
+ * on its way to a grade only one character can pass.
+ */
+export const jobCsvDelimiterSchema: z.ZodType<string> = z
+  .string()
+  .check(maxCodeUnits(MAX_CSV_DELIMITER_LENGTH))
+  .transform(normalizeCsvDelimiter)
+  .superRefine((value, ctx) => {
+    if (isCsvDelimiterChoice(value)) return;
+    ctx.addIssue({
+      code: "custom",
+      message: `csvDelimiter must state a delimiter psilink accepts: ${csvDelimiterRefusal(value)}`,
+    });
+  });
+
+/**
  * The per-run diagnostic and recovery controls, admitted on every arm of both
  * modes. Each is a bare boolean that selects a fixed CLI flag rather than
  * contributing a value, so neither can become a path, host, credential, or
@@ -953,6 +1020,7 @@ const jobExchangeIntentCommonFields = {
     .optional(),
   expectedPartnerDeduplicate: z.boolean().optional(),
   includeOwnColumns: OwnColumnSelectionSchema.optional(),
+  csvDelimiter: jobCsvDelimiterSchema.optional(),
   side: z.enum(["inviter", "acceptor"]).optional(),
   eventStream: z.boolean().optional(),
   signing: jobSigningChoiceSchema.optional(),

@@ -22,6 +22,7 @@ import { MAX_INPUT_NAME_LENGTH, isAdmissibleInputName } from "./workInputName";
 import {
   MAX_STANDARDIZATION_STEPS,
   MAX_STANDARDIZATION_TRANSFORMATIONS,
+  jobCsvDelimiterSchema,
   stepPatternsWithinCap,
 } from "./intentSchemas";
 import { JOB_DATA_ROOT_ENV } from "./gate";
@@ -232,10 +233,16 @@ export interface JobInputProfile {
  * {@link inferDateOfBirthColumn} and its first {@link INFER_DATE_SCAN_CAP} non-empty
  * values are fed to {@link inferDateFormat}. Every accumulator is constant-size, so
  * peak memory is one parse chunk regardless of file size.
+ *
+ * `csvDelimiter` is the field delimiter the operator chose for their own file;
+ * omitted, the pass reads commas, and `detect` takes the delimiter from the file.
+ * The columns this reports become the party's linkage terms, so the profile and
+ * the run the console composes must read the file the same way.
  */
 export async function profileJobInput(
   resolvedDir: string,
   name: string,
+  csvDelimiter?: string,
 ): Promise<JobInputProfile> {
   const { filePath, stat } = resolveJobInputFile(resolvedDir, name);
   const stream = fs.createReadStream(filePath);
@@ -278,6 +285,8 @@ export async function profileJobInput(
           }
         }
       },
+      undefined,
+      csvDelimiter,
     ));
   } catch (error) {
     // Classify the fault into a closed code; the underlying error (a read fault
@@ -317,11 +326,16 @@ export async function profileJobInput(
  * browser supersedes the sweep it aborts, the read stream is destroyed, and the pass
  * rejects with a {@link JobInputCoverageAbortedError} rather than scanning the rest
  * of a CLI-scale file. The abort error holds no path or row bytes.
+ *
+ * `csvDelimiter` is the operator's own choice for this file, as
+ * {@link profileJobInput} takes it: a sweep that read the file another way would
+ * report coverage for columns the run never sees.
  */
 export async function coverageJobInput(
   resolvedDir: string,
   name: string,
   standardization: Standardization,
+  csvDelimiter?: string,
   signal?: AbortSignal,
 ): Promise<Array<FieldValueCoverage>> {
   const { filePath } = resolveJobInputFile(resolvedDir, name);
@@ -332,9 +346,14 @@ export async function coverageJobInput(
   // holds the real fault on the non-abort path.
   stream.on("error", () => {});
   const accumulator = createFieldCoverageAccumulator(standardization);
-  const parse = streamCSVRows(stream, (rows) => {
-    for (const row of rows) accumulator.add(row);
-  });
+  const parse = streamCSVRows(
+    stream,
+    (rows) => {
+      for (const row of rows) accumulator.add(row);
+    },
+    undefined,
+    csvDelimiter,
+  );
 
   if (signal === undefined) {
     await parse;
@@ -429,13 +448,17 @@ const coverageStandardizationSchema = StandardizationSchema.refine(
 interface CoverageRequestBody {
   name: string;
   standardization: Standardization;
+  csvDelimiter?: string;
 }
 
 /** Schema for the coverage request body. `name` is length-bounded here and
- * resolved against the mounted directory at sweep time. */
+ * resolved against the mounted directory at sweep time; `csvDelimiter` takes the
+ * job intent's own grade ({@link jobCsvDelimiterSchema}), so a sweep and the run
+ * it advises accept the same delimiters. */
 export const coverageRequestSchema: z.ZodType<CoverageRequestBody> = z
   .object({
     name: z.string().min(1).check(maxCodeUnits(MAX_INPUT_NAME_LENGTH)),
     standardization: coverageStandardizationSchema,
+    csvDelimiter: jobCsvDelimiterSchema.optional(),
   })
   .strict();

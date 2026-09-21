@@ -13,6 +13,7 @@ import {
   acceptorDisclosedColumns,
   acceptorLaunchPayload,
 } from "@exchange/acceptorColumnsModel";
+import { acceptorServerJobConfig } from "@exchange/useAcceptorExchange";
 
 import type {
   AcceptorScreenAction,
@@ -501,6 +502,27 @@ describe("the console's mounted-file commit", () => {
     ]);
   });
 
+  test("a delimiter change voids the commit and the columns it seeded", () => {
+    const committed = acceptorScreenReducer(ACCEPTOR_SCREEN_INITIAL, {
+      type: "console-file-committed",
+      source: PROFILE,
+    });
+    const gatePassed = acceptorScreenReducer(committed, {
+      type: "console-accept-committed",
+      name: "Ida Mensah",
+      acquired: csv,
+    });
+    const voided = acceptorScreenReducer(gatePassed, {
+      type: "console-file-voided",
+    });
+    // "Accept and continue" reads `consoleSource`, so it refuses again until the
+    // operator confirms the file the new delimiter reads.
+    expect(voided.consoleSource).toBeUndefined();
+    expect(voided.columnsState).toBeUndefined();
+    expect(voided.acquired).toBeUndefined();
+    expect(voided.sanitizedColumnPositions).toEqual([]);
+  });
+
   test("a commit clears the refusal the last one left", () => {
     const refused = acceptorScreenReducer(ACCEPTOR_SCREEN_INITIAL, {
       type: "unnameable-columns-refused",
@@ -542,5 +564,75 @@ describe("the managed-exchange offer", () => {
       type: "manage-offer-deposited",
     });
     expect(state.manageOffer).toEqual({ status: "deposited" });
+  });
+});
+
+describe("what a voided commit can still compose", () => {
+  // The mounted file is tab-separated: the comma read the operator started on
+  // yields the whole header as one column, the tab read the columns the run sees.
+  const COMMA_PROFILE: ProfiledJobInput = {
+    ...PROFILE,
+    columns: [csv.columns.join("\t")],
+  };
+
+  /** The server-job config the console composes from this state and the operator's
+   * current delimiter: the mounted-file reference AcceptorScreen derives from
+   * `consoleSource`, over the columns the commit seeded. Undefined where the screen
+   * derives no launch source, which is what "Accept and continue" refuses on. */
+  function serverJobConfigFor(
+    state: AcceptorScreenState,
+    csvDelimiter: string,
+  ) {
+    if (state.consoleSource === undefined || state.columnsState === undefined)
+      return undefined;
+    return acceptorServerJobConfig({
+      token: invitation.token,
+      acceptorName: "Sam Rivera",
+      // No rows: they only infer the date input format, which this sequence does
+      // not measure.
+      ...acceptorLaunchPayload(
+        acceptorColumnsEditorState(state.columnsState, linkageTerms, []),
+      ),
+      inputSource: { kind: "workFile", name: state.consoleSource.name },
+      transport: { channel: "filedrop" },
+      deduplicate: state.committedDeduplicate,
+      csvDelimiter,
+    });
+  }
+
+  test("nothing until a fresh commit, and then the columns it was read by", () => {
+    const committed = acceptorScreenReducer(ACCEPTOR_SCREEN_INITIAL, {
+      type: "console-file-committed",
+      source: COMMA_PROFILE,
+    });
+    const gatePassed = acceptorScreenReducer(committed, {
+      type: "console-accept-committed",
+      name: "Sam Rivera",
+      acquired: csv,
+    });
+    const underComma = serverJobConfigFor(gatePassed, ",");
+    expect(underComma?.csvDelimiter).toBe(",");
+    expect(underComma?.metadata?.map((column) => column.name)).toEqual(
+      COMMA_PROFILE.columns,
+    );
+
+    const voided = acceptorScreenReducer(gatePassed, {
+      type: "console-file-voided",
+    });
+    // Cancelling the confirm stage the delimiter change opened leaves the void
+    // standing, so the columns the comma read seeded reach no config at all.
+    expect(serverJobConfigFor(voided, "\t")).toBeUndefined();
+
+    const reconfirmed = acceptorScreenReducer(voided, {
+      type: "console-file-committed",
+      source: PROFILE,
+    });
+    const config = serverJobConfigFor(reconfirmed, "\t");
+    expect(config?.csvDelimiter).toBe("\t");
+    expect(config?.metadata?.map((column) => column.name)).toEqual(csv.columns);
+    expect(config?.inputSource).toEqual({
+      kind: "workFile",
+      name: csv.fileName,
+    });
   });
 });

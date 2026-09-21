@@ -245,6 +245,10 @@ export type InviterScreenAction =
       alert?: AlertContent;
       announcement?: string;
     }
+  /** The delimiter moved under the file the console holds: the commit and the
+   * draft seeded from it go, since those columns were read by the previous
+   * choice and the run would read the file by the new one. */
+  | { type: "console-file-voided" }
   /** The console re-profiled the file it already holds, whose columns are
    * unchanged: the authored draft stands and only the profile-derived facts move. */
   | {
@@ -400,6 +404,13 @@ export function inviterScreenReducer(
         ...(action.announcement !== undefined
           ? { editorAnnouncement: action.announcement }
           : {}),
+      };
+    case "console-file-voided":
+      return {
+        ...state,
+        ...NO_FILE,
+        intakeAlert: undefined,
+        sanitizedNotice: undefined,
       };
     case "console-file-reprofiled":
       return {

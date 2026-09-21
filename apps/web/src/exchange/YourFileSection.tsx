@@ -42,6 +42,12 @@ const log = getLogger("YourFileSection");
  * when the file can back an exchange). The console never reads the file in the
  * browser: it renders {@link ServerFilePicker} over the operator-mounted
  * work-input directory, and the file-assurance line and sample-data copy say so.
+ *
+ * Both surfaces offer the delimiter control: the hosted build reads the dropped
+ * file by it, and the console hands it to the picker, which profiles the mounted
+ * file by it and passes it to the run the console composes. Changing it voids a
+ * file already committed on the console, so Continue is withheld until the
+ * operator confirms the file the new choice reads.
  */
 export function YourFileSection({
   name,
@@ -56,6 +62,7 @@ export function YourFileSection({
   notice,
   committed,
   onCommit,
+  onInvalidate,
   onContinue,
   onLoadSample,
   onDownloadSamples,
@@ -64,8 +71,9 @@ export function YourFileSection({
   onNameChange: (name: string) => void;
   /** The dropped or selected file; the host parses it. Hosted build only. */
   onFile: (file: File) => void;
-  /** How this party's file separates its fields. Hosted build only: the console
-   * reads the file on the host, not in the browser. */
+  /** How this party's file separates its fields: the delimiter the hosted build
+   * reads the dropped file by, and the one the console profiles and runs its
+   * mounted file by. */
   delimiter: CsvDelimiterChoice;
   onDelimiterChange: (choice: CsvDelimiterChoice) => void;
   reading: boolean;
@@ -83,6 +91,9 @@ export function YourFileSection({
   /** Commit a profiled console file to the host (the picker's "Use this file");
    * unused off the console. */
   onCommit?: (profile: ProfiledJobInput) => void;
+  /** Drop the committed console file and the terms derived from it: the delimiter
+   * moved, so its columns are not the ones the run reads. Unused off the console. */
+  onInvalidate?: () => void;
   onContinue: () => void;
   /** Seed the synthetic sample into this exchange in place. Hosted build only -- the
    * console cannot read an in-browser file, so its sample path is download-only. */
@@ -123,7 +134,8 @@ export function YourFileSection({
 
   // A delimiter the rule refuses reads nothing: the intake closes and Continue
   // is withheld, rather than a file being read by a delimiter nobody chose.
-  const delimiterUsable = resolveCsvDelimiter(delimiter).ok;
+  const delimiterResolution = resolveCsvDelimiter(delimiter);
+  const delimiterUsable = delimiterResolution.ok;
   const ready =
     name.trim().length > 0 &&
     acquired !== undefined &&
@@ -143,9 +155,16 @@ export function YourFileSection({
       />
       {consoleBuild ? (
         <>
+          <CsvDelimiterField
+            choice={delimiter}
+            onChange={onDelimiterChange}
+            note={CSV_DELIMITER_LOCAL_NOTICE}
+          />
           <ServerFilePicker
             committed={committed}
+            delimiter={delimiterResolution}
             onUse={(profile) => onCommit?.(profile)}
+            onInvalidate={() => onInvalidate?.()}
           />
           {acquired === undefined && (
             <p className={`${styles.small} ${styles.sub}`}>

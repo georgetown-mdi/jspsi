@@ -100,6 +100,13 @@ function outboundPayloadConsentFor(
  * setting the CLI reads when it writes this party's result file, adding nothing
  * to what the partner is sent. The schema refuses it beside a count-only
  * algorithm, so an intent pairing the two fails here rather than at the run.
+ *
+ * `csv_delimiter` is forwarded the same way: the field delimiter the CLI reads
+ * this party's own input by and writes its own result with. Core's spec schema
+ * resolves the spellings a party may write (`tab`, `detect`) and grades the
+ * result, so the composed document holds the same value a hand-authored
+ * configuration would. An absent field composes no key, which reads and writes
+ * commas.
  */
 export function composeConfigDocument(
   intent: JobFiledropExchangeIntent,
@@ -115,6 +122,7 @@ export function composeConfigDocument(
     expectedPartnerDeduplicate,
     retentionDisposition,
     includeOwnColumns,
+    csvDelimiter,
   } = intent;
   const outboundPayloadConsent = outboundPayloadConsentFor(intent);
   const signing = composedSigning(intent, signingPaths);
@@ -140,6 +148,7 @@ export function composeConfigDocument(
     ...(signing !== undefined ? { signing } : {}),
     ...(retentionDisposition !== undefined ? { retentionDisposition } : {}),
     ...(includeOwnColumns !== undefined ? { includeOwnColumns } : {}),
+    ...(csvDelimiter !== undefined ? { csvDelimiter } : {}),
   };
   return mintExchangeFile(fileInput);
 }
@@ -155,8 +164,8 @@ export function composeConfigDocument(
  * the CLI child resolves at exchange time, so no secret byte transits this
  * process. The client's `linkageTerms`, `metadata`, `standardization`,
  * `expectedPayloadColumns`, `expectedPartnerDeduplicate`,
- * `outbound_payload_consent`, `signing`, `retention_disposition`, and
- * `include_own_columns` are
+ * `outbound_payload_consent`, `signing`, `retention_disposition`,
+ * `include_own_columns`, and `csv_delimiter` are
  * composed as they are on the filedrop path; `options` is the same
  * numeric/boolean/enum subset, plus the `connectionPerPoll` dialing mode
  * this channel alone admits.
@@ -182,6 +191,7 @@ export function composeSftpConfigDocument(
     expectedPartnerDeduplicate,
     retentionDisposition,
     includeOwnColumns,
+    csvDelimiter,
   } = intent;
   const outboundPayloadConsent = outboundPayloadConsentFor(intent);
   const signing = composedSigning(intent, signingPaths);
@@ -202,6 +212,7 @@ export function composeSftpConfigDocument(
     ...(signing !== undefined ? { signing } : {}),
     ...(retentionDisposition !== undefined ? { retentionDisposition } : {}),
     ...(includeOwnColumns !== undefined ? { includeOwnColumns } : {}),
+    ...(csvDelimiter !== undefined ? { csvDelimiter } : {}),
   };
   const validated = ExchangeSpecSchema.parse(assembled);
   return stringifyYaml(snakeizeKeys(validated));
