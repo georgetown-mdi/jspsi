@@ -62,7 +62,7 @@
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^6.1.1",
     "@vitest/browser": "^4.1.9",
-    "@vitest/browser-playwright": "^4.1.9",
+    "@vitest/browser-playwright": "^5.0.0",
     "eslint-visitor-keys": "^5.0.1",
     "playwright": "^1.62.1",
     "postcss-preset-mantine": "^1.18.0",
