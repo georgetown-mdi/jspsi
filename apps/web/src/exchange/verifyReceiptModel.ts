@@ -73,12 +73,14 @@ import type {
  * version alone. A dropped document is read and parsed whichever it turns out to
  * be, so this is a narrower USE of the identity file, not a narrower read of it.
  *
- * Every embedded error string is routed through core's display-boundary
- * sanitizers before it reaches this model's output: a malformed document's parse
- * error through {@link sanitizeErrorForDisplay}, a reconstruction warning (which
- * interpolates a supplied column name) and a certificate identity (free text its
- * holder chose) through {@link sanitizeForDisplay}. Nothing here echoes an
- * unsanitized byte of a supplied file.
+ * Every embedded string has passed the display boundary before it reaches this
+ * model's output: a malformed document's parse error through
+ * {@link sanitizeErrorForDisplay} here, a certificate identity (free text its
+ * holder chose) through {@link sanitizeForDisplay} here, and a reconstruction
+ * warning as core composed it -- fixed copy, with the one supplied column name
+ * escaped and capped where it was interpolated -- which this model passes
+ * through without a second pass. Nothing here echoes an unsanitized byte of a
+ * supplied file.
  */
 
 // --- Input parse -------------------------------------------------------------
