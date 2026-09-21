@@ -297,16 +297,25 @@ describe("wiring", () => {
     expect(readRepo("apps/web/vite.config.ts")).toContain(RECORD_ENV);
   });
 
-  it("runs the check from the workflow that builds the deployed server", () => {
+  // The build this check drives is the only web build that workflow runs, and
+  // the artifact is packaged from what it leaves in apps/web/.output, so the
+  // check and the upload have to stay in one job: a check moved to a job of its
+  // own would leave the packaging job with no build to zip.
+  it("runs the check in the job that uploads the deploy artifact", () => {
     const workflow = workflowDocument(
       repoRoot,
       ".github/workflows/eb_build_and_test.yaml",
     );
-    const steps = workflow.jobs["build-and-test"].steps.map(
-      (step) => step.run ?? "",
+    const runners = Object.values(workflow.jobs).filter((job) =>
+      (job.steps ?? []).some((step) =>
+        (step.run ?? "").includes("check:deploy-trigger-graph"),
+      ),
     );
+    expect(runners).toHaveLength(1);
     expect(
-      steps.some((run) => run.includes("check:deploy-trigger-graph")),
+      (runners[0].steps ?? []).some((step) =>
+        (step.uses ?? "").startsWith("actions/upload-artifact@"),
+      ),
     ).toBe(true);
   });
 
