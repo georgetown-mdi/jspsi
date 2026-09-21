@@ -203,7 +203,7 @@ export interface PsiEngine {
   dispose(): void;
 }
 
-/** @internal Settings only a test varies. */
+/** Settings only a test varies; exported so the public signatures that take it name a public type. */
 export interface InProcessPsiEngineOptions {
   /**
    * @internal

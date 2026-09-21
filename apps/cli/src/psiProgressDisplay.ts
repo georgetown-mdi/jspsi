@@ -123,8 +123,8 @@ function formatRate(elements: number, durationMs: number): string | undefined {
 /**
  * How far into its set an operation is: `4,000 of 10,000 values (40%)`, or the
  * total alone where nothing has been reported yet. The share is rounded down
- * and held at 100 so a frame declaring more elements than it holds cannot put
- * the line past its own total.
+ * and held at 100 so a count that overshoots its total by a rounding step
+ * cannot put the line past that total.
  */
 function formatProcessed(
   elements: number,

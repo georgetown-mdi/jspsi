@@ -41,6 +41,7 @@ export type {
   PsiEngine,
   PsiEngineMode,
   PsiProcessedElementsReporter,
+  InProcessPsiEngineOptions,
 } from "./psi/psiEngine";
 export { WorkerPsiEngine, servePsiWorker } from "./psi/psiWorkerEngine";
 export type {
