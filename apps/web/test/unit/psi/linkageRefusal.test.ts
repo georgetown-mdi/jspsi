@@ -6,10 +6,7 @@ import {
   inferMetadata,
 } from "@psilink/core";
 
-import {
-  CSV_DELIMITER_SINGLE_COLUMN_COMMAND_LINE_REMEDY,
-  CSV_DELIMITER_SINGLE_COLUMN_REMEDY,
-} from "@components/csvDelimiterChoice";
+import { CSV_DELIMITER_SINGLE_COLUMN_REMEDY } from "@components/csvDelimiterChoice";
 import { unlinkableFileAlert } from "@components/UnlinkableFileAlert";
 
 import { linkageRefusalFor } from "@psi/linkageRefusal";
@@ -115,17 +112,14 @@ describe("linkageRefusalFor", () => {
 describe("unlinkableFileAlert", () => {
   test("the no-key refusal names the missing field types and a remedy the operator owns", () => {
     const columns = ["notes"];
-    const alert = unlinkableFileAlert(
-      {
-        kind: "no-linkable-key",
-        missingFields: decideLinkageTermsVerdict(
-          columns,
-          getDefaultLinkageTerms("x"),
-        ).unsatisfiedFields,
-        singleColumn: false,
-      },
-      CSV_DELIMITER_SINGLE_COLUMN_REMEDY,
-    );
+    const alert = unlinkableFileAlert({
+      kind: "no-linkable-key",
+      missingFields: decideLinkageTermsVerdict(
+        columns,
+        getDefaultLinkageTerms("x"),
+      ).unsatisfiedFields,
+      singleColumn: false,
+    });
     expect(alert.title).toBe("This file cannot be linked");
     expect(alert.message).toContain("cannot satisfy any default linkage key");
     expect(alert.message).toContain("date_of_birth");
@@ -140,10 +134,11 @@ describe("unlinkableFileAlert", () => {
       ["notes"],
       termsNamed("partner-key-name", "partner_field_name"),
     );
-    const alert = unlinkableFileAlert(
-      { kind: "shortfall", verdict, singleColumn: false },
-      CSV_DELIMITER_SINGLE_COLUMN_REMEDY,
-    );
+    const alert = unlinkableFileAlert({
+      kind: "shortfall",
+      verdict,
+      singleColumn: false,
+    });
     expect(alert.title).toBe("This file cannot satisfy the linkage terms");
     expect(alert.message).toContain(
       "the one linkage key cannot be produced from this input's columns",
@@ -172,41 +167,22 @@ describe("unlinkableFileAlert", () => {
       termsNamed("k", "first_name"),
     );
     expect(
-      unlinkableFileAlert(
-        { kind: "shortfall", verdict, singleColumn: true },
-        CSV_DELIMITER_SINGLE_COLUMN_REMEDY,
-      ).message,
+      unlinkableFileAlert({ kind: "shortfall", verdict, singleColumn: true })
+        .message,
     ).toContain(CSV_DELIMITER_SINGLE_COLUMN_REMEDY);
     expect(
-      unlinkableFileAlert(
-        { kind: "no-linkable-key", missingFields: [], singleColumn: true },
-        CSV_DELIMITER_SINGLE_COLUMN_REMEDY,
-      ).message,
+      unlinkableFileAlert({
+        kind: "no-linkable-key",
+        missingFields: [],
+        singleColumn: true,
+      }).message,
     ).toContain(CSV_DELIMITER_SINGLE_COLUMN_REMEDY);
     // A file with columns to spare falls short for a reason the delimiter cannot
     // fix, so the remedy stays off it.
     expect(
-      unlinkableFileAlert(
-        { kind: "shortfall", verdict, singleColumn: false },
-        CSV_DELIMITER_SINGLE_COLUMN_REMEDY,
-      ).message,
+      unlinkableFileAlert({ kind: "shortfall", verdict, singleColumn: false })
+        .message,
     ).not.toContain("single column");
-  });
-
-  test("states the remedy the calling surface offers, not a fixed one", () => {
-    // A surface with no delimiter control -- the console's Direct exchange step --
-    // passes the command line's remedy, so the alert cannot send its operator to a
-    // control that screen does not have.
-    const verdict = decideLinkageTermsVerdict(
-      ["first_name|last_name"],
-      termsNamed("k", "first_name"),
-    );
-    const message = unlinkableFileAlert(
-      { kind: "shortfall", verdict, singleColumn: true },
-      CSV_DELIMITER_SINGLE_COLUMN_COMMAND_LINE_REMEDY,
-    ).message;
-    expect(message).toContain("csv_delimiter");
-    expect(message).not.toContain("How your file separates fields");
   });
 
   test("a dead key's shortfall names the cleaning, not the columns", () => {
@@ -229,10 +205,11 @@ describe("unlinkableFileAlert", () => {
     };
     const verdict = decideLinkageTermsVerdict(["date_of_birth"], deadTerms);
     expect(verdict.deadKeys).toHaveLength(1);
-    const alert = unlinkableFileAlert(
-      { kind: "shortfall", verdict, singleColumn: false },
-      CSV_DELIMITER_SINGLE_COLUMN_REMEDY,
-    );
+    const alert = unlinkableFileAlert({
+      kind: "shortfall",
+      verdict,
+      singleColumn: false,
+    });
     expect(alert.message).toContain(
       "the cleaning declared for the one linkage key drops every record",
     );

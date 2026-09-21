@@ -15,13 +15,17 @@ import {
 
 import { linkageRefusalFor } from "@psi/linkageRefusal";
 
-import { CSV_DELIMITER_SINGLE_COLUMN_COMMAND_LINE_REMEDY } from "@components/csvDelimiterChoice";
-import { unlinkableFileAlert } from "@components/UnlinkableFileAlert";
+import {
+  emptyColumnPositions,
+  sanitizedColumnsAlert,
+  unnameableColumnsAlert,
+} from "@psi/columnNames";
 
 import type { LinkageStrategy, LinkageTerms, Metadata } from "@psilink/core";
 
 import type { AlertContent } from "@components/csvIntake";
 import type { LinkageRefusal } from "@psi/linkageRefusal";
+import type { ProfiledJobInput } from "@psi/jobClient/workInputClient";
 
 /**
  * The pure model behind the "Direct exchange" console: the symmetric spine's
@@ -296,19 +300,47 @@ export function previewInferredTerms(
 }
 
 /**
- * The confirm screen's alert for a file the preview refuses, in the shared words
- * every seat refuses an unlinkable file with ({@link unlinkableFileAlert}).
- *
- * This spine renders the mounted-file picker with no delimiter control, so a
- * refusal over a file that read as ONE column states the command line's remedy:
- * the operator changes how their file is read by running the exchange from a
- * configuration, not by a control this screen does not have.
+ * What the file step holds: the mounted file committed to the run, the refusal
+ * standing against the last commit, and the advisory about what the console's
+ * parse removed from that file's header. One value rather than three, so a
+ * commit and a voiding each move the whole step at once.
  */
-export function directUnlinkableFileAlert(
-  refusal: LinkageRefusal,
-): AlertContent {
-  return unlinkableFileAlert(
-    refusal,
-    CSV_DELIMITER_SINGLE_COLUMN_COMMAND_LINE_REMEDY,
-  );
+export interface DirectFileState {
+  /** The profiled mounted file the rest of the spine reads, or undefined where
+   * the step holds none -- nothing committed yet, a refused commit, or a commit
+   * a delimiter change voided. */
+  source?: ProfiledJobInput;
+  /** The refusal the step shows over the file it would not take. */
+  alert?: AlertContent;
+  /** What the parse removed from the committed file's header. Held here rather
+   * than read off the profile, so it is still stated when the same read leaves a
+   * column unnamed and the commit is refused. */
+  notice?: AlertContent;
+}
+
+/**
+ * The file step holding nothing: where it starts, and where a delimiter change
+ * under a committed file returns it. The commit and both notices go together,
+ * since those columns were read by the delimiter in effect when the file was
+ * opened and the run reads the file by the new one -- a set of columns the run
+ * does not produce cannot survive into the terms this party confirms.
+ */
+export const DIRECT_NO_FILE: DirectFileState = {};
+
+/**
+ * The file step's state once the picker commits `profile`.
+ *
+ * A blank header cell is refused here with the shared unnameable alert --
+ * core's inferMetadata would otherwise throw at preview time -- and the refusal
+ * holds no profile, so the confirm step cannot read a file this step refused.
+ * The removal notice is stated either way, beside the refusal it caused.
+ */
+export function directFileCommit(profile: ProfiledJobInput): DirectFileState {
+  const stripped = profile.sanitizedColumnPositions;
+  const notice =
+    stripped.length > 0 ? sanitizedColumnsAlert(stripped) : undefined;
+  const unnameable = emptyColumnPositions(profile.columns);
+  if (unnameable.length > 0)
+    return { alert: unnameableColumnsAlert(unnameable, stripped), notice };
+  return { source: profile, notice };
 }

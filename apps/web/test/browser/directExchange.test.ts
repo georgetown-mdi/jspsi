@@ -491,6 +491,90 @@ describe("direct exchange confirm and run", () => {
       .toBeInTheDocument();
   });
 
+  test("profiles and runs by the operator's own field delimiter", async () => {
+    // The mounted file is read on the console, so the choice has to reach both
+    // the profile pass -- whose columns become this party's linkage terms -- and
+    // the run itself, or the operator confirms columns the run does not produce.
+    const api = stubJobApi({ sftp: CONFIGURED_SFTP });
+    app.render(createElement(DirectExchangeScreen));
+
+    await userEvent.selectOptions(
+      page.getByLabelText("How your file separates fields"),
+      "|",
+    );
+    await reachConfirm();
+    await trustAffirmation().click();
+    await page.getByRole("button", { name: "Run the exchange" }).click();
+
+    const profile = api.captured.find((request) =>
+      request.url.startsWith("/api/jobs/inputs/profile"),
+    );
+    expect(profile?.url).toContain("delimiter=%7C");
+    await vi.waitFor(() => {
+      expect(
+        api.captured.some(
+          (request) => request.url === "/api/jobs" && request.method === "POST",
+        ),
+      ).toBe(true);
+    });
+    const post = api.captured.find(
+      (request) => request.url === "/api/jobs" && request.method === "POST",
+    );
+    expect(
+      (JSON.parse(post?.body ?? "{}") as Record<string, unknown>).csvDelimiter,
+    ).toBe("|");
+  });
+
+  test("changing the delimiter under a committed file voids that commit", async () => {
+    // Those columns were read by the previous choice, so the commit taken from
+    // them goes: the operator confirms the file the new choice reads rather than
+    // running on terms drawn from a reading the run does not repeat.
+    stubJobApi({ sftp: CONFIGURED_SFTP });
+    app.render(createElement(DirectExchangeScreen));
+    await page.getByRole("button", { name: "Select clients.csv" }).click();
+    await page.getByRole("button", { name: "Use this file" }).click();
+    await expect
+      .element(
+        page.getByRole("heading", { level: 1, name: "The agreed server" }),
+      )
+      .toBeInTheDocument();
+
+    await page.getByRole("button", { name: "Back" }).click();
+    await userEvent.selectOptions(
+      page.getByLabelText("How your file separates fields"),
+      "|",
+    );
+
+    // The step asks for the file again on the columns the new choice read, and
+    // nothing downstream holds the voided commit.
+    await expect
+      .element(page.getByRole("button", { name: "Use this file" }))
+      .toBeInTheDocument();
+    expect(app.container.textContent).not.toContain("Selected");
+  });
+
+  test("a delimiter the rule refuses holds the spine on the file step", async () => {
+    // The refused choice reads nothing, so the step cannot move on to a run that
+    // would read the file with commas nobody chose. The gate is this step's, as
+    // the invitation steps withhold their own Continue.
+    stubJobApi({ sftp: CONFIGURED_SFTP });
+    app.render(createElement(DirectExchangeScreen));
+    await page.getByRole("button", { name: "Select clients.csv" }).click();
+    await userEvent.selectOptions(
+      page.getByLabelText("How your file separates fields"),
+      "other",
+    );
+    await userEvent.fill(
+      page.getByLabelText("Field separator character"),
+      "||",
+    );
+    await page.getByRole("button", { name: "Use this file" }).click();
+
+    await expect
+      .element(page.getByRole("heading", { level: 1, name: "Your file" }))
+      .toBeInTheDocument();
+  });
+
   test("names the header positions the console's parse stripped", async () => {
     // The console reads the file on the server, so the positions ride the
     // profile; this spine states them on the confirm screen, the last one before

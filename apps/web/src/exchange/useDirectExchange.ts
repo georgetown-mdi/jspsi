@@ -49,6 +49,7 @@ export function useDirectExchange({
   identity,
   linkageStrategy,
   deduplicate,
+  csvDelimiter,
   options,
   runDiagnostics,
 }: {
@@ -68,6 +69,11 @@ export function useDirectExchange({
    * `--deduplicate`. Omitted when the operator leaves the closed default, which
    * is the value a run with no flag at all applies. */
   deduplicate?: boolean;
+  /** How this party's own file is read and its own result written, forwarded to
+   * the CLI's `--csv-delimiter`. Omitted while the file step's choice is
+   * refused, which reads nothing -- that step holds the spine until it resolves,
+   * so no run starts under one. */
+  csvDelimiter?: string;
   /** The agreed-server step's file-handling choices, already resolved through
    * core's retain-mode implication. They reach the run as CLI flags, a zero-setup
    * command with no configuration document; undefined when the operator
@@ -167,6 +173,7 @@ export function useDirectExchange({
       ...(identity !== undefined ? { identity } : {}),
       ...(linkageStrategy !== undefined ? { linkageStrategy } : {}),
       ...(deduplicate !== undefined ? { deduplicate } : {}),
+      ...(csvDelimiter !== undefined ? { csvDelimiter } : {}),
       ...(options !== undefined ? { options } : {}),
       ...(runDiagnostics !== undefined ? { runDiagnostics } : {}),
       // Persist the created job's id so a reload or hard tab close can re-attach,

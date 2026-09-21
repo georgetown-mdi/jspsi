@@ -358,6 +358,41 @@ describe(
       expect(argv).not.toContain("--no-deduplicate");
     });
 
+    test("the field-delimiter token survives a real parse", async () => {
+      // The file step resolves the operator's choice to the character itself, so
+      // what the flag receives is a single character rather than a word. Whether
+      // the CLI takes that form on this command is the tool's answer to give.
+      const dir = scratchDir("zs-delimiter");
+      const argv = await captureZeroSetupArgv({
+        workdir: dir,
+        connectionArgs: [RENDEZVOUS_URL],
+        eventStream: true,
+        csvDelimiter: "|",
+        timeoutMs: CHILD_EXIT_TIMEOUT_MS,
+      });
+      expect(argv).toContain("--csv-delimiter=|");
+
+      const parsed = parseWithRealCli(argv, dir);
+      expect(parsed.stderr).not.toContain("Unknown argument");
+      expect(parsed.status).not.toBe(EXIT_USAGE);
+      expect(parsed.stderr).toContain("input.csv does not exist");
+    });
+
+    test("the console emits no delimiter token where the operator chose none", async () => {
+      // A zero-setup run loads no configuration file for a flag to override, so
+      // an unset flag reads the comma the CLI reads by default.
+      const dir = scratchDir("zs-delimiter-default");
+      const argv = await captureZeroSetupArgv({
+        workdir: dir,
+        connectionArgs: [RENDEZVOUS_URL],
+        eventStream: true,
+        timeoutMs: CHILD_EXIT_TIMEOUT_MS,
+      });
+      expect(argv.some((token) => token.startsWith("--csv-delimiter"))).toBe(
+        false,
+      );
+    });
+
     test("every emitted connection-tuning token survives a real parse", async () => {
       // The console composes durations in the units its own controls offer; the
       // CLI's duration flags have two different grammars (only the poll interval
