@@ -17,6 +17,7 @@ import { Link } from "@tanstack/react-router";
 import { LinkageStrategySchema, holdsPrivateKeyMaterial } from "@psilink/core";
 
 import { InvitationTerms } from "@components/InvitationTerms";
+import { unlinkableFileAlert } from "@components/UnlinkableFileAlert";
 import { useOnlineStatus } from "@components/useOnlineStatus";
 
 import {
@@ -47,7 +48,6 @@ import {
   DIRECT_DEDUPLICATE_SIDE_NOTICE,
   DIRECT_LINKAGE_STRATEGY_AGREEMENT_NOTICE,
   directBothSidedDeduplicateNotice,
-  directUnlinkableFileAlert,
   previewInferredTerms,
 } from "./directExchangeModel";
 
@@ -152,7 +152,7 @@ export function DirectConfirmSection({
   const unlinkable =
     preview.refusal === undefined
       ? undefined
-      : directUnlinkableFileAlert(preview.refusal);
+      : unlinkableFileAlert(preview.refusal);
 
   // A column this file sends whose name is too long to transmit. The console would
   // refuse the run at data preparation, so it is refused here where the operator can

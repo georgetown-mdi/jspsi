@@ -9,6 +9,9 @@ import {
 
 import { disclosedColumnNames } from "@psi/metadataEditing";
 
+import { CSV_DELIMITER_SINGLE_COLUMN_REMEDY } from "@components/csvDelimiterChoice";
+import { unlinkableFileAlert } from "@components/UnlinkableFileAlert";
+
 import {
   CONNECTION_TUNING_DEFAULT,
   connectionTuningProblems,
@@ -17,12 +20,15 @@ import {
   DEFAULT_PREVIEW_IDENTITY,
   DIRECT_DEDUPLICATE_DEFAULT,
   DIRECT_LINKAGE_STRATEGY_DEFAULT,
+  DIRECT_NO_FILE,
   DIRECT_STEP_ORDER,
   directBothSidedDeduplicateNotice,
   directDeduplicateIntentFields,
+  directFileCommit,
+  directFileRefusal,
+  directFileSanitizedNotice,
   directLinkageStrategyIntentFields,
   directServerBlockedReason,
-  directUnlinkableFileAlert,
   previewInferredTerms,
 } from "@exchange/directExchangeModel";
 import {
@@ -31,9 +37,15 @@ import {
   exchangeFilesProblems,
 } from "@console/exchangeFilesModel";
 
+import { CONTROLS_ONLY_HEADER_PROFILE } from "../../utils/unnamedColumnProfiles";
+
 import type { LinkageStrategy } from "@psilink/core";
 
-import type { DirectServerGates } from "@exchange/directExchangeModel";
+import type {
+  DirectFileState,
+  DirectServerGates,
+} from "@exchange/directExchangeModel";
+import type { ProfiledJobInput } from "@psi/jobClient/workInputClient";
 
 const LINKABLE_COLUMNS = [
   "ssn",
@@ -41,6 +53,16 @@ const LINKABLE_COLUMNS = [
   "last_name",
   "date_of_birth",
   "program_code",
+];
+
+/** A tab-separated header read by a delimiter that is not its own: the whole row
+ * comes back as one column. */
+const ONE_COLUMN_HEADER = ["first_name\tlast_name\tdate_of_birth"];
+
+/** Every strategy an operator can select on the confirm step. */
+const LINKAGE_STRATEGIES: ReadonlyArray<LinkageStrategy> = [
+  "cascade",
+  "single-pass",
 ];
 
 describe("previewInferredTerms", () => {
@@ -143,21 +165,22 @@ describe("previewInferredTerms", () => {
     expect(preview.refusal.missingFields.length).toBeGreaterThan(0);
   });
 
-  test("a file that read as one column is sent to the command line, not a control", () => {
-    // This spine's file step renders the mounted-file picker with no delimiter
-    // control, so the remedy it states for a one-column read is the configuration
-    // key the operator sets at the command line.
+  test("a file that read as one column is sent to this step's own control", () => {
+    // This spine's file step offers the delimiter control beside the picker, so
+    // the remedy it states for a one-column read is that control -- the same
+    // sentence the invitation steps state, with nothing of the command line in
+    // it.
     const preview = previewInferredTerms(
-      ["first_name\tlast_name\tdate_of_birth"],
+      ONE_COLUMN_HEADER,
       "x",
       DIRECT_LINKAGE_STRATEGY_DEFAULT,
       DIRECT_DEDUPLICATE_DEFAULT,
     );
     if (preview.refusal === undefined)
       throw new Error("expected a refusal over a one-column read");
-    const message = directUnlinkableFileAlert(preview.refusal).message;
-    expect(message).toContain("csv_delimiter");
-    expect(message).not.toContain("How your file separates fields");
+    const message = unlinkableFileAlert(preview.refusal).message;
+    expect(message).toContain(CSV_DELIMITER_SINGLE_COLUMN_REMEDY);
+    expect(message).not.toContain("csv_delimiter");
   });
 
   test("the refusal grades the previewed terms, not the unnarrowed default set", () => {
@@ -380,5 +403,103 @@ describe("the agreed-server step's continue gate", () => {
     expect(
       directServerBlockedReason(gates({ splitDirectoryBlocked: true })),
     ).toBe("Resolve the retain-mode requirement above to continue.");
+  });
+});
+
+describe("the file step's state", () => {
+  /** A profiled mounted file as the console's own parse reports it. */
+  function profileOf(
+    columns: Array<string>,
+    sanitizedColumnPositions: Array<number> = [],
+  ): ProfiledJobInput {
+    return {
+      name: "clients.csv",
+      sizeBytes: 4096,
+      modifiedAt: 1_700_000_000_000,
+      rowCount: 2,
+      columns,
+      sanitizedColumnPositions,
+      columnSamples: new Map(columns.map((column) => [column, ["1", "2"]])),
+    };
+  }
+
+  /** The unnameable-header file, whose strip is what emptied a column name. */
+  function controlsOnlyProfile(): ProfiledJobInput {
+    return profileOf(
+      CONTROLS_ONLY_HEADER_PROFILE.columns,
+      CONTROLS_ONLY_HEADER_PROFILE.sanitizedColumnPositions,
+    );
+  }
+
+  test("a commit holds the read and nothing drawn from it", () => {
+    // Everything the step states about the file is read back from the file, so
+    // a commit stores one thing and a void clears one thing -- a refusal cannot
+    // be left behind by the read it describes.
+    const profile = profileOf(LINKABLE_COLUMNS);
+    expect(directFileCommit(profile)).toEqual({ source: profile });
+    expect(directFileRefusal(profile)).toBeUndefined();
+    expect(directFileSanitizedNotice(profile)).toBeUndefined();
+  });
+
+  test("a header the strip emptied is refused, the removal stated beside it", () => {
+    // core's inferMetadata throws on a blank column name, so the step refuses
+    // the file here rather than at the confirm step's preview, and the removal
+    // that emptied the name is stated beside that refusal.
+    const profile = controlsOnlyProfile();
+    expect(directFileRefusal(profile)?.title).toBeDefined();
+    expect(directFileSanitizedNotice(profile)?.title).toBeDefined();
+  });
+
+  test("a header that read as one column is refused beside the control", () => {
+    // A file separated by something other than the delimiter it was read by
+    // comes back this way, and the control that reads it is on this step -- so
+    // the step refuses it here, where the remedy the alert names is on screen,
+    // rather than at the confirm preview two steps on.
+    expect(directFileRefusal(profileOf(ONE_COLUMN_HEADER))?.message).toContain(
+      CSV_DELIMITER_SINGLE_COLUMN_REMEDY,
+    );
+  });
+
+  test("the confirm step's own choices do not move this grading", () => {
+    // The step grades before the operator reaches the strategy and side
+    // controls, so it grades at the spine's defaults. Neither choice reaches the
+    // keys the columns are graded against: a file this step takes is not one the
+    // confirm step refuses over the same columns, and one it refuses would be
+    // refused there under every choice.
+    for (const columns of [ONE_COLUMN_HEADER, LINKABLE_COLUMNS])
+      for (const linkageStrategy of LINKAGE_STRATEGIES)
+        for (const deduplicate of [false, true]) {
+          const state = { columns, linkageStrategy, deduplicate };
+          const refusedAtConfirm =
+            previewInferredTerms(
+              columns,
+              DEFAULT_PREVIEW_IDENTITY,
+              linkageStrategy,
+              deduplicate,
+            ).refusal !== undefined;
+          expect({ ...state, refused: refusedAtConfirm }).toEqual({
+            ...state,
+            refused: directFileRefusal(profileOf(columns)) !== undefined,
+          });
+        }
+  });
+
+  test("the state a delimiter change voids to holds nothing a commit set", () => {
+    // The committed columns were read by the delimiter in effect when the file
+    // was opened, and the run reads the file by the new one, so what that
+    // reading put in the step goes. Enumerated from a taken commit and a refused
+    // one together, so a field added to the step has to be cleared here too.
+    const set = new Set(
+      [
+        directFileCommit(profileOf(LINKABLE_COLUMNS, [2])),
+        directFileCommit(controlsOnlyProfile()),
+      ].flatMap((commit) => Object.keys(commit)),
+    ) as Set<keyof DirectFileState>;
+    expect(set).toEqual(new Set(["source"]));
+    for (const field of set)
+      expect({ field, held: DIRECT_NO_FILE[field] }).toEqual({
+        field,
+        held: undefined,
+      });
   });
 });

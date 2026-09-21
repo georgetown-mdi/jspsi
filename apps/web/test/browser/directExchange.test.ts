@@ -11,6 +11,7 @@ import "@mantine/core/styles.css";
 
 import {
   CONSENT_FACTS,
+  CSV_DELIMITER_DETECT,
   DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
   DEDUPLICATE_PARTNER_DECLARED_DISCLOSURE_STATEMENT,
   DEDUPLICATE_PARTNER_DECLARED_SIDE_NOTE,
@@ -23,6 +24,8 @@ import {
   SINGLE_PASS_DISCLOSURE_TITLE,
 } from "@psi/linkageStrategyChoice";
 import { DEDUPLICATE_CONTROL_LABEL } from "@psi/deduplicateChoice";
+
+import { CSV_DELIMITER_SINGLE_COLUMN_REMEDY } from "@components/csvDelimiterChoice";
 
 import {
   ReattachNotice,
@@ -85,6 +88,21 @@ const CLIENTS_PROFILE = {
   ],
 };
 
+/** The same file read by a delimiter that is not its own: the whole header comes
+ * back as one column, the reading a file separated another way produces. */
+const ONE_COLUMN_PROFILE = {
+  ...CLIENTS_FILE,
+  rowCount: 2,
+  columns: [CLIENTS_PROFILE.columns.join("|")],
+  sanitizedColumnPositions: [],
+  columnSamples: [
+    {
+      column: CLIENTS_PROFILE.columns.join("|"),
+      values: ["1|Ann|Lee|01/02/1990|A", "2|Bo|Ray|03/04/1985|B"],
+    },
+  ],
+};
+
 // A valid literal OpenSSH SHA256 fingerprint the host-key probe returns.
 const PROBE_FINGERPRINT = `SHA256:${"B".repeat(42)}A`;
 
@@ -100,6 +118,10 @@ interface StubOptions {
   /** The body `GET /api/jobs/inputs/profile` serves. Defaults to
    * {@link CLIENTS_PROFILE}. */
   profile?: unknown;
+  /** The body that route serves for the `delimiter` it was read by (absent for a
+   * read that named none), for a file whose columns differ by choice. Takes
+   * precedence over {@link StubOptions.profile}. */
+  profileByDelimiter?: (delimiter: string | null) => unknown;
   /** The run status a `GET /api/jobs/job-7` reports. Defaults to `running`; a
    * terminal value (`failed`) lets a discard skip the cancel-and-poll wait and DELETE
    * at once, so a start-over test does not sit through the 15 s discard budget. */
@@ -176,10 +198,18 @@ function stubJobApi(options: StubOptions = {}): {
         return Promise.resolve(
           jsonResponse({ configured: true, files: [CLIENTS_FILE] }),
         );
-      if (url.startsWith("/api/jobs/inputs/profile"))
-        return Promise.resolve(
-          jsonResponse(options.profile ?? CLIENTS_PROFILE),
+      if (url.startsWith("/api/jobs/inputs/profile")) {
+        const read = new URL(url, window.location.origin).searchParams.get(
+          "delimiter",
         );
+        return Promise.resolve(
+          jsonResponse(
+            options.profileByDelimiter?.(read) ??
+              options.profile ??
+              CLIENTS_PROFILE,
+          ),
+        );
+      }
       if (url === "/api/jobs/sftp/probe") {
         const probe = options.probe ?? {
           status: 200,
@@ -296,6 +326,17 @@ const CONFIGURED_SFTP = {
   host: "sftp.example.gov",
   port: 2222,
 };
+
+const ATTACHMENT_KEY = "psilink-console-last-job";
+
+/** Persist a console strand-recovery record so the recovery panel has a job to
+ * offer on mount, the same shape `consoleRecovery.test.ts` writes. */
+function persistAttachment(jobId: string): void {
+  window.localStorage.setItem(
+    ATTACHMENT_KEY,
+    JSON.stringify({ v: 1, jobId, seat: "inviter", channel: "sftp" }),
+  );
+}
 
 const app = createAppMount();
 
@@ -458,9 +499,10 @@ describe("direct exchange confirm and run", () => {
   test("a header the strip emptied is refused by that cause, notice beside it", async () => {
     // The committed profile is the body the console's own parse returns for a
     // header whose middle column is only direction characters
-    // (unnamedColumnProfiles). The refusal drops the file, so the confirm screen
-    // that otherwise states the removal is never reached: the file step states it
-    // beside the refusal, which names the removal rather than a trailing comma.
+    // (unnamedColumnProfiles). The step will not run that read, so the confirm
+    // screen that otherwise states the removal is never reached: the file step
+    // states it beside the refusal, which names the removal rather than a
+    // trailing comma.
     stubJobApi({
       sftp: CONFIGURED_SFTP,
       profile: { ...CLIENTS_PROFILE, ...CONTROLS_ONLY_HEADER_PROFILE },
@@ -485,9 +527,279 @@ describe("direct exchange confirm and run", () => {
         ),
       )
       .toBeInTheDocument();
-    // The refused file did not commit: the spine stays on its file step.
+    // A read the step refuses does not advance it.
     await expect
       .element(page.getByRole("heading", { level: 1, name: "Your file" }))
+      .toBeInTheDocument();
+  });
+
+  test("profiles and runs by the operator's own field delimiter", async () => {
+    // The mounted file is read on the console, so the choice has to reach both
+    // the profile pass -- whose columns become this party's linkage terms -- and
+    // the run itself, or the operator confirms columns the run does not produce.
+    const api = stubJobApi({ sftp: CONFIGURED_SFTP });
+    app.render(createElement(DirectExchangeScreen));
+
+    await userEvent.selectOptions(
+      page.getByLabelText("How your file separates fields"),
+      "|",
+    );
+    await reachConfirm();
+    await trustAffirmation().click();
+    await page.getByRole("button", { name: "Run the exchange" }).click();
+
+    const profile = api.captured.find((request) =>
+      request.url.startsWith("/api/jobs/inputs/profile"),
+    );
+    expect(profile?.url).toContain("delimiter=%7C");
+    await vi.waitFor(() => {
+      expect(
+        api.captured.some(
+          (request) => request.url === "/api/jobs" && request.method === "POST",
+        ),
+      ).toBe(true);
+    });
+    const post = api.captured.find(
+      (request) => request.url === "/api/jobs" && request.method === "POST",
+    );
+    expect(
+      (JSON.parse(post?.body ?? "{}") as Record<string, unknown>).csvDelimiter,
+    ).toBe("|");
+  });
+
+  test("changing the delimiter under a committed file voids that commit", async () => {
+    // Those columns were read by the previous choice, so the commit taken from
+    // them goes: the operator confirms the file the new choice reads rather than
+    // running on terms drawn from a reading the run does not repeat.
+    stubJobApi({ sftp: CONFIGURED_SFTP });
+    app.render(createElement(DirectExchangeScreen));
+    await page.getByRole("button", { name: "Select clients.csv" }).click();
+    await page.getByRole("button", { name: "Use this file" }).click();
+    await expect
+      .element(
+        page.getByRole("heading", { level: 1, name: "The agreed server" }),
+      )
+      .toBeInTheDocument();
+
+    await page.getByRole("button", { name: "Back" }).click();
+    await userEvent.selectOptions(
+      page.getByLabelText("How your file separates fields"),
+      "|",
+    );
+
+    // The step asks for the file again on the columns the new choice read, and
+    // nothing downstream holds the voided commit.
+    await expect
+      .element(page.getByRole("button", { name: "Use this file" }))
+      .toBeInTheDocument();
+    expect(app.container.textContent).not.toContain("Selected");
+  });
+
+  test("a delimiter the rule refuses withholds the commit", async () => {
+    // A choice the rule refuses reads nothing, so there is no file for the step
+    // to take: the commit is withheld rather than offered as a click that
+    // stores nothing, and the step holds no file until the choice resolves.
+    stubJobApi({ sftp: CONFIGURED_SFTP });
+    app.render(createElement(DirectExchangeScreen));
+    await page.getByRole("button", { name: "Select clients.csv" }).click();
+    await userEvent.selectOptions(
+      page.getByLabelText("How your file separates fields"),
+      "other",
+    );
+    await userEvent.fill(
+      page.getByLabelText("Field separator character"),
+      "||",
+    );
+
+    await expect
+      .element(page.getByRole("button", { name: "Use this file" }))
+      .toBeDisabled();
+    await expect
+      .element(page.getByRole("heading", { level: 1, name: "Your file" }))
+      .toBeInTheDocument();
+
+    // Nothing stands behind that stage either: the listing marks no file, and
+    // its own actions are closed while the choice is refused.
+    await page.getByRole("button", { name: "Choose another file" }).click();
+    await expect
+      .element(page.getByRole("button", { name: "Select clients.csv" }))
+      .toBeDisabled();
+    expect(app.container.textContent).not.toContain("Selected");
+
+    // A delimiter the rule takes opens both again, and the commit the step was
+    // withholding goes through.
+    await userEvent.fill(page.getByLabelText("Field separator character"), "|");
+    await page.getByRole("button", { name: "Select clients.csv" }).click();
+    await page.getByRole("button", { name: "Use this file" }).click();
+    await expect
+      .element(
+        page.getByRole("heading", { level: 1, name: "The agreed server" }),
+      )
+      .toBeInTheDocument();
+  });
+
+  test("a one-column read is refused on the step that holds the control", async () => {
+    // The file is separated by pipes, so a comma read brings its whole header
+    // back as one column. The remedy for that reading is the delimiter control,
+    // so the step refuses the file where the control is rather than passing it
+    // to the confirm preview, whose screen has no such control.
+    const api = stubJobApi({
+      sftp: CONFIGURED_SFTP,
+      profileByDelimiter: (read) =>
+        read === "|" ? CLIENTS_PROFILE : ONE_COLUMN_PROFILE,
+    });
+    app.render(createElement(DirectExchangeScreen));
+    await page.getByRole("button", { name: "Select clients.csv" }).click();
+    await page.getByRole("button", { name: "Use this file" }).click();
+
+    await expect
+      .element(
+        page.getByText(CSV_DELIMITER_SINGLE_COLUMN_REMEDY, { exact: false }),
+      )
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByRole("heading", { level: 1, name: "Your file" }))
+      .toBeInTheDocument();
+
+    // The alert names this control, so setting the file's own separator re-reads
+    // THAT file where the refusal was raised, rather than sending the operator
+    // back through the file list to say the same thing again.
+    await userEvent.selectOptions(
+      page.getByLabelText("How your file separates fields"),
+      "|",
+    );
+    await expect
+      .element(
+        page.getByText("client_id, first_name, last_name, dob, program_code"),
+      )
+      .toBeInTheDocument();
+    // The refusal is read off the committed file, so it leaves with the read it
+    // described -- on the change itself, before the operator clicks anything.
+    expect(app.container.textContent).not.toContain(
+      CSV_DELIMITER_SINGLE_COLUMN_REMEDY,
+    );
+
+    await page.getByRole("button", { name: "Use this file" }).click();
+    await expect
+      .element(
+        page.getByRole("heading", { level: 1, name: "The agreed server" }),
+      )
+      .toBeInTheDocument();
+
+    // And the run reads the file by the choice the step settled on, so the
+    // columns this party confirmed are the columns it runs.
+    await page
+      .getByRole("button", { name: "Continue to confirm and run" })
+      .click();
+    await trustAffirmation().click();
+    await page.getByRole("button", { name: "Run the exchange" }).click();
+    await vi.waitFor(() => {
+      expect(
+        api.captured.some(
+          (request) => request.url === "/api/jobs" && request.method === "POST",
+        ),
+      ).toBe(true);
+    });
+    const post = api.captured.find(
+      (request) => request.url === "/api/jobs" && request.method === "POST",
+    );
+    expect(
+      (JSON.parse(post?.body ?? "{}") as Record<string, unknown>).csvDelimiter,
+    ).toBe("|");
+  });
+
+  test("a recovered job stays offered under a refused read, and clears once the file is accepted", async () => {
+    // A refused read is still a stored file, so the recovery panel keys off the
+    // refusal itself, not only an uncommitted file, to stay on screen through it.
+    persistAttachment("job-7");
+    stubJobApi({
+      sftp: CONFIGURED_SFTP,
+      profileByDelimiter: (read) =>
+        read === "|" ? CLIENTS_PROFILE : ONE_COLUMN_PROFILE,
+    });
+    app.render(createElement(DirectExchangeScreen));
+    await page.getByRole("button", { name: "Select clients.csv" }).click();
+    await page.getByRole("button", { name: "Use this file" }).click();
+
+    await expect
+      .element(
+        page.getByText(CSV_DELIMITER_SINGLE_COLUMN_REMEDY, { exact: false }),
+      )
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText(
+          "An exchange started from this console is still running",
+        ),
+      )
+      .toBeInTheDocument();
+
+    await userEvent.selectOptions(
+      page.getByLabelText("How your file separates fields"),
+      "|",
+    );
+    await expect
+      .element(
+        page.getByText("client_id, first_name, last_name, dob, program_code"),
+      )
+      .toBeInTheDocument();
+    await page.getByRole("button", { name: "Use this file" }).click();
+    await expect
+      .element(
+        page.getByRole("heading", { level: 1, name: "The agreed server" }),
+      )
+      .toBeInTheDocument();
+    expect(
+      page
+        .getByText("An exchange started from this console is still running", {
+          exact: false,
+        })
+        .query(),
+    ).toBeNull();
+  });
+
+  test("a one-column detect read is refused, and a named separator answers it", async () => {
+    // Detection reads the file itself, so a file it cannot split comes back as
+    // the same single column a mis-set separator produces -- and the remedy is
+    // the same control.
+    stubJobApi({
+      sftp: CONFIGURED_SFTP,
+      profileByDelimiter: (read) =>
+        read === "|" ? CLIENTS_PROFILE : ONE_COLUMN_PROFILE,
+    });
+    app.render(createElement(DirectExchangeScreen));
+    await userEvent.selectOptions(
+      page.getByLabelText("How your file separates fields"),
+      CSV_DELIMITER_DETECT,
+    );
+    await page.getByRole("button", { name: "Select clients.csv" }).click();
+    await page.getByRole("button", { name: "Use this file" }).click();
+    await expect
+      .element(
+        page.getByText(CSV_DELIMITER_SINGLE_COLUMN_REMEDY, { exact: false }),
+      )
+      .toBeInTheDocument();
+
+    await userEvent.selectOptions(
+      page.getByLabelText("How your file separates fields"),
+      "|",
+    );
+    await expect
+      .element(
+        page.getByText("client_id, first_name, last_name, dob, program_code"),
+      )
+      .toBeInTheDocument();
+    // The reading that answered the refusal took it off the screen, so the
+    // operator is not left acting on an alert they have already acted on.
+    expect(app.container.textContent).not.toContain(
+      CSV_DELIMITER_SINGLE_COLUMN_REMEDY,
+    );
+
+    await page.getByRole("button", { name: "Use this file" }).click();
+    await expect
+      .element(
+        page.getByRole("heading", { level: 1, name: "The agreed server" }),
+      )
       .toBeInTheDocument();
   });
 

@@ -4,11 +4,6 @@ import { Alert, Anchor } from "@mantine/core";
 import { IconAlertCircle } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
 
-import {
-  emptyColumnPositions,
-  sanitizedColumnsAlert,
-  unnameableColumnsAlert,
-} from "@psi/columnNames";
 import { deleteSftpConnection } from "@psi/jobClient/sftpAuthoringClient";
 import { fetchJobRendezvous } from "@psi/jobClient/workInputClient";
 import { fetchSftpConnection } from "@psi/jobClient/serverJobExchangeDriver";
@@ -28,10 +23,18 @@ import {
   withConnectionTuning,
 } from "@console/connectionTuningModel";
 import {
+  CSV_DELIMITER_LOCAL_NOTICE,
+  CsvDelimiterField,
+} from "@components/CsvDelimiterField";
+import {
   EXCHANGE_FILES_DEFAULT,
   ZERO_SETUP_EXCHANGE_FILES,
   exchangeFilesOptions,
 } from "@console/exchangeFilesModel";
+import {
+  INITIAL_CSV_DELIMITER_CHOICE,
+  resolveCsvDelimiter,
+} from "@components/csvDelimiterChoice";
 import { AppPage } from "@components/AppPage";
 import { ServerFilePicker } from "@console/ServerFilePicker";
 import styles from "@styles/app.module.css";
@@ -39,9 +42,13 @@ import styles from "@styles/app.module.css";
 import {
   DIRECT_DEDUPLICATE_DEFAULT,
   DIRECT_LINKAGE_STRATEGY_DEFAULT,
+  DIRECT_NO_FILE,
   DIRECT_STEP_LABELS,
   DIRECT_STEP_ORDER,
   directDeduplicateIntentFields,
+  directFileCommit,
+  directFileRefusal,
+  directFileSanitizedNotice,
   directLinkageStrategyIntentFields,
 } from "./directExchangeModel";
 import { WorkShell } from "./WorkShell";
@@ -62,8 +69,8 @@ import type {
   JobRendezvousConfig,
   ProfiledJobInput,
 } from "@psi/jobClient/workInputClient";
-import type { AlertContent } from "@components/csvIntake";
 import type { ConnectionTuningDraft } from "@console/connectionTuningModel";
+import type { CsvDelimiterChoice } from "@components/csvDelimiterChoice";
 import type { ExchangeFilesDraft } from "@console/exchangeFilesModel";
 import type { LinkageStrategy } from "@psilink/core";
 import type { RailStep } from "@psi/rail";
@@ -91,12 +98,26 @@ export function DirectExchangeScreen() {
   const consoleBuild = isConsoleBuild();
 
   const [step, setStep] = useState<DirectStep>("file");
-  const [consoleSource, setConsoleSource] = useState<ProfiledJobInput>();
-  const [intakeAlert, setIntakeAlert] = useState<AlertContent>();
-  // What the console's parse removed from the chosen file's header. Held on this
-  // spine rather than read off the committed profile, so it is still stated when
-  // the same read leaves a column unnamed and the file step refuses it.
-  const [sanitizedNotice, setSanitizedNotice] = useState<AlertContent>();
+  const [file, setFile] = useState(DIRECT_NO_FILE);
+  const consoleSource = file.source;
+  // What the step states over the committed file is read back from that file, so
+  // a voided commit takes its refusal and its advisory off the screen with it.
+  const fileRefusal =
+    consoleSource === undefined ? undefined : directFileRefusal(consoleSource);
+  const fileNotice =
+    consoleSource === undefined
+      ? undefined
+      : directFileSanitizedNotice(consoleSource);
+  // How this party's own mounted file is read and its own result file written.
+  // Local to this step, as the invitation spines hold it: every consumer takes
+  // the resolved character.
+  const [delimiterChoice, setDelimiterChoice] = useState<CsvDelimiterChoice>(
+    INITIAL_CSV_DELIMITER_CHOICE,
+  );
+  const delimiterResolution = resolveCsvDelimiter(delimiterChoice);
+  const csvDelimiter = delimiterResolution.ok
+    ? delimiterResolution.delimiter
+    : undefined;
   const [transport, setTransport] = useState<DirectTransport>("sftp");
   const [sftpInfo, setSftpInfo] = useState<SftpConnectionInfo>();
   const [rendezvous, setRendezvous] = useState<JobRendezvousConfig>();
@@ -186,6 +207,7 @@ export function DirectExchangeScreen() {
     ...(identity.trim().length > 0 ? { identity: identity.trim() } : {}),
     ...directLinkageStrategyIntentFields(linkageStrategy),
     ...directDeduplicateIntentFields(deduplicate),
+    ...(csvDelimiter !== undefined ? { csvDelimiter } : {}),
     options: withConnectionTuning(
       exchangeFilesOptions(exchangeFiles, ZERO_SETUP_EXCHANGE_FILES),
       connectionTuning,
@@ -209,27 +231,24 @@ export function DirectExchangeScreen() {
     setStep(next);
   }
 
-  // Commit a profiled mounted file. A blank header cell is refused early with the
-  // shared unnameable alert -- core's inferMetadata would otherwise throw at preview
-  // time. A fresh file drops the trust affirmation, so the operator re-affirms for
-  // the new context, then advances to the server step.
+  // The step stores the read and advances only on one it will run: a read it
+  // refuses stays on screen under the refusal derived from it, which the
+  // delimiter control above answers. A fresh file drops the trust affirmation,
+  // so the operator re-affirms for the new context. The delimiter gate keeps a
+  // read by a character nobody chose out of the step's state.
   function commitFile(profile: ProfiledJobInput) {
-    const stripped = profile.sanitizedColumnPositions;
-    // Before the refusal below, which drops the profile the confirm step reads
-    // its own notice from: the removal is stated beside the refusal it caused.
-    setSanitizedNotice(
-      stripped.length > 0 ? sanitizedColumnsAlert(stripped) : undefined,
-    );
-    const emptyPositions = emptyColumnPositions(profile.columns);
-    if (emptyPositions.length > 0) {
-      setConsoleSource(undefined);
-      setIntakeAlert(unnameableColumnsAlert(emptyPositions, stripped));
-      return;
-    }
-    setIntakeAlert(undefined);
-    setConsoleSource(profile);
+    if (!delimiterResolution.ok) return;
+    setFile(directFileCommit(profile));
     setAffirmed(false);
-    goTo("server");
+    if (directFileRefusal(profile) === undefined) goTo("server");
+  }
+
+  // The delimiter moved under the committed file: its columns are this party's
+  // linkage terms and the run reads the file by the new choice, so the commit
+  // goes and the operator confirms the file the new choice reads.
+  function voidCommittedFile() {
+    setFile(DIRECT_NO_FILE);
+    setAffirmed(false);
   }
 
   function authorSftpConnection(connection: SftpConnectionProjection) {
@@ -320,35 +339,45 @@ export function DirectExchangeScreen() {
         {step === "file" && (
           <>
             <h1 tabIndex={-1}>Your file</h1>
-            {consoleSource === undefined && <RecoveredExchangePanel />}
-            {intakeAlert !== undefined && (
+            {(consoleSource === undefined || fileRefusal !== undefined) && (
+              <RecoveredExchangePanel />
+            )}
+            {fileRefusal !== undefined && (
               <Alert
                 color="red"
                 icon={<IconAlertCircle aria-hidden />}
-                title={intakeAlert.title}
+                title={fileRefusal.title}
                 mb="md"
               >
-                {intakeAlert.message}
+                {fileRefusal.message}
               </Alert>
             )}
-            {sanitizedNotice !== undefined && (
+            {fileNotice !== undefined && (
               <Alert
                 role="note"
                 color="yellow"
                 icon={<IconAlertCircle aria-hidden />}
-                title={sanitizedNotice.title}
+                title={fileNotice.title}
                 mb="md"
               >
-                {sanitizedNotice.message}
+                {fileNotice.message}
               </Alert>
             )}
+            <CsvDelimiterField
+              choice={delimiterChoice}
+              onChange={setDelimiterChoice}
+              note={CSV_DELIMITER_LOCAL_NOTICE}
+            />
             <ServerFilePicker
               committed={
                 consoleSource !== undefined
                   ? { name: consoleSource.name }
                   : undefined
               }
+              delimiter={delimiterResolution}
+              commitWithheld={!delimiterResolution.ok}
               onUse={commitFile}
+              onInvalidate={voidCommittedFile}
             />
           </>
         )}

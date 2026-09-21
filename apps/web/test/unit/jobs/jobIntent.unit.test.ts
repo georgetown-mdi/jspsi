@@ -1433,6 +1433,80 @@ describe("jobZeroSetupIntentSchema accepts the allowed fields", () => {
   });
 });
 
+describe("the zero-setup arms admit the party's own field delimiter", () => {
+  // The Direct exchange step offers the delimiter control its invitation
+  // siblings offer, so the choice reaches the CLI through this boundary. Core
+  // owns the accepted set; what is pinned here is that this arm reaches for the
+  // same grade the exchange arm applies, that the value arrives resolved, that
+  // an intent omitting it still parses (the run then reads commas), and that a
+  // refused one is named by field rather than reaching the subprocess.
+  test("accepts a named delimiter, on both arms", () => {
+    for (const csvDelimiter of ["\t", "|", ";", "detect"])
+      for (const intent of [
+        validZeroSetupIntent({ csvDelimiter }),
+        validZeroSetupSftpIntent({ csvDelimiter }),
+      ])
+        expect(jobZeroSetupIntentSchema.safeParse(intent).success).toBe(true);
+  });
+
+  test("resolves the spellings a party may write, as the exchange arm does", () => {
+    const parsed = jobZeroSetupIntentSchema.safeParse(
+      validZeroSetupIntent({ csvDelimiter: "tab" }),
+    );
+    expect(parsed.success).toBe(true);
+    expect((parsed.success ? parsed.data : undefined)?.csvDelimiter).toBe("\t");
+  });
+
+  test("accepts an intent omitting the field, which runs at the comma", () => {
+    const parsed = jobZeroSetupIntentSchema.safeParse(validZeroSetupIntent());
+    expect(parsed.success).toBe(true);
+    expect(
+      (parsed.success ? parsed.data : undefined)?.csvDelimiter,
+    ).toBeUndefined();
+  });
+
+  test("rejects a value outside the accepted set, naming the field", () => {
+    for (const refused of ["", '"', "||", "\n"]) {
+      const parsed = jobZeroSetupIntentSchema.safeParse(
+        validZeroSetupIntent({ csvDelimiter: refused }),
+      );
+      expect(parsed.success).toBe(false);
+      const issue = parsed.success ? undefined : parsed.error.issues[0];
+      expect(issue?.path).toEqual(["csvDelimiter"]);
+      expect(issue?.message).toContain("csvDelimiter");
+      // The refused value is described by shape, never echoed.
+      expect(issue?.message).not.toContain(`"${refused}"`);
+    }
+  });
+
+  test("rejects a value past the field's bound, at the field's path", () => {
+    const padding = MAX_CSV_DELIMITER_LENGTH - "detect".length;
+    expect(
+      jobZeroSetupIntentSchema.safeParse(
+        validZeroSetupIntent({ csvDelimiter: " ".repeat(padding) + "detect" }),
+      ).success,
+    ).toBe(true);
+    const parsed = jobZeroSetupIntentSchema.safeParse(
+      validZeroSetupIntent({
+        csvDelimiter: " ".repeat(padding + 1) + "detect",
+      }),
+    );
+    expect(parsed.success).toBe(false);
+    const paths = parsed.success
+      ? []
+      : parsed.error.issues.map((issue) => issue.path);
+    expect(paths).toContainEqual(["csvDelimiter"]);
+  });
+
+  test("rejects it on the create route's own union too", () => {
+    expect(
+      jobCreateIntentSchema.safeParse(
+        validZeroSetupIntent({ csvDelimiter: "||" }),
+      ).success,
+    ).toBe(false);
+  });
+});
+
 // Every option a zero-setup arm admits has a flag on the argv this mode builds,
 // so nothing an operator authors is accepted and then dropped. What has no flag
 // -- or no faithful flag form -- is refused here instead.

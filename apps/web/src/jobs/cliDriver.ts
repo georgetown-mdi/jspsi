@@ -360,6 +360,9 @@ export function spawnZeroSetupJob(args: {
   linkageStrategy?: "cascade" | "single-pass";
   /** This party's own side of the matching cardinality; emitted only when set. */
   deduplicate?: boolean;
+  /** The field delimiter this run reads its input by and writes its result with;
+   * emitted only when set, and an unset one reads and writes commas. */
+  csvDelimiter?: string;
   /** See {@link spawnExchangeJob}'s `extraEnv`; identical server-only channel. */
   extraEnv?: NodeJS.ProcessEnv;
   handlers: CliDriverHandlers;
@@ -367,6 +370,7 @@ export function spawnZeroSetupJob(args: {
   const { binaryPath, connectionArgs, inputPath, outputPath } = args;
   const { recordPath, workdir, handlers, eventStream, extraEnv } = args;
   const { identity, linkageStrategy, deduplicate, optionArgs } = args;
+  const { csvDelimiter } = args;
 
   // The URL is the first positional (connectionArgs[0]); input and output are the
   // trailing positionals. Every value-bearing flag is a single `--flag=value`
@@ -382,6 +386,7 @@ export function spawnZeroSetupJob(args: {
       ? [`--linkage-strategy=${linkageStrategy}`]
       : []),
     ...(deduplicate === true ? ["--deduplicate"] : []),
+    ...(csvDelimiter !== undefined ? [`--csv-delimiter=${csvDelimiter}`] : []),
     `--record-file=${recordPath}`,
     ...runControlArgv(args.runControls),
     ...(eventStream ? ["--event-stream"] : []),

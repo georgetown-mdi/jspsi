@@ -396,3 +396,41 @@ describe("a cancel after the void commits nothing", () => {
     expect(profileRequests).toEqual([{ name: "a.csv", delimiter: "\t" }]);
   });
 });
+
+describe("the confirm stage's commit is the parent's to withhold", () => {
+  /** Open the confirm stage on "b.csv" under `commitWithheld`, and report what the
+   * stage was handed: the confirm panel renders the commit control, so this is
+   * where the withholding lands (`directExchange.test.ts` pins the disabled
+   * button itself, which needs a DOM). */
+  async function stagedWithholding(
+    commitWithheld: boolean,
+  ): Promise<boolean | undefined> {
+    const render = (): unknown =>
+      reactHarness.render(() =>
+        ServerFilePicker({
+          committed: undefined,
+          delimiter: COMMA,
+          commitWithheld,
+          onUse: () => {},
+          onInvalidate: NO_INVALIDATE,
+        }),
+      );
+    render();
+    await settle();
+    findProp<(name: string) => void>(render(), "onSelect")?.("b.csv");
+    await settle();
+    const confirming = render();
+    expect(confirmedColumns(confirming)).toEqual(COMMA_COLUMNS);
+    return findProp<boolean>(confirming, "commitWithheld");
+  }
+
+  test("a parent that will not take a commit has the control withheld", async () => {
+    // Offering a click that stores nothing is what the withholding replaces: the
+    // parent's own gate is closed, and it states beside its control why.
+    expect(await stagedWithholding(true)).toBe(true);
+  });
+
+  test("a parent that will take one has it offered", async () => {
+    expect(await stagedWithholding(false)).toBe(false);
+  });
+});

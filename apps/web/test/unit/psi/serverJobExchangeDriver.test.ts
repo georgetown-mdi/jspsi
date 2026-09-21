@@ -1768,6 +1768,29 @@ describe("createServerJobZeroSetupDriver intent", () => {
     expect(intent.linkageStrategy).toBeUndefined();
   });
 
+  test("forwards the party's own field delimiter into the intent", async () => {
+    // A zero-setup run composes no configuration document, so the choice made at
+    // the file step reaches the CLI only as this field and the flag it becomes.
+    const { client, createdIntents } = scriptedClient([result(true)]);
+    await createServerJobZeroSetupDriver(
+      { ...zeroSetupConfig(), csvDelimiter: "\t" },
+      client,
+    ).run(driverEvents(new AbortController().signal));
+
+    expect(createdIntents[0]).toMatchObject({ csvDelimiter: "\t" });
+  });
+
+  test("omits the field delimiter when the config names none", async () => {
+    const { client, createdIntents } = scriptedClient([result(true)]);
+    await createServerJobZeroSetupDriver(zeroSetupConfig(), client).run(
+      driverEvents(new AbortController().signal),
+    );
+
+    expect(
+      (createdIntents[0] as Record<string, unknown>).csvDelimiter,
+    ).toBeUndefined();
+  });
+
   test("maps the console event stream onto the lifecycle (shared run body)", async () => {
     const { client } = scriptedClient([
       stages("prepare"),

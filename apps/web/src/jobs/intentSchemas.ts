@@ -719,7 +719,7 @@ export type JobZeroSetupLinkageStrategy = "cascade" | "single-pass";
  * `linkageTerms`, `metadata`, `standardization`, `expectedPayloadColumns`,
  * or `expectedPartnerDeduplicate` -- only an input source, the tuning
  * `options` subset, the `eventStream` toggle, the per-run controls
- * ({@link jobRunControlFields}), and two optional, bounded selectors:
+ * ({@link jobRunControlFields}), and four optional, bounded selectors:
  *
  * - `linkageStrategy` is a closed enum forwarded to the CLI's
  *   `--linkage-strategy`.
@@ -734,8 +734,13 @@ export type JobZeroSetupLinkageStrategy = "cascade" | "single-pass";
  *   {@link MAX_IDENTITY_LENGTH} and held to the shared label contract's four
  *   shape rules: no leading `-`, no control character, no text-direction
  *   character, and no private key material.
+ * - `csvDelimiter` is this party's local file-format setting, forwarded to the
+ *   CLI's `--csv-delimiter`: a single character or the reserved `detect` word,
+ *   graded by {@link jobCsvDelimiterSchema}. It governs only how this party's
+ *   own file is read and its own result written, and an absent one emits no
+ *   flag, so the run reads and writes commas.
  *
- * None of the three is a path, host, or credential. Exactly one of `inputCsv`
+ * None of the four is a path, host, or credential. Exactly one of `inputCsv`
  * or `inputFile` is set (enforced by {@link jobZeroSetupIntentSchema}),
  * identically to the exchange mode.
  */
@@ -750,6 +755,7 @@ interface JobZeroSetupIntentBase {
   linkageStrategy?: JobZeroSetupLinkageStrategy;
   deduplicate?: boolean;
   identity?: string;
+  csvDelimiter?: string;
 }
 
 /**
@@ -947,9 +953,10 @@ const jobInputFileReferenceSchema: z.ZodType<JobInputFileReference> = z
  *
  * A single character, or the reserved `detect` word -- never a path, host,
  * credential, or argv fragment. It reaches the CLI as the composed config's
- * `csv_delimiter` value, and the read it governs is of this party's own mounted
- * file alone: the partner reads theirs by their own choice, and nothing about it
- * crosses.
+ * `csv_delimiter` value, or on the zero-setup arms as the single
+ * `--csv-delimiter=<value>` token, and the read it governs is of this party's
+ * own mounted file alone: the partner reads theirs by their own choice, and
+ * nothing about it crosses.
  *
  * The parsed value is the RESOLVED one: the transform runs before the grade, so
  * every reader of it -- the profile pass, the coverage sweep, and the composed
@@ -1161,7 +1168,7 @@ export const jobExchangeIntentSchema: z.ZodType<JobExchangeIntent> = z
 // The zero-setup common fields hold NONE of the exchange mode's credential
 // or terms material -- no sharedSecret, linkageTerms, metadata,
 // standardization, expectedPayloadColumns, or expectedPartnerDeduplicate --
-// only an input source, the tuning options, the event toggle, and the three
+// only an input source, the tuning options, the event toggle, and the four
 // bounded selectors. `inputCsv` reuses the exchange mode's cap.
 const jobZeroSetupIntentCommonFields = {
   ...jobRunControlFields,
@@ -1194,6 +1201,7 @@ const jobZeroSetupIntentCommonFields = {
       message: IDENTITY_PRIVATE_KEY_MESSAGE,
     })
     .optional(),
+  csvDelimiter: jobCsvDelimiterSchema.optional(),
 };
 
 // Mode-holding zero-setup arms, each `.strict()` and discriminated on channel.

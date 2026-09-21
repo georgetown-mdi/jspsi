@@ -173,6 +173,7 @@ function maximalZeroSetupIntent(): JobZeroSetupSftpIntent {
     identity: "County Health",
     linkageStrategy: "single-pass",
     deduplicate: true,
+    csvDelimiter: "|",
   });
 }
 
@@ -286,6 +287,7 @@ const ZERO_SETUP_INTENT_ROUTES: Record<
     token: "--linkage-strategy=single-pass",
   },
   deduplicate: { carries: "argvToken", token: "--deduplicate" },
+  csvDelimiter: { carries: "argvToken", token: "--csv-delimiter=|" },
 };
 
 /** The maximal exchange hand-off's template, as YAML text. */
@@ -387,6 +389,7 @@ describe("every authorable option graduates into the hand-off", () => {
       "--identity=County Health",
       "--linkage-strategy=single-pass",
       "--deduplicate",
+      "--csv-delimiter=|",
       "input.csv",
       "results.csv",
     ]);
@@ -427,6 +430,22 @@ describe("every authorable option graduates into the hand-off", () => {
       (parseYaml(yaml) as { linkage_terms: { linkage_strategy: string } })
         .linkage_terms.linkage_strategy,
     ).toBe("single-pass");
+  });
+
+  test("the tab delimiter renders as the word `tab` on the zero-setup command line", () => {
+    // A literal tab is invisible in a copied command and a paste can drop it,
+    // so the hand-off spells it as the word the CLI reads back as the
+    // character (`normalizeCsvDelimiter`, packages/core/src/csvDelimiter.ts).
+    const intent = maximalZeroSetupIntent();
+    intent.csvDelimiter = "\t";
+    const handoff = buildJobHandoff(intent, testSftpServerEntry(), {
+      credentialPasted: false,
+      filedropSplit: false,
+    });
+    if (handoff.template.kind !== "command")
+      throw new Error("a zero-setup hand-off composed no command template");
+    expect(handoff.template.argv).toContain("--csv-delimiter=tab");
+    expect(maximalZeroSetupArgv()).toContain("--csv-delimiter=|");
   });
 });
 

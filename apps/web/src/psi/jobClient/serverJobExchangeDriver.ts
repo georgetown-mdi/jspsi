@@ -1169,7 +1169,7 @@ function intentFor(config: ServerJobExchangeDriverConfig): JobExchangeIntent {
  * `expectedPartnerDeduplicate`), because both parties infer terms from their
  * own files and there is no application-layer encryption to key. It supplies
  * only the channel, input source, tuning subset, and the zero-setup intent's
- * three optional bounded selectors. */
+ * four optional bounded selectors. */
 export interface ServerJobZeroSetupDriverConfig {
   transport: ServerJobExchangeTransport;
   /** Where the console reads this party's input from ({@link JobInputSource}):
@@ -1191,6 +1191,10 @@ export interface ServerJobZeroSetupDriverConfig {
   /** This party's own side of the matching cardinality, forwarded to the CLI's
    * `--deduplicate`; omitted for the closed default. */
   deduplicate?: boolean;
+  /** The field delimiter this party's own input is read by and its own result
+   * written with, forwarded to the CLI's `--csv-delimiter`; omitted for the
+   * comma a run with no flag reads. */
+  csvDelimiter?: string;
   /** Invoked with the created job's id the moment `POST /api/jobs` resolves,
    * before the event stream opens -- the same strand-recovery call site the
    * exchange driver exposes. */
@@ -1208,7 +1212,7 @@ function zeroSetupIntentFor(
   config: ServerJobZeroSetupDriverConfig,
 ): JobZeroSetupIntent {
   const { transport, inputSource, options, identity } = config;
-  const { linkageStrategy, deduplicate } = config;
+  const { linkageStrategy, deduplicate, csvDelimiter } = config;
   const shared = {
     mode: "zeroSetup" as const,
     ...(inputSource.kind === "inline"
@@ -1219,6 +1223,7 @@ function zeroSetupIntentFor(
     ...(identity !== undefined ? { identity } : {}),
     ...(linkageStrategy !== undefined ? { linkageStrategy } : {}),
     ...(deduplicate !== undefined ? { deduplicate } : {}),
+    ...(csvDelimiter !== undefined ? { csvDelimiter } : {}),
     eventStream: true,
   };
   return transport.channel === "sftp"

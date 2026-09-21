@@ -1132,6 +1132,9 @@ export class JobManager {
         ...(intent.deduplicate !== undefined
           ? { deduplicate: intent.deduplicate }
           : {}),
+        ...(intent.csvDelimiter !== undefined
+          ? { csvDelimiter: intent.csvDelimiter }
+          : {}),
         ...(extraEnv !== undefined ? { extraEnv } : {}),
         handlers: args.handlers,
       });

@@ -237,8 +237,9 @@ function buildExchangeHandoffTemplate(
  * Compose the zero-setup mode's portable command tokens: `psilink` plus the
  * connection portion (sftp's `sftp://` URL and `--server-*` flags with the
  * credential `@path` placeholdered, or filedrop's placeholder `file://`
- * locator), the run's tuning flags, its identity, linkage-strategy, and
- * deduplicate selectors when set, and the input/output positionals.
+ * locator), the run's tuning flags, its identity, linkage-strategy,
+ * deduplicate, and field-delimiter selectors when set, and the input/output
+ * positionals.
  *
  * The sftp arm reuses {@link zeroSetupSftpArgv} against a
  * placeholder-credential entry, so the URL, username, and mandatory
@@ -278,10 +279,20 @@ function buildZeroSetupHandoffTemplate(
       ? [`--linkage-strategy=${intent.linkageStrategy}`]
       : []),
     ...(intent.deduplicate === true ? ["--deduplicate"] : []),
+    ...(intent.csvDelimiter !== undefined
+      ? [`--csv-delimiter=${handoffCsvDelimiterSpelling(intent.csvDelimiter)}`]
+      : []),
     HANDOFF_INPUT_NAME,
     HANDOFF_OUTPUT_NAME,
   ];
   return { kind: "command", argv };
+}
+
+/** The delimiter as the copyable command spells it: a tab is the word `tab`,
+ * which the CLI reads back as the character, since a literal tab is invisible
+ * in copied text and a paste can drop it. Every other choice is itself. */
+function handoffCsvDelimiterSpelling(csvDelimiter: string): string {
+  return csvDelimiter === "\t" ? "tab" : csvDelimiter;
 }
 
 /**
