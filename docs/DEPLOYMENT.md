@@ -144,7 +144,7 @@ The run needs read credentials for the AWS account, which no CI job and no devel
 - **The deployed certificate is not the recorded one.** Someone installed a replacement without recording it. Re-record with `--record` and commit, after checking that the installed certificate is the one intended.
 - **A published range is not admitted, or an admitted range is not published.** Authorize the missing ranges on the shared security group and revoke the ones Cloudflare no longer publishes, re-record the snapshot with `--record`, and commit it. Authorize before revoking: a revoke first drops live requests from the range being replaced.
 - **The recorded snapshot differs from the published list while the rules match it.** Only the record is stale: re-record with `--record` and commit.
-- **A comparison could not run.** The run had no credentials for the account or no route to `cloudflare.com`. It exits 2 rather than 0, because nothing was compared; fix the run rather than reading the result as agreement.
+- **A comparison could not run.** The run had no credentials for the account or no route to `cloudflare.com`, so one side of a comparison was the recorded value rather than the deployed one. It exits 2 rather than 0, and the lines it printed for that comparison are the recorded value alone; fix the run rather than reading them as agreement.
 
 ### Recorded settings and their source
 

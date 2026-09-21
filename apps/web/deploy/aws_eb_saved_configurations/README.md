@@ -73,9 +73,11 @@ node check-origin-drift.mjs --record   # rewrite the recorded values below
 | 1    | A comparison found a difference: the certificate is inside the margin, or a rule differs    |
 | 2    | A comparison could not run -- no credentials, no route to `cloudflare.com`, or no record    |
 
-It reads the account through the `aws` CLI, as the refresh commands above do, so it runs from a machine holding read credentials for the account: `sts:GetCallerIdentity`, `s3:GetObject` on the deployment bucket's `cert/` prefix, and `ec2:DescribeSecurityGroups`. No CI job and no development container holds those, so the run is the maintainer's; the cadence and what to do about each result are in [docs/DEPLOYMENT.md](../../../../docs/DEPLOYMENT.md#checking-for-certificate-and-range-drift). The script prints no account id and no bucket name of its own, but an AWS CLI error it passes through can name either.
+A run that falls back to a recorded value exits 2 as well: the expiry `recorded-origin.json` holds when the account is unreadable, or the range snapshot it holds when `cloudflare.com` is unreachable. Those lines still print, and they state the recorded value alone rather than the deployed one. `--record` exits 2 on the same footing when it could not refresh every value; it writes what it did read.
 
-What it reads comes from the committed files beside it rather than from a typed-in identifier: the one security group both environments attach is the shared group that carries the port-443 rule, and the region is the one their ARNs state. The certificate is the object `.platform/hooks/prebuild/download_certificates.sh` installs on the instance, read from the same bucket and key.
+It reads the account through the `aws` CLI, as the refresh commands above do, so it runs from a machine holding read credentials for the account: `sts:GetCallerIdentity`, `s3:GetObject` on the deployment bucket's `cert/` prefix, and `ec2:DescribeSecurityGroups`. No CI job and no development container holds those, so the run is the maintainer's; the cadence and what to do about each result are in [docs/DEPLOYMENT.md](../../../../docs/DEPLOYMENT.md#checking-for-certificate-and-range-drift). The script prints no account id and no bucket name of its own, but an AWS CLI error it passes through can name either. Every call it makes is bounded -- 30 seconds for a published list, 2 minutes for an `aws` call, which is given no standard input -- so an unreachable host or a CLI waiting on a prompt ends as a value the run could not read rather than as a run that never returns.
+
+What it reads comes from the committed files beside it rather than from a typed-in identifier: the one security group both environments attach is the shared group that carries the port-443 rule, and the region is the one their ARNs state. The certificate is the object `.platform/hooks/prebuild/download_certificates.sh` installs on the instance, read from the same bucket and key. Ranges compare as addresses rather than as text, so two spellings of one range agree; a range on either side that is no CIDR is named as a value the check cannot compare.
 
 ## The recorded values
 
@@ -84,7 +86,7 @@ What it reads comes from the committed files beside it rather than from a typed-
 - `origin_certificate` -- the expiry of the certificate the origin serves, and when that was recorded. A run that reads the account compares the deployed certificate against this date as well as against the margin, so a replacement installed without a commit here fails the check.
 - `cloudflare_ranges` -- the two published lists, the date they were fetched, and the URLs they were fetched from. `fetched: null` states that no snapshot has been taken yet: until one is, a run with no route to `cloudflare.com` has nothing to compare the rules against and exits 2.
 
-`--record` fetches both lists, writes them under the run's date, and takes the deployed certificate's expiry when the account answers. Commit the result: the diff is the record of what Cloudflare changed.
+`--record` fetches both lists, writes them under the run's date, and takes the deployed certificate's expiry when the account answers. A run the account does not answer keeps the recorded expiry, writes the lists it fetched, and exits 2. Commit the result: the diff is the record of what Cloudflare changed.
 
 ## The verification this directory still needs
 

@@ -10,6 +10,7 @@ import {
   EXIT_AGREES,
   EXIT_DRIFTED,
   EXIT_UNCHECKED,
+  canonicalCidr,
   certificateExpiry,
   certificateVerdict,
   checkOriginDrift,
@@ -150,7 +151,7 @@ describe("reading a published range list", () => {
   it("takes one CIDR per line and ignores blank lines", () => {
     expect(parsePublishedRanges("198.51.100.0/24\n\n2001:DB8::/32\n")).toEqual([
       "198.51.100.0/24",
-      "2001:db8::/32",
+      "2001:DB8::/32",
     ]);
   });
 
@@ -159,6 +160,46 @@ describe("reading a published range list", () => {
       /which is no CIDR/,
     );
     expect(() => parsePublishedRanges("\n \n")).toThrow(/empty/);
+  });
+});
+
+describe("reading a range as an address", () => {
+  it("reduces two spellings of one range to one", () => {
+    expect(canonicalCidr("2001:DB8::/32")).toBe(
+      canonicalCidr("2001:0db8:0000:0000:0000:0000:0000:0000/32"),
+    );
+    expect(canonicalCidr("::ffff:192.0.2.0/120")).toBe(
+      canonicalCidr("0:0:0:0:0:FFFF:C000:0200/120"),
+    );
+    expect(canonicalCidr("198.051.100.000/24")).toBe(
+      canonicalCidr("198.51.100.0/24"),
+    );
+  });
+
+  it("keeps ranges that differ apart", () => {
+    expect(canonicalCidr("2001:db8::/32")).not.toBe(
+      canonicalCidr("2001:db9::/32"),
+    );
+    expect(canonicalCidr("198.51.100.0/24")).not.toBe(
+      canonicalCidr("198.51.100.0/25"),
+    );
+  });
+
+  it("reads nothing out of a value that is no CIDR", () => {
+    for (const value of [
+      "198.51.100.0",
+      "198.51.100.0/",
+      "198.51.100.0/33",
+      "198.51.100.256/24",
+      "198.51.100/24",
+      "2001:db8::/129",
+      "2001:db8:::1/32",
+      "2001:zz8::/32",
+      "2001:db8:1:2:3:4:5:6:7/32",
+      "192.0.2.0:1/24",
+      "",
+    ])
+      expect(canonicalCidr(value)).toBeUndefined();
   });
 });
 
@@ -328,7 +369,30 @@ describe("the drift check", () => {
       "compared the expiry recorded-origin.json records, the account being unreadable (no credentials)",
     );
     expect(lines.join("\n")).toContain(`it expires ${CERTIFICATE_EXPIRY}`);
-    expect(exitCode).toBe(EXIT_AGREES);
+    expect(lines.join("\n")).toContain("the recorded expiry alone was checked");
+    expect(lines.join("\n")).toContain(
+      "A comparison could not run, so this run does not state that the values agree.",
+    );
+    expect(exitCode).toBe(EXIT_UNCHECKED);
+  });
+
+  it("reports a difference alongside a comparison that could not run", async () => {
+    const { lines, exitCode } = await runCheck({
+      effects: {
+        readOriginCertificate: async () => {
+          throw new Error("no credentials");
+        },
+        describeSecurityGroup: async () =>
+          groupFixture([httpsPermission({ ipv4: PUBLISHED.ipv4 })]),
+      },
+    });
+    expect(exitCode).toBe(EXIT_DRIFTED);
+    expect(lines.join("\n")).toContain(
+      "2001:db8::/32 is published and not admitted",
+    );
+    expect(lines.join("\n")).toContain(
+      "A comparison found a difference, and another could not run.",
+    );
   });
 
   it("fails when a published range is not admitted", async () => {
@@ -380,9 +444,49 @@ describe("the drift check", () => {
         },
       },
     });
-    expect(exitCode).toBe(EXIT_AGREES);
+    expect(exitCode).toBe(EXIT_UNCHECKED);
     expect(lines.join("\n")).toContain(
       "the snapshot recorded-origin.json records, fetched 2026-09-17, the published list being unreadable (no route to host)",
+    );
+  });
+
+  it("agrees when a rule spells an admitted range differently", async () => {
+    const { exitCode } = await runCheck({
+      effects: {
+        describeSecurityGroup: async () =>
+          groupFixture([
+            httpsPermission({
+              ipv4: ["198.051.100.000/24"],
+              ipv6: ["2001:0DB8:0000:0000:0000:0000:0000:0000/32"],
+            }),
+          ]),
+      },
+    });
+    expect(exitCode).toBe(EXIT_AGREES);
+  });
+
+  it("reports a port-443 source that is no CIDR", async () => {
+    const { lines, exitCode } = await runCheck({
+      effects: {
+        describeSecurityGroup: async () =>
+          groupFixture([
+            httpsPermission({ ipv4: [...PUBLISHED.ipv4, "198.51.100/24"] }),
+          ]),
+      },
+    });
+    expect(exitCode).toBe(EXIT_DRIFTED);
+    expect(lines.join("\n")).toContain(
+      "the group admits 198.51.100/24, which is no CIDR this check can compare",
+    );
+  });
+
+  it("reports a recorded range that is no CIDR", async () => {
+    const record = recordFixture();
+    record.cloudflare_ranges.ipv4 = ["198.51.100/24"];
+    const { lines, exitCode } = await runCheck({ record });
+    expect(exitCode).toBe(EXIT_UNCHECKED);
+    expect(lines.join("\n")).toContain(
+      "recorded-origin.json records 198.51.100/24, which is no CIDR",
     );
   });
 
@@ -430,7 +534,7 @@ describe("the drift check", () => {
 
 describe("recording the origin values", () => {
   it("writes the published ranges under the run's date and the deployed expiry", async () => {
-    const { record } = await recordOrigin({
+    const { record, reads } = await recordOrigin({
       record: recordFixture(),
       configurations: CONFIGURATIONS,
       effects: effectsFixture(),
@@ -445,10 +549,11 @@ describe("recording the origin values", () => {
       not_after: CERTIFICATE_EXPIRY,
       recorded: "2026-09-21",
     });
+    expect(reads).toEqual({ publishedRanges: true, originCertificate: true });
   });
 
   it("keeps the recorded expiry when the account is unreadable", async () => {
-    const { record, lines } = await recordOrigin({
+    const { record, lines, reads } = await recordOrigin({
       record: recordFixture(),
       configurations: CONFIGURATIONS,
       effects: effectsFixture({
@@ -460,6 +565,7 @@ describe("recording the origin values", () => {
     });
     expect(record.origin_certificate.recorded).toBe("2026-09-17");
     expect(lines.join("\n")).toContain("Kept the recorded certificate expiry");
+    expect(reads).toEqual({ publishedRanges: true, originCertificate: false });
   });
 });
 
