@@ -66,7 +66,7 @@ interface AssembledAddress {
   host: string | undefined;
 }
 
-/** The host an honest endpoint names. */
+/** The host a well-formed endpoint names. */
 const INVITER_HOST = "inviter.example.org";
 
 /** The host a partner would be moving the dial to. */
@@ -258,7 +258,7 @@ afterEach(() => {
 });
 
 describe("the address the real client assembles from an endpoint", () => {
-  test("an honest endpoint reaches the host it names", () => {
+  test("a well-formed endpoint reaches the host it names", () => {
     const { url, host } = assembleAddress({
       host: INVITER_HOST,
       port: PORT,

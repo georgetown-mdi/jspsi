@@ -119,7 +119,8 @@ address naming another authority opens nothing.
 
 The browser acceptor applies the same two delimiter rules -- one
 implementation, shared from `@psilink/core` -- to the `host` and `path` of the
-invitation endpoint it dials, and refuses before it constructs a peer. It needs them for a different
+invitation endpoint it dials, and refuses before it constructs a peer. It
+needs them for a different
 reason than the CLI: the PeerJS client assembles its address by concatenating
 scheme, `host`, `:`, `port`, `path` and `peerjs?key=`, so a delimiter in either
 field is read as part of the address rather than as a value inside it. What
