@@ -5,11 +5,12 @@
  * and the exchange is still here, so it says so itself
  * ({@link ./managedHandoffGate.ts}).
  *
- * A command-line configuration this app cannot hold is the one refusal that
- * states its own reason: the file is in front of the operator, and what stops it
- * is a line in it -- a channel this app does not run, a credential it will not
- * store, a missing role -- so the refusal names the lines and what to do about
- * them ({@link ManagedConfigurationRefusedError}).
+ * A command-line configuration this app will not take is the one refusal that
+ * states its own reason: the file is in front of the operator, who wrote it by
+ * hand, and what stops it is a line in it -- a field off the exchange-file
+ * schema, a channel this app does not run, a credential it will not store, a
+ * missing role -- so the refusal names the lines and what to do about them
+ * ({@link ManagedConfigurationRefusedError}).
  *
  * Three things stop a file that says nothing of its own, and they call for
  * different actions. Bytes that are not

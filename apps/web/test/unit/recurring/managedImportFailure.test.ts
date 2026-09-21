@@ -1,5 +1,13 @@
 import { describe, expect, test } from "vitest";
-import { generateSharedSecret, getDefaultLinkageTerms } from "@psilink/core";
+import {
+  generateSharedSecret,
+  getDefaultLinkageTerms,
+  snakeizeKeys,
+} from "@psilink/core";
+
+import { stringify as stringifyYaml } from "yaml";
+
+import { readManagedCommandLineConfiguration } from "@psi/managed/managedCommandLineImport";
 
 import {
   MANAGED_EXCHANGE_PREVIOUS_ARTIFACT_VERSION,
@@ -23,7 +31,10 @@ import type {
   NewManagedExchange,
   RunnableManagedExchangeRecord,
 } from "@psi/managed/managedExchangeRecord";
-import type { WebRTCExchangeLocator } from "@psilink/core";
+import type {
+  WebRTCConnectionConfig,
+  WebRTCExchangeLocator,
+} from "@psilink/core";
 
 /** A record built from `fields` and narrowed to the runnable shape: every fixture
  * here is built with a shared secret, and the export paths take the record type
@@ -66,6 +77,32 @@ function artifactDocument(): Record<string, unknown> {
 
 function serialize(document: Record<string, unknown>): string {
   return `${JSON.stringify(document, null, 2)}\n`;
+}
+
+/** A hand-written command-line configuration, as the file on disk holds it: the
+ * document this app composes plus the `role` the CLI reads. Loosely typed, since
+ * what it is here for is being edited off the schema. */
+function configurationDocument(): Record<string, unknown> & {
+  connection: WebRTCConnectionConfig;
+} {
+  const composed = composeManagedExchangeFile({
+    connection: webrtcLocator,
+    linkageTerms: getDefaultLinkageTerms("County Health Dept"),
+  });
+  const connection = composed.connection as WebRTCConnectionConfig;
+  return { ...composed, connection: { ...connection, role: "acceptor" } };
+}
+
+/** The reason the affordance shows for a command-line configuration it refuses. */
+function reasonForImportingConfiguration(
+  document: Record<string, unknown>,
+): string {
+  try {
+    readManagedCommandLineConfiguration(stringifyYaml(snakeizeKeys(document)));
+  } catch (error) {
+    return importFailureReason(error);
+  }
+  throw new Error("the import was expected to refuse this configuration");
 }
 
 /** The reason the affordance shows for bytes the import refuses. */
@@ -111,6 +148,39 @@ describe("a backup file the artifact schema rejects", () => {
   test("says the same for an embedded document this build does not know", () => {
     const document = artifactDocument();
     document.exchangeDocument = `${document.exchangeDocument as string}later_agreed_option: true\n`;
+
+    expect(reasonForImporting(serialize(document))).toBe(
+      UNRECOGNIZED_IMPORT_REASON,
+    );
+  });
+});
+
+describe("a command-line configuration off the exchange-file schema", () => {
+  test("names the fields to fix, in the spelling the file writes them", () => {
+    const document = configurationDocument();
+
+    const reason = reasonForImportingConfiguration({
+      ...document,
+      csvDelimiter: ";;",
+      connection: {
+        ...document.connection,
+        server: { ...document.connection.server, port: 70_000 },
+      },
+    });
+
+    expect(reason).toContain("csv_delimiter");
+    expect(reason).toContain("connection.server.port");
+    expect(reason).toContain("import it again");
+    expect(reason).not.toBe(UNRECOGNIZED_IMPORT_REASON);
+    expect(reason).not.toContain("newer version");
+  });
+
+  test("a backup envelope missing a field keeps the version wording", () => {
+    // The two schema failures part here: the operator wrote the configuration
+    // above by hand and can fix the line it names, while a backup file this app
+    // wrote is only explained by the build that wrote it.
+    const document = artifactDocument();
+    delete document.local;
 
     expect(reasonForImporting(serialize(document))).toBe(
       UNRECOGNIZED_IMPORT_REASON,

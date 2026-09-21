@@ -306,11 +306,11 @@ export function managedImportFileKind(
  * neither revives a spent record nor stands beside one as a second live copy.
  *
  * @throws {UsageError} if the bytes parse as neither file.
- * @throws {ManagedConfigurationRefusedError} if a configuration is one this app
- *   cannot hold.
+ * @throws {ManagedConfigurationRefusedError} if a configuration fails the
+ *   exchange-file schema, or is one this app cannot hold.
  * @throws {ManagedImportHandedOffError} or
  *   {@link ManagedImportCustodyUnreadableError} on the backup leg's refusals.
- * @throws {ZodError} if either file fails its schema, or the install does.
+ * @throws {ZodError} if the backup file fails its schema, or the install does.
  */
 export async function importManagedExchangeFile(
   source: string,

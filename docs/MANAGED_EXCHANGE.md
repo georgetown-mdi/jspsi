@@ -1155,6 +1155,10 @@ it keeps running there, from the files it already has.
 
 What the import accepts is what this app can hold:
 
+- **A file psilink itself would load.** A hand-edited configuration that no
+  longer matches the format psilink reads is refused naming the fields to fix,
+  spelled as the file spells them, so the operator goes back to the line rather
+  than to the app.
 - **A webrtc connection, and no other channel.** The browser runs webrtc
   exchanges only, so a configuration on another channel is refused, named by its
   channel.

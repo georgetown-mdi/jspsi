@@ -35,7 +35,11 @@ import {
   serializeManagedExchangeArtifact,
 } from "@psi/managed/managedExchangeArtifact";
 
-import type { ExchangeSpec, WebRTCExchangeLocator } from "@psilink/core";
+import type {
+  ExchangeSpec,
+  WebRTCConnectionConfig,
+  WebRTCExchangeLocator,
+} from "@psilink/core";
 import type { NewManagedExchange } from "@psi/managed/managedExchangeRecord";
 
 // Reading a command-line psilink.yaml back as a configuration-only record: what
@@ -226,14 +230,33 @@ describe("refusing what this app cannot hold", () => {
     expect(() => readManagedCommandLineConfiguration("\tnot: [yaml")).toThrow();
   });
 
-  test("a document off the exchange-file schema is refused by the schema", () => {
-    expect(() =>
-      readManagedCommandLineConfiguration(
-        configText(
-          commandLineDocument({ linkage_terms: { identity: "no keys here" } }),
-        ),
+  test("a document off the exchange-file schema names the lines to fix", () => {
+    const message = refusal(
+      configText(
+        commandLineDocument({ linkage_terms: { identity: "no keys here" } }),
       ),
-    ).toThrow(ZodError);
+    );
+
+    expect(message).toContain("linkage_terms");
+    expect(message).toContain("import it again");
+  });
+
+  test("a refused field is named as the file spells it, not as Zod saw it", () => {
+    const document = commandLineDocument({ csvDelimiter: ";;" });
+    const connection = document.connection as WebRTCConnectionConfig;
+    const message = refusal(
+      configText({
+        ...document,
+        connection: {
+          ...connection,
+          server: { ...connection.server, port: 70_000 },
+        },
+      }),
+    );
+
+    expect(message).toContain("csv_delimiter");
+    expect(message).toContain("connection.server.port");
+    expect(message).not.toContain("csvDelimiter");
   });
 
   test("nothing about a refused file is representable as a record", () => {

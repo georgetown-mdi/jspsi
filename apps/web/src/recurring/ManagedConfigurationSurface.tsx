@@ -13,8 +13,6 @@ import {
   LABEL_GUIDANCE,
   MAX_LABEL_LENGTH,
   MAX_TOKEN_MAX_AGE_DAYS,
-  labelWithinCap,
-  maxAgeDaysError,
 } from "@exchange/manageOfferModel";
 import { AppPage } from "@components/AppPage";
 import styles from "@styles/app.module.css";
@@ -30,6 +28,7 @@ import {
 } from "./managedDetailModel";
 import { ConfigRowItem } from "./ManagedExchangeDetail";
 import { DeleteExchangeButton } from "./SavedExchanges";
+import { useLocalFieldsDraft } from "./useLocalFieldsDraft";
 
 import type {
   ManagedExchangeLocalEdits,
@@ -242,44 +241,32 @@ function ConfigurationSettingsEditor({
   record: ManagedExchangeRecord;
   onRecordEdited: (record: ManagedExchangeRecord) => void;
 }) {
-  const [label, setLabel] = useState(record.label);
-  const [maxAgeEnabled, setMaxAgeEnabled] = useState(
-    record.tokenMaxAgeDays !== undefined,
-  );
-  // Held as the NumberInput reports it (a string when cleared or mid-edit), so
-  // an invalid state blocks the save rather than being coerced to a sentinel
-  // that silently drops the opted-in bound.
-  const [maxAgeDays, setMaxAgeDays] = useState<number | string>(
-    record.tokenMaxAgeDays ?? 90,
-  );
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [failed, setFailed] = useState(false);
-
-  const maxAgeError = maxAgeEnabled ? maxAgeDaysError(maxAgeDays) : undefined;
-  const tokenMaxAgeDays =
-    maxAgeEnabled && maxAgeError === undefined && typeof maxAgeDays === "number"
-      ? maxAgeDays
-      : undefined;
-  const labelValid = labelWithinCap(label);
-  const canSave = labelValid && !saving && maxAgeError === undefined;
+  const {
+    label,
+    editLabel,
+    maxAgeEnabled,
+    editMaxAgeEnabled,
+    maxAgeDays,
+    editMaxAgeDays,
+    maxAgeError,
+    tokenMaxAgeDaysEdit,
+    labelValid,
+    canSave,
+    saving,
+    saved,
+    failed,
+    submit,
+  } = useLocalFieldsDraft(record);
 
   function save() {
     if (!canSave) return;
-    setSaving(true);
-    setSaved(false);
-    setFailed(false);
     const edits: ManagedExchangeLocalEdits = {
       label,
-      tokenMaxAgeDays: maxAgeEnabled ? (tokenMaxAgeDays ?? null) : null,
+      tokenMaxAgeDays: tokenMaxAgeDaysEdit,
     };
-    void updateManagedExchangeLocalFields(record.id, edits)
-      .then((updated) => {
-        onRecordEdited(updated);
-        setSaved(true);
-      })
-      .catch(() => setFailed(true))
-      .finally(() => setSaving(false));
+    submit(() =>
+      updateManagedExchangeLocalFields(record.id, edits).then(onRecordEdited),
+    );
   }
 
   return (
@@ -299,20 +286,14 @@ function ConfigurationSettingsEditor({
             ? undefined
             : `Keep the label to ${MAX_LABEL_LENGTH} characters or fewer.`
         }
-        onChange={(event) => {
-          setLabel(event.currentTarget.value);
-          setSaved(false);
-        }}
+        onChange={(event) => editLabel(event.currentTarget.value)}
         mt="sm"
       />
       <Checkbox
         label="Set a maximum age for the exchange's secret"
         description="Off by default. When set, each command-line run stamps this age onto the secret it rotates, and the exchange must run again within it or you re-invite your partner."
         checked={maxAgeEnabled}
-        onChange={(event) => {
-          setMaxAgeEnabled(event.currentTarget.checked);
-          setSaved(false);
-        }}
+        onChange={(event) => editMaxAgeEnabled(event.currentTarget.checked)}
         mt="sm"
       />
       {maxAgeEnabled && (
@@ -324,10 +305,7 @@ function ConfigurationSettingsEditor({
           step={1}
           allowDecimal={false}
           error={maxAgeError}
-          onChange={(value) => {
-            setMaxAgeDays(value);
-            setSaved(false);
-          }}
+          onChange={editMaxAgeDays}
           mt="xs"
         />
       )}

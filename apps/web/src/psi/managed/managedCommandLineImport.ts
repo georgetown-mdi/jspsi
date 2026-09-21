@@ -11,6 +11,10 @@
  * reaches storage is the schema's own parse result with two fields taken out of
  * it, so no key the schema does not name can ride into the record.
  *
+ * A document that schema refuses is refused in this app's own words, naming the
+ * fields as the file spells them: the operator writes this file by hand, so what
+ * stops it is a line they can fix.
+ *
  * Two fields of the document are LOCAL fields of the record rather than document
  * fields, and each is read out of the document and dropped from it -- exactly
  * the two the export injects on the way out ({@link ./managedCronExport.ts}), so
@@ -34,7 +38,13 @@
  * with the machine that runs the exchange.
  */
 
-import { parseExchangeSpec, parseSensitiveYaml } from "@psilink/core";
+import { ZodError } from "zod";
+
+import {
+  parseExchangeSpec,
+  parseSensitiveYaml,
+  snakeizeKey,
+} from "@psilink/core";
 
 import {
   fieldsOutsideComposableDocument,
@@ -59,16 +69,90 @@ export const MAX_CONFIGURATION_IMPORT_BYTES = 1_000_000;
 const IMPORTED_CONFIGURATION_LABEL = "";
 
 /**
- * Raised when a document parses as an exchange file this app cannot hold: a
- * channel it does not run, a field outside what it composes, or a secret it does
- * not import. Its message is shown to the operator, so it states what the file
- * holds and what to do about it, and it names FIELD NAMES only -- a field's value
- * is the credential.
+ * Raised when a file is not a configuration this app takes: a document off the
+ * exchange-file schema, or one that parses and holds what this app cannot keep --
+ * a channel it does not run, a field outside what it composes, or a secret it
+ * does not import. Its message is shown to the operator, so it states what the
+ * file holds and what to do about it, and it names FIELD NAMES only -- a field's
+ * value is the credential.
  */
 export class ManagedConfigurationRefusedError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "ManagedConfigurationRefusedError";
+  }
+}
+
+/** How many offending fields a schema refusal names before it counts the rest.
+ * A hand-edited file with one mistake names it; a file off the schema wholesale
+ * would otherwise list every field of it in an alert. */
+const MAX_REFUSED_FIELDS_NAMED = 5;
+
+/**
+ * One Zod issue path as the FILE spells it: snake_case keys ({@link snakeizeKey},
+ * since the schema parses the camelized shape), array indices in brackets, and
+ * the path cut at a `params` segment -- the key inside that free-form record is
+ * the author's own text, and the block locates the problem well enough.
+ */
+function documentFieldPath(path: ReadonlyArray<PropertyKey>): string {
+  const paramsIndex = path.indexOf("params");
+  const segments = paramsIndex >= 0 ? path.slice(0, paramsIndex + 1) : path;
+  return segments.reduce<string>(
+    (rendered, segment) =>
+      typeof segment === "number"
+        ? `${rendered}[${segment}]`
+        : rendered === ""
+          ? snakeizeKey(String(segment))
+          : `${rendered}.${snakeizeKey(String(segment))}`,
+    "",
+  );
+}
+
+/**
+ * What a schema refusal tells the operator: which lines of their own file to
+ * fix. Only field names are named -- never an issue message, which a built-in
+ * Zod code can compose out of the offending value.
+ */
+function schemaRefusal(error: ZodError): ManagedConfigurationRefusedError {
+  const fields = [
+    ...new Set(
+      error.issues
+        .map((issue) => documentFieldPath(issue.path))
+        .filter((field) => field !== ""),
+    ),
+  ];
+  if (fields.length === 0)
+    return new ManagedConfigurationRefusedError(
+      "This file is not a psilink exchange configuration. Check that you " +
+        "chose the psilink.yaml this exchange runs under, and import it again.",
+    );
+  const named = fields.slice(0, MAX_REFUSED_FIELDS_NAMED);
+  const beyond = fields.length - named.length;
+  const list =
+    beyond > 0 ? `${named.join(", ")}, and ${beyond} more` : named.join(", ");
+  return new ManagedConfigurationRefusedError(
+    "This file is not a valid psilink configuration. " +
+      (fields.length === 1 ? "Fix this setting" : "Fix these settings") +
+      " in the file and import it again: " +
+      list +
+      ".",
+  );
+}
+
+/**
+ * The document the shared exchange-file schema reads out of a command-line
+ * file, refusing in this app's own words rather than raising the schema's
+ * {@link ZodError}: the file is in front of the operator, who edits it by hand,
+ * so a field it refuses is a line they can fix. The backup artifact's schema
+ * failures keep the {@link ZodError} they raise -- that file is written by this
+ * app, and a refusal there is a version difference rather than a typo.
+ */
+function importedDocument(raw: unknown): ExchangeSpec {
+  try {
+    return parseExchangeSpec(raw);
+  } catch (error) {
+    if (error instanceof ZodError) throw schemaRefusal(error);
+    throw error;
   }
 }
 
@@ -159,15 +243,15 @@ function importedTokenMaxAgeDays(document: ExchangeSpec): number | undefined {
  * `authentication` block -- re-validated so what is stored is a schema parse
  * result rather than an edited object.
  *
- * @throws {ZodError} if the document without those fields is not a valid
- *   exchange file.
+ * @throws {ManagedConfigurationRefusedError} if the document without those
+ *   fields is not a valid exchange file.
  */
 function storedDocument(
   document: ExchangeSpec,
   connection: WebRTCConnectionConfig,
 ): ExchangeSpec {
   const { authentication: _authentication, ...rest } = document;
-  return parseExchangeSpec({ ...rest, connection: withoutRole(connection) });
+  return importedDocument({ ...rest, connection: withoutRole(connection) });
 }
 
 /**
@@ -179,17 +263,17 @@ function storedDocument(
  * the store untouched.
  *
  * @throws {UsageError} if the bytes are not parseable YAML.
- * @throws {ManagedConfigurationRefusedError} if the document is one this app
- *   cannot hold (another channel, a field outside what it composes, a secret,
- *   or no role).
- * @throws {ZodError} if the document is not a valid exchange file, or the
- *   record built from it is not a valid record.
+ * @throws {ManagedConfigurationRefusedError} if the document is not a valid
+ *   exchange file, or is one this app cannot hold (another channel, a field
+ *   outside what it composes, a secret, or no role).
+ * @throws {ZodError} if the record built from the document is not a valid
+ *   record.
  */
 export function readManagedCommandLineConfiguration(
   source: string,
 ): ManagedExchangeRecord {
   const raw = parseSensitiveYaml(source, "command-line exchange configuration");
-  const document = parseExchangeSpec(raw);
+  const document = importedDocument(raw);
   const connection = importedWebrtcConnection(document);
   const side = importedSide(connection);
   const tokenMaxAgeDays = importedTokenMaxAgeDays(document);
