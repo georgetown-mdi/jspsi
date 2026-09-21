@@ -38,7 +38,7 @@ import { inProcessOnly } from "../sftpBackendGate";
 // inflightDropRecovery.test.ts, the socket-state census over the dials this path
 // issues is dialDeferral.test.ts, and the withheld-close partner that leaves the
 // session property SET is heldSessionWithheldClose.test.ts; the party scaffolding
-// below is deliberately this file's own, as dialDeferral's is, because each file
+// below is this file's own, as dialDeferral's is, because each file
 // needs a different slice of the session controls.
 
 const TEST_TIMEOUT_MS = 120_000;
@@ -993,7 +993,7 @@ inProcessOnly(
       expect(stalled(outcomes.settledBeat)).toBe(false);
       expect(outcomes.settledBeat.status).toBe("rejected");
       expect(outcomes.beatMs).toBeLessThan(STALL_DEADLINE_MS);
-      // And it was genuinely outstanding across that recovery rather than refused
+      // And it was outstanding across that recovery rather than refused
       // on entry, which would settle it without ever reaching the transport.
       expect(outcomes.beatMs).toBeGreaterThan(500);
       // And the read it was concurrent with completes across that same recovery.
@@ -1059,7 +1059,7 @@ inProcessOnly(
         (level) => level === "WARN" || level === "ERROR",
       ).then(([result]) => result);
 
-      // The beat was genuinely outstanding when the cut landed rather than long
+      // The beat was outstanding when the cut landed rather than long
       // since answered, which is what makes the rest of this a measurement.
       expect(outcomes.parkedBeforeCut).toBe(true);
       expect(stalled(outcomes.settledBeat)).toBe(false);

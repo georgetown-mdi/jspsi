@@ -1482,7 +1482,7 @@ describe("Windows access-list check tiers", () => {
   });
 
   test("a listing whose own identity is not a SID falls through to icacls", () => {
-    // Every rule is well formed, so entry-by-entry the file reads as owner-only
+    // Every rule is well formed, so entry-by-entry the file is owner-only
     // -- against an identity the listing did not in fact state.
     const { commands } = runWindowsAclCheck({
       powershell: `PS C:\\>|${OWNER_SID};${FULL_CONTROL_RIGHTS};${ALLOW}`,

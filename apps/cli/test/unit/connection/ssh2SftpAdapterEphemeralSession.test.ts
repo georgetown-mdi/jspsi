@@ -1137,7 +1137,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
   test("a release that finds the transport still writable drops the latch", async () => {
     // The warning above rests on an ssh2 assumption -- end() ends the socket -- so it
     // is checked, not asserted: an ssh2 whose end() stopped ending the socket would
-    // leave a genuinely live session held across the idle gap, the one thing this
+    // leave a live session held across the idle gap, the one thing this
     // mode exists to prevent, and the operator must be pointed at the changelog
     // rather than told to expect a stall. It is also the one branch where the
     // session may still be LIVE, so the check has to handle the latch as well as the

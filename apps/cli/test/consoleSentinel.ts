@@ -293,7 +293,7 @@ export class ConsoleSentinel {
     const unescaped = this.unescapedLines();
     if (unescaped.length > 0) {
       throw new Error(
-        `Console sentinel: ${unescaped.length} console line(s) carried a byte ` +
+        `Console sentinel: ${unescaped.length} console line(s) contained a byte ` +
           `outside printable ASCII and the renderer's framing newline, so they ` +
           `reached the console without passing a display sink. Route the value ` +
           `through sanitizeErrorForDisplay (an error) or sanitizeForDisplay (a ` +
@@ -305,8 +305,8 @@ export class ConsoleSentinel {
     throw new Error(
       `Console sentinel: ${violations.length} un-allowlisted console line(s) ` +
         `emitted during this test file. Eliminate each at the source, or -- if ` +
-        `genuinely intended -- accept it with a matcher in the integration ` +
-        `console allowlist (a visible, reviewable edit):\n${this.report(violations)}`,
+        `intended -- accept it with a matcher in the integration console ` +
+        `allowlist (a visible, reviewable edit):\n${this.report(violations)}`,
     );
   }
 

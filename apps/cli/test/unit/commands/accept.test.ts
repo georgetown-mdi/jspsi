@@ -2456,7 +2456,7 @@ describe("reconciling a pre-existing config", () => {
   });
 
   test("validateAccept: a matching config is reconciled but a pre-existing key file still hard-aborts", async () => {
-    // The reconcile path (#61) makes a pre-existing CONFIG reusable, but a
+    // The reconcile path makes a pre-existing CONFIG reusable, but a
     // pre-existing KEY file must still abort -- a stale authentication token must
     // never be silently reused. The config here matches the invitation (so on its
     // own it would be reused), proving the key gate fires independently of, and
@@ -3153,7 +3153,7 @@ describe("displayInvitation: the declared terms it discloses (columns, citations
 
   test("displayInvitation: an invitation giving this party no result counts no received columns", () => {
     // The mint-reachable pair: the result is not shared, the terms declare an
-    // empty send, and the token still carries the subset a mint stamps whatever
+    // empty send, and the token still holds the subset a mint stamps whatever
     // the output direction. No column crosses to a party entitled to no result,
     // so the prompt states the non-receipt once and puts no count of arriving
     // columns two lines under it.
@@ -4177,7 +4177,7 @@ describe("displayInvitation: the declared terms it discloses (columns, citations
     expect(CONSENT_FACTS.duplicateGroupingDisplayLimit.basis).toBe(
       "trust-contingent",
     );
-    // The cascade this token names carries the grouping to this party's own
+    // The cascade this token names brings the grouping to this party's own
     // process, so the enforced sentence must not stand in for the one above.
     expect(soleReceiver).not.toContain(
       CONSENT_FACTS.duplicateGroupingWithheld.note,
@@ -4510,7 +4510,7 @@ describe("displayInvitation: the declared terms it discloses (columns, citations
     );
     // The honest-helper disclosure is its own fact, not a rider on the cooperative
     // caveat: it holds however honestly the partner behaves, so it has the
-    // opposite basis and may not inherit that line's marker. One label carries
+    // opposite basis and may not inherit that line's marker. One label covers
     // both cases of it, so a reader meets the same line whichever the run is.
     for (const document of [inviterWithheld, inviterLearnsNoMembership])
       expect(document).toContain(

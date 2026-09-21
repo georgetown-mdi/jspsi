@@ -801,7 +801,7 @@ test("authentication=null runs the exchange without authentication and without e
 test("the local own-columns selection reaches the result formatter", async () => {
   // The config key changes only what this party writes for itself, so the one
   // thing the CLI owes it is the hand-off: the selection prepareForExchange
-  // carried must reach buildOutputTable, which composes the file.
+  // returned must reach buildOutputTable, which composes the file.
   vi.mocked(buildOutputTable).mockClear();
   const carrying = minimalPreparedExchange({ includeOwnColumns: "all" });
   await Promise.all([
@@ -4189,11 +4189,10 @@ test("SIGTERM logs recovery message when tokenRotated=true", async () => {
 
 // --- SIGINT/SIGTERM exit-code race ------------------------------------------
 //
-// Regression guard for the race where a signal-induced cleanup causes
-// runExchange to throw, runProtocol's catch propagates the error, and the
-// CLI handler's process.exit(69) preempts the signal handler's
-// process.exit(130/143). After the fix runProtocol detects signalReceived
-// and resolves rather than rejecting, so the CLI handler never enters its
+// A signal-induced cleanup can make runExchange throw, and a runProtocol
+// that propagated that error would let the CLI handler's process.exit(69)
+// preempt the signal handler's process.exit(130/143). runProtocol detects
+// signalReceived and resolves instead, so the CLI handler never enters its
 // own exit path.
 
 test("runProtocol resolves (does not reject) when interrupted by SIGINT mid-runExchange", async () => {
@@ -5284,8 +5283,8 @@ test("a close that throws on a completed run still emits the terminal result eve
 // Which run a callback belongs to, for the close hook below. A two-party case
 // closes two connections in one process while only one of the parties writes to
 // fd 3, and the async context is what tells them apart: every continuation of a
-// party's runProtocol call, its teardown close included, carries the store the
-// call was entered with.
+// party's runProtocol call, its teardown close included, runs with the store
+// the call was entered with.
 const closeWatchParty = new AsyncLocalStorage<string>();
 
 /**

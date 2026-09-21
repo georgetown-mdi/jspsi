@@ -1457,7 +1457,7 @@ describe("handler", () => {
     expect(exitCode).toBe(0);
   });
 
-  test("the terms the receipt holds carry a run to both verdicts", async () => {
+  test("the terms the receipt holds are enough for both verdicts", async () => {
     // The run's own artifacts, this party's retained files, and its config,
     // which is all an operator keeps: the receipt supplies the partner's half of
     // the agreed terms, so the record and the receipt both grade verified with
@@ -1587,7 +1587,7 @@ describe("handler", () => {
     // from the two terms documents rather than read off an exchange record:
     // whichever source this run used is what the line reports. The file the
     // operator named wins, and terms that are not this run's are reported as a
-    // mismatch rather than passing on the carried copy.
+    // mismatch rather than passing on the embedded copy.
     const { signedPath, pin, ownFingerprint } = await exchangeArtifacts();
     const shared = {
       record: signedPath,
@@ -1616,7 +1616,7 @@ describe("handler", () => {
     expect(supplied.exitCode).toBe(RECEIPT_VERIFICATION_FAILED_EXIT_CODE);
   });
 
-  test("a receipt whose carried terms were stripped leaves the hash to a terms file", async () => {
+  test("a receipt whose embedded terms were stripped leaves the hash to a terms file", async () => {
     // The envelope is unsigned, so a holder may drop it: every signature check
     // is unchanged and the line names the input that supplies the hash instead.
     const { signedPath, pin, ownFingerprint } = await exchangeArtifacts();

@@ -47,7 +47,7 @@ export const ERROR_CLASS_EXIT_CODES: ReadonlyArray<{
       new InternalConsistencyError("two derivations of one size disagreed"),
   },
   {
-    planted: "an Error carrying its own exitCode",
+    planted: "an Error with its own exitCode",
     code: PERSISTENCE_LOSS_EXIT_CODE,
     plant: () =>
       Object.assign(new Error("the result file did not reach disk"), {

@@ -548,11 +548,11 @@ inProcessOnly(
       ).client.sftp;
 
       // The guarded listener is present, which is what keeps Node from throwing
-      // on the 'error' event; without the fix this count is 0. The count must be
-      // exactly 1, not >= 1: the fix rests on ssh2's Client.sftp() stripping its
-      // own setup-time 'error' listener before handing the wrapper back, so the
-      // only listener after connect() is the adapter's own. If a future ssh2
-      // stops stripping it, the count becomes 2 and this assertion fails.
+      // on the 'error' event. The count must be exactly 1, not >= 1: it rests
+      // on ssh2's Client.sftp() stripping its own setup-time 'error' listener
+      // before handing the wrapper back, so the only listener after connect()
+      // is the adapter's own. If a future ssh2 stops stripping it, the count
+      // becomes 2 and this assertion fails.
       expect(wrapper.listenerCount("error")).toBe(1);
 
       // A baseline operation works before the session is killed, so the terminal

@@ -769,7 +769,7 @@ function attachSftpHandlers(
   const onStat = (op: "STAT" | "LSTAT", statFn: typeof fs.stat) => {
     const answer = (reqid: number, p: string): void => {
       statFn(resolve(p), (err, st) => {
-        // Only a genuinely missing path is NO_SUCH_FILE; anything else (EACCES,
+        // Only a missing path is NO_SUCH_FILE; anything else (EACCES,
         // ENOTDIR) is a generic failure, matching the OPEN/OPENDIR handlers so a
         // distinct error code is not flattened into "missing file".
         if (err)

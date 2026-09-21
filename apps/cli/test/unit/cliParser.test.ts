@@ -86,7 +86,7 @@ test("--help short-circuits without a strict-option failure", async () => {
 test("--version prints the CLI's own package version, not yargs' walk-up guess", async () => {
   // yargs' default .version() heuristic walks up from ITS OWN install directory,
   // which in this npm-workspaces monorepo resolves to the repo root's package.json
-  // (version 0.0.0), not apps/cli/package.json -- the bug this test guards against.
+  // (version 0.0.0), not apps/cli/package.json.
   const { name, version } = JSON.parse(
     readFileSync(path.join(__dirname, "..", "..", "package.json"), "utf8"),
   ) as { name: string; version: string };

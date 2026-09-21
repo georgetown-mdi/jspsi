@@ -1390,8 +1390,8 @@ inProcessOnly(
       // The publish failed, which is what put a temp on the server with no
       // session left to remove it.
       expect(outcome.sendError).toBeInstanceOf(Error);
-      // The sweep itself removed nothing -- this is the state the fix is for, and
-      // asserting it keeps the case honest if the tear ever stops reaching it.
+      // The sweep itself removed nothing, and asserting it fails the case if
+      // the tear ever stops reaching it.
       expect(outcome.afterSweep.filter(isProtocolTemp)).toHaveLength(1);
       // And the run does not end with it: the re-establishment teardown drives
       // before its drain re-issues the cleanup the released session could not

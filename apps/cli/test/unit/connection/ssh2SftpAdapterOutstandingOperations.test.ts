@@ -1406,7 +1406,7 @@ describe("an operation outstanding across a session transition", () => {
   });
 
   test("a trickling upload holds every later boundary too: its progress window is re-armed, never tripped", async () => {
-    // The other shape carrying no bound the hold can rely on: an operation whose
+    // The other shape with no bound the hold can rely on: an operation whose
     // deadline is a progress-reset window (the chunked put's idle window here, the
     // capped get's sink likewise). A server acknowledging a chunk at a time re-arms
     // that window instead of tripping it, so the upload stays unsettled and every

@@ -204,7 +204,7 @@ describe("the remaining-redials reading", () => {
 
   test("clamps at zero rather than reporting a negative allowance", () => {
     // The budget bounds sessions LOST, and a teardown-exempt or unbudgeted loss
-    // can carry the tally past it; the line that reads this must still say the
+    // can push the tally past it; the line that reads this must still say the
     // last re-dial has been spent rather than quoting a negative.
     expect(remainingMidExchangeRedials(3, 5)).toBe(0);
     expect(remainingMidExchangeRedials(0, 1)).toBe(0);

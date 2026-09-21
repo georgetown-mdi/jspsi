@@ -397,7 +397,7 @@ test.each([
   // The vendored broker answers a wrong key with a plain ERROR holding this
   // wording rather than the dedicated type; both routes must reach the same fix.
   [
-    "a generic ERROR carrying the broker's invalid-key wording",
+    "a generic ERROR with the broker's invalid-key wording",
     { type: BROKER_MESSAGE.error, payload: { msg: "Invalid key provided" } },
   ],
 ])(
