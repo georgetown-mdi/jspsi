@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 import {
   LinkageTermsUnsatisfiableError,
   OperatorConfigError,
+  generateSharedSecret,
   prepareForExchange,
   sanitizeForDisplay,
 } from "@psilink/core";
@@ -12,6 +13,11 @@ import {
   RelayedSelfExplainingError,
   RelayedTerminalError,
 } from "@psi/jobClient/serverJobExchangeDriver";
+import {
+  WEBRTC_ENDPOINT_HOST_REFUSED,
+  WEBRTC_ENDPOINT_PATH_REFUSED,
+  dialAsAcceptor,
+} from "@psi/transport/rendezvous";
 import { CSV_DELIMITER_SINGLE_COLUMN_REMEDY } from "@components/csvDelimiterChoice";
 import { failureFor } from "@exchange/useInviterExchange";
 
@@ -419,6 +425,50 @@ describe("failureFor", () => {
     // delimiter remedy: the shortfall is the terms', not the reading's.
     expect(failure.message).not.toContain(CSV_DELIMITER_SINGLE_COLUMN_REMEDY);
   });
+
+  test.each([
+    ["host", "inviter.example.org@evil.example.org", "/api/"],
+    ["path", "inviter.example.org", "/api/?x"],
+  ] as const)(
+    "the acceptor reads a %s refusal in full, with no retry offered",
+    async (field, host, path) => {
+      // The dial refuses an invitation endpoint that could move the connection,
+      // before any peer exists. The refusal names the remedy -- a new invitation
+      // from the partner -- so the alert shows the refusal itself and leaves out
+      // the retryable `exchange` category, the only one the acceptor's "Try
+      // again" is offered for (`AcceptorExchangeSection`) and whose copy would
+      // call an endpoint the partner wrote a temporary connection problem.
+      const refusal = await dialAsAcceptor(
+        generateSharedSecret(),
+        { channel: "webrtc", host, port: 3000, path },
+        {
+          peerFactory: () => {
+            throw new Error("a Peer was constructed for a refused endpoint");
+          },
+        },
+      ).catch((error: unknown) => error);
+
+      const failure = failureFor(
+        "security",
+        refusal,
+        undefined,
+        "browser",
+        "acceptor",
+      );
+      expect(failure.category).toBe("security");
+      expect(failure.title).toBe("This invitation can no longer be used");
+      expect(failure.message).toBe(
+        sanitizeForDisplay(
+          field === "host"
+            ? WEBRTC_ENDPOINT_HOST_REFUSED
+            : WEBRTC_ENDPOINT_PATH_REFUSED,
+        ),
+      );
+      expect(failure.message).toContain(
+        "Ask your partner to send a new invitation",
+      );
+    },
+  );
 
   test("the run-boundary refusal over a file that read as one column states the delimiter remedy", () => {
     // A file separated by something other than the delimiter this party chose

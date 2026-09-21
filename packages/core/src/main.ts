@@ -713,8 +713,12 @@ export {
 } from "./auth";
 export type { AuthResult } from "./auth";
 export { runKex } from "./kex";
-export { deriveRendezvousPeerId, RENDEZVOUS_ROLES } from "./rendezvous";
-export type { RendezvousRole } from "./rendezvous";
+export {
+  authorityMovingSignalingField,
+  deriveRendezvousPeerId,
+  RENDEZVOUS_ROLES,
+} from "./rendezvous";
+export type { RendezvousRole, SignalingLocationField } from "./rendezvous";
 // The shared chokepoint for parsing config/credential documents that may hold
 // secrets, so a parse error never leaks source bytes. Consumed by the CLI (file
 // reads, via its thin re-export) and the web app (an imported linkage-terms

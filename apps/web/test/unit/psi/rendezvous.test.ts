@@ -5,6 +5,8 @@ import { default as EventEmitter } from "eventemitter3";
 import { deriveRendezvousPeerId, generateSharedSecret } from "@psilink/core";
 
 import {
+  WEBRTC_ENDPOINT_HOST_REFUSED,
+  WEBRTC_ENDPOINT_PATH_REFUSED,
   dialAsAcceptor,
   listenAsInviter,
 } from "../../../src/psi/transport/rendezvous.js";
@@ -465,6 +467,109 @@ describe("peer logging wiring", () => {
 
     await vi.waitFor(() => expect(capturedOptions).toBeDefined());
     expectRedactsAll(capturedOptions, [inviterId, acceptorId]);
+
+    controller.abort();
+    await expect(promise).rejects.toThrow(/aborted/i);
+  });
+});
+
+// The endpoint is written by the remote partner and the operator cannot
+// inspect it, so a host or path whose shape could put the signaling socket on
+// another server is refused outright rather than dialed. What each shape does
+// to the address the real PeerJS client assembles is measured in
+// test/browser/webrtcEndpointAuthority.test.ts.
+describe("an invitation endpoint that could move the dialed address", () => {
+  const refusedHosts: Array<[string, string]> = [
+    ["userinfo", "inviter.example.org@evil.example.org"],
+    ["a path of its own", "inviter.example.org/x"],
+    ["a query", "inviter.example.org?x"],
+    ["a fragment", "inviter.example.org#x"],
+    ["a backslash", "inviter.example.org\\evil.example.org"],
+    ["a space", "inviter.example.org evil.example.org"],
+    ["a tab", "inviter.example.org\tevil.example.org"],
+  ];
+
+  const refusedPaths: Array<[string, string]> = [
+    ["userinfo", "/api/@evil.example.org"],
+    ["a query", "/api/?x"],
+    ["a fragment", "/api/#x"],
+    ["a backslash", "/api\\evil.example.org"],
+    ["a space", "/api /"],
+    ["a tab", "/api\t/"],
+    ["no leading separator", "api/"],
+  ];
+
+  test.each(refusedHosts)(
+    "a host carrying %s is refused before a peer is constructed",
+    async (_shape, host) => {
+      stubWindow();
+      const fake = new FakePeer();
+      const cap = captureFactory(fake);
+
+      await expect(
+        dialAsAcceptor(
+          generateSharedSecret(),
+          { ...endpoint, host },
+          { peerFactory: cap.factory },
+        ),
+      ).rejects.toThrow(WEBRTC_ENDPOINT_HOST_REFUSED);
+
+      // Nothing was registered with any broker, so the refusal cost the
+      // rendezvous nothing and disclosed neither derived id.
+      expect(() => cap.id()).toThrow("peer not constructed");
+    },
+  );
+
+  test.each(refusedPaths)(
+    "a path carrying %s is refused before a peer is constructed",
+    async (_shape, path) => {
+      stubWindow();
+      const fake = new FakePeer();
+      const cap = captureFactory(fake);
+
+      await expect(
+        dialAsAcceptor(
+          generateSharedSecret(),
+          { ...endpoint, path },
+          { peerFactory: cap.factory },
+        ),
+      ).rejects.toThrow(WEBRTC_ENDPOINT_PATH_REFUSED);
+
+      expect(() => cap.id()).toThrow("peer not constructed");
+    },
+  );
+
+  test("the refusal repeats neither the host nor the path it refused", async () => {
+    stubWindow();
+    const host = "inviter.example.org@evil.example.org";
+    const rejection = await dialAsAcceptor(
+      generateSharedSecret(),
+      { ...endpoint, host },
+      { peerFactory: captureFactory(new FakePeer()).factory },
+    ).catch((e: unknown) => e);
+
+    expect((rejection as Error).message).not.toContain("evil.example.org");
+  });
+
+  test("an endpoint omitting the path takes this app's own mount point", async () => {
+    stubWindow();
+    const fake = new FakePeer();
+    let capturedOptions: PeerOptions | undefined;
+    const controller = new AbortController();
+    const promise = dialAsAcceptor(
+      generateSharedSecret(),
+      { channel: "webrtc", host: "inviter.example.org", port: 3000 },
+      {
+        signal: controller.signal,
+        peerFactory: (_id, options) => {
+          capturedOptions = options;
+          return fake as unknown as Peer;
+        },
+      },
+    );
+
+    await vi.waitFor(() => expect(capturedOptions).toBeDefined());
+    expect(capturedOptions?.path).toBe("/api/");
 
     controller.abort();
     await expect(promise).rejects.toThrow(/aborted/i);

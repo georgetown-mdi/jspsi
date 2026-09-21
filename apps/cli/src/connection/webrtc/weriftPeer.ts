@@ -1,6 +1,7 @@
 import logLibrary from "loglevel";
 
 import {
+  authorityMovingSignalingField,
   chainDetailCauses,
   ConnectionError,
   UsageError,
@@ -316,22 +317,6 @@ export const WEBRTC_BROKER_PATH_REFUSED =
   "whitespace. Set `path` to the broker's mount point, such as `/` or `/psi`.";
 
 /**
- * Refused anywhere in a `host`. Each is a delimiter the URL parser acts on: `@`
- * closes an authority's userinfo, `/` `?` and `#` end the host, `\` folds to
- * `/`, and whitespace either ends the parse or is stripped. None of them appears
- * in a hostname or an IP literal.
- */
-const HOST_AUTHORITY_DELIMITERS = /[@/?#\\]|\s/;
-
-/**
- * Refused anywhere in a `path`, which is {@link HOST_AUTHORITY_DELIMITERS} less
- * the separator a path is made of. A leading `/` is required separately: a value
- * without one is not a mount point, and where it lands depends on how the
- * address is assembled rather than on what the field means.
- */
-const PATH_AUTHORITY_DELIMITERS = /[@?#\\]|\s/;
-
-/**
  * Resolve a webrtc connection's `server` block into the broker location the
  * signaling socket dials.
  *
@@ -344,8 +329,12 @@ const PATH_AUTHORITY_DELIMITERS = /[@?#\\]|\s/;
  *
  * It is also where `host` and `path` are refused for shape, since both routes
  * here -- an operator's `psilink.yaml` and the invitation endpoint an offline
- * accept persists -- can hold a partner-supplied value; the refused
- * characters and both routes are recorded in docs/spec/WEBRTC_TRANSPORT.md.
+ * accept persists -- can hold a partner-supplied value. The rule is core's
+ * {@link authorityMovingSignalingField}, shared with the browser acceptor so
+ * both refuse the same delimiters; the CLI additionally requires a bare
+ * authority (no port or path in the host), which the browser does not check.
+ * The refused characters and both routes are recorded in
+ * docs/spec/WEBRTC_TRANSPORT.md.
  * `key` needs no equivalent refusal: it cannot appear on an invitation
  * endpoint and is encoded as a query parameter.
  *
@@ -370,11 +359,10 @@ export function brokerLocationFromConnection(
         "dialable port; set `port` to a value between 1 and 65535, or omit it " +
         `to use the default (${secure ? 443 : 80})`,
     );
-  if (HOST_AUTHORITY_DELIMITERS.test(server.host))
-    throw new UsageError(WEBRTC_BROKER_HOST_REFUSED);
   const path = server.path ?? "/";
-  if (!path.startsWith("/") || PATH_AUTHORITY_DELIMITERS.test(path))
-    throw new UsageError(WEBRTC_BROKER_PATH_REFUSED);
+  const moved = authorityMovingSignalingField({ host: server.host, path });
+  if (moved === "host") throw new UsageError(WEBRTC_BROKER_HOST_REFUSED);
+  if (moved === "path") throw new UsageError(WEBRTC_BROKER_PATH_REFUSED);
   // Past the refusals, so a connection that fails to resolve at all gets its
   // refusal alone rather than a warning about a socket nothing will dial.
   if (!secure) warn(PLAINTEXT_SIGNALING_WARNING);

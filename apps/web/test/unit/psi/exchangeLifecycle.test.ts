@@ -10,6 +10,7 @@ import {
   StandardizedDataset,
   UsageError,
   describeResolvedRunShape,
+  generateSharedSecret,
   getDefaultLinkageTerms,
   runExchange,
 } from "@psilink/core";
@@ -20,6 +21,11 @@ import {
   FINAL_FRAME_UNCONFIRMED_WAIT_EXPIRED_WARNING,
   runExchangeLifecycle,
 } from "../../../src/psi/exchangeLifecycle.js";
+import {
+  WEBRTC_ENDPOINT_HOST_REFUSED,
+  WEBRTC_ENDPOINT_PATH_REFUSED,
+  dialAsAcceptor,
+} from "../../../src/psi/transport/rendezvous.js";
 import { authenticateExchange } from "../../../src/psi/authenticateExchange.js";
 import { openPeerMessageConnection } from "../../../src/psi/transport/peerMessageConnection.js";
 
@@ -40,6 +46,7 @@ import type {
   PsiProgress,
   ResolvedRunShape,
   RunExchangeOptions,
+  WebRTCEndpoint,
 } from "@psilink/core";
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
@@ -507,6 +514,56 @@ describe("runExchangeLifecycle", () => {
     expect(s.onResult).not.toHaveBeenCalled();
     expect(mockedOpen).not.toHaveBeenCalled();
   });
+
+  test.each([
+    ["host", "inviter.example.org@evil.example.org", "/api/"],
+    ["path", "inviter.example.org", "/api/?x"],
+  ] as const)(
+    "a dial-time %s refusal is category 'security', not the retryable one",
+    async (field, host, path) => {
+      // The acceptor's dial refuses an invitation endpoint whose host or path
+      // could move the connection somewhere the endpoint does not name. The
+      // endpoint alone decides that, so a retry refuses identically: it must
+      // reach the alert that states the refusal and offers a fresh invitation,
+      // not the generic retryable one. Raised here by the real dial rather than
+      // rebuilt, so the pair the alert reads is asserted as it is thrown.
+      const endpoint: WebRTCEndpoint = {
+        channel: "webrtc",
+        host,
+        port: 3000,
+        path,
+      };
+      const acquire: Acquire = async () => {
+        await dialAsAcceptor(generateSharedSecret(), endpoint, {
+          peerFactory: () => {
+            throw new Error("a Peer was constructed for a refused endpoint");
+          },
+        });
+        throw new Error("the dial resolved a refused endpoint");
+      };
+      const s = seams();
+
+      await runExchangeLifecycle({
+        acquire,
+        exchangeRole: "responder",
+        signal: new AbortController().signal,
+        ...s,
+      });
+
+      expect(s.onError).toHaveBeenCalledWith({
+        category: "security",
+        error: expect.objectContaining({
+          kind: "security",
+          message:
+            field === "host"
+              ? WEBRTC_ENDPOINT_HOST_REFUSED
+              : WEBRTC_ENDPOINT_PATH_REFUSED,
+          psilinkRecoveryHintEmitted: true,
+        }),
+      });
+      expect(mockedOpen).not.toHaveBeenCalled();
+    },
+  );
 
   test("a runExchange failure is classified as category 'exchange'", async () => {
     const { mc } = makeFakeMc();
