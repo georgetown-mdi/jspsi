@@ -4,7 +4,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { page, userEvent } from "vitest/browser";
 
-import { createElement, useEffect, useState } from "react";
+import { createElement, useState } from "react";
 
 // Load Mantine's stylesheet so components render with their real geometry.
 import "@mantine/core/styles.css";
@@ -154,8 +154,9 @@ function stubSigningApi(options: StubOptions = {}): { bodies: Array<string> } {
   return { bodies };
 }
 
-/** The draft the harness last held, so a test can assert on the value a screen
- * would include in the run intent as well as on what is rendered. */
+/** The draft the card last passed the harness, so a test can assert on the
+ * value a screen would include in the run intent as well as on what is
+ * rendered. */
 let latestDraft: ReceiptsDraft = RECEIPTS_DEFAULT;
 
 /** The default console layout: one mount, so the rendezvous holds the working
@@ -172,21 +173,24 @@ const SINGLE_MOUNT_RENDEZVOUS: JobRendezvousConfig = {
 
 /**
  * The card wired the way both screens wire it -- `AcceptorScreen` directly and
- * `InviterScreen` through `ReviewCreateSection` -- with a bare `useState` setter as
+ * `InviterScreen` through `ReviewCreateSection` -- with a `useState` setter as
  * `onChange`. That is the contract the concurrent-edit tests turn on: the setter
  * REPLACES the whole draft, so whatever the card passes is the whole of what
- * survives.
+ * survives. The only thing wrapped around it is the record of that draft in
+ * {@link latestDraft}, taken where the card passes it: recorded in an effect
+ * instead, it lands after the render an assertion on the screen already saw,
+ * and a test reading it there would read the draft before last.
  */
 function ReceiptsHarness({ identity }: { identity: string }): ReactElement {
   const [draft, setDraft] = useState<ReceiptsDraft>(RECEIPTS_DEFAULT);
-  useEffect(() => {
-    latestDraft = draft;
-  }, [draft]);
   return createElement(ReceiptsCard, {
     draft,
     identity,
     rendezvous: SINGLE_MOUNT_RENDEZVOUS,
-    onChange: setDraft,
+    onChange: (next: ReceiptsDraft) => {
+      latestDraft = next;
+      setDraft(next);
+    },
   });
 }
 
