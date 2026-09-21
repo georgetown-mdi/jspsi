@@ -327,6 +327,17 @@ const CONFIGURED_SFTP = {
   port: 2222,
 };
 
+const ATTACHMENT_KEY = "psilink-console-last-job";
+
+/** Persist a console strand-recovery record so the recovery panel has a job to
+ * offer on mount, the same shape `consoleRecovery.test.ts` writes. */
+function persistAttachment(jobId: string): void {
+  window.localStorage.setItem(
+    ATTACHMENT_KEY,
+    JSON.stringify({ v: 1, jobId, seat: "inviter", channel: "sftp" }),
+  );
+}
+
 const app = createAppMount();
 
 afterEach(async () => {
@@ -695,6 +706,57 @@ describe("direct exchange confirm and run", () => {
     expect(
       (JSON.parse(post?.body ?? "{}") as Record<string, unknown>).csvDelimiter,
     ).toBe("|");
+  });
+
+  test("a recovered job stays offered under a refused read, and clears once the file is accepted", async () => {
+    // The refusal above still stores the file (Edit 1's reason for being), so
+    // the recovery panel must key off the refusal itself, not just an
+    // uncommitted file, to stay on screen through it.
+    persistAttachment("job-7");
+    stubJobApi({
+      sftp: CONFIGURED_SFTP,
+      profileByDelimiter: (read) =>
+        read === "|" ? CLIENTS_PROFILE : ONE_COLUMN_PROFILE,
+    });
+    app.render(createElement(DirectExchangeScreen));
+    await page.getByRole("button", { name: "Select clients.csv" }).click();
+    await page.getByRole("button", { name: "Use this file" }).click();
+
+    await expect
+      .element(
+        page.getByText(CSV_DELIMITER_SINGLE_COLUMN_REMEDY, { exact: false }),
+      )
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText(
+          "An exchange started from this console is still running",
+        ),
+      )
+      .toBeInTheDocument();
+
+    await userEvent.selectOptions(
+      page.getByLabelText("How your file separates fields"),
+      "|",
+    );
+    await expect
+      .element(
+        page.getByText("client_id, first_name, last_name, dob, program_code"),
+      )
+      .toBeInTheDocument();
+    await page.getByRole("button", { name: "Use this file" }).click();
+    await expect
+      .element(
+        page.getByRole("heading", { level: 1, name: "The agreed server" }),
+      )
+      .toBeInTheDocument();
+    expect(
+      page
+        .getByText("An exchange started from this console is still running", {
+          exact: false,
+        })
+        .query(),
+    ).toBeNull();
   });
 
   test("a one-column detect read is refused, and a named separator answers it", async () => {

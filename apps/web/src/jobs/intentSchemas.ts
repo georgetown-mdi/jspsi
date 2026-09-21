@@ -953,9 +953,10 @@ const jobInputFileReferenceSchema: z.ZodType<JobInputFileReference> = z
  *
  * A single character, or the reserved `detect` word -- never a path, host,
  * credential, or argv fragment. It reaches the CLI as the composed config's
- * `csv_delimiter` value, and the read it governs is of this party's own mounted
- * file alone: the partner reads theirs by their own choice, and nothing about it
- * crosses.
+ * `csv_delimiter` value, or on the zero-setup arms as the single
+ * `--csv-delimiter=<value>` token, and the read it governs is of this party's
+ * own mounted file alone: the partner reads theirs by their own choice, and
+ * nothing about it crosses.
  *
  * The parsed value is the RESOLVED one: the transform runs before the grade, so
  * every reader of it -- the profile pass, the coverage sweep, and the composed

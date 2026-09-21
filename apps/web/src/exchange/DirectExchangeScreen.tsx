@@ -339,7 +339,9 @@ export function DirectExchangeScreen() {
         {step === "file" && (
           <>
             <h1 tabIndex={-1}>Your file</h1>
-            {consoleSource === undefined && <RecoveredExchangePanel />}
+            {(consoleSource === undefined || fileRefusal !== undefined) && (
+              <RecoveredExchangePanel />
+            )}
             {fileRefusal !== undefined && (
               <Alert
                 color="red"
