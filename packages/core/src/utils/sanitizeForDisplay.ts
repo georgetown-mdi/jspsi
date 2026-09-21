@@ -15,8 +15,8 @@ declare const displayableBrand: unique symbol;
  * cast or unwrapping.
  *
  * The brand is a phantom property keyed by a module-private `unique symbol`, so
- * nothing outside this module satisfies it structurally: the three functions
- * here are the only way to obtain one, short of a deliberate `as Displayable`
+ * nothing outside this module satisfies it structurally: the producers here
+ * are the only way to obtain one, short of a deliberate `as Displayable`
  * assertion. It exists only in the type system -- no value has the property
  * at runtime, and the branded string is byte-identical to the unbranded one.
  *
@@ -741,6 +741,43 @@ export function clipToRenderedCostKeepingEnd(
     cost = next;
   }
   return `${DISPLAY_TRUNCATION_MARKER}${trimPartialControlCharacterMarkerAtStart(kept)}`;
+}
+
+/**
+ * Mark a note THIS CODEBASE composed as a {@link Displayable}, so the sink
+ * renders it whole: fixed operator-facing copy, with any fragment somebody
+ * else chose already put through {@link sanitizeForDisplay} where it was
+ * interpolated.
+ *
+ * The slot exists because {@link DEFAULT_MAX_DISPLAY_LENGTH} is sized for one
+ * untrusted fragment, not for a sentence: a note charged to it reaches the
+ * operator cut mid-instruction, losing the half that says what to do. A note
+ * marked here is charged to nothing, while the fragments inside it keep the
+ * cap they were escaped under, so the bound still sits on the bytes somebody
+ * else chose.
+ *
+ * What the mark claims is checked rather than taken: a note holding any code
+ * point outside printable ASCII (U+0020-U+007E) is not the composition
+ * described above -- first-party copy is ASCII, and so is what
+ * {@link sanitizeForDisplay} returns -- so it is escaped and capped like any
+ * unmarked value instead. That refuses the control class, the bidi overrides
+ * and the confusables at this slot; what it does not bound is the length of
+ * printable ASCII, which is the whole of the exemption. A fragment rendered
+ * by {@link renderOperatorSuppliedText}, which keeps non-ASCII as the
+ * operator typed it, is therefore not composable into a note: such a message
+ * takes the standing escape.
+ *
+ * Use {@link displayText} instead wherever the copy fits a tagged template:
+ * it accepts only a `Displayable` or a `number` between its fixed spans, so
+ * it needs no check. This one takes the note as a string, for prose too long
+ * to sit on one source line.
+ */
+export function firstPartyNote(text: string): Displayable {
+  for (const ch of text) {
+    const cp = ch.codePointAt(0)!;
+    if (cp < 0x20 || cp > 0x7e) return sanitizeForDisplay(text);
+  }
+  return text as Displayable;
 }
 
 /**

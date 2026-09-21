@@ -27,6 +27,7 @@ import type {
   CertificateBindingStatus,
   CommitmentName,
   CommitmentStatus,
+  Displayable,
   DualSignedRecord,
   DualSignedRecordVerificationReport,
   ExchangeRecord,
@@ -72,12 +73,16 @@ import type {
  * version alone. A dropped document is read and parsed whichever it turns out to
  * be, so this is a narrower USE of the identity file, not a narrower read of it.
  *
- * Every embedded error string is routed through core's display-boundary
- * sanitizers before it reaches this model's output: a malformed document's parse
- * error through {@link sanitizeErrorForDisplay}, a reconstruction warning (which
- * interpolates a supplied column name) and a certificate identity (free text its
- * holder chose) through {@link sanitizeForDisplay}. Nothing here echoes an
- * unsanitized byte of a supplied file.
+ * Every embedded string has passed the display boundary before it reaches this
+ * model's output: a malformed document's parse error through
+ * {@link sanitizeErrorForDisplay} here, a certificate identity (free text its
+ * holder chose) through {@link sanitizeForDisplay} here, the per-exchange
+ * binder {@link signedVerdictViewModel} composes through
+ * {@link sanitizeForDisplay} here, and a reconstruction warning as core
+ * composed it -- fixed copy, with the one supplied column name escaped and
+ * capped where it was interpolated -- which this model passes through
+ * without a second pass. Nothing here echoes an unsanitized byte of a
+ * supplied file.
  */
 
 // --- Input parse -------------------------------------------------------------
@@ -355,8 +360,9 @@ export interface VerdictViewModel {
    * gap to show the reader). */
   resultSize?: VerdictRow;
   termsHash: VerdictRow;
-  /** Reconstruction caveats, each already sanitized for display. */
-  warnings: Array<string>;
+  /** Reconstruction caveats, each composed at the display boundary where it
+   * was written. */
+  warnings: Array<Displayable>;
   /** The standing caveat: the unsigned-record path does not check partner
    * receipt signatures. Fixed copy, mirrored from the CLI. */
   signatureNote: string;
@@ -533,12 +539,13 @@ const SIGNATURE_NOTE_WITH_SIGNED_RECORD =
 
 /**
  * Build the verdict view-model from a {@link RecordVerificationReport} and any
- * reconstruction warnings. Each warning is sanitized here (it interpolates a
- * supplied column name), so the caller passes the raw warnings straight from
- * {@link reconstructCommittedData}. Only the commitments the report holds are
- * shown; the mandatory pair is always present in a parsed record, and the
- * association table appears only when the record holds it. The result-size row
- * follows the same rule -- shown only where the record records a size.
+ * reconstruction warnings. A warning arrives already at the display boundary
+ * -- core composes it as first-party copy and escapes the one supplied column
+ * name it interpolates -- so it is rendered whole rather than charged to the
+ * per-value cap, which would cut the sentence. Only the commitments the report
+ * holds are shown; the mandatory pair is always present in a parsed record, and
+ * the association table appears only when the record holds it. The result-size
+ * row follows the same rule -- shown only where the record records a size.
  *
  * Pass `signedRecordVerified` when the same run also verified a dual-signed
  * record, so the standing caveat points at that verdict rather than telling the
@@ -549,7 +556,7 @@ const SIGNATURE_NOTE_WITH_SIGNED_RECORD =
  */
 export function verdictViewModel(
   report: RecordVerificationReport,
-  warnings: ReadonlyArray<string>,
+  warnings: ReadonlyArray<Displayable>,
   signedRecordVerified = false,
   receiptHoldsNoPartnerTerms = false,
 ): VerdictViewModel {
@@ -595,7 +602,7 @@ export function verdictViewModel(
       tone: termsRow.tone,
       explanation: termsExplanation,
     },
-    warnings: warnings.map((warning) => sanitizeForDisplay(warning)),
+    warnings: [...warnings],
     signatureNote: signedRecordVerified
       ? SIGNATURE_NOTE_WITH_SIGNED_RECORD
       : SIGNATURE_NOTE,

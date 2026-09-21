@@ -132,6 +132,8 @@ export const DISPLAYABLE_PRODUCERS = [
   "renderOperatorSuppliedSpanText",
   "redactAndRenderOperatorSuppliedText",
   "displayText",
+  "firstPartyNote",
+  "reproductionMismatchCauses",
   "describeDecodeError",
   "displayPartyIdentity",
   "redactAndDisplayPartyIdentity",

@@ -1,13 +1,18 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  DEFAULT_MAX_DISPLAY_LENGTH,
+  DISPLAY_TRUNCATION_MARKER,
   EXCHANGE_RECORD_VERSION,
   SIGNED_RECEIPT_VERSION,
   buildExchangeRecord,
   computeCertificateFingerprint,
   deriveOurIdColumn,
+  firstPartyNote,
   generateSigningIdentity,
   reconstructCommittedData,
+  reproductionMismatchCauses,
+  sanitizeForDisplay,
   serializeCertificate,
   serializeDualSignedRecord,
   serializeExchangeRecord,
@@ -38,6 +43,7 @@ import type {
   ExchangeRecord,
   LinkageTerms,
   ReceiptContent,
+  RecordVerificationReport,
   SignedReceiptPartyReport,
   SigningIdentity,
   VerificationKeys,
@@ -352,16 +358,92 @@ describe("verdictViewModel: no re-supply", () => {
   });
 });
 
-describe("verdictViewModel: warnings are sanitized", () => {
-  test("a reconstruction warning is passed through the display sanitizer", async () => {
+// Copy longer than the per-value cap whose last sentence is the one an operator
+// acts on, so a cut is visible in what it loses rather than in a length alone.
+const LONG_SENTENCES = "the same sentence again. ".repeat(12);
+
+// A received payload holding an empty cell: the shape reproductionMismatchCauses
+// raises its note on, since the result writes a committed null and a committed
+// empty string alike.
+const EMPTY_CELL_PAYLOAD = {
+  columns: ["value"],
+  rows: [[""]],
+} as unknown as CanonicalValue;
+
+// The notes beside the verdict are psilink's own sentences, and the operator
+// acts on the second half of one -- what to set, what to re-supply. The
+// per-value cap is sized for a single untrusted fragment, so the note slot is
+// exempt from it while anything a supplied file chose keeps it.
+describe("verdictViewModel: what the note slot caps", () => {
+  test("a reconstruction warning's column name reaches the page escaped", async () => {
     const { record, keys } = await fixtures();
     const esc = String.fromCharCode(0x1b);
     const report = await verifyExchangeRecord(record, keys, {});
     const view = verdictViewModel(report, [
-      `the identifier column "a${esc}[31m" has duplicate values`,
+      firstPartyNote(
+        `the identifier column "a${sanitizeForDisplay(`${esc}[31m`)}" has ` +
+          "duplicate values",
+      ),
     ]);
     expect(view.warnings).toHaveLength(1);
     expect(view.warnings[0]).not.toContain(esc);
+  });
+
+  test("a first-party note longer than the cap renders whole", async () => {
+    const { record, keys } = await fixtures();
+    const report = await verifyExchangeRecord(record, keys, {});
+    const note = firstPartyNote(
+      `${LONG_SENTENCES}Set the delimiter and verify again.`,
+    );
+    expect(note.length).toBeGreaterThan(DEFAULT_MAX_DISPLAY_LENGTH);
+    const view = verdictViewModel(report, [note]);
+    expect(view.warnings[0]).toBe(note);
+    expect(view.warnings[0]).toContain("Set the delimiter and verify again.");
+    expect(view.warnings[0]).not.toContain(DISPLAY_TRUNCATION_MARKER);
+  });
+
+  test("an untrusted string of that length is cut at the cap", async () => {
+    const { record, keys } = await fixtures();
+    const report = await verifyExchangeRecord(record, keys, {});
+    const columnName = `${LONG_SENTENCES}Set the delimiter and verify again.`;
+    expect(columnName.length).toBeGreaterThan(DEFAULT_MAX_DISPLAY_LENGTH);
+    const view = verdictViewModel(report, [
+      firstPartyNote(
+        `the identifier column "${sanitizeForDisplay(columnName)}" has ` +
+          "duplicate values",
+      ),
+    ]);
+    expect(view.warnings[0]).toContain(DISPLAY_TRUNCATION_MARKER);
+    expect(view.warnings[0]).not.toContain(
+      "Set the delimiter and verify again.",
+    );
+    // The note's own sentence survives the fragment's cut: the cap sits on the
+    // bytes the supplied file chose, not on the copy explaining them.
+    expect(view.warnings[0]).toContain('" has duplicate values');
+  });
+
+  test("the reproduction-limitation note renders whole", async () => {
+    const { record, keys } = await fixtures();
+    const report = await verifyExchangeRecord(record, keys, {});
+    const mismatched: RecordVerificationReport = {
+      ...report,
+      outcome: "failed",
+      commitments: {
+        ...report.commitments,
+        partnerPayloadReceived: "mismatch",
+      },
+    };
+    const causes = reproductionMismatchCauses(mismatched, {
+      partnerPayloadReceived: EMPTY_CELL_PAYLOAD,
+    });
+    expect(causes).toHaveLength(1);
+    expect(causes[0].length).toBeGreaterThan(DEFAULT_MAX_DISPLAY_LENGTH);
+    const view = verdictViewModel(mismatched, causes);
+    expect(view.warnings[0]).toBe(causes[0]);
+    expect(view.warnings[0]).toContain(
+      "not a confirmation that nothing else differs.",
+    );
+    expect(view.warnings[0]).not.toContain(DISPLAY_TRUNCATION_MARKER);
   });
 });
 

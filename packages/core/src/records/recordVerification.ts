@@ -1,6 +1,10 @@
 import { computeTermsHash, verifyCommitmentOpening } from "./exchangeRecord.js";
 import { readRowColumn } from "../file.js";
 import { distinctMatchedRows } from "../payloadExchange.js";
+import {
+  firstPartyNote,
+  sanitizeForDisplay,
+} from "../utils/sanitizeForDisplay.js";
 
 import type {
   CommitmentName,
@@ -9,6 +13,7 @@ import type {
   VerificationKeys,
 } from "./exchangeRecord.js";
 import type { CanonicalValue } from "../utils/canonical.js";
+import type { Displayable } from "../utils/sanitizeForDisplay.js";
 import type { LinkageTerms } from "../config/linkageTermsSchema.js";
 import type { CSVRow } from "../file.js";
 import type { AssociationTable } from "../types.js";
@@ -390,10 +395,13 @@ interface ReconstructionSources {
 }
 
 /** The reconstructed committed data plus any non-fatal caveats a caller should
- * report (e.g. a duplicate-identifier ambiguity). */
+ * report (e.g. a duplicate-identifier ambiguity). Each caveat is composed here
+ * as a {@link firstPartyNote}, so the sink renders the sentence whole while
+ * the one column name a caveat interpolates keeps the cap it was escaped
+ * under. */
 interface ReconstructedData {
   data: Partial<Record<CommitmentName, CanonicalValue>>;
-  warnings: string[];
+  warnings: Displayable[];
 }
 
 // The result file's fixed leading columns: our matched record id, then the
@@ -447,7 +455,7 @@ export function reconstructCommittedData(
   sources: ReconstructionSources,
 ): ReconstructedData {
   const { record, inputRows, result, ourIdColumn } = sources;
-  const warnings: string[] = [];
+  const warnings: Displayable[] = [];
   const data: Partial<Record<CommitmentName, CanonicalValue>> = {};
 
   let idToRow: Map<string, number> | undefined;
@@ -462,15 +470,17 @@ export function reconstructCommittedData(
     });
     if (anyDuplicate)
       warnings.push(
-        `the identifier column "${ourIdColumn}" has duplicate values in the ` +
-          "input, so a matched row's index is ambiguous; the first occurrence " +
-          "is used. An input holding several rows for one individual -- what a " +
-          "deduplicating exchange sets out to group -- has duplicates here " +
-          "whenever its identifier names the individual rather than the row, so " +
-          "this is the expected case for such an input rather than an unusual " +
-          "one. Every later duplicate then reproduces the first row's values " +
-          "and the commitments report a mismatch; an identifier column unique " +
-          "per row reproduces exactly",
+        firstPartyNote(
+          `the identifier column "${sanitizeForDisplay(ourIdColumn)}" has ` +
+            "duplicate values in the input, so a matched row's index is " +
+            "ambiguous; the first occurrence is used. An input holding several " +
+            "rows for one individual -- what a deduplicating exchange sets out " +
+            "to group -- has duplicates here whenever its identifier names the " +
+            "individual rather than the row, so this is the expected case for " +
+            "such an input rather than an unusual one. Every later duplicate " +
+            "then reproduces the first row's values and the commitments report " +
+            "a mismatch; an identifier column unique per row reproduces exactly",
+        ),
       );
   }
 
@@ -498,8 +508,10 @@ export function reconstructCommittedData(
   }
   if (anyMissingIdentity)
     warnings.push(
-      "the result references an identifier not present in the supplied input, " +
-        "so the input may not match this exchange",
+      firstPartyNote(
+        "the result references an identifier not present in the supplied " +
+          "input, so the input may not match this exchange",
+      ),
     );
 
   // associationTable: this party's [our indices, partner indices], one entry per
@@ -560,14 +572,16 @@ export function reconstructCommittedData(
     }
     if (anyDivergentCopy)
       warnings.push(
-        "the result has several rows for one partner record whose " +
-          "received values differ. The partner sent one row for that record " +
-          "and the received-payload commitment binds it once, so the copies a " +
-          "grouped result writes against this party's records have to agree; " +
-          "they are reproduced as they stand, so a commitment reports a " +
-          "mismatch -- the received payload's where a value cell is what " +
-          "differs, and the association table's where a partner row index " +
-          "moved instead",
+        firstPartyNote(
+          "the result has several rows for one partner record whose " +
+            "received values differ. The partner sent one row for that record " +
+            "and the received-payload commitment binds it once, so the copies " +
+            "a grouped result writes against this party's records have to " +
+            "agree; they are reproduced as they stand, so a commitment " +
+            "reports a mismatch -- the received payload's where a value cell " +
+            "is what differs, and the association table's where a partner row " +
+            "index moved instead",
+        ),
       );
     partnerPayloadReceived = { columns: receivedColumns, rows };
   }
@@ -620,16 +634,19 @@ function carriesEmptyCell(value: CanonicalValue | undefined): boolean {
 export function reproductionMismatchCauses(
   report: RecordVerificationReport,
   data: Partial<Record<CommitmentName, CanonicalValue>> = {},
-): string[] {
+): Displayable[] {
   if (report.commitments.partnerPayloadReceived !== "mismatch") return [];
   if (!carriesEmptyCell(data.partnerPayloadReceived)) return [];
   return [
-    "the re-supplied received payload has empty cells, and a result cell " +
-      "cannot distinguish a committed empty string from a committed null -- " +
-      "the result writes both as an empty cell. A partner-sent null in one of " +
-      "those cells would reproduce here as an empty string and report this " +
-      "mismatch; the commitment covers the whole payload, so this is one " +
-      "possible cause, not a confirmation that nothing else differs.",
+    firstPartyNote(
+      "the re-supplied received payload has empty cells, and a result cell " +
+        "cannot distinguish a committed empty string from a committed null " +
+        "-- the result writes both as an empty cell. A partner-sent null in " +
+        "one of those cells would reproduce here as an empty string and " +
+        "report this mismatch; the commitment covers the whole payload, so " +
+        "this is one possible cause, not a confirmation that nothing else " +
+        "differs.",
+    ),
   ];
 }
 

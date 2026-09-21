@@ -36,6 +36,7 @@ import type {
   AssertedIdentityStatus,
   CertificateBindingStatus,
   CommitmentStatus,
+  Displayable,
   DualSignedRecord,
   DualSignedRecordVerificationReport,
   ExchangeRecord,
@@ -481,7 +482,7 @@ function configTermsNote(
  * code (0 unless a check definitively failed). @internal exported for testing */
 export function formatVerificationReport(
   report: RecordVerificationReport,
-  warnings: string[],
+  warnings: Displayable[],
   signedRecordSupplied = false,
   supplied: SuppliedVerificationInputs = NOTHING_SUPPLIED,
 ): { lines: string[]; exitCode: number } {
@@ -515,12 +516,11 @@ export function formatVerificationReport(
   // line reads "not checked", and the two are unreadable apart.
   const configNote = configTermsNote(supplied);
   if (configNote !== undefined) lines.push(configNote);
-  // A reconstruction warning interpolates a column name drawn from the supplied
-  // files, so route it through the display-boundary sanitizer (as every sibling
-  // command does for partner- or file-controlled text) before it reaches the
-  // terminal -- the commitment/terms lines above are fixed strings and need none.
-  for (const warning of warnings)
-    lines.push(`  note: ${sanitizeForDisplay(warning)}`);
+  // Each note crossed the display boundary where it was composed, escaping the
+  // one column name it draws from the supplied files and leaving its own
+  // sentence whole; re-sanitizing here would cut the sentence at the per-value
+  // cap and double every backslash the escaped column name holds.
+  for (const warning of warnings) lines.push(`  note: ${warning}`);
   // The record is self-attested, so this section says nothing about the partner.
   // Name where the evidence against the partner is, or was not supplied.
   lines.push(
@@ -1211,7 +1211,7 @@ export async function handler(argv: Arguments): Promise<void> {
       const keysPath = keysArg ?? keysPathFor(recordPath);
       const keys = readVerificationKeysFile(keysPath);
 
-      const warnings: string[] = [];
+      const warnings: Displayable[] = [];
       let data: Awaited<ReturnType<typeof reconstructCommittedData>>["data"] =
         {};
       if (inputFile !== undefined && resultFile !== undefined) {
