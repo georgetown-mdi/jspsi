@@ -109,8 +109,9 @@ function profileLiveMessage(
  * is showing -- and holds the confirm stage on it: its columns were read by the
  * delimiter in effect when it was opened, and a commitment the run would not
  * reproduce is worse than a second confirmation. A file already committed is voided
- * at the same moment ({@link onInvalidate}). A choice the rule refuses selects
- * nothing at all.
+ * at the same moment ({@link onInvalidate}). A choice the rule refuses closes the
+ * row actions and the parent's gate but leaves an open confirm stage as it was; the
+ * commit made there is voided once the choice resolves.
  */
 export function ServerFilePicker({
   committed,
