@@ -52,8 +52,11 @@ function missingFieldsDetail(fields: ReadonlyArray<LinkageField>): string {
  * {@link CSV_DELIMITER_SINGLE_COLUMN_REMEDY} to either shape: that reading is what
  * a file separated by something other than the delimiter it was read by produces,
  * and the delimiter is the operator's to change here, unlike the terms this copy
- * otherwise sends them to. Every surface rendering this alert offers the control,
- * so there is one sentence to add rather than one per surface.
+ * otherwise sends them to. Every seat rendering this alert holds a file read
+ * under that control -- the direct spine refuses the one-column reading on the
+ * file step itself ({@link directFileCommit}), and the mint gates re-check a file
+ * the inviter's file step took -- so the sentence names a control the operator
+ * has.
  *
  * The return shape is the structural {@link AlertContent} (`{ title, message }`)
  * every caller assigns into its error state and renders through the shared alert

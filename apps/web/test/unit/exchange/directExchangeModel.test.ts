@@ -53,6 +53,16 @@ const LINKABLE_COLUMNS = [
   "program_code",
 ];
 
+/** A tab-separated header read by a delimiter that is not its own: the whole row
+ * comes back as one column. */
+const ONE_COLUMN_HEADER = ["first_name\tlast_name\tdate_of_birth"];
+
+/** Every strategy an operator can select on the confirm step. */
+const LINKAGE_STRATEGIES: ReadonlyArray<LinkageStrategy> = [
+  "cascade",
+  "single-pass",
+];
+
 describe("previewInferredTerms", () => {
   test("linkage keys and fields match core inference for the same columns", () => {
     // The preview must be exactly what the CLI infers from the same columns
@@ -159,7 +169,7 @@ describe("previewInferredTerms", () => {
     // sentence the invitation steps state, with nothing of the command line in
     // it.
     const preview = previewInferredTerms(
-      ["first_name\tlast_name\tdate_of_birth"],
+      ONE_COLUMN_HEADER,
       "x",
       DIRECT_LINKAGE_STRATEGY_DEFAULT,
       DIRECT_DEDUPLICATE_DEFAULT,
@@ -432,6 +442,42 @@ describe("the file step's state", () => {
     expect(committed.source).toBeUndefined();
     expect(committed.alert?.title).toBeDefined();
     expect(committed.notice?.title).toBeDefined();
+  });
+
+  test("a header that read as one column is refused beside the control", () => {
+    // A file separated by something other than the delimiter it was read by
+    // comes back this way, and the control that reads it is on this step -- so
+    // the step refuses it here, where the remedy the alert names is on screen,
+    // rather than at the confirm preview two steps on.
+    const committed = directFileCommit(profileOf(ONE_COLUMN_HEADER));
+    expect(committed.source).toBeUndefined();
+    expect(committed.alert?.message).toContain(
+      CSV_DELIMITER_SINGLE_COLUMN_REMEDY,
+    );
+  });
+
+  test("the confirm step's own choices do not move this grading", () => {
+    // The step grades before the operator reaches the strategy and side
+    // controls, so it grades at the spine's defaults. Neither choice reaches the
+    // keys the columns are graded against: a file this step takes is not one the
+    // confirm step refuses over the same columns, and one it refuses would be
+    // refused there under every choice.
+    for (const columns of [ONE_COLUMN_HEADER, LINKABLE_COLUMNS])
+      for (const linkageStrategy of LINKAGE_STRATEGIES)
+        for (const deduplicate of [false, true]) {
+          const state = { columns, linkageStrategy, deduplicate };
+          const refusedAtConfirm =
+            previewInferredTerms(
+              columns,
+              DEFAULT_PREVIEW_IDENTITY,
+              linkageStrategy,
+              deduplicate,
+            ).refusal !== undefined;
+          expect({ ...state, refused: refusedAtConfirm }).toEqual({
+            ...state,
+            refused: directFileCommit(profileOf(columns)).source === undefined,
+          });
+        }
   });
 
   test("the state a delimiter change voids to holds nothing a commit set", () => {

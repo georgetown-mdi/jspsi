@@ -24,6 +24,8 @@ import {
 } from "@psi/linkageStrategyChoice";
 import { DEDUPLICATE_CONTROL_LABEL } from "@psi/deduplicateChoice";
 
+import { CSV_DELIMITER_SINGLE_COLUMN_REMEDY } from "@components/csvDelimiterChoice";
+
 import {
   ReattachNotice,
   UNDESCRIBABLE_RECORD_CONFIRM_BODY,
@@ -85,6 +87,21 @@ const CLIENTS_PROFILE = {
   ],
 };
 
+/** The same file read by a delimiter that is not its own: the whole header comes
+ * back as one column, the reading a file separated another way produces. */
+const ONE_COLUMN_PROFILE = {
+  ...CLIENTS_FILE,
+  rowCount: 2,
+  columns: [CLIENTS_PROFILE.columns.join("|")],
+  sanitizedColumnPositions: [],
+  columnSamples: [
+    {
+      column: CLIENTS_PROFILE.columns.join("|"),
+      values: ["1|Ann|Lee|01/02/1990|A", "2|Bo|Ray|03/04/1985|B"],
+    },
+  ],
+};
+
 // A valid literal OpenSSH SHA256 fingerprint the host-key probe returns.
 const PROBE_FINGERPRINT = `SHA256:${"B".repeat(42)}A`;
 
@@ -100,6 +117,10 @@ interface StubOptions {
   /** The body `GET /api/jobs/inputs/profile` serves. Defaults to
    * {@link CLIENTS_PROFILE}. */
   profile?: unknown;
+  /** The body that route serves for the `delimiter` it was read by (absent for a
+   * read that named none), for a file whose columns differ by choice. Takes
+   * precedence over {@link StubOptions.profile}. */
+  profileByDelimiter?: (delimiter: string | null) => unknown;
   /** The run status a `GET /api/jobs/job-7` reports. Defaults to `running`; a
    * terminal value (`failed`) lets a discard skip the cancel-and-poll wait and DELETE
    * at once, so a start-over test does not sit through the 15 s discard budget. */
@@ -176,10 +197,18 @@ function stubJobApi(options: StubOptions = {}): {
         return Promise.resolve(
           jsonResponse({ configured: true, files: [CLIENTS_FILE] }),
         );
-      if (url.startsWith("/api/jobs/inputs/profile"))
-        return Promise.resolve(
-          jsonResponse(options.profile ?? CLIENTS_PROFILE),
+      if (url.startsWith("/api/jobs/inputs/profile")) {
+        const read = new URL(url, window.location.origin).searchParams.get(
+          "delimiter",
         );
+        return Promise.resolve(
+          jsonResponse(
+            options.profileByDelimiter?.(read) ??
+              options.profile ??
+              CLIENTS_PROFILE,
+          ),
+        );
+      }
       if (url === "/api/jobs/sftp/probe") {
         const probe = options.probe ?? {
           status: 200,
@@ -572,6 +601,43 @@ describe("direct exchange confirm and run", () => {
 
     await expect
       .element(page.getByRole("heading", { level: 1, name: "Your file" }))
+      .toBeInTheDocument();
+  });
+
+  test("a one-column read is refused on the step that holds the control", async () => {
+    // The file is separated by pipes, so a comma read brings its whole header
+    // back as one column. The remedy for that reading is the delimiter control,
+    // so the step refuses the file where the control is rather than passing it
+    // to the confirm preview, whose screen has no such control.
+    stubJobApi({
+      sftp: CONFIGURED_SFTP,
+      profileByDelimiter: (read) =>
+        read === "|" ? CLIENTS_PROFILE : ONE_COLUMN_PROFILE,
+    });
+    app.render(createElement(DirectExchangeScreen));
+    await page.getByRole("button", { name: "Select clients.csv" }).click();
+    await page.getByRole("button", { name: "Use this file" }).click();
+
+    await expect
+      .element(
+        page.getByText(CSV_DELIMITER_SINGLE_COLUMN_REMEDY, { exact: false }),
+      )
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByRole("heading", { level: 1, name: "Your file" }))
+      .toBeInTheDocument();
+
+    // The file's own separator reads its five columns, and the step takes it.
+    await userEvent.selectOptions(
+      page.getByLabelText("How your file separates fields"),
+      "|",
+    );
+    await page.getByRole("button", { name: "Select clients.csv" }).click();
+    await page.getByRole("button", { name: "Use this file" }).click();
+    await expect
+      .element(
+        page.getByRole("heading", { level: 1, name: "The agreed server" }),
+      )
       .toBeInTheDocument();
   });
 

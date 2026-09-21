@@ -21,6 +21,8 @@ import {
   unnameableColumnsAlert,
 } from "@psi/columnNames";
 
+import { unlinkableFileAlert } from "@components/UnlinkableFileAlert";
+
 import type { LinkageStrategy, LinkageTerms, Metadata } from "@psilink/core";
 
 import type { AlertContent } from "@components/csvIntake";
@@ -328,12 +330,37 @@ export interface DirectFileState {
 export const DIRECT_NO_FILE: DirectFileState = {};
 
 /**
+ * The refusal a read that came back as ONE column stands under, or `undefined`
+ * for a read of any other width. The grading is the confirm step's own
+ * ({@link previewInferredTerms}) over those columns, taken at the spine's
+ * defaults: the strategy and the side ride the terms without reaching the keys
+ * the columns are graded against, which `directExchangeModel.test.ts` holds.
+ */
+function singleColumnRefusal(
+  columns: Array<string>,
+): LinkageRefusal | undefined {
+  if (columns.length !== 1) return undefined;
+  return previewInferredTerms(
+    columns,
+    DEFAULT_PREVIEW_IDENTITY,
+    DIRECT_LINKAGE_STRATEGY_DEFAULT,
+    DIRECT_DEDUPLICATE_DEFAULT,
+  ).refusal;
+}
+
+/**
  * The file step's state once the picker commits `profile`.
  *
  * A blank header cell is refused here with the shared unnameable alert --
  * core's inferMetadata would otherwise throw at preview time -- and the refusal
  * holds no profile, so the confirm step cannot read a file this step refused.
  * The removal notice is stated either way, beside the refusal it caused.
+ *
+ * A read that came back as ONE column is refused here too when the grading
+ * refuses it, on the step holding the delimiter control that alert's remedy
+ * names: that reading is what a file separated by another character produces,
+ * and this step is where the operator changes it. The confirm step grades the
+ * committed file again, for the refusals this one-column gate does not cover.
  */
 export function directFileCommit(profile: ProfiledJobInput): DirectFileState {
   const stripped = profile.sanitizedColumnPositions;
@@ -342,5 +369,8 @@ export function directFileCommit(profile: ProfiledJobInput): DirectFileState {
   const unnameable = emptyColumnPositions(profile.columns);
   if (unnameable.length > 0)
     return { alert: unnameableColumnsAlert(unnameable, stripped), notice };
+  const refusal = singleColumnRefusal(profile.columns);
+  if (refusal !== undefined)
+    return { alert: unlinkableFileAlert(refusal), notice };
   return { source: profile, notice };
 }

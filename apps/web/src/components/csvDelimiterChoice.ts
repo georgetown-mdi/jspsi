@@ -74,9 +74,10 @@ export type CsvDelimiterResolution =
  * the delimiter it was read by reaches a column check that way, so the column
  * refusals state this rather than leaving the operator with terms to renegotiate.
  *
- * One sentence for every surface: each file step of both builds offers the
- * control ({@link CsvDelimiterField}), so the remedy names a choice on the screen
- * rather than a route off it.
+ * One sentence for every surface: the control ({@link CsvDelimiterField}) is on
+ * the file step of both builds, and a refusal stating this sentence reaches the
+ * operator either on that step or at a gate re-checking the file it read. So the
+ * remedy names a control they have rather than a route off the flow.
  */
 export const CSV_DELIMITER_SINGLE_COLUMN_REMEDY =
   "This file read as a single column, so its fields may be separated by a " +
