@@ -152,7 +152,7 @@ describe("vendored PSI prebuild tarball manifest", () => {
     expect(observed).toBe(manifest.linux.maxGlibcFloor);
   });
 
-  test("ships musl prebuilds that are genuinely musl-linked", () => {
+  test("ships musl prebuilds that are linked against musl", () => {
     // A musl-tagged build that still references glibc symbols is mis-built and
     // would dlopen-fail under Alpine (the exact silent-WASM regression the musl
     // build exists to remove); catch it here rather than at runtime.

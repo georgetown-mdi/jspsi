@@ -3892,14 +3892,14 @@ describe("declared transform param types", () => {
       message: "replace_regex replacement must be text, not a number",
     },
     {
-      name: "an object carrying a marker",
+      name: "an object holding a marker",
       fn: "coalesce",
       params: { default: { note: MARKER } },
       param: "default",
       message: "coalesce default must be text, not an object",
     },
     {
-      name: "an array carrying a marker",
+      name: "an array holding a marker",
       fn: "coalesce",
       params: { default: [MARKER] },
       param: "default",
@@ -3933,7 +3933,7 @@ describe("declared transform param types", () => {
     expect(describeDecodeError(result.error)).not.toContain(MARKER);
   });
 
-  test("a long text param carrying a marker parses, so no refusal quotes it", () => {
+  test("a long text param holding a marker parses, so no refusal quotes it", () => {
     // The other half of the measurement above: where the value is the type the
     // function reads, it is accepted as declared rather than echoed into an
     // issue at all.

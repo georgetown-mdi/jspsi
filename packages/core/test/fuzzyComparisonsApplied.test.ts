@@ -900,7 +900,7 @@ describe("buildKeyStrings: a value the declared expansion cannot be applied to",
     );
   }
 
-  test("refuses the exchange though the crossing would settle the row first", () => {
+  test("refuses the exchange though the crossing would decide the row first", () => {
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
     const dates = canonicalDates(NON_CANONICAL_DATE_INDEX + 1);
     dates[NON_CANONICAL_DATE_INDEX] = NON_CANONICAL_DATE;

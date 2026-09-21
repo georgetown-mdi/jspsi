@@ -411,7 +411,7 @@ describe("substringCollapsesParsedDateToConstant", () => {
     }
   });
 
-  test("a wrong-typed bound is refused at compile and reads as unmeasurable", () => {
+  test("a wrong-typed bound is refused at compile and is treated as unmeasurable", () => {
     // The type is refused where a document is decoded, so only a caller building
     // steps without one reaches this: the factory refuses the bound at compile,
     // and a run this build cannot measure resolves UP to the collapse word
@@ -3867,7 +3867,7 @@ describe("the grading pass under the transform-work budget", () => {
     ]).flat(),
   ];
 
-  test("a pass inside the budget reads the probes it carries", () => {
+  test("a pass inside the budget reads the probes it holds", () => {
     const steps = amplifyingPairs(1000);
     expect(pipelineCollapsesParsedDateToConstant(steps)).toBe(false);
     expect(pipelineAlwaysDrops(steps)).toBe(false);

@@ -244,7 +244,7 @@ const renderNoPinRefusal = (
 // rejected shape, is driven by REJECTED_KEY_TYPES below.
 const SERVER_CHOSEN_KEY_TYPES: Array<[string, string]> = [
   ["a benign key type", "ssh-ed25519"],
-  ["a key type carrying a PEM BEGIN marker", "-----BEGIN RSA PRIVATE KEY-----"],
+  ["a key type holding a PEM BEGIN marker", "-----BEGIN RSA PRIVATE KEY-----"],
 ];
 
 for (const [label, keyType] of SERVER_CHOSEN_KEY_TYPES) {
@@ -477,7 +477,7 @@ const typeLinkOf = (rendered: string): string | undefined =>
 const REJECTED_KEY_TYPES: Array<[string, string, string[]]> = [
   ["a control-laden type", "ssh-\x1b[31mevil\r\nINJECTED", ["INJECTED"]],
   [
-    "a type carrying a sliced private key",
+    "a type holding a sliced private key",
     "-----BEGIN OPENSSH PRIVATE KEY-----\nc2gtcnNhAAAAAwEAAQ==\nQ1n3QqzB2rN",
     ["BEGIN OPENSSH", "c2gtcnNhAAAAAwEAAQ", "Q1n3QqzB2rN"],
   ],

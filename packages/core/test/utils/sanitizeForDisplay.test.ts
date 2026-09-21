@@ -300,7 +300,7 @@ describe("what an operator-supplied render replaces beyond the control class", (
       expect(replaceUnrenderableForOperatorDisplay(untouched)).toBe(untouched);
   });
 
-  test("replaces exactly the units the package reads as unpaired", () => {
+  test("replaces exactly the units the package treats as unpaired", () => {
     // The class the replacement matches and the one the package reads as
     // non-well-formed are the same set, so what a render leaves standing is
     // what the canonical encoder would have taken.

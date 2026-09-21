@@ -1022,7 +1022,7 @@ test("a lone END marker in an abort reason deletes nothing", async () => {
     );
 });
 
-test("a plain abort reason reads as its own text", async () => {
+test("a plain abort reason displays as its own text", async () => {
   for (const render of abortRenders)
     expect(await render(["the operator declined the terms"])).toBe(
       `partner aborted linkage terms exchange${REASON_LINK}` +
@@ -1061,7 +1061,7 @@ test("a marker in a partner column name leaves the diagnostic it names", async (
   );
 });
 
-test("a plain partner column name reads as its own text", async () => {
+test("a plain partner column name displays as its own text", async () => {
   const { initiator, responder } = await columnMismatchRenders("email");
   expect(responder).toBe(
     'linkage terms are incompatible: payload mismatch: local receive columns ["email"] do not match partner send columns []',

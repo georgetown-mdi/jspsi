@@ -108,7 +108,7 @@ function makeQueued(options?: {
   return { conn, controls, send, close };
 }
 
-test("finish drains a buffered frame before surfacing the transport error", async () => {
+test("finish drains a buffered frame before reporting the transport error", async () => {
   const { conn, controls, close } = makeQueued();
   controls.deliver("final"); // buffered, no parked waiter
   controls.finish(new ConnectionError("peer closed", "transport"));

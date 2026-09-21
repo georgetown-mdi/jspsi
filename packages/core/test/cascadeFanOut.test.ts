@@ -383,7 +383,7 @@ function roundCandidates(
   return typeof value === "string" ? new Set([value]) : value;
 }
 
-test("a record at the width its key declares carries every candidate into the round", () => {
+test("a record at the width its key declares contributes every candidate to the round", () => {
   // The worst case measured rather than assumed: the widest cell the terms
   // admit realizes exactly the declared width, and one part more realizes
   // nothing at all.

@@ -114,7 +114,7 @@ describe("authorityMovingSignalingField", () => {
     ["a space", `${HOST} evil.example.org`],
     ["a tab", `${HOST}\tevil.example.org`],
     ["a newline", `${HOST}\nevil.example.org`],
-  ])("refuses a host carrying %s", (_shape, host) => {
+  ])("refuses a host with %s", (_shape, host) => {
     expect(authorityMovingSignalingField({ host, path: PATH })).toBe("host");
   });
 
@@ -127,7 +127,7 @@ describe("authorityMovingSignalingField", () => {
     ["a tab", "/api\t/"],
     ["a newline", "/api\n/"],
     ["no leading separator", "api/"],
-  ])("refuses a path carrying %s", (_shape, path) => {
+  ])("refuses a path with %s", (_shape, path) => {
     expect(authorityMovingSignalingField({ host: HOST, path })).toBe("path");
   });
 

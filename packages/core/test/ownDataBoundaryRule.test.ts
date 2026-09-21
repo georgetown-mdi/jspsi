@@ -52,7 +52,7 @@ const satisfyingRows: Array<CSVRow> = [
 const laterColumns = ["first_name"];
 const laterRows: Array<CSVRow> = [{ first_name: "Alice" }];
 
-test("a binding point's verdict does not settle the run's", () => {
+test("a binding point's verdict does not decide the run's", () => {
   const accepted = deriveAcceptedLinkageTerms(inviterTerms, "Accepting Org");
 
   // The binding point: this party's own file is bound and graded, and passes.

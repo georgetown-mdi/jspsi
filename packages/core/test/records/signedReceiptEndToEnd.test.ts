@@ -1026,7 +1026,7 @@ describe("the partner terms the receipt retains", () => {
     );
   });
 
-  test("carry a run whose certificates are anchored to a verified verdict", async () => {
+  test("support a run whose certificates are anchored to a verified verdict", async () => {
     // No partner terms document in hand: the receipt's own copy is what makes
     // the agreed-terms hash checkable, and with both certificates anchored and
     // the run's record beside it the verdict reaches verified.

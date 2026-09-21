@@ -3145,7 +3145,7 @@ describe("buildKeyStrings", () => {
     elements: Array.from({ length: 11 }, () => ({ field: "last_name" })),
   };
 
-  test("elements binding one large field settle on the row's total, not each element's", () => {
+  test("elements binding one large field are held to the row's total, not each element's", () => {
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
     expect(
       buildKeyStrings(

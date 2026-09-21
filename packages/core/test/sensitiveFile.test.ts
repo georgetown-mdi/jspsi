@@ -41,7 +41,7 @@ const throwingChannels: Array<[string, () => unknown]> = [
     () => editSensitiveYamlDocument(`a:\n\tb: ${SECRET}\n`, LABEL, () => {}),
   ],
   [
-    "editYamlDocument unresolved alias surfacing at serialization (after edit)",
+    "editYamlDocument unresolved alias reported at serialization (after edit)",
     () => editSensitiveYamlDocument(`password: *${SECRET}\n`, LABEL, () => {}),
   ],
   [
