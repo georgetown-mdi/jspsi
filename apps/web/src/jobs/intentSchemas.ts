@@ -941,14 +941,20 @@ const jobInputFileReferenceSchema: z.ZodType<JobInputFileReference> = z
  * file alone: the partner reads theirs by their own choice, and nothing about it
  * crosses.
  *
+ * The parsed value is the RESOLVED one: the transform runs before the grade, so
+ * every reader of it -- the profile pass, the coverage sweep, and the composed
+ * `csv_delimiter` -- takes the character a read can be given rather than the
+ * word a party wrote for it.
+ *
  * The refusal names the field, so a client that sends one the grade rejects
  * learns which value to correct rather than that its body was rejected. The
  * value itself is never echoed -- core's refusal states its shape.
  */
 export const jobCsvDelimiterSchema: z.ZodType<string> = z
   .string()
+  .transform(normalizeCsvDelimiter)
   .superRefine((value, ctx) => {
-    if (isCsvDelimiterChoice(normalizeCsvDelimiter(value))) return;
+    if (isCsvDelimiterChoice(value)) return;
     ctx.addIssue({
       code: "custom",
       message: `csvDelimiter must state a delimiter psilink accepts: ${csvDelimiterRefusal(value)}`,

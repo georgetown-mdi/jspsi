@@ -5,6 +5,7 @@ import { CSV_DELIMITER_DETECT, csvDelimiterRefusal } from "@psilink/core";
 import {
   CSV_DELIMITER_OPTIONS,
   CSV_DELIMITER_OTHER,
+  CSV_DELIMITER_SINGLE_COLUMN_COMMAND_LINE_REMEDY,
   CSV_DELIMITER_SINGLE_COLUMN_REMEDY,
   INITIAL_CSV_DELIMITER_CHOICE,
   resolveCsvDelimiter,
@@ -112,7 +113,12 @@ describe("the single-column remedy", () => {
     ).toBe(true);
   });
 
-  test("sends no reader to the command line: every build offers the control", () => {
+  test("names the command line where the surface offers no control", () => {
+    expect(CSV_DELIMITER_SINGLE_COLUMN_COMMAND_LINE_REMEDY).toBe(
+      "This file read as a single column, so its fields may be separated by a character other than the comma. This console reads your file with commas: to read one separated another way, run the exchange from the command line on a configuration that states csv_delimiter.",
+    );
+    // The control's own wording names no command line, so a surface that has the
+    // control never sends its operator off the screen to use it.
     expect(CSV_DELIMITER_SINGLE_COLUMN_REMEDY).not.toContain("command line");
     expect(CSV_DELIMITER_SINGLE_COLUMN_REMEDY).not.toContain("csv_delimiter");
   });

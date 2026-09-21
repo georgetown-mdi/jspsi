@@ -45,6 +45,7 @@ import { isConsoleBuild, psilinkVersion } from "@utils/clientConfig";
 import { whenDiagnostic } from "@utils/diagnostics";
 
 import {
+  CSV_DELIMITER_SINGLE_COLUMN_REMEDY,
   INITIAL_CSV_DELIMITER_CHOICE,
   resolveCsvDelimiter,
 } from "@components/csvDelimiterChoice";
@@ -238,7 +239,10 @@ function invitationFileAlert(failure: InvitationFileFailure): AlertContent {
     case "overlong":
       return overlongColumnsAlert(failure.positions);
     case "unlinkable":
-      return unlinkableFileAlert(failure.refusal);
+      return unlinkableFileAlert(
+        failure.refusal,
+        CSV_DELIMITER_SINGLE_COLUMN_REMEDY,
+      );
   }
 }
 

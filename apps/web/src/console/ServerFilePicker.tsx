@@ -104,10 +104,12 @@ function profileLiveMessage(
  * trusted data, so the file is read in place with no drift or freshness re-check.
  *
  * The profile is read by the operator's own field-delimiter choice, so the columns
- * confirmed here are the columns the run reads. Changing that choice re-opens the
- * confirm stage on the committed file: its columns were read by the delimiter in
- * effect when it was chosen, and a commitment the run would not reproduce is worse
- * than a second confirmation. A choice the rule refuses selects nothing at all.
+ * confirmed here are the columns the run reads. Changing that choice re-profiles
+ * the file on screen -- the open selection, or the committed file while the listing
+ * is showing -- and holds the confirm stage on it: its columns were read by the
+ * delimiter in effect when it was opened, and a commitment the run would not
+ * reproduce is worse than a second confirmation. A choice the rule refuses selects
+ * nothing at all.
  */
 export function ServerFilePicker({
   committed,
@@ -169,17 +171,19 @@ export function ServerFilePicker({
     [csvDelimiter],
   );
 
-  // A committed file's columns were read by the delimiter in effect when it was
-  // chosen, so a later change leaves them stale: re-profile it on the new choice
-  // and put the operator back at the confirm stage, with the columns it now reads
-  // on screen before anything is committed again.
+  // The columns on screen were read by the delimiter in effect when the file was
+  // opened, so a later change leaves them stale: re-profile the file the operator
+  // is looking at -- the open selection, or the committed file while the listing
+  // is showing -- and put them at the confirm stage on the columns it now reads,
+  // before anything is committed.
+  const displayedName = selectedName ?? committed?.name;
   const profiledBy = useRef(csvDelimiter);
   useEffect(() => {
     if (profiledBy.current === csvDelimiter) return;
     profiledBy.current = csvDelimiter;
-    if (csvDelimiter === undefined || committed === undefined) return;
-    void selectFile(committed.name);
-  }, [csvDelimiter, committed, selectFile]);
+    if (csvDelimiter === undefined || displayedName === undefined) return;
+    void selectFile(displayedName);
+  }, [csvDelimiter, displayedName, selectFile]);
 
   function cancelSelection() {
     profileId.current += 1;

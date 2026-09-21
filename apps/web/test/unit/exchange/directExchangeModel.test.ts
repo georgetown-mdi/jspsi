@@ -22,6 +22,7 @@ import {
   directDeduplicateIntentFields,
   directLinkageStrategyIntentFields,
   directServerBlockedReason,
+  directUnlinkableFileAlert,
   previewInferredTerms,
 } from "@exchange/directExchangeModel";
 import {
@@ -140,6 +141,23 @@ describe("previewInferredTerms", () => {
     if (preview.refusal?.kind !== "no-linkable-key")
       throw new Error("expected a no-linkable-key refusal");
     expect(preview.refusal.missingFields.length).toBeGreaterThan(0);
+  });
+
+  test("a file that read as one column is sent to the command line, not a control", () => {
+    // This spine's file step renders the mounted-file picker with no delimiter
+    // control, so the remedy it states for a one-column read is the configuration
+    // key the operator sets at the command line.
+    const preview = previewInferredTerms(
+      ["first_name\tlast_name\tdate_of_birth"],
+      "x",
+      DIRECT_LINKAGE_STRATEGY_DEFAULT,
+      DIRECT_DEDUPLICATE_DEFAULT,
+    );
+    if (preview.refusal === undefined)
+      throw new Error("expected a refusal over a one-column read");
+    const message = directUnlinkableFileAlert(preview.refusal).message;
+    expect(message).toContain("csv_delimiter");
+    expect(message).not.toContain("How your file separates fields");
   });
 
   test("the refusal grades the previewed terms, not the unnarrowed default set", () => {
