@@ -48,6 +48,7 @@ stands, from a direction still open to a decision taken and built.
 | [shared-consent-summary.md](shared-consent-summary.md) | Shipped. |
 | [signing-identity-custody.md](signing-identity-custody.md) | Decided and built, by a 3-panelist design panel converging 3-0. |
 | [standing-relay-delivery.md](standing-relay-delivery.md) | Decided, the reference is written, and the first deployment has driven a relayed exchange through it. |
+| [turn-provisioning-governance.md](turn-provisioning-governance.md) | Surveyed, with a recommendation per profile; nothing decided or built, and the configuration shape left to separate work. |
 | [wasm-parallel-evaluation.md](wasm-parallel-evaluation.md) | Both arms measured, and the browser direction decided: Web Worker sharding, with the pthreads/SIMD build declined; nothing is built into the production path. |
 | [web-server-runtime-role.md](web-server-runtime-role.md) | Direction recorded; no removal scheduled. |
 | [webrtc-frame-structure-envelope.md](webrtc-frame-structure-envelope.md) | Decided and built, by a 3-panelist design panel converging 3-0 on the retirement and 2-1 on the ceiling. |
