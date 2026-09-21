@@ -119,13 +119,13 @@ address naming another authority opens nothing.
 
 The browser acceptor applies the same two delimiter rules -- one
 implementation, shared from `@psilink/core` -- to the `host` and `path` of the
-invitation endpoint it dials, and refuses before it constructs a peer. It
-needs them for a different
-reason than the CLI: the PeerJS client assembles its address by concatenating
-scheme, `host`, `:`, `port`, `path` and `peerjs?key=`, so a delimiter in either
-field is read as part of the address rather than as a value inside it. What
-each shape does to the assembled address is measured against the real client in
-real Chromium (`apps/web/test/browser/webrtcEndpointAuthority.test.ts`):
+invitation endpoint it dials, and refuses before it constructs a peer. It needs
+them for a different reason than the CLI: the PeerJS client assembles its
+address by concatenating scheme, `host`, `:`, `port`, `path` and `peerjs?key=`,
+so a delimiter in either field is read as part of the address rather than as a
+value inside it. What each shape does to the assembled address is measured
+against the real client in real Chromium
+(`apps/web/test/browser/webrtcEndpointAuthority.test.ts`):
 
 | Endpoint field | What the delimiter does to the dialed address |
 | -------------- | --------------------------------------------- |
@@ -143,6 +143,14 @@ address and opens it internally with no point in between for the app to read it
 back. What the acceptor relies on instead is that its dial path resolves the
 endpoint through that refusal, which the same file measures by driving the dial
 path with each shape and requiring that no peer is ever constructed.
+
+Both rules are a denylist of delimiters rather than an allowlist of host
+spellings, and a mapped separator passes: a `host` holding U+3002, U+FF61, or
+U+FF0E -- the alternative label separators the URL parser folds onto `.` --
+contains none of the refused characters, so the browser dials the mapped name.
+That name is one the endpoint itself spells, since the partner chooses the
+endpoint host outright, and the CLI's bare-authority check accepts the same
+mapped host, so the two consumers agree on the server a locator names.
 
 The server stamps `src` itself from the connecting client's id, so an outbound
 frame contains only `type`, `payload`, and `dst`. Heartbeats (`HEARTBEAT`, no

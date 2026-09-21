@@ -1,6 +1,7 @@
 import Peer from "peerjs";
 
 import {
+  ConnectionError,
   authorityMovingSignalingField,
   deriveRendezvousPeerId,
   getLogger,
@@ -135,6 +136,23 @@ export const WEBRTC_ENDPOINT_PATH_REFUSED =
   "created from their own address.";
 
 /**
+ * An endpoint refusal in the shape the run's alert reads as an invitation
+ * fault: a `security`-kind {@link ConnectionError} holding core's
+ * `psilinkRecoveryHintEmitted` tag, which together show the refusal's own text
+ * and remedy with no retry control (`failureFor` in
+ * `apps/web/src/exchange/useInviterExchange.ts`). A plain `Error` takes the
+ * generic retryable copy instead, and every retry refuses identically, since
+ * the endpoint alone decides it. The tag's contract holds here: both refusals
+ * are fixed sentences naming the operator's next step, composed from no
+ * partner-authored value.
+ */
+function endpointRefusal(message: string): ConnectionError {
+  return Object.assign(new ConnectionError(message, "security"), {
+    psilinkRecoveryHintEmitted: true,
+  });
+}
+
+/**
  * The inviter's signaling location, read off the invitation endpoint, for the
  * acceptor to dial. The host was already normalized when the invitation was
  * built (`webrtcEndpointFromLocation`). The endpoint omits the port only for a
@@ -152,7 +170,8 @@ export const WEBRTC_ENDPOINT_PATH_REFUSED =
  * test/browser/webrtcEndpointAuthority.test.ts and recorded in
  * docs/spec/WEBRTC_TRANSPORT.md.
  *
- * @throws {Error} if `host` or `path` has a shape that could move the address.
+ * @throws {ConnectionError} if `host` or `path` has a shape that could move
+ *                           the address ({@link endpointRefusal}).
  */
 function acceptorLocationFromEndpoint(
   endpoint: WebRTCEndpoint,
@@ -163,8 +182,8 @@ function acceptorLocationFromEndpoint(
     path: endpoint.path ?? "/api/",
   };
   const moved = authorityMovingSignalingField(location);
-  if (moved === "host") throw new Error(WEBRTC_ENDPOINT_HOST_REFUSED);
-  if (moved === "path") throw new Error(WEBRTC_ENDPOINT_PATH_REFUSED);
+  if (moved === "host") throw endpointRefusal(WEBRTC_ENDPOINT_HOST_REFUSED);
+  if (moved === "path") throw endpointRefusal(WEBRTC_ENDPOINT_PATH_REFUSED);
   return location;
 }
 
