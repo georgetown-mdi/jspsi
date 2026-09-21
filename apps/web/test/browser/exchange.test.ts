@@ -1957,7 +1957,7 @@ describe("inviter screen", () => {
     // The pre-round statement is the timing half: an operator can read what
     // their partner presented while the exchange is still running, which is the
     // only point at which reading it can change what they do. It states the
-    // run's own terms, so it reads as plain run status -- an ordinary
+    // run's own terms, so it is shown as plain run status -- an ordinary
     // one-to-one run raises no warning, and the warnings alert never mounts.
     const matching = {
       localDeduplicate: false,

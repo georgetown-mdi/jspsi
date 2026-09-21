@@ -367,7 +367,7 @@ describe("parseManagedExchangeRecord reader-rejects-unknown", () => {
 
   test("a record written before a kind existed still reads unchanged", () => {
     // Widening the enum only adds members, so a stored entry an earlier build
-    // wrote -- a linkage shortfall recorded as "input" -- loads and reads as it did.
+    // wrote -- a linkage shortfall recorded as "input" -- loads and reads back unchanged.
     const legacy = {
       ...buildManagedExchangeRecord(newExchange()),
       lastRun: {

@@ -1942,7 +1942,7 @@ describe("acceptor screen: run and completion", () => {
   test("the resolved matching is readable before the run ends", async () => {
     // The acceptor's mirror of the inviting seat's pre-round statement: the pair
     // is readable while the exchange is still running, not only once it has
-    // finished, and it reads as plain run status rather than through the
+    // finished, and it is shown as plain run status rather than through the
     // warnings alert, which an ordinary one-to-one run never raises.
     const matching = {
       localDeduplicate: false,

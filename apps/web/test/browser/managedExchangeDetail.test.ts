@@ -1545,7 +1545,7 @@ describe("managed exchange detail accounting of disclosures", () => {
           )
           .elements(),
       ).toHaveLength(2);
-      // The plain empty state, which reads as an absence of disclosures, is the
+      // The plain empty state, which displays as an absence of disclosures, is the
       // one this run must not get.
       expect(
         page
