@@ -219,7 +219,7 @@ async function createSealedInvitation() {
   await page.getByRole("button", { name: "Create the invitation" }).click();
   await expect
     .element(page.getByRole("heading", { level: 1 }))
-    .toHaveTextContent("Your invitation is ready");
+    .toMatchTextContent("Your invitation is ready");
   // The run starts from an effect after the invitation lands; wait for it so
   // callers can drive the captured lifecycle callbacks right away.
   await vi.waitFor(() => expect(lifecycleHarness.calls).toHaveLength(1));
@@ -253,7 +253,7 @@ async function reachReviewCreate() {
     .click();
   await expect
     .element(page.getByRole("heading", { level: 1 }))
-    .toHaveTextContent("Review & create");
+    .toMatchTextContent("Review & create");
 }
 
 // The refusals the mint's transform check raises, built by driving the real
@@ -367,7 +367,7 @@ describe("quick path", () => {
 
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("psilink - private record linkage");
+      .toMatchTextContent("psilink - private record linkage");
 
     expect(document.querySelectorAll("main").length).toBe(1);
     expect(document.querySelectorAll("h1").length).toBe(1);
@@ -441,7 +441,7 @@ describe("inviter screen", () => {
 
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Your file");
+      .toMatchTextContent("Your file");
 
     expect(document.querySelectorAll("main").length).toBe(1);
 
@@ -537,7 +537,7 @@ describe("inviter screen", () => {
       .click();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Matching & sharing");
+      .toMatchTextContent("Matching & sharing");
 
     // The grid's two control labels, asserted before anything selects through
     // them: a label regression is a named expectation here rather than a locator
@@ -611,7 +611,7 @@ describe("inviter screen", () => {
       .click();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Matching & sharing");
+      .toMatchTextContent("Matching & sharing");
 
     // The conflict's audible half: announced even though the seed mounted
     // already in conflict.
@@ -652,7 +652,7 @@ describe("inviter screen", () => {
       .click();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Review & create");
+      .toMatchTextContent("Review & create");
 
     await expect
       .element(page.getByText("clients.csv - 2 rows"))
@@ -704,7 +704,7 @@ describe("inviter screen", () => {
     await createButton.click();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Your invitation is ready");
+      .toMatchTextContent("Your invitation is ready");
 
     const nav = document.querySelector('nav[aria-label="Exchange progress"]');
     expect(nav).not.toBeNull();
@@ -760,7 +760,7 @@ describe("inviter screen", () => {
       .click();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Review & create");
+      .toMatchTextContent("Review & create");
 
     // The ledger's Customize Cleaning row is a button whose first span is its
     // label and whose fact span has the amber attention class when failing.
@@ -802,7 +802,7 @@ describe("inviter screen", () => {
       .click();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Cleaning");
+      .toMatchTextContent("Cleaning");
     await vi.waitFor(() => {
       expect(
         document.querySelector('[data-testid="coverage-silent-empty"]'),
@@ -848,14 +848,14 @@ describe("inviter screen", () => {
       .click();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Review & create");
+      .toMatchTextContent("Review & create");
 
     // Browser Back moves to the previous step in place -- the screen never
     // unmounts, so the file and the step-2 edit are intact.
     window.history.back();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Matching & sharing");
+      .toMatchTextContent("Matching & sharing");
     await expect
       .element(page.getByLabelText(usedLabel("program_code")))
       .toHaveValue("ignored");
@@ -865,7 +865,7 @@ describe("inviter screen", () => {
     window.history.back();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Your file");
+      .toMatchTextContent("Your file");
     await expect.element(page.getByText("clients.csv")).toBeInTheDocument();
     expect(document.querySelector(`.${styles.fileCard}`)).not.toBeNull();
     await expect
@@ -877,7 +877,7 @@ describe("inviter screen", () => {
     window.history.forward();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Matching & sharing");
+      .toMatchTextContent("Matching & sharing");
     await expect
       .element(page.getByLabelText(usedLabel("program_code")))
       .toHaveValue("ignored");
@@ -927,7 +927,7 @@ describe("inviter screen", () => {
       window.history.back();
       await expect
         .element(page.getByRole("heading", { level: 1 }))
-        .toHaveTextContent("Your file");
+        .toMatchTextContent("Your file");
 
       // No storage write anywhere contains the file's contents (a unique cell
       // value stands in for the CSV bytes), and the file's rows never reach
@@ -966,7 +966,7 @@ describe("inviter screen", () => {
       .click();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Matching & sharing");
+      .toMatchTextContent("Matching & sharing");
 
     // A popstate into a step entry whose step no build knows (a tab surviving
     // a deploy that renamed a section) must not clear the work column: the
@@ -978,7 +978,7 @@ describe("inviter screen", () => {
     );
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Matching & sharing");
+      .toMatchTextContent("Matching & sharing");
     // The section's own controls keep rendering with their edited state intact.
     await expect
       .element(page.getByLabelText(usedLabel("first_name")))
@@ -1000,14 +1000,14 @@ describe("inviter screen", () => {
       .click();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Review & create");
+      .toMatchTextContent("Review & create");
 
     // Back lands on the clamped review, not the dead `share` entry: the heading
     // is Review & create and the share surface never appears.
     window.history.back();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Review & create");
+      .toMatchTextContent("Review & create");
     expect(page.getByText("Share this invitation").query()).toBeNull();
     await expect
       .element(page.getByText("Ready to create."))
@@ -1017,11 +1017,11 @@ describe("inviter screen", () => {
     window.history.forward();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Review & create");
+      .toMatchTextContent("Review & create");
     window.history.back();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Review & create");
+      .toMatchTextContent("Review & create");
     expect(page.getByText("Share this invitation").query()).toBeNull();
   });
 
@@ -1065,7 +1065,7 @@ describe("inviter screen", () => {
     await page.getByRole("button", { name: "Create the invitation" }).click();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Your invitation is ready");
+      .toMatchTextContent("Your invitation is ready");
     // The mint releases this guard -- the file's terms are sealed into an
     // invitation -- and in the same moment starts the browser listening for the
     // partner, which the live run's own guard covers
@@ -1145,7 +1145,7 @@ describe("inviter screen", () => {
       await page.getByRole("button", { name: "Create the invitation" }).click();
       await expect
         .element(page.getByRole("heading", { level: 1 }))
-        .toHaveTextContent("Your invitation is ready");
+        .toMatchTextContent("Your invitation is ready");
       await vi.waitFor(() => expect(lifecycleHarness.calls).toHaveLength(1));
 
       // Post-mint the synthetic-data reminder persists (the live invitation
@@ -1180,7 +1180,7 @@ describe("inviter screen", () => {
         .click();
       await expect
         .element(page.getByRole("heading", { level: 1 }))
-        .toHaveTextContent("Matching & sharing");
+        .toMatchTextContent("Matching & sharing");
       expect(ledger().textContent).toContain("Sample data (synthetic records)");
 
       // Clear resets to a fresh step 1: no file read, the sample name gone, the
@@ -1188,7 +1188,7 @@ describe("inviter screen", () => {
       await page.getByRole("button", { name: "Clear" }).click();
       await expect
         .element(page.getByRole("heading", { level: 1 }))
-        .toHaveTextContent("Your file");
+        .toMatchTextContent("Your file");
       expect(page.getByText("psilink-sample-inviter.csv").query()).toBeNull();
       await expect.element(page.getByLabelText("Your name")).toHaveValue("");
       expect(ledger().textContent).not.toContain(
@@ -1238,7 +1238,7 @@ describe("inviter screen", () => {
       window.history.back();
       await expect
         .element(page.getByRole("heading", { level: 1 }))
-        .toHaveTextContent("Your file");
+        .toMatchTextContent("Your file");
       const fileInput = document.querySelector('input[type="file"]');
       await userEvent.upload(
         page.elementLocator(fileInput as HTMLElement),
@@ -1289,7 +1289,7 @@ describe("inviter screen", () => {
     await page.getByRole("button", { name: /Matching on/ }).click();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Matching keys");
+      .toMatchTextContent("Matching keys");
     expect(
       document.querySelector(
         `aside[aria-label="This exchange"] button[aria-current="true"]`,
@@ -1334,7 +1334,7 @@ describe("inviter screen", () => {
     await page.getByRole("button", { name: /Legal agreement/ }).click();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Legal agreement");
+      .toMatchTextContent("Legal agreement");
     await page.getByLabelText("Attach a legal agreement").click();
     await userEvent.fill(
       page.getByLabelText("Agreement reference"),
@@ -1361,7 +1361,7 @@ describe("inviter screen", () => {
     await page.getByRole("button", { name: /Back to Review & create/ }).click();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Review & create");
+      .toMatchTextContent("Review & create");
 
     await expect
       .element(page.getByText("Ready to create."))
@@ -1477,7 +1477,7 @@ describe("inviter screen", () => {
     await createButton.click();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Your invitation is ready");
+      .toMatchTextContent("Your invitation is ready");
   });
 
   test("a refused transform names the step and the change at the create click", async () => {
@@ -1539,7 +1539,7 @@ describe("inviter screen", () => {
     await createButton.click();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Your invitation is ready");
+      .toMatchTextContent("Your invitation is ready");
   });
 
   test("a refused transform names the step and the change at the save click", async () => {
@@ -1552,7 +1552,7 @@ describe("inviter screen", () => {
     await page.getByRole("button", { name: "Create the invitation" }).click();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Save your exchange file");
+      .toMatchTextContent("Save your exchange file");
     await userEvent.fill(
       page.getByLabelText("SFTP server host"),
       "sftp.riverbend.example.gov",
@@ -1652,7 +1652,7 @@ describe("inviter screen", () => {
     await page.getByRole("button", { name: "Create the invitation" }).click();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Save your exchange file");
+      .toMatchTextContent("Save your exchange file");
     await userEvent.fill(
       page.getByLabelText("SFTP server host"),
       "sftp.riverbend.example.gov",
@@ -1921,7 +1921,7 @@ describe("inviter screen", () => {
     call.onStage("confirming protocol");
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Exchange in progress");
+      .toMatchTextContent("Exchange in progress");
     expect(page.getByText("Share this invitation").query()).toBeNull();
     await vi.waitFor(() => {
       expect(document.activeElement?.textContent).toBe("Exchange in progress");
@@ -1978,7 +1978,7 @@ describe("inviter screen", () => {
 
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Exchange in progress");
+      .toMatchTextContent("Exchange in progress");
     await vi.waitFor(() => expect(paragraphsSaying(sentence)).toHaveLength(1));
     expect(paragraphsSaying(sentence)[0].closest('[role="status"]')).toBeNull();
     expect(
@@ -1995,7 +1995,7 @@ describe("inviter screen", () => {
     // The completion panel takes the sentence over, so it still stands once.
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Exchange complete");
+      .toMatchTextContent("Exchange complete");
     await vi.waitFor(() => expect(paragraphsSaying(sentence)).toHaveLength(1));
     expect(
       page.getByText("The exchange reported a warning").query(),
@@ -2027,7 +2027,7 @@ describe("inviter screen", () => {
 
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Exchange complete");
+      .toMatchTextContent("Exchange complete");
     await expect
       .element(page.getByText(/1,847.*matched records/))
       .toBeInTheDocument();
@@ -2097,7 +2097,7 @@ describe("inviter screen", () => {
 
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Exchange complete");
+      .toMatchTextContent("Exchange complete");
     // No results download and no count -- the caveat states the terms did
     // this, while the record downloads are still offered.
     await expect
@@ -2314,7 +2314,7 @@ describe("inviter screen", () => {
       .click();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Review & create");
+      .toMatchTextContent("Review & create");
   });
 
   test("post-create: an expired invitation names itself, not the partner", async () => {
@@ -2418,7 +2418,7 @@ describe("inviter screen", () => {
       .click();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Review & create");
+      .toMatchTextContent("Review & create");
     expect(
       document.querySelector('nav[aria-label="Exchange setup"]'),
     ).not.toBeNull();
@@ -2448,7 +2448,7 @@ describe("inviter screen", () => {
     await page.getByRole("button", { name: "Create the invitation" }).click();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Save your exchange file");
+      .toMatchTextContent("Save your exchange file");
     expect(document.querySelectorAll(`.${styles.tagRoadmap}`)).toHaveLength(0);
     expect(lifecycleHarness.calls).toHaveLength(0);
     // The save-flow top bar shows the four-step timeline with Save file
@@ -2483,7 +2483,7 @@ describe("inviter screen", () => {
       await page.getByRole("button", { name: "Create the invitation" }).click();
       await expect
         .element(page.getByRole("heading", { level: 1 }))
-        .toHaveTextContent("Save your exchange file");
+        .toMatchTextContent("Save your exchange file");
 
       // The credential alert describes what the operator actually supplies --
       // an SSH username and an @file key/password reference in the config --
@@ -2576,7 +2576,7 @@ describe("inviter screen", () => {
         .click();
       await expect
         .element(page.getByRole("heading", { level: 1 }))
-        .toHaveTextContent("Review & create");
+        .toMatchTextContent("Review & create");
       await expect
         .element(page.getByText("Terms locked when the invitation was created"))
         .toBeInTheDocument();
@@ -2595,7 +2595,7 @@ describe("inviter screen", () => {
       await page.getByRole("button", { name: "Create the invitation" }).click();
       await expect
         .element(page.getByRole("heading", { level: 1 }))
-        .toHaveTextContent("Save your exchange file");
+        .toMatchTextContent("Save your exchange file");
       expect(lifecycleHarness.calls).toHaveLength(0);
 
       // The filedrop field requires an absolute path.
@@ -2660,7 +2660,7 @@ describe("inviter screen", () => {
     await page.getByRole("button", { name: "Create the invitation" }).click();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Save your exchange file");
+      .toMatchTextContent("Save your exchange file");
     expect(page.getByRole("button", { name: ACCEPT_KIT_BUTTON }).query()).toBe(
       null,
     );
@@ -2773,7 +2773,7 @@ describe("exchange screen at a narrow viewport", () => {
       .click();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Matching & sharing");
+      .toMatchTextContent("Matching & sharing");
   }
 
   test("the spine compresses to a step strip naming the current position", async () => {
@@ -2832,7 +2832,7 @@ describe("exchange screen at a narrow viewport", () => {
     await clickWhenHittable(keysRow);
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Matching keys");
+      .toMatchTextContent("Matching keys");
   });
 
   test("the share bar is the first interactive element and collapses", async () => {

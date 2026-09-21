@@ -887,7 +887,7 @@ describe("InvitationTerms: result sharing is stated from the viewer's perspectiv
     );
     await expect
       .element(group("What the exchange produces"))
-      .toHaveTextContent("learns which of its own records are in your data");
+      .toMatchTextContent("learns which of its own records are in your data");
   });
 
   test("a one-sided count-only invitation states no membership disclosure", async () => {
@@ -1598,7 +1598,7 @@ describe("InvitationTerms: the acceptor's outbound send is gated on the inviting
       .element(
         page.getByRole("list", { name: "What you will send to your partner" }),
       )
-      .toHaveTextContent("diagnosis");
+      .toMatchTextContent("diagnosis");
   });
 
   test("does not fire on the inviter's own preview of these same terms", async () => {
@@ -1613,7 +1613,7 @@ describe("InvitationTerms: the acceptor's outbound send is gated on the inviting
     expect(app.container.textContent).not.toContain(NO_PAYLOAD_SENTENCE);
     await expect
       .element(page.getByRole("list", { name: "Columns sent to your partner" }))
-      .toHaveTextContent("risk_score");
+      .toMatchTextContent("risk_score");
   });
 });
 
@@ -1677,7 +1677,7 @@ describe("InvitationTerms: the inviter's own send is gated on the accepting part
     expect(app.container.textContent).not.toContain(NO_PAYLOAD_SENTENCE);
     await expect
       .element(page.getByRole("list", { name: "Columns sent to your partner" }))
-      .toHaveTextContent("risk_score");
+      .toMatchTextContent("risk_score");
   });
 
   test("the acceptor's screens show the mirror of these same terms", async () => {
@@ -1695,7 +1695,7 @@ describe("InvitationTerms: the inviter's own send is gated on the accepting part
       .element(
         page.getByRole("list", { name: "What you will send to your partner" }),
       )
-      .toHaveTextContent("diagnosis");
+      .toMatchTextContent("diagnosis");
   });
 });
 

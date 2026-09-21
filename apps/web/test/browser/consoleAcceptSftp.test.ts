@@ -373,7 +373,7 @@ describe("console SFTP accept: author-then-launch", () => {
     await page.getByRole("button", { name: "Start the exchange" }).click();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Exchange in progress");
+      .toMatchTextContent("Exchange in progress");
     await expect
       .element(page.getByText(SERVER_JOB_KEEP_OPEN_BODY))
       .toBeInTheDocument();
@@ -395,7 +395,7 @@ describe("console SFTP accept: author-then-launch", () => {
     api.closeEvents();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Exchange complete");
+      .toMatchTextContent("Exchange complete");
   });
 
   test("a split-provisioned console does not gate a single-directory SFTP accept", async () => {

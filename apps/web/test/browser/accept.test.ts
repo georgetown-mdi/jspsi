@@ -597,7 +597,7 @@ describe("acceptor screen: review terms", () => {
     );
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Consent & your file");
+      .toMatchTextContent("Consent & your file");
   });
 });
 
@@ -613,7 +613,7 @@ describe("acceptor screen: consent gate and parse-behind-consent", () => {
     );
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Consent & your file");
+      .toMatchTextContent("Consent & your file");
   }
 
   test("the submit is disabled until both consent and a name are supplied", async () => {
@@ -682,7 +682,7 @@ describe("acceptor screen: consent gate and parse-behind-consent", () => {
     );
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Confirm your columns");
+      .toMatchTextContent("Confirm your columns");
     expect(csvLoadHarness.called).toBe(1);
   });
 
@@ -764,7 +764,7 @@ describe("acceptor screen: consent-step legal-agreement display", () => {
     );
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Consent & your file");
+      .toMatchTextContent("Consent & your file");
   }
 
   test("an agreement-bearing invitation shows the three values, read-only", async () => {
@@ -837,7 +837,7 @@ describe("acceptor screen: confirm your columns (verdict, mapper, launch)", () =
     );
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Consent & your file");
+      .toMatchTextContent("Consent & your file");
     await consentAndName();
     const fileInput = document.querySelector('input[type="file"]');
     await userEvent.upload(
@@ -874,7 +874,7 @@ describe("acceptor screen: confirm your columns (verdict, mapper, launch)", () =
     const announcement = page.getByTestId("verdict-announcement");
     await expect
       .element(announcement)
-      .toHaveTextContent(
+      .toMatchTextContent(
         "No agreed linkage key can be satisfied by your columns",
       );
     expect(announcement.element().getAttribute("role")).toBe("status");
@@ -893,7 +893,7 @@ describe("acceptor screen: confirm your columns (verdict, mapper, launch)", () =
       .toBeDisabled();
     await expect
       .element(page.getByTestId("launch-blocked-reason"))
-      .toHaveTextContent("Cover the remaining agreed linkage keys above");
+      .toMatchTextContent("Cover the remaining agreed linkage keys above");
   });
 
   test("a fully-covered file is all-clear with the exact body copy and no mapper", async () => {
@@ -940,7 +940,7 @@ describe("acceptor screen: confirm your columns (verdict, mapper, launch)", () =
       .toBeInTheDocument();
     await expect
       .element(page.getByTestId("verdict-announcement"))
-      .toHaveTextContent(
+      .toMatchTextContent(
         "1 of 2 linkage keys can be satisfied by your columns",
       );
 
@@ -954,7 +954,9 @@ describe("acceptor screen: confirm your columns (verdict, mapper, launch)", () =
       .toBeInTheDocument();
     await expect
       .element(page.getByTestId("verdict-announcement"))
-      .toHaveTextContent("All 2 linkage keys can be satisfied by your columns");
+      .toMatchTextContent(
+        "All 2 linkage keys can be satisfied by your columns",
+      );
     await expect
       .element(page.getByRole("button", { name: "Start the exchange" }))
       .toBeEnabled();
@@ -1293,7 +1295,7 @@ describe("acceptor screen: confirm your columns (verdict, mapper, launch)", () =
     );
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Consent & your file");
+      .toMatchTextContent("Consent & your file");
     await expect
       .element(page.getByText("cohort_intake.csv"))
       .toBeInTheDocument();
@@ -1345,7 +1347,7 @@ describe("acceptor screen: confirm your columns (verdict, mapper, launch)", () =
     window.history.back();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Consent & your file");
+      .toMatchTextContent("Consent & your file");
     await expect
       .element(page.getByText("cohort_intake.csv"))
       .toBeInTheDocument();
@@ -1696,7 +1698,7 @@ describe("acceptor columns step: the send summary is gated on the inviting party
     // testid because the sentence is on this screen twice -- here and in the
     // visible panel above -- so a getByText would not say which one it read.
     const announcement = page.getByTestId("disclosure-summary-announcement");
-    await expect.element(announcement).toHaveTextContent(noPayloadSentence);
+    await expect.element(announcement).toMatchTextContent(noPayloadSentence);
     expect(announcement.element().textContent).not.toContain("risk_score");
   });
 
@@ -1709,13 +1711,13 @@ describe("acceptor columns step: the send summary is gated on the inviting party
     // while the region is still empty.
     await expect
       .element(page.getByTestId("disclosure-summary-announcement"))
-      .toHaveTextContent(
+      .toMatchTextContent(
         `Columns sent to your partner: ${isolatedColumnName("risk_score")}.`,
       );
     expect(app.container.textContent).not.toContain(noPayloadSentence);
     await expect
       .element(page.getByText("For each matched row:", { exact: false }))
-      .toHaveTextContent("risk_score");
+      .toMatchTextContent("risk_score");
     expect(app.container.textContent).toContain(
       "Nothing here is sent to your partner except the columns you mark as shared.",
     );
@@ -1736,13 +1738,13 @@ describe("acceptor columns step: the send summary is gated on the inviting party
     // operator hearing nothing where a disclosure does happen.
     await expect
       .element(page.getByTestId("disclosure-summary-announcement"))
-      .toHaveTextContent(
+      .toMatchTextContent(
         `Columns sent to your partner: ${isolatedColumnName("risk_score")}.`,
       );
     expect(app.container.textContent).not.toContain(noPayloadSentence);
     await expect
       .element(page.getByText("For each matched row:", { exact: false }))
-      .toHaveTextContent("risk_score");
+      .toMatchTextContent("risk_score");
   });
 });
 
@@ -1896,7 +1898,7 @@ describe("acceptor screen: run and completion", () => {
     // The run column opens at "Exchange in progress" and its heading takes focus.
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Exchange in progress");
+      .toMatchTextContent("Exchange in progress");
     await vi.waitFor(() => {
       expect(document.activeElement?.textContent).toBe("Exchange in progress");
     });
@@ -1963,7 +1965,7 @@ describe("acceptor screen: run and completion", () => {
 
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Exchange in progress");
+      .toMatchTextContent("Exchange in progress");
     await vi.waitFor(() => expect(paragraphsSaying(sentence)).toHaveLength(1));
     expect(paragraphsSaying(sentence)[0].closest('[role="status"]')).toBeNull();
     expect(
@@ -1980,7 +1982,7 @@ describe("acceptor screen: run and completion", () => {
     // The completion panel takes the sentence over, so it still stands once.
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Exchange complete");
+      .toMatchTextContent("Exchange complete");
     await vi.waitFor(() => expect(paragraphsSaying(sentence)).toHaveLength(1));
     expect(
       page.getByText("The exchange reported a warning").query(),
@@ -2012,7 +2014,7 @@ describe("acceptor screen: run and completion", () => {
 
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Exchange complete");
+      .toMatchTextContent("Exchange complete");
     // The mirror of the inviting seat's statement, on the same panel: both seats
     // state the partner's value and the label their own side resolved to.
     await expect
@@ -2098,7 +2100,7 @@ describe("acceptor screen: run and completion", () => {
       });
       await expect
         .element(page.getByRole("heading", { level: 1 }))
-        .toHaveTextContent("Exchange complete");
+        .toMatchTextContent("Exchange complete");
 
       const shareToggle = page.getByRole("button", {
         name: "What you will share",
@@ -2176,7 +2178,7 @@ describe("acceptor screen: run and completion", () => {
 
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Exchange complete");
+      .toMatchTextContent("Exchange complete");
     const ledger = document.querySelector(
       'aside[aria-label="This exchange"]',
     ) as Element;
@@ -2206,7 +2208,7 @@ describe("acceptor screen: run and completion", () => {
 
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Exchange complete");
+      .toMatchTextContent("Exchange complete");
     await expect
       .element(
         page.getByText(
@@ -2802,7 +2804,7 @@ describe("AcceptorScreen: this party's own deduplicate", () => {
     window.history.back();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Consent & your file");
+      .toMatchTextContent("Consent & your file");
     window.history.back();
     await openDisclosure(OTHER_DETAILS);
     await expect.element(ownSide()).toBeInTheDocument();
@@ -2812,7 +2814,7 @@ describe("AcceptorScreen: this party's own deduplicate", () => {
     window.history.forward();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Consent & your file");
+      .toMatchTextContent("Consent & your file");
     window.history.forward();
     await expect
       .element(page.getByRole("heading", { name: "Confirm your columns" }))

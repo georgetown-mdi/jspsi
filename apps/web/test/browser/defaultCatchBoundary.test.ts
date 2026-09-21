@@ -91,7 +91,7 @@ describe("DefaultCatchBoundary", () => {
     // dropped error.
     await expect
       .element(page.getByTestId("error-component"))
-      .toHaveTextContent("boom");
+      .toMatchTextContent("boom");
     await expect
       .element(page.getByRole("button", { name: "Try again" }))
       .toBeInTheDocument();
@@ -105,7 +105,7 @@ describe("DefaultCatchBoundary", () => {
 
     await expect
       .element(page.getByTestId("error-component"))
-      .toHaveTextContent("danger\\x1b[31m\\x0ahere");
+      .toMatchTextContent("danger\\x1b[31m\\x0ahere");
   });
 
   test("redacts a leaked private-key block before it reaches the DOM", async () => {
@@ -120,13 +120,13 @@ describe("DefaultCatchBoundary", () => {
     const errorComponent = page.getByTestId("error-component");
     await expect
       .element(errorComponent)
-      .toHaveTextContent("[redacted private key]");
+      .toMatchTextContent("[redacted private key]");
     // Both the markers and the key body must be gone -- the whole block is
     // replaced, so neither the BEGIN line nor the base64 payload survives.
     await expect
       .element(errorComponent)
-      .not.toHaveTextContent("BEGIN PRIVATE KEY");
-    await expect.element(errorComponent).not.toHaveTextContent("MIIBVgIBADAN");
+      .not.toMatchTextContent("BEGIN PRIVATE KEY");
+    await expect.element(errorComponent).not.toMatchTextContent("MIIBVgIBADAN");
   });
 
   test("sanitizes a non-Error thrown value without crashing", async () => {
@@ -137,7 +137,7 @@ describe("DefaultCatchBoundary", () => {
 
     await expect
       .element(page.getByTestId("error-component"))
-      .toHaveTextContent("raw\\x1bstring");
+      .toMatchTextContent("raw\\x1bstring");
   });
 
   test("dev-gates the raw error to the console via whenDiagnostic", async () => {

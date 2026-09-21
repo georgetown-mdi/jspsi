@@ -297,7 +297,7 @@ describe("column-name isolation: what the wrapper does not contain", () => {
     mountMetadata(editor.draft.metadata, notice);
     await expect
       .element(page.getByText("changed to Ignored", { exact: false }))
-      .toHaveTextContent(notice);
+      .toMatchTextContent(notice);
   });
 
   test("the demotion notice does not contain one behind an unmatched PDI", async () => {

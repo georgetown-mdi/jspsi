@@ -137,10 +137,10 @@ describe("ReviewCreateSection: the dropped-citation notice", () => {
     });
     await expect
       .element(citationNotice)
-      .toHaveTextContent(CITATION_DROP_NOTICE_NAME);
+      .toMatchTextContent(CITATION_DROP_NOTICE_NAME);
     await expect
       .element(citationNotice)
-      .toHaveTextContent("the citation cannot be verified");
+      .toMatchTextContent("the citation cannot be verified");
     // Told, not stopped: dropping the citation is the correct outcome, so the
     // create action stays available.
     await expect
@@ -170,7 +170,7 @@ describe("ReviewCreateSection: the inert-coalesce notice", () => {
       .toBeInTheDocument();
     await expect
       .element(page.getByRole("note", { name: INERT_COALESCE_NOTICE_NAME }))
-      .toHaveTextContent("is never substituted where it sits");
+      .toMatchTextContent("is never substituted where it sits");
     // Advisory, not a refusal: terms with this shape are valid and run, so
     // the create action stays available.
     await expect

@@ -369,6 +369,18 @@ warm cache passes even when the configuration is wrong. Inline vitest projects
 do not inherit the root `optimizeDeps`/`resolve` configuration; each project
 that needs it has its own.
 
+### Locators and text assertions
+
+The browser projects set `browser.locators.exact: false`, so a name given to
+`getByRole`, `getByText`, and their siblings matches a substring of the
+element's rendered accessible name. A locator that has to match the whole name
+passes `{ exact: true }` at its own call site.
+
+Text content is asserted with `toMatchTextContent`, which matches a substring
+or a regular expression. `toHaveTextContent` beside it matches the element's
+whole text content exactly, so an assertion naming one sentence of a panel
+takes the first.
+
 ## Cross-runtime interop suite
 
 The CLI and the web app share no code but `@psilink/core`, and their own suites

@@ -6,10 +6,15 @@
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 
-import { vi } from "vitest";
+import { vi, type Mock } from "vitest";
 
 import { SSH2SFTPClientAdapter } from "../../../src/connection/ssh2SftpAdapter";
 import { SftpAdapterLedger } from "../../../src/connection/sftpAdapterLedger";
+
+// vi.fn() with no implementation infers a type vitest does not export, so any
+// fixture type holding one cannot be written down (TS2883). The annotation
+// here is what keeps every fixture below nameable.
+const mockFn = (): Mock => vi.fn();
 
 // A remote path naming the protocol's own in-flight write, temp-<uuidv4()>.tmp:
 // the ONLY shape the record admits, so a case about the record must use a real
@@ -44,11 +49,11 @@ export const releasableClient = () =>
 
 export function wrapperMethods(overrides: Record<string, unknown> = {}) {
   return {
-    open: vi.fn(),
-    close: vi.fn(),
-    opendir: vi.fn(),
-    readdir: vi.fn(),
-    on: vi.fn(),
+    open: mockFn(),
+    close: mockFn(),
+    opendir: mockFn(),
+    readdir: mockFn(),
+    on: mockFn(),
     ...overrides,
   };
 }
@@ -59,20 +64,20 @@ export function wrapperMethods(overrides: Record<string, unknown> = {}) {
 // registers nothing.
 export const fatalErrorWrapper = () =>
   Object.assign(new EventEmitter(), {
-    open: vi.fn(),
-    close: vi.fn(),
-    opendir: vi.fn(),
-    readdir: vi.fn(),
+    open: mockFn(),
+    close: mockFn(),
+    opendir: mockFn(),
+    readdir: mockFn(),
   }) as unknown as EventEmitter & ReturnType<typeof wrapperMethods>;
 
 export const captureAdapterLog = (adapter: SSH2SFTPClientAdapter) => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (adapter as any).log = {
-    warn: vi.fn(),
-    info: vi.fn(),
-    debug: vi.fn(),
-    trace: vi.fn(),
-    error: vi.fn(),
+    warn: mockFn(),
+    info: mockFn(),
+    debug: mockFn(),
+    trace: mockFn(),
+    error: mockFn(),
   };
 };
 
@@ -84,7 +89,7 @@ export const captureAdapterLog = (adapter: SSH2SFTPClientAdapter) => {
 // suppressing it here loses no coverage (this.log.warn is the only WARN sink).
 export function stubAdapterLog(adapter: SSH2SFTPClientAdapter): void {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (adapter as any).log = { warn: vi.fn(), debug: vi.fn() };
+  (adapter as any).log = { warn: mockFn(), debug: mockFn() };
 }
 
 export const adapterLog = (adapter: SSH2SFTPClientAdapter) =>
@@ -197,7 +202,7 @@ export function ephemeralClient(wrapper: ReturnType<typeof wrapperMethods>) {
   // and has destroy(); the release's call sites are verified against the first two
   // at connect, and both forced closes read `destroyed` back where they drive it.
   const socket = {
-    setKeepAlive: vi.fn(),
+    setKeepAlive: mockFn(),
     writableEnded: false,
     destroyed: false,
     destroy: vi.fn(() => {
@@ -207,14 +212,14 @@ export function ephemeralClient(wrapper: ReturnType<typeof wrapperMethods>) {
     }),
   };
   Object.assign(rawClient, {
-    setNoDelay: vi.fn(),
+    setNoDelay: mockFn(),
     _sock: socket,
     end: vi.fn(() => {
       state.live = false;
       rawClient.emit("close");
     }),
   });
-  const connect = vi.fn().mockImplementation(async () => {
+  const connect = mockFn().mockImplementation(async () => {
     state.live = true;
     // A dial gets a FRESH socket: whatever a previous cycle's teardown did to the
     // last one does not transfer to it, so a release reading the socket sees this
@@ -243,8 +248,8 @@ export function ephemeralClient(wrapper: ReturnType<typeof wrapperMethods>) {
     },
     connect,
     client: rawClient,
-    end: vi.fn().mockResolvedValue(true),
-    realPath: vi.fn().mockResolvedValue("/"),
+    end: mockFn().mockResolvedValue(true),
+    realPath: mockFn().mockResolvedValue("/"),
     get: vi.fn(onLiveSession("get", Buffer.from("payload"))),
     put: vi.fn(onLiveSession("put", "ok")),
     delete: vi.fn(async (path: string) => {
@@ -277,8 +282,8 @@ export function slowClosingClient(wrapper: ReturnType<typeof wrapperMethods>) {
   const rawClient = new EventEmitter() as EventEmitter &
     Record<string, unknown>;
   Object.assign(rawClient, {
-    setNoDelay: vi.fn(),
-    _sock: { setKeepAlive: vi.fn(), writableEnded: false, destroy: vi.fn() },
+    setNoDelay: mockFn(),
+    _sock: { setKeepAlive: mockFn(), writableEnded: false, destroy: mockFn() },
     end: vi.fn(() => {
       state.ending = true;
       setTimeout(() => {
@@ -288,7 +293,7 @@ export function slowClosingClient(wrapper: ReturnType<typeof wrapperMethods>) {
       }, 0);
     }),
   });
-  const connect = vi.fn().mockImplementation(async () => {
+  const connect = mockFn().mockImplementation(async () => {
     state.ending = false;
     state.live = true;
   });
@@ -298,8 +303,8 @@ export function slowClosingClient(wrapper: ReturnType<typeof wrapperMethods>) {
     },
     connect,
     client: rawClient,
-    end: vi.fn().mockResolvedValue(true),
-    realPath: vi.fn().mockResolvedValue("/"),
+    end: mockFn().mockResolvedValue(true),
+    realPath: mockFn().mockResolvedValue("/"),
     exists: vi.fn(async () => {
       if (state.ending)
         throw new Error("Channel closed while the connection was ending");

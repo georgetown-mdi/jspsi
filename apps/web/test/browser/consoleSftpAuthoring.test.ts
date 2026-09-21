@@ -237,7 +237,7 @@ async function reachReviewCreate() {
     .click();
   await expect
     .element(page.getByRole("heading", { level: 1 }))
-    .toHaveTextContent("Review & create");
+    .toMatchTextContent("Review & create");
 }
 
 /** Open the authoring form and fill the recognizable connection fields. */
@@ -498,7 +498,7 @@ describe("console SFTP connection authoring", () => {
     await page.getByRole("button", { name: "Create the invitation" }).click();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Your invitation is ready");
+      .toMatchTextContent("Your invitation is ready");
     await page.getByRole("button", { name: "Show full code" }).click();
     const encoded = (
       document.querySelector(`.${styles.revealArea}`) as HTMLTextAreaElement
@@ -753,7 +753,7 @@ describe("console SFTP connection authoring", () => {
     // has no live role that would voice the whole body a second time.
     await expect
       .element(page.getByTestId("credential-warnings-announcement"))
-      .toHaveTextContent("Credential file location");
+      .toMatchTextContent("Credential file location");
     expect(
       page
         .getByText("inside the job data root", { exact: false })
@@ -1211,7 +1211,7 @@ describe("console SFTP connection authoring", () => {
     await page.getByRole("button", { name: "Create the invitation" }).click();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Save your exchange file");
+      .toMatchTextContent("Save your exchange file");
   });
 });
 
@@ -1230,7 +1230,7 @@ describe("the credential warnings' announcement", () => {
       }),
     );
 
-    await expect.element(region).toHaveTextContent("Credential file location");
+    await expect.element(region).toMatchTextContent("Credential file location");
     // The same node took the text: a region that appears with its warning is a
     // freshly inserted node rather than a change to one already being observed.
     expect(region.element()).toBe(mounted);

@@ -97,7 +97,7 @@ describe("the shell says what is unavailable", () => {
     // visible strip has no live role that would voice it a second time.
     await expect
       .element(page.getByRole("status"))
-      .toHaveTextContent("You are offline");
+      .toMatchTextContent("You are offline");
     expect(app.container.querySelector('[role="alert"]')).toBeNull();
   });
 

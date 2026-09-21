@@ -310,6 +310,10 @@ export default defineConfig((_configEnv) => {
             // second one. The server-less vector suites pay a reuse-aware probe.
             globalSetup: ["./test/devServer/globalSetup.ts"],
             browser: {
+              // These suites name a locator by a substring of the element's
+              // rendered accessible name, which vitest's default exact
+              // matching rejects.
+              locators: { exact: false },
               // invitedPSI opens a real WebRTC DataConnection between two
               // same-machine peers that configure no STUN/TURN (hermetic -- see
               // invitedPSI.test.ts), so a loopback host candidate is the only way
@@ -366,6 +370,9 @@ export default defineConfig((_configEnv) => {
             testTimeout: 420_000,
             hookTimeout: 120_000,
             browser: {
+              // The same substring locator matching as the browser project
+              // above, for the same reason.
+              locators: { exact: false },
               // The same loopback-candidate reasoning as the browser project
               // above: the two peers configure a public STUN list they cannot
               // reach here, so a host candidate is the only one that connects,

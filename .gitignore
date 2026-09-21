@@ -13,8 +13,8 @@ count.txt
 .nitro
 .tanstack
 .output
-.vitest-attachments
-# Vitest browser-mode failure screenshots.
+# Vitest browser-mode failure screenshots and run attachments.
+.vitest
 __screenshots__
 *.swp
 terraform.tfvars

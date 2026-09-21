@@ -85,7 +85,7 @@ async function reachReviewCreate() {
     .click();
   await expect
     .element(page.getByRole("heading", { level: 1 }))
-    .toHaveTextContent("Review & create");
+    .toMatchTextContent("Review & create");
 }
 
 /** The create step's blocked-reason line, or the empty string once it is clear. */

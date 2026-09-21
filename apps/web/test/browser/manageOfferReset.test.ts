@@ -92,7 +92,7 @@ async function mintOverOverlongHeader() {
   await page.getByRole("button", { name: "Create the invitation" }).click();
   await expect
     .element(page.getByRole("heading", { level: 1 }))
-    .toHaveTextContent("Your invitation is ready");
+    .toMatchTextContent("Your invitation is ready");
 }
 
 /** The invitation the acceptor seat walks: a webrtc endpoint, since the offer is
@@ -144,7 +144,7 @@ async function launchOverOverlongHeader() {
     .click();
   await expect
     .element(page.getByRole("heading", { level: 1 }))
-    .toHaveTextContent("Consent & your file");
+    .toMatchTextContent("Consent & your file");
   await userEvent.click(page.getByRole("checkbox"));
   await userEvent.fill(page.getByLabelText("Your name"), "Sam Alvarez");
   const fileInput = document.querySelector('input[type="file"]');
@@ -187,12 +187,12 @@ describe("the recurring-save offer after a refused deposit", () => {
     window.history.back();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Review & create");
+      .toMatchTextContent("Review & create");
 
     await page.getByRole("button", { name: "Create the invitation" }).click();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Your invitation is ready");
+      .toMatchTextContent("Your invitation is ready");
 
     // The fresh exchange's offer is open again, and the refusal it would
     // otherwise be blocked by is gone from the screen.
