@@ -67,7 +67,7 @@ function logAt(
   return { stdout: stdoutWrites.join(""), stderr: stderrWrites.join("") };
 }
 
-// --- info/debug (formerly stdout) now land on stderr, not stdout -------------
+// --- info/debug land on stderr ----------------------------------------------
 
 test("configureStderrLogging: info diagnostics go to stderr, never stdout", () => {
   // info is the level the interleaving bug hinged on: loglevel's default routes
@@ -93,7 +93,7 @@ test("configureStderrLogging: trace diagnostics go to stderr, never stdout", () 
   expect(stdout).toBe("");
 });
 
-// --- warn/error stay on stderr (no regression to their current routing) ------
+// --- warn/error stay on stderr ----------------------------------------------
 
 test("configureStderrLogging: warn output stays on stderr", () => {
   const { stdout, stderr } = logAt("warn", "a warning line");

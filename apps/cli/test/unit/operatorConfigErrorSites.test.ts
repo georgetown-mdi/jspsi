@@ -176,7 +176,7 @@ const RECORDED_SITES: readonly ConfigErrorSite[] = [
       "`linkageTerms.linkageKeys.length` a COUNT off the agreed terms, which " +
       "the accept path does adopt from the invitation. The count is the " +
       "verdict's whole basis -- what the content rule excludes is text another " +
-      "party wrote, and a cardinality carries none of it, whichever document it " +
+      "party wrote, and a cardinality includes none of it, whichever document it " +
       "was read off. Interpolating a NAME from those same terms here would not " +
       "inherit this reasoning. `SINGLE_PASS_LOCAL_REMEDY` " +
       "(connection/frameSize.ts) is a module constant of fixed prose, shared " +
@@ -213,8 +213,8 @@ const RECORDED_SITES: readonly ConfigErrorSite[] = [
       "what the callee interpolates is a build literal; the count-only arm " +
       "beside it holds a module constant of fixed prose and quotes no value at " +
       "all. The sibling arm over the agreed terms' linkage keys, which the " +
-      "accept path adopts wholesale, deliberately raises a plain UsageError " +
-      "instead and is correctly absent from this ledger.",
+      "accept path adopts wholesale, raises a plain UsageError instead and " +
+      "is correctly absent from this ledger.",
   },
   {
     file: "packages/core/src/linkageSatisfiability.ts",

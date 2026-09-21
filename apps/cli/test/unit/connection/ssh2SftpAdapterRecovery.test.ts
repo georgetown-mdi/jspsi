@@ -36,7 +36,7 @@ import {
 // to model a server dropping the one long-lived session mid-exchange.
 
 describe("session recovery", () => {
-  // A raw SFTPWrapper stand-in carrying the four methods connect()'s presence
+  // A raw SFTPWrapper stand-in with the four methods connect()'s presence
   // guard checks plus the EventEmitter `on` the fatal-'error' guard attaches to.
   function sessionWrapper(overrides: Record<string, unknown> = {}) {
     return {

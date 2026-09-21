@@ -412,7 +412,7 @@ describe("keyboard-interactive", () => {
 
   test("answers with the current password after a reconnect, not a stale captured one", async () => {
     // Read-fresh: the once-attached listener reads this.options.password at answer
-    // time, so a later connect() carrying a different password is answered with
+    // time, so a later connect() with a different password is answered with
     // the new one. A closure that captured the password at attach time would
     // answer the first password -- this pins the read-fresh invariant as a check.
     const adapter = new SSH2SFTPClientAdapter();
@@ -1331,7 +1331,7 @@ describe("bounded put (idle window)", () => {
     // The server accepts and acks the first couple of chunks, then withholds all
     // further acks (stops consuming the source). The idle window, reset by those
     // chunks, then fires on the no-progress gap with the typed terminal error --
-    // proving the bound catches a transfer that genuinely started and then stalled,
+    // proving the bound catches a transfer that started and then stalled,
     // not merely one that never began.
     vi.useFakeTimers();
     try {
@@ -2005,7 +2005,7 @@ describe("bounded list", () => {
   });
 
   test("settles on the deadline even when the close callback is also withheld", async () => {
-    // Regression: settle() must not gate the listing's settlement on the close
+    // settle() must not gate the listing's settlement on the close
     // callback. A server can withhold close exactly as it withholds a readdir,
     // so if settle() awaited close() the deadline would fire, clear its own
     // timer, then hang forever inside the un-returning close -- restoring the
@@ -2290,7 +2290,7 @@ describe("fatal wrapper-error guard", () => {
   test("an operation after a fatal wrapper error rejects promptly with the terminal cause", async () => {
     // The captured-cause nice-to-have: once a fatal 'error' has killed the
     // session, the next operation rejects at once with the typed terminal error
-    // (carrying the real cause) instead of issuing a request to the dead wrapper
+    // (with the real cause) instead of issuing a request to the dead wrapper
     // and waiting out the 60 s liveness deadline.
     const adapter = new SSH2SFTPClientAdapter();
     const wrapper = makeWrapper();
@@ -2412,7 +2412,7 @@ describe("fatal wrapper-error guard", () => {
 
 describe("session heartbeat and TCP keepalive", () => {
   // A faithful connected-client mock: the raw wrapper (for the fatal-'error'
-  // guard), the ssh2 Client with setNoDelay + a socket carrying setKeepAlive, and
+  // guard), the ssh2 Client with setNoDelay + a socket with setKeepAlive, and
   // realPath (the heartbeat's no-op) + end (teardown).
   function connectMock() {
     const setKeepAlive = vi.fn();

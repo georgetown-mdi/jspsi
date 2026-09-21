@@ -462,7 +462,7 @@ for (const { name, says, drive } of LINES)
 
 test("a log sink renders an operator path rather than interpolating it raw", async () => {
   // What the mark decides beyond the separators: the render replaces the
-  // control class with a printable marker, so a path carrying an escape
+  // control class with a printable marker, so a path containing an escape
   // sequence cannot drive the terminal it is reported on. Interpolated raw, the
   // byte would reach the operator as it stands.
   const { log, lines } = stubLog();

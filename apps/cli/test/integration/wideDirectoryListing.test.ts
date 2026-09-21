@@ -27,13 +27,13 @@ import { inProcessOnly } from "../sftpBackendGate";
 // single SFTP NAME packet cannot carry a listing this wide, so the backend
 // batches across round trips the way a real server would.
 //
-// The batch-size knob is driven alongside the default because it is a
+// The batch-size setting is driven alongside the default because it is a
 // hazard: a cap wider than one packet must still deliver every entry rather
 // than losing the reply.
 //
 // Each of the three enforced bounds -- entry count, filename length, and
 // round-trip count -- is driven one step past, where the adapter refuses
-// instead of enumerating. Only the in-process backend exposes the batch knob
+// instead of enumerating. Only the in-process backend exposes the batch size
 // and request meter these need (see test/sftpServer/types.ts), so these
 // tests run there and start their own instance.
 

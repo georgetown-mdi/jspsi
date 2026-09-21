@@ -907,7 +907,7 @@ test("writeOutput: the stdout branch waits for the last line to be flushed", asy
     });
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(settled).toBe(false);
-    // Only the last line carries a callback: it is the one whose flush states
+    // Only the last line has a callback: it is the one whose flush states
     // that every line before it has left the process. The lines before it are
     // paced by the stream's own backpressure, which this stub never applies.
     expect(held).toHaveLength(1);

@@ -1587,7 +1587,7 @@ describe("handler", () => {
     // from the two terms documents rather than read off an exchange record:
     // whichever source this run used is what the line reports. The file the
     // operator named wins, and terms that are not this run's are reported as a
-    // mismatch rather than passing on the carried copy.
+    // mismatch rather than passing on the embedded copy.
     const { signedPath, pin, ownFingerprint } = await exchangeArtifacts();
     const shared = {
       record: signedPath,

@@ -57,7 +57,7 @@ if (loopbackTlsCert === null && prerequisitesAreRequired(process.env))
     "no loopback TLS certificate could be minted here, so the live " +
       "one-command webrtc acceptance would silently skip in an environment " +
       "that is supposed to supply one. Install `openssl`, or set " +
-      `${ALLOW_MISSING_PREREQUISITES_ENV}=1 to skip the leg deliberately.`,
+      `${ALLOW_MISSING_PREREQUISITES_ENV}=1 to skip the leg.`,
   );
 const liveTest = test.skipIf(loopbackTlsCert === null);
 
@@ -97,7 +97,7 @@ const NO_SHOW_PEER_TIMEOUT_MS = 10_000;
 const NO_SHOW_PEER_TIMEOUT = `${NO_SHOW_PEER_TIMEOUT_MS / 1000}s`;
 
 // The de-symmetrized inputs, so the result proves the PSI filtered on both
-// sides rather than echoing every record: each side carries one non-matcher
+// sides rather than echoing every record: each side has one non-matcher
 // (the inviter's Dave, the acceptor's Zoe) and the two sit at different
 // positions, so the association table is transpose-asymmetric and a swapped or
 // mis-keyed partner index fails the assertion, not merely a dropped row.

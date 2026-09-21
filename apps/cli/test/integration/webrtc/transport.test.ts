@@ -388,7 +388,7 @@ const ICE_CANDIDATE_TYPES = ["host", "srflx", "prflx", "relay"];
 test("the ICE report reads the statistics real werift produces", async () => {
   // The reader itself is exercised against hand-written reports in
   // test/unit/connection/webrtcIceDiagnostics.test.ts. What only a live pair
-  // holds is that the entries werift emits still carry the field names it keys
+  // holds is that the entries werift emits still have the field names it keys
   // on -- `candidateType`, `localCandidateId`, `remoteCandidateId`, `state`,
   // `nominated` -- so a bump that renames one reddens here rather than reaching
   // an operator as a report that quietly names nothing.

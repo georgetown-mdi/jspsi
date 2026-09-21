@@ -785,7 +785,7 @@ for (const withheld of WITHHELD_REPLY_CASES)
         );
 
         // The server did receive the request and did not answer it, so the
-        // rejection is over a request genuinely left outstanding rather than one
+        // rejection is over a request left outstanding rather than one
         // the client never issued.
         const meter = srv.sessionControls.requests.read();
         const received = meter.receivedByOp[withheld.opcode] ?? 0;

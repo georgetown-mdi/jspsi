@@ -99,7 +99,7 @@ async function runCli(argv: string[]): Promise<void> {
     .command("exchange <input> [output]", "", exchangeBuilder, exchangeHandler)
     .exitProcess(false)
     // Raise a failing run to the caller instead of letting yargs print its
-    // usage block to the console, which this suite's sentinel reads as a line
+    // usage block to the console, which this suite's sentinel treats as a line
     // that reached the console without a display sink.
     .fail((message, err: unknown) => {
       throw err ?? new Error(message);

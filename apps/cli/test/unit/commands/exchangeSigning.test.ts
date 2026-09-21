@@ -239,7 +239,7 @@ test("certificate mode with no pin resolves as a first contact", async () => {
   const resolved = await resolveSigningPersist(config, "Party A", configPath());
   // This resolver states no pin rule of its own: a block with no pin is a first
   // authenticated contact, which adopts the certificate the partner presents at
-  // the terms exchange and records it into the configuration path carried here.
+  // the terms exchange and records it into the configuration path passed here.
   // The absent pin travels through verbatim, which is what leaves the adoption
   // to the one place that can see the presented certificate.
   expect(resolved).not.toBeNull();

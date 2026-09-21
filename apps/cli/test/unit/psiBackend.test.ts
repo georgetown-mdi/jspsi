@@ -9,7 +9,7 @@ import { isNativeUnavailable } from "../../src/psiBackend";
 
 // Pins the classification the WASM fallback depends on: which native-load errors
 // are the ordinary "no prebuild here" case (resolve null, fall back quietly)
-// versus a genuinely broken addon that must be reported. Getting this wrong either
+// versus a broken addon that must be reported. Getting this wrong either
 // hides a real regression -- a present-but-broken prebuild silently treated as
 // "absent" -- or warns on every run of a platform that simply has no prebuild.
 describe("isNativeUnavailable", () => {

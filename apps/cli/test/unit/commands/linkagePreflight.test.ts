@@ -284,7 +284,7 @@ test("a keyless refusal over a one-column CSV states the delimiter remedy", () =
   expect(links[0]).toContain("single column");
   expect(links[0]).toContain("CSV delimiter");
   expect(links[0]).toContain("detect");
-  // The clause closes the message, so the link it is joined to must not carry
+  // The clause closes the message, so the link it is joined to must not include
   // the space the clause leaves for a following sentence.
   expect(links[0]).not.toMatch(/ $/);
 });

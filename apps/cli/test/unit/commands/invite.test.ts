@@ -3824,7 +3824,7 @@ test("handler: a webrtc online invite reports the webrtc peer-budget defaults, n
 
 test("handler: a failed config write reports no saved peer budget", async () => {
   // Nothing was written, so the summary that names what the file holds must
-  // not run at all: the honest report is the write failure the outcome line
+  // not run at all: the accurate report is the write failure the outcome line
   // already states.
   const { input, options } = onlineFixture();
   const runOnlineBootstrapMock = vi.mocked(runOnlineBootstrap);

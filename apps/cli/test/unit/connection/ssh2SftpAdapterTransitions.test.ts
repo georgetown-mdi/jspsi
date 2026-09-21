@@ -1185,13 +1185,13 @@ describe("session transitions", () => {
   });
 
   test("a dial behind a latched teardown stops retrying between attempts", async () => {
-    // The other half of the fix, and not a substitute for the bound: with the wait
-    // bounded, an abandoning teardown destroys the socket beneath a mid-handshake
-    // dial and that attempt rejects as an unexpected close -- but the retry loop
-    // would then mint a FRESH socket and keep a torn-down connection, and a process
-    // that exits by drain, alive for the remainder of the dial budget (measured
-    // against the real stack). So the loop reads the teardown latch between
-    // attempts, exactly as runTransition reads it before a transition's body.
+    // The bound alone is not enough: with the wait bounded, an abandoning
+    // teardown destroys the socket beneath a mid-handshake dial and that
+    // attempt rejects as an unexpected close -- but the retry loop would then
+    // mint a FRESH socket and keep a torn-down connection, and a process that
+    // exits by drain, alive for the remainder of the dial budget (measured
+    // against the real stack). So the loop reads the teardown latch between attempts,
+    // exactly as runTransition reads it before a transition's body.
     vi.useFakeTimers();
     try {
       const { client, connect, state } = ephemeralClient(wrapperMethods());

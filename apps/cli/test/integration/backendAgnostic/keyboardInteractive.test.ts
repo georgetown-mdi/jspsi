@@ -147,7 +147,7 @@ test("tryKeyboard authenticates against a server that refuses the password metho
 test("without tryKeyboard the same server refuses the password-only client", async () => {
   // The negative control: the server offers only keyboard-interactive, so a
   // client presenting just the `password` method exhausts its methods and the
-  // connect fails. This proves the server genuinely refuses `password` and that
+  // connect fails. This proves the server refuses `password` and that
   // tryKeyboard is what makes the positive case above succeed (rather than the
   // server accepting the direct password all along). maxReconnectAttempts: 0 so
   // the auth failure is reported promptly instead of being retried.
