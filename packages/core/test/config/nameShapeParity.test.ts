@@ -33,6 +33,16 @@ function* bmpCharacters(): Generator<{ codePoint: number; character: string }> {
 const label = (codePoint: number) =>
   `U+${codePoint.toString(16).toUpperCase().padStart(4, "0")}`;
 
+/**
+ * A bound on the recorded-free-text and transform-params-key sweeps below,
+ * sized as a safety check for a sweep that never finishes rather than as an
+ * assertion about how fast a loaded machine parses: each runs a whole schema
+ * parse per BMP code point, costing 1.4 s and 1.7 s on an idle container and
+ * 3.9 s and 7.8 s with the cores ten times oversubscribed -- past vitest's
+ * 5,000 ms default.
+ */
+const SCHEMA_SWEEP_HANG_BACKSTOP_MS = 60_000;
+
 test("the name shape refuses exactly the free-text control class and the bidi class", () => {
   const disagreements: Array<string> = [];
   for (const { codePoint, character } of bmpCharacters()) {
@@ -106,25 +116,30 @@ const termsWithRecordedFreeText = (value: string) => ({
   },
 });
 
-test("a recorded free-text value refuses exactly the control and bidi classes", () => {
-  // The three free-text fields a record holds verbatim -- the party identity,
-  // the legal agreement's purpose, and a payload column's description -- refuse
-  // both classes, where the fourth free-text field (a constraint exclude value)
-  // refuses the control class alone. Driven through the schema a parse runs
-  // rather than read off its source.
-  const disagreements: Array<string> = [];
-  for (const { codePoint, character } of bmpCharacters()) {
-    const value = `Agency${character}A`;
-    const refusedByEitherClass =
-      TEXT_CONTROL_CHAR_PATTERN.test(value) || BIDI_CONTROL_PATTERN.test(value);
-    const admittedByTheSchema = safeParseLinkageTerms(
-      termsWithRecordedFreeText(value),
-    ).success;
-    if (admittedByTheSchema === refusedByEitherClass)
-      disagreements.push(label(codePoint));
-  }
-  expect(disagreements).toEqual([]);
-});
+test(
+  "a recorded free-text value refuses exactly the control and bidi classes",
+  { timeout: SCHEMA_SWEEP_HANG_BACKSTOP_MS },
+  () => {
+    // The three free-text fields a record holds verbatim -- the party identity,
+    // the legal agreement's purpose, and a payload column's description -- refuse
+    // both classes, where the fourth free-text field (a constraint exclude value)
+    // refuses the control class alone. Driven through the schema a parse runs
+    // rather than read off its source.
+    const disagreements: Array<string> = [];
+    for (const { codePoint, character } of bmpCharacters()) {
+      const value = `Agency${character}A`;
+      const refusedByEitherClass =
+        TEXT_CONTROL_CHAR_PATTERN.test(value) ||
+        BIDI_CONTROL_PATTERN.test(value);
+      const admittedByTheSchema = safeParseLinkageTerms(
+        termsWithRecordedFreeText(value),
+      ).success;
+      if (admittedByTheSchema === refusedByEitherClass)
+        disagreements.push(label(codePoint));
+    }
+    expect(disagreements).toEqual([]);
+  },
+);
 
 // The terms document a params key is swept inside. Minimal but complete: the
 // sweep is about the key alone, so nothing else here may fail the parse.
@@ -149,21 +164,25 @@ const termsWithParamsKey = (key: string) => ({
   ],
 });
 
-test("a transform params key admits exactly what the shape admits", () => {
-  // The fourth boundary a name crosses, and the only one that is an object KEY
-  // rather than a value: a parameter name a partner authors, which locates the
-  // offending entry in a refusal's issue path. Driven through the schema a
-  // parse runs rather than read off its source. `safeParseLinkageTerms` runs
-  // the camelize pre-pass first, as every real parse path does, so a key that
-  // reaches the record stage is the key the document holds.
-  const disagreements: Array<string> = [];
-  for (const { codePoint, character } of bmpCharacters()) {
-    const admittedByTheSchema = safeParseLinkageTerms(
-      termsWithParamsKey(`a${character}b`),
-    ).success;
-    const admittedInAName = NAME_SHAPE_PATTERN.test(`a${character}b`);
-    if (admittedByTheSchema !== admittedInAName)
-      disagreements.push(label(codePoint));
-  }
-  expect(disagreements).toEqual([]);
-});
+test(
+  "a transform params key admits exactly what the shape admits",
+  { timeout: SCHEMA_SWEEP_HANG_BACKSTOP_MS },
+  () => {
+    // The fourth boundary a name crosses, and the only one that is an object KEY
+    // rather than a value: a parameter name a partner authors, which locates the
+    // offending entry in a refusal's issue path. Driven through the schema a
+    // parse runs rather than read off its source. `safeParseLinkageTerms` runs
+    // the camelize pre-pass first, as every real parse path does, so a key that
+    // reaches the record stage is the key the document holds.
+    const disagreements: Array<string> = [];
+    for (const { codePoint, character } of bmpCharacters()) {
+      const admittedByTheSchema = safeParseLinkageTerms(
+        termsWithParamsKey(`a${character}b`),
+      ).success;
+      const admittedInAName = NAME_SHAPE_PATTERN.test(`a${character}b`);
+      if (admittedByTheSchema !== admittedInAName)
+        disagreements.push(label(codePoint));
+    }
+    expect(disagreements).toEqual([]);
+  },
+);
