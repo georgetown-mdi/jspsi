@@ -300,7 +300,7 @@ describe("checkValueConstraints", () => {
     // `a]|.|[b` compiles `^[a]|.|[b]$` = `(^[a]) | (.) | ([b]$)`: the `.`
     // branch full-matches any code point, so the class admits everything.
     // Unlike the empty-/zero-width-branch breakout above (closed by full
-    // match), a branch that matches one code point cannot be
+    // match), a branch that genuinely matches one code point cannot be
     // neutralized without rejecting a legitimately permissive class like
     // `[\s\S]` -- distinguishing them would take a full class parser.
     const field: LinkageField = {
