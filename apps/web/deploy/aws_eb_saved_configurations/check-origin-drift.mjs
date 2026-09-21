@@ -608,7 +608,10 @@ export const awsEffects = {
         throw new Error(
           `${url} did not answer within ${RANGE_FETCH_TIMEOUT_MS / 1000} seconds`,
         );
-      throw new Error(`${url} is unreachable (${error.message})`);
+      const cause = error.cause?.code ?? error.cause?.message;
+      throw new Error(
+        `${url} is unreachable (${cause ? `${error.message}: ${cause}` : error.message})`,
+      );
     }
     if (!response.ok) throw new Error(`${url} answered ${response.status}`);
     return await response.text();

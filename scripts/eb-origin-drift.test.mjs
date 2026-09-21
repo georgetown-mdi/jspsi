@@ -402,6 +402,23 @@ describe("the drift check", () => {
     });
   });
 
+  it("reports no recorded expiry when the record states none readable", async () => {
+    const noCertificate = recordFixture();
+    delete noCertificate.origin_certificate;
+    const notADate = recordFixture();
+    notADate.origin_certificate.not_after = "not-a-date";
+    for (const record of [noCertificate, notADate]) {
+      const { lines, exitCode } = await runCheck({ record });
+      expect(exitCode).toBe(EXIT_DRIFTED);
+      expect(lines.join("\n")).toContain(
+        "origin certificate: recorded-origin.json records no expiry.",
+      );
+      expect(pastedRecord(lines).origin_certificate.not_after).toBe(
+        CERTIFICATE_EXPIRY,
+      );
+    }
+  });
+
   it("compares nothing when the deployed certificate is unreadable", async () => {
     const { lines, exitCode } = await runCheck({
       effects: {
@@ -642,6 +659,12 @@ describe("the aws boundary", () => {
         groupId: "sg-shared",
       }),
     ).rejects.toThrow("the account describes no such group");
+  });
+
+  it("names the DNS failure cause when a URL is unreachable", async () => {
+    await expect(
+      awsEffects.fetchText("https://no-such-host.invalid/"),
+    ).rejects.toThrow(/is unreachable.*ENOTFOUND/);
   });
 });
 
