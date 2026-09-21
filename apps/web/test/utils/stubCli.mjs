@@ -260,7 +260,7 @@ function runExchangeStub() {
     process.on("SIGTERM", () => process.exit(143));
 
   // Written only once every handler above is installed, so a signalling test can
-  // wait for the disposition it is exercising to actually be in place. Sleeping
+  // wait for the state it is exercising to actually be in place. Sleeping
   // instead races the child's startup: a signal delivered before registration
   // takes the DEFAULT action, so an ignore-and-escalate case silently becomes a
   // first-signal kill and the terminal holds the wrong code.

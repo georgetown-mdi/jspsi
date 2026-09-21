@@ -188,7 +188,7 @@ describe("ownColumnsField", () => {
 });
 
 describe("editorWithIncludeOwnColumns", () => {
-  test("a selection lands on the draft and turning it off drops the field", () => {
+  test("a selection is written to the draft and turning it off drops the field", () => {
     const editor = editorFromCsv("County Health", acquired());
     expect(editor.draft.includeOwnColumns).toBeUndefined();
 

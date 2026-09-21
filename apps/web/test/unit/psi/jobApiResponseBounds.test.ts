@@ -222,7 +222,7 @@ describe("a status body over its cap fails the reader safely", () => {
   });
 
   test("a body under the byte cap but past the structural bound is unanswered", async () => {
-    // Nesting no console answer holds, inside the byte cap: a read carrying no
+    // Nesting no console answer holds, inside the byte cap: a read with no
     // structural bound parses it and takes the record off the fields beside it.
     const depth = 5_000;
     const body =
@@ -261,7 +261,7 @@ const OVER_SFTP_CAP = overCapBody(MAX_SFTP_CONNECTION_RESPONSE_BYTES, {
 });
 
 describe("an SFTP connection body over its cap fails the reader safely", () => {
-  test("the effective connection reads as none configured", async () => {
+  test("the effective connection is reported as none configured", async () => {
     await expect(
       fetchSftpConnection(answering(OVER_SFTP_CAP)),
     ).resolves.toEqual({ connection: null });

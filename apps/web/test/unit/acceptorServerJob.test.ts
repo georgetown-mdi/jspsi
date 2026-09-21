@@ -83,7 +83,7 @@ function configFor() {
   });
 }
 
-describe("acceptorServerJobConfig carries the party's own field delimiter", () => {
+describe("acceptorServerJobConfig includes the party's own field delimiter", () => {
   // The accepting seat offers the same control the inviting one does, and the
   // console runs the accept from a config composed at a separate invocation, so a
   // choice held only in the browser would read the mounted file with commas.

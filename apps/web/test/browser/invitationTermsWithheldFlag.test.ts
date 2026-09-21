@@ -69,8 +69,8 @@ function soleReceiverTerms(overrides: Partial<LinkageTerms>): LinkageTerms {
   };
 }
 
-// The document whose terms derive no withholding: a cascade carries each
-// party's matched positions as the rounds go.
+// The document whose terms derive no withholding: a cascade passes each
+// party's matched positions along as the rounds go.
 const CASCADE_TERMS = soleReceiverTerms({ linkageStrategy: "cascade" });
 
 // The document whose terms derive the withholding: single-pass, the inviting

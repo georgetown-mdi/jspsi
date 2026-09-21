@@ -1243,7 +1243,7 @@ describe("managed exchange detail run schedule", () => {
 
   /** A stub input-file pointer that counts the platform reads made through it and
    * hands back a file stamped at `lastModifiedMs`. A picker handle, the only real
-   * one carrying the permission extension, cannot be summoned from a test, and an
+   * one with the permission extension, cannot be summoned from a test, and an
    * origin-private file is stamped at the moment the suite writes it. */
   function inputHandleStub(lastModifiedMs: number) {
     const reads: Array<string> = [];
@@ -1545,7 +1545,7 @@ describe("managed exchange detail accounting of disclosures", () => {
           )
           .elements(),
       ).toHaveLength(2);
-      // The plain empty state, which reads as an absence of disclosures, is the
+      // The plain empty state, which displays as an absence of disclosures, is the
       // one this run must not get.
       expect(
         page
@@ -3110,7 +3110,7 @@ describe("the results a scheduled run left for this visit", () => {
       .toBeInTheDocument();
   });
 
-  test("a run too large to keep reads as its own state, with no file offered", async () => {
+  test("a run too large to keep is shown as its own state, with no file offered", async () => {
     renderParked({
       kind: "parked",
       results: {

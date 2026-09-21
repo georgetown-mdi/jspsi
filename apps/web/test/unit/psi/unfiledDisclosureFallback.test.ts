@@ -142,7 +142,7 @@ describe("the flag", () => {
 
   test("a flag that would take the value past its length bound is refused", async () => {
     const store = installStorage();
-    // A record id is any non-empty string, so an imported record can carry one
+    // A record id is any non-empty string, so an imported record can have one
     // this long; the value is written where storage is already short, so the
     // write is refused rather than grown.
     const enormous = "x".repeat(5000);
@@ -207,7 +207,7 @@ describe("two contexts writing the flag value", () => {
     expect(await racing).toBe(true);
 
     // The stated limit of the unlocked fallback: the clear wrote back a value
-    // taken before the flag landed, so the run that flag stood for is unnamed.
+    // taken before the flag was written, so the run that flag stood for is unnamed.
     expect(store.has(KEY)).toBe(false);
     expect(unfiledExchangeFlagged("exchange-b")).toBe(false);
   });

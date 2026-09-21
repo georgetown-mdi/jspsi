@@ -981,7 +981,7 @@ describe("status route reports record availability", () => {
 
   test("a record with no mismatch marker is held back as undescribable", async () => {
     // Every record of this format states the marker, so a file without one is a
-    // record this console cannot describe -- it is not read as a run that
+    // record this console cannot describe -- it is not treated as a run that
     // observed no mismatch, which would be a clean check this console never saw.
     const id = await createSucceededJob({
       STUB_OUTPUT_FILE: "id\n1\n",
@@ -1062,7 +1062,7 @@ describe("status route reports record availability", () => {
   });
 
   test("a malformed record file is treated as undescribable (defensive parse)", async () => {
-    // The record write landed a non-JSON body; the status route must not throw,
+    // The record write produced a non-JSON body; the status route must not throw,
     // and must treat the record as unavailable rather than serving a bad stamp --
     // while still reporting the file it could not read as being there.
     const id = await createSucceededJob({

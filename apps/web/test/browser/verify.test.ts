@@ -528,7 +528,7 @@ describe("verify receipt screen", () => {
       .toBeInTheDocument();
   });
 
-  test("a malformed record lands on a designed alert without clearing the input", async () => {
+  test("a malformed record shows a designed alert without clearing the input", async () => {
     const { record, keys } = await buildFixture();
     await mountVerifyScreen();
 
@@ -907,7 +907,7 @@ describe("verify receipt screen", () => {
       .toBeInTheDocument();
 
     // A document that is not this exchange's: it is what the re-run reads, so
-    // the line the carried copy had verified reports a mismatch.
+    // the line the receipt's own copy had verified reports a mismatch.
     await userEvent.fill(
       page.getByLabelText("Your partner's linkage terms"),
       JSON.stringify({ ...PARTNER_TERMS, date: "2025-02-02" }),

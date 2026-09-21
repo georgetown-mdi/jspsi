@@ -477,7 +477,7 @@ describe("rendered resolver-owned token contrast (WCAG 2.1 AA)", () => {
 describe("rendered app-token surface contrast (WCAG 2.1 AA)", () => {
   // styles/tokens.css keeps a second, --app-* palette the console's stylesheet
   // paints with, per scheme. Its dashed file dropzone border is the one boundary
-  // in that palette carrying WCAG 1.4.11's 3:1 non-text floor on its own: the
+  // in that palette that must meet WCAG 1.4.11's 3:1 non-text floor on its own: the
   // border is what marks the drop target, and --app-field-border is close enough
   // to --app-field-bg for the ratio to be at risk. The route sweep in
   // themeContrastSweep.test.ts judges text only, so it does not reach this.

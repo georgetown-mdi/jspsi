@@ -679,7 +679,7 @@ describe("clearing the answer folds the windows it held", () => {
     );
 
     // Two windows opened and closed under the answer with no runner running, so
-    // the acknowledgement is the only place they can still be read as withheld.
+    // the acknowledgement is the only place they can still be counted as withheld.
     const cleared = await clearManagedExchangeStandingCondition(
       created.id,
       Date.parse("2026-01-27T12:00:00.000Z"),
@@ -694,7 +694,7 @@ describe("clearing the answer folds the windows it held", () => {
       at: "2026-01-20T17:00:00.000Z",
       outcome: "skipped",
     });
-    // Both halves landed in the stored record, which is what a later wake reads
+    // Both halves were written to the stored record, which is what a later wake reads
     // instead of recounting those windows against the partner.
     expect(await getManagedExchange(created.id)).toEqual(cleared);
   });
@@ -1442,12 +1442,12 @@ describe("a scheduled run's results wait for the next visit", () => {
     ).toEqual([new Date(laterRun).toISOString()]);
   });
 
-  test("an exchange nothing has parked for reads as nothing, never as unavailable", async () => {
+  test("an exchange nothing has parked for is reported as nothing, never as unavailable", async () => {
     const created = await createManagedExchange(newExchange());
     expect(await readParkedResults(created.id)).toEqual({ kind: "none" });
   });
 
-  test("a stored value this build refuses reads as unreadable, and is left where it is", async () => {
+  test("a stored value this build refuses is reported as unreadable, and is left where it is", async () => {
     const created = await createManagedExchange(newExchange());
     await putRawParkedStored(created.id, {
       version: "psilink-parked-results/v2",
@@ -1718,7 +1718,7 @@ describe("persistent storage request", () => {
     expect(typeof granted).toBe("boolean");
   });
 
-  test("create requests persistent storage before the record lands", async () => {
+  test("create requests persistent storage before the record is written", async () => {
     const realPersist = StorageManager.prototype.persist;
     let persistCalls = 0;
     StorageManager.prototype.persist = function (this: StorageManager) {

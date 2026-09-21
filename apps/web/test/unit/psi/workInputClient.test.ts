@@ -250,7 +250,7 @@ describe("fetchJobInputProfile", () => {
     ).toMatchObject({ kind: "profile" });
   });
 
-  test("carries the reported positions through to the seat", async () => {
+  test("passes the reported positions through to the seat", async () => {
     const result = await fetchJobInputProfile("x", undefined, () =>
       Promise.resolve(
         jsonResponse({ ...PROFILE_WIRE, sanitizedColumnPositions: [1, 2] }),

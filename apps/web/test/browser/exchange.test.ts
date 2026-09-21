@@ -79,7 +79,7 @@ vi.mock("@psi/invitation", async (importOriginal) => {
 
 // Defer or fail the CSV parse per-test to observe in-flight state (the
 // Continue gate, the abort signal) and the read-failure path, which a real
-// parse of an inline File cannot reach deterministically. With both knobs
+// parse of an inline File cannot reach deterministically. With both settings
 // unset it delegates to the real loader.
 const csvLoadHarness = vi.hoisted(() => ({
   defer: false,
@@ -1957,7 +1957,7 @@ describe("inviter screen", () => {
     // The pre-round statement is the timing half: an operator can read what
     // their partner presented while the exchange is still running, which is the
     // only point at which reading it can change what they do. It states the
-    // run's own terms, so it reads as plain run status -- an ordinary
+    // run's own terms, so it is shown as plain run status -- an ordinary
     // one-to-one run raises no warning, and the warnings alert never mounts.
     const matching = {
       localDeduplicate: false,
@@ -2724,7 +2724,7 @@ describe("exchange screen at a narrow viewport", () => {
   // the first paint, read the sample file so the ledger fills and the Customize
   // surfaces become reachable, then walk to Matching & sharing (spine step 2).
   /**
-   * Scroll a control into view and click it once it is genuinely hittable.
+   * Scroll a control into view and click it once it is hittable.
    *
    * The spine's sticky step nav can overlay a row that is present, matched, and
    * visible, so a click at the row's centre lands on the nav instead and fails

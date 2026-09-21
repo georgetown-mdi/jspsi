@@ -82,10 +82,10 @@ describe("linkageRefusalFor", () => {
     expect(refusal.verdict).toBe(verdict);
   });
 
-  test("a one-column read is carried on either shape, and a wider one is not", () => {
+  test("a one-column read is reported on either shape, and a wider one is not", () => {
     // A file separated by something other than the delimiter it was read by comes
     // out as one mashed column, which satisfies no key and narrows derived terms to
-    // none -- so both shapes carry the reading the delimiter remedy rests on.
+    // none -- so both shapes produce the reading the delimiter remedy rests on.
     const mashed = ["first_name|last_name"];
     const narrowed = getDefaultLinkageTerms("x", inferMetadata(mashed, []));
     expect(

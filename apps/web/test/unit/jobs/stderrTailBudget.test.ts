@@ -35,7 +35,7 @@ import type { RunFailure } from "@exchange/useInviterExchange";
 // value's budget of the alert, whatever the child wrote.
 //
 // The tail reaches the manager branded (`PartnerOriginText`), so the link it
-// rides is built by the one elimination and carries that composition's
+// rides is built by the one elimination and applies that composition's
 // treatments: a control character the child wrote arrives as the replacement's
 // `<hh>` marker rather than as the escape's `\xhh` token, which is what keeps
 // the child from spelling the renderer's own framing.

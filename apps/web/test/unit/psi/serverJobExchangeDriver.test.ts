@@ -397,7 +397,7 @@ describe("createServerJobExchangeDriver event mapping", () => {
     }
   });
 
-  test("the console seat carries the cluster summary through to its outputs", async () => {
+  test("the console seat passes the cluster summary through to its outputs", async () => {
     // The CLI states the same figures on an info log line no relay event holds,
     // so the terminal event is the only route to this seat: without the
     // forward, the console's completion panel can never state the grouping the
@@ -1392,7 +1392,7 @@ describe("createFetchJobApiClient over an injected fetch", () => {
     expect(error.activeJobId).toBeUndefined();
   });
 
-  test("a refused (400) create carries the refusal token off the body", async () => {
+  test("a refused (400) create takes the refusal token off the body", async () => {
     // The refusal is about the console's mounts, which this browser never learns,
     // so the token is what lets the seat compose copy the operator can act on.
     const fetchImpl = (() =>

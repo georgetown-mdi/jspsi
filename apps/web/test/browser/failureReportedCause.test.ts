@@ -144,8 +144,8 @@ test("a long report scrolls under a label that stays put", async () => {
   });
   const { label, report } = mounted;
 
-  // The text element carries the height bound, not the block it sits in, so
-  // scrolling it cannot carry the label -- which stands outside it -- along.
+  // The text element has the height bound, not the block it sits in, so
+  // scrolling it cannot move the label -- which stands outside it -- along.
   expect(getComputedStyle(report).overflowY).toBe("auto");
   expect(report.scrollHeight).toBeGreaterThan(report.clientHeight);
   expect(report.contains(label)).toBe(false);

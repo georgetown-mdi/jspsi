@@ -126,7 +126,7 @@ async function accountingEntries(
 }
 
 /** Hold the store's own report of a note it could not write, which the suite's
- * output would otherwise carry, and clear the flag it falls back to once the test
+ * output would otherwise show, and clear the flag it falls back to once the test
  * is done, so no exchange stays named past it. */
 function captureRefusedNoteReport(id: string) {
   const failure = vi
@@ -157,7 +157,7 @@ describe("what a run that could not file leaves", () => {
     });
   });
 
-  test("a run that built no record is read as the fact alone", async () => {
+  test("a run that built no record is reported as the fact alone", async () => {
     const created = await createManagedExchange(newExchange());
 
     await noteUnfiledDisclosureRun(created.id, undefined, NOTED_AT);
@@ -168,7 +168,7 @@ describe("what a run that could not file leaves", () => {
     });
   });
 
-  test("an exchange with nothing noted reads as none", async () => {
+  test("an exchange with nothing noted is reported as none", async () => {
     const created = await createManagedExchange(newExchange());
 
     expect(await readUnfiledDisclosures(created.id)).toEqual({ kind: "none" });
@@ -224,7 +224,7 @@ describe("what a run that could not file leaves", () => {
     );
   });
 
-  test("the run refused that way lands in the flag and the diagnostic log", async () => {
+  test("the run refused that way is recorded in the flag and the diagnostic log", async () => {
     const created = await createManagedExchange(newExchange());
     await putRawStored(unfiledDisclosureKey(created.id), {
       noted: "yesterday",
@@ -247,7 +247,7 @@ describe("what a run that could not file leaves", () => {
 });
 
 describe("filing what the note retained", () => {
-  test("the record lands in the accounting and the note goes", async () => {
+  test("the record is written to the accounting and the note goes", async () => {
     const created = await createManagedExchange(newExchange());
     const record = await disclosureRecord();
     await noteUnfiledDisclosureRun(created.id, record, NOTED_AT);

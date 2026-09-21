@@ -65,7 +65,7 @@ describe("listMountEntries", () => {
     });
   });
 
-  test("a segment carrying a separator is readable:false", () => {
+  test("a segment containing a separator is readable:false", () => {
     const mount = mountWithKeys();
     expect(listMountEntries(mount, ["a/b"]).readable).toBe(false);
   });

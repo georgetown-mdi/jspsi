@@ -578,7 +578,7 @@ describe("GET /api/jobs/:jobId/receipt serves only a workdir-contained receipt",
     expect((await getReceipt(id)).status).toBe(404);
   });
 
-  test("a signed run whose receipt never landed is 404, not an empty 200", async () => {
+  test("a signed run whose receipt was never written is 404, not an empty 200", async () => {
     const { manager, id } = await createSettledJob();
     expect(manager.getJobView(id)!.receiptPath).not.toBeNull();
     expect((await getReceipt(id)).status).toBe(404);
@@ -638,7 +638,7 @@ describe("the status body reports the receipt in three states", () => {
     };
   }
 
-  test("a signed run says all along that a receipt is coming, and reports it once it lands", async () => {
+  test("a signed run says all along that a receipt is coming, and reports it once it is written", async () => {
     const { manager, id } = await createSettledJob();
     expect(await receiptStatusOf(id)).toMatchObject({
       receiptRequested: true,

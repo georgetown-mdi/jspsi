@@ -260,7 +260,7 @@ describe("daylight saving", () => {
     });
   });
 
-  test("catch-up across a transition lands on the agreed instant", () => {
+  test("catch-up across a transition falls on the agreed instant", () => {
     withTimeZone("America/New_York", () => {
       const caught = catchUpManagedSchedule(
         march,
@@ -353,7 +353,7 @@ describe("daylight saving", () => {
       });
   });
 
-  test("run bookkeeping with no UTC designator is read as no run at all in either zone", () => {
+  test("run bookkeeping with no UTC designator is treated as no run at all in either zone", () => {
     for (const zone of divergingZones) {
       const walked = withTimeZone(zone, () =>
         catchUpManagedSchedule(
@@ -725,7 +725,7 @@ describe("catch-up on wake", () => {
     expect(caught.schedule.nextWindow).toBe("2026-01-27T14:00:00.000Z");
   });
 
-  test("run bookkeeping with an unusable stamp is read as no run at all", () => {
+  test("run bookkeeping with an unusable stamp is treated as no run at all", () => {
     const caught = catchUpManagedSchedule(
       weekly,
       { at: "last Tuesday", outcome: "succeeded" },

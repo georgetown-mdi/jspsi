@@ -69,10 +69,10 @@ describe("assessManagedInputColumns: the standing-terms guard", () => {
     expect(rejection?.reason).toBe("columns");
   });
 
-  test("carries the one-column reading a wrong delimiter produces", () => {
+  test("reports the one-column reading a wrong delimiter produces", () => {
     // A stored record reads its input by the delimiter it was set up with, so an
     // extract separated another way arrives as one mashed column. The rejection
-    // carries that reading for the launch surface to state the delimiter remedy on,
+    // includes that reading for the launch surface to state the delimiter remedy on,
     // instead of sending the operator to renegotiate terms with their partner.
     const mashed = assessManagedInputColumns(standingExchangeFile(), [
       standingColumns.join("\t"),

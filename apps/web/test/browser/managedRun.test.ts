@@ -206,7 +206,7 @@ describe("runManagedRerun: the runner's failure bookkeeping", () => {
       }),
     ).rejects.toBeInstanceOf(ConnectionError);
 
-    // The failure landed in the record's bookkeeping (the evidence the desync
+    // The failure was written to the record's bookkeeping (the evidence the desync
     // tiering later reads), and the secret did not rotate.
     const stored = await getManagedExchange(created.id);
     expect(stored?.lastRun?.outcome).toBe("failed");

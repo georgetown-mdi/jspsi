@@ -84,7 +84,7 @@ function openWithoutCloseWait(conn: DataConnection) {
 }
 
 /** Let pending microtasks and zero-delay timers run, so a promise that is not
- * settled after this one is genuinely parked. */
+ * settled after this one is parked. */
 function drainTaskQueue(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }

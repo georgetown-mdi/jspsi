@@ -168,7 +168,7 @@ describe("parseRecordDocument", () => {
 
   test("an unrecognized version is its own named outcome", async () => {
     // The version a record written before the run binder holds: refused as its
-    // own outcome, naming the version this build recognizes, rather than read as a
+    // own outcome, naming the version this build recognizes, rather than treated as a
     // record whose absent binder leaves a receipt unpaired.
     const { record } = await fixtures();
     const bumped = JSON.stringify({
@@ -347,7 +347,7 @@ describe("verdictViewModel: no re-supply", () => {
   });
 
   test("with a receipt whose terms were stripped, the row says so", async () => {
-    // The reader supplied the one file that carries the partner's half and it
+    // The reader supplied the only file that could hold the partner's half and it
     // holds none, so pointing them back at it would send them nowhere.
     const { record, keys } = await fixtures();
     const report = await verifyExchangeRecord(record, keys, {});

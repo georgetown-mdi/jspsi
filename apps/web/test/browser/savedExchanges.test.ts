@@ -661,7 +661,7 @@ describe("saved list route: delete is a fully supported, always-available action
       .toBeInTheDocument();
 
     // Cancel the modal, then reopen it via the row's Delete button: the failure
-    // from the last attempt must not carry over into the fresh confirm.
+    // from the last attempt must not appear in the fresh confirm.
     await page.getByRole("button", { name: "Cancel" }).click();
     await page.getByRole("button", { name: "Delete" }).click();
 

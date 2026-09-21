@@ -33,7 +33,7 @@ const ENTRY_OVERHEAD_BYTES = 128;
  * Steps per transformation in the widest template below. The schema's own step
  * cap is not what decides this: core's compose walks the whole spec under a node
  * budget that bites first, refusing a wider steps block outright (the last case
- * pins that), so the widest template a hand-off can carry is one whose steps
+ * pins that), so the widest template a hand-off can hold is the one whose steps
  * that walk admits.
  */
 const ADMITTED_STEPS_PER_TRANSFORMATION = 16;
@@ -66,7 +66,7 @@ function maxMetadata(): Metadata {
 }
 
 /** Standardization at the boundary's transformation maximum, every output and
- * input at its length cap, each carrying `steps` steps. */
+ * input at its length cap, each with `steps` steps. */
 function maxStandardization(steps: number): Standardization {
   return Array.from(
     { length: MAX_STANDARDIZATION_TRANSFORMATIONS },
@@ -78,7 +78,7 @@ function maxStandardization(steps: number): Standardization {
   );
 }
 
-/** An sftp exchange intent at every schema maximum the template carries, with
+/** An sftp exchange intent at every schema maximum the template allows, with
  * `steps` steps on each transformation. */
 function widestIntent(steps: number) {
   return validSftpIntent({
@@ -129,7 +129,7 @@ describe("the hand-off cap covers the create intent's schema maxima", () => {
   test(
     "a standardization block past the compose's node budget mints no hand-off at all",
     () => {
-      // The steps a schema-valid intent may carry outrun what core's compose
+      // A schema-valid intent may hold more steps than core's compose
       // walks, so that intent fails at job creation rather than composing a
       // template no cap covers.
       expect(() =>

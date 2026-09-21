@@ -428,7 +428,7 @@ describe("single-pass stage labels", () => {
     );
   }
 
-  test("the encryption stages read as display labels", () => {
+  test("each encryption stage has its own display label", () => {
     expect(labelOf(SINGLE_PASS_STAGE_IDS.encryptingOwnData)).toBe(
       "Encrypting your data",
     );
@@ -437,7 +437,7 @@ describe("single-pass stage labels", () => {
     );
   });
 
-  test("the matching stage reads as a display label", () => {
+  test("the matching stage has its own display label", () => {
     expect(labelOf(SINGLE_PASS_STAGE_IDS.identifyingSharedValues)).toBe(
       "Finding matches",
     );
@@ -673,7 +673,7 @@ describe("PSI progress", () => {
     );
   });
 
-  test("the next operation opens on its own total, with no count carried over", () => {
+  test("the next operation opens on its own total, with no count from the one before", () => {
     const run = runWithPsiProgress(
       running(
         SINGLE_PASS_STAGE_IDS.encryptingOwnData,

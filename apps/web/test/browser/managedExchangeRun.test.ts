@@ -316,7 +316,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
 
     expect(order).toEqual(["handshake", "dataExchange"]);
     expect(storedAtDataExchange?.sharedSecret).toBe(rotatedSecret);
-    // No success stamp during the data exchange: succeeded lands strictly after.
+    // No success stamp during the data exchange: succeeded is written strictly after.
     expect(storedAtDataExchange?.lastRun).toBeUndefined();
     expect(result.exchange).toBe("exchanged:carried");
     // The success outcome landed on the store.
@@ -529,7 +529,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
     expect(error).toBeInstanceOf(RotationPersistError);
     expect((error as RotationPersistError).lastRun.failureKind).toBe("storage");
     expect(dataExchangeRan).toBe(false);
-    // Nothing committed: the old secret is retained and no bookkeeping landed
+    // Nothing committed: the old secret is retained and no bookkeeping was written
     // (the write failed; the evidence travels on the error instead).
     const stored = await getManagedExchange(created.id);
     expect(stored?.sharedSecret).toBe(created.sharedSecret);
@@ -593,7 +593,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
     // not replaced by the bookkeeping rejection.
     expect(error).toBe(inputFailure);
     // No connection was attempted and nothing committed: the guard failed before
-    // the handshake, the pre-run secret is intact, and no bookkeeping landed.
+    // the handshake, the pre-run secret is intact, and no bookkeeping was written.
     expect(handshakeRan).toBe(false);
     const stored = await getManagedExchange(created.id);
     expect(stored?.sharedSecret).toBe(created.sharedSecret);
@@ -1051,7 +1051,7 @@ describe("a failing run never overwrites a success stamped after it began", () =
     cause: new Error("the entry was not found"),
   });
 
-  test("a failure stamped over a success that landed mid-run leaves the success", async () => {
+  test("a failure stamped over a success written mid-run leaves the success", async () => {
     const created = await createManagedExchange(newExchange());
     const runStartedAtMs = Date.now();
     const successAt = runStartedAtMs + 1_000;

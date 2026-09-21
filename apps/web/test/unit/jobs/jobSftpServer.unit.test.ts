@@ -763,7 +763,7 @@ describe("validateAuthoredSftpServer raw (pasted) credential path", () => {
     expect(fs.readdirSync(scratch)).toEqual([]);
   });
 
-  test("a materialized value never lands under the data root", () => {
+  test("a materialized value is never written under the data root", () => {
     const dir = scratchDir();
     const dataRoot = path.join(dir, "data-root");
     const scratch = credentialScratchDir();

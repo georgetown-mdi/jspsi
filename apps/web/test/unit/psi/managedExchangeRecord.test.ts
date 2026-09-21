@@ -164,7 +164,7 @@ describe("the stored field delimiter", () => {
     );
   });
 
-  test("a record holding no delimiter reads back with none, which its runs read as a comma", () => {
+  test("a record holding no delimiter reads back with none, which its runs treat as a comma", () => {
     const record = buildManagedExchangeRecord(newExchange());
     expect(record.exchangeFile).not.toHaveProperty("csvDelimiter");
     expect(parseManagedExchangeRecord(record)).toEqual(record);
@@ -367,7 +367,7 @@ describe("parseManagedExchangeRecord reader-rejects-unknown", () => {
 
   test("a record written before a kind existed still reads unchanged", () => {
     // Widening the enum only adds members, so a stored entry an earlier build
-    // wrote -- a linkage shortfall recorded as "input" -- loads and reads as it did.
+    // wrote -- a linkage shortfall recorded as "input" -- loads and reads back unchanged.
     const legacy = {
       ...buildManagedExchangeRecord(newExchange()),
       lastRun: {
@@ -1382,7 +1382,7 @@ describe("the standing condition across the bookkeeping writes", () => {
   test("it is raised even where the write rules drop the entry that raised it", () => {
     // The rules choose which of two runs' stamps the record keeps; the condition is
     // not a stamp but evidence nobody has answered, so a run that met one raises it
-    // whether or not its entry lands.
+    // whether or not its entry is written.
     const succeeded = applyManagedExchangeLastRun(
       buildManagedExchangeRecord(newExchange()),
       { at: laterAt, outcome: "succeeded" },
@@ -1438,7 +1438,7 @@ describe("the standing condition across the bookkeeping writes", () => {
     ).toEqual(NO_STANDING_CONDITION);
   });
 
-  test("a schedule advance carries a condition its window's run could not persist", () => {
+  test("a schedule advance keeps a condition its window's run could not persist", () => {
     // The window that counts no miss at all: the store refused the rotation write
     // and the run's own bookkeeping write, then answered this one.
     const record = buildManagedExchangeRecord(newExchange({ schedule }));
@@ -1527,7 +1527,7 @@ describe("the operator's compromise response", () => {
   });
 
   test("an answer with no condition standing raises one to hold it", () => {
-    // The raise write the failure earned never landed -- a store that refused the
+    // The raise write the failure earned never reached the store -- a store that refused the
     // run's own bookkeeping. Without a carrier the answer would have nowhere to
     // live, and the gate would be put again at the next visit.
     const record = parseManagedExchangeRecord({
