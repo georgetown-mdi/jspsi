@@ -377,6 +377,15 @@ Ratified by the owner:
   rounds raised, is landed or recorded as refused with a reason, and no source
   or test file the review named as oversized, misnamed, or misplaced remains in
   that state.
+- **Console CLI Parity** (board 9) -- Done is: no setting the command-line
+  configuration file holds is unreachable from the console -- authored,
+  loaded from the mounted working directory, or carried into the hand-off --
+  and every gap the parity inventory named is closed or recorded as refused
+  with a reason.
+- **Recurring web exchanges** (board 9) -- Done is: every configuration
+  artifact the app exports for a recurring exchange can be brought back into
+  it, its own backup envelope and the command-line pair alike, or the app
+  names at the point it offers the export what restores the exchange instead.
 
 Drafted, pending the owner's ratification:
 
