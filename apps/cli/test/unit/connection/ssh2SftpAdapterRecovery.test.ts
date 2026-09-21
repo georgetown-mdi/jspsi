@@ -1060,7 +1060,7 @@ describe("session recovery", () => {
     );
   });
 
-  test("the undetermined publish escapes a destination carrying ANSI and a line break", async () => {
+  test("the undetermined publish escapes a destination containing ANSI and a line break", async () => {
     // `toPath` is partner-derived on the ack and rendezvous rename paths (the ack
     // name's middle segments are unconstrained), so the destination is escaped
     // like every other path this app names in an error -- a hostile name must not
