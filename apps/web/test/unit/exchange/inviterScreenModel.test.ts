@@ -17,6 +17,7 @@ import {
   inviterScreenReducer,
   unmatchableFileAlert,
 } from "@exchange/inviterScreenModel";
+import { inviterServerJobConfig } from "@exchange/useInviterExchange";
 
 import type {
   InviterScreenAction,
@@ -459,5 +460,64 @@ describe("the managed-exchange offer", () => {
       type: "manage-offer-failed",
     });
     expect(state.manageOffer).toEqual({ status: "error" });
+  });
+});
+
+describe("what a voided commit can still compose", () => {
+  const PROFILE: ProfiledJobInput = {
+    name: csv.fileName,
+    sizeBytes: csv.sizeBytes,
+    modifiedAt: 1_700_000_000_000,
+    rowCount: csv.rowCount,
+    columns: csv.columns,
+    sanitizedColumnPositions: [],
+    columnSamples: new Map(),
+  };
+
+  function seeded(state: InviterScreenState): InviterScreenState {
+    return inviterScreenReducer(state, {
+      type: "console-file-seeded",
+      source: PROFILE,
+      acquired: csv,
+      editor: editorFromCsv("Dana Okafor", csv),
+    });
+  }
+
+  /** The server-job config the console composes from this state and the operator's
+   * current delimiter: the mounted-file reference InviterScreen derives from
+   * `consoleSource`, over the terms the draft validates to. Undefined where the
+   * screen derives no source and has no draft to mint from. */
+  function serverJobConfigFor(state: InviterScreenState, csvDelimiter: string) {
+    if (state.consoleSource === undefined || state.editor === undefined)
+      return undefined;
+    return inviterServerJobConfig({
+      minted: mintedFrom(state),
+      inputSource: { kind: "workFile", name: state.consoleSource.name },
+      transport: { channel: "filedrop" },
+      csvDelimiter,
+    });
+  }
+
+  test("nothing until a fresh commit, and then the delimiter it was read by", () => {
+    const named = inviterScreenReducer(INVITER_SCREEN_INITIAL, {
+      type: "name-changed",
+      name: "Dana Okafor",
+    });
+    const committed = seeded(named);
+    expect(serverJobConfigFor(committed, ",")?.csvDelimiter).toBe(",");
+
+    const voided = inviterScreenReducer(committed, {
+      type: "console-file-voided",
+    });
+    // Cancelling the confirm stage the delimiter change opened leaves the void
+    // standing, so the commit the previous delimiter read reaches no config.
+    expect(serverJobConfigFor(voided, "\t")).toBeUndefined();
+
+    const config = serverJobConfigFor(seeded(voided), "\t");
+    expect(config?.csvDelimiter).toBe("\t");
+    expect(config?.inputSource).toEqual({
+      kind: "workFile",
+      name: csv.fileName,
+    });
   });
 });

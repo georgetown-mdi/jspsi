@@ -352,3 +352,47 @@ describe("the delimiter change voids the commit it was not read by", () => {
     expect(onInvalidate).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("a cancel after the void commits nothing", () => {
+  test("the confirm stage the re-profile opened is left without a commit", async () => {
+    const committed: WorkInputReference = { name: "a.csv" };
+    const onInvalidate = vi.fn();
+    const onUse = vi.fn();
+    const render = (options: {
+      committed?: WorkInputReference;
+      delimiter: CsvDelimiterResolution;
+    }): unknown =>
+      reactHarness.render(() =>
+        ServerFilePicker({
+          committed: options.committed,
+          delimiter: options.delimiter,
+          onUse,
+          onInvalidate,
+        }),
+      );
+
+    render({ committed, delimiter: COMMA });
+    await settle();
+    render({ committed, delimiter: TAB });
+    await settle();
+    expect(onInvalidate).toHaveBeenCalledTimes(1);
+
+    // The parent has dropped the commit the comma read made, so the operator is
+    // at the confirm stage with nothing committed behind it.
+    const confirming = render({ delimiter: TAB });
+    expect(confirmedColumns(confirming)).toEqual(TAB_COLUMNS);
+
+    const cancel = findProp<() => void>(confirming, "onCancel");
+    expect(cancel).toBeDefined();
+    cancel?.();
+    const listing = render({ delimiter: TAB });
+    await settle();
+    // Cancel commits nothing, so the columns the previous delimiter read reach no
+    // run: the operator is back at the listing with the void standing.
+    expect(onUse).not.toHaveBeenCalled();
+    expect(onInvalidate).toHaveBeenCalledTimes(1);
+    expect(confirmedColumns(listing)).toBeUndefined();
+    expect(findProp<(name: string) => void>(listing, "onSelect")).toBeDefined();
+    expect(profileRequests).toEqual([{ name: "a.csv", delimiter: "\t" }]);
+  });
+});
