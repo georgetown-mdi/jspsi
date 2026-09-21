@@ -1,0 +1,16 @@
+{
+  "origin_certificate": {
+    "not_after": "2041-09-13",
+    "recorded": "2026-09-17",
+    "source": "the HTTPS measurement pass recorded in docs/DEPLOYMENT.md"
+  },
+  "cloudflare_ranges": {
+    "fetched": null,
+    "source": {
+      "ipv4": "https://www.cloudflare.com/ips-v4",
+      "ipv6": "https://www.cloudflare.com/ips-v6"
+    },
+    "ipv4": [],
+    "ipv6": []
+  }
+}
