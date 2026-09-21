@@ -10,7 +10,7 @@ import {
 } from "../../src/psi/psiChunks";
 
 // The sizing policy the engine splits an operation on. The two constants it
-// derives from are measured figures (psiChunks.ts states what was measured),
+// derives from answer to costs outside this tree (psiChunks.ts states each),
 // so what is pinned here is the shape they have to produce: a set small enough
 // to finish quickly runs as the one call it always was, no chunk ever falls
 // under the native addon's thread floor, and no operation is split more ways
@@ -76,3 +76,12 @@ test("a caller-set chunk size splits into chunks no larger than it", () => {
     expect(range.end - range.start).toBeLessThanOrEqual(40);
   expect(chunkRangesOfSize(7, 40)).toStrictEqual([{ start: 0, end: 7 }]);
 });
+
+test.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
+  "a chunk size of %p is refused by name rather than silently clamped",
+  (size) => {
+    // NaN survives Math.max and Math.ceil, so an unrefused one leaves the
+    // split covering nothing and the engine serializing an empty message.
+    expect(() => chunkRangesOfSize(200, size)).toThrow(/chunkElements/);
+  },
+);

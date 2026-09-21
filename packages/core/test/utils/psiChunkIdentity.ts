@@ -2,6 +2,7 @@ import { expect } from "vitest";
 
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
+import { buildResponse } from "../../src/psi/psiChunks";
 import { InProcessPsiEngine } from "../../src/psi/psiEngine";
 import { fixedKeyPsiLibrary, psiTestKey } from "./fixedKeyPsiLibrary";
 
@@ -113,8 +114,9 @@ export async function expectChunkedRoundMatchesSingleCall(params: {
 }
 
 /**
- * Asserts that a chunked count-only round reports the cardinality the single
- * call reports, and returns the processed counts the match reported.
+ * Asserts that a chunked count-only round puts the single call's response
+ * bytes on the wire and reports its cardinality, and returns the processed
+ * counts the match reported -- none, the match being one call at every size.
  */
 export async function expectChunkedCountMatchesSingleCall(params: {
   library: PSILibrary;
@@ -163,4 +165,57 @@ export async function expectChunkedCountMatchesSingleCall(params: {
     client.delete();
   }
   return processed;
+}
+
+/**
+ * Asserts that the cardinality reported over a response whose element list is
+ * DUPLICATED, each repeat a whole list away from its twin so a split would put
+ * the two in different chunks, is the one a single call over that response
+ * reports. The response is the partner's message and no local rule constrains
+ * what it holds, so the repeat is the shape the count has to survive.
+ */
+export async function expectDuplicatedResponseCountMatchesSingleCall(params: {
+  library: PSILibrary;
+  serverValues: ReadonlyArray<string>;
+  clientValues: ReadonlyArray<string>;
+  chunkElements: number;
+}): Promise<void> {
+  const { library, serverValues, clientValues, chunkElements } = params;
+  const server = library.server!.createFromKey(SERVER_KEY, false);
+  const client = library.client!.createFromKey(CLIENT_KEY, false);
+  const joiner = engine(library, "joiner", false, chunkElements);
+  const processed: Array<number> = [];
+  joiner.observeProcessedElements((count) => processed.push(count));
+  try {
+    const setup = server.createSetupMessage(
+      FALSE_POSITIVE_RATE,
+      CLIENT_INPUT_COUNT,
+      serverValues,
+      library.dataStructure.Raw,
+      [],
+    );
+    const elements = server
+      .processRequest(client.createRequest(clientValues))
+      .getEncryptedElementsList_asU8();
+    const duplicated = buildResponse(library, [...elements, ...elements]);
+    const wholeSize = client.getIntersectionSize(setup, duplicated);
+    expect(wholeSize).toBeGreaterThan(0);
+    // What a split would have reported, driven against the library rather than
+    // argued: the library deduplicates within each call, so every repeat the
+    // split separates is counted again.
+    expect(
+      client.getIntersectionSize(setup, buildResponse(library, elements)) +
+        client.getIntersectionSize(setup, buildResponse(library, elements)),
+    ).toBe(wholeSize * 2);
+
+    await joiner.receiveServerSetup(setup.serializeBinary());
+    expect(
+      await joiner.computeIntersectionCardinality(duplicated.serializeBinary()),
+    ).toBe(wholeSize);
+    expect(processed).toStrictEqual([]);
+  } finally {
+    joiner.dispose();
+    server.delete();
+    client.delete();
+  }
 }

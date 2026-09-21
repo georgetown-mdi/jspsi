@@ -4,15 +4,14 @@ import type { Server as PSIServer } from "@openmined/psi.js/implementation/serve
 
 import { markNamedDiagnosis } from "../errors";
 import {
+  appendChunkElements,
   buildRequest,
   buildResponse,
   chunkRangesOfSize,
-  concatChunkElements,
   mergeAssociationChunks,
-  mergeResponseChunks,
+  mergeCountOnlyResponseChunks,
   mergeSetupChunks,
   psiChunkRanges,
-  serializeRequest,
   serializeResponse,
   serializeSetup,
 } from "./psiChunks";
@@ -100,6 +99,11 @@ export function valuesContributedExactlyOnce(
  * so the figure is always short of the operation's own element count, which
  * its settle report states. A count and nothing else crosses this boundary: no
  * element, no value, no index.
+ *
+ * One operation reports nothing at all:
+ * {@link PsiEngine.computeIntersectionCardinality} runs as a single call
+ * whatever its size, so a count-only round's match has a start and a finish
+ * and no figure in between.
  */
 export type PsiProcessedElementsReporter = (processed: number) => void;
 
@@ -181,7 +185,8 @@ export interface PsiEngine {
    * preceding {@link receiveServerSetup} -- no identifier, no pairing, no matched
    * position. Client role; throws if no setup is held. Count-only mode only: an
    * identifier-revealing engine refuses, so the disclosure a round produces stays
-   * the one its key was created for.
+   * the one its key was created for. Runs as one library call at every size, so
+   * it is the one operation reporting no processed count while it runs.
    */
   computeIntersectionCardinality(responseBytes: Uint8Array): Promise<number>;
   /**
@@ -405,7 +410,7 @@ export class InProcessPsiEngine implements PsiEngine {
     if (ranges.length === 1)
       return Promise.resolve(server.processRequest(request).serializeBinary());
     const inbound = request.getEncryptedElementsList_asU8();
-    const masked = this.overChunks(ranges, (range) =>
+    const maskChunk = (range: PsiChunkRange): Array<Uint8Array> =>
       server
         .processRequest(
           buildRequest(
@@ -414,14 +419,22 @@ export class InProcessPsiEngine implements PsiEngine {
             this.revealsIdentifiers,
           ),
         )
-        .getEncryptedElementsList_asU8(),
+        .getEncryptedElementsList_asU8();
+    // A count-only response is sorted by element bytes, so the whole masked
+    // list is held to order it; an identifier-revealing one answers position
+    // by position, so each chunk goes straight into the outgoing message.
+    if (!this.revealsIdentifiers)
+      return Promise.resolve(
+        serializeResponse(
+          this.library,
+          mergeCountOnlyResponseChunks(this.overChunks(ranges, maskChunk)),
+        ),
+      );
+    const response = buildResponse(this.library, []);
+    this.overChunks(ranges, (range) =>
+      appendChunkElements(response, maskChunk(range)),
     );
-    return Promise.resolve(
-      serializeResponse(
-        this.library,
-        mergeResponseChunks(masked, this.revealsIdentifiers),
-      ),
-    );
+    return Promise.resolve(response.serializeBinary());
   }
 
   createClientRequest(values: ReadonlyArray<string>): Promise<Uint8Array> {
@@ -438,18 +451,19 @@ export class InProcessPsiEngine implements PsiEngine {
       return Promise.resolve(
         client.createRequest(contributed).serializeBinary(),
       );
-    const masked = this.overChunks(ranges, (range) =>
-      client
-        .createRequest(contributed.slice(range.start, range.end))
-        .getEncryptedElementsList_asU8(),
-    );
-    return Promise.resolve(
-      serializeRequest(
-        this.library,
-        concatChunkElements(masked),
-        this.revealsIdentifiers,
+    // A request holds its elements in input order, so each chunk's masked
+    // elements go straight into the outgoing message, with no list held
+    // beside it to concatenate.
+    const request = buildRequest(this.library, [], this.revealsIdentifiers);
+    this.overChunks(ranges, (range) =>
+      appendChunkElements(
+        request,
+        client
+          .createRequest(contributed.slice(range.start, range.end))
+          .getEncryptedElementsList_asU8(),
       ),
     );
+    return Promise.resolve(request.serializeBinary());
   }
 
   receiveServerSetup(setupBytes: Uint8Array): Promise<void> {
@@ -531,21 +545,13 @@ export class InProcessPsiEngine implements PsiEngine {
       "computeIntersectionCardinality",
       "count-only",
     );
+    // One call over the whole response, never split, so this step reports no
+    // processed count: the library deduplicates the response it is handed
+    // before sizing the intersection, and the response is the PARTNER's, so a
+    // sum over chunks counts a value it repeated across a chunk boundary once
+    // per chunk (docs/spec/PROTOCOL.md, the count-only match).
     const response = this.library.response.deserializeBinary(responseBytes);
-    const ranges = this.rangesFor(response.getEncryptedElementsList().length);
-    if (ranges.length === 1)
-      return Promise.resolve(client.getIntersectionSize(setup, response));
-    const elements = response.getEncryptedElementsList_asU8();
-    // Each response element is matched against the held setup on its own, and
-    // a count-only round contributes values occurring exactly once, so no
-    // element can be counted under two chunks and the chunk sizes add up.
-    const sizes = this.overChunks(ranges, (range) =>
-      client.getIntersectionSize(
-        setup,
-        buildResponse(this.library, elements.slice(range.start, range.end)),
-      ),
-    );
-    return Promise.resolve(sizes.reduce((total, size) => total + size, 0));
+    return Promise.resolve(client.getIntersectionSize(setup, response));
   }
 
   dispose(): void {

@@ -41,20 +41,17 @@ export interface PsiChunkRange {
 
 /**
  * The smallest set a chunk may cover. The native addon parallelises one call
- * across threads only above its own per-thread floor, below which a chunk runs
- * single-threaded: measured on 10 cores, a 1,000-element call costs 80 us per
- * element against 10.8 us at 20,000, so a chunk under a few thousand elements
- * throws the addon's 6-7x away. A set at or below this floor therefore takes
- * exactly one chunk and runs the single call it always ran.
+ * across threads only above a per-thread input floor of its own, below which
+ * a chunk runs single-threaded and throws that parallelism away; this value
+ * holds every chunk well clear of that floor. A set at or below it therefore
+ * takes exactly one chunk and runs the single call it always ran.
  */
 export const PSI_CHUNK_MIN_ELEMENTS = 8192;
 
 /**
  * The most chunks one operation is split into. Every chunk costs the match
  * operations a re-read of the whole held server setup, so the overhead grows
- * with the chunk COUNT rather than the chunk size: measured at 100,000
- * elements, five chunks keep the association table inside run-to-run noise
- * (~5%) where ten chunks cost up to 41%.
+ * with the chunk COUNT rather than the chunk size.
  */
 export const PSI_CHUNK_TARGET_COUNT = 5;
 
@@ -97,14 +94,20 @@ export function chunkRanges(total: number, count: number): PsiChunkRange[] {
 
 /**
  * The ranges splitting `total` items into chunks of at most `size`, for a
- * caller that sets the chunk size itself rather than taking the measured
- * policy above.
+ * caller that sets the chunk size itself rather than taking the policy above.
+ * Refuses a size that is not a positive integer: `Math.ceil` carries NaN and
+ * a fraction through, and the split would cover none of the set or all of it
+ * one item at a time.
  */
 export function chunkRangesOfSize(
   total: number,
   size: number,
 ): PsiChunkRange[] {
-  return chunkRanges(total, Math.max(1, Math.ceil(total / Math.max(1, size))));
+  if (!Number.isInteger(size) || size < 1)
+    throw new Error(
+      `the PSI engine's chunkElements option must be a positive integer, not ${String(size)}`,
+    );
+  return chunkRanges(total, Math.max(1, Math.ceil(total / size)));
 }
 
 /** Orders two masked elements the way the engine's setup sort does. */
@@ -138,21 +141,37 @@ export interface MergedPsiSetup {
 export function mergeSetupChunks(
   chunks: ReadonlyArray<PsiSetupChunk>,
 ): MergedPsiSetup {
-  const pairs: Array<{ element: Uint8Array; inputIndex: number }> = [];
+  let total = 0;
+  for (const chunk of chunks) total += chunk.elements.length;
+  const masked = new Array<Uint8Array>(total);
+  const inputIndices = new Int32Array(total);
+  let next = 0;
   for (const chunk of chunks)
-    for (let position = 0; position < chunk.elements.length; position += 1)
-      pairs.push({
-        element: chunk.elements[position]!,
-        inputIndex: chunk.start + chunk.permutation[position]!,
-      });
-  pairs.sort(
-    (a, b) =>
-      compareElementBytes(a.element, b.element) || a.inputIndex - b.inputIndex,
+    for (let position = 0; position < chunk.elements.length; position += 1) {
+      masked[next] = chunk.elements[position]!;
+      inputIndices[next] = chunk.start + chunk.permutation[position]!;
+      next += 1;
+    }
+  // Sorted through an index array rather than through a list of
+  // {element, input index} objects: at the sizes the single-pass ceiling is
+  // derived from, one such object per element is a second materialization of
+  // the whole set, and that ceiling is a bound on transient allocation
+  // (docs/spec/PROTOCOL.md, the single-pass dataset ceiling).
+  const order = new Int32Array(total);
+  for (let index = 0; index < total; index += 1) order[index] = index;
+  order.sort(
+    (left, right) =>
+      compareElementBytes(masked[left]!, masked[right]!) ||
+      inputIndices[left]! - inputIndices[right]!,
   );
-  return {
-    elements: pairs.map((pair) => pair.element),
-    permutation: pairs.map((pair) => pair.inputIndex),
-  };
+  const elements = new Array<Uint8Array>(total);
+  const permutation = new Array<number>(total);
+  for (let index = 0; index < total; index += 1) {
+    const source = order[index]!;
+    elements[index] = masked[source]!;
+    permutation[index] = inputIndices[source]!;
+  }
+  return { elements, permutation };
 }
 
 /** One chunk's association result, indexed within the chunk's own slice. */
@@ -188,17 +207,32 @@ export function concatChunkElements(
 }
 
 /**
- * Reassembles a server response from chunk results, in the order a single call
- * over the whole request emits: the request's own order under
- * `revealsIdentifiers`, and element-byte order without it, where the library
- * sorts the response rather than answering position by position.
+ * Reassembles a COUNT-ONLY server response from chunk results, in the order a
+ * single call over the whole request emits: sorted by element bytes, the
+ * library sorting the response rather than answering position by position.
+ * An identifier-revealing response holds the request's own order, so its
+ * chunks go straight into the outgoing message
+ * ({@link appendChunkElements}) with no list beside it.
  */
-export function mergeResponseChunks(
+export function mergeCountOnlyResponseChunks(
   chunks: ReadonlyArray<ReadonlyArray<Uint8Array>>,
-  revealsIdentifiers: boolean,
 ): Uint8Array[] {
-  const elements = concatChunkElements(chunks);
-  return revealsIdentifiers ? elements : elements.sort(compareElementBytes);
+  return concatChunkElements(chunks).sort(compareElementBytes);
+}
+
+/**
+ * Appends one chunk's masked elements to the message being built, for the
+ * merges that are a concatenation in input order -- a request, and an
+ * identifier-revealing response. Byte-identical to setting the whole list at
+ * once, and it never holds a second copy of the elements.
+ */
+export function appendChunkElements(
+  message: {
+    addEncryptedElements(value: Uint8Array | string, index?: number): unknown;
+  },
+  elements: ReadonlyArray<Uint8Array>,
+): void {
+  for (const element of elements) message.addEncryptedElements(element);
 }
 
 function toElementList(elements: ReadonlyArray<Uint8Array>): Uint8Array[] {

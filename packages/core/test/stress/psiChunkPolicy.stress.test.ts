@@ -62,12 +62,14 @@ describe.each([
       ctx.skip();
       return;
     }
+    // No count between: the match is one call at every size, so a count-only
+    // round moves a figure through its masking steps alone.
     expect(
       await expectChunkedCountMatchesSingleCall({
         library,
         serverValues,
         clientValues,
       }),
-    ).toStrictEqual(expectedCounts);
+    ).toStrictEqual([]);
   });
 });

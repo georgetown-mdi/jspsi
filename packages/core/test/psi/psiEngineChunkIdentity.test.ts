@@ -8,6 +8,7 @@ import {
   chunkIdentityValues,
   expectChunkedCountMatchesSingleCall,
   expectChunkedRoundMatchesSingleCall,
+  expectDuplicatedResponseCountMatchesSingleCall,
 } from "../utils/psiChunkIdentity";
 
 // A chunked operation goes on the wire as the single call's bytes. The chunk
@@ -57,6 +58,8 @@ describe.each([
       ctx.skip();
       return;
     }
+    // No count between: the match is one call at every size, so a count-only
+    // round moves a figure through its masking steps alone.
     expect(
       await expectChunkedCountMatchesSingleCall({
         library,
@@ -64,7 +67,20 @@ describe.each([
         clientValues,
         chunkElements: CHUNK_ELEMENTS,
       }),
-    ).toStrictEqual(BETWEEN_CHUNKS);
+    ).toStrictEqual([]);
+  });
+
+  test("a duplicated response counts each value once, not once per chunk", async (ctx) => {
+    if (!library) {
+      ctx.skip();
+      return;
+    }
+    await expectDuplicatedResponseCountMatchesSingleCall({
+      library,
+      serverValues,
+      clientValues,
+      chunkElements: CHUNK_ELEMENTS,
+    });
   });
 
   test("a set the policy takes in one chunk reports no count at all", async (ctx) => {
