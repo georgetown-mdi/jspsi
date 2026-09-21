@@ -456,17 +456,41 @@ const FILE_EXISTS_REASON =
   ": it already exists (another process may have created it concurrently)";
 
 /**
+ * What a refused narrowing leaves at the destination path, which is the one
+ * thing the two Windows writers differ on: the credential writer narrows a
+ * temp file and its failure path removes it, so the destination keeps
+ * whatever it held, while the streamed result CSV narrows the destination
+ * itself after unlinking what was there, so an empty file stays behind. See
+ * docs/spec/CREDENTIAL_STORAGE.md#result-csv-output.
+ */
+type AclRestrictLeftover = "destination-untouched" | "empty-file-left";
+
+/**
  * The refusal both Windows writers raise when icacls could not narrow the
  * destination's access list: the run refuses to put content in a file whose
- * ACL it could not restrict.
+ * ACL it could not restrict, and states what is at `destPath` afterwards so
+ * the operator is left with neither an unexplained file nor a missing one.
  */
-function aclRestrictFailureMessage(destPath: string): MessageWithOperatorText {
-  return messageWithOperatorText`Could not restrict ACLs on ${operatorSuppliedText(
-    destPath,
-  )}${ACL_RESTRICT_REMEDY}`;
+function aclRestrictFailureMessage(
+  destPath: string,
+  leftover: AclRestrictLeftover,
+): MessageWithOperatorText {
+  const marked = operatorSuppliedText(destPath);
+  const outcome =
+    leftover === "empty-file-left"
+      ? ACL_RESTRICT_EMPTY_FILE_LEFT
+      : ACL_RESTRICT_DESTINATION_UNTOUCHED;
+  return messageWithOperatorText`Could not restrict ACLs on ${marked}${outcome}${ACL_RESTRICT_REMEDY}`;
 }
 
-/** What {@link aclRestrictFailureMessage} states behind the path. */
+/**
+ * What {@link aclRestrictFailureMessage} states behind the path: the leftover
+ * its call site chooses, then the remedy both share.
+ */
+const ACL_RESTRICT_DESTINATION_UNTOUCHED =
+  "; no content was written and that path is unchanged";
+const ACL_RESTRICT_EMPTY_FILE_LEFT =
+  "; no rows were written, and the empty file left at that path replaced any file already there";
 const ACL_RESTRICT_REMEDY =
   "; restrict manually to owner-read-only via icacls or File Properties";
 
@@ -584,8 +608,12 @@ export function writeFileOwnerOnly(
           );
         } catch {
           // State a clear remediation; the outer catch removes the placeholder,
-          // which this branch's close has already released.
-          const message = aclRestrictFailureMessage(destPath);
+          // which this branch's close has already released, so the destination
+          // is left as the run found it.
+          const message = aclRestrictFailureMessage(
+            destPath,
+            "destination-untouched",
+          );
           throw keepOperatorSuppliedText(new Error(message.text), message);
         }
         fs.writeFileSync(fd, content, "utf8");
@@ -833,9 +861,10 @@ export function createOwnerOnlyWriteStream(destPath: string): fs.WriteStream {
         { stdio: "ignore", timeout: 5000 },
       );
     } catch {
-      // Surface a clear remediation rather than stream PII into a file whose ACL
-      // we could not restrict; the empty placeholder is left for the operator.
-      const message = aclRestrictFailureMessage(destPath);
+      // Report a clear remediation rather than stream PII into a file whose ACL
+      // we could not restrict; the empty placeholder is left for the operator,
+      // standing where the unlink above removed any previous result.
+      const message = aclRestrictFailureMessage(destPath, "empty-file-left");
       throw keepOperatorSuppliedText(new Error(message.text), message);
     }
     // The narrowed ACL is a property of the file object and survives the reopen:

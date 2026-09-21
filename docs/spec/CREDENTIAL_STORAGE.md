@@ -489,9 +489,10 @@ so no key material is written. The result CSV has no temp path, so its
 pre-narrowing file IS the destination: a refusal leaves an empty file at the
 output path, and on Windows it leaves one where the previous run's result used to
 be, that file having been unlinked before the narrowing was attempted. Both
-writers raise one and the same text, which names the path and the manual remedy
-and states neither the leftover nor the removed prior result, so the divergence
-is recorded here.
+writers raise the same refusal, which names the path and the manual remedy, and
+each states the divergence in it: the credential writer that no content was
+written and the path is unchanged, the result CSV that no rows were written and
+that the empty file left there replaced any file already at the path.
 
 Unlike the credential writers, the CSV is streamed directly to the output path
 (the result set may be large) rather than written through the

@@ -1024,6 +1024,109 @@ describe("extended-ACL strip failure reporting", () => {
   );
 });
 
+// --- Windows ACL narrowing refusal -------------------------------------------
+
+// Put both Windows writers in front of an `icacls` that fails, on any host.
+// The failure is what `execFileSync` really throws for a command it cannot
+// spawn, captured from the runtime rather than hand-built; only `icacls` is
+// answered, so `whoami` still runs for real. The writers reach their own
+// narrowing step either way, which is where the refusal under test is raised.
+function failIcacls(): void {
+  const failure = capturedExecFileFailure(() =>
+    childProcess.execFileSync(path.join(dir, "no-such-icacls"), [], {
+      stdio: "ignore",
+    }),
+  );
+  execFile.respond = (file) => {
+    if (file !== "icacls") return undefined;
+    throw failure;
+  };
+}
+
+const ACL_REMEDY =
+  "; restrict manually to owner-read-only via icacls or File Properties";
+
+// The two writers raise the same refusal but leave different things at the
+// destination, so each states its own: an operator reading one has to know
+// whether to go looking for a file or for the rows that are missing.
+describe("Windows ACL narrowing refusal", () => {
+  test("the credential writer states the destination is unchanged", () => {
+    const dest = path.join(dir, "secret");
+    writeFileOwnerOnly(dest, "original");
+    failIcacls();
+
+    const thrown = catchThrown(() =>
+      withPlatform("win32", () => writeFileOwnerOnly(dest, "rotated")),
+    ) as Error;
+
+    expect(thrown.message).toBe(
+      `Could not restrict ACLs on ${dest}; no content was written and that ` +
+        `path is unchanged${ACL_REMEDY}`,
+    );
+    // The statement against the disk it describes: the file the narrowing
+    // failed on was the temp path, so the previous credential still stands.
+    expect(fs.readFileSync(dest, "utf8")).toBe("original");
+    expect(fs.readdirSync(dir).filter((n) => n.includes(".tmp."))).toEqual([]);
+  });
+
+  test("the result-CSV writer names the empty file left at the path", () => {
+    const dest = path.join(dir, "result.csv");
+    fs.writeFileSync(dest, "previous,result\n");
+    failIcacls();
+
+    const thrown = catchThrown(() =>
+      withPlatform("win32", () => createOwnerOnlyWriteStream(dest)),
+    ) as Error;
+
+    expect(thrown.message).toBe(
+      `Could not restrict ACLs on ${dest}; no rows were written, and the ` +
+        `empty file left at that path replaced any file already there${ACL_REMEDY}`,
+    );
+    // Both statements against the disk: an empty file stands at the output
+    // path, and the previous result it replaced is gone.
+    expect(fs.readFileSync(dest, "utf8")).toBe("");
+  });
+
+  test("both refusals name the path and the same manual remedy", () => {
+    const secret = path.join(dir, "secret");
+    const csv = path.join(dir, "result.csv");
+    failIcacls();
+
+    const messages = withPlatform("win32", () => [
+      (catchThrown(() => writeFileOwnerOnly(secret, "x")) as Error).message,
+      (catchThrown(() => createOwnerOnlyWriteStream(csv)) as Error).message,
+    ]);
+
+    expect(messages[0]).toContain(secret);
+    expect(messages[1]).toContain(csv);
+    for (const message of messages) {
+      expect(message.startsWith("Could not restrict ACLs on ")).toBe(true);
+      expect(message.endsWith(ACL_REMEDY)).toBe(true);
+    }
+  });
+
+  test.skipIf(process.platform === "win32")(
+    "no POSIX refusal claims the destination was replaced",
+    () => {
+      // Unlinking the destination before narrowing it is the Windows sequence
+      // alone: the POSIX writer opens the file in place, so a file already at
+      // the output path keeps its rows through a refusal there and the
+      // operator must not be told it was replaced.
+      const dest = path.join(dir, "result.csv");
+      fs.writeFileSync(dest, "previous,result\n");
+      failAclStripWith(capturedChmodRefusal());
+
+      const thrown = catchThrown(() =>
+        withPlatform("darwin", () => createOwnerOnlyWriteStream(dest)),
+      ) as Error;
+
+      expect(thrown.message).toMatch(STRIP_REFUSAL);
+      expect(thrown.message).not.toContain("replaced");
+      expect(fs.readFileSync(dest, "utf8")).toBe("previous,result\n");
+    },
+  );
+});
+
 // --- extended-ACL strip: symlink posture -------------------------------------
 
 // Arm the `execFileSync` recorder declared at the top of this file and hand back
