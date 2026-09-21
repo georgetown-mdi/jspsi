@@ -7,9 +7,9 @@ name: CLI Build and Test
 # relies on (see docs/spec/DEPENDENCY_PINS.md, "Upgrading the SFTP Stack"); the same
 # integration suite also runs in release.yaml as the ship gate before publish.
 #
-# Scoped by path to CLI-affecting changes. If this job is made a required
-# status check, configure branch protection so a path-skipped run does not
-# block an unrelated PR -- a skipped required check otherwise stays pending.
+# Scoped by path to CLI-affecting changes. If the terminal `Test` job is made a
+# required status check, configure branch protection so a path-skipped run does
+# not block an unrelated PR -- a skipped required check otherwise stays pending.
 
 on:
   pull_request:
@@ -42,76 +42,144 @@ permissions:
   contents: read
 
 jobs:
+  # The six suites this gate runs share no mutable state, so they run as
+  # parallel legs of one matrix rather than as serial steps of one job, and the
+  # gate's wall time is its slowest suite rather than their sum. Each leg is a
+  # runner of its own, and within a leg each suite stands up everything it
+  # touches: the SFTP suite's server binds loopback on an ephemeral port
+  # (test/sftpServer/inProcessServer.ts, test/sftpServer/nativeSshdServer.ts)
+  # under a globalSetup only the `integration` project references
+  # (test/sftpServer/globalSetup.ts); the WebRTC suite spawns a broker per file
+  # that reports the port it chose (test/signaling/brokerProcess.ts) behind
+  # loopback listeners on ephemeral ports (test/signaling/tlsBrokerFront.ts,
+  # test/signaling/sniVhost.ts); the backend-agnostic and cross-runtime suites
+  # each work in a fresh mkdtemp directory. Nothing crosses a leg boundary.
+  #
+  # The terminal `test` job below holds one stable name for a required status
+  # check to name, since each leg's own check-run name carries its leg values.
+  suite:
+    name: Test (${{ matrix.suite }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: unit
+            command: npm run test:unit -w apps/cli
+          # Integration tests exercise the real ssh2 SFTPWrapper contract end to
+          # end (unit tests run against mocks), so they are what actually
+          # catches a dependency bump that breaks the coupling. The suite is
+          # self-managing: a vitest globalSetup starts the SFTP test server
+          # before it and stops it after, so no extra setup step is needed.
+          #
+          # PSILINK_REQUIRE_WORKER_BUILD=1 makes the real-worker offload suite
+          # FAIL (not skip) if the CLI bundle is missing, so a regressed build
+          # step cannot let that suite silently no-op green here -- mirroring
+          # PSILINK_SFTP_CHROOT_REQUIRED in the chroot leg. It is set on the two
+          # legs that build the CLI, this one and the native sshd leg; the
+          # hardened legs do not build it and skip.
+          - suite: in-process sftp
+            command: npm run test:integration -w apps/cli
+            build-cli: "true"
+            require-worker-build: "1"
+          # The WebRTC suite is a vitest project of its own
+          # (apps/cli/vitest.config.mts) so it runs exactly once per pull
+          # request, here. It drives two loopback werift peers through the
+          # vendored broker it spawns itself, which the SFTP backend has no
+          # bearing on, so repeating it on the native leg and on each
+          # hardened-sshd matrix leg would buy nothing for several minutes of
+          # runner time. Those legs run the `integration` project, which
+          # excludes it.
+          - suite: webrtc
+            command: npm run test:integration:webrtc -w apps/cli
+          # The integration files no SFTP backend differentiates are a project
+          # of their own for the same reason (apps/cli/vitest.config.mts): each
+          # drives a filedrop directory or a listener of its own, so repeating
+          # them on the native and hardened-sshd legs would buy nothing.
+          - suite: backend-agnostic
+            command: npm run test:integration:backend-agnostic -w apps/cli
+          # The cross-runtime suite: the built CLI meeting a party assembled
+          # from the web app's own exchange modules over one file-drop
+          # directory. It is a web-workspace script because only that workspace
+          # may import apps/web/src, but the drift it catches lands as readily
+          # on this side of the wire, so it runs on this workflow's path filter
+          # as well as on the web app's own
+          # (.github/workflows/eb_build_and_test.yaml). It stands up no server
+          # and no browser, and it spawns the CLI from apps/cli/dist
+          # (apps/web/test/interop/cliParty.ts), so this leg builds it.
+          - suite: cross-runtime interop
+            command: npm run test:interop -w apps/web
+            build-cli: "true"
+          # A second run of the same suite against a native OpenSSH sshd, so the
+          # adapter is also exercised against a real server.
+          - suite: native sshd
+            command: npm run test:integration -w apps/cli
+            sftp-backend: native
+            native-sshd: "true"
+            build-cli: "true"
+            require-worker-build: "1"
+    steps:
+      - uses: actions/checkout@v7
+      # Pins Node, installs from the lockfile, and builds @psilink/core. Those
+      # two are what every leg would otherwise repeat; the action restores both
+      # from content-keyed caches, so they are paid once per lockfile and
+      # core-source state across the whole repository rather than once per leg.
+      - uses: ./.github/actions/setup
+      # sshd ships on the Ubuntu runner, but its build fatally checks for the
+      # privilege-separation directory at startup even when run unprivileged.
+      - name: Create the sshd privilege-separation directory
+        if: matrix.native-sshd == 'true'
+        run: sudo mkdir -p /run/sshd
+      # The three legs that read apps/cli/dist build it themselves rather than
+      # taking it from a producer job. The build is 6.5 s over a 1.6 MB tree
+      # (measured locally), so a job of its own -- runner start, checkout,
+      # setup, and an artifact round trip -- would cost more runner time than
+      # the one repeated build it saves, and would serialize ahead of the
+      # slowest suite.
+      - name: Build CLI
+        if: matrix.build-cli == 'true'
+        run: npm run build -w apps/cli
+      - name: Run the ${{ matrix.suite }} suite
+        run: ${{ matrix.command }}
+        env:
+          # Absent from a matrix entry these read as the empty string, which
+          # both readers treat as unset: apps/cli/test/sftpServer/index.ts maps
+          # "" to the in-process backend, and
+          # apps/cli/test/integration/psiWorkerRealWorker.test.ts compares
+          # against the literal "1".
+          PSILINK_REQUIRE_WORKER_BUILD: ${{ matrix.require-worker-build }}
+          PSILINK_SFTP_BACKEND: ${{ matrix.sftp-backend }}
+
+  # The one job name a required status check can name, standing for every suite
+  # leg above. `if: always()` is what makes it usable as one: without it a failed
+  # leg leaves this job skipped, and a skipped required check stays pending
+  # rather than red, so the pull request would be unmergeable with nothing red
+  # to show for it.
   test:
     name: Test
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 5
+    needs: suite
+    if: always()
     steps:
-      - uses: actions/checkout@v7
-      # Pins Node, installs from the lockfile, and builds @psilink/core.
-      - uses: ./.github/actions/setup
-      - name: Build CLI
-        run: npm run build -w apps/cli
-      - name: Unit tests (CLI)
-        run: npm run test:unit -w apps/cli
-      # Integration tests exercise the real ssh2 SFTPWrapper contract end to end
-      # (unit tests run against mocks), so they are what actually catches a
-      # dependency bump that breaks the coupling. The suite is self-managing: a
-      # vitest globalSetup starts the SFTP test server before the suite and stops
-      # it after, so no extra setup step is needed.
-      #
-      # PSILINK_REQUIRE_WORKER_BUILD=1 makes the real-worker offload suite FAIL (not
-      # skip) if the CLI bundle built above is missing, so a regressed build step
-      # cannot let that suite silently no-op green here -- mirroring
-      # PSILINK_SFTP_CHROOT_REQUIRED in the chroot leg. It is set only on this leg,
-      # which builds the CLI; the hardened/native legs do not build it and skip.
-      - name: Integration tests (CLI, in-process server)
-        run: npm run test:integration -w apps/cli
+      - name: Report the suite results
         env:
-          PSILINK_REQUIRE_WORKER_BUILD: "1"
-      # The WebRTC suite is a vitest project of its own (apps/cli/vitest.config.mts)
-      # so it runs exactly once per pull request, here. It drives two loopback
-      # werift peers through the vendored broker it spawns itself, which the SFTP
-      # backend has no bearing on, so repeating it on the native leg below and on
-      # each hardened-sshd matrix leg would buy nothing for several minutes of
-      # runner time. Those legs run the `integration` project, which excludes it.
-      - name: WebRTC integration tests (CLI)
-        run: npm run test:integration:webrtc -w apps/cli
-      # The integration files no SFTP backend differentiates are a project of
-      # their own for the same reason (apps/cli/vitest.config.mts): each drives a
-      # filedrop directory or a listener of its own, so repeating them on the
-      # native leg below and on each hardened-sshd matrix leg would buy nothing.
-      - name: Backend-agnostic integration tests (CLI)
-        run: npm run test:integration:backend-agnostic -w apps/cli
-      # The cross-runtime suite: the CLI built above meeting a party assembled
-      # from the web app's own exchange modules over one file-drop directory. It
-      # is a web-workspace script because only that workspace may import
-      # apps/web/src, but the drift it catches lands as readily on this side of
-      # the wire, so it runs on this workflow's path filter as well as on the web
-      # app's own (.github/workflows/eb_build_and_test.yaml). It stands up no
-      # server and no browser.
-      - name: CLI/web cross-runtime interop
-        run: npm run test:interop -w apps/web
-      # A second leg runs the same suite against a native OpenSSH sshd, so the
-      # adapter is also exercised against a real server. sshd ships on the Ubuntu
-      # runner, but its build fatally checks for the privilege-separation
-      # directory at startup even when run unprivileged, so create it here.
-      - name: Integration tests (CLI, native sshd server)
+          RESULT: ${{ needs.suite.result }}
         run: |
-          sudo mkdir -p /run/sshd
-          npm run test:integration -w apps/cli
-        env:
-          PSILINK_SFTP_BACKEND: native
+          echo "suite legs: $RESULT"
+          test "$RESULT" = success
 
   # Phase 3 hardened native-sshd profiles. The same conformance suite runs against
   # the native backend under each hardened configuration real deployments use
   # (restricted kex/cipher policy, connection/auth rate limits, an explicit user
   # allowlist), proving the pure-JS ssh2 adapter still negotiates and runs under
-  # them. Additive and parallel: the in-process and baseline native legs in the
-  # `test` job above are unchanged. Integration tests import the adapter from src
-  # (vitest transpiles) and consume @psilink/core from the setup action's build,
-  # so no CLI build step is needed. If the added CI minutes prove too costly, trim
-  # this matrix -- the three hardened profiles are independent legs.
+  # them. Additive and parallel: the in-process and native sshd legs of the
+  # `suite` matrix above are unchanged. Integration tests import the adapter
+  # from src (vitest transpiles) and consume @psilink/core from the setup
+  # action's build, so no CLI build step is needed. If the added CI minutes
+  # prove too costly, trim this matrix -- the three hardened profiles are
+  # independent legs.
   hardened-native:
     name: Hardened native sshd (${{ matrix.profile }})
     runs-on: ubuntu-latest
@@ -126,7 +194,7 @@ jobs:
       - name: Integration tests (CLI, native sshd, ${{ matrix.profile }} profile)
         run: |
           # sshd fatally checks for its privilege-separation directory at startup
-          # even when run unprivileged (as the baseline native leg notes), so
+          # even when run unprivileged (as the native sshd leg notes), so
           # create it here.
           sudo mkdir -p /run/sshd
           npm run test:integration -w apps/cli
