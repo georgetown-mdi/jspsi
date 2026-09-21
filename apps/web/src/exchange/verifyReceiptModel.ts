@@ -76,10 +76,12 @@ import type {
  * Every embedded string has passed the display boundary before it reaches this
  * model's output: a malformed document's parse error through
  * {@link sanitizeErrorForDisplay} here, a certificate identity (free text its
- * holder chose) through {@link sanitizeForDisplay} here, and a reconstruction
- * warning as core composed it -- fixed copy, with the one supplied column name
- * escaped and capped where it was interpolated -- which this model passes
- * through without a second pass. Nothing here echoes an unsanitized byte of a
+ * holder chose) through {@link sanitizeForDisplay} here, the per-exchange
+ * binder {@link signedVerdictViewModel} composes through
+ * {@link sanitizeForDisplay} here, and a reconstruction warning as core
+ * composed it -- fixed copy, with the one supplied column name escaped and
+ * capped where it was interpolated -- which this model passes through
+ * without a second pass. Nothing here echoes an unsanitized byte of a
  * supplied file.
  */
 
