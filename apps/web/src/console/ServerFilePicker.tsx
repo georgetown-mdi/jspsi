@@ -65,15 +65,6 @@ const PROFILE_UNAVAILABLE_COPY: Record<
   },
 };
 
-/**
- * What a parent did with the profile the confirm stage offered it. `"refused"`
- * holds that stage open on the file, which is what lets a delimiter change re-read
- * the very file the refusal is about. A parent that returns nothing closes the
- * stage, which is where a refusal telling the operator to choose the file again
- * leaves them.
- */
-export type FileCommitOutcome = "committed" | "refused";
-
 /** The listing settle copy for the aria-live status region. */
 function listingLiveMessage(listing: JobInputsResult | "loading"): string {
   if (listing === "loading") return "";
@@ -118,19 +109,16 @@ function profileLiveMessage(
  * is showing -- and holds the confirm stage on it: its columns were read by the
  * delimiter in effect when it was opened, and a commitment the run would not
  * reproduce is worse than a second confirmation. A file already committed is voided
- * at the same moment ({@link onInvalidate}). A choice the rule refuses closes the
- * row actions and the parent's gate but leaves an open confirm stage as it was;
- * what a commit made there stores is the parent's own rule, and a stored one is
- * voided once the choice resolves.
- *
- * A commit the parent will not take ({@link FileCommitOutcome}) leaves the confirm
- * stage open on that file, so it is still the file on screen: the delimiter change
- * above re-profiles the very file the refusal is about, and the commit that
- * follows answers it, with no trip through the listing in between.
+ * at the same moment ({@link onInvalidate}). A choice the rule refuses profiles
+ * nothing, so the row actions close and an open confirm stage stays on the file
+ * it was showing, with its commit disabled where the parent asks for that
+ * ({@link commitWithheld}) -- the delimiter change that resolves the choice then
+ * re-reads that very file, with no trip through the listing in between.
  */
 export function ServerFilePicker({
   committed,
   delimiter,
+  commitWithheld,
   onUse,
   onInvalidate,
 }: {
@@ -141,10 +129,13 @@ export function ServerFilePicker({
    * resolved it. Omitted where the surface offers no control, which reads commas;
    * a refused choice selects no file, as the hosted build's dropzone closes. */
   delimiter?: CsvDelimiterResolution;
-  /** Commit a profiled file to the console -- the second stage's "Use this file".
-   * Return `"refused"` where the parent stores nothing, to hold the confirm stage
-   * open on that file; returning nothing closes it. */
-  onUse: (profile: ProfiledJobInput) => FileCommitOutcome | void;
+  /** Set while the parent will not take a commit -- its own gate is closed on
+   * something it states itself -- so the confirm stage disables "Use this file"
+   * rather than offering a click that stores nothing. */
+  commitWithheld?: boolean;
+  /** Commit a profiled file to the console -- the second stage's "Use this
+   * file". */
+  onUse: (profile: ProfiledJobInput) => void;
   /** The committed file's columns were read by a delimiter that no longer applies:
    * the parent drops the commit and everything derived from it, and holds its own
    * Continue until a fresh "Use this file". */
@@ -222,7 +213,7 @@ export function ServerFilePicker({
   }
 
   function useProfiled(profiled: ProfiledJobInput) {
-    if (onUse(profiled) === "refused") return;
+    onUse(profiled);
     cancelSelection();
   }
 
@@ -269,6 +260,7 @@ export function ServerFilePicker({
           <ConfirmPanel
             name={selectedName}
             profile={profile}
+            commitWithheld={commitWithheld === true}
             onUse={useProfiled}
             onCancel={cancelSelection}
             onRetry={() => void selectFile(selectedName)}
@@ -527,12 +519,16 @@ export function FileProfileSummary({ profile }: { profile: ProfiledJobInput }) {
 function ConfirmPanel({
   name,
   profile,
+  commitWithheld,
   onUse,
   onCancel,
   onRetry,
 }: {
   name: string;
   profile: JobInputProfileResult | "loading" | undefined;
+  /** Set while the parent will not take a commit: the control is disabled with
+   * no second message, the parent stating the reason beside its own gate. */
+  commitWithheld: boolean;
   onUse: (profile: ProfiledJobInput) => void;
   onCancel: () => void;
   onRetry: () => void;
@@ -584,7 +580,9 @@ function ConfirmPanel({
       <h2 style={{ margin: 0 }}>Confirm this file</h2>
       <FileProfileSummary profile={profiled} />
       <Group>
-        <Button onClick={() => onUse(profiled)}>Use this file</Button>
+        <Button disabled={commitWithheld} onClick={() => onUse(profiled)}>
+          Use this file
+        </Button>
         <Button variant="default" onClick={onCancel}>
           Choose another file
         </Button>

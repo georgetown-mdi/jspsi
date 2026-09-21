@@ -488,9 +488,10 @@ describe("direct exchange confirm and run", () => {
   test("a header the strip emptied is refused by that cause, notice beside it", async () => {
     // The committed profile is the body the console's own parse returns for a
     // header whose middle column is only direction characters
-    // (unnamedColumnProfiles). The refusal drops the file, so the confirm screen
-    // that otherwise states the removal is never reached: the file step states it
-    // beside the refusal, which names the removal rather than a trailing comma.
+    // (unnamedColumnProfiles). The step will not run that read, so the confirm
+    // screen that otherwise states the removal is never reached: the file step
+    // states it beside the refusal, which names the removal rather than a
+    // trailing comma.
     stubJobApi({
       sftp: CONFIGURED_SFTP,
       profile: { ...CLIENTS_PROFILE, ...CONTROLS_ONLY_HEADER_PROFILE },
@@ -515,7 +516,7 @@ describe("direct exchange confirm and run", () => {
         ),
       )
       .toBeInTheDocument();
-    // The refused file did not commit: the spine stays on its file step.
+    // A read the step refuses does not advance it.
     await expect
       .element(page.getByRole("heading", { level: 1, name: "Your file" }))
       .toBeInTheDocument();
@@ -583,10 +584,10 @@ describe("direct exchange confirm and run", () => {
     expect(app.container.textContent).not.toContain("Selected");
   });
 
-  test("a delimiter the rule refuses holds the spine on the file step", async () => {
-    // The refused choice reads nothing, so the step cannot move on to a run that
-    // would read the file with commas nobody chose. The gate is this step's, as
-    // the invitation steps withhold their own Continue.
+  test("a delimiter the rule refuses withholds the commit", async () => {
+    // A choice the rule refuses reads nothing, so there is no file for the step
+    // to take: the commit is withheld rather than offered as a click that
+    // stores nothing, and the step holds no file until the choice resolves.
     stubJobApi({ sftp: CONFIGURED_SFTP });
     app.render(createElement(DirectExchangeScreen));
     await page.getByRole("button", { name: "Select clients.csv" }).click();
@@ -598,20 +599,32 @@ describe("direct exchange confirm and run", () => {
       page.getByLabelText("Field separator character"),
       "||",
     );
-    await page.getByRole("button", { name: "Use this file" }).click();
 
+    await expect
+      .element(page.getByRole("button", { name: "Use this file" }))
+      .toBeDisabled();
     await expect
       .element(page.getByRole("heading", { level: 1, name: "Your file" }))
       .toBeInTheDocument();
 
-    // It also stores nothing: the columns behind that click were read by a
-    // choice the operator has moved off, and the one in force is refused, so the
-    // step holds no file until a delimiter it can read by is set.
+    // Nothing stands behind that stage either: the listing marks no file, and
+    // its own actions are closed while the choice is refused.
     await page.getByRole("button", { name: "Choose another file" }).click();
     await expect
       .element(page.getByRole("button", { name: "Select clients.csv" }))
-      .toBeInTheDocument();
+      .toBeDisabled();
     expect(app.container.textContent).not.toContain("Selected");
+
+    // A delimiter the rule takes opens both again, and the commit the step was
+    // withholding goes through.
+    await userEvent.fill(page.getByLabelText("Field separator character"), "|");
+    await page.getByRole("button", { name: "Select clients.csv" }).click();
+    await page.getByRole("button", { name: "Use this file" }).click();
+    await expect
+      .element(
+        page.getByRole("heading", { level: 1, name: "The agreed server" }),
+      )
+      .toBeInTheDocument();
   });
 
   test("a one-column read is refused on the step that holds the control", async () => {
@@ -649,6 +662,12 @@ describe("direct exchange confirm and run", () => {
         page.getByText("client_id, first_name, last_name, dob, program_code"),
       )
       .toBeInTheDocument();
+    // The refusal is read off the committed file, so it leaves with the read it
+    // described -- on the change itself, before the operator clicks anything.
+    expect(app.container.textContent).not.toContain(
+      CSV_DELIMITER_SINGLE_COLUMN_REMEDY,
+    );
+
     await page.getByRole("button", { name: "Use this file" }).click();
     await expect
       .element(
@@ -681,8 +700,7 @@ describe("direct exchange confirm and run", () => {
   test("a one-column detect read is refused, and a named separator answers it", async () => {
     // Detection reads the file itself, so a file it cannot split comes back as
     // the same single column a mis-set separator produces -- and the remedy is
-    // the same control. The refusal has to clear on the reading that answers it,
-    // or the operator is left acting on an alert they have already acted on.
+    // the same control.
     stubJobApi({
       sftp: CONFIGURED_SFTP,
       profileByDelimiter: (read) =>
@@ -710,22 +728,18 @@ describe("direct exchange confirm and run", () => {
         page.getByText("client_id, first_name, last_name, dob, program_code"),
       )
       .toBeInTheDocument();
+    // The reading that answered the refusal took it off the screen, so the
+    // operator is not left acting on an alert they have already acted on.
+    expect(app.container.textContent).not.toContain(
+      CSV_DELIMITER_SINGLE_COLUMN_REMEDY,
+    );
+
     await page.getByRole("button", { name: "Use this file" }).click();
     await expect
       .element(
         page.getByRole("heading", { level: 1, name: "The agreed server" }),
       )
       .toBeInTheDocument();
-
-    // The refusal went with the reading that produced it: the step it was shown
-    // on no longer states it.
-    await page.getByRole("button", { name: "Back" }).click();
-    await expect
-      .element(page.getByRole("heading", { level: 1, name: "Your file" }))
-      .toBeInTheDocument();
-    expect(app.container.textContent).not.toContain(
-      CSV_DELIMITER_SINGLE_COLUMN_REMEDY,
-    );
   });
 
   test("names the header positions the console's parse stripped", async () => {

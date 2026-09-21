@@ -5,7 +5,6 @@ import { resolveCsvDelimiter } from "@components/csvDelimiterChoice";
 
 import type {
   JobInputProfileResult,
-  ProfiledJobInput,
   WorkInputReference,
 } from "@psi/jobClient/workInputClient";
 import type { CsvDelimiterResolution } from "@components/csvDelimiterChoice";
@@ -398,85 +397,40 @@ describe("a cancel after the void commits nothing", () => {
   });
 });
 
-describe("a commit the parent will not take holds the stage on that file", () => {
-  /** The profiled file the confirm stage is holding, as "Use this file" hands it
-   * to the parent. */
-  function stagedProfile(tree: unknown): ProfiledJobInput {
-    const profile = findProp<JobInputProfileResult | "loading">(
-      tree,
-      "profile",
-    );
-    if (
-      profile === undefined ||
-      profile === "loading" ||
-      profile.kind !== "profile"
-    )
-      throw new Error("expected a profiled file at the confirm stage");
-    return profile.profile;
-  }
-
-  /** Open the confirm stage on "b.csv" and offer its profile to `onUse`, which is
-   * the parent's own commit rule. Returns the tree the offer was made from. */
-  async function commitStaged(
-    render: (delimiter: CsvDelimiterResolution) => unknown,
-  ): Promise<unknown> {
-    render(COMMA);
-    await settle();
-    findProp<(name: string) => void>(render(COMMA), "onSelect")?.("b.csv");
-    await settle();
-    const confirming = render(COMMA);
-    expect(confirmedColumns(confirming)).toEqual(COMMA_COLUMNS);
-    findProp<(profile: ProfiledJobInput) => void>(
-      confirming,
-      "onUse",
-    )?.(stagedProfile(confirming));
-    return confirming;
-  }
-
-  test("the next delimiter re-reads it, with no return to the listing", async () => {
-    const onUse = vi.fn(() => "refused" as const);
-    const render = (delimiter: CsvDelimiterResolution): unknown =>
+describe("the confirm stage's commit is the parent's to withhold", () => {
+  /** Open the confirm stage on "b.csv" under `commitWithheld`, and report what the
+   * stage was handed: the confirm panel renders the commit control, so this is
+   * where the withholding lands (`directExchange.test.ts` pins the disabled
+   * button itself, which needs a DOM). */
+  async function stagedWithholding(
+    commitWithheld: boolean,
+  ): Promise<boolean | undefined> {
+    const render = (): unknown =>
       reactHarness.render(() =>
         ServerFilePicker({
           committed: undefined,
-          delimiter,
-          onUse,
+          delimiter: COMMA,
+          commitWithheld,
+          onUse: () => {},
           onInvalidate: NO_INVALIDATE,
         }),
       );
-
-    await commitStaged(render);
-    expect(onUse).toHaveBeenCalledTimes(1);
-    // The parent stores nothing and shows its refusal, so the file is still what
-    // the operator is looking at.
-    expect(confirmedColumns(render(COMMA))).toEqual(COMMA_COLUMNS);
-
-    render(TAB);
+    render();
     await settle();
-    // Setting the file's own separator re-reads THAT file: the refusal is
-    // answered from the stage it was raised on, with no re-selection in between.
-    expect(profileRequests).toEqual([
-      { name: "b.csv", delimiter: "," },
-      { name: "b.csv", delimiter: "\t" },
-    ]);
-    expect(confirmedColumns(render(TAB))).toEqual(TAB_COLUMNS);
+    findProp<(name: string) => void>(render(), "onSelect")?.("b.csv");
+    await settle();
+    const confirming = render();
+    expect(confirmedColumns(confirming)).toEqual(COMMA_COLUMNS);
+    return findProp<boolean>(confirming, "commitWithheld");
+  }
+
+  test("a parent that will not take a commit has the control withheld", async () => {
+    // Offering a click that stores nothing is what the withholding replaces: the
+    // parent's own gate is closed, and it states beside its control why.
+    expect(await stagedWithholding(true)).toBe(true);
   });
 
-  test("a commit the parent takes returns the operator to the listing", async () => {
-    const onUse = vi.fn();
-    const render = (delimiter: CsvDelimiterResolution): unknown =>
-      reactHarness.render(() =>
-        ServerFilePicker({
-          committed: undefined,
-          delimiter,
-          onUse,
-          onInvalidate: NO_INVALIDATE,
-        }),
-      );
-
-    await commitStaged(render);
-    const listing = render(COMMA);
-    expect(confirmedColumns(listing)).toBeUndefined();
-    expect(findProp<(name: string) => void>(listing, "onSelect")).toBeDefined();
+  test("a parent that will take one has it offered", async () => {
+    expect(await stagedWithholding(false)).toBe(false);
   });
 });

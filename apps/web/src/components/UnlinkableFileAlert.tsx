@@ -54,7 +54,7 @@ function missingFieldsDetail(fields: ReadonlyArray<LinkageField>): string {
  * and the delimiter is the operator's to change here, unlike the terms this copy
  * otherwise sends them to. Every seat rendering this alert holds a file read
  * under that control -- the direct spine refuses the one-column reading on the
- * file step itself ({@link directFileCommit}), and the mint gates re-check a file
+ * file step itself ({@link directFileRefusal}), and the mint gates re-check a file
  * the inviter's file step took -- so the sentence names a control the operator
  * has.
  *

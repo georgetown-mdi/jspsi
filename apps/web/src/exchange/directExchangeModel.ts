@@ -302,30 +302,25 @@ export function previewInferredTerms(
 }
 
 /**
- * What the file step holds: the mounted file committed to the run, the refusal
- * standing against the last commit, and the advisory about what the console's
- * parse removed from that file's header. One value rather than three, so a
- * commit and a voiding each move the whole step at once.
+ * What the file step holds: the mounted file committed to the run, and nothing
+ * else. What the step states over that file -- the refusal it will not advance
+ * past, the advisory about what the parse removed -- is read from the file
+ * itself ({@link directFileRefusal}, {@link directFileSanitizedNotice}), so
+ * neither can outlive the read it describes.
  */
 export interface DirectFileState {
   /** The profiled mounted file the rest of the spine reads, or undefined where
-   * the step holds none -- nothing committed yet, a refused commit, or a commit
-   * a delimiter change voided. */
+   * the step holds none -- nothing committed yet, or a commit a delimiter change
+   * voided. */
   source?: ProfiledJobInput;
-  /** The refusal the step shows over the file it would not take. */
-  alert?: AlertContent;
-  /** What the parse removed from the committed file's header. Held here rather
-   * than read off the profile, so it is still stated when the same read leaves a
-   * column unnamed and the commit is refused. */
-  notice?: AlertContent;
 }
 
 /**
  * The file step holding nothing: where it starts, and where a delimiter change
- * under a committed file returns it. The commit and both notices go together,
- * since those columns were read by the delimiter in effect when the file was
- * opened and the run reads the file by the new one -- a set of columns the run
- * does not produce cannot survive into the terms this party confirms.
+ * under a committed file returns it. Those columns were read by the delimiter in
+ * effect when the file was opened and the run reads the file by the new one, so a
+ * set of columns the run does not produce cannot survive into the terms this
+ * party confirms.
  */
 export const DIRECT_NO_FILE: DirectFileState = {};
 
@@ -349,28 +344,41 @@ function singleColumnRefusal(
 }
 
 /**
- * The file step's state once the picker commits `profile`.
+ * Why the file step will not run the committed read, or `undefined` when
+ * nothing stops it.
  *
- * A blank header cell is refused here with the shared unnameable alert --
- * core's inferMetadata would otherwise throw at preview time -- and the refusal
- * holds no profile, so the confirm step cannot read a file this step refused.
- * The removal notice is stated either way, beside the refusal it caused.
- *
- * A read that came back as ONE column is refused here too when the grading
- * refuses it, on the step holding the delimiter control that alert's remedy
- * names: that reading is what a file separated by another character produces,
- * and this step is where the operator changes it. The confirm step grades the
- * committed file again, for the refusals this one-column gate does not cover.
+ * A blank header cell is refused with the shared unnameable alert -- core's
+ * inferMetadata would otherwise throw at preview time. A read that came back as
+ * ONE column is refused on the step holding the delimiter control that alert's
+ * remedy names: that reading is what a file separated by another character
+ * produces, and this step is where the operator changes it. The confirm step
+ * grades the committed file again, for the refusals this step does not cover.
  */
-export function directFileCommit(profile: ProfiledJobInput): DirectFileState {
-  const stripped = profile.sanitizedColumnPositions;
-  const notice =
-    stripped.length > 0 ? sanitizedColumnsAlert(stripped) : undefined;
+export function directFileRefusal(
+  profile: ProfiledJobInput,
+): AlertContent | undefined {
   const unnameable = emptyColumnPositions(profile.columns);
   if (unnameable.length > 0)
-    return { alert: unnameableColumnsAlert(unnameable, stripped), notice };
+    return unnameableColumnsAlert(unnameable, profile.sanitizedColumnPositions);
   const refusal = singleColumnRefusal(profile.columns);
-  if (refusal !== undefined)
-    return { alert: unlinkableFileAlert(refusal), notice };
-  return { source: profile, notice };
+  return refusal === undefined ? undefined : unlinkableFileAlert(refusal);
+}
+
+/** What the console's parse removed from the committed file's header, or
+ * `undefined` where it removed nothing. Stated beside a refusal over the same
+ * read, since the removal can be what left a column unnamed. */
+export function directFileSanitizedNotice(
+  profile: ProfiledJobInput,
+): AlertContent | undefined {
+  const stripped = profile.sanitizedColumnPositions;
+  return stripped.length > 0 ? sanitizedColumnsAlert(stripped) : undefined;
+}
+
+/**
+ * The file step's state once the picker commits `profile`: the read itself, and
+ * nothing derived from it. Whether the step advances past that read is
+ * {@link directFileRefusal}'s over the same profile.
+ */
+export function directFileCommit(profile: ProfiledJobInput): DirectFileState {
+  return { source: profile };
 }

@@ -25,6 +25,8 @@ import {
   directBothSidedDeduplicateNotice,
   directDeduplicateIntentFields,
   directFileCommit,
+  directFileRefusal,
+  directFileSanitizedNotice,
   directLinkageStrategyIntentFields,
   directServerBlockedReason,
   previewInferredTerms,
@@ -421,27 +423,31 @@ describe("the file step's state", () => {
     };
   }
 
-  test("a commit holds the profile the rest of the spine reads", () => {
+  /** The unnameable-header file, whose strip is what emptied a column name. */
+  function controlsOnlyProfile(): ProfiledJobInput {
+    return profileOf(
+      CONTROLS_ONLY_HEADER_PROFILE.columns,
+      CONTROLS_ONLY_HEADER_PROFILE.sanitizedColumnPositions,
+    );
+  }
+
+  test("a commit holds the read and nothing drawn from it", () => {
+    // Everything the step states about the file is read back from the file, so
+    // a commit stores one thing and a void clears one thing -- a refusal cannot
+    // be left behind by the read it describes.
     const profile = profileOf(LINKABLE_COLUMNS);
-    const committed = directFileCommit(profile);
-    expect(committed.source).toBe(profile);
-    expect(committed.alert).toBeUndefined();
-    expect(committed.notice).toBeUndefined();
+    expect(directFileCommit(profile)).toEqual({ source: profile });
+    expect(directFileRefusal(profile)).toBeUndefined();
+    expect(directFileSanitizedNotice(profile)).toBeUndefined();
   });
 
   test("a header the strip emptied is refused, the removal stated beside it", () => {
-    // core's inferMetadata throws on a blank column name, so the step refuses the
-    // file here rather than at the confirm step's preview -- and it holds no
-    // profile, so nothing downstream reads the file it refused.
-    const committed = directFileCommit(
-      profileOf(
-        CONTROLS_ONLY_HEADER_PROFILE.columns,
-        CONTROLS_ONLY_HEADER_PROFILE.sanitizedColumnPositions,
-      ),
-    );
-    expect(committed.source).toBeUndefined();
-    expect(committed.alert?.title).toBeDefined();
-    expect(committed.notice?.title).toBeDefined();
+    // core's inferMetadata throws on a blank column name, so the step refuses
+    // the file here rather than at the confirm step's preview, and the removal
+    // that emptied the name is stated beside that refusal.
+    const profile = controlsOnlyProfile();
+    expect(directFileRefusal(profile)?.title).toBeDefined();
+    expect(directFileSanitizedNotice(profile)?.title).toBeDefined();
   });
 
   test("a header that read as one column is refused beside the control", () => {
@@ -449,9 +455,7 @@ describe("the file step's state", () => {
     // comes back this way, and the control that reads it is on this step -- so
     // the step refuses it here, where the remedy the alert names is on screen,
     // rather than at the confirm preview two steps on.
-    const committed = directFileCommit(profileOf(ONE_COLUMN_HEADER));
-    expect(committed.source).toBeUndefined();
-    expect(committed.alert?.message).toContain(
+    expect(directFileRefusal(profileOf(ONE_COLUMN_HEADER))?.message).toContain(
       CSV_DELIMITER_SINGLE_COLUMN_REMEDY,
     );
   });
@@ -475,29 +479,23 @@ describe("the file step's state", () => {
             ).refusal !== undefined;
           expect({ ...state, refused: refusedAtConfirm }).toEqual({
             ...state,
-            refused: directFileCommit(profileOf(columns)).source === undefined,
+            refused: directFileRefusal(profileOf(columns)) !== undefined,
           });
         }
   });
 
   test("the state a delimiter change voids to holds nothing a commit set", () => {
     // The committed columns were read by the delimiter in effect when the file
-    // was opened, and the run reads the file by the new one, so everything taken
-    // from that reading goes: the profile, and the notice and refusal that
-    // describe its columns. Enumerated from a taken commit and a refused one
-    // together, so a field added to the step has to be cleared here too.
+    // was opened, and the run reads the file by the new one, so what that
+    // reading put in the step goes. Enumerated from a taken commit and a refused
+    // one together, so a field added to the step has to be cleared here too.
     const set = new Set(
       [
         directFileCommit(profileOf(LINKABLE_COLUMNS, [2])),
-        directFileCommit(
-          profileOf(
-            CONTROLS_ONLY_HEADER_PROFILE.columns,
-            CONTROLS_ONLY_HEADER_PROFILE.sanitizedColumnPositions,
-          ),
-        ),
+        directFileCommit(controlsOnlyProfile()),
       ].flatMap((commit) => Object.keys(commit)),
     ) as Set<keyof DirectFileState>;
-    expect(set).toEqual(new Set(["source", "alert", "notice"]));
+    expect(set).toEqual(new Set(["source"]));
     for (const field of set)
       expect({ field, held: DIRECT_NO_FILE[field] }).toEqual({
         field,

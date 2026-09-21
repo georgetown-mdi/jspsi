@@ -47,6 +47,8 @@ import {
   DIRECT_STEP_ORDER,
   directDeduplicateIntentFields,
   directFileCommit,
+  directFileRefusal,
+  directFileSanitizedNotice,
   directLinkageStrategyIntentFields,
 } from "./directExchangeModel";
 import { WorkShell } from "./WorkShell";
@@ -70,7 +72,6 @@ import type {
 import type { ConnectionTuningDraft } from "@console/connectionTuningModel";
 import type { CsvDelimiterChoice } from "@components/csvDelimiterChoice";
 import type { ExchangeFilesDraft } from "@console/exchangeFilesModel";
-import type { FileCommitOutcome } from "@console/ServerFilePicker";
 import type { LinkageStrategy } from "@psilink/core";
 import type { RailStep } from "@psi/rail";
 import type { RunDiagnosticsDraft } from "@psi/runDiagnosticsModel";
@@ -99,6 +100,14 @@ export function DirectExchangeScreen() {
   const [step, setStep] = useState<DirectStep>("file");
   const [file, setFile] = useState(DIRECT_NO_FILE);
   const consoleSource = file.source;
+  // What the step states over the committed file is read back from that file, so
+  // a voided commit takes its refusal and its advisory off the screen with it.
+  const fileRefusal =
+    consoleSource === undefined ? undefined : directFileRefusal(consoleSource);
+  const fileNotice =
+    consoleSource === undefined
+      ? undefined
+      : directFileSanitizedNotice(consoleSource);
   // How this party's own mounted file is read and its own result file written.
   // Local to this step, as the invitation spines hold it: every consumer takes
   // the resolved character.
@@ -222,19 +231,16 @@ export function DirectExchangeScreen() {
     setStep(next);
   }
 
-  // A fresh file drops the trust affirmation, so the operator re-affirms for the
-  // new context before the server step. Nothing is stored while the delimiter
-  // choice is refused -- the step states that refusal beside the control -- and a
-  // commit this step refuses keeps the picker on the file, so changing the choice
-  // re-reads it.
-  function commitFile(profile: ProfiledJobInput): FileCommitOutcome {
-    if (!delimiterResolution.ok) return "refused";
-    const committed = directFileCommit(profile);
-    setFile(committed);
-    if (committed.source === undefined) return "refused";
+  // The step stores the read and advances only on one it will run: a read it
+  // refuses stays on screen under the refusal derived from it, which the
+  // delimiter control above answers. A fresh file drops the trust affirmation,
+  // so the operator re-affirms for the new context. The delimiter gate keeps a
+  // read by a character nobody chose out of the step's state.
+  function commitFile(profile: ProfiledJobInput) {
+    if (!delimiterResolution.ok) return;
+    setFile(directFileCommit(profile));
     setAffirmed(false);
-    goTo("server");
-    return "committed";
+    if (directFileRefusal(profile) === undefined) goTo("server");
   }
 
   // The delimiter moved under the committed file: its columns are this party's
@@ -334,25 +340,25 @@ export function DirectExchangeScreen() {
           <>
             <h1 tabIndex={-1}>Your file</h1>
             {consoleSource === undefined && <RecoveredExchangePanel />}
-            {file.alert !== undefined && (
+            {fileRefusal !== undefined && (
               <Alert
                 color="red"
                 icon={<IconAlertCircle aria-hidden />}
-                title={file.alert.title}
+                title={fileRefusal.title}
                 mb="md"
               >
-                {file.alert.message}
+                {fileRefusal.message}
               </Alert>
             )}
-            {file.notice !== undefined && (
+            {fileNotice !== undefined && (
               <Alert
                 role="note"
                 color="yellow"
                 icon={<IconAlertCircle aria-hidden />}
-                title={file.notice.title}
+                title={fileNotice.title}
                 mb="md"
               >
-                {file.notice.message}
+                {fileNotice.message}
               </Alert>
             )}
             <CsvDelimiterField
@@ -367,6 +373,7 @@ export function DirectExchangeScreen() {
                   : undefined
               }
               delimiter={delimiterResolution}
+              commitWithheld={!delimiterResolution.ok}
               onUse={commitFile}
               onInvalidate={voidCommittedFile}
             />
