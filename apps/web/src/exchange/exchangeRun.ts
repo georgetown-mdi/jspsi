@@ -130,13 +130,16 @@ export interface ExchangeRun {
 }
 
 /** The figures a live PSI progress line states: which operation is running, how
- * many encrypted values it covers, and when this browser saw it start. The
- * elapsed figure is derived at render against the clock rather than stored, so
- * it ticks without a state write per second. */
+ * many encrypted values it covers, how many of them it has finished, and when
+ * this browser saw it start. The elapsed figure is derived at render against
+ * the clock rather than stored, so it ticks without a state write per second.
+ * `processed` is unset until the operation reports one, which an operation over
+ * a set too small for the engine to split never does. */
 export interface RunningPsiOperation {
   operation: PsiOperation;
   elements: number;
   startedAt: Date;
+  processed?: number;
 }
 
 export function initialRun(seat: ExchangeSeat = "inviter"): ExchangeRun {
@@ -267,14 +270,23 @@ export function runWithMatching(
 }
 
 /** Take one PSI progress report: a `started` report opens the live line on that
- * operation, and a `finished` or `failed` one closes it. Returns the run
- * unchanged where nothing moves, so a settle report with no line open costs no
- * re-render. */
+ * operation, a `progress` one advances its processed count, and a `finished` or
+ * `failed` one closes it. Returns the run unchanged where nothing moves, so a
+ * settle report with no line open, or a mid-operation count arriving after the
+ * line closed, costs no re-render. */
 export function runWithPsiProgress(
   run: ExchangeRun,
   progress: PsiProgress,
   at: Date,
 ): ExchangeRun {
+  if (progress.state === "progress") {
+    const running = run.psiOperation;
+    if (running === undefined || progress.processed === undefined) return run;
+    return {
+      ...run,
+      psiOperation: { ...running, processed: progress.processed },
+    };
+  }
   if (progress.state !== "started")
     return run.psiOperation === undefined ? run : withoutPsiOperation(run);
   return {
@@ -409,10 +421,26 @@ function elapsedLabel(elapsedMs: number): string {
   return `${hours}h ${String(minutes).padStart(2, "0")}m`;
 }
 
-/** The status panel's live PSI line as of `now`: how many values the running
- * operation covers and how long it has run, preceded by the operation's own
- * name where the stage label above does not already state it. Undefined when no
- * operation is running, which is what leaves the stage label standing alone. */
+/** How far into its set the running operation is -- `4,000 of 10,000 values
+ * (40%)` -- or the total alone until it reports a count. The share is rounded
+ * down and held at 100, so a count that overshoots its total by a rounding
+ * step cannot put the line past that total. */
+function processedLabel(running: RunningPsiOperation): string {
+  const { elements, processed } = running;
+  if (processed === undefined) return valueCountLabel(elements);
+  const share =
+    elements <= 0
+      ? 100
+      : Math.min(100, Math.floor((processed / elements) * 100));
+  const grouped = new Intl.NumberFormat("en-US").format(Math.trunc(processed));
+  return `${grouped} of ${valueCountLabel(elements)} (${share}%)`;
+}
+
+/** The status panel's live PSI line as of `now`: how far the running operation
+ * has got through the values it covers and how long it has run, preceded by the
+ * operation's own name where the stage label above does not already state it.
+ * Undefined when no operation is running, which is what leaves the stage label
+ * standing alone. */
 export function psiProgressLabel(
   run: ExchangeRun,
   now: Date,
@@ -420,7 +448,7 @@ export function psiProgressLabel(
   const running = run.psiOperation;
   if (running === undefined) return undefined;
   const figures =
-    `${valueCountLabel(running.elements)}, ` +
+    `${processedLabel(running)}, ` +
     `${elapsedLabel(now.getTime() - running.startedAt.getTime())} elapsed`;
   const operationLabel = PSI_OPERATION_LABELS[running.operation];
   return operationLabel === currentStageLabel(run)

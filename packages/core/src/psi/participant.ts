@@ -182,11 +182,12 @@ export type PsiOperation =
 
 /**
  * Where one crypto operation stands: `started` when the participant dispatched
- * it to the engine, and `finished` or `failed` when the engine settled. An
- * operation that failed did not produce a result, so a display shows no
- * completion figure for it.
+ * it to the engine, `progress` each time the engine has finished part of the
+ * set, and `finished` or `failed` when the engine settled. An operation that
+ * failed did not produce a result, so a display shows no completion figure for
+ * it.
  */
-export type PsiProgressState = "started" | "finished" | "failed";
+export type PsiProgressState = "started" | "progress" | "finished" | "failed";
 
 /**
  * One report about a PSI crypto operation, for a progress display. Every figure
@@ -206,9 +207,21 @@ export interface PsiProgress {
   elements: number;
   state: PsiProgressState;
   /**
+   * How many of `elements` the operation has finished masking or matching.
+   * Present on `progress` alone, and always short of `elements`: the engine
+   * reports between the chunks it splits a large set into, never after the
+   * last one, whose figure the `finished` report states.
+   *
+   * The `computeIntersectionCardinality` operation reports `started` and
+   * `finished` and nothing between them at any size: a count-only round's
+   * match is one library call that cannot be split (see
+   * {@link ./psiEngine.PsiEngine.computeIntersectionCardinality}).
+   */
+  processed?: number;
+  /**
    * Wall-clock milliseconds the operation ran, measured on the monotonic clock
    * so a clock adjustment cannot make it negative. Present on `finished` and
-   * `failed`, absent on `started`.
+   * `failed`, absent on `started` and `progress`.
    */
   durationMs?: number;
 }
@@ -216,7 +229,10 @@ export interface PsiProgress {
 /**
  * Takes each {@link PsiProgress} report from a {@link PSIParticipant}. Called
  * synchronously from the participant's own call path, so an implementation
- * returns quickly and does not throw: a raise here reaches the exchange.
+ * returns quickly and does not throw: a raise on a `started`, `finished`, or
+ * `failed` report reaches the exchange. A raise on a `progress` report is
+ * dropped instead -- that operation is already part-run and its result is
+ * still to come, so a fault in a display must not abort the round.
  */
 export type PsiProgressReporter = (progress: PsiProgress) => void;
 
@@ -227,6 +243,10 @@ export class PSIParticipant {
   private elementBounds: PsiElementBounds;
   private engine: PsiEngine;
   private onProgress?: PsiProgressReporter;
+  // The operation now dispatched to the engine, for the mid-operation reports
+  // the engine raises against it. Undefined between operations.
+  private runningOperation:
+    { operation: PsiOperation; elements: number } | undefined;
 
   constructor(
     id: string,
@@ -271,6 +291,33 @@ export class PSIParticipant {
         this.id,
         "identifier-revealing",
       );
+    // Take the engine's processed counts only where a caller is rendering
+    // them, so a participant that shows nothing composes no report at all.
+    if (onProgress !== undefined)
+      this.engine.observeProcessedElements?.((processed) =>
+        this.reportProcessed(processed),
+      );
+  }
+
+  // One mid-operation report, naming the operation the participant dispatched
+  // and the count the engine has reached. Best effort: the operation is already
+  // part-run and its result is still to come, so a reporter that raises here is
+  // dropped rather than failing the round, unlike the started and settled
+  // reports below.
+  private reportProcessed(processed: number): void {
+    const running = this.runningOperation;
+    const report = this.onProgress;
+    if (running === undefined || report === undefined) return;
+    try {
+      report({
+        operation: running.operation,
+        elements: running.elements,
+        state: "progress",
+        processed,
+      });
+    } catch {
+      // Dropped; the operation continues and its settle report follows.
+    }
   }
 
   /**
@@ -327,9 +374,10 @@ export class PSIParticipant {
   // Report one crypto operation's element count and duration around the engine
   // call that runs it, for a caller rendering a progress display. The timing is
   // taken here, on the participant's own thread, rather than inside the engine:
-  // a worker-backed engine runs the masking inside one blocking library call,
-  // so its own thread cannot post anything until that call returns, and the
-  // report a display ticks against has to come from the thread that is free.
+  // a worker-backed engine runs each chunk of the masking inside a blocking
+  // library call, so the elapsed figure a display ticks against has to come
+  // from the thread that is free. The engine's own mid-operation counts are
+  // reported against the operation named here (see reportProcessed).
   private async reportProgress<T>(
     operation: PsiOperation,
     elements: number,
@@ -342,9 +390,11 @@ export class PSIParticipant {
     const durationMs = (): number =>
       Math.max(0, Math.round(performance.now() - startedAt));
     let result: T;
+    this.runningOperation = { operation, elements };
     try {
       result = await run();
     } catch (error) {
+      this.runningOperation = undefined;
       report({
         operation,
         elements,
@@ -353,6 +403,7 @@ export class PSIParticipant {
       });
       throw error;
     }
+    this.runningOperation = undefined;
     // Outside the try: a reporter that raises on this report must not also
     // relabel the operation that already completed as failed.
     report({

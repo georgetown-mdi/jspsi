@@ -19,6 +19,21 @@ const psiLibrary = await PSI();
 const senderValues = ["Alice", "Bob", "Carol", "David", "Elizabeth"];
 const receiverValues = ["Carol", "Elizabeth", "Henry"];
 
+// A set the engine splits at this size, so the mid-operation reports below are
+// driven by the real chunk loop rather than a stand-in.
+const CHUNK_ELEMENTS = 20;
+const CHUNKED_VALUES = Array.from({ length: 100 }, (_, index) => `v-${index}`);
+
+function chunkingEngine(role: "starter" | "joiner"): InProcessPsiEngine {
+  return new InProcessPsiEngine(
+    psiLibrary,
+    role,
+    role,
+    "identifier-revealing",
+    { chunkElements: CHUNK_ELEMENTS },
+  );
+}
+
 function participant(
   id: string,
   role: "starter" | "joiner",
@@ -195,6 +210,104 @@ test("a raising reporter neither relabels nor repeats a finished operation", asy
     "reporter refused",
   );
 
+  expect(reports.map((report) => report.state)).toStrictEqual([
+    "started",
+    "finished",
+  ]);
+});
+
+test("an operation over a set the engine splits reports its processed count", async () => {
+  const reports: Array<PsiProgress> = [];
+  await participant(
+    "sender",
+    "starter",
+    reports,
+    chunkingEngine("starter"),
+  ).createServerSetup(CHUNKED_VALUES);
+
+  expect(reports.map((report) => report.state)).toStrictEqual([
+    "started",
+    "progress",
+    "progress",
+    "progress",
+    "progress",
+    "finished",
+  ]);
+  const mid = reports.filter((report) => report.state === "progress");
+  // Every mid-operation report names the operation the participant dispatched
+  // and the set it covers, and holds a count short of that set: the figure the
+  // last chunk reaches is what the finished report states.
+  for (const report of mid) {
+    expect(report.operation).toBe("createServerSetup");
+    expect(report.elements).toBe(CHUNKED_VALUES.length);
+    expect(report.durationMs).toBeUndefined();
+    expect(report.processed).toBeLessThan(CHUNKED_VALUES.length);
+  }
+  expect(mid.map((report) => report.processed)).toStrictEqual([20, 40, 60, 80]);
+  expect(reports.at(-1)?.processed).toBeUndefined();
+});
+
+test("a reporter that raises mid-operation neither aborts nor repeats it", async () => {
+  const reports: Array<PsiProgress> = [];
+  const raising = new PSIParticipant(
+    "sender",
+    psiLibrary,
+    { role: "starter", verbose: 0 },
+    UNBOUNDED_PSI_ELEMENTS,
+    chunkingEngine("starter"),
+    (progress) => {
+      reports.push(progress);
+      if (progress.state === "progress") throw new Error("reporter refused");
+    },
+  );
+
+  await expect(
+    raising.createServerSetup(CHUNKED_VALUES),
+  ).resolves.toHaveProperty("setup");
+  expect(reports.map((report) => report.state)).toStrictEqual([
+    "started",
+    "progress",
+    "progress",
+    "progress",
+    "progress",
+    "finished",
+  ]);
+});
+
+test("a processed-count sink is registered only where a caller renders one", () => {
+  let registrations = 0;
+  const counting = {
+    observeProcessedElements: () => {
+      registrations += 1;
+    },
+  } as unknown as PsiEngine;
+  const build = (onProgress?: (progress: PsiProgress) => void): void => {
+    new PSIParticipant(
+      "sender",
+      psiLibrary,
+      { role: "starter", verbose: 0 },
+      UNBOUNDED_PSI_ELEMENTS,
+      counting,
+      onProgress,
+    );
+  };
+
+  build();
+  expect(registrations).toBe(0);
+  build(() => {});
+  expect(registrations).toBe(1);
+});
+
+test("an engine that reports no processed count runs the operation anyway", async () => {
+  const reports: Array<PsiProgress> = [];
+  const countless = {
+    createServerSetup: () =>
+      Promise.resolve({ setup: new Uint8Array(), permutation: [] }),
+  } as unknown as PsiEngine;
+
+  await participant("sender", "starter", reports, countless).createServerSetup(
+    senderValues,
+  );
   expect(reports.map((report) => report.state)).toStrictEqual([
     "started",
     "finished",

@@ -1743,11 +1743,14 @@ export interface RunExchangeOptions {
    */
   onStage?: (id: string) => void;
   /**
-   * Called as each PSI crypto operation starts and settles, with the element
-   * count it covers and, once it settles, how long it ran. A front end renders
-   * a live progress display from it: the operations are the ones a long round
-   * spends its minutes inside, and a single one of them cannot report partial
-   * progress, since the masking runs inside one blocking library call.
+   * Called as each PSI crypto operation starts, moves, and settles, with the
+   * element count it covers, how many of them it has finished while it runs,
+   * and how long it ran once it settles. A front end renders a live progress
+   * display from it: the operations are the ones a long round spends its
+   * minutes inside, and one over a large set reports its processed count
+   * between the chunks the engine splits it into. A count-only round's match
+   * is the exception -- one library call at any size, so it reports a start
+   * and a finish and nothing between.
    *
    * Every figure is a count or a duration, never a value from either party's
    * data, and none of it goes on the wire.

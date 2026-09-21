@@ -4,11 +4,12 @@
 // rate. Fed by core's onPsiProgress reports (RunExchangeOptions), wired in
 // protocol.ts.
 //
-// A single crypto operation reports no partial progress: the masking runs
-// inside one blocking library call, so the count a line shows is the whole
-// operation's and the rate is measured only once it returns. The elapsed time
-// is what ticks, which is why the line is drawn from the reporting thread's own
-// clock rather than from anything the crypto reports.
+// An operation over a set large enough for core to split reports how many
+// values it has finished part-way through, and the line states that against the
+// operation's total; one over a smaller set reports the total alone, and the
+// elapsed figure is all that moves. Either way the elapsed time is drawn from
+// the reporting thread's own clock rather than from anything the crypto
+// reports, and the rate is measured only once the operation returns.
 //
 // Every line is composed from fixed literals, an element count and a duration,
 // so no partner-supplied text reaches the terminal through it and no display
@@ -119,14 +120,36 @@ function formatRate(elements: number, durationMs: number): string | undefined {
   return `${formatCount(perSecond)} values/s`;
 }
 
-/** The live line's text for an operation that has run `elapsedMs`. */
+/**
+ * How far into its set an operation is: `4,000 of 10,000 values (40%)`, or the
+ * total alone where nothing has been reported yet. The share is rounded down
+ * and held at 100 so a count that overshoots its total by a rounding step
+ * cannot put the line past that total.
+ */
+function formatProcessed(
+  elements: number,
+  processed: number | undefined,
+): string {
+  if (processed === undefined) return formatValues(elements);
+  const share =
+    elements <= 0
+      ? 100
+      : Math.min(100, Math.floor((processed / elements) * 100));
+  return `${formatCount(processed)} of ${formatValues(elements)} (${share}%)`;
+}
+
+/**
+ * The live line's text for an operation that has run `elapsedMs`, having
+ * finished `processed` of its values where core has reported a count.
+ */
 export function psiStatusText(
   operation: PsiOperation,
   elements: number,
   elapsedMs: number,
+  processed?: number,
 ): string {
   return (
-    `${OPERATION_LABELS[operation]}: ${formatValues(elements)}, ` +
+    `${OPERATION_LABELS[operation]}: ${formatProcessed(elements, processed)}, ` +
     `${formatDuration(elapsedMs)} elapsed`
   );
 }
@@ -161,7 +184,12 @@ export function createPsiProgressDisplay(
   const tickMs = options.tickMs ?? TICK_MS;
   const statusLine = options.statusLine;
   let running:
-    | { operation: PsiOperation; elements: number; startedAt: number }
+    | {
+        operation: PsiOperation;
+        elements: number;
+        startedAt: number;
+        processed?: number;
+      }
     | undefined;
   let ticker: ReturnType<typeof setInterval> | undefined;
   let drawn = false;
@@ -191,6 +219,7 @@ export function createPsiProgressDisplay(
         running.operation,
         running.elements,
         Math.max(0, now() - running.startedAt),
+        running.processed,
       ),
     );
   };
@@ -210,6 +239,13 @@ export function createPsiProgressDisplay(
         // ref'd while it runs), so the redraw timer must not: a report that
         // never settles leaves it the only thing keeping the process alive.
         ticker.unref();
+        return;
+      }
+      if (progress.state === "progress") {
+        // Recorded for the next redraw rather than drawn here: an operation
+        // that settles inside the first tick still draws nothing, which is
+        // what keeps a short run from flickering a line it cannot read.
+        if (running !== undefined) running.processed = progress.processed;
         return;
       }
       running = undefined;
