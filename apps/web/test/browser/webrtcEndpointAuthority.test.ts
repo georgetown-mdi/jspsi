@@ -253,6 +253,24 @@ const pathShapes: Array<Shape> = [
   },
 ];
 
+/**
+ * One alternative label separator: a character the URL parser folds onto `.`
+ * and the shared rule's denylist does not hold.
+ */
+interface MappedSeparator {
+  what: string;
+  separator: string;
+}
+
+const mappedSeparators: Array<MappedSeparator> = [
+  { what: "U+3002", separator: "\u3002" },
+  { what: "U+FF61", separator: "\uFF61" },
+  { what: "U+FF0E", separator: "\uFF0E" },
+];
+
+/** The host a mapped separator between the two names resolves to. */
+const MAPPED_HOST = `${INVITER_HOST}.${OTHER_HOST}`;
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -343,6 +361,53 @@ describe("the acceptor's dial path", () => {
           { peerFactory: refusingFactory },
         ),
       ).rejects.toThrow(WEBRTC_ENDPOINT_PATH_REFUSED);
+    },
+  );
+});
+
+/**
+ * The shared rule is a denylist of delimiters, so a separator the URL parser
+ * folds onto `.` passes it and the client dials the joined name. That name is
+ * one the endpoint spells itself, so this is measured rather than refused.
+ */
+describe("a host holding a mapped label separator", () => {
+  const endpoint: WebRTCEndpoint = {
+    channel: "webrtc",
+    host: INVITER_HOST,
+    port: PORT,
+    path: "/api/",
+  };
+
+  /** What a peer factory the dial path reaches throws, to tell it from a refusal. */
+  const REACHED_THE_DIAL = "the dial reached peer construction";
+
+  test.each(mappedSeparators)(
+    "$what is not refused before the peer",
+    async ({ separator }) => {
+      await expect(
+        dialAsAcceptor(
+          generateSharedSecret(),
+          { ...endpoint, host: `${INVITER_HOST}${separator}${OTHER_HOST}` },
+          {
+            peerFactory: (): never => {
+              throw new Error(REACHED_THE_DIAL);
+            },
+          },
+        ),
+      ).rejects.toThrow(REACHED_THE_DIAL);
+    },
+  );
+
+  test.each(mappedSeparators)(
+    "$what dials the mapped name",
+    ({ separator }) => {
+      expect(
+        assembleAddress({
+          host: `${INVITER_HOST}${separator}${OTHER_HOST}`,
+          port: PORT,
+          path: "/api/",
+        }).host,
+      ).toBe(MAPPED_HOST);
     },
   );
 });
