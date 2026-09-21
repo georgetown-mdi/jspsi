@@ -88,3 +88,53 @@ export async function deriveRendezvousPeerId(
   );
   return toHex(bytes);
 }
+
+/**
+ * Refused anywhere in a signaling `host`. Each is a delimiter the URL parser
+ * acts on: `@` closes an authority's userinfo, `/` `?` and `#` end the host,
+ * `\` folds to `/`, and whitespace either ends the parse or is stripped. None
+ * of them appears in a hostname or an IP literal.
+ */
+const HOST_AUTHORITY_DELIMITERS = /[@/?#\\]|\s/;
+
+/**
+ * Refused anywhere in a signaling `path`, which is
+ * {@link HOST_AUTHORITY_DELIMITERS} less the separator a path is made of. A
+ * leading `/` is required separately: a value without one is not a mount point,
+ * and where it lands depends on how the address is assembled rather than on
+ * what the field means.
+ */
+const PATH_AUTHORITY_DELIMITERS = /[@?#\\]|\s/;
+
+/** The half of a signaling location a refusal names. */
+export type SignalingLocationField = "host" | "path";
+
+/**
+ * Which field of a signaling location has a shape that could move the address
+ * a rendezvous dials, or `undefined` when neither does. The refusal both
+ * consumers of an invitation endpoint apply before anything is dialed, since a
+ * `host` and `path` that came off an invitation are partner-supplied and
+ * bounded only by length.
+ *
+ * The rule is the union of what either party's assembly can be moved by,
+ * because the two assemble the address differently: the CLI builds it through
+ * the URL API and the browser's PeerJS client concatenates it as a string, so
+ * a delimiter harmless under one lands the authority elsewhere under the other.
+ * Which delimiter does what to which assembly is recorded in
+ * docs/spec/WEBRTC_TRANSPORT.md.
+ *
+ * `host` is reported before `path` so a location failing both gets the refusal
+ * for the field the address is built around.
+ */
+export function authorityMovingSignalingField(location: {
+  host: string;
+  path: string;
+}): SignalingLocationField | undefined {
+  if (HOST_AUTHORITY_DELIMITERS.test(location.host)) return "host";
+  if (
+    !location.path.startsWith("/") ||
+    PATH_AUTHORITY_DELIMITERS.test(location.path)
+  )
+    return "path";
+  return undefined;
+}

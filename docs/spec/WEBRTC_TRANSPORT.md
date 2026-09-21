@@ -117,6 +117,32 @@ query parameter rather than interpolated. The finished address is checked
 against the configured host once more before the socket is constructed, so an
 address naming another authority opens nothing.
 
+The browser acceptor applies the same two delimiter rules -- one
+implementation, shared from `@psilink/core` -- to the `host` and `path` of the
+invitation endpoint it dials, and refuses before it constructs a peer. It needs them for a different
+reason than the CLI: the PeerJS client assembles its address by concatenating
+scheme, `host`, `:`, `port`, `path` and `peerjs?key=`, so a delimiter in either
+field is read as part of the address rather than as a value inside it. What
+each shape does to the assembled address is measured against the real client in
+real Chromium (`apps/web/test/browser/webrtcEndpointAuthority.test.ts`):
+
+| Endpoint field | What the delimiter does to the dialed address |
+| -------------- | --------------------------------------------- |
+| `host` with `@` | the named host becomes userinfo, and the dial reaches the name after the `@` |
+| `host` with whitespace | a tab or newline is deleted and a space percent-encoded, so the dial reaches a third name that is neither |
+| `host` with `/ ? # \` | the dial keeps the named host, dropping the endpoint's own port and mount point |
+| `path` with `@ ? # \` or whitespace | the dial keeps the named host; the rest of the address is reshaped |
+| `path` without a leading `/` | the client inserts one, so the mount point is whatever follows |
+
+Not one of those shapes fails closed on its own: every one assembles an address
+the browser accepts, so the refusal is the whole of what stands between a
+partner's delimiter and the socket. The browser has no equivalent of the CLI's
+second check on the finished address either, since the client builds that
+address and opens it internally with no point in between for the app to read it
+back. What the acceptor relies on instead is that its dial path resolves the
+endpoint through that refusal, which the same file measures by driving the dial
+path with each shape and requiring that no peer is ever constructed.
+
 The server stamps `src` itself from the connecting client's id, so an outbound
 frame contains only `type`, `payload`, and `dst`. Heartbeats (`HEARTBEAT`, no
 payload) go up every 5 s. The broker neither queues nor reports an undeliverable

@@ -1,6 +1,10 @@
 import Peer from "peerjs";
 
-import { deriveRendezvousPeerId, getLogger } from "@psilink/core";
+import {
+  authorityMovingSignalingField,
+  deriveRendezvousPeerId,
+  getLogger,
+} from "@psilink/core";
 
 import { isDiagnosticMode, whenDiagnostic } from "@utils/diagnostics";
 import { ConfigManager } from "@utils/clientConfig";
@@ -109,20 +113,59 @@ function inviterLocationFromWindow(): SignalingLocation {
 }
 
 /**
+ * The refusal an invitation endpoint whose `host` could move the dialed address
+ * gets. Names the class of character rather than echoing the value: the value
+ * comes from the partner's invitation, so echoing it would put partner-chosen
+ * bytes in front of the operator in place of the remedy.
+ */
+export const WEBRTC_ENDPOINT_HOST_REFUSED =
+  "this invitation's signaling endpoint names a host that could move the " +
+  "connection to another server: the host must contain none of @ / ? # \\ or " +
+  "whitespace. Ask your partner to send a new invitation created from their " +
+  "own address.";
+
+/**
+ * The refusal an invitation endpoint whose `path` could move the dialed address
+ * gets (see {@link WEBRTC_ENDPOINT_HOST_REFUSED}).
+ */
+export const WEBRTC_ENDPOINT_PATH_REFUSED =
+  "this invitation's signaling endpoint names a path that could move the " +
+  'connection to another server: the path must start with "/" and contain ' +
+  "none of @ ? # \\ or whitespace. Ask your partner to send a new invitation " +
+  "created from their own address.";
+
+/**
  * The inviter's signaling location, read off the invitation endpoint, for the
  * acceptor to dial. The host was already normalized when the invitation was
  * built (`webrtcEndpointFromLocation`). The endpoint omits the port only for a
  * default-port deployment, so when absent it is resolved by the acceptor's own
  * scheme (acceptor and inviter run the same app, typically the same origin).
+ *
+ * `host` and `path` are refused for shape here, before the location reaches a
+ * Peer: the endpoint is content the remote partner wrote and the operator
+ * cannot inspect, and the PeerJS client assembles its signaling address by
+ * string concatenation, so a delimiter left in either field can put the
+ * authority somewhere the endpoint does not name. The rule is core's
+ * {@link authorityMovingSignalingField}, the same one the CLI applies to a
+ * webrtc `server` block; what each refused shape does to the assembled address
+ * is measured against the real client in
+ * test/browser/webrtcEndpointAuthority.test.ts and recorded in
+ * docs/spec/WEBRTC_TRANSPORT.md.
+ *
+ * @throws {Error} if `host` or `path` has a shape that could move the address.
  */
 function acceptorLocationFromEndpoint(
   endpoint: WebRTCEndpoint,
 ): SignalingLocation {
-  return {
+  const location = {
     host: endpoint.host,
     port: endpoint.port ?? (window.location.protocol === "https:" ? 443 : 80),
     path: endpoint.path ?? "/api/",
   };
+  const moved = authorityMovingSignalingField(location);
+  if (moved === "host") throw new Error(WEBRTC_ENDPOINT_HOST_REFUSED);
+  if (moved === "path") throw new Error(WEBRTC_ENDPOINT_PATH_REFUSED);
+  return location;
 }
 
 /**
