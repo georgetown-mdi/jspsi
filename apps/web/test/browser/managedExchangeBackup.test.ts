@@ -128,7 +128,7 @@ describe("export/import round-trip against the real store", () => {
   test("a malformed import leaves the store untouched", async () => {
     const existing = await createManagedExchange(newExchange());
     await expect(importManagedExchange("not json {{{")).rejects.toThrow();
-    // The pre-existing record is untouched and no new record landed.
+    // The pre-existing record is untouched and no new record was written.
     const all = await listManagedExchanges();
     expect(all.map((r) => r.id)).toEqual([existing.id]);
   });
@@ -195,7 +195,7 @@ describe("the import marker is the restore evidence the desync tiering reads", (
     await deleteManagedExchange(source.id);
     const { record: installed } = await importManagedExchange(bytes);
 
-    // The first run after the import fails closed. Its bookkeeping lands as auth.
+    // The first run after the import fails closed. Its bookkeeping is recorded as auth.
     await recordManagedExchangeLastRun(
       installed.id,
       failedRun(Date.now(), "failed", "auth"),

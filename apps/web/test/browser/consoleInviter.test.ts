@@ -2088,7 +2088,7 @@ describe("console inviter exchange record on a terminated run", () => {
       .toBeInTheDocument();
   });
 
-  test("a confirm open when the ask lands states the answer instead of vanishing", async () => {
+  test("a confirm open when the ask arrives states the answer instead of vanishing", async () => {
     // The ask is in flight for the first seconds of a settled failed run, so it
     // can answer while the operator is reading the confirm it opened. Unmounting
     // the dialog there would take the question off the screen mid-read and leave a

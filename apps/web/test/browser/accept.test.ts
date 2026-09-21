@@ -87,7 +87,7 @@ vi.mock("@psi/acceptInvitation", async (importOriginal) => {
 // Defer or fail the CSV parse per-test to observe the parse-behind-consent gate
 // (the loader is untouched until "Accept and continue" fires with consent) and
 // the read-failure path, which a real parse of an inline File cannot reach
-// deterministically. With both knobs unset it delegates to the real loader.
+// deterministically. With both settings unset it delegates to the real loader.
 const csvLoadHarness = vi.hoisted(() => ({
   defer: false,
   fail: undefined as Error | undefined,
@@ -976,7 +976,7 @@ describe("acceptor screen: confirm your columns (verdict, mapper, launch)", () =
     expect(start.element().getAttribute("aria-describedby")).toBeNull();
   });
 
-  test("a reason arising mid-session lands in the region already mounted", async () => {
+  test("a reason arising mid-session appears in the region already mounted", async () => {
     await reachColumns("first_name,last_name\nAlice,Smith\n");
     const region = page.getByTestId("launch-blocked-reason").element();
     expect(region.textContent).toBe("");
@@ -1216,7 +1216,7 @@ describe("acceptor screen: confirm your columns (verdict, mapper, launch)", () =
     // row holds the step's isolation as characters instead: a ledger value is a
     // string sink, where no element can hold it.
     //
-    // The header the file holds carries an override; the name every sink here shows
+    // The file's header holds an override; the name every sink here shows
     // is the one core's parse boundary stripped it from, so this drives both halves
     // at once -- what the acceptor's own read does to the header, and how the row
     // then shows it.

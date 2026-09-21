@@ -162,7 +162,7 @@ vi.mock("@psilink/core", async (importOriginal) => {
     // suite that never runs the real exchange cannot produce one; the accessor is
     // mocked here and each test states which side of the payload send its failure
     // fell on, as the CLI's own protocol suite does. Its sibling, which answers
-    // whether a record was owed for a failure carrying none, is marked the same
+    // whether a record was owed for a failure with none, is marked the same
     // way and mocked for the same reason.
     exchangeRecordFromFailure: vi.fn(() => undefined),
     exchangeRecordOwedButUnbuilt: vi.fn(() => false),
@@ -490,7 +490,7 @@ describe("runManagedExchangeInBrowser", () => {
     expect(mockedAppendDisclosure).not.toHaveBeenCalled();
   });
 
-  test("a cancel that landed while the channel was opening cuts the exchange too", async () => {
+  test("a cancel that arrived while the channel was opening cuts the exchange too", async () => {
     // An aborted signal never fires its listener again, so a cancel arriving
     // before there was a connection to close has to be read once more when one
     // exists -- otherwise this run exchanges with the partner and holds the
@@ -954,7 +954,7 @@ describe("filing the run's disclosure", () => {
 
   test("files the disclosure before the run yields its outputs", async () => {
     // A tab closed on the completion screen must not be what decides whether the
-    // disclosure was recorded, so the entry lands before the outputs are yielded.
+    // disclosure was recorded, so the entry is written before the outputs are yielded.
     const { mc } = makeParkedCloseMc();
     mockedOpen.mockResolvedValue(mc);
     acquireResources();
@@ -1197,7 +1197,7 @@ describe("filing a stopped run's disclosure", () => {
     // The third input into the record-owed region, past the two the cancel and the
     // drop reach: the partner's payload arrived and this party's consent check
     // refused it (core's reconcileReceivedPayload, a protocol ConnectionError).
-    // The record commits to what arrived before the refusal, so the entry lands
+    // The record commits to what arrived before the refusal, so the entry is written
     // exactly once and holds those column names.
     const { mc } = makeParkedCloseMc();
     mockedOpen.mockResolvedValue(mc);

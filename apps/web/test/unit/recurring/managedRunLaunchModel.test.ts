@@ -281,7 +281,7 @@ describe("classifyManagedRunFailure: pre-connection benign states from the error
     // hand-off, and the critical section stamped the kind before it threw. What
     // they get is the refusal and where the exchange runs now -- no retry, no
     // re-invite, and no override that would take the exchange back. Reaching this
-    // kind is what settles the surface onto the spent state.
+    // kind is what puts the surface onto the spent state.
     const failure = classifyStateAgainstOneRecord(
       new ManagedExchangeSpentError("abc"),
       record({ lastRun: failed("handed-off") }),

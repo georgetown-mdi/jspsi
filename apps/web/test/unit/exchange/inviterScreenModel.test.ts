@@ -117,7 +117,7 @@ describe("the step the work column shows", () => {
 });
 
 describe("what the terms declare", () => {
-  test("a name edit carries the draft's identity with it", () => {
+  test("a name edit keeps the draft's identity", () => {
     const state = withFile("Dana Okafor", {
       type: "name-changed",
       name: "Sam Rivera",
@@ -135,7 +135,7 @@ describe("what the terms declare", () => {
     expect(state.editor).toBeUndefined();
   });
 
-  test("a column's disclosure choice lands on the draft and announces", () => {
+  test("a column's disclosure choice is written to the draft and announces", () => {
     const seeded = withFile();
     if (seeded.editor === undefined || seeded.acquired === undefined)
       throw new Error("the fixture read no file");
@@ -160,7 +160,7 @@ describe("what the terms declare", () => {
     expect(state.announcement).toBe("Demoted client_id.");
   });
 
-  test("an own-columns choice lands through the plain editor edit", () => {
+  test("an own-columns choice arrives through the plain editor edit", () => {
     const seeded = withFile();
     if (seeded.editor === undefined)
       throw new Error("the fixture read no file");

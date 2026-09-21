@@ -40,7 +40,7 @@ import type {
 
 // The read-failed recovery listing, against real Chromium (real IndexedDB).
 // Unlike savedExchangesFailed.test.ts, which mocks the strict read, this file
-// seeds a genuinely unreadable record beside a good one: the strict list read
+// seeds an unreadable record beside a good one: the strict list read
 // rejects wholesale, routing both routes to the read-failed surface, while the
 // diagnostic read lists both entries with a delete-by-key. Deleting the bad
 // record and reloading recovers the list to the normal run surface.

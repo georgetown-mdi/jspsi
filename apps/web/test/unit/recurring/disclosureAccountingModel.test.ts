@@ -617,7 +617,7 @@ describe("the exported accounting", () => {
 
   test("states a stopped run's outcome and what it cannot attest in that run's row", async () => {
     // The export is where a compliance reader meets the entry without the screen
-    // around it, so the row has to carry the same qualification the screen shows:
+    // around it, so the row has to state the same qualification the screen shows:
     // a file asserting more than the screen did would read an unconfirmed send as
     // a delivered one.
     const accounting = accountingOf(
@@ -640,7 +640,7 @@ describe("the exported accounting", () => {
     expect(cell).toContain("recorded as received");
   });
 
-  test("carries an observed certificate mismatch into the same cell, under the standing header", async () => {
+  test("states an observed certificate mismatch in the same cell, under the standing header", async () => {
     const accounting = accountingOf(
       await disclosureRecord({
         outcome: "receipt-swap-terminated",
@@ -656,7 +656,7 @@ describe("the exported accounting", () => {
     expect(cell).toContain("not the one pinned for them");
     // The note names the fact it qualifies rather than a position on screen:
     // in the export that fact is a column of this same row, and the screen's
-    // vertical list carries the same label.
+    // vertical list shows the same label.
     expect(cell).toContain("the partner named in the Partner fact");
     expect(columns).toContain("Partner");
     // The marker widens no entry's column set: the header a compliance reader

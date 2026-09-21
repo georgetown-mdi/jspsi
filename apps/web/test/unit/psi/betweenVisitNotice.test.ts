@@ -105,7 +105,7 @@ describe("betweenVisitNotice: the completed run", () => {
     ).toBeUndefined();
   });
 
-  test("each run is its own occurrence, so two runs carry two tags", () => {
+  test("each run is its own occurrence, so two runs produce two tags", () => {
     const first = betweenVisitNotice({
       record: record({ lastRun: { at: RUN_AT, outcome: "succeeded" } }),
       local: undefined,

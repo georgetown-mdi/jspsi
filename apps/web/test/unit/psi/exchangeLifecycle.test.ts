@@ -1076,7 +1076,7 @@ describe("runExchangeLifecycle", () => {
 
   test("states the resolved matching alone on a one-to-one run within the bound", async () => {
     // The run shape raises neither the cardinality notice nor the projection
-    // advisory here, so an ordinary run carries no warning at all -- and the
+    // advisory here, so an ordinary run shows no warning at all -- and the
     // pair, which the operator would otherwise read nothing about until the
     // exchange had finished, goes to the status slot on its own.
     const { mc } = makeFakeMc();
@@ -1190,7 +1190,7 @@ describe("the PSI progress reporter", () => {
     );
   });
 
-  test("drops a report that lands after the run was aborted", async () => {
+  test("drops a report that arrives after the run was aborted", async () => {
     // Every owner-driven callback no-ops once the signal aborts, so a report
     // arriving from a settling operation cannot set state on an unmounted
     // screen.

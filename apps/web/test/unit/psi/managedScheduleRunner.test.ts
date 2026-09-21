@@ -633,7 +633,7 @@ describe("a window nobody arrived in", () => {
 });
 
 describe("a window whose run raised a standing condition", () => {
-  test("the window's own write carries the persist failure the run could not save", async () => {
+  test("the window's own write records the persist failure the run could not save", async () => {
     // The window that counts no miss at all: a store failure spanning the
     // rotation write and the run's best-effort bookkeeping write, recovering in
     // time to answer this one, would otherwise advance the plan past a window
@@ -665,7 +665,7 @@ describe("a window whose run raised a standing condition", () => {
     });
   });
 
-  test("a handshake that failed closed is carried the same way", async () => {
+  test("a handshake that failed closed is recorded the same way", async () => {
     const record = recordWith();
     const runner = harness({
       records: [record],
@@ -688,7 +688,7 @@ describe("a window whose run raised a standing condition", () => {
     });
   });
 
-  test("a failure past the data-exchange boundary carries none", async () => {
+  test("a failure past the data-exchange boundary records none", async () => {
     // The same boundary the attempt's own stamp applies: past it the handshake
     // is not what failed.
     const record = recordWith();
@@ -712,7 +712,7 @@ describe("a window whose run raised a standing condition", () => {
     );
   });
 
-  test("a window nobody arrived in carries none", async () => {
+  test("a window nobody arrived in records none", async () => {
     const record = recordWith();
     const runner = harness({
       records: [record],
@@ -731,7 +731,7 @@ describe("a due window under the operator's compromise response", () => {
    * on the next window at the same wall clock. */
   const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
-  /** A record carrying an unanswered failure the operator has since answered
+  /** A record with an unanswered failure the operator has since answered
    * "something does not add up" at. */
   function respondedRecord(
     respondedAt = "2026-01-05T11:00:00.000Z",
@@ -876,7 +876,7 @@ describe("a due window under the operator's compromise response", () => {
     });
   });
 
-  test("stops the window's own attempts once the answer lands mid-window", async () => {
+  test("stops the window's own attempts once the answer arrives mid-window", async () => {
     // The answer is written while the first attempt runs, as another tab's
     // acknowledgement gate would write it. The window is three hours wide and
     // the failure retryable, so nothing but the answer ends the occupancy here.
@@ -1077,7 +1077,7 @@ describe("a window the single-writer lock was held through", () => {
 
   test("credits the concurrent run that succeeded inside it", async () => {
     // The refusal advances the plan past a window whose run is still in flight,
-    // so that run's bookkeeping lands in a window the walk no longer visits.
+    // so that run's bookkeeping is recorded in a window the walk no longer visits.
     // Uncredited, a success could not reset the count, and the two-miss
     // escalation would fire a window early.
     const { record, runner, wake } = await refusedThenWokenAgain();

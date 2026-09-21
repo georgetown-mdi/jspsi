@@ -260,7 +260,7 @@ describe("a stopped run's entry through the real store", () => {
  * unhandled.
  */
 describe("a read that rejects rather than classifying", () => {
-  test("lands on the transient state instead of stranding the spinner", async () => {
+  test("shows the transient state instead of stranding the spinner", async () => {
     const created = await createManagedExchange(newExchange());
     reads.mockRejectedValueOnce(new Error("the read contract lapsed"));
 

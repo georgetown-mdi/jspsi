@@ -76,7 +76,7 @@ const CONFIG_HANDOFF = {
 } satisfies JobHandoff;
 
 /** The same invitation hand-off for a run that signed its receipts, which adds
- * the carry-the-identity step and the timestamped-receipt note. */
+ * the copy-the-identity step and the timestamped-receipt note. */
 const SIGNED_CONFIG_HANDOFF = {
   ...CONFIG_HANDOFF,
   usedSigningIdentity: true,
@@ -173,11 +173,11 @@ describe("RecurringHandoff panel", () => {
     expect(text()).toContain(".psilink.key");
     expect(text()).toContain("0 2 * * *");
     expect(text()).toContain("schtasks /Create");
-    // An unsigned run is told nothing about carrying a signing identity.
+    // An unsigned run is told nothing about copying a signing identity.
     expect(text()).not.toContain("Copy your signing identity");
   });
 
-  test("adds the carry-the-identity step for a run that signed its receipts", async () => {
+  test("adds the copy-the-identity step for a run that signed its receipts", async () => {
     stubHandoff(SIGNED_CONFIG_HANDOFF);
     app.render(createElement(RecurringHandoff, { jobId: JOB_ID }));
 

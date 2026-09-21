@@ -214,7 +214,7 @@ describe("the re-take on a spent copy's own surface", () => {
   });
 });
 
-describe("a run pressed after the hand-off landed", () => {
+describe("a run pressed after the hand-off arrived", () => {
   test("the refusal fixes the surface on the spent state, with no reload", async () => {
     // The surface reads the spent state when it loads, and this operator's
     // surface loaded before the hand-off was confirmed in another tab -- so the

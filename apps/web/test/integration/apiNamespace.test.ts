@@ -249,7 +249,7 @@ const REFUSED_REQUESTS: ReadonlyArray<[string, string]> = REFUSED.map(
   ([method, path]) => [method, path],
 );
 
-/** The rows the console arm re-drives: every one the hosted matrix reads as a
+/** The rows the console arm re-drives: every one the hosted matrix treats as a
  * spelling of a job route. */
 const JOB_ROUTE_REQUESTS: ReadonlyArray<[string, string]> = REFUSED.filter(
   (row) => row[2] === "jobRoute",

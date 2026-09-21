@@ -1200,7 +1200,7 @@ describe("rendezvousStartupWarnings overlap branch", () => {
     expect(warnings[0]).toContain("the work-input directory");
   });
 
-  test("does not warn for a symlinked mount that lands beside the data root", () => {
+  test("does not warn for a symlinked mount that resolves beside the data root", () => {
     // Resolution decides an overlap, never invents one: a link is not itself the
     // fault, and a console whose mounts are links would otherwise warn always.
     const mounts = tempDir("mounts");

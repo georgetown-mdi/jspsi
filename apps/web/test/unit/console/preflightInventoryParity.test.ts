@@ -150,7 +150,7 @@ describe("every row is dispositioned in the console", () => {
     // The rows that are gaps by design. Each is written down rather than
     // dropped so that building the boundary is a change to this list, not a
     // rediscovery, and each names no console surface -- a pending row that still
-    // pointed at a symbol would read as covered.
+    // pointed at a symbol would count as covered.
     for (const id of ["jobAdmission"] as const) {
       expect([id, PREFLIGHT_INVENTORY[id].console.kind]).toEqual([
         id,

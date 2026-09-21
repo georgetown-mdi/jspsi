@@ -138,7 +138,7 @@ function multiFieldDraft(): AdvancedInviteDraft {
 /** Set (or, with `null`, strip) a named field's constraints in a document -- a
  * hand-edit an external author could make that the editor has no control to
  * produce. Mutates a clone via a localized cast: the constraint shape is per-type
- * in the union, which the test deliberately violates to model an arbitrary input. */
+ * in the union, which the test violates by design to model an arbitrary input. */
 function withFieldConstraints(
   terms: LinkageTerms,
   fieldName: string,
@@ -1603,7 +1603,7 @@ describe("draftFromTerms reconstructs multi-field bindings on import", () => {
 
       // Fail-closed: the key that referenced the unbound second field cannot generate,
       // while the first-name key still can. The operator re-establishes the second
-      // binding deliberately -- in the workbench, or by roling the column `linkage` --
+      // binding by hand -- in the workbench, or by roling the column `linkage` --
       // rather than having the import do it for them.
       const { satisfiableKeyCount } = assessLinkageSatisfiability(
         seed.columns,

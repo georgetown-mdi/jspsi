@@ -554,7 +554,7 @@ describe("the create gate and the two sentences that state it", () => {
     );
   });
 
-  test("clear gates read as ready in both places, and enable the create", () => {
+  test("clear gates report ready in both places, and enable the create", () => {
     const status = inviterCreateStatus(clearGates);
     expect(status.ready).toBe(true);
     expect(status.statusLine).toBe("Ready to create.");

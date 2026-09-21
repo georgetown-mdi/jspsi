@@ -169,7 +169,7 @@ describe("computeFieldCoverage: the silent-empty defense", () => {
 
   test("a step left mid-edit makes the field unavailable, not a false alarm", () => {
     // pad_left with no length throws at compile; the field is reported unavailable
-    // (coverage unknown) rather than crashing the sweep or reading as a collapse.
+    // (coverage unknown) rather than crashing the sweep or counting as a collapse.
     const rows = [{ n: "42" }];
     const standardization: Standardization = [
       { output: "first_name", input: "n", steps: [{ function: "pad_left" }] },

@@ -22,7 +22,7 @@ describe("SERVER_JOB_PEER_WINDOW_BODY", () => {
     );
   });
 
-  test("formats durations, with the one-hour default reading as 'an hour'", () => {
+  test("formats durations, with the one-hour default displayed as 'an hour'", () => {
     expect(peerWindowDurationPhrase(3_600_000)).toBe("an hour");
     expect(peerWindowDurationPhrase(2 * 3_600_000)).toBe("2 hours");
     expect(peerWindowDurationPhrase(60_000)).toBe("a minute");

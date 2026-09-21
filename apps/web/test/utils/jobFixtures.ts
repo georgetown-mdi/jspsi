@@ -208,7 +208,7 @@ export async function awaitJobTerminalState(
 ): Promise<JobTerminalState> {
   // A wrapper object, not a bare local: the terminal is set from the driver's
   // callback, which TypeScript's control-flow analysis would otherwise narrow a
-  // local `null` past, making the poll condition read as always-true.
+  // local `null` past, making the poll condition always true.
   const terminalRef: { current: JobTerminalState | null } = { current: null };
   spawn((state) => {
     terminalRef.current = state;

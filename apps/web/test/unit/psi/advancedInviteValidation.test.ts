@@ -56,7 +56,7 @@ function importedTransformSteps(offset: number): Array<TransformStep> {
 }
 
 /** `draft` with its key list replaced by an imported document's shape: every key
- * at the element cap this test uses, every element carrying one parse_date step
+ * at the element cap this test uses, every element with one parse_date step
  * of its own. The elements are copies of a key the seed already offers, so each
  * still references a field the draft's columns supply. */
 function importedDocument(

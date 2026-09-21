@@ -440,7 +440,7 @@ describe("a stored schedule the entry form did not write", () => {
       // rather than re-derived.
       expect(rebuilt.windowSeconds).toBe(5400);
       expect(rebuilt.anchor).toBe(stored.anchor);
-      // The edit itself lands, and the bookkeeping starts over on the new
+      // The edit itself takes effect, and the bookkeeping starts over on the new
       // lattice as it does for any edited cadence.
       expect(rebuilt.intervalDays).toBe(14);
       expect(rebuilt.consecutiveMisses).toBe(0);

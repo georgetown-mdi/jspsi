@@ -358,7 +358,7 @@ describe("the console reads that report off the job's status", () => {
     expect(asks).toEqual(["job-1"]);
   });
 
-  test("a read that landed before the exit is asked again", async () => {
+  test("a read that arrived before the exit is asked again", async () => {
     // The CLI reports its outcome before it closes the transport, so the read
     // that follows the result frame usually finds the child still closing: the
     // report exists only once the console has reconciled its exit.

@@ -66,7 +66,7 @@ function configFor() {
   });
 }
 
-describe("inviterServerJobConfig carries the party's own field delimiter", () => {
+describe("inviterServerJobConfig includes the party's own field delimiter", () => {
   // The console reads the operator's mounted file, so the choice made at the file
   // step only takes effect if it reaches the intent the driver POSTs. Absent, the
   // run reads and writes commas, so the config states nothing rather than a

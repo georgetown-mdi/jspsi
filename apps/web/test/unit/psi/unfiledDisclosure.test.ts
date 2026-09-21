@@ -150,7 +150,7 @@ describe("reading the noted runs", () => {
     expect(read).toEqual([{ at: record.createdAt, record }]);
   });
 
-  test("a run that retained no record reads as the fact alone", () => {
+  test("a run that retained no record is reported as the fact alone", () => {
     expect(unfiledDisclosuresOf(noted([{ at: NOTED_AT }]))).toEqual([
       { at: NOTED_AT },
     ]);

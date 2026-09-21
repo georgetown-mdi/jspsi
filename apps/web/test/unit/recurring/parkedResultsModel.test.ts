@@ -104,7 +104,7 @@ describe("the rows a returning operator reads", () => {
   });
 });
 
-describe("the row a run written to the granted folder reads as", () => {
+describe("the row shown for a run written to the granted folder", () => {
   function written(fallback?: "ungranted" | "write-failed"): ParkedResults {
     return {
       version: PARKED_RESULTS_VERSION,
@@ -137,7 +137,7 @@ describe("the row a run written to the granted folder reads as", () => {
     expect(row.summary).toContain("Nothing of them is kept in this browser");
   });
 
-  test("reads as a sentence where the run reported no count", () => {
+  test("states a sentence where the run reported no count", () => {
     const row = parkedResultsRows({
       version: PARKED_RESULTS_VERSION,
       entries: [
@@ -172,7 +172,7 @@ describe("the row a run written to the granted folder reads as", () => {
   });
 });
 
-describe("the row a run too large to keep reads as", () => {
+describe("the row shown for a run too large to keep", () => {
   function tooLarge(
     matchedRecordCount?: number,
     fallback?: ParkedResultsFallback,

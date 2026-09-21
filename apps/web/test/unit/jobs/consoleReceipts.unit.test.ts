@@ -546,7 +546,7 @@ describe("the graduation hand-off handles the identity path accurately", () => {
     );
   });
 
-  test("usedSigningIdentity flags the carry-the-key caveat only for a signed run", () => {
+  test("usedSigningIdentity flags the copy-the-key caveat only for a signed run", () => {
     const { handoff } = handoffYaml();
     expect(handoff.usedSigningIdentity).toBe(true);
     expect(
@@ -572,7 +572,7 @@ describe("the graduation hand-off handles the identity path accurately", () => {
 describe("the signing artifacts resolve inside the directory that owns them", () => {
   const workdir = "/srv/jobs/93b1c0d6";
 
-  test("the receipt lands directly under the job workdir, the identity under the mount", () => {
+  test("the receipt is written directly under the job workdir, the identity under the mount", () => {
     expect(resolveWorkdirFile(workdir, JOB_FILE_NAMES.receipt)).toBe(
       path.resolve(workdir, JOB_FILE_NAMES.receipt),
     );
@@ -1450,7 +1450,7 @@ describe("the receipts card's model", () => {
   });
 
   test("changing the location drops the fingerprint read at the old one", () => {
-    // A fingerprint is a fact about one key. Carrying it across a move would
+    // A fingerprint is a fact about one key. Keeping it across a move would
     // report the old key's value beside the new location and let the run gate
     // pass on an identity that may not be there.
     const authored = draft({

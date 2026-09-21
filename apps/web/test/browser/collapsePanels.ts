@@ -30,7 +30,7 @@ const DEFERRED_COMMIT_TIMEOUT_MS = 10_000;
 
 /**
  * A disclosure's toggle button, located by the accessible name it holds. A
- * toggle whose name carries the panel's collapsed summary beside its label is
+ * toggle whose name includes the panel's collapsed summary beside its label is
  * matched by a pattern for the label part.
  */
 export function disclosureToggle(name: string | RegExp) {

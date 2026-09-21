@@ -82,7 +82,7 @@ interface StubOptions {
   secretsConfigured?: boolean;
   /** Gates the responses wait on, taken in request order: the nth request settles
    * when the nth promise does, so a test can drive the card while a request is
-   * genuinely in flight. A request past the end of the list settles at once. */
+   * still in flight. A request past the end of the list settles at once. */
   gates?: Array<Promise<void>>;
 }
 
@@ -200,7 +200,7 @@ afterEach(async () => {
 });
 
 /** The card's own disclosure, matched on its label: the toggle's accessible name
- * carries the collapsed summary after it, which varies with the draft. */
+ * includes the collapsed summary after it, which varies with the draft. */
 const RECEIPTS_CARD = /Receipts and record keeping/;
 
 const modeSelect = () => page.getByLabelText("What this exchange produces");
@@ -254,7 +254,7 @@ async function drainSettledResponse(): Promise<void> {
 }
 
 describe("ReceiptsCard: asking the console for this party's fingerprint", () => {
-  test("shows the value to share and names the file it landed in", async () => {
+  test("shows the value to share and names the file it was written to", async () => {
     const stub = stubSigningApi();
     await renderCard();
     await chooseCertificateMode();

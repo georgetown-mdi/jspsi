@@ -129,7 +129,7 @@ function disclosedBy(state: AcceptorScreenState): Array<string> {
 }
 
 describe("the step the work column shows", () => {
-  test("a step move carries the sub-section it lands on", () => {
+  test("a step move records the sub-section it lands on", () => {
     const state = acceptorScreenReducer(ACCEPTOR_SCREEN_INITIAL, {
       type: "step-shown",
       step: "columns",
@@ -164,7 +164,7 @@ describe("the invitation the console reviews", () => {
     expect(state.decode.status).toBe("error");
   });
 
-  test("the rendezvous mount lands with the terms it decides runnability for", () => {
+  test("the rendezvous mount arrives with the terms it decides runnability for", () => {
     const state = acceptorScreenReducer(ACCEPTOR_SCREEN_INITIAL, {
       type: "invitation-decoded",
       invitation,
@@ -183,7 +183,7 @@ describe("what the acceptor discloses", () => {
     expect(disclosedBy(state)).toContain("program_code");
   });
 
-  test("a disclosure edit lands on the metadata the launch reads", () => {
+  test("a disclosure edit is written to the metadata the launch reads", () => {
     const seeded = accepted();
     if (seeded.columnsState === undefined)
       throw new Error("the fixture acquired no file");
@@ -351,7 +351,7 @@ describe("whether the launch may proceed", () => {
     expect(moved.committedDeduplicate).toBe(false);
   });
 
-  test("the parse commits the cardinality the action carries, not the live control", () => {
+  test("the parse commits the cardinality the action states, not the live control", () => {
     const movedBeforeParse = acceptorScreenReducer(ACCEPTOR_SCREEN_INITIAL, {
       type: "deduplicate-chosen",
       deduplicate: true,
@@ -559,7 +559,7 @@ describe("the managed-exchange offer", () => {
     expect(state.manageOffer).toEqual({ status: "error" });
   });
 
-  test("a deposit that lands reports it", () => {
+  test("a deposit that arrives is reported", () => {
     const state = acceptorScreenReducer(ACCEPTOR_SCREEN_INITIAL, {
       type: "manage-offer-deposited",
     });

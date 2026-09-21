@@ -158,7 +158,7 @@ describe("buildRunOutputs", () => {
     ).toMatchObject({ kind: "counted", countReportedByPartner: true });
   });
 
-  test("every outcome carries what the agreed deduplicate pair resolved to", () => {
+  test("every outcome states what the agreed deduplicate pair resolved to", () => {
     // The completion panel states the partner's value and the resolved
     // cardinality whatever this party received, so a helper that got no result
     // and a count-only party read them too.
@@ -179,9 +179,9 @@ describe("buildRunOutputs", () => {
     }
   });
 
-  test("a matched result carries the run's own entity-cluster summary", () => {
+  test("a matched result includes the run's own entity-cluster summary", () => {
     // The completion panel states how the closure grouped the pairs, so the
-    // summary rides the matched outputs rather than being recomputed there. A
+    // summary is written on the matched outputs rather than recomputed there. A
     // run that reported none leaves the field absent, which is every
     // cardinality but the both-sided one.
     const entityClusters = {

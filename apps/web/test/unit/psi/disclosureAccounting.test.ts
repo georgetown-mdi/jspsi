@@ -144,13 +144,12 @@ describe("reading a stored accounting", () => {
 });
 
 /**
- * Premise under test: a moved exchange-record version literal invalidates the
+ * Assumption under test: a moved exchange-record version literal invalidates the
  * stored entries but leaves the envelope intact, so entries come back verbatim
- * through the envelope-only read -- the recovery this suite exists to pin. The
- * bump is simulated with a literal derived from core's constant, not hard-coded,
- * so it stays non-current as core's constant moves. Stated limit: a real bump
- * also moves the record's field set, so a real entry could fail for more than
- * the version alone; the envelope schema never looks inside an entry.
+ * through the envelope-only read. The bump is derived from core's constant, so
+ * it stays non-current as that constant moves. Limit: a real bump also moves
+ * the record's field set, so a real entry could fail for more than the version
+ * alone.
  */
 describe("a moved exchange-record version leaves the stored entries recoverable", () => {
   /** A stored accounting whose entries hold a record version this build does not

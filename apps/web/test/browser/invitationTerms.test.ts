@@ -1054,7 +1054,7 @@ describe("InvitationTerms: always-visible egress and legal-agreement facts, tier
     await renderTerms(linkageTerms, perspective ? { perspective } : undefined);
   }
 
-  test("the egress count lands in the 'What you disclose' tier, outside the 'Other details' disclosure", async () => {
+  test("the egress count appears in the 'What you disclose' tier, outside the 'Other details' disclosure", async () => {
     // Two columns the inviter requests FROM the acceptor: the acceptor's egress -- its
     // own data leaving, so it belongs to the "what you disclose" direction.
     await render({
@@ -1094,7 +1094,7 @@ describe("InvitationTerms: always-visible egress and legal-agreement facts, tier
     );
   });
 
-  test("the egress count is the inviter's OWN inbound under 'proposing', so it lands in 'What you receive'", async () => {
+  test("the egress count is the inviter's OWN inbound under 'proposing', so it appears in 'What you receive'", async () => {
     // Under "proposing" the viewer is the inviter: the same request is its own inbound
     // ("You request ... from your partner"), so it belongs to the inviter's "what you
     // receive" direction, not "what you disclose".
@@ -1309,7 +1309,7 @@ describe("InvitationTerms: always-visible ingress count in the 'What you receive
     await renderTerms(linkageTerms, options);
   }
 
-  test("the ingress count lands in the 'What you receive' tier, outside the 'Other details' disclosure", async () => {
+  test("the ingress count appears in the 'What you receive' tier, outside the 'Other details' disclosure", async () => {
     // Two columns the inviter will send the acceptor for matched records.
     await render({
       ...terms,
@@ -1392,7 +1392,7 @@ describe("InvitationTerms: always-visible ingress count in the 'What you receive
 
   test("an invitation giving this party no result raises no ingress count beside its 'No'", async () => {
     // The mint-reachable pair: the result is not shared, the terms declare an
-    // empty send, and the token still carries the subset a mint stamps whatever
+    // empty send, and the token still holds the subset a mint stamps whatever
     // the output direction. Nothing crosses to a party entitled to no result, so
     // the screen states the non-receipt under Result sharing and counts no
     // arriving column against it -- the same reading the CLI accept prompt makes
@@ -2660,7 +2660,7 @@ describe("InvitationTerms: a qualifying sentence sits at its headline's visibili
     expect(collapse.textContent).toContain(
       CONSENT_FACTS.duplicateGroupingDisplayLimit.note,
     );
-    // The cascade these terms name carries the grouping to this party's own
+    // The cascade these terms name extends the grouping to this party's own
     // process, so the enforced sentence must not stand in for the one above.
     expect(app.container.textContent).not.toContain(
       CONSENT_FACTS.duplicateGroupingWithheld.note,
@@ -2723,7 +2723,7 @@ describe("InvitationTerms: a qualifying sentence sits at its headline's visibili
 
   // A probe's two sides, each rendered under the accepting party's own value
   // where the shape names one -- the seat's control, which no field of the
-  // invitation carries.
+  // invitation holds.
   const renderProbeSide = async (
     probe: (typeof pinnedDisclosureProbes)[number],
     side: "base" | "variant",
