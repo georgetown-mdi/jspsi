@@ -76,9 +76,9 @@ jobs:
           # PSILINK_REQUIRE_WORKER_BUILD=1 makes the real-worker offload suite
           # FAIL (not skip) if the CLI bundle is missing, so a regressed build
           # step cannot let that suite silently no-op green here -- mirroring
-          # PSILINK_SFTP_CHROOT_REQUIRED in the chroot leg. It is set only on
-          # this leg, which builds the CLI; the native and hardened legs do not
-          # build it and skip.
+          # PSILINK_SFTP_CHROOT_REQUIRED in the chroot leg. It is set on the two
+          # legs that build the CLI, this one and the native sshd leg; the
+          # hardened legs do not build it and skip.
           - suite: in-process sftp
             command: npm run test:integration -w apps/cli
             build-cli: "true"
@@ -117,6 +117,8 @@ jobs:
             command: npm run test:integration -w apps/cli
             sftp-backend: native
             native-sshd: "true"
+            build-cli: "true"
+            require-worker-build: "1"
     steps:
       - uses: actions/checkout@v7
       # Pins Node, installs from the lockfile, and builds @psilink/core. Those
@@ -129,7 +131,7 @@ jobs:
       - name: Create the sshd privilege-separation directory
         if: matrix.native-sshd == 'true'
         run: sudo mkdir -p /run/sshd
-      # The two legs that read apps/cli/dist build it themselves rather than
+      # The three legs that read apps/cli/dist build it themselves rather than
       # taking it from a producer job. The build is 6.5 s over a 1.6 MB tree
       # (measured locally), so a job of its own -- runner start, checkout,
       # setup, and an artifact round trip -- would cost more runner time than
