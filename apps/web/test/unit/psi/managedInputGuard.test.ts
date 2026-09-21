@@ -10,7 +10,9 @@ import {
   ManagedInputError,
   assessManagedInputColumns,
   managedInputFailureKind,
+  managedInputLastRun,
 } from "@psi/managed/managedInputGuard";
+import { lastRunSchema } from "@psi/managed/managedExchangeRecord";
 
 import type { ExchangeSpec, WebRTCExchangeLocator } from "@psilink/core";
 
@@ -149,5 +151,66 @@ describe("managedInputFailureKind: the recorded kind for each rejection", () => 
     ]);
     if (rejection === undefined) throw new Error("expected a rejection");
     expect(managedInputFailureKind(rejection)).toBe("terms-shortfall");
+  });
+});
+
+describe("managedInputLastRun: the bookkeeping a rejection records", () => {
+  const at = Date.parse("2026-07-14T09:00:00.000Z");
+
+  /** The rejection a file separated by something other than this record's
+   * delimiter produces: the whole header arrives as one mashed column. */
+  function mashedRejection() {
+    const rejection = assessManagedInputColumns(standingExchangeFile(), [
+      standingColumns.join("\t"),
+    ]);
+    if (rejection === undefined) throw new Error("expected a rejection");
+    return rejection;
+  }
+
+  test("stamps the one-column reading on a mashed shortfall", () => {
+    // The launch error holding the reading is gone by the next visit, so the
+    // entry is the only place the delimiter remedy can be read back from.
+    expect(managedInputLastRun(mashedRejection(), at)).toStrictEqual({
+      at: "2026-07-14T09:00:00.000Z",
+      outcome: "failed",
+      failureKind: "terms-shortfall",
+      singleColumnInput: true,
+    });
+  });
+
+  test("omits the reading on a shortfall of the agreed keys", () => {
+    // Absence is what keeps the agreed-keys copy: a file that dropped one column
+    // is a real shortfall, and naming a delimiter would misdirect the operator.
+    const rejection = assessManagedInputColumns(
+      standingExchangeFile(),
+      standingColumns.slice(1),
+    );
+    if (rejection === undefined) throw new Error("expected a rejection");
+    const lastRun = managedInputLastRun(rejection, at);
+    expect(lastRun.failureKind).toBe("terms-shortfall");
+    expect(lastRun).not.toHaveProperty("singleColumnInput");
+  });
+
+  test("omits the reading on an acquire rejection", () => {
+    const lastRun = managedInputLastRun(
+      { reason: "acquire", cause: new Error("gone") },
+      at,
+    );
+    expect(lastRun.failureKind).toBe("input");
+    expect(lastRun).not.toHaveProperty("singleColumnInput");
+  });
+
+  test("the stamped entry is one the record validator admits", () => {
+    expect(
+      lastRunSchema.parse(managedInputLastRun(mashedRejection(), at)),
+    ).toStrictEqual(managedInputLastRun(mashedRejection(), at));
+    // Admitted only as `true`, so the field cannot hold a reading its own
+    // absence already states.
+    expect(() =>
+      lastRunSchema.parse({
+        ...managedInputLastRun(mashedRejection(), at),
+        singleColumnInput: false,
+      }),
+    ).toThrow();
   });
 });

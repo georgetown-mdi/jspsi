@@ -12,8 +12,11 @@ import {
   managedRunFailureFromRecord,
   managedRunReinvites,
   managedRunRetryable,
+  managedRunTierFailure,
   withShownCause,
 } from "@recurring/managedRunLaunchModel";
+
+import { SINGLE_COLUMN_DELIMITER_REMEDY } from "@psi/managed/managedFailureCopy";
 
 import {
   MANAGED_EXCHANGE_SCHEMA_VERSION,
@@ -232,6 +235,32 @@ describe("classifyManagedRunFailure: pre-connection benign states from the error
       false,
     );
     expect(wider.message).not.toMatch(/single column/);
+  });
+
+  test("a stored one-column reading states the delimiter at the next visit", () => {
+    // An unattended run's launch error is gone by the time the operator opens the
+    // app, so the summary reads the reading off the entry the run stamped. The
+    // same stamp with no reading keeps the agreed-keys copy.
+    const stamped = managedRunTierFailure(
+      "terms-shortfall",
+      record({
+        lastRun: { ...failed("terms-shortfall"), singleColumnInput: true },
+      }),
+    );
+    if (!("message" in stamped))
+      throw new Error("expected the shortfall alert state");
+    expect(stamped.message).toMatch(/read as a single column/);
+    expect(stamped.message).toContain(SINGLE_COLUMN_DELIMITER_REMEDY);
+    expect(stamped.message).toMatch(/nothing left this device/);
+
+    const plain = managedRunTierFailure(
+      "terms-shortfall",
+      record({ lastRun: failed("terms-shortfall") }),
+    );
+    if (!("message" in plain))
+      throw new Error("expected the shortfall alert state");
+    expect(plain.message).not.toMatch(/single column/);
+    expect(plain.message).toMatch(/every linkage key/);
   });
 
   test("a run in progress elsewhere is the benign already-running state", () => {

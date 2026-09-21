@@ -15,6 +15,7 @@ import { sanitizeErrorForDisplay } from "@psilink/core";
 import {
   CONSENT_FAILURE_TITLE,
   INPUT_FAILURE_TITLE,
+  SINGLE_COLUMN_DELIMITER_REMEDY,
   TERMS_SHORTFALL_FAILURE_TITLE,
   UNEXPLAINED_FAILURE_TITLE,
 } from "@psi/managed/managedFailureCopy";
@@ -258,25 +259,22 @@ const TERMS_SHORTFALL_FAILURE: ManagedRunFailureAlert = {
  * shape a file separated by something other than the delimiter this exchange
  * reads it by comes out as ({@link ../psi/managed/managedInputGuard.ts}). The
  * terms are not the operator's problem here, so the copy states the reading and
- * the two ways out of it -- a file separated the way this exchange reads, or a
- * fresh setup naming the separator -- rather than the agreed keys. A record's
- * delimiter is fixed for the partnership, so neither way is a retry, and the
- * state keeps the shortfall tier's recovery.
+ * the remedy every managed surface states for it
+ * ({@link SINGLE_COLUMN_DELIMITER_REMEDY}) rather than the agreed keys. A
+ * record's delimiter is fixed for the partnership, so neither way out is a
+ * retry, and the state keeps the shortfall tier's recovery.
  *
- * Reached from the live launch error, which holds the reading; a shortfall read
- * back from a record holds only the tier, and renders
- * {@link TERMS_SHORTFALL_FAILURE}. */
+ * Reached from the live launch error, which holds the reading, and from a
+ * record whose shortfall stamp holds it
+ * ({@link ../psi/managed/managedExchangeRecord.ts}, `singleColumnInput`). */
 const SINGLE_COLUMN_SHORTFALL_FAILURE: ManagedRunFailureAlert = {
   kind: "terms-shortfall",
   title: TERMS_SHORTFALL_FAILURE_TITLE,
   message:
     "The run stopped before connecting because your input file read as a " +
     "single column, which cannot supply every linkage key this exchange " +
-    "agreed to match on, and nothing left this device. Its fields may be " +
-    "separated by a character other than the one this exchange reads it with. " +
-    "Save the input file with the separator this exchange was set up to read, " +
-    "or set the exchange up again with your partner and choose your file's " +
-    "separator at its file step.",
+    "agreed to match on, and nothing left this device. " +
+    SINGLE_COLUMN_DELIMITER_REMEDY,
   recovery: "restate",
 };
 
@@ -379,8 +377,10 @@ const UNEXPLAINED_FAILURE: ManagedRunFailureAlert = {
 };
 
 /** The surface state for a derived failure tier. The expired tier reads
- * `record.expires` to name the lapsed instant; the transport, missed, and none
- * tiers map to the generic transport copy.
+ * `record.expires` to name the lapsed instant; the shortfall tier reads the
+ * stamp's own `singleColumnInput` to choose between the delimiter remedy and
+ * the agreed-keys copy; the transport, missed, and none tiers map to the
+ * generic transport copy.
  *
  * The missed tier does not use the no-show copy: that copy attests nothing left
  * this device for THIS failure, while a recorded `"missed"` outcome belongs to
@@ -408,7 +408,9 @@ export function managedRunTierFailure(
     case "input":
       return INPUT_FAILURE;
     case "terms-shortfall":
-      return TERMS_SHORTFALL_FAILURE;
+      return record.lastRun?.singleColumnInput === true
+        ? SINGLE_COLUMN_SHORTFALL_FAILURE
+        : TERMS_SHORTFALL_FAILURE;
     case "consent":
       return CONSENT_FAILURE;
     case "handed-off":

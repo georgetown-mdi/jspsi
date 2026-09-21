@@ -731,6 +731,13 @@ unattended run that met it shows the same two ways forward at the operator's
 next visit, rather than the re-pick that would refuse identically. That is the
 case the split exists for: nobody was watching when it failed.
 
+The bookkeeping holds one thing more about a shortfall: whether the file read as
+a single column, the shape a file separated by something other than the delimiter
+this exchange reads it by comes out as. Where it did, the next visit and the
+between-visit notification state the separator as the way forward instead of the
+agreed keys -- there is nothing to decide with the partner, and copy sending the
+operator to do so would not reach the remedy.
+
 #### An input that has not changed since the last run
 
 An extract left standing at the agreed path is the one refresh failure nothing

@@ -46,10 +46,7 @@
  *   field-scoped write it awaits.
  */
 
-import {
-  ManagedInputError,
-  managedInputFailureKind,
-} from "./managedInputGuard";
+import { ManagedInputError, managedInputLastRun } from "./managedInputGuard";
 import {
   RotationPersistError,
   failedRun,
@@ -214,8 +211,9 @@ export async function runManagedExchange<TInput, THandshake, TExchange>(
       // caller loaded, so a hand-off confirmed since that load stops this run.
       await refuseHandedOffCopy(record.id, now, runStartedAtMs);
       // The input guard runs before the handshake opens any connection. A benign
-      // input rejection records its classified kind inside the lock (this run's
-      // record until the lock releases), then re-raises with no handshake attempted.
+      // input rejection records its classified bookkeeping inside the lock (this
+      // run's record until the lock releases), then re-raises with no handshake
+      // attempted.
       let input: TInput;
       try {
         input = await phases.acquireInput();
@@ -227,11 +225,7 @@ export async function runManagedExchange<TInput, THandshake, TExchange>(
           try {
             await recordLastRun(
               record.id,
-              failedRun(
-                now(),
-                "failed",
-                managedInputFailureKind(error.rejection),
-              ),
+              managedInputLastRun(error.rejection, now()),
               runStartedAtMs,
             );
           } catch {
