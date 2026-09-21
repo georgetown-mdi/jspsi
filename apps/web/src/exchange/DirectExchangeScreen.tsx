@@ -221,14 +221,11 @@ export function DirectExchangeScreen() {
     setStep(next);
   }
 
-  // Commit a profiled mounted file. A fresh file drops the trust affirmation, so
-  // the operator re-affirms for the new context, then advances to the server
-  // step; a commit the step refused stays on it with the refusal.
-  //
-  // A refused delimiter holds the spine on this step too -- this is the gate the
-  // picker leaves to its parent, the invitation steps' withheld Continue. The
-  // file profiled under the previous choice is voided the moment the refusal
-  // resolves, so nothing runs on columns read a way nobody chose.
+  // A fresh file drops the trust affirmation, so the operator re-affirms for
+  // the new context before the server step. A refused delimiter holds this
+  // step, the gate the picker leaves to its parent (the invitation steps
+  // withhold Continue), and the file profiled under the previous choice is
+  // voided when the refusal resolves, so no run reads columns nobody chose.
   function commitFile(profile: ProfiledJobInput) {
     const committed = directFileCommit(profile);
     setFile(committed);
