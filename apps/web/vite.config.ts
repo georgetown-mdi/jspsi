@@ -74,8 +74,8 @@ const psiWorkerWasmEngine = "@openmined/psi.js/psi_wasm_worker";
 
 // The features Playwright disables for test stability, in its own order. The
 // installed package exports no entry point reaching them, so they are copied
-// here and test/unit/chromiumDisableFeaturesSwitch.test.ts holds the copy
-// against playwright-core, failing on a bump that changes the list.
+// here and test/integration/chromiumDisableFeaturesSwitch.test.ts holds the
+// copy against a real Chromium launch, failing on a bump that changes the list.
 const playwrightDisabledFeatures = [
   "AvoidUnnecessaryBeforeUnloadCheckSync",
   "BoundaryEventDispatchTracksNodeRemoval",

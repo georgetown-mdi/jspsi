@@ -1,42 +1,22 @@
-import { createRequire } from "node:module";
-import fs from "node:fs";
-
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import { chromium } from "playwright";
 
 import viteConfig from "../../vite.config.ts";
 
+// The integration project rather than the unit one: every case here launches a
+// real Chromium, and CI installs the browser (eb_build_and_test.yaml) before
+// this project runs and after the unit project has finished. A case moved back
+// to unit would have no browser to launch on the automated gate.
+
 const MDNS_FEATURE = "WebRtcHideLocalIpsWithMdns";
 const SWITCH_PREFIX = "--disable-features=";
 
-// Playwright keeps its list in a module its package exports no entry point for,
-// so the one readable copy is the bundle the chromium launch path is built
-// from. Reading it here is what makes the copy in vite.config.ts checkable
-// rather than asserted.
-function installedPlaywrightDisabledFeatures(): Array<string> {
-  const playwrightCoreBundle = createRequire(import.meta.url).resolve(
-    "playwright-core/lib/coreBundle",
-  );
-  const source = fs.readFileSync(playwrightCoreBundle, "utf8");
-  const start = source.indexOf("disabledFeatures = [");
-  const end = source.indexOf("].filter(Boolean)", start);
-  if (start < 0 || end < 0) {
-    throw new Error(
-      `No disabledFeatures list in ${playwrightCoreBundle}. Playwright moved or ` +
-        `renamed it, so the copy in apps/web/vite.config.ts can no longer be checked ` +
-        `against the installed package -- find the list again and reteach this test.`,
-    );
-  }
-  const features = [
-    ...source.slice(start, end).matchAll(/^\s*"([^"]+)",?$/gm),
-  ].map((match) => match[1]);
-  if (features.length === 0) {
-    throw new Error(
-      `The disabledFeatures list in ${playwrightCoreBundle} parsed as empty, which ` +
-        `would make every assertion below vacuous.`,
-    );
-  }
-  return features;
+function disableFeaturesSwitches(args: ReadonlyArray<string>): Array<string> {
+  return args.filter((arg) => arg.startsWith(SWITCH_PREFIX));
+}
+
+function featuresOf(disableFeaturesSwitch: string): Array<string> {
+  return disableFeaturesSwitch.slice(SWITCH_PREFIX.length).split(",");
 }
 
 /** The launch arguments of every vitest project that launches a browser. */
@@ -60,20 +40,25 @@ async function browserProjectLaunchArgs(): Promise<Map<string, Array<string>>> {
   return launchArgs;
 }
 
-function disableFeaturesSwitches(args: ReadonlyArray<string>): Array<string> {
-  return args.filter((arg) => arg.startsWith(SWITCH_PREFIX));
-}
-
-function featuresOf(disableFeaturesSwitch: string): Array<string> {
-  return disableFeaturesSwitch.slice(SWITCH_PREFIX.length).split(",");
-}
-
 describe("the browser projects' --disable-features switch", () => {
+  // Playwright's own list, read off a launch it composed itself: the installed
+  // package exports no entry point reaching it, and the launched command line
+  // is the list as the browser actually receives it.
+  let playwrightDefaultFeatures: Array<string> = [];
+
+  beforeAll(async () => {
+    const server = await chromium.launchServer({ headless: true });
+    try {
+      const switches = disableFeaturesSwitches(server.process().spawnargs);
+      expect(switches, "a launch passing no arguments of ours").toHaveLength(1);
+      playwrightDefaultFeatures = featuresOf(switches[0]);
+    } finally {
+      await server.close();
+    }
+  }, 120_000);
+
   it("passes one switch holding Playwright's list and the mDNS feature", async () => {
-    const expected = [
-      ...installedPlaywrightDisabledFeatures(),
-      MDNS_FEATURE,
-    ].sort();
+    const expected = [...playwrightDefaultFeatures, MDNS_FEATURE].sort();
     const launchArgs = await browserProjectLaunchArgs();
 
     expect([...launchArgs.keys()].sort()).toEqual(["browser", "live-webrtc"]);
@@ -84,22 +69,9 @@ describe("the browser projects' --disable-features switch", () => {
         expected,
       );
     }
-  });
+  }, 30_000);
 
-  it("leaves chromium one winning switch, with the mDNS obfuscation off", async (context) => {
-    let executable = "";
-    try {
-      executable = chromium.executablePath();
-    } catch {
-      executable = "";
-    }
-    if (!executable || !fs.existsSync(executable)) {
-      context.skip(
-        `no chromium build installed (npx playwright install chromium), so the ` +
-          `launched command line and the candidates it yields go unmeasured`,
-      );
-    }
-
+  it("leaves chromium one winning switch, with the mDNS obfuscation off", async () => {
     const args = (await browserProjectLaunchArgs()).get("browser");
     expect(args).toBeDefined();
     const server = await chromium.launchServer({ headless: true, args });
@@ -109,10 +81,7 @@ describe("the browser projects' --disable-features switch", () => {
       const switches = disableFeaturesSwitches(server.process().spawnargs);
       const deciding = featuresOf(switches[switches.length - 1]);
       expect(deciding).toEqual(
-        expect.arrayContaining([
-          ...installedPlaywrightDisabledFeatures(),
-          MDNS_FEATURE,
-        ]),
+        expect.arrayContaining([...playwrightDefaultFeatures, MDNS_FEATURE]),
       );
 
       const browser = await chromium.connect(server.wsEndpoint());
