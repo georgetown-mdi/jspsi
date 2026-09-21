@@ -72,6 +72,40 @@ const srcAliases = {
 // its WASM, so `optimizeDeps` never affects `vite build`.
 const psiWorkerWasmEngine = "@openmined/psi.js/psi_wasm_worker";
 
+// The features Playwright disables for test stability, in its own order. The
+// installed package exports no entry point reaching them, so they are copied
+// here and test/unit/chromiumDisableFeaturesSwitch.test.ts holds the copy
+// against playwright-core, failing on a bump that changes the list.
+const playwrightDisabledFeatures = [
+  "AvoidUnnecessaryBeforeUnloadCheckSync",
+  "BoundaryEventDispatchTracksNodeRemoval",
+  "DestroyProfileOnBrowserClose",
+  "DialMediaRouteProvider",
+  "GlobalMediaControls",
+  "HttpsUpgrades",
+  "LensOverlay",
+  "MediaRouter",
+  "PaintHolding",
+  "ThirdPartyStoragePartitioning",
+  "BlockOriginHeaderModificationOnRedirect",
+  "Translate",
+  "AutoDeElevate",
+  "OptimizationHints",
+  "msForceBrowserSignIn",
+  "msEdgeUpdateLaunchServicesPreferredVersion",
+];
+
+// The one --disable-features switch the browser projects launch with. Chromium
+// keeps only the LAST --disable-features switch on a command line instead of
+// merging duplicates -- measured 2026-09-21 against the chromium playwright
+// 1.62.1 installs, where a switch after Playwright's own put the mDNS
+// obfuscation back on -- so the feature these projects need is composed into
+// Playwright's list rather than passed on a switch of its own.
+const browserDisableFeaturesSwitch = `--disable-features=${[
+  ...playwrightDisabledFeatures,
+  "WebRtcHideLocalIpsWithMdns",
+].join(",")}`;
+
 // The Elastic Beanstalk deploy trigger (.github/workflows/eb_deploy.yaml) is a
 // hand-written path filter over the sources this build reads, and the bundler is
 // the only thing that knows what that set actually is. When
@@ -288,7 +322,7 @@ export default defineConfig((_configEnv) => {
               // server or `npm run build`.
               provider: playwright({
                 launchOptions: {
-                  args: ["--disable-features=WebRtcHideLocalIpsWithMdns"],
+                  args: [browserDisableFeaturesSwitch],
                 },
               }),
               headless: true,
@@ -339,7 +373,7 @@ export default defineConfig((_configEnv) => {
               // that do not resolve in a container.
               provider: playwright({
                 launchOptions: {
-                  args: ["--disable-features=WebRtcHideLocalIpsWithMdns"],
+                  args: [browserDisableFeaturesSwitch],
                 },
               }),
               headless: true,
