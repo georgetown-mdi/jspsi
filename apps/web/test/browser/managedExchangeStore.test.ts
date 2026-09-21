@@ -34,6 +34,7 @@ import {
   MAX_SCHEDULE_INTERVAL_DAYS,
   NO_STANDING_CONDITION,
   composeManagedExchangeFile,
+  runnableManagedExchangeOrRefuse,
   standingCompromiseResponse,
 } from "@psi/managed/managedExchangeRecord";
 import {
@@ -72,7 +73,17 @@ import type {
   ManagedExchangeRecord,
   ManagedExchangeSchedule,
   NewManagedExchange,
+  RunnableManagedExchangeRecord,
 } from "@psi/managed/managedExchangeRecord";
+
+/** A stored record narrowed to the runnable shape these fixtures all have: every
+ * record here is created with a shared secret, and the export, hand-off, and run
+ * paths take the record type that holds one. */
+async function createRunnableExchange(
+  fields: Parameters<typeof createManagedExchange>[0],
+): Promise<RunnableManagedExchangeRecord> {
+  return runnableManagedExchangeOrRefuse(await createManagedExchange(fields));
+}
 
 // The IndexedDB half of the managed-exchange store, exercised against real
 // Chromium (real IndexedDB, structured clone, and the File System Access handle
@@ -379,13 +390,13 @@ afterEach(async () => {
 
 describe("managed exchange store CRUD", () => {
   test("create then get round-trips the record", async () => {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
     const read = await getManagedExchange(created.id);
     expect(read).toEqual(created);
   });
 
   test("create persists origin-isolated to this app's database", async () => {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
     // The record is under the app's named database and store, keyed by its id.
     const stored = (await rawStored(created.id)) as { id: string } | undefined;
     expect(stored?.id).toBe(created.id);
@@ -397,14 +408,14 @@ describe("managed exchange store CRUD", () => {
   });
 
   test("list returns every persisted record", async () => {
-    const a = await createManagedExchange(newExchange({ label: "A" }));
-    const b = await createManagedExchange(newExchange({ label: "B" }));
+    const a = await createRunnableExchange(newExchange({ label: "A" }));
+    const b = await createRunnableExchange(newExchange({ label: "B" }));
     const all = await listManagedExchanges();
     expect(all.map((r) => r.id).sort()).toEqual([a.id, b.id].sort());
   });
 
   test("put replaces a whole record and re-validates it", async () => {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
     const rotated = { ...created, sharedSecret: generateSharedSecret() };
     const saved = await putManagedExchange(rotated);
     expect(saved.sharedSecret).toBe(rotated.sharedSecret);
@@ -417,7 +428,7 @@ describe("managed exchange store CRUD", () => {
   });
 
   test("update edits local fields in place, leaving the document untouched", async () => {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
     const updated = await updateManagedExchangeLocalFields(created.id, {
       label: "Riverbend monthly",
       schedule,
@@ -435,7 +446,7 @@ describe("managed exchange store CRUD", () => {
 
 describe("single-transaction local edits", () => {
   test("an edit after an out-of-band rotation write preserves the rotated secret", async () => {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
     const rotatedSecret = generateSharedSecret();
     await putManagedExchange({ ...created, sharedSecret: rotatedSecret });
 
@@ -453,7 +464,7 @@ describe("single-transaction local edits", () => {
   });
 
   test("the edit's read and write share one readwrite transaction", async () => {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
 
     // Count the transactions the update opens. One readwrite transaction is the
     // structural guarantee that no concurrent write can land between the read
@@ -482,7 +493,7 @@ describe("single-transaction local edits", () => {
   });
 
   test("a rejected edit aborts the transaction and writes nothing", async () => {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
     await expect(
       updateManagedExchangeLocalFields(created.id, {
         label: "x".repeat(MAX_LABEL_LENGTH + 1),
@@ -494,7 +505,7 @@ describe("single-transaction local edits", () => {
 
 describe("field-scoped rotation write", () => {
   test("advances the secret and expires, leaving the document and label untouched", async () => {
-    const created = await createManagedExchange(
+    const created = await createRunnableExchange(
       newExchange({ label: "Riverbend quarterly" }),
     );
     const rotatedSecret = generateSharedSecret();
@@ -512,7 +523,7 @@ describe("field-scoped rotation write", () => {
   });
 
   test("a null expires clears any standing bound", async () => {
-    const created = await createManagedExchange(
+    const created = await createRunnableExchange(
       newExchange({ expires: "2026-04-06T14:00:00.000Z" }),
     );
     const rotatedSecret = generateSharedSecret();
@@ -530,7 +541,7 @@ describe("field-scoped rotation write", () => {
     // transaction. A rotation applied after a label edit keeps the new label -- the
     // rotation write is structurally incapable of reverting a field it does not
     // touch, the property the persist-before-success write depends on.
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
     await updateManagedExchangeLocalFields(created.id, {
       label: "edited after create",
     });
@@ -544,7 +555,7 @@ describe("field-scoped rotation write", () => {
   });
 
   test("a malformed rotated secret aborts and writes nothing", async () => {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
     await expect(
       persistManagedExchangeRotation(created.id, {
         sharedSecret: "not-a-secret",
@@ -568,7 +579,7 @@ describe("field-scoped rotation write", () => {
 
 describe("field-scoped lastRun write", () => {
   test("records the outcome, leaving the secret and document untouched", async () => {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
     const updated = await recordManagedExchangeLastRun(
       created.id,
       {
@@ -586,7 +597,7 @@ describe("field-scoped lastRun write", () => {
   });
 
   test("recording an outcome cannot revert a concurrent rotation write", async () => {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
     const rotatedSecret = generateSharedSecret();
     await persistManagedExchangeRotation(created.id, {
       sharedSecret: rotatedSecret,
@@ -612,7 +623,7 @@ describe("field-scoped compromise response write", () => {
   const answeredAt = "2026-07-14T15:00:00.000Z";
 
   async function withFailedHandshake(): Promise<string> {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
     await recordManagedExchangeLastRun(
       created.id,
       { at: failedAt, outcome: "failed", failureKind: "auth" },
@@ -666,7 +677,7 @@ describe("field-scoped compromise response write", () => {
 
 describe("clearing the answer folds the windows it held", () => {
   test("advances the schedule past them as the answer leaves the record", async () => {
-    const created = await createManagedExchange(newExchange({ schedule }));
+    const created = await createRunnableExchange(newExchange({ schedule }));
     const failedAt = "2026-01-06T14:30:00.000Z";
     await recordManagedExchangeLastRun(
       created.id,
@@ -700,7 +711,7 @@ describe("clearing the answer folds the windows it held", () => {
   });
 
   test("leaves the schedule alone when no window elapsed under it", async () => {
-    const created = await createManagedExchange(newExchange({ schedule }));
+    const created = await createRunnableExchange(newExchange({ schedule }));
     const failedAt = "2026-01-06T14:30:00.000Z";
     await recordManagedExchangeLastRun(
       created.id,
@@ -739,7 +750,7 @@ describe("atomic schedule advance", () => {
   } as const;
 
   test("the planned window, the count, and the outcome land in one write", async () => {
-    const created = await createManagedExchange(newExchange({ schedule }));
+    const created = await createRunnableExchange(newExchange({ schedule }));
     const written = await persistManagedExchangeScheduleAdvance(created.id, {
       schedule: advanced,
       fromNextWindow: schedule.nextWindow,
@@ -756,7 +767,7 @@ describe("atomic schedule advance", () => {
   });
 
   test("advancing cannot revert a concurrent rotation write", async () => {
-    const created = await createManagedExchange(newExchange({ schedule }));
+    const created = await createRunnableExchange(newExchange({ schedule }));
     const rotatedSecret = generateSharedSecret();
     await persistManagedExchangeRotation(created.id, {
       sharedSecret: rotatedSecret,
@@ -773,7 +784,7 @@ describe("atomic schedule advance", () => {
   });
 
   test("a schedule dropped between the wake and the write is not resurrected", async () => {
-    const created = await createManagedExchange(newExchange({ schedule }));
+    const created = await createRunnableExchange(newExchange({ schedule }));
     await updateManagedExchangeLocalFields(created.id, { schedule: null });
     const written = await persistManagedExchangeScheduleAdvance(created.id, {
       schedule: advanced,
@@ -787,7 +798,7 @@ describe("atomic schedule advance", () => {
   });
 
   test("a plan a newer write already moved leaves the stored record alone", async () => {
-    const created = await createManagedExchange(newExchange({ schedule }));
+    const created = await createRunnableExchange(newExchange({ schedule }));
     const newer = {
       ...advanced,
       nextWindow: "2026-01-27T14:00:00.000Z",
@@ -810,7 +821,7 @@ describe("atomic schedule advance", () => {
   });
 
   test("a count the operator cleared survives a wake that read the old one", async () => {
-    const created = await createManagedExchange(
+    const created = await createRunnableExchange(
       newExchange({ schedule: { ...schedule, consecutiveMisses: 3 } }),
     );
     const cleared = { ...schedule, consecutiveMisses: 0 };
@@ -827,7 +838,7 @@ describe("atomic schedule advance", () => {
   });
 
   test("an advance the record schema rejects aborts the transaction and writes nothing", async () => {
-    const created = await createManagedExchange(newExchange({ schedule }));
+    const created = await createRunnableExchange(newExchange({ schedule }));
     await expect(
       persistManagedExchangeScheduleAdvance(created.id, {
         schedule: { ...advanced, consecutiveMisses: -1 },
@@ -862,7 +873,7 @@ describe("input-file handle persistence", () => {
     const handle = await root.getFileHandle("managed-input.csv", {
       create: true,
     });
-    const created = await createManagedExchange(
+    const created = await createRunnableExchange(
       newExchange({ inputFileHandle: handle }),
     );
     const read = await getManagedExchange(created.id);
@@ -887,7 +898,7 @@ describe("deposit persists a managed record of the party's side", () => {
       NOW,
     );
 
-    const created = await createManagedExchange(deposit);
+    const created = await createRunnableExchange(deposit);
 
     const stored = await listManagedExchanges();
     expect(stored).toHaveLength(1);
@@ -908,7 +919,7 @@ describe("deposit persists a managed record of the party's side", () => {
       NOW,
     );
 
-    const created = await createManagedExchange(deposit);
+    const created = await createRunnableExchange(deposit);
 
     const stored = await listManagedExchanges();
     expect(stored).toHaveLength(1);
@@ -917,7 +928,7 @@ describe("deposit persists a managed record of the party's side", () => {
   });
 
   test("both sides deposit into one list holding both", async () => {
-    await createManagedExchange(
+    await createRunnableExchange(
       buildManagedDeposit(
         {
           documentParts: { side: "inviter", linkageTerms },
@@ -928,7 +939,7 @@ describe("deposit persists a managed record of the party's side", () => {
         NOW,
       ),
     );
-    await createManagedExchange(
+    await createRunnableExchange(
       buildManagedDeposit(
         {
           documentParts: { side: "acceptor", linkageTerms },
@@ -950,7 +961,7 @@ describe("deposit persists a managed record of the party's side", () => {
 
 describe("reader rejects unknown on a store read", () => {
   test("a future schemaVersion in the store rejects rather than loading", async () => {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
     await rawPut({ ...created, schemaVersion: "psilink-managed-exchange/v4" });
     await expect(getManagedExchange(created.id)).rejects.toThrow();
     await expect(listManagedExchanges()).rejects.toThrow();
@@ -972,7 +983,7 @@ describe("the unattended read is per entry", () => {
   }
 
   test("skips the entry it cannot parse and returns every record it can", async () => {
-    const good = await createManagedExchange(
+    const good = await createRunnableExchange(
       newExchange({ label: "Good", schedule }),
     );
     await seedOutOfBoundsRecord(good);
@@ -987,8 +998,8 @@ describe("the unattended read is per entry", () => {
   });
 
   test("reports nothing unreadable for a store of valid records", async () => {
-    const first = await createManagedExchange(newExchange({ label: "First" }));
-    const second = await createManagedExchange(
+    const first = await createRunnableExchange(newExchange({ label: "First" }));
+    const second = await createRunnableExchange(
       newExchange({ label: "Second" }),
     );
 
@@ -1001,7 +1012,7 @@ describe("the unattended read is per entry", () => {
   });
 
   test("names the key a delete acts on, so the read recovers once it is used", async () => {
-    const good = await createManagedExchange(
+    const good = await createRunnableExchange(
       newExchange({ label: "Good", schedule }),
     );
     await seedOutOfBoundsRecord(good);
@@ -1025,7 +1036,7 @@ describe("one-step delete leaves nothing behind", () => {
     const handle = await root.getFileHandle("managed-input.csv", {
       create: true,
     });
-    const created = await createManagedExchange(
+    const created = await createRunnableExchange(
       newExchange({
         inputFileHandle: handle,
         tokenMaxAgeDays: 90,
@@ -1092,7 +1103,7 @@ describe("one-step delete leaves nothing behind", () => {
 
 describe("the accounting of disclosures accumulates each run's record", () => {
   test("a filed record round-trips verbatim, and a second run is a second entry", async () => {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
     const first = await disclosureRecord({
       createdAt: "2026-02-01T14:00:00.000Z",
     });
@@ -1109,7 +1120,7 @@ describe("the accounting of disclosures accumulates each run's record", () => {
   });
 
   test("re-filing one run's record does not double its entry", async () => {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
     const record = await disclosureRecord();
 
     await appendDisclosureRecordToStore(created.id, record);
@@ -1119,7 +1130,7 @@ describe("the accounting of disclosures accumulates each run's record", () => {
   });
 
   test("an exchange that has never completed a run has no accounting", async () => {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
 
     // Classified as an empty store rather than as a failure: this is the only
     // state the surface may render as "nothing was disclosed".
@@ -1129,7 +1140,7 @@ describe("the accounting of disclosures accumulates each run's record", () => {
   });
 
   test("an entry is stored as the reader admits it, without a caller's extra key", async () => {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
     const record = await disclosureRecord();
 
     // A caller handing the store more than the record format holds: the append
@@ -1163,7 +1174,7 @@ describe("an unreadable accounting recovers without deleting the exchange", () =
     id: string;
     entries: Array<unknown>;
   }> {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
     const record = await disclosureRecord();
     const entries = [
       { ...record, version: `${record.version}-moved` } as unknown,
@@ -1195,7 +1206,7 @@ describe("an unreadable accounting recovers without deleting the exchange", () =
   });
 
   test("an accounting damaged past its envelope leaves nothing to hand back", async () => {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
     await putRawDisclosureStored(created.id, {
       version: DISCLOSURE_ACCOUNTING_VERSION,
       entries: "one disclosure",
@@ -1210,7 +1221,7 @@ describe("an unreadable accounting recovers without deleting the exchange", () =
   });
 
   test("an accounting this version can read classifies as an accounting, not a recovery", async () => {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
     const record = await disclosureRecord();
     await appendDisclosureRecordToStore(created.id, record);
 
@@ -1283,7 +1294,7 @@ describe("an unreadable accounting recovers without deleting the exchange", () =
   });
 
   test("the reset of an exchange with no accounting is idempotent", async () => {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
 
     await expect(
       resetDisclosureAccounting(created.id),
@@ -1293,7 +1304,7 @@ describe("an unreadable accounting recovers without deleting the exchange", () =
 
   test("the reset is scoped to its own exchange, leaving another's accounting alone", async () => {
     const { id } = await strandedAccounting();
-    const other = await createManagedExchange(newExchange());
+    const other = await createRunnableExchange(newExchange());
     const otherRecord = await disclosureRecord();
     await appendDisclosureRecordToStore(other.id, otherRecord);
 
@@ -1317,7 +1328,7 @@ describe("a refused accounting is classified by which side is behind", () => {
     id: string;
     entries: Array<unknown>;
   }> {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
     const record = await disclosureRecord();
     const entries = [
       { ...record, version: neighbouringRecordVersion(offset) } as unknown,
@@ -1365,7 +1376,7 @@ describe("a refused accounting is classified by which side is behind", () => {
 
 describe("a scheduled run's results wait for the next visit", () => {
   test("a parked run round-trips its results, readable by a later visit", async () => {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
 
     await parkRunResults(created.id, parkedRun());
 
@@ -1388,7 +1399,7 @@ describe("a scheduled run's results wait for the next visit", () => {
   });
 
   test("a second run parks beside the first, oldest run first", async () => {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
     await parkRunResults(created.id, parkedRun());
     await parkRunResults(created.id, parkedRun(LATER_RUN_AT));
 
@@ -1399,7 +1410,7 @@ describe("a scheduled run's results wait for the next visit", () => {
   });
 
   test("a refused write records its named state, holding no rows", async () => {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
 
     await recordParkedResultsRefusal(created.id, RUN_AT);
 
@@ -1410,7 +1421,7 @@ describe("a scheduled run's results wait for the next visit", () => {
   });
 
   test("the stated retention is applied on every read, and takes the bytes with it", async () => {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
     await parkRunResults(created.id, parkedRun());
     const pastRetention =
       Date.parse(RUN_AT) + (PARKED_RESULTS_RETENTION_DAYS + 1) * DAY_MS;
@@ -1425,7 +1436,7 @@ describe("a scheduled run's results wait for the next visit", () => {
   });
 
   test("the retention is applied on a write too, so one run's results cannot outlive it", async () => {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
     await parkRunResults(created.id, parkedRun());
     const laterRun =
       Date.parse(RUN_AT) + (PARKED_RESULTS_RETENTION_DAYS + 1) * DAY_MS;
@@ -1443,12 +1454,12 @@ describe("a scheduled run's results wait for the next visit", () => {
   });
 
   test("an exchange nothing has parked for is reported as nothing, never as unavailable", async () => {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
     expect(await readParkedResults(created.id)).toEqual({ kind: "none" });
   });
 
   test("a stored value this build refuses is reported as unreadable, and is left where it is", async () => {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
     await putRawParkedStored(created.id, {
       version: "psilink-parked-results/v2",
       entries: [],
@@ -1461,7 +1472,7 @@ describe("a scheduled run's results wait for the next visit", () => {
   });
 
   test("a value this build refuses refuses the next run's parking too, and is not overwritten", async () => {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
     const stored = { version: "psilink-parked-results/v2", entries: [] };
     await putRawParkedStored(created.id, stored);
 
@@ -1478,7 +1489,7 @@ describe("a scheduled run's results wait for the next visit", () => {
 
 describe("clearing what scheduled runs left takes the bytes with it", () => {
   test("removes the rows, the notes, and the states, and leaves no envelope", async () => {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
     await parkRunResults(created.id, parkedRun());
     await recordResultsWrittenToFolder(created.id, {
       kind: "written",
@@ -1496,7 +1507,7 @@ describe("clearing what scheduled runs left takes the bytes with it", () => {
   });
 
   test("removes a stored value this build cannot read, which nothing else does", async () => {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
     await putRawParkedStored(created.id, {
       version: "psilink-parked-results/v2",
       entries: [],
@@ -1511,7 +1522,7 @@ describe("clearing what scheduled runs left takes the bytes with it", () => {
   });
 
   test("leaves the exchange itself, and its accounting, standing", async () => {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
     await parkRunResults(created.id, parkedRun());
 
     await clearParkedResults(created.id);
@@ -1522,7 +1533,7 @@ describe("clearing what scheduled runs left takes the bytes with it", () => {
 
 describe("clearing the store leaves no accounting behind", () => {
   test("a cleared store takes every accounting of disclosures with it", async () => {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
     await appendDisclosureRecordToStore(created.id, await disclosureRecord());
     await parkRunResults(created.id, parkedRun());
     expect(await rawDisclosureStored(created.id)).toBeDefined();
@@ -1545,7 +1556,7 @@ describe("clearing the store leaves no accounting behind", () => {
 
 describe("diagnostic read never rejects wholesale", () => {
   test("readable entries hold display essentials only, never the secret", async () => {
-    const created = await createManagedExchange(
+    const created = await createRunnableExchange(
       newExchange({ label: "Riverbend quarterly", side: "acceptor" }),
     );
 
@@ -1568,7 +1579,7 @@ describe("diagnostic read never rejects wholesale", () => {
   });
 
   test("a backup marker present is treated as backedUp; the timestamp never shows", async () => {
-    const created = await createManagedExchange(
+    const created = await createRunnableExchange(
       newExchange({ label: "Backed up" }),
     );
     await markManagedExchangeBackedUp(created.id, "2026-07-10T09:00:00.000Z");
@@ -1580,13 +1591,13 @@ describe("diagnostic read never rejects wholesale", () => {
   });
 
   test("an absent sibling entry is treated as not backed up", async () => {
-    await createManagedExchange(newExchange({ label: "Fresh" }));
+    await createRunnableExchange(newExchange({ label: "Fresh" }));
     const [entry] = await listManagedExchangesDiagnostic();
     expect(entry.backedUp).toBe(false);
   });
 
   test("an unparseable sibling entry is treated as backed up (conservative on doubt)", async () => {
-    const created = await createManagedExchange(
+    const created = await createRunnableExchange(
       newExchange({ label: "Doubtful" }),
     );
     // Corrupt the sibling entry so its parse fails: a wrongly-shown custody warning
@@ -1600,7 +1611,7 @@ describe("diagnostic read never rejects wholesale", () => {
   });
 
   test("a spent copy is reported with the route it was spent to", async () => {
-    const created = await createManagedExchange(
+    const created = await createRunnableExchange(
       newExchange({ label: "Handed off" }),
     );
     expect(
@@ -1622,13 +1633,13 @@ describe("diagnostic read never rejects wholesale", () => {
   });
 
   test("a live record reports no spend", async () => {
-    await createManagedExchange(newExchange({ label: "Live" }));
+    await createRunnableExchange(newExchange({ label: "Live" }));
     const [entry] = await listManagedExchangesDiagnostic();
     expect(entry.spent).toBeUndefined();
   });
 
   test("an unreadable record's spend survives its unreadability", async () => {
-    const good = await createManagedExchange(newExchange({ label: "Good" }));
+    const good = await createRunnableExchange(newExchange({ label: "Good" }));
     await rawPut({
       ...good,
       id: "bad-record",
@@ -1651,7 +1662,7 @@ describe("diagnostic read never rejects wholesale", () => {
   });
 
   test("one unreadable record does not fail the read; it yields an unreadable marker keyed for delete", async () => {
-    const good = await createManagedExchange(newExchange({ label: "Good" }));
+    const good = await createRunnableExchange(newExchange({ label: "Good" }));
     // Seed a future-version record under its own key: the strict list read rejects
     // wholesale on it, but the diagnostic read must still enumerate both.
     await rawPut({
@@ -1676,7 +1687,7 @@ describe("diagnostic read never rejects wholesale", () => {
   });
 
   test("an unreadable record with a live sibling backup marker is still treated as backed up", async () => {
-    const good = await createManagedExchange(newExchange({ label: "Good" }));
+    const good = await createRunnableExchange(newExchange({ label: "Good" }));
     await rawPut({
       ...good,
       id: "bad-record",
@@ -1696,7 +1707,7 @@ describe("diagnostic read never rejects wholesale", () => {
   });
 
   test("an unreadable record is deletable by key without a successful parse", async () => {
-    const good = await createManagedExchange(newExchange({ label: "Good" }));
+    const good = await createRunnableExchange(newExchange({ label: "Good" }));
     await rawPut({
       ...good,
       id: "bad-record",
@@ -1726,7 +1737,7 @@ describe("persistent storage request", () => {
       return Promise.resolve(false);
     };
     try {
-      const created = await createManagedExchange(newExchange());
+      const created = await createRunnableExchange(newExchange());
       expect(persistCalls).toBeGreaterThanOrEqual(1);
       // A denied grant does not fail the create.
       expect(await getManagedExchange(created.id)).toEqual(created);
@@ -1741,7 +1752,7 @@ describe("persistent storage request", () => {
       throw new Error("persist unavailable");
     };
     try {
-      const created = await createManagedExchange(newExchange());
+      const created = await createRunnableExchange(newExchange());
       expect(await getManagedExchange(created.id)).toEqual(created);
     } finally {
       StorageManager.prototype.persist = realPersist;

@@ -34,6 +34,7 @@ import {
   diagnoseManagedExchangeRecord,
   parseManagedExchangeRecord,
   partitionReadableManagedExchanges,
+  runnableManagedExchangeOrRefuse,
   safeParseManagedExchangeRecord,
   standingCompromiseResponse,
 } from "./managedExchangeRecord";
@@ -50,6 +51,7 @@ import type {
   ManagedExchangeRotation,
   ManagedExchangeScheduleAdvance,
   NewManagedExchange,
+  RunnableManagedExchangeRecord,
 } from "./managedExchangeRecord";
 import type {
   ManagedLocalState,
@@ -762,7 +764,8 @@ async function spendCurrentCopy(
  * `handoff` records WHICH export spent the copy, since the two have different
  * recoveries: a migration spend (`handoff` omitted) is revived by importing the
  * downloaded artifact ({@link reviveSpentManagedExchange}), while a `"command-line"`
- * hand-off downloaded files the import flow does not accept, so an artifact
+ * hand-off downloaded files that bring back no secret -- the import reads their
+ * `psilink.yaml` as a configuration only and never the key file -- so an artifact
  * predating it is refused instead of reviving the copy. Re-validated
  * ({@link parseManagedLocalState}) before the write, so a malformed spent state
  * aborts the transaction rather than landing.
@@ -1025,13 +1028,14 @@ export async function updateManagedExchangeLocalFields(
 export async function persistManagedExchangeRotation(
   id: string,
   rotation: ManagedExchangeRotation,
-): Promise<ManagedExchangeRecord> {
-  return readModifyWriteRotation(id, (stored) => {
+): Promise<RunnableManagedExchangeRecord> {
+  const rotated = await readModifyWriteRotation(id, (stored) => {
     if (stored === undefined)
       throw new Error(`no managed exchange with id ${id}`);
     const existing = parseManagedExchangeRecord(stored);
     return applyManagedExchangeRotation(existing, rotation);
   });
+  return runnableManagedExchangeOrRefuse(rotated);
 }
 
 /**

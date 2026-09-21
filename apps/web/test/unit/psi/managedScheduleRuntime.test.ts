@@ -22,11 +22,11 @@ import {
 } from "../../../src/psi/parkedResultsStore.js";
 import { MAX_PARKED_RESULT_BYTES } from "../../../src/psi/resultSizeProjection.js";
 
-import type { ManagedExchangeRecord } from "../../../src/psi/managed/managedExchangeRecord.js";
 import type { ManagedExchangeRunResult } from "../../../src/psi/managed/managedExchangeRun.js";
 import type { ManagedRunDriverConfig } from "../../../src/psi/managed/managedRunDriver.js";
 import type { ManagedScheduleTickSeams } from "../../../src/psi/managed/managedScheduleRunner.js";
 import type { RunOutputs } from "../../../src/psi/runOutputs.js";
+import type { RunnableManagedExchangeRecord } from "../../../src/psi/managed/managedExchangeRecord.js";
 
 const log = getLogger("managedScheduleRuntime");
 
@@ -73,7 +73,7 @@ const mockedTooLarge = vi.mocked(recordResultsTooLarge);
 const RECORD = {
   id: "record-under-test",
   label: "Riverbend quarterly",
-} as ManagedExchangeRecord;
+} as RunnableManagedExchangeRecord;
 
 /** The granted output folder, as the run reaches it: a permission state it
  * reports without prompting, and a write that either takes the bytes or throws.
@@ -109,12 +109,12 @@ function grantedFolder({
       id: RECORD.id,
       label: RECORD.label,
       outputDirectoryHandle: handle as unknown as FileSystemDirectoryHandle,
-    } as ManagedExchangeRecord,
+    } as RunnableManagedExchangeRecord,
   };
 }
 
 /** An attempt against `record` rather than the folderless one above. */
-function attemptFor(record: ManagedExchangeRecord) {
+function attemptFor(record: RunnableManagedExchangeRecord) {
   return { ...attempt(), record };
 }
 

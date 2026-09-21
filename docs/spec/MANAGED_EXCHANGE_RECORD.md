@@ -102,7 +102,7 @@ are the standing definition of the managed exchange.
 | `side` | enum (`"inviter"` \| `"acceptor"`) | This party's side of the partnership; dispatches a re-run to the matching rendezvous flow (see [Role: a local `side` field](#role-a-local-side-field-not-the-document)). Local-only by design -- not the document's `connection.role`, which no web path reads. |
 | `inputFileHandle` | `FileSystemFileHandle` or absent | A persisted **pointer** to the operator's input file, held where the File System Access API exists (Chromium), with persistent read permission where the platform grants it (an installed app), so an unattended run reads the standing file with nobody present and an attended re-run is one action. It is a reference, never a copy: no input content or row value derived from it persists, which is where the no-second-copy invariant is enforced. It is also live, not a snapshot: each run calls `getFile()` at run start and reads whatever file exists at the path, the pointer following the name rather than the file that stood there when it was picked -- a `File` already obtained stops being readable once the file underneath it changes, so `File` objects are never retained across runs -- which is what makes putting the current period's extract at the same name the data-refresh workflow, by an overwrite in place, a rename over the name, or a delete and a create (see [The input file each run](../MANAGED_EXCHANGE.md#the-input-file-each-run)). A missing entry at run start fails the file read with a clean not-found, recorded as a benign `"input"` failure (see `lastRun`), never routed through desync/attack framing. What it does add to the store's disclosure is the input file's **name**, and the granted read permission extends an in-origin reader's reach to the file's current contents (see [Metadata at rest](../SECURITY_DESIGN.md#metadata-at-rest-presence-and-shape)). Absent on browsers without the API (each attended run re-selects the file) and in any imported record: the handle is a device- and profile-local platform object stored by structured clone, with no file serialization, so the export artifact omits it and the first run after an import re-acquires one by selection. |
 | `outputDirectoryHandle` | `FileSystemDirectoryHandle` or absent | A persisted **pointer** to the folder the operator granted for a scheduled run's results, held where the File System Access API exists. A run with nobody present writes its results CSV into that folder, under a name holding the exchange's label and the run's own instant, so successive runs accumulate rather than overwrite and two exchanges granted one folder are told apart by name; a run whose grant is absent, not honoured unattended, or revoked, and one whose write fails, parks the results instead (see [The parked results of a scheduled run](#the-parked-results-of-a-scheduled-run)). The grant is taken at schedule entry and by re-pointing, never at run time: the directory picker requires a user gesture, and at run time the permission is **queried and never prompted**, the same unattended rule `inputFileHandle` takes. The mode is `readwrite`, a larger grant than the input side's single-file read -- an in-origin script can read and write everything in that folder while it stands (see [Metadata at rest](../SECURITY_DESIGN.md#metadata-at-rest-presence-and-shape)). Absent on browsers without the API, and never in the export artifact, for the reason `inputFileHandle` is: it is a device- and profile-local platform object stored by structured clone, with no serialization. What an import then holds depends on which import it is: one that installs a fresh record has no handle and re-grants, while a [revive-in-place](#the-backup-marker-the-spent-state-and-the-import-marker-local-siblings-never-in-the-artifact) -- this profile's own spent record, updated rather than duplicated -- keeps the grant that record already held, since the folder was granted to this profile and the handle never left it. |
-| `sharedSecret` | string (base64url, 43 chars / 32 bytes) | The **current** rotated shared secret, matching `SHARED_SECRET_REGEX` (see [EXCHANGE_FILE.md](EXCHANGE_FILE.md)) -- the `.psilink.key` analog the exchange-file document never holds. This is the one at-rest secret in the record. Rotated after every successful run and re-persisted before the run is treated as succeeded (see [Persist-before-success ordering](#persist-before-success-ordering)). |
+| `sharedSecret` | string (base64url, 43 chars / 32 bytes), or absent | The **current** rotated shared secret, matching `SHARED_SECRET_REGEX` (see [EXCHANGE_FILE.md](EXCHANGE_FILE.md)) -- the `.psilink.key` analog the exchange-file document never holds. This is the one at-rest secret in the record. Rotated after every successful run and re-persisted before the run is treated as succeeded (see [Persist-before-success ordering](#persist-before-success-ordering)). Absent in a [configuration-only record](#the-configuration-only-record), which runs nowhere here; its absence is what withholds the run, and no other field records that. |
 | `expires` | string (ISO 8601, UTC `Z`) or absent | The instant after which `sharedSecret` must not be used; the recovery when it lapses is re-invite. Absent means no bound is in force. The record inherits the CLI key file's **consumer** semantics for `expires` -- one field, one meaning to every consumer (see [Token age and rotation policy](../SECURITY_DESIGN.md#token-age-and-rotation-policy), a citation about meaning, not sourcing) -- while its **provenance** is single-source: only the max-age stamp writes it, the invitation's setup lifetime having been consumed at provisioning. Two write paths stamp it -- a successful run's rotation write-back and an operator's in-place edit of `tokenMaxAgeDays` -- both under the same never-move-later rule (see [Edit-time re-derivation of `expires`](#edit-time-re-derivation-of-expires)). |
 | `tokenMaxAgeDays` | integer or absent | The operator's max-token-age policy for this exchange, the browser analog of the CLI `authentication.token_max_age_days`, and like it **off by default**: absent means no bound is in force, and a record is created with it absent unless the operator sets one. When set, each successful run stamps `expires` this many days out onto the rotated secret. The reason to opt in is a dormant partnership: rotation caps exposure only for an exchange that actually runs, so an idle stored secret has no automatic exposure bound without it (see [The primary controls](../SECURITY_DESIGN.md#the-primary-controls)). It is a **local field** the operator may edit in place without a re-invite; what the edit does to `expires` is [Edit-time re-derivation of `expires`](#edit-time-re-derivation-of-expires). |
 | `schedule` | object or absent | The partnership-agreed run schedule the unattended path executes: the agreed recurrence and run window -- the schedule is partnership-level agreement, coordinated out-of-band exactly as the terms are -- plus the retry bookkeeping for a missed window (the next planned attempt). Absent for an exchange run attended-only. The field-by-field layout is in [The `schedule` object](#the-schedule-object). |
@@ -118,6 +118,36 @@ a handle is persisted, from which named input file. That
 presence-and-shape disclosure, and why none of the secret-centric controls
 reduce it, is analyzed in [Metadata at
 rest](../SECURITY_DESIGN.md#metadata-at-rest-presence-and-shape).
+
+#### The configuration-only record
+
+A record MAY hold **no `sharedSecret`**. Such a record is a **configuration
+only**: the agreed terms, the connection, and the local settings, with nothing to
+run them on. One route writes one -- importing a command-line `psilink.yaml`
+without its `.psilink.key` (see [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md#bringing-a-command-line-configuration-back))
+-- and the exchange it describes keeps running wherever that key file is.
+
+**The withheld run is the record's shape, not a flag.** Every path that runs,
+rotates, re-invites, hands off, or backs up an exchange takes the narrowed record
+type that holds a secret (`RunnableManagedExchangeRecord`), so a configuration-only
+record cannot be handed to one: the surfaces narrow first and show the
+configuration-only state where the narrowing fails, and the unattended tick skips
+such a record. There is no transition into or out of the state, and no stored
+marker to disagree with the record.
+
+**It holds nothing a run or a secret produces.** The record schema refuses a
+configuration-only record that also holds `expires` (a bound on a secret it does
+not have), `schedule` or `lastRun` (nothing here runs to meet a window or record
+an outcome), or either platform handle (no run reads a file or writes a folder).
+`label` and `tokenMaxAgeDays` are the fields it does hold and the two it edits in
+place, and an edit of the policy stamps no `expires`.
+
+**`schemaVersion` does not move for it.** The literal moves for a member an older
+build would read past and lose state by ([Versioning](#versioning-an-app-upgrade-can-invalidate-a-stored-record)).
+A build that predates this shape requires `sharedSecret`, so it refuses a
+configuration-only record whole rather than reading one as runnable -- the
+fail-closed outcome the version bump exists to produce -- while every record such
+a build wrote stays readable here.
 
 #### The connection block: credential-free by composition
 
@@ -1108,9 +1138,12 @@ record, in a separate origin-local store keyed by the record `id`, and are
     the marker to bytes that exist: a step that resolved without serializing would leave
     a marker attesting bytes nothing produced, so it fails the export instead.
   - **The command-line export marks nothing.** What it writes is the CLI's own
-    `psilink.yaml` and `.psilink.key`, which this app's import does not accept, so a
-    marker stamped for it would present the record as restorable from files nothing
-    here restores from. It takes a plain read of the record by `id` and leaves the
+    `psilink.yaml` and `.psilink.key`. The import accepts that `psilink.yaml` -- as a
+    [configuration-only record](#the-configuration-only-record), holding no secret --
+    and never the key file, so neither file restores the secret a marker attests.
+    A marker stamped for the pair would present the record as restorable from files
+    nothing here restores a secret from. It takes a plain read of the record by `id`
+    and leaves the
     marker -- present or absent -- exactly where it stood, whether the hand-off is
     confirmed or dismissed. The two exports are named apart where they are offered, so
     the operator chooses between "a file this browser restores from" and "the files
@@ -1205,9 +1238,11 @@ record, in a separate origin-local store keyed by the record `id`, and are
   that record's fields, keeps its `id` and its platform handles -- the input file
   and the granted output folder -- clears the spent state,
   and marks it imported and backed-up, rather than installing a duplicate). The
-  command-line export downloads the CLI's `psilink.yaml` and `.psilink.key`, which
-  the import flow does not accept, so that hand-off leaves nothing of its own to
-  import back: the two files are the exchange's backup of record, on the machine
+  command-line export downloads the CLI's `psilink.yaml` and `.psilink.key`. The
+  import reads that `psilink.yaml` as a [configuration-only
+  record](#the-configuration-only-record) and never the key file, so it brings back
+  settings and no secret: that hand-off leaves nothing of its own to revive a spent
+  record with, and the two files stay the exchange's backup of record, on the machine
   that runs it. That is why the surfaces reading the spent state branch on the
   discriminator rather than naming one recovery for both -- a spent copy is told
   the recovery its hand-off actually has.

@@ -464,3 +464,34 @@ describe("savedExchangeRow: a standing condition", () => {
     );
   });
 });
+
+describe("a configuration-only row", () => {
+  /** The record a command-line configuration installs: the same fixture without
+   * the secret, which is the whole of what withholds the run. */
+  function configurationOnly(): ManagedExchangeRecord {
+    const { sharedSecret: _sharedSecret, ...rest } = record();
+    return rest;
+  }
+
+  test("says what this browser holds and where the exchange runs", () => {
+    const row = savedExchangeRow(configurationOnly(), undefined, NOW);
+
+    expect(row.configurationOnly).toBe(true);
+    expect(row.status).toBe(
+      "Configuration only - edit it here, run it with psilink",
+    );
+  });
+
+  test("has no backup state and no lapse: there is no secret to have either", () => {
+    const row = savedExchangeRow(configurationOnly(), undefined, NOW);
+
+    expect(row.backup.kind).toBe("not-applicable");
+    expect(row.expired).toBe(false);
+  });
+
+  test("a row holding the secret is not configuration only", () => {
+    expect(savedExchangeRow(record(), undefined, NOW).configurationOnly).toBe(
+      false,
+    );
+  });
+});

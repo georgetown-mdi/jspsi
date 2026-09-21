@@ -34,7 +34,7 @@ import type {
   ManagedCronExportDispatch,
   ManagedHandoffRefusal,
 } from "@psi/managed/managedExchangeExport";
-import type { ManagedExchangeRecord } from "@psi/managed/managedExchangeRecord";
+import type { RunnableManagedExchangeRecord } from "@psi/managed/managedExchangeRecord";
 
 /** The key file's custody rules, cited rather than restated here. */
 const KEY_FILE_SECURITY_DOC_URL =
@@ -73,7 +73,7 @@ export function ManagedCronExportPanel({
   recheckRunInFlight,
   onHandedOff,
 }: {
-  record: ManagedExchangeRecord;
+  record: RunnableManagedExchangeRecord;
   /** Whether a run of this exchange is in flight in any context this browser profile
    * can see -- the host's own run, a second tab's, or the scheduled runtime's. Both
    * the download and the hand-off confirmation are withheld while it is, for the
@@ -184,12 +184,12 @@ export function ManagedCronExportPanel({
             </p>
             <p className={styles.small}>
               These two files are the command line&apos;s, not a backup file
-              this browser can restore from -- importing them here does nothing,
-              so downloading them leaves the backup state above exactly as it
-              is. If you want a file that brings this exchange back to this
-              browser, download a backup up there first and keep the exchange
-              here -- once you hand it over, a backup taken before the hand-off
-              will not bring it back.
+              this browser can restore from. Importing the psilink.yaml here
+              brings back its settings and no secret, so downloading them leaves
+              the backup state above exactly as it is. If you want a file that
+              brings this exchange back to this browser, download a backup up
+              there first and keep the exchange here -- once you hand it over, a
+              backup taken before the hand-off will not bring it back.
             </p>
             <ol className={styles.handoffSteps}>
               <li>

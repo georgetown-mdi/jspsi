@@ -1081,7 +1081,11 @@ this browser's -- and that the CLI names it in a warning on every run. Naming a
 The two files have the current secret, but they are a backup for the command line,
 not for this browser: reconstituting a browser copy after an eviction is the artifact
 import ([Eviction recovery is the import
-flow](#eviction-recovery-is-the-import-flow)), which these two files are not. So --
+flow](#eviction-recovery-is-the-import-flow)), which these two files are not. The
+`psilink.yaml` of the pair does come back, as settings to edit and export rather
+than as an exchange that runs here ([Bringing a command-line configuration
+back](#bringing-a-command-line-configuration-back)); the secret stays in the
+`.psilink.key`, which this browser does not read at an import. So --
 unlike the backup and migration exports -- taking this one **marks nothing**: the
 exchange's backup state is exactly what it was before, whether the operator confirms
 the hand-off or declines it. A backup indicator reading green is a promise that a file
@@ -1133,6 +1137,45 @@ it was -- same terms, same label, same schedule, same accounting of disclosures 
 because none of that ever left this browser. The schedule is the one thing to
 settle by hand: the cron entry or scheduled task that was meeting the agreed window
 is no longer the one meeting it, so remove it there.
+
+### Bringing a command-line configuration back
+
+A `psilink.yaml` written for the command line imports here on its own, without
+its key file. What lands is a **configuration-only** exchange: the agreed terms,
+the rendezvous address, and the local settings, with no shared secret. It is for
+the operator who would rather set an exchange up in a browser than author YAML,
+and run it where the data and the scheduler are -- read the file in, edit what is
+editable, download it again, run it there.
+
+Such an exchange **does not run in this browser**, and its own page says so in
+place of the Run control. The absent key file is the whole reason: without the
+secret the partnership rotates, there is nothing here to connect with. Nothing
+about the exchange on the other machine changes by importing its configuration --
+it keeps running there, from the files it already has.
+
+What the import accepts is what this app can hold:
+
+- **A webrtc connection, and no other channel.** The browser runs webrtc
+  exchanges only, so a configuration on another channel is refused, named by its
+  channel.
+- **A credential-free rendezvous address.** A TURN credential, an ICE
+  provisioning block, a signing identity or receipt path, a pinned fingerprint --
+  anything this app does not compose for itself -- is refused rather than stored,
+  by field name. The next export would hand it straight back to the command line,
+  and this browser cannot tell what a path on another machine opens.
+- **No shared secret.** A configuration naming one in its `authentication` block
+  is refused: the key file stays where the exchange runs. psilink reads the secret
+  from `.psilink.key` and refuses it in `psilink.yaml` for the same reason.
+- **A `role`.** The configuration has to say which side of the partnership this
+  party takes; the command line refuses a webrtc connection that names none, and
+  so does this.
+
+What is editable is what a browser-run exchange edits in place: the label, and
+the maximum age for the exchange's secret, which the exported configuration
+carries as `authentication.token_max_age_days` for the command-line run to apply.
+The agreed terms are read-only here as everywhere else -- exchanging on different
+terms is a new exchange, agreed with the partner. An import that is not edited
+exports back to the same configuration.
 
 ## Desync detection and recovery
 
@@ -1791,7 +1834,12 @@ recovery affordance is the empty state itself, which offers the import of the
 backup file the operator exported. Restoring after eviction and migrating to
 a new device are the **same import operation** (consistent with
 migration-not-sync): an import re-establishes the one owner, wherever it
-runs. One limit: a wholesale eviction erases the evidence that
+runs. The one control takes either file the operator may hold and routes it by
+what the file is: the backup artifact restores the exchange, and a command-line
+`psilink.yaml` lands as a configuration-only exchange instead ([Bringing a
+command-line configuration
+back](#bringing-a-command-line-configuration-back)). One limit: a wholesale
+eviction erases the evidence that
 anything existed, so the app cannot always distinguish a first visit from a
 post-eviction one -- which is exactly why the managed-exchange list's empty
 state has the import affordance standing, rather than exposing it only

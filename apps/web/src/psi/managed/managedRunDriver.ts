@@ -69,11 +69,11 @@ import type Peer from "peerjs";
 import type { ObjectUrls, RunOutputs } from "../runOutputs";
 import type { PairTableFactors } from "../resultSizeProjection";
 
-import type { ManagedExchangeRecord } from "./managedExchangeRecord";
 import type { ManagedExchangeRunResult } from "./managedExchangeRun";
 import type { ManagedInputSource } from "./managedInputHandle";
 import type { ManagedRerunOptions } from "./managedRun";
 import type { PeerCloseOutcome } from "../transport/waitForPeerClose";
+import type { RunnableManagedExchangeRecord } from "./managedExchangeRecord";
 
 const log = getLogger("managedRunDriver");
 
@@ -104,7 +104,7 @@ export interface ManagedRunDriverConfig {
    * `exchangeFile` supplies the terms (the connection block is read only for the
    * webrtc dispatchability check -- the signaling location is the app's own; see
    * {@link beginManagedRendezvous}). */
-  record: ManagedExchangeRecord;
+  record: RunnableManagedExchangeRecord;
   /** The per-run input source: read through the persisted handle (attended may
    * prompt once for a gone permission), or an operator-re-selected file. Its
    * contents are never taken from the record. */

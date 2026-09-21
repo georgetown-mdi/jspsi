@@ -16,14 +16,24 @@ import {
 import {
   buildManagedExchangeRecord,
   composeManagedExchangeFile,
+  runnableManagedExchangeOrRefuse,
 } from "@psi/managed/managedExchangeRecord";
 import { managedCronExportPanelState } from "@recurring/managedCronExportModel";
 
 import type { ExchangeLocator, WebRTCExchangeLocator } from "@psilink/core";
 import type {
-  ManagedExchangeRecord,
   NewManagedExchange,
+  RunnableManagedExchangeRecord,
 } from "@psi/managed/managedExchangeRecord";
+
+/** A record built from `fields` and narrowed to the runnable shape: every fixture
+ * here is built with a shared secret, and the export paths take the record type
+ * that holds one. */
+function runnableRecord(
+  fields: NewManagedExchange,
+): RunnableManagedExchangeRecord {
+  return runnableManagedExchangeOrRefuse(buildManagedExchangeRecord(fields));
+}
 
 // The pure model behind the command-line export panel, tested in Node without a
 // store or a download: what the panel renders for an exportable record, the two
@@ -43,8 +53,8 @@ const webrtcLocator: WebRTCExchangeLocator = {
 
 function managedRecord(
   overrides: Partial<NewManagedExchange> = {},
-): ManagedExchangeRecord {
-  return buildManagedExchangeRecord({
+): RunnableManagedExchangeRecord {
+  return runnableRecord({
     label: "Riverbend quarterly",
     exchangeFile: composeManagedExchangeFile({
       connection: webrtcLocator,
@@ -58,7 +68,7 @@ function managedRecord(
 
 /** The state for an exportable record, failing the test if the composer refused
  * one it was expected to compose. */
-function exportableState(record: ManagedExchangeRecord) {
+function exportableState(record: RunnableManagedExchangeRecord) {
   const state = managedCronExportPanelState(record);
   if (state.kind !== "exportable")
     throw new Error(`the model refused an exportable record: ${state.reason}`);

@@ -306,7 +306,7 @@ export function ManagedExchangeDetail({
  * app's own fixed copy, not a value the partner or operator chose (those reach
  * the row through `row.value` / `row.values` / `row.muted` instead).
  */
-function ConfigRowItem({ row }: { row: ConfigRow }) {
+export function ConfigRowItem({ row }: { row: ConfigRow }) {
   return (
     <div className={styles.dlRow}>
       <span className={styles.dlLabel}>{row.label}</span>

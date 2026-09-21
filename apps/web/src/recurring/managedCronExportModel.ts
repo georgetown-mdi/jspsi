@@ -18,12 +18,21 @@
 
 import { sanitizeErrorForDisplay } from "@psilink/core";
 
-import { composeManagedCronExport } from "@psi/managed/managedCronExport";
+import {
+  composeManagedCronExport,
+  composeManagedCronExportConfig,
+} from "@psi/managed/managedCronExport";
 
 import { cronScheduleLine, taskSchedulerLine } from "./scheduleTemplates";
 
-import type { ManagedCronExport } from "@psi/managed/managedCronExport";
-import type { ManagedExchangeRecord } from "@psi/managed/managedExchangeRecord";
+import type {
+  ManagedCommandLineConfig,
+  ManagedCronExport,
+} from "@psi/managed/managedCronExport";
+import type {
+  ManagedExchangeRecord,
+  RunnableManagedExchangeRecord,
+} from "@psi/managed/managedExchangeRecord";
 
 /**
  * The STUN server the exported invocation falls back to, disclosed on the panel
@@ -39,14 +48,16 @@ import type { ManagedExchangeRecord } from "@psi/managed/managedExchangeRecord";
 export const CLI_BUILT_IN_STUN_URI = "stun:stun.l.google.com:19302";
 
 /**
- * What the panel renders for a record: the composed export and its schedule lines,
- * or the composer's own reason for refusing it.
+ * What a panel renders for a record: the composed export and its schedule lines,
+ * or the composer's own reason for refusing it. `composed` holds the two files
+ * on the hand-off panel and the configuration file alone for a record that holds
+ * no secret, which is what each panel's own composer decides.
  */
-type ManagedCronExportPanelState =
+type ManagedCronExportPanelState<TComposed extends ManagedCommandLineConfig> =
   | {
       kind: "exportable";
-      /** The two files and the invocation the composer produced. */
-      composed: ManagedCronExport;
+      /** What the composer produced. */
+      composed: TComposed;
       /** The daily cron line running {@link composed}'s command. */
       cronLine: string;
       /** The daily Windows Task Scheduler command running the same. */
@@ -60,18 +71,14 @@ type ManagedCronExportPanelState =
       reason: string;
     };
 
-/**
- * Derive the panel's state for `record`. A record the composer refuses -- a stored
- * connection on another channel, or a document holding anything the app could not
- * have composed -- yields the refusal and its reason; anything else yields the
- * composed export and the two schedule lines.
- */
-export function managedCronExportPanelState(
-  record: ManagedExchangeRecord,
-): ManagedCronExportPanelState {
-  let composed: ManagedCronExport;
+/** Compose through `compose`, presenting its refusal rather than re-deriving the
+ * rule, and add the two schedule lines the composed command runs under. */
+function exportPanelState<TComposed extends ManagedCommandLineConfig>(
+  compose: () => TComposed,
+): ManagedCronExportPanelState<TComposed> {
+  let composed: TComposed;
   try {
-    composed = composeManagedCronExport(record);
+    composed = compose();
   } catch (error) {
     return { kind: "refused", reason: sanitizeErrorForDisplay(error) };
   }
@@ -81,4 +88,26 @@ export function managedCronExportPanelState(
     cronLine: cronScheduleLine(composed.command),
     taskSchedulerLine: taskSchedulerLine(composed.command),
   };
+}
+
+/**
+ * Derive the hand-off panel's state for `record`. A record the composer refuses
+ * -- a stored connection on another channel, or a document holding anything the
+ * app could not have composed -- yields the refusal and its reason; anything else
+ * yields the composed export and the two schedule lines.
+ */
+export function managedCronExportPanelState(
+  record: RunnableManagedExchangeRecord,
+): ManagedCronExportPanelState<ManagedCronExport> {
+  return exportPanelState(() => composeManagedCronExport(record));
+}
+
+/**
+ * The same for a configuration-only record: the `psilink.yaml` half alone, the
+ * key file it runs under having stayed on the machine that holds it.
+ */
+export function managedConfigurationExportState(
+  record: ManagedExchangeRecord,
+): ManagedCronExportPanelState<ManagedCommandLineConfig> {
+  return exportPanelState(() => composeManagedCronExportConfig(record));
 }

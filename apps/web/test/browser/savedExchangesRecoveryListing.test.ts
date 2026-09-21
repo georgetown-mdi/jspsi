@@ -21,6 +21,10 @@ import {
   spendManagedExchangeIfCurrent,
 } from "@psi/managed/managedExchangeStore";
 import {
+  composeManagedExchangeFile,
+  runnableManagedExchangeOrRefuse,
+} from "@psi/managed/managedExchangeRecord";
+import {
   encodeManagedExchangeArtifact,
   serializeManagedExchangeArtifact,
 } from "@psi/managed/managedExchangeArtifact";
@@ -29,14 +33,22 @@ import {
   markManagedExchangeBackedUp,
 } from "@psi/managed/managedLocalState";
 import { SavedExchanges } from "@recurring/SavedExchanges";
-import { composeManagedExchangeFile } from "@psi/managed/managedExchangeRecord";
 
 import { createAppMount } from "./renderApp";
 
 import type {
-  ManagedExchangeRecord,
   NewManagedExchange,
+  RunnableManagedExchangeRecord,
 } from "@psi/managed/managedExchangeRecord";
+
+/** A stored record narrowed to the runnable shape these fixtures all have: every
+ * record here is created with a shared secret, and the export, hand-off, and run
+ * paths take the record type that holds one. */
+async function createRunnableExchange(
+  fields: Parameters<typeof createManagedExchange>[0],
+): Promise<RunnableManagedExchangeRecord> {
+  return runnableManagedExchangeOrRefuse(await createManagedExchange(fields));
+}
 
 // The read-failed recovery listing, against real Chromium (real IndexedDB).
 // Unlike savedExchangesFailed.test.ts, which mocks the strict read, this file
@@ -118,7 +130,7 @@ afterEach(async () => {
 
 describe("read-failed recovery listing", () => {
   test("lists the readable record and the unreadable one, then delete-and-reload recovers", async () => {
-    const good = await createManagedExchange(
+    const good = await createRunnableExchange(
       newExchange({ label: "Riverbend quarterly" }),
     );
     // A key that sorts after any hex-first randomUUID, so the unreadable row is
@@ -168,7 +180,7 @@ describe("read-failed recovery listing", () => {
   });
 
   test("the recovery listing never renders the stored secret", async () => {
-    const good = await createManagedExchange(
+    const good = await createRunnableExchange(
       newExchange({ label: "Riverbend quarterly" }),
     );
     await rawPut({
@@ -195,9 +207,9 @@ describe("recovery listing: the delete confirm's custody notes", () => {
    * randomUUID sorts before "zzz-bad-record"), so the `.first()` Delete opens it. */
   async function mountReadFailedWith(
     label: string,
-    seedState?: (record: ManagedExchangeRecord) => Promise<unknown>,
-  ): Promise<ManagedExchangeRecord> {
-    const good = await createManagedExchange(newExchange({ label }));
+    seedState?: (record: RunnableManagedExchangeRecord) => Promise<unknown>,
+  ): Promise<RunnableManagedExchangeRecord> {
+    const good = await createRunnableExchange(newExchange({ label }));
     await rawPut({
       ...good,
       id: "zzz-bad-record",
@@ -248,7 +260,7 @@ describe("recovery listing: the delete confirm's custody notes", () => {
     // read, which routes the surface to read-failed on its own. The diagnostic read
     // then treats that unparseable sibling conservatively -- backed up on doubt -- so
     // the good record's delete confirm includes the custody note.
-    const good = await createManagedExchange(
+    const good = await createRunnableExchange(
       newExchange({ label: "Doubtful partnership" }),
     );
     await rawLocalPut(good.id, { backup: { backedUpAt: "not-an-instant" } });
@@ -331,14 +343,14 @@ describe("the import this surface offers works from the read-failed state", () =
   test("an artifact of a different exchange lands beside the unreadable record", async () => {
     // What the surface's copy offers as the way forward: one record this build cannot
     // parse must not refuse an import for an unrelated exchange.
-    const other = await createManagedExchange(
+    const other = await createRunnableExchange(
       newExchange({ label: "Other partnership" }),
     );
     const bytes = serializeManagedExchangeArtifact(
       encodeManagedExchangeArtifact(other),
     );
     await deleteManagedExchange(other.id);
-    const good = await createManagedExchange(
+    const good = await createRunnableExchange(
       newExchange({ label: "Riverbend quarterly" }),
     );
     await rawPut({
@@ -350,7 +362,7 @@ describe("the import this surface offers works from the read-failed state", () =
 
     app.render(createElement(SavedExchanges));
     await expect
-      .element(page.getByRole("button", { name: "Import a backup file" }))
+      .element(page.getByRole("button", { name: "Import a file" }))
       .toBeInTheDocument();
     await userEvent.upload(
       page.elementLocator(

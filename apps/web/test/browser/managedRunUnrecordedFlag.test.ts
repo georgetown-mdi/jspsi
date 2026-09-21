@@ -22,15 +22,28 @@ import {
   flagUnfiledExchange,
   unfiledExchangeFlagged,
 } from "@psi/unfiledDisclosureFlag";
+import {
+  composeManagedExchangeFile,
+  runnableManagedExchangeOrRefuse,
+} from "@psi/managed/managedExchangeRecord";
 import { ManagedRunSurface } from "@recurring/ManagedRunSurface";
-import { composeManagedExchangeFile } from "@psi/managed/managedExchangeRecord";
 
 import { createAppMount, flushPendingUpdates } from "./renderApp";
 
 import type {
   ManagedExchangeRecord,
   NewManagedExchange,
+  RunnableManagedExchangeRecord,
 } from "@psi/managed/managedExchangeRecord";
+
+/** A stored record narrowed to the runnable shape these fixtures all have: every
+ * record here is created with a shared secret, and the export, hand-off, and run
+ * paths take the record type that holds one. */
+async function createRunnableExchange(
+  fields: Parameters<typeof createManagedExchange>[0],
+): Promise<RunnableManagedExchangeRecord> {
+  return runnableManagedExchangeOrRefuse(await createManagedExchange(fields));
+}
 
 /**
  * The last-resort marker for a run this browser could store nothing about, and
@@ -101,7 +114,7 @@ afterEach(async () => {
 
 describe("a flagged exchange whose page shows the operator nothing", () => {
   test("keeps its flag across a visit that cannot find it", async () => {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
     await deleteManagedExchange(created.id);
     expect(await flagUnfiledExchange(created.id)).toBe(true);
 
@@ -118,7 +131,7 @@ describe("a flagged exchange whose page shows the operator nothing", () => {
   });
 
   test("keeps its flag across a visit that cannot load it", async () => {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
     await seedUnloadable(created);
     expect(await flagUnfiledExchange(created.id)).toBe(true);
 
@@ -135,7 +148,7 @@ describe("a flagged exchange whose page shows the operator nothing", () => {
   });
 
   test("keeps its flag across a visit to a spent copy", async () => {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
     expect(
       await spendManagedExchangeIfCurrent(
         created.id,
@@ -161,7 +174,7 @@ describe("a flagged exchange whose page shows the operator nothing", () => {
 
 describe("a flagged exchange whose page states the run", () => {
   test("drops the flag once the alert has rendered", async () => {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
     expect(await flagUnfiledExchange(created.id)).toBe(true);
 
     app.render(createElement(ManagedRunSurface, { id: created.id }));

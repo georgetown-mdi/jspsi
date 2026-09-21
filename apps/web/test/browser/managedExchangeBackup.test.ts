@@ -21,6 +21,10 @@ import {
   spendManagedExchangeIfCurrent,
 } from "@psi/managed/managedExchangeStore";
 import {
+  composeManagedExchangeFile,
+  runnableManagedExchangeOrRefuse,
+} from "@psi/managed/managedExchangeRecord";
+import {
   dispatchManagedMigration,
   exportManagedBackup,
 } from "@psi/managed/managedExchangeExport";
@@ -35,7 +39,6 @@ import {
   markManagedExchangeBackedUp,
   markManagedExchangeImported,
 } from "@psi/managed/managedLocalState";
-import { composeManagedExchangeFile } from "@psi/managed/managedExchangeRecord";
 import { deriveManagedFailureTier } from "@psi/managed/managedFailureTiers";
 import { failedRun } from "@psi/managed/managedRunRotate";
 import { importManagedExchange } from "@psi/managed/managedExchangeImport";
@@ -46,8 +49,18 @@ import { withManagedExchangeLock } from "@psi/managed/managedExchangeLock";
 import type {
   ManagedExchangeSchedule,
   NewManagedExchange,
+  RunnableManagedExchangeRecord,
 } from "@psi/managed/managedExchangeRecord";
 import type { WebRTCExchangeLocator } from "@psilink/core";
+
+/** A stored record narrowed to the runnable shape these fixtures all have: every
+ * record here is created with a shared secret, and the export, hand-off, and run
+ * paths take the record type that holds one. */
+async function createRunnableExchange(
+  fields: Parameters<typeof createManagedExchange>[0],
+): Promise<RunnableManagedExchangeRecord> {
+  return runnableManagedExchangeOrRefuse(await createManagedExchange(fields));
+}
 
 // The store-backed export/import and local sibling state, exercised against real
 // Chromium (real IndexedDB and the sibling object store). The pure encode/parse and
@@ -100,7 +113,7 @@ afterEach(async () => {
 
 describe("export/import round-trip against the real store", () => {
   test("an import installs a new owner minus the handle", async () => {
-    const source = await createManagedExchange(
+    const source = await createRunnableExchange(
       newExchange({ tokenMaxAgeDays: 90 }),
     );
     const bytes = serializeManagedExchangeArtifact(
@@ -126,7 +139,7 @@ describe("export/import round-trip against the real store", () => {
   });
 
   test("a malformed import leaves the store untouched", async () => {
-    const existing = await createManagedExchange(newExchange());
+    const existing = await createRunnableExchange(newExchange());
     await expect(importManagedExchange("not json {{{")).rejects.toThrow();
     // The pre-existing record is untouched and no new record was written.
     const all = await listManagedExchanges();
@@ -136,7 +149,7 @@ describe("export/import round-trip against the real store", () => {
 
 describe("the backup marker persists beside the record", () => {
   test("marking backed-up flips the list's derived backup state to green", async () => {
-    const record = await createManagedExchange(newExchange());
+    const record = await createRunnableExchange(newExchange());
     const before = savedExchangeRows(
       [record],
       await listManagedLocalState(),
@@ -156,7 +169,7 @@ describe("the backup marker persists beside the record", () => {
 
 describe("the import marker is the restore evidence the desync tiering reads", () => {
   test("an import stamps importedAt beside the record, out of the artifact", async () => {
-    const source = await createManagedExchange(newExchange());
+    const source = await createRunnableExchange(newExchange());
     const bytes = serializeManagedExchangeArtifact(
       encodeManagedExchangeArtifact(source),
     );
@@ -172,7 +185,7 @@ describe("the import marker is the restore evidence the desync tiering reads", (
   });
 
   test("a rotation consumes the import marker (a completed handshake proves sync)", async () => {
-    const record = await createManagedExchange(newExchange());
+    const record = await createRunnableExchange(newExchange());
     await markManagedExchangeImported(record.id, new Date().toISOString());
     expect((await getManagedLocalState(record.id))?.imported).toBeDefined();
 
@@ -188,7 +201,7 @@ describe("the import marker is the restore evidence the desync tiering reads", (
   });
 
   test("an auth failure on a freshly imported record tiers as imported, not unexplained", async () => {
-    const source = await createManagedExchange(newExchange());
+    const source = await createRunnableExchange(newExchange());
     const bytes = serializeManagedExchangeArtifact(
       encodeManagedExchangeArtifact(source),
     );
@@ -215,7 +228,7 @@ describe("the import marker is the restore evidence the desync tiering reads", (
 
 describe("an unattended run's failure shows through the same tiers at the next visit", () => {
   test("a stored auth failure with no benign evidence is treated as the unexplained tier", async () => {
-    const record = await createManagedExchange(newExchange());
+    const record = await createRunnableExchange(newExchange());
     // An unattended run failed closed and recorded auth -- nothing else explains it.
     await recordManagedExchangeLastRun(
       record.id,
@@ -230,7 +243,7 @@ describe("an unattended run's failure shows through the same tiers at the next v
   });
 
   test("a stored storage failure is treated as the benign storage tier at the next visit", async () => {
-    const record = await createManagedExchange(newExchange());
+    const record = await createRunnableExchange(newExchange());
     await recordManagedExchangeLastRun(
       record.id,
       failedRun(Date.now(), "failed", "storage"),
@@ -246,7 +259,7 @@ describe("an unattended run's failure shows through the same tiers at the next v
 
 describe("a migration spends the source", () => {
   test("marking spent shows a spent row (no run) and revives by import", async () => {
-    const source = await createManagedExchange(newExchange());
+    const source = await createRunnableExchange(newExchange());
     const bytes = serializeManagedExchangeArtifact(
       encodeManagedExchangeArtifact(source),
     );
@@ -283,7 +296,7 @@ describe("the spend is checked against the stored record in one step", () => {
     // the stored secret is still the one the operator's files hold -- and would
     // be superseded by that run's own persist the moment it lands. The exclusion
     // is what refuses it, on the very lock the run holds.
-    const record = await createManagedExchange(newExchange());
+    const record = await createRunnableExchange(newExchange());
     let granted!: () => void;
     const holding = new Promise<void>((resolve) => {
       granted = resolve;
@@ -330,7 +343,7 @@ describe("the spend is checked against the stored record in one step", () => {
   });
 
   test("a secret the store has rotated past refuses, writing nothing", async () => {
-    const record = await createManagedExchange(newExchange());
+    const record = await createRunnableExchange(newExchange());
     const downloadedSecret = record.sharedSecret;
     await markManagedExchangeBackedUp(record.id, "2026-07-14T12:00:00.000Z");
     await persistManagedExchangeRotation(record.id, {
@@ -357,7 +370,7 @@ describe("the spend is checked against the stored record in one step", () => {
   });
 
   test("the current secret spends the copy, keeping its backup marker", async () => {
-    const record = await createManagedExchange(newExchange());
+    const record = await createRunnableExchange(newExchange());
     await markManagedExchangeBackedUp(record.id, "2026-07-14T12:00:00.000Z");
     const before = await getManagedExchange(record.id);
 
@@ -379,7 +392,7 @@ describe("the spend is checked against the stored record in one step", () => {
   });
 
   test("a command-line hand-off is recorded beside the instant", async () => {
-    const record = await createManagedExchange(newExchange());
+    const record = await createRunnableExchange(newExchange());
 
     expect(
       await spendManagedExchangeIfCurrent(
@@ -400,7 +413,7 @@ describe("the spend is checked against the stored record in one step", () => {
     // Reported as its own refusal rather than folded into the superseded one: the
     // hand-off surfaces answer them differently, since a record that is not here
     // cannot be downloaded again.
-    const record = await createManagedExchange(newExchange());
+    const record = await createRunnableExchange(newExchange());
     const downloadedSecret = record.sharedSecret;
     await deleteManagedExchange(record.id);
 
@@ -439,7 +452,7 @@ describe("the export binds the marker to the bytes it serialized", () => {
   }
 
   test("the post-run completion export contains the ROTATED secret, not the mount-time one", async () => {
-    const record = await createManagedExchange(newExchange());
+    const record = await createRunnableExchange(newExchange());
     const original = record.sharedSecret;
     // Simulate a run: the rotation persist advances the stored secret (and clears any
     // marker) exactly as runManagedExchange's persist-before-success write does.
@@ -469,7 +482,7 @@ describe("the export binds the marker to the bytes it serialized", () => {
   });
 
   test("a rotation stales the marker even when the run then fails in the data exchange", async () => {
-    const record = await createManagedExchange(newExchange());
+    const record = await createRunnableExchange(newExchange());
     // Take a backup: green.
     await exportManagedBackup(record.id, exportDeps());
     expect(
@@ -507,7 +520,7 @@ describe("the export binds the marker to the bytes it serialized", () => {
   });
 
   test("a stale-tab export cannot mark green over a newer rotation", async () => {
-    const record = await createManagedExchange(newExchange());
+    const record = await createRunnableExchange(newExchange());
     // Another context rotates the secret (and clears the marker).
     const rotated = generateSharedSecret();
     await persistManagedExchangeRotation(record.id, {
@@ -530,7 +543,7 @@ describe("the export binds the marker to the bytes it serialized", () => {
   });
 
   test("a migration dispatch marks green but spends only on confirm", async () => {
-    const record = await createManagedExchange(newExchange());
+    const record = await createRunnableExchange(newExchange());
     const downloaded: Array<string> = [];
     const dispatch = await dispatchManagedMigration(record.id, {
       readAndMark: readRecordAndMarkBackedUp,
@@ -552,7 +565,7 @@ describe("importing a spent secret-match revives in place", () => {
     // The export the indicator is about, end to end against the real store: it marks
     // the record green, and the bytes it wrote bring the exchange back after the
     // eviction the marker promises they cover.
-    const source = await createManagedExchange(newExchange());
+    const source = await createRunnableExchange(newExchange());
     const deps = {
       downloaded: [] as Array<string>,
       readAndMark: readRecordAndMarkBackedUp,
@@ -576,7 +589,7 @@ describe("importing a spent secret-match revives in place", () => {
     // operator saved, so the older browser backup brings nothing back. Reviving would
     // run a copy that was handed away; installing fresh would leave the secret in a
     // live row beside the spent husk. The import refuses instead, naming the record.
-    const source = await createManagedExchange(newExchange());
+    const source = await createRunnableExchange(newExchange());
     const bytes = serializeManagedExchangeArtifact(
       encodeManagedExchangeArtifact(source),
     );
@@ -608,11 +621,11 @@ describe("importing a spent secret-match revives in place", () => {
     // artifact would revive, and the copy a command-line hand-off runs from. Reviving
     // the migration husk would put a second live owner beside that hand-off, so the
     // refusal wins and names the handed-off record.
-    const migrated = await createManagedExchange(newExchange());
+    const migrated = await createRunnableExchange(newExchange());
     const bytes = serializeManagedExchangeArtifact(
       encodeManagedExchangeArtifact(migrated),
     );
-    const handedOff = await createManagedExchange(
+    const handedOff = await createRunnableExchange(
       newExchange({
         label: "Riverbend quarterly (command line)",
         sharedSecret: migrated.sharedSecret,
@@ -657,7 +670,7 @@ describe("importing a spent secret-match revives in place", () => {
   });
 
   test("a re-import onto the spending device revives the husk, not a duplicate", async () => {
-    const source = await createManagedExchange(newExchange({ schedule }));
+    const source = await createRunnableExchange(newExchange({ schedule }));
     const bytes = serializeManagedExchangeArtifact(
       encodeManagedExchangeArtifact(source),
     );
@@ -692,7 +705,7 @@ describe("importing a spent secret-match revives in place", () => {
   });
 
   test("importing over a LIVE secret-match installs fresh (never forks a live owner)", async () => {
-    const source = await createManagedExchange(newExchange());
+    const source = await createRunnableExchange(newExchange());
     const bytes = serializeManagedExchangeArtifact(
       encodeManagedExchangeArtifact(source),
     );
@@ -771,14 +784,14 @@ describe("a record this build cannot parse is skipped, not fatal to the import",
     // beside a valid record handed off to the command line. The artifact is a third
     // exchange's, so the import has nothing to reconcile -- and the invalid record
     // must not refuse it, which is the way forward the surface offers.
-    const other = await createManagedExchange(
+    const other = await createRunnableExchange(
       newExchange({ label: "Other partnership" }),
     );
     const bytes = serializeManagedExchangeArtifact(
       encodeManagedExchangeArtifact(other),
     );
     await deleteManagedExchange(other.id);
-    const handedOff = await createManagedExchange(
+    const handedOff = await createRunnableExchange(
       newExchange({ label: "Handed to the command line" }),
     );
     expect(
@@ -816,7 +829,7 @@ describe("a record this build cannot parse is skipped, not fatal to the import",
     // still reads: the refusal fires on it rather than installing a second live copy
     // beside the machine the hand-off runs on. It names no label, the failed parse
     // leaving the record's own fields untrusted.
-    const handedOff = await createManagedExchange(newExchange());
+    const handedOff = await createRunnableExchange(newExchange());
     const bytes = serializeManagedExchangeArtifact(
       encodeManagedExchangeArtifact(handedOff),
     );
@@ -846,7 +859,7 @@ describe("a record this build cannot parse is skipped, not fatal to the import",
   test("a skipped record whose secret field is unreadable too installs fresh", async () => {
     // The stated limit of that refusal: the comparison needs the stored secret, so a
     // record holding none this build can read matches nothing and the import lands.
-    const handedOff = await createManagedExchange(newExchange());
+    const handedOff = await createRunnableExchange(newExchange());
     const bytes = serializeManagedExchangeArtifact(
       encodeManagedExchangeArtifact(handedOff),
     );
@@ -870,7 +883,7 @@ describe("a record this build cannot parse is skipped, not fatal to the import",
     // The same limit reached the other way: an app upgrade can leave a record with
     // no `sharedSecret` field rather than an unreadable one, and an absent field
     // matches no artifact either, so the refusal does not fire.
-    const handedOff = await createManagedExchange(newExchange());
+    const handedOff = await createRunnableExchange(newExchange());
     const bytes = serializeManagedExchangeArtifact(
       encodeManagedExchangeArtifact(handedOff),
     );
@@ -898,7 +911,7 @@ describe("a record this build cannot parse is skipped, not fatal to the import",
     // A revive rewrites the whole record, which needs a record this build can parse,
     // so the migration's artifact installs fresh and the husk stays for the operator
     // to discard.
-    const source = await createManagedExchange(newExchange());
+    const source = await createRunnableExchange(newExchange());
     const bytes = serializeManagedExchangeArtifact(
       encodeManagedExchangeArtifact(source),
     );
@@ -930,7 +943,7 @@ describe("a record this build cannot parse is skipped, not fatal to the import",
     const outputFolder = await root.getDirectoryHandle("revived-results", {
       create: true,
     });
-    const source = await createManagedExchange(
+    const source = await createRunnableExchange(
       newExchange({
         inputFileHandle: inputFile,
         outputDirectoryHandle: outputFolder,
@@ -994,14 +1007,14 @@ describe("a local-state entry this build cannot parse is skipped too", () => {
     // cannot parse, beside a valid record handed off to the command line. The
     // artifact is a third exchange's, so nothing stored holds its secret and the
     // import must land -- which is the way forward that surface offers.
-    const other = await createManagedExchange(
+    const other = await createRunnableExchange(
       newExchange({ label: "Other partnership" }),
     );
     const bytes = serializeManagedExchangeArtifact(
       encodeManagedExchangeArtifact(other),
     );
     await deleteManagedExchange(other.id);
-    const handedOff = await createManagedExchange(
+    const handedOff = await createRunnableExchange(
       newExchange({ label: "Handed to the command line" }),
     );
     expect(
@@ -1012,7 +1025,7 @@ describe("a local-state entry this build cannot parse is skipped too", () => {
         "command-line",
       ),
     ).toBe("spent");
-    const stranded = await createManagedExchange(
+    const stranded = await createRunnableExchange(
       newExchange({ label: "Saved state unreadable" }),
     );
     await plantUnreadableSibling(stranded.id);
@@ -1035,7 +1048,7 @@ describe("a local-state entry this build cannot parse is skipped too", () => {
     // The conservative refusal: the sibling entry is where a hand-off is recorded,
     // so an unreadable one leaves no way to tell a handed-off record from a
     // migration-spent or a live one. It names the exchange and no hand-off route.
-    const stored = await createManagedExchange(newExchange());
+    const stored = await createRunnableExchange(newExchange());
     const bytes = serializeManagedExchangeArtifact(
       encodeManagedExchangeArtifact(stored),
     );
@@ -1059,7 +1072,7 @@ describe("a local-state entry this build cannot parse is skipped too", () => {
     // Both halves unreadable: the secret still reads off the raw record, so the
     // refusal fires, and it names no label, the failed parse leaving the record's
     // own fields untrusted.
-    const stored = await createManagedExchange(newExchange());
+    const stored = await createRunnableExchange(newExchange());
     const bytes = serializeManagedExchangeArtifact(
       encodeManagedExchangeArtifact(stored),
     );
@@ -1076,7 +1089,7 @@ describe("a local-state entry this build cannot parse is skipped too", () => {
     // The unreadable entry belongs to an exchange the artifact is not: it takes no
     // part in the reconciliation, so a migration-spent record is revived in place
     // beside it rather than the import refusing or installing a duplicate.
-    const source = await createManagedExchange(newExchange());
+    const source = await createRunnableExchange(newExchange());
     const bytes = serializeManagedExchangeArtifact(
       encodeManagedExchangeArtifact(source),
     );
@@ -1087,7 +1100,7 @@ describe("a local-state entry this build cannot parse is skipped too", () => {
         "2026-07-14T13:00:00.000Z",
       ),
     ).toBe("spent");
-    const stranded = await createManagedExchange(
+    const stranded = await createRunnableExchange(
       newExchange({ label: "Saved state unreadable" }),
     );
     await plantUnreadableSibling(stranded.id);
@@ -1105,7 +1118,7 @@ describe("a local-state entry this build cannot parse is skipped too", () => {
   test("a hand-off the store could read decides ahead of one it could not", async () => {
     // Two stored records hold the artifact's secret and only one states what spent
     // it, so the refusal that can name a route is the one the import meets.
-    const handedOff = await createManagedExchange(newExchange());
+    const handedOff = await createRunnableExchange(newExchange());
     const bytes = serializeManagedExchangeArtifact(
       encodeManagedExchangeArtifact(handedOff),
     );
@@ -1117,7 +1130,7 @@ describe("a local-state entry this build cannot parse is skipped too", () => {
         "command-line",
       ),
     ).toBe("spent");
-    const stranded = await createManagedExchange(
+    const stranded = await createRunnableExchange(
       newExchange({
         label: "Saved state unreadable",
         sharedSecret: handedOff.sharedSecret,
@@ -1140,7 +1153,7 @@ describe("what the handed-off import refusal is scoped to", () => {
   // the store, which is what the re-take's attestation exists to be better than.
 
   test("an artifact behind the record's rotation matches nothing and installs fresh", async () => {
-    const source = await createManagedExchange(newExchange());
+    const source = await createRunnableExchange(newExchange());
     const bytes = serializeManagedExchangeArtifact(
       encodeManagedExchangeArtifact(source),
     );
@@ -1173,7 +1186,7 @@ describe("what the handed-off import refusal is scoped to", () => {
   });
 
   test("deleting the handed-off record removes the match, and a later import installs", async () => {
-    const source = await createManagedExchange(newExchange());
+    const source = await createRunnableExchange(newExchange());
     const bytes = serializeManagedExchangeArtifact(
       encodeManagedExchangeArtifact(source),
     );
@@ -1212,7 +1225,7 @@ describe("taking a command-line hand-off back", () => {
   const retakenAt = "2026-07-14T14:00:00.000Z";
 
   async function handedOff() {
-    const record = await createManagedExchange(newExchange({ schedule }));
+    const record = await createRunnableExchange(newExchange({ schedule }));
     await markManagedExchangeBackedUp(record.id, "2026-07-14T12:00:00.000Z");
     await spendManagedExchangeIfCurrent(
       record.id,
@@ -1317,7 +1330,7 @@ describe("taking a command-line hand-off back", () => {
     // Its recovery is importing its own artifact back, which revives it in place;
     // clearing its spent state here would leave the device it was migrated to
     // running beside a live copy here.
-    const record = await createManagedExchange(newExchange());
+    const record = await createRunnableExchange(newExchange());
     await spendManagedExchangeIfCurrent(
       record.id,
       record.sharedSecret,
@@ -1333,7 +1346,7 @@ describe("taking a command-line hand-off back", () => {
   });
 
   test("a live record has nothing to take back, and a deleted one is gone", async () => {
-    const live = await createManagedExchange(newExchange());
+    const live = await createRunnableExchange(newExchange());
     expect(await retakeHandedOffManagedExchange(live.id, retakenAt)).toEqual({
       kind: "not-handed-off",
     });
@@ -1453,7 +1466,7 @@ describe("taking a command-line hand-off back", () => {
 
 describe("delete leaves no sibling state behind", () => {
   test("deleting a record removes its backup marker and spent state", async () => {
-    const record = await createManagedExchange(newExchange());
+    const record = await createRunnableExchange(newExchange());
     await markManagedExchangeBackedUp(record.id, new Date().toISOString());
     await spendManagedExchangeIfCurrent(
       record.id,

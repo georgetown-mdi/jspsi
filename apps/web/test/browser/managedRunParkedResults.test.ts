@@ -15,15 +15,30 @@ import {
   createManagedExchange,
   spendManagedExchangeIfCurrent,
 } from "@psi/managed/managedExchangeStore";
+import {
+  composeManagedExchangeFile,
+  runnableManagedExchangeOrRefuse,
+} from "@psi/managed/managedExchangeRecord";
 import { ManagedRunSurface } from "@recurring/ManagedRunSurface";
-import { composeManagedExchangeFile } from "@psi/managed/managedExchangeRecord";
 import { readParkedResults } from "@psi/parkedResultsStore";
 
 import { createAppMount, flushPendingUpdates } from "./renderApp";
 import { captureDownloads } from "./captureDownloads";
 
-import type { NewManagedExchange } from "@psi/managed/managedExchangeRecord";
+import type {
+  NewManagedExchange,
+  RunnableManagedExchangeRecord,
+} from "@psi/managed/managedExchangeRecord";
 import type { ParkedResultsRead } from "@psi/parkedResultsStore";
+
+/** A stored record narrowed to the runnable shape these fixtures all have: every
+ * record here is created with a shared secret, and the export, hand-off, and run
+ * paths take the record type that holds one. */
+async function createRunnableExchange(
+  fields: Parameters<typeof createManagedExchange>[0],
+): Promise<RunnableManagedExchangeRecord> {
+  return runnableManagedExchangeOrRefuse(await createManagedExchange(fields));
+}
 
 // How the run surface drives the parked-results read it owns: what the section
 // shows while a read is in flight, that the retry offered where the store did
@@ -130,7 +145,7 @@ afterEach(async () => {
  */
 describe("a re-read of the parked results", () => {
   test("reaches the store again and replaces the transient notice while it runs", async () => {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
     const afterRetry = deferredRead();
     reads
       .mockResolvedValueOnce({ kind: "unavailable" })
@@ -173,7 +188,7 @@ describe("a re-read of the parked results", () => {
  */
 describe("a copy a hand-off spent", () => {
   async function spendNewExchange(): Promise<string> {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
     expect(
       await spendManagedExchangeIfCurrent(
         created.id,

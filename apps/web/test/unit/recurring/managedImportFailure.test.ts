@@ -5,6 +5,7 @@ import {
   MANAGED_EXCHANGE_PREVIOUS_ARTIFACT_VERSION,
   buildManagedExchangeRecord,
   composeManagedExchangeFile,
+  runnableManagedExchangeOrRefuse,
 } from "@psi/managed/managedExchangeRecord";
 import {
   OUTDATED_IMPORT_REASON,
@@ -18,7 +19,20 @@ import {
   serializeManagedExchangeArtifact,
 } from "@psi/managed/managedExchangeArtifact";
 
+import type {
+  NewManagedExchange,
+  RunnableManagedExchangeRecord,
+} from "@psi/managed/managedExchangeRecord";
 import type { WebRTCExchangeLocator } from "@psilink/core";
+
+/** A record built from `fields` and narrowed to the runnable shape: every fixture
+ * here is built with a shared secret, and the export paths take the record type
+ * that holds one. */
+function runnableRecord(
+  fields: NewManagedExchange,
+): RunnableManagedExchangeRecord {
+  return runnableManagedExchangeOrRefuse(buildManagedExchangeRecord(fields));
+}
 
 // What the import affordance says about a file it will not take. The copy is
 // driven from real rejections rather than a hand-made error, so a route that
@@ -35,7 +49,7 @@ const webrtcLocator: WebRTCExchangeLocator = {
 /** A valid artifact as the loose document a newer build's extra markers are
  * added to. */
 function artifactDocument(): Record<string, unknown> {
-  const record = buildManagedExchangeRecord({
+  const record = runnableRecord({
     label: "Riverbend quarterly",
     exchangeFile: composeManagedExchangeFile({
       connection: webrtcLocator,

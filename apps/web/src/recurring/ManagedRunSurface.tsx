@@ -62,6 +62,11 @@ import {
   retakeManagedExchange,
 } from "@psi/managed/managedRetake";
 
+import {
+  runnableManagedExchange,
+  runnableManagedExchangeOrRefuse,
+  standingCompromiseResponse,
+} from "@psi/managed/managedExchangeRecord";
 import { MANAGED_EXCHANGE_ARTIFACT_MIME } from "@psi/managed/managedExchangeArtifact";
 import { ManagedExchangeLockUnavailableError } from "@psi/managed/managedExchangeLock";
 import { canReinviteFromRecord } from "@psi/managed/managedReinvite";
@@ -71,7 +76,6 @@ import { getManagedLocalState } from "@psi/managed/managedLocalState";
 import { managedRerunCompletion } from "@psi/managed/managedCompletionSurface";
 import { reinviteManagedExchange } from "@psi/managed/managedReinviteDriver";
 import { runManagedExchangeInBrowser } from "@psi/managed/managedRunDriver";
-import { standingCompromiseResponse } from "@psi/managed/managedExchangeRecord";
 import { storedInputHandleUsable } from "@psi/managed/managedInputHandle";
 import { whenDiagnostic } from "@utils/diagnostics";
 
@@ -123,6 +127,7 @@ import {
   managedStandingConditionView,
 } from "./managedStandingConditionModel";
 import { DeleteExchangeButton } from "./SavedExchanges";
+import { ManagedConfigurationSurface } from "./ManagedConfigurationSurface";
 import { ManagedCronExportPanel } from "./ManagedCronExportPanel";
 import { REINVITE_RUN_IN_FLIGHT_REASON } from "./managedReinviteGate";
 import { useManagedRunInFlight } from "./useManagedRunInFlight";
@@ -133,6 +138,7 @@ import type { ResolvedMatching } from "@psilink/core";
 import type {
   ManagedExchangeLocalEdits,
   ManagedExchangeRecord,
+  RunnableManagedExchangeRecord,
 } from "@psi/managed/managedExchangeRecord";
 import type {
   ManagedHandoffRefusal,
@@ -176,7 +182,21 @@ interface LiveManagedRunFailure {
  * editing, and per-exchange detail are separate items.
  */
 export function ManagedRunSurface({ id }: { id: string }) {
-  const [record, setRecord] = useState<ManagedExchangeRecord>();
+  const [record, setRecord] = useState<RunnableManagedExchangeRecord>();
+  // The loaded record when it holds no secret: a configuration imported from the
+  // command line, which edits and exports here and runs there. It is held apart
+  // from `record` rather than beside a flag, so no run control can be reached
+  // with it -- the run path takes the runnable record type and this is not one.
+  const [configuration, setConfiguration] = useState<ManagedExchangeRecord>();
+  // Every store write this surface makes keeps the secret the record it read
+  // holds -- a rotation, a local-fields edit, a folder grant -- so adopting the
+  // returned record restates what this surface holds rather than admitting a
+  // shape it has no controls for.
+  const adoptRecord = useCallback(
+    (updated: ManagedExchangeRecord) =>
+      setRecord(runnableManagedExchangeOrRefuse(updated)),
+    [],
+  );
   // Three load states, each with its own recovery: MISSING (the store resolves
   // undefined -- deleted or cleared); UNLOADABLE (the read rejects: a stored record
   // this app version can no longer load, the documented app-upgrade case, whose
@@ -380,6 +400,10 @@ export function ManagedRunSurface({ id }: { id: string }) {
           // state, not a hidden button.
           setSpent(local.spent);
           setLoadFailure("spent");
+        } else if (!runnableManagedExchange(loaded)) {
+          // A configuration-only record has its own surface: settings and the
+          // command-line export, no run. The record's shape decides it.
+          setConfiguration(loaded);
         } else {
           setBackupMarker(local?.backup);
           setLocalState(local);
@@ -540,11 +564,17 @@ export function ManagedRunSurface({ id }: { id: string }) {
       // The record the store holds at this launch, read before the run so this
       // run's own bookkeeping stamp cannot be in it. A rejected read, or one that
       // finds no record, leaves the surface's held record standing in for this run.
-      let launched = record;
+      let launched: RunnableManagedExchangeRecord = record;
       try {
+        const reread = await getManagedExchange(record.id).catch(
+          () => undefined,
+        );
+        // A re-read holding no secret is not this run's to act on: the
+        // surface's own record stands in, and the run's own gates decide.
         launched =
-          (await getManagedExchange(record.id).catch(() => undefined)) ??
-          record;
+          reread !== undefined && runnableManagedExchange(reread)
+            ? reread
+            : record;
         if (controller.signal.aborted) return;
         const result = await runManagedExchangeInBrowser({
           record: launched,
@@ -773,7 +803,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
         // takes the run's lock.
         if (await recheckLock()) return;
         const result = await reinviteManagedExchange(record);
-        setRecord(result.record);
+        adoptRecord(result.record);
         setLiveFailure(undefined);
         setReinvite(result.reinvite);
       } catch (error) {
@@ -804,7 +834,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
       record.id,
       new Date().toISOString(),
     )
-      .then(setRecord)
+      .then(adoptRecord)
       .catch((error) => {
         whenDiagnostic(() => console.error(error));
         setCompromiseWriteFailed(true);
@@ -849,7 +879,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
     setClearStandingFailed(false);
     clearManagedExchangeStandingCondition(record.id)
       .then((updated) => {
-        setRecord(updated);
+        adoptRecord(updated);
         setStandingSettled(true);
         setCompromiseWriteFailed(false);
         setReinviteWithheld(false);
@@ -916,7 +946,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
   ): Promise<void> {
     if (record === undefined) return;
     const updated = await updateManagedExchangeLocalFields(record.id, edits);
-    setRecord(updated);
+    adoptRecord(updated);
   }
 
   // The picker is reached with no awaited work in front of it: a browser hands a
@@ -927,7 +957,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
     if (held === undefined) return Promise.resolve();
     return chooseManagedOutputDirectory().then(async (directory) => {
       if (directory === undefined) return;
-      setRecord(
+      adoptRecord(
         await persistManagedExchangeOutputDirectory(held.id, directory),
       );
     });
@@ -935,7 +965,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
 
   async function stopUsingOutputFolder(): Promise<void> {
     if (record === undefined) return;
-    setRecord(await persistManagedExchangeOutputDirectory(record.id, null));
+    adoptRecord(await persistManagedExchangeOutputDirectory(record.id, null));
   }
 
   // Queue a fresh read of the accounting, dropping the standing verdict as it
@@ -1042,6 +1072,12 @@ export function ManagedRunSurface({ id }: { id: string }) {
             onClearParkedResults={clearParked}
             id={id}
             onRetaken={readRecordAgain}
+          />
+        ) : configuration !== undefined ? (
+          <ManagedConfigurationSurface
+            record={configuration}
+            onRecordEdited={setConfiguration}
+            onDeleted={() => void navigate({ to: "/saved" })}
           />
         ) : record === undefined ? (
           <>
@@ -1826,8 +1862,9 @@ function ReinvitePanel({
  * the actionable "Back up this exchange") plus the two export intents that download
  * the artifact this browser restores from. A backup export leaves this exchange live;
  * a migration export hands it off to another device, spending this copy. Both are
- * named against the command-line export below, whose two files this browser's import
- * does not accept, so the state this panel shows is about the restorable file alone.
+ * named against the command-line export below, whose two files bring back no secret
+ * (its `psilink.yaml` imports as a configuration only), so the state this panel shows
+ * is about the restorable file alone.
  * The custody guidance matches the CLI key file's: the file is a plaintext credential
  * to keep under owner-only custody. */
 function BackupPanel({
@@ -1890,8 +1927,8 @@ function BackupPanel({
 /** The durable surface of a spent copy, read from the stored spent state on every
  * later visit -- so it must say what THAT hand-off left the operator with. A
  * migration copy is somewhere an import can bring back; a command-line hand-off
- * produced the CLI's two files, which the import flow does not accept, so the
- * exchange runs from those files and they are its backup of record.
+ * produced the CLI's two files, which bring back no secret, so the exchange runs
+ * from those files and they are its backup of record.
  *
  * `spent` is undefined when the run-refusal transition reached this state without
  * the stored entry in hand: the reload behind it reads the record and the sibling

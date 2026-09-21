@@ -26,6 +26,8 @@ import {
   diagnoseManagedExchangeRecord,
   parseManagedExchangeRecord,
   partitionReadableManagedExchanges,
+  runnableManagedExchange,
+  runnableManagedExchangeOrRefuse,
   safeParseManagedExchangeRecord,
   standingCompromiseResponse,
   standingConditionFrom,
@@ -1647,5 +1649,56 @@ describe("the operator's compromise response", () => {
       },
     });
     expect(result.success).toBe(false);
+  });
+});
+
+describe("the configuration-only record", () => {
+  /** The fields a command-line configuration installs: no shared secret, which
+   * is what withholds every run of it here. */
+  function configurationFields(): NewManagedExchange {
+    const { sharedSecret: _sharedSecret, ...rest } = newExchange();
+    return rest;
+  }
+
+  test("builds and parses without a shared secret", () => {
+    const record = buildManagedExchangeRecord(configurationFields());
+
+    expect(record.sharedSecret).toBeUndefined();
+    expect(runnableManagedExchange(record)).toBe(false);
+    expect(parseManagedExchangeRecord(record)).toEqual(record);
+  });
+
+  test("the narrowing refuses it rather than composing an empty secret", () => {
+    expect(() =>
+      runnableManagedExchangeOrRefuse(
+        buildManagedExchangeRecord(configurationFields()),
+      ),
+    ).toThrow(/configuration only/);
+  });
+
+  test("holds nothing a run or a secret produces", () => {
+    for (const held of [
+      { expires: "2026-04-06T14:00:00.000Z" },
+      { schedule },
+      { lastRun: { at: "2026-03-07T14:00:00.000Z", outcome: "succeeded" } },
+      { inputFileHandle: { name: "records.csv" } as FileSystemFileHandle },
+    ])
+      expect(() =>
+        parseManagedExchangeRecord({
+          ...buildManagedExchangeRecord(configurationFields()),
+          ...held,
+        }),
+      ).toThrow();
+  });
+
+  test("a max-age edit sets the policy and stamps no bound on a secret it has none for", () => {
+    const record = buildManagedExchangeRecord(configurationFields());
+
+    const edited = applyManagedExchangeLocalEdits(record, {
+      tokenMaxAgeDays: 30,
+    });
+
+    expect(edited.tokenMaxAgeDays).toBe(30);
+    expect(edited.expires).toBeUndefined();
   });
 });

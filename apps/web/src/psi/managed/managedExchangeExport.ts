@@ -38,13 +38,17 @@ import {
   serializeManagedExchangeArtifact,
 } from "./managedExchangeArtifact";
 import { composeManagedCronExport } from "./managedCronExport";
+import { runnableManagedExchangeOrRefuse } from "./managedExchangeRecord";
 
+import type {
+  ManagedExchangeRecord,
+  RunnableManagedExchangeRecord,
+} from "./managedExchangeRecord";
 import type {
   ManagedSpendOutcome,
   ManagedSpentHandoff,
 } from "./managedLocalStateShape";
 import type { ManagedCronExport } from "./managedCronExport";
-import type { ManagedExchangeRecord } from "./managedExchangeRecord";
 
 /** The download filename `psilink-managed-backup-<date>.json`, the date the local
  * calendar day of `at`, mirroring the exchange-file filename discipline so repeated
@@ -156,7 +160,7 @@ function handoffRefusalMessage(
  */
 async function spendIfArtifactIsCurrent(
   id: string,
-  exported: ManagedExchangeRecord,
+  exported: RunnableManagedExchangeRecord,
   spentAt: Date,
   spend: (
     expectedSharedSecret: string,
@@ -178,7 +182,7 @@ interface ManagedBackupResult {
   /** The instant the backup marker was stamped, from the caller's `now`. */
   backedUpAt: Date;
   /** The record the export serialized (the fresh store read). */
-  record: ManagedExchangeRecord;
+  record: RunnableManagedExchangeRecord;
 }
 
 /**
@@ -203,7 +207,7 @@ async function readMarkAndDownload(
     backedUpAt.toISOString(),
     (read) => {
       serialized = serializeManagedExchangeArtifact(
-        encodeManagedExchangeArtifact(read),
+        encodeManagedExchangeArtifact(runnableManagedExchangeOrRefuse(read)),
       );
     },
   );
@@ -213,7 +217,7 @@ async function readMarkAndDownload(
         "backup marker would attest bytes nothing produced",
     );
   deps.download(managedBackupFileName(backedUpAt), serialized);
-  return { backedUpAt, record };
+  return { backedUpAt, record: runnableManagedExchangeOrRefuse(record) };
 }
 
 /**
@@ -239,7 +243,7 @@ export interface ManagedMigrationDispatch {
   /** The instant the backup marker was stamped, from the caller's `now`. */
   backedUpAt: Date;
   /** The record the export serialized (the fresh store read). */
-  record: ManagedExchangeRecord;
+  record: RunnableManagedExchangeRecord;
   /** Spend the source as of `spentAt` (the operator's confirmation instant),
    * transitioning this device's copy to its visible spent state. Called only after
    * the operator confirms the file is saved; not called on a cancelled save. Rejects
@@ -304,7 +308,7 @@ export interface ManagedCronExportDeps {
  * backup marker untouched either way. */
 export interface ManagedCronExportDispatch {
   /** The record the export composed from (the fresh store read). */
-  record: ManagedExchangeRecord;
+  record: RunnableManagedExchangeRecord;
   /** What the two downloads held, and the invocation that runs them. */
   composed: ManagedCronExport;
   /** Spend the source as of `spentAt` (the operator's confirmation instant), under
@@ -348,9 +352,10 @@ export async function dispatchManagedCronExport(
   id: string,
   deps: ManagedCronExportDeps,
 ): Promise<ManagedCronExportDispatch> {
-  const record = await deps.readRecord(id);
-  if (record === undefined)
+  const stored = await deps.readRecord(id);
+  if (stored === undefined)
     throw new Error(`no managed exchange with id ${id}`);
+  const record = runnableManagedExchangeOrRefuse(stored);
   const composed = composeManagedCronExport(record);
   for (const file of [composed.config, composed.key])
     deps.download(file.fileName, file.text, file.mimeType);

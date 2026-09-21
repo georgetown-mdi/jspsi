@@ -70,6 +70,7 @@ import type {
   ManagedExchangeSchedule,
   ManagedExchangeSide,
   ManagedStandingCondition,
+  RunnableManagedExchangeRecord,
 } from "./managedExchangeRecord";
 import type { ExchangeSpec } from "@psilink/core";
 import type { ZodType } from "zod";
@@ -156,7 +157,7 @@ export function serializeExchangeDocument(exchangeFile: ExchangeSpec): string {
  * step would render.
  */
 export function keyFileFieldsFromRecord(
-  record: ManagedExchangeRecord,
+  record: RunnableManagedExchangeRecord,
 ): ManagedExchangeKeyFields {
   return {
     sharedSecret: record.sharedSecret,
@@ -175,7 +176,7 @@ export function keyFileFieldsFromRecord(
  * mints a fresh local record rather than copying this one.
  */
 export function encodeManagedExchangeArtifact(
-  record: ManagedExchangeRecord,
+  record: RunnableManagedExchangeRecord,
 ): ManagedExchangeArtifact {
   const standing = raisedStandingCondition(record);
   return {

@@ -12,6 +12,7 @@ import {
   buildManagedExchangeRecord,
   composeManagedExchangeFile,
   keyFileFieldsSchema,
+  runnableManagedExchangeOrRefuse,
 } from "@psi/managed/managedExchangeRecord";
 import {
   encodeManagedExchangeArtifact,
@@ -24,8 +25,18 @@ import {
 import type {
   ManagedExchangeSchedule,
   NewManagedExchange,
+  RunnableManagedExchangeRecord,
 } from "@psi/managed/managedExchangeRecord";
 import type { WebRTCExchangeLocator } from "@psilink/core";
+
+/** A record built from `fields` and narrowed to the runnable shape: every fixture
+ * here is built with a shared secret, and the export paths take the record type
+ * that holds one. */
+function runnableRecord(
+  fields: NewManagedExchange,
+): RunnableManagedExchangeRecord {
+  return runnableManagedExchangeOrRefuse(buildManagedExchangeRecord(fields));
+}
 
 // The export/import artifact, tested in Node without a store: the round-trip
 // restores a runnable record minus the handle, the artifact's two halves satisfy
@@ -66,7 +77,7 @@ function newExchange(
 
 describe("export/import round-trip", () => {
   test("restores a runnable record (fresh id, no handle, fields preserved)", () => {
-    const record = buildManagedExchangeRecord(
+    const record = runnableRecord(
       newExchange({
         inputFileHandle: { name: "records.csv" } as FileSystemFileHandle,
         tokenMaxAgeDays: 90,
@@ -94,7 +105,7 @@ describe("export/import round-trip", () => {
   });
 
   test("keeps the run bookkeeping across the round trip", () => {
-    const record = buildManagedExchangeRecord(newExchange());
+    const record = runnableRecord(newExchange());
     const withRun = {
       ...record,
       lastRun: {
@@ -112,7 +123,7 @@ describe("export/import round-trip", () => {
     // An export that dropped it would be a fourth way to clear one, and only the
     // operator's acknowledgement, a re-invite, and a delete may.
     const withCondition = {
-      ...buildManagedExchangeRecord(newExchange()),
+      ...runnableRecord(newExchange()),
       standingCondition: {
         since: "2026-07-10T09:00:00.000Z",
         kind: "auth" as const,
@@ -129,7 +140,7 @@ describe("export/import round-trip", () => {
     // would clear it -- and an import would then offer the fresh invitation the
     // operator withheld.
     const answered = {
-      ...buildManagedExchangeRecord(newExchange()),
+      ...runnableRecord(newExchange()),
       standingCondition: {
         since: "2026-07-10T09:00:00.000Z",
         kind: "auth" as const,
@@ -151,9 +162,7 @@ describe("export/import round-trip", () => {
     // a record with the member gone.
     const artifact = JSON.parse(
       serializeManagedExchangeArtifact(
-        encodeManagedExchangeArtifact(
-          buildManagedExchangeRecord(newExchange()),
-        ),
+        encodeManagedExchangeArtifact(runnableRecord(newExchange())),
       ),
     ) as { local: Record<string, unknown> };
     artifact.local.standingCondition = {
@@ -167,7 +176,7 @@ describe("export/import round-trip", () => {
   });
 
   test("a record with none standing round-trips to the none form", () => {
-    const record = buildManagedExchangeRecord(newExchange());
+    const record = runnableRecord(newExchange());
     const artifact = encodeManagedExchangeArtifact(record);
     expect(artifact.local).not.toHaveProperty("standingCondition");
     expect(reconstructRecordFromArtifact(artifact).standingCondition).toEqual(
@@ -176,7 +185,7 @@ describe("export/import round-trip", () => {
   });
 
   test("serialize then importManagedExchangeArtifact round-trips from bytes", () => {
-    const record = buildManagedExchangeRecord(newExchange());
+    const record = runnableRecord(newExchange());
     const bytes = serializeManagedExchangeArtifact(
       encodeManagedExchangeArtifact(record),
     );
@@ -186,7 +195,7 @@ describe("export/import round-trip", () => {
   });
 
   test("a secret-only export (no expires) round-trips", () => {
-    const record = buildManagedExchangeRecord(newExchange());
+    const record = runnableRecord(newExchange());
     const artifact = encodeManagedExchangeArtifact(record);
     expect(artifact.key).not.toHaveProperty("expires");
     const restored = reconstructRecordFromArtifact(artifact);
@@ -196,7 +205,7 @@ describe("export/import round-trip", () => {
 
 describe("CLI separability", () => {
   test("the embedded document parses as an exchange file", () => {
-    const record = buildManagedExchangeRecord(
+    const record = runnableRecord(
       newExchange({ expires: "2026-04-06T14:00:00.000Z" }),
     );
     const artifact = encodeManagedExchangeArtifact(record);
@@ -212,7 +221,7 @@ describe("CLI separability", () => {
   });
 
   test("the key block is a lift-out .psilink.key: exact CLI field names, camelCase", () => {
-    const record = buildManagedExchangeRecord(
+    const record = runnableRecord(
       newExchange({ expires: "2026-04-06T14:00:00.000Z" }),
     );
     const artifact = encodeManagedExchangeArtifact(record);
@@ -233,7 +242,7 @@ describe("CLI separability", () => {
   });
 
   test("a tampered schedule with intervalDays: 0 is rejected (artifact no laxer than record)", () => {
-    const record = buildManagedExchangeRecord(newExchange({ schedule }));
+    const record = runnableRecord(newExchange({ schedule }));
     const bytes = serializeManagedExchangeArtifact(
       encodeManagedExchangeArtifact(record),
     );
@@ -247,7 +256,7 @@ describe("CLI separability", () => {
   });
 
   test("the local fields are cleanly separated into their own block", () => {
-    const record = buildManagedExchangeRecord(
+    const record = runnableRecord(
       newExchange({ tokenMaxAgeDays: 90, schedule }),
     );
     const artifact = encodeManagedExchangeArtifact(record);
@@ -265,7 +274,7 @@ describe("CLI separability", () => {
 
 describe("the grants the source held", () => {
   test("a source holding both handles marks both, and an import reports both", () => {
-    const record = buildManagedExchangeRecord(
+    const record = runnableRecord(
       newExchange({
         inputFileHandle: { name: "records.csv" } as FileSystemFileHandle,
         outputDirectoryHandle: { name: "results" } as FileSystemDirectoryHandle,
@@ -285,7 +294,7 @@ describe("the grants the source held", () => {
   });
 
   test("a source holding one handle marks only that one", () => {
-    const record = buildManagedExchangeRecord(
+    const record = runnableRecord(
       newExchange({
         outputDirectoryHandle: { name: "results" } as FileSystemDirectoryHandle,
       }),
@@ -300,7 +309,7 @@ describe("the grants the source held", () => {
 
   test("a source holding neither writes no marker and reports none", () => {
     const artifact = encodeManagedExchangeArtifact(
-      buildManagedExchangeRecord(newExchange()),
+      runnableRecord(newExchange()),
     );
     expect(artifact.local).not.toHaveProperty("heldInputFile");
     expect(artifact.local).not.toHaveProperty("heldOutputFolder");
@@ -316,7 +325,7 @@ describe("the grants the source held", () => {
     const artifact = JSON.parse(
       serializeManagedExchangeArtifact(
         encodeManagedExchangeArtifact(
-          buildManagedExchangeRecord(
+          runnableRecord(
             newExchange({
               inputFileHandle: { name: "records.csv" } as FileSystemFileHandle,
             }),
@@ -334,7 +343,7 @@ describe("the grants the source held", () => {
 describe("rejection of malformed or tampered imports", () => {
   function goodBytes(): string {
     return serializeManagedExchangeArtifact(
-      encodeManagedExchangeArtifact(buildManagedExchangeRecord(newExchange())),
+      encodeManagedExchangeArtifact(runnableRecord(newExchange())),
     );
   }
 

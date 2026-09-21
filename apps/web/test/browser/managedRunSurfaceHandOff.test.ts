@@ -20,14 +20,29 @@ import {
   getManagedExchange,
   spendManagedExchangeIfCurrent,
 } from "@psi/managed/managedExchangeStore";
+import {
+  composeManagedExchangeFile,
+  runnableManagedExchangeOrRefuse,
+} from "@psi/managed/managedExchangeRecord";
 import { MANAGED_RUN_HANDED_OFF_ATTESTATION } from "@recurring/managedRunLaunchModel";
 import { ManagedRunSurface } from "@recurring/ManagedRunSurface";
-import { composeManagedExchangeFile } from "@psi/managed/managedExchangeRecord";
 import { getManagedLocalState } from "@psi/managed/managedLocalState";
 
 import { createAppMount } from "./renderApp";
 
-import type { NewManagedExchange } from "@psi/managed/managedExchangeRecord";
+import type {
+  NewManagedExchange,
+  RunnableManagedExchangeRecord,
+} from "@psi/managed/managedExchangeRecord";
+
+/** A stored record narrowed to the runnable shape these fixtures all have: every
+ * record here is created with a shared secret, and the export, hand-off, and run
+ * paths take the record type that holds one. */
+async function createRunnableExchange(
+  fields: Parameters<typeof createManagedExchange>[0],
+): Promise<RunnableManagedExchangeRecord> {
+  return runnableManagedExchangeOrRefuse(await createManagedExchange(fields));
+}
 
 // The run surface's hand-off confirm, rendered against real Chromium (the record
 // and its sibling stores are the real IndexedDB ones). What is pinned here is the
@@ -116,7 +131,7 @@ afterEach(async () => {
 
 describe("the hand-off confirm states what does not travel", () => {
   test("the confirm says the accounting stays behind, and to export it first", async () => {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
 
     app.render(createElement(ManagedRunSurface, { id: created.id }));
 
@@ -156,7 +171,7 @@ describe("the re-take on a spent copy's own surface", () => {
   // reach it, that declining writes nothing, and that confirming leaves them on a
   // surface that runs.
   async function handedOffSurface() {
-    const created = await createManagedExchange(
+    const created = await createRunnableExchange(
       newExchange({ inputFileHandle: await inputHandle() }),
     );
     expect(
@@ -222,7 +237,7 @@ describe("a run pressed after the hand-off arrived", () => {
     // The run path itself is what refuses; what is pinned here is that the
     // surface fixes on the state that refusal left rather than standing on
     // its run controls until something reloads it.
-    const created = await createManagedExchange(
+    const created = await createRunnableExchange(
       newExchange({ inputFileHandle: await inputHandle() }),
     );
     app.render(createElement(ManagedRunSurface, { id: created.id }));
@@ -279,7 +294,7 @@ describe("a run pressed after the hand-off arrived", () => {
     // surface must not do is fill that gap by guessing: the migration copy sends
     // the operator to import a backup file, which a command-line hand-off never
     // produced and no import here accepts.
-    const created = await createManagedExchange(
+    const created = await createRunnableExchange(
       newExchange({ inputFileHandle: await inputHandle() }),
     );
     app.render(createElement(ManagedRunSurface, { id: created.id }));

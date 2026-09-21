@@ -26,6 +26,7 @@ import {
   buildManagedExchangeRecord,
   composeManagedExchangeFile,
   parseManagedExchangeRecord,
+  runnableManagedExchangeOrRefuse,
 } from "@psi/managed/managedExchangeRecord";
 import {
   encodeManagedExchangeArtifact,
@@ -43,12 +44,23 @@ import type {
   ManagedExchangeRecord,
   ManagedExchangeSchedule,
   ManagedExchangeScheduleAdvance,
+  NewManagedExchange,
+  RunnableManagedExchangeRecord,
 } from "@psi/managed/managedExchangeRecord";
 import type {
   ManagedScheduleAttempt,
   ManagedScheduleTickSeams,
 } from "@psi/managed/managedScheduleRunner";
 import type { ManagedLocalState } from "@psi/managed/managedLocalStateShape";
+
+/** A record built from `fields` and narrowed to the runnable shape: every fixture
+ * here is built with a shared secret, and the export paths take the record type
+ * that holds one. */
+function runnableRecord(
+  fields: NewManagedExchange,
+): RunnableManagedExchangeRecord {
+  return runnableManagedExchangeOrRefuse(buildManagedExchangeRecord(fields));
+}
 
 // The unattended runner's tick in Node, with the clock, the store, the delay
 // and the run all injected. The fake clock advances only where real time would
@@ -80,8 +92,8 @@ function recordWith(
   fields: Partial<ManagedExchangeRecord> & {
     schedule?: ManagedExchangeSchedule;
   } = {},
-): ManagedExchangeRecord {
-  const base = buildManagedExchangeRecord({
+): RunnableManagedExchangeRecord {
+  const base = runnableRecord({
     label: "Riverbend quarterly",
     exchangeFile: composeManagedExchangeFile({
       connection: { channel: "webrtc", host: "signaling.example.org" },
@@ -92,7 +104,9 @@ function recordWith(
     inputFileHandle,
     schedule: weekly,
   });
-  return parseManagedExchangeRecord({ ...base, ...fields });
+  return runnableManagedExchangeOrRefuse(
+    parseManagedExchangeRecord({ ...base, ...fields }),
+  );
 }
 
 /** One recorded attempt: what the tick handed the run seam. */
@@ -735,20 +749,28 @@ describe("a due window under the operator's compromise response", () => {
    * "something does not add up" at. */
   function respondedRecord(
     respondedAt = "2026-01-05T11:00:00.000Z",
-  ): ManagedExchangeRecord {
-    return applyManagedExchangeCompromiseResponse(
-      parseManagedExchangeRecord({
-        ...recordWith(),
-        standingCondition: { since: "2026-01-05T10:00:00.000Z", kind: "auth" },
-      }),
-      respondedAt,
+  ): RunnableManagedExchangeRecord {
+    return runnableManagedExchangeOrRefuse(
+      applyManagedExchangeCompromiseResponse(
+        parseManagedExchangeRecord({
+          ...recordWith(),
+          standingCondition: {
+            since: "2026-01-05T10:00:00.000Z",
+            kind: "auth",
+          },
+        }),
+        respondedAt,
+      ),
     );
   }
 
-  function storedRecord(runner: Harness, id: string): ManagedExchangeRecord {
+  function storedRecord(
+    runner: Harness,
+    id: string,
+  ): RunnableManagedExchangeRecord {
     const stored = runner.stored.get(id);
     if (stored === undefined) throw new Error("the record went missing");
-    return stored;
+    return runnableManagedExchangeOrRefuse(stored);
   }
 
   function storedSchedule(
