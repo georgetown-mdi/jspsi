@@ -203,8 +203,8 @@ describe("the pair where the inviting party receives no result", () => {
 
   test("names the accepting party as the only party the result reaches", () => {
     // The sentence it replaces said "whichever party receives the result",
-    // which in this shape names the reader alone and so reads as nobody else
-    // learning the grouping.
+    // which in this shape names the reader alone and so says that nobody else
+    // learns the grouping.
     expect(soleAcceptorReceiver).toContain(
       "These terms hand that result to the accepting party alone",
     );

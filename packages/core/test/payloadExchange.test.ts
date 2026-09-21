@@ -2481,7 +2481,7 @@ test("buildOutputTable: 'all' writes every declared column but the identifier", 
 });
 
 test("buildOutputTable: an own column's value repeats once per pair under a deduplicating match", () => {
-  // Our row 1 stands in two pairs, so its carried values are written twice --
+  // Our row 1 stands in two pairs, so its values are written twice --
   // as its identifier already is -- and the row count is the pair count.
   const partnerPayload: PartnerPayload = {
     columns: ["note"],

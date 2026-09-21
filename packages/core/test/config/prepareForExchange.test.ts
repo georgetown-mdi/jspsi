@@ -844,9 +844,9 @@ describe("runExchange: an unpinned certificate-mode run that cannot pin is refus
     expect((thrown as Error).name).toBe(OperatorConfigError.name);
   });
 
-  test("prepare carries the signing block to the boundary that holds it", () => {
-    // The prepare step cannot settle whether the run signs in band, so it
-    // prepares an unpinned certificate-mode config and carries the block to
+  test("prepare passes the signing block to the boundary that holds it", () => {
+    // The prepare step cannot determine whether the run signs in band, so it
+    // prepares an unpinned certificate-mode config and passes the block to
     // the run boundary, which can.
     const prepared = prepareForExchange(
       { linkageTerms: terms, metadata, signing: { mode: "certificate" } },

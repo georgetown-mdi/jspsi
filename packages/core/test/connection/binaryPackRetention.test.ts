@@ -43,7 +43,7 @@ import type { Packable, Unpackable } from "peerjs-js-binarypack";
  * rather than report a number nothing stands behind. */
 const collect = (globalThis as { gc?: () => void }).gc;
 
-/** Why a measurement skipped, stated at the run: a runtime skip carries its note
+/** Why a measurement skipped, stated at the run: a runtime skip passes its note
  * into the skipped-leg reporter, so a runner that stops passing the flag says
  * what it stopped measuring rather than naming a leg and leaving it at that. */
 const NO_COLLECTOR_REASON =

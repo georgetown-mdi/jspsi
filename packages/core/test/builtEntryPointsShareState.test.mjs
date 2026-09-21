@@ -66,7 +66,7 @@ test("the testing entry's fan-out lever rewrites the listing the main entry read
   expect(buildKeyStrings(KEY, overWideDataset(), 0)).toBeNull();
 
   // With nothing declared, the same expansion is an unlisted producer's, which
-  // is carried to the strategy that refuses it rather than dropped.
+  // reaches the strategy that refuses it rather than being dropped.
   const carried = withNoListedFanOutFunctions(() =>
     buildKeyStrings(KEY, overWideDataset(), 0),
   );

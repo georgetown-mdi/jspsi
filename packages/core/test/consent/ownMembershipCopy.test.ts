@@ -171,7 +171,7 @@ describe("the own-membership consent pair", () => {
         acceptorIsTheHelper({ linkageStrategy: "single-pass" }),
       ),
     ).toBe(false);
-    // And an absent request binds the partner to nothing, so it reads as
+    // And an absent request binds the partner to nothing, so it is treated as
     // disclosure rather than as an empty declaration.
     expect(
       withholdsPartnerAssociationTable(

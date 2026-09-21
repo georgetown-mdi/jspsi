@@ -150,7 +150,7 @@ test("a well-formed ragged table decodes to the cells it declares", () => {
 
 test.each([
   [
-    "carrying fewer words than the agreed key and record counts declare cells",
+    "holding fewer words than the agreed key and record counts declare cells",
     [0, 0, 0],
     /fewer cells than the agreed key and record counts/,
   ],
@@ -185,7 +185,7 @@ test.each([
     /truncated inside a cell it declared/,
   ],
   [
-    "carrying trailing words past its last cell",
+    "holding trailing words past its last cell",
     [1, 0, 0, 0, 0, 9],
     /trailing words past its last cell/,
   ],

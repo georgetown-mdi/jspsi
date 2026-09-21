@@ -806,7 +806,7 @@ describe("the consent summary's withheld-table register", () => {
 
   // Every case below reads the summary field the surfaces select on, and
   // holds the predicate behind it to the same answer, so a summary that
-  // stopped carrying the resolution fails here rather than at a renderer.
+  // stopped stating the resolution fails here rather than at a renderer.
   const withheld = (overrides: Partial<LinkageTerms>): boolean => {
     const terms = { ...WITHHOLDING_TERMS, ...overrides };
     const carried = summarizeInvitation({
@@ -820,7 +820,7 @@ describe("the consent summary's withheld-table register", () => {
     expect(withheld({})).toBe(true);
   });
 
-  test("drops it under cascade, whose rounds carry the grouping either way", () => {
+  test("drops it under cascade, whose rounds reveal the grouping either way", () => {
     // The strategy axis. A cascade has no frame to suppress: each round names
     // the matched positions as it goes, so what the accepting party's operator
     // is shown is the client's choice however the rest of the document reads.
@@ -994,7 +994,7 @@ describe("the consent summary's withheld-table register, mirrored", () => {
     expect(withheld({})).toBe(true);
   });
 
-  test("drops it under cascade, whose rounds carry the grouping either way", () => {
+  test("drops it under cascade, whose rounds reveal the grouping either way", () => {
     expect(withheld({ linkageStrategy: "cascade" })).toBe(false);
   });
 

@@ -15,7 +15,7 @@ import type { CSVRow } from "../src/file";
 // online acceptance and its offline preflight (apps/cli/test/unit/commands/),
 // the web's columns step (apps/web/test/unit/acceptorColumns.test.ts) -- and
 // what this file pins is the half none of them can state on its own: a verdict
-// taken at a binding point does not settle the run, so the run guard stays the
+// taken at a binding point does not decide the run, so the run guard stays the
 // binding check.
 
 const inviterTerms: LinkageTerms = {
@@ -52,7 +52,7 @@ const satisfyingRows: Array<CSVRow> = [
 const laterColumns = ["first_name"];
 const laterRows: Array<CSVRow> = [{ first_name: "Alice" }];
 
-test("a binding point's verdict does not settle the run's", () => {
+test("a binding point's verdict does not decide the run's", () => {
   const accepted = deriveAcceptedLinkageTerms(inviterTerms, "Accepting Org");
 
   // The binding point: this party's own file is bound and graded, and passes.

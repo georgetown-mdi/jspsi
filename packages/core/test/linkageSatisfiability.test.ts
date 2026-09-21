@@ -411,7 +411,7 @@ describe("substringCollapsesParsedDateToConstant", () => {
     }
   });
 
-  test("a wrong-typed bound is refused at compile and reads as unmeasurable", () => {
+  test("a wrong-typed bound is refused at compile and is treated as unmeasurable", () => {
     // The type is refused where a document is decoded, so only a caller building
     // steps without one reaches this: the factory refuses the bound at compile,
     // and a run this build cannot measure resolves UP to the collapse word
@@ -1233,7 +1233,7 @@ describe("pipelineAlwaysDrops rescue equivalence", () => {
 
 describe("parse_date probe walk equivalence", () => {
   // The shipped predicates read every substring run of one element in a single
-  // forward pass carrying one value per probe date. Checked here: those verdicts
+  // forward pass keeping one value per probe date. Checked here: those verdicts
   // against a transcription that measures each run on its own, re-running the
   // probes from the `parse_date` for every run end, over every pipeline the
   // alphabet below spells.
@@ -1267,9 +1267,9 @@ describe("parse_date probe walk equivalence", () => {
       : { kind: "value", value: current };
   };
 
-  /** The measurement a run end carries: which `parse_date` laid out the value,
+  /** The measurement a run end holds: which `parse_date` laid out the value,
    * the layout it renders, and the steps between it and the run end. Undefined
-   * where the index carries no measurement at all. */
+   * where the index has no measurement at all. */
   const runMeasurement = (
     steps: ReadonlyArray<TransformStep>,
     index: number,
@@ -1467,7 +1467,7 @@ describe("parse_date probe walk equivalence", () => {
   };
 
   /** A run end settled by two distinct survivors read BEFORE a probe the
-   * measurement cannot read. The single forward pass carries one value per probe
+   * measurement cannot read. The single forward pass keeps one value per probe
    * across the whole span, so the declared probe order it reads them back in is
    * what keeps this a coarsening rather than an unmeasurable window. */
   const distinctSurvivorsPrecedeUnreadableProbe = (
@@ -1551,7 +1551,7 @@ describe("parse_date probe walk equivalence", () => {
     expect(elementCollapseVerdicts).toBeGreaterThan(0);
   });
 
-  // Two behaviors the single forward pass carries past the run that starts them
+  // Two behaviors the single forward pass keeps past the run that starts them
   // need a span longer than one run, and the sweep above reaches neither: it
   // stops at four steps, and every unreadability source in its alphabet takes
   // all four probes at once. The alphabet here is small enough to enumerate
@@ -3849,7 +3849,7 @@ describe("assessLinkageSatisfiability matches buildStandardizedDataset", () => {
 describe("the grading pass under the transform-work budget", () => {
   // The measurement runs the same partner-authored steps the exchange runs,
   // over four probe dates, so an amplifying pipeline spends here too. A pass
-  // that runs out of budget blanks the probes it was carrying, which is the
+  // that runs out of budget blanks the probes it was holding, which is the
   // can't-measure outcome an unreadable probe already has: the header still
   // renders, and only ever with the wider breadth word.
 
@@ -3867,7 +3867,7 @@ describe("the grading pass under the transform-work budget", () => {
     ]).flat(),
   ];
 
-  test("a pass inside the budget reads the probes it carries", () => {
+  test("a pass inside the budget reads the probes it holds", () => {
     const steps = amplifyingPairs(1000);
     expect(pipelineCollapsesParsedDateToConstant(steps)).toBe(false);
     expect(pipelineAlwaysDrops(steps)).toBe(false);

@@ -859,8 +859,8 @@ describe("buildKeyStrings: a value the declared expansion cannot be applied to",
   // `adjacent_years` retains three 8-character candidates per canonical date,
   // so the row's corrected total passes MAX_ASSEMBLED_KEY_LENGTH_PER_ROW
   // (4,194,304) at the 174,763rd date -- long before the non-canonical one the
-  // cell holds. What the crossing settles is the row; what the non-canonical
-  // date settles is the exchange, and it must not turn on which comes first.
+  // cell holds. The crossing decides the row and the non-canonical date
+  // decides the exchange, and neither may turn on which comes first.
   const DATES_EXPANDED_BEFORE_CROSSING = 174763;
   const NON_CANONICAL_DATE_INDEX = 190000;
   const NON_CANONICAL_DATE = "1990-01-15";
@@ -900,7 +900,7 @@ describe("buildKeyStrings: a value the declared expansion cannot be applied to",
     );
   }
 
-  test("refuses the exchange though the crossing would settle the row first", () => {
+  test("refuses the exchange though the crossing would decide the row first", () => {
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
     const dates = canonicalDates(NON_CANONICAL_DATE_INDEX + 1);
     dates[NON_CANONICAL_DATE_INDEX] = NON_CANONICAL_DATE;

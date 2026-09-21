@@ -969,7 +969,7 @@ const reasonLabel = (position: number): string =>
 const REASON_LINK = `\ncaused by: ${reasonLabel(1)}`;
 // The opening of the next reason packed on that same link: the escape's own
 // token for the line breaks the elimination places between two reasons, then
-// the label the second reason carries.
+// the label the second reason has.
 const PACKED_REASON = `\\x0a\\x0a${reasonLabel(2)}`;
 const BEGIN_MARKER = "-----BEGIN OPENSSH PRIVATE KEY-----";
 const END_MARKER = "-----END OPENSSH PRIVATE KEY-----";
@@ -1022,7 +1022,7 @@ test("a lone END marker in an abort reason deletes nothing", async () => {
     );
 });
 
-test("a plain abort reason reads as its own text", async () => {
+test("a plain abort reason displays as its own text", async () => {
   for (const render of abortRenders)
     expect(await render(["the operator declined the terms"])).toBe(
       `partner aborted linkage terms exchange${REASON_LINK}` +
@@ -1061,7 +1061,7 @@ test("a marker in a partner column name leaves the diagnostic it names", async (
   );
 });
 
-test("a plain partner column name reads as its own text", async () => {
+test("a plain partner column name displays as its own text", async () => {
   const { initiator, responder } = await columnMismatchRenders("email");
   expect(responder).toBe(
     'linkage terms are incompatible: payload mismatch: local receive columns ["email"] do not match partner send columns []',

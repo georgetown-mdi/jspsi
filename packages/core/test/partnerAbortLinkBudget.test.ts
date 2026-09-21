@@ -159,7 +159,7 @@ const BEGIN_MARKER = "-----BEGIN OPENSSH PRIVATE KEY-----";
 const END_MARKER = "-----END OPENSSH PRIVATE KEY-----";
 const KEY_BODY = "b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAAB";
 
-// The tail a plant carries, so a plant that ate what follows it inside its own
+// The tail a plant holds, so a plant that ate what follows it inside its own
 // link is caught: the render boundary redacts each link too, so a plant with
 // nothing behind it renders the same whether or not the link redacted before
 // it clipped.
@@ -215,7 +215,7 @@ const PLAIN_REASONS = [
   "identity mismatch",
 ];
 
-// A refusal the size of a real one: more reasons than one link carries and
+// A refusal the size of a real one: more reasons than one link holds and
 // more than the chain shows, so a plant has whole reasons on either side of it
 // and the ceiling's counted tail behind them.
 const MANY_REASONS = Array.from(

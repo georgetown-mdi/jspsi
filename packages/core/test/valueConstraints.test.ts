@@ -197,7 +197,7 @@ describe("checkValueConstraints", () => {
       ),
     ).toBe(false);
     // A non-word character is still outside the class -> still flagged, so the
-    // class is genuinely evaluated (not blanket-suppressed).
+    // class is evaluated per value rather than suppressed outright.
     expect(
       checkValueConstraints(field, "!").some(
         (v) => v.kind === "disallowedCharacters",

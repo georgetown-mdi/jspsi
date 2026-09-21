@@ -177,7 +177,7 @@ describe("a record states the certificate mismatch its run observed", () => {
 
   test("a presented certificate whose self-signature does not verify", async () => {
     // The fingerprint covers the certificate BODY alone, so a certificate
-    // carrying A's body under another party's signature still matches the pin
+    // holding A's body under another party's signature still matches the pin
     // and is caught at the swap, where the signature beside that body is
     // weighed. It is not the pinned identity: nothing holding A's key signed it.
     const unsigned: SigningIdentity = {
@@ -282,7 +282,7 @@ describe("a record states no mismatch where the run observed none", () => {
 
 describe("the marker is read from a condition, never from message text", () => {
   test("a failure whose message names a fingerprint mismatch observes none", async () => {
-    // The wording a genuine refusal uses, on an error that carries no condition:
+    // The wording a genuine refusal uses, on an error that has no condition:
     // a classifier matching on text would read this as a mismatch, and putting
     // a finding about the partner into a disclosure record on a string a
     // transport or a caller composed is what the condition exists to stop.

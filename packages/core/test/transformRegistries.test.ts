@@ -66,7 +66,7 @@ const termsNamingFunction = (
 });
 
 describe("the transform registries a decoded document indexes", () => {
-  test("carry no prototype and no writable rows", () => {
+  test("have no prototype and no writable rows", () => {
     for (const [label, table] of exportedRegistries) {
       expect(Object.getPrototypeOf(table), label).toBeNull();
       expect(Object.isFrozen(table), label).toBe(true);

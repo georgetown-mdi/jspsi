@@ -236,14 +236,14 @@ describe("safeParseStandardization", () => {
         "replace_regex replacement must be text, not a number" + QUOTE_REMEDY,
     },
     {
-      name: "an object carrying a marker",
+      name: "an object holding a marker",
       fn: "coalesce",
       params: { default: { note: MARKER } },
       param: "default",
       message: "coalesce default must be text, not an object" + QUOTE_REMEDY,
     },
     {
-      name: "an array carrying a marker",
+      name: "an array holding a marker",
       fn: "coalesce",
       params: { default: [MARKER] },
       param: "default",

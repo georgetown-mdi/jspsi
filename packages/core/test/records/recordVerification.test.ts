@@ -468,14 +468,14 @@ describe("verifyExchangeRecord checks the recorded result size", () => {
       ],
     },
     {
-      label: "carrying a negative row index",
+      label: "with a negative row index",
       table: [
         [0, -1],
         [1, 0],
       ],
     },
     {
-      label: "carrying a fractional row index",
+      label: "with a fractional row index",
       table: [
         [0, 1.5],
         [1, 0],
@@ -620,7 +620,7 @@ describe("recordAlterationIsTheOnlyExplanation", () => {
       report: { ...onlyTheFigureAtFault, commitments: {} },
     },
     {
-      label: "a commitment map carrying no association table",
+      label: "a commitment map with no association table",
       report: {
         ...onlyTheFigureAtFault,
         commitments: {

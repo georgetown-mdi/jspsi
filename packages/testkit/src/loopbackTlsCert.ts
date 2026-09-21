@@ -26,7 +26,7 @@ export interface LoopbackTlsCert {
  * acceptance -- so the run names what it lost and fails where the environment
  * was supposed to supply it.
  *
- * The certificate carries both loopback names in its subject alternative name,
+ * The certificate holds both loopback names in its subject alternative name,
  * so it serves a client that dials `localhost` and one that dials `127.0.0.1`
  * with verification on and no dependence on how the name resolves.
  */
