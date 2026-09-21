@@ -5,7 +5,7 @@ import { defaultSpawnAggregateWorker } from "@psi/workers/nonEmptyAggregateWorke
 import { postJobInputCoverage } from "@psi/jobClient/workInputClient";
 
 import type { FieldValueCoverage } from "@psi/workers/nonEmptyAggregate";
-import type { WorkInputReference } from "@psi/jobClient/workInputClient";
+import type { WorkInputRead } from "@psi/jobClient/workInputClient";
 
 import type { CSVRow, Standardization } from "@psilink/core";
 
@@ -73,9 +73,9 @@ const rowsCoverageProvider: CoverageProviderFactory<ReadonlyArray<CSVRow>> = (
  * threads through to the server, stopping the whole-file pass rather than scanning to
  * the end. `dispose` aborts the current sweep.
  */
-export const consoleCoverageProvider: CoverageProviderFactory<
-  WorkInputReference
-> = (reference) => {
+export const consoleCoverageProvider: CoverageProviderFactory<WorkInputRead> = (
+  read,
+) => {
   let active: AbortController | null = null;
   return {
     compute: (standardization) => {
@@ -84,7 +84,7 @@ export const consoleCoverageProvider: CoverageProviderFactory<
       active = controller;
       return new Promise<Array<FieldValueCoverage>>((resolve, reject) => {
         void postJobInputCoverage(
-          reference,
+          read,
           standardization,
           controller.signal,
         ).then((outcome) => {
@@ -105,7 +105,7 @@ export const consoleCoverageProvider: CoverageProviderFactory<
  * mounted-file reference so one {@link useNonEmptyRates} call serves both builds. */
 export type CoverageInput =
   | { kind: "rows"; rows: ReadonlyArray<CSVRow> }
-  | { kind: "workFile"; reference: WorkInputReference };
+  | ({ kind: "workFile" } & WorkInputRead);
 
 /** The unified coverage provider: dispatches a `rows` input to the hosted
  * worker-backed provider and a `workFile` input to the console fetch-backed sweep.
@@ -116,7 +116,7 @@ export const coverageProvider: CoverageProviderFactory<CoverageInput> = (
 ) =>
   input.kind === "rows"
     ? rowsCoverageProvider(input.rows)
-    : consoleCoverageProvider(input.reference);
+    : consoleCoverageProvider(input);
 
 /**
  * Run the full-CSV per-field value coverage for the current standardization behind

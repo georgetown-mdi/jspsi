@@ -315,7 +315,7 @@ describe("a listing body over its cap fails the reader safely", () => {
       columnSamples: [{ column: "a", values: ["x"] }],
     });
     await expect(
-      fetchJobInputProfile("people.csv", answering(body)),
+      fetchJobInputProfile("people.csv", undefined, answering(body)),
     ).resolves.toEqual({ kind: "unavailable", reason: "unknown" });
   });
 
@@ -333,7 +333,7 @@ describe("a listing body over its cap fails the reader safely", () => {
     });
     await expect(
       postJobInputCoverage(
-        { name: "people.csv" },
+        { reference: { name: "people.csv" } },
         { transformations: [] } as unknown as Parameters<
           typeof postJobInputCoverage
         >[1],

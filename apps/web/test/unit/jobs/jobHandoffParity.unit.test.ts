@@ -157,6 +157,7 @@ function maximalExchangeIntent(): JobSftpExchangeIntent {
     signing: { mode: "certificate", partnerFingerprint: PARTNER_FINGERPRINT },
     retentionDisposition: "Filed with the 2026 intake, kept seven years.",
     includeOwnColumns: "all",
+    csvDelimiter: "|",
   });
 }
 
@@ -237,6 +238,7 @@ const EXCHANGE_INTENT_ROUTES: Record<
   signing: { carries: "configKey", key: "signing" },
   retentionDisposition: { carries: "configKey", key: "retention_disposition" },
   includeOwnColumns: { carries: "configKey", key: "include_own_columns" },
+  csvDelimiter: { carries: "configKey", key: "csv_delimiter" },
 };
 
 /** Every field of an sftp zero-setup intent, and where it graduates. */

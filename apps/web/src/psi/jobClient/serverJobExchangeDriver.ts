@@ -124,6 +124,11 @@ export interface ServerJobExchangeDriverConfig {
    * partner. Absent where the operator chose nothing, or the terms leave it
    * nothing to act on. */
   includeOwnColumns?: OwnColumnSelection;
+  /** The field delimiter this party's own input is read by and its own result
+   * file written with -- core's local `csv_delimiter`. Local: the partner reads
+   * their own file by their own choice, and nothing about this one crosses.
+   * Absent composes no key, so the run reads and writes commas. */
+  csvDelimiter?: string;
   options?: JobExchangeOptions;
   /** The operator's per-run diagnostic and recovery choices, forwarded to the
    * intent unchanged ({@link RunDiagnosticsIntentFields}). Absent for a run
@@ -1126,6 +1131,7 @@ function intentFor(config: ServerJobExchangeDriverConfig): JobExchangeIntent {
     expectedPayloadColumns,
     expectedPartnerDeduplicate,
     includeOwnColumns,
+    csvDelimiter,
     options,
     runDiagnostics,
     receipts,
@@ -1144,6 +1150,7 @@ function intentFor(config: ServerJobExchangeDriverConfig): JobExchangeIntent {
       ? { expectedPartnerDeduplicate }
       : {}),
     ...(includeOwnColumns !== undefined ? { includeOwnColumns } : {}),
+    ...(csvDelimiter !== undefined ? { csvDelimiter } : {}),
     ...(options !== undefined ? { options } : {}),
     ...runDiagnostics,
     ...receipts,

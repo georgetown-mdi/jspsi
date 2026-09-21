@@ -476,11 +476,15 @@ export function InviterScreen() {
   // throwing getter there -- so this never touches it on that path.
   const coverageInput = useMemo<CoverageInput>(() => {
     if (consoleSource !== undefined)
-      return { kind: "workFile", reference: { name: consoleSource.name } };
+      return {
+        kind: "workFile",
+        reference: { name: consoleSource.name },
+        ...(csvDelimiter !== undefined ? { csvDelimiter } : {}),
+      };
     if (!isConsoleBuild() && acquired !== undefined)
       return { kind: "rows", rows: acquired.rawRows };
     return EMPTY_COVERAGE_INPUT;
-  }, [acquired, consoleSource]);
+  }, [acquired, consoleSource, csvDelimiter]);
 
   // The per-column preview samples the Cleaning tab's before/after preview reads:
   // computed from the browser rows on the hosted build, read from the server-side

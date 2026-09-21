@@ -17,13 +17,15 @@ import { jobEmptyResponse, jobJsonResponse } from "@jobs/gate";
  * mounted input CSV under a submitted standardization, in a single streaming pass.
  * Shares `gateJobRoute`.
  *
- * The body `{ name, standardization }` is read under a 1 MiB cap and validated: the
- * standardization goes through the same bounded schema the job intent uses PLUS a
- * route-level per-step pattern-length cap (RE2JS is linear at run time, but its
- * compile cost lands on this event loop). The input directory defaults to
- * `JOB_DATA_ROOT` when `JOB_INPUT_DIR` is unset, so once the job API is enabled a
- * directory is always resolved; a name that resolves to no regular file is `404`, a
- * bad or oversized body is `400`/`413`, and any other sweep fault is `400`.
+ * The body `{ name, standardization, csvDelimiter? }` is read under a 1 MiB cap and
+ * validated: the standardization goes through the same bounded schema the job intent
+ * uses PLUS a route-level per-step pattern-length cap (RE2JS is linear at run time,
+ * but its compile cost lands on this event loop), and `csvDelimiter` takes the job
+ * intent's own grade so the sweep reads the file the run will. The input directory
+ * defaults to `JOB_DATA_ROOT` when `JOB_INPUT_DIR` is unset, so once the job API is
+ * enabled a directory is always resolved; a name that resolves to no regular file is
+ * `404`, a bad or oversized body is `400`/`413`, and any other sweep fault is
+ * `400`.
  *
  * `request.signal` threads into the sweep so a client disconnect stops the whole-file
  * pass rather than scanning a CLI-scale file to completion after the browser has
@@ -44,7 +46,7 @@ export const Route = createFileRoute("/api/jobs/inputs/coverage")({
 
         const parsed = coverageRequestSchema.safeParse(body.value);
         if (!parsed.success) return jobEmptyResponse(400);
-        const { name, standardization } = parsed.data;
+        const { name, standardization, csvDelimiter } = parsed.data;
         if (!isAdmissibleInputName(name)) return jobEmptyResponse(404);
 
         try {
@@ -52,6 +54,7 @@ export const Route = createFileRoute("/api/jobs/inputs/coverage")({
             resolvedDir,
             name,
             standardization,
+            csvDelimiter,
             request.signal,
           );
           return jobJsonResponse({ rates });

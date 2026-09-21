@@ -977,6 +977,32 @@ describe("createServerJobExchangeDriver intent and cancellation", () => {
     expect(createdIntents[0]).toMatchObject({ metadata, standardization });
   });
 
+  test("forwards the party's own field delimiter into the intent", async () => {
+    // The choice made at the file step reaches the CLI only through this field;
+    // the console composes the config at a separate invocation, so a delimiter
+    // held in the browser alone would leave the run reading commas.
+    const { client, createdIntents } = scriptedClient([result(true)]);
+    const driver = createServerJobExchangeDriver(
+      { ...driverConfig(), csvDelimiter: "\t" },
+      client,
+    );
+
+    await driver.run(driverEvents(new AbortController().signal));
+
+    expect(createdIntents[0]).toMatchObject({ csvDelimiter: "\t" });
+  });
+
+  test("omits the field delimiter when the config names none", async () => {
+    const { client, createdIntents } = scriptedClient([result(true)]);
+    const driver = createServerJobExchangeDriver(driverConfig(), client);
+
+    await driver.run(driverEvents(new AbortController().signal));
+
+    expect(
+      (createdIntents[0] as Record<string, unknown>).csvDelimiter,
+    ).toBeUndefined();
+  });
+
   test("omits metadata and standardization when the config sets neither", async () => {
     const { client, createdIntents } = scriptedClient([result(true)]);
     const driver = createServerJobExchangeDriver(driverConfig(), client);

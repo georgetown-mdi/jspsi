@@ -30,6 +30,14 @@ export interface WorkInputReference {
   name: string;
 }
 
+/** A mounted file and the field delimiter the operator chose to read it by: what a
+ * console-side pass over that file needs to read it the way the run will. An absent
+ * delimiter reads commas, core's default for a party that named none. */
+export interface WorkInputRead {
+  reference: WorkInputReference;
+  csvDelimiter?: string;
+}
+
 /** The `GET /api/jobs/inputs` outcome: the listing, a stable `disabled` state (the
  * job API is off -- `JOB_DATA_ROOT` unset -- so the gate 404s), or a transient
  * `error` (another non-2xx, a network fault, or a malformed body). The picker
@@ -240,19 +248,26 @@ export async function fetchJobInputs(
   }
 }
 
-/** Profile one mounted input file by its admissible name. A 404 is `not_found` (the
- * file is gone since the listing); a 400 holds a closed profile-fault code the
- * picker names; anything else (another non-2xx, a malformed body, a network error) is
- * `unknown`. */
+/** Profile one mounted input file by its admissible name, read by the operator's own
+ * field delimiter (omitted reads commas). A 404 is `not_found` (the file is gone
+ * since the listing); a 400 holds a closed profile-fault code the picker names;
+ * anything else (another non-2xx, a malformed body, a network error) is `unknown`. */
 export async function fetchJobInputProfile(
   name: string,
+  csvDelimiter?: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<JobInputProfileResult> {
   try {
-    const response = await fetchImpl(
-      `/api/jobs/inputs/profile?name=${encodeURIComponent(name)}`,
-      { method: "GET" },
-    );
+    // encodeURIComponent rather than URLSearchParams: the latter writes a space
+    // as `+`, which would change the name encoding this endpoint has always used.
+    const query =
+      `name=${encodeURIComponent(name)}` +
+      (csvDelimiter === undefined
+        ? ""
+        : `&delimiter=${encodeURIComponent(csvDelimiter)}`);
+    const response = await fetchImpl(`/api/jobs/inputs/profile?${query}`, {
+      method: "GET",
+    });
     if (!response.ok) {
       if (response.status === 404)
         return { kind: "unavailable", reason: "not_found" };
@@ -450,7 +465,7 @@ type CoverageSweepOutcome =
  * back: only the outcome kind.
  */
 export async function postJobInputCoverage(
-  reference: WorkInputReference,
+  read: WorkInputRead,
   standardization: Standardization,
   signal: AbortSignal,
   fetchImpl: typeof fetch = fetch,
@@ -460,8 +475,11 @@ export async function postJobInputCoverage(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        name: reference.name,
+        name: read.reference.name,
         standardization,
+        ...(read.csvDelimiter !== undefined
+          ? { csvDelimiter: read.csvDelimiter }
+          : {}),
       }),
       signal,
     });

@@ -34,6 +34,7 @@ import type {
   ProfiledJobInput,
   WorkInputReference,
 } from "@psi/jobClient/workInputClient";
+import type { CsvDelimiterResolution } from "@components/csvDelimiterChoice";
 
 /** The picker's per-reason copy for a profile that could not be read: a title and a
  * body, so each distinct failure names what to fix instead of one generic "removed or
@@ -101,14 +102,25 @@ function profileLiveMessage(
  * (so the loading branch is never a focus dead-end), and a polite status region
  * announces every listing/profile update. The mounted directory is the operator's own
  * trusted data, so the file is read in place with no drift or freshness re-check.
+ *
+ * The profile is read by the operator's own field-delimiter choice, so the columns
+ * confirmed here are the columns the run reads. Changing that choice re-opens the
+ * confirm stage on the committed file: its columns were read by the delimiter in
+ * effect when it was chosen, and a commitment the run would not reproduce is worse
+ * than a second confirmation. A choice the rule refuses selects nothing at all.
  */
 export function ServerFilePicker({
   committed,
+  delimiter,
   onUse,
 }: {
   /** The file currently committed to the console (its reference), so its row is
    * marked. */
   committed: WorkInputReference | undefined;
+  /** How the operator's own file separates its fields, as the surface's control
+   * resolved it. Omitted where the surface offers no control, which reads commas;
+   * a refused choice selects no file, as the hosted build's dropzone closes. */
+  delimiter?: CsvDelimiterResolution;
   /** Commit a profiled file to the console -- the second stage's "Use this file". */
   onUse: (profile: ProfiledJobInput) => void;
 }) {
@@ -117,6 +129,9 @@ export function ServerFilePicker({
   );
   const [selectedName, setSelectedName] = useState<string>();
   const [profile, setProfile] = useState<JobInputProfileResult | "loading">();
+  const csvDelimiter =
+    delimiter === undefined || !delimiter.ok ? undefined : delimiter.delimiter;
+  const delimiterRefused = delimiter !== undefined && !delimiter.ok;
 
   // A monotonic id per listing/profile fetch so a superseded resolution (a refresh
   // spam, or a second row picked mid-profile) falls on the floor instead of
@@ -143,13 +158,28 @@ export function ServerFilePicker({
     void loadListing();
   }, [loadListing]);
 
-  const selectFile = useCallback(async (name: string) => {
-    const id = ++profileId.current;
-    setSelectedName(name);
-    setProfile("loading");
-    const result = await fetchJobInputProfile(name);
-    if (mounted.current && id === profileId.current) setProfile(result);
-  }, []);
+  const selectFile = useCallback(
+    async (name: string) => {
+      const id = ++profileId.current;
+      setSelectedName(name);
+      setProfile("loading");
+      const result = await fetchJobInputProfile(name, csvDelimiter);
+      if (mounted.current && id === profileId.current) setProfile(result);
+    },
+    [csvDelimiter],
+  );
+
+  // A committed file's columns were read by the delimiter in effect when it was
+  // chosen, so a later change leaves them stale: re-profile it on the new choice
+  // and put the operator back at the confirm stage, with the columns it now reads
+  // on screen before anything is committed again.
+  const profiledBy = useRef(csvDelimiter);
+  useEffect(() => {
+    if (profiledBy.current === csvDelimiter) return;
+    profiledBy.current = csvDelimiter;
+    if (csvDelimiter === undefined || committed === undefined) return;
+    void selectFile(committed.name);
+  }, [csvDelimiter, committed, selectFile]);
 
   function cancelSelection() {
     profileId.current += 1;
@@ -213,6 +243,7 @@ export function ServerFilePicker({
           <ListingView
             listing={listing}
             committed={committed}
+            selectionClosed={delimiterRefused}
             onRefresh={refresh}
             onSelect={(name) => void selectFile(name)}
           />
@@ -227,11 +258,15 @@ export function ServerFilePicker({
 function ListingView({
   listing,
   committed,
+  selectionClosed,
   onRefresh,
   onSelect,
 }: {
   listing: JobInputsResult | "loading";
   committed: WorkInputReference | undefined;
+  /** Set while the delimiter choice is refused: no file is profiled by a value the
+   * rule rejects, so the row actions are closed until the choice resolves. */
+  selectionClosed: boolean;
   onRefresh: () => void;
   onSelect: (name: string) => void;
 }) {
@@ -363,6 +398,7 @@ function ListingView({
                   <Button
                     size="xs"
                     variant="light"
+                    disabled={selectionClosed}
                     aria-label={`${action} ${displayName}`}
                     onClick={() => onSelect(file.name)}
                   >

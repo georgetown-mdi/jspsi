@@ -863,11 +863,15 @@ export function AcceptorScreen() {
   // throwing getter there -- so this never touches it on that path.
   const coverageInput = useMemo<CoverageInput>(() => {
     if (consoleSource !== undefined)
-      return { kind: "workFile", reference: { name: consoleSource.name } };
+      return {
+        kind: "workFile",
+        reference: { name: consoleSource.name },
+        ...(csvDelimiter !== undefined ? { csvDelimiter } : {}),
+      };
     if (!consoleBuild && acquired !== undefined)
       return { kind: "rows", rows: acquired.rawRows };
     return EMPTY_COVERAGE_INPUT;
-  }, [acquired, consoleSource, consoleBuild]);
+  }, [acquired, consoleSource, consoleBuild, csvDelimiter]);
 
   // The per-column preview samples the Cleaning tab reads: computed from the browser
   // rows on the hosted build, read from the server-side profile on the console. Kept
@@ -1282,14 +1286,22 @@ export function AcceptorScreen() {
               }
             />
             {consoleBuild ? (
-              <ServerFilePicker
-                committed={
-                  consoleSource !== undefined
-                    ? { name: consoleSource.name }
-                    : undefined
-                }
-                onUse={commitConsoleAcceptFile}
-              />
+              <>
+                <CsvDelimiterField
+                  choice={delimiterChoice}
+                  onChange={setDelimiterChoice}
+                  note={CSV_DELIMITER_LOCAL_NOTICE}
+                />
+                <ServerFilePicker
+                  committed={
+                    consoleSource !== undefined
+                      ? { name: consoleSource.name }
+                      : undefined
+                  }
+                  delimiter={delimiterResolution}
+                  onUse={commitConsoleAcceptFile}
+                />
+              </>
             ) : (
               <>
                 <CsvDelimiterField

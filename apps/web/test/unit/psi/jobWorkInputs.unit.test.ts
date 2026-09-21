@@ -152,6 +152,43 @@ describe("listJobInputs", () => {
   });
 });
 
+describe("profileJobInput reads by the party's own delimiter", () => {
+  // The columns this reports become the party's linkage terms and the run reads the
+  // same mounted file, so a profile that read the file another way than the composed
+  // config states would mint terms for columns the exchange never sees.
+  const TAB_CSV = [
+    "ssn\tfirst_name\tlast_name",
+    "111223333\tJane\tPublic",
+    "222334444\tJohn\tQuince",
+  ].join("\n");
+
+  function writeTabFixture(dir: string): void {
+    fs.writeFileSync(path.join(dir, "tabbed.csv"), TAB_CSV);
+  }
+
+  test("reads a tab-separated file as one column when no delimiter is named", async () => {
+    const dir = tempDir("input");
+    writeTabFixture(dir);
+    const profile = await profileJobInput(dir, "tabbed.csv");
+    expect(profile.columns).toHaveLength(1);
+  });
+
+  test("reads its columns when the party names the tab", async () => {
+    const dir = tempDir("input");
+    writeTabFixture(dir);
+    const profile = await profileJobInput(dir, "tabbed.csv", "\t");
+    expect(profile.columns).toEqual(["ssn", "first_name", "last_name"]);
+    expect(profile.rowCount).toBe(2);
+  });
+
+  test("takes the delimiter from the file under detect", async () => {
+    const dir = tempDir("input");
+    writeTabFixture(dir);
+    const profile = await profileJobInput(dir, "tabbed.csv", "detect");
+    expect(profile.columns).toEqual(["ssn", "first_name", "last_name"]);
+  });
+});
+
 describe("profileJobInput", () => {
   test("profiles columns, row count, samples, and date format in one pass", async () => {
     const dir = tempDir("input");
@@ -316,7 +353,13 @@ describe("coverageJobInput", () => {
     const controller = new AbortController();
     controller.abort();
     await expect(
-      coverageJobInput(dir, "input.csv", standardization, controller.signal),
+      coverageJobInput(
+        dir,
+        "input.csv",
+        standardization,
+        undefined,
+        controller.signal,
+      ),
     ).rejects.toBeInstanceOf(JobInputCoverageAbortedError);
   });
 
@@ -330,6 +373,7 @@ describe("coverageJobInput", () => {
       dir,
       "input.csv",
       standardization,
+      undefined,
       controller.signal,
     );
     controller.abort();
