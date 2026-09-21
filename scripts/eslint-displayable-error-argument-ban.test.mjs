@@ -298,17 +298,27 @@ const GOVERNED_SOURCE_EXTENSION = /\.(?:mts|ts|tsx)$/;
 
 /**
  * What a return type annotation declares: `yes` for a `Displayable`, a
- * `Promise<Displayable>`, or a union holding one; `unreadable` for an annotation
- * naming `Displayable` in a shape this does not decide; `no` otherwise. An
- * unreadable one fails the scan rather than passing as a non-producer.
+ * `Promise<Displayable>`, an array of them, or a union holding one;
+ * `unreadable` for an annotation naming `Displayable` in a shape this does not
+ * decide; `no` otherwise. An unreadable one fails the scan rather than passing
+ * as a non-producer.
+ *
+ * An array counts because the ban matches the producing CALL: a list of notes
+ * composed into an error's text stringifies to its escaped members joined, the
+ * same double escape a single value would take.
  */
 function declaresDisplayable(typeNode) {
   if (typeNode === undefined) return "no";
+  if (ts.isArrayTypeNode(typeNode))
+    return declaresDisplayable(typeNode.elementType);
   if (ts.isTypeReferenceNode(typeNode)) {
     const name = typeNode.typeName.getText();
     if (name === "Displayable")
       return typeNode.typeArguments ? "unreadable" : "yes";
-    if (name === "Promise" && typeNode.typeArguments?.length === 1)
+    if (
+      (name === "Promise" || name === "Array" || name === "ReadonlyArray") &&
+      typeNode.typeArguments?.length === 1
+    )
       return declaresDisplayable(typeNode.typeArguments[0]);
   }
   if (ts.isUnionTypeNode(typeNode)) {

@@ -169,6 +169,7 @@ export {
   sanitizeForDisplay,
   renderOperatorSuppliedText,
   displayText,
+  firstPartyNote,
   renderedDisplayCost,
   boundRawFragmentForFit,
   clipToRenderedCost,

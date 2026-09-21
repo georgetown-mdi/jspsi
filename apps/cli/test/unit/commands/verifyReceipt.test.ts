@@ -11,7 +11,10 @@ import {
   buildExchangeRecord,
   computeCertificateFingerprint,
   DEFAULT_LINKAGE_RULE_SET,
+  DEFAULT_MAX_DISPLAY_LENGTH,
+  DISPLAY_TRUNCATION_MARKER,
   EXCHANGE_RECORD_VERSION,
+  firstPartyNote,
   generateSigningIdentity,
   getDefaultLinkageTerms,
   serializeDualSignedRecord,
@@ -204,9 +207,16 @@ describe("formatVerificationReport", () => {
 
   test("warnings are reported as notes", () => {
     const { lines } = formatVerificationReport(report("incomplete"), [
-      "a duplicate identifier value",
+      firstPartyNote("a duplicate identifier value"),
     ]);
     expect(lines.join("\n")).toContain("note: a duplicate identifier value");
+  });
+
+  test("a note longer than the per-value cap reaches the terminal whole", () => {
+    const note = firstPartyNote("x".repeat(DEFAULT_MAX_DISPLAY_LENGTH + 200));
+    const { lines } = formatVerificationReport(report("incomplete"), [note]);
+    expect(lines.join("\n")).toContain(`note: ${note}`);
+    expect(lines.join("\n")).not.toContain(DISPLAY_TRUNCATION_MARKER);
   });
 
   test("a warning with control bytes is sanitized before display", () => {
@@ -216,11 +226,13 @@ describe("formatVerificationReport", () => {
     const esc = String.fromCharCode(0x1b);
     const bel = String.fromCharCode(0x07);
     const { lines } = formatVerificationReport(report("incomplete"), [
-      'the identifier column "a' +
-        esc +
-        "[31m" +
-        bel +
-        '" has duplicate values',
+      firstPartyNote(
+        'the identifier column "a' +
+          esc +
+          "[31m" +
+          bel +
+          '" has duplicate values',
+      ),
     ]);
     const out = lines.join("\n");
     // The raw ESC and BEL bytes are replaced with visible escapes, never emitted.

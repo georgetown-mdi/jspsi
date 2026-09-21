@@ -6,6 +6,7 @@ import {
   clipToRenderedCost,
   clipToRenderedCostKeepingEnd,
   controlCharacterMarker,
+  firstPartyNote,
   operatorDisplayMarker,
   renderedDisplayCost,
   renderOperatorSuppliedText,
@@ -641,5 +642,48 @@ describe("boundRawFragmentForFit", () => {
     expect(cutAndFitted("a".repeat(200) + PRIVATE_KEY)).toContain(
       "[redacted private key]",
     );
+  });
+});
+
+describe("firstPartyNote", () => {
+  // The note slot exists so a sentence the operator acts on is not cut at a cap
+  // sized for one untrusted fragment.
+  const LONG_NOTE =
+    "the same sentence again. ".repeat(12) +
+    "Set the delimiter and verify again.";
+
+  test("copy longer than the per-value cap is returned whole", () => {
+    expect(LONG_NOTE.length).toBeGreaterThan(DEFAULT_MAX_DISPLAY_LENGTH);
+    expect(firstPartyNote(LONG_NOTE)).toBe(LONG_NOTE);
+  });
+
+  test("the same text sanitized as a value is cut at the cap", () => {
+    expect(sanitizeForDisplay(LONG_NOTE)).toContain(DISPLAY_TRUNCATION_MARKER);
+    expect(sanitizeForDisplay(LONG_NOTE)).not.toContain(
+      "Set the delimiter and verify again.",
+    );
+  });
+
+  test("an escape a fragment already took is left as it stands", () => {
+    const note = `read "${sanitizeForDisplay("a\u001b[31m")}" as one column`;
+    expect(firstPartyNote(note)).toBe(note);
+    // Escaped once, not twice: a second pass would double the backslash the
+    // fragment's escape holds.
+    expect(firstPartyNote(note)).toContain("\\x1b");
+    expect(firstPartyNote(note)).not.toContain("\\\\x1b");
+  });
+
+  // The mark is a claim about who wrote the bytes, and the claim is checked:
+  // first-party copy is printable ASCII, and so is what sanitizeForDisplay
+  // returns, so text outside that class did not come from where the mark says.
+  test("text outside printable ASCII is escaped and capped instead", () => {
+    const control = `note ${String.fromCharCode(0x1b)}[31m`;
+    expect(firstPartyNote(control)).toBe(sanitizeForDisplay(control));
+    expect(firstPartyNote(control)).not.toContain(String.fromCharCode(0x1b));
+
+    // A Cyrillic "a", which renders as a Latin one: printable, and outside the
+    // class, so the note slot hands it to the escape and its cap like any value.
+    const confusables = "\u0430".repeat(DEFAULT_MAX_DISPLAY_LENGTH);
+    expect(firstPartyNote(confusables)).toContain(DISPLAY_TRUNCATION_MARKER);
   });
 });

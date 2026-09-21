@@ -45,6 +45,7 @@ import {
 import { WorkShell } from "./WorkShell";
 
 import type {
+  Displayable,
   DualSignedRecord,
   ExchangeRecord,
   LinkageTerms,
@@ -500,7 +501,7 @@ export function VerifyReceiptScreen() {
         signedRecord?.record,
       );
       let recordReport: RecordVerificationReport | undefined;
-      let recordWarnings: Array<string> = [];
+      let recordWarnings: Array<Displayable> = [];
       if (parsedRecord !== undefined && keys?.keys !== undefined) {
         let data: Awaited<ReturnType<typeof reconstructCommittedData>>["data"] =
           {};

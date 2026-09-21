@@ -27,6 +27,7 @@ import type {
   CertificateBindingStatus,
   CommitmentName,
   CommitmentStatus,
+  Displayable,
   DualSignedRecord,
   DualSignedRecordVerificationReport,
   ExchangeRecord,
@@ -355,8 +356,9 @@ export interface VerdictViewModel {
    * gap to show the reader). */
   resultSize?: VerdictRow;
   termsHash: VerdictRow;
-  /** Reconstruction caveats, each already sanitized for display. */
-  warnings: Array<string>;
+  /** Reconstruction caveats, each composed at the display boundary where it
+   * was written. */
+  warnings: Array<Displayable>;
   /** The standing caveat: the unsigned-record path does not check partner
    * receipt signatures. Fixed copy, mirrored from the CLI. */
   signatureNote: string;
@@ -533,12 +535,13 @@ const SIGNATURE_NOTE_WITH_SIGNED_RECORD =
 
 /**
  * Build the verdict view-model from a {@link RecordVerificationReport} and any
- * reconstruction warnings. Each warning is sanitized here (it interpolates a
- * supplied column name), so the caller passes the raw warnings straight from
- * {@link reconstructCommittedData}. Only the commitments the report holds are
- * shown; the mandatory pair is always present in a parsed record, and the
- * association table appears only when the record holds it. The result-size row
- * follows the same rule -- shown only where the record records a size.
+ * reconstruction warnings. A warning arrives already at the display boundary
+ * -- core composes it as first-party copy and escapes the one supplied column
+ * name it interpolates -- so it is rendered whole rather than charged to the
+ * per-value cap, which would cut the sentence. Only the commitments the report
+ * holds are shown; the mandatory pair is always present in a parsed record, and
+ * the association table appears only when the record holds it. The result-size
+ * row follows the same rule -- shown only where the record records a size.
  *
  * Pass `signedRecordVerified` when the same run also verified a dual-signed
  * record, so the standing caveat points at that verdict rather than telling the
@@ -549,7 +552,7 @@ const SIGNATURE_NOTE_WITH_SIGNED_RECORD =
  */
 export function verdictViewModel(
   report: RecordVerificationReport,
-  warnings: ReadonlyArray<string>,
+  warnings: ReadonlyArray<Displayable>,
   signedRecordVerified = false,
   receiptHoldsNoPartnerTerms = false,
 ): VerdictViewModel {
@@ -595,7 +598,7 @@ export function verdictViewModel(
       tone: termsRow.tone,
       explanation: termsExplanation,
     },
-    warnings: warnings.map((warning) => sanitizeForDisplay(warning)),
+    warnings: [...warnings],
     signatureNote: signedRecordVerified
       ? SIGNATURE_NOTE_WITH_SIGNED_RECORD
       : SIGNATURE_NOTE,
