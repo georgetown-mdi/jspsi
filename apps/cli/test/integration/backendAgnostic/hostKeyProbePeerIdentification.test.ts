@@ -5,7 +5,10 @@ import {
   probeHostKeyLines,
 } from "../../../src/commands/probeHostKey";
 import { peerIdentificationDiagnosisOf } from "../../../src/connection/sftpPeerIdentification";
-import { establishHostKeyTrust } from "../../../src/hostKeyTrust";
+import {
+  establishHostKeyTrust,
+  HOST_KEY_PROBE_DIALS_ONCE,
+} from "../../../src/hostKeyTrust";
 import {
   countingPeer,
   diagnosisCount,
@@ -90,7 +93,9 @@ test(
         (err: unknown) => err,
       );
       const links = displayLinks(raised);
-      expectNonSshAnswerDiagnosis(links, peer);
+      // The first-use refusal leads, and the diagnosis follows it whole.
+      expect(links[0]).toContain(HOST_KEY_PROBE_DIALS_ONCE);
+      expectNonSshAnswerDiagnosis(links.slice(1), peer);
       expect(diagnosisCount(links)).toBe(1);
       expect(peer.accepted().silent).toBe(1);
     } finally {

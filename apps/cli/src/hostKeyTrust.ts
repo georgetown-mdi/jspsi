@@ -11,6 +11,7 @@ import type { ConnectionConfig, PresentedHostKey } from "@psilink/core";
 
 import { SSH2SFTPClientAdapter } from "./connection/ssh2SftpAdapter";
 import { persistHostKeyFingerprint } from "./config";
+import { exitCodeForError } from "./util/exit";
 import { promptConfirm } from "./util/prompt";
 
 /**
@@ -74,6 +75,36 @@ const hostKeyRefusal = (summary: string, details: string[]): UsageError =>
       undefined,
     ),
   });
+
+/**
+ * States that a host-key probe makes a single connection attempt; shared by
+ * the `probe-host-key` help and the first-use trust refusal so both say the
+ * same thing.
+ */
+export const HOST_KEY_PROBE_DIALS_ONCE =
+  "the probe dials once and is not re-dialed";
+
+/**
+ * The refusal for a first-use probe that read no host key. It keeps the probe's
+ * rejection as its cause, and the exit status that rejection maps to, so the
+ * run exits as it would have had the exchange's own connect failed.
+ */
+function probeFailureRefusal(failure: unknown): Error {
+  const refusal = new Error(
+    `could not read the SFTP server's host key, so nothing was pinned and no ` +
+      `credential was sent; ${HOST_KEY_PROBE_DIALS_ONCE}. Run the command ` +
+      `again; if the server is slow to answer, raise the connect timeout ` +
+      `with --connection-timeout or ` +
+      `connection.options.server_connect_timeout_ms.`,
+  );
+  Object.defineProperty(refusal, "cause", {
+    value: failure,
+    writable: true,
+    configurable: true,
+    enumerable: false,
+  });
+  return Object.assign(refusal, { exitCode: exitCodeForError(failure) });
+}
 
 const REAL_DEPS: HostKeyTrustDeps = {
   probe: (connection, verbosity) => {
@@ -181,10 +212,18 @@ export async function establishHostKeyTrust(
 
   // Probe on a throwaway connection (its own adapter): the verifier records the
   // presented key and refuses, so no credential is ever sent and nothing needs
-  // closing. A genuine connect failure propagates as it stands, unwrapped and
-  // with nothing pinned (hostKeyTrust.test.ts, "a probe failure propagates
-  // unchanged and pins nothing").
-  const presented = await deps.probe(connection, verbosity);
+  // closing. One dial, so the connect timeout bounds the operator's wait for
+  // the prompt; the exchange's own connect keeps its reconnect setting.
+  const probeConnection: ConnectionConfig = {
+    ...connection,
+    options: { ...connection.options, maxReconnectAttempts: 0 },
+  };
+  let presented: PresentedHostKey;
+  try {
+    presented = await deps.probe(probeConnection, verbosity);
+  } catch (err) {
+    throw probeFailureRefusal(err);
+  }
 
   // presented.keyType is the server's choice within the bound core's
   // keyTypeFromBlob applies, so escape it before it reaches the operator's

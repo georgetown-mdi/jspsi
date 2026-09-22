@@ -11,6 +11,7 @@ import type { PeerIdentificationDiagnosis } from "../connection/sftpPeerIdentifi
 
 import { channelFromURL } from "../connectionFromUrl";
 import { SSH2SFTPClientAdapter } from "../connection/ssh2SftpAdapter";
+import { HOST_KEY_PROBE_DIALS_ONCE } from "../hostKeyTrust";
 import { peerIdentificationDiagnosisOf } from "../connection/sftpPeerIdentification";
 import {
   decodeUrlComponent,
@@ -65,8 +66,8 @@ export function builder(cmd: Argv): Argv {
       type: "string",
       describe:
         "how long to wait for the connection before giving up (e.g. 10s); " +
-        "enforced as the SSH ready timeout, and the whole wait -- the probe " +
-        "dials once and is not re-dialed",
+        "enforced as the SSH ready timeout, and the whole wait -- " +
+        HOST_KEY_PROBE_DIALS_ONCE,
     })
     .option("json", {
       type: "boolean",
