@@ -381,12 +381,14 @@ const COMPOSED_FIELD_PATHS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * The top-level blocks a composition here writes, from the same measure. The
- * export writes a composed block over the opened document's whole
- * ({@link ./handoff}), so a setting INSIDE one of these cannot be held: the
- * composition's block replaces it, key for key.
+ * The top-level blocks a composition here writes, from the same measure.
+ * Exported for the hand-off's own merge ({@link ./handoff}): the export holds
+ * a mounted top-level key only outside this set, since a key inside it is the
+ * composition's alone, present or absent as the run composed it -- a setting
+ * INSIDE one of these cannot be held, the composition's block replaces it,
+ * key for key.
  */
-const COMPOSED_BLOCKS: ReadonlySet<string> = new Set(
+export const COMPOSED_BLOCKS: ReadonlySet<string> = new Set(
   [...COMPOSED_FIELD_PATHS].map((field) => field.split(".")[0]),
 );
 

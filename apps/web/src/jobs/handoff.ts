@@ -1,4 +1,10 @@
-import { parseExchangeSpec, serializeExchangeDocument } from "@psilink/core";
+import {
+  parseExchangeSpec,
+  serializeExchangeDocument,
+  snakeizeKey,
+} from "@psilink/core";
+
+import { COMPOSED_BLOCKS } from "./configLoad";
 
 import { zeroSetupOptionsArgv, zeroSetupSftpArgv } from "./intentArgv";
 
@@ -260,14 +266,19 @@ function composedHandoffSpec(
  * line is the file psilink itself would write for the same settings, guidance
  * comments included.
  *
- * A run composed from a configuration the operator opened off the mount
- * serializes that document with the composition written over it, top-level key
- * by top-level key. Every block the composition emits is the composition's
- * alone -- the connection, the linkage terms, the signing paths, each already
- * placeholdered above -- so no container path and no credential from the opened
- * file reaches the template. What survives is the settings the console has no
- * control for and never composes, which the load names for the operator
- * ({@link ./configLoad}).
+ * A run composed from a configuration the operator opened off the mount merges
+ * the mounted document's top-level keys OUTSIDE {@link COMPOSED_BLOCKS} (the
+ * settings the console has no editor for, held unchanged) with the composed
+ * document (every block the composition emits, whole -- the connection, the
+ * linkage terms, the signing paths, each already placeholdered above). A block
+ * in {@link COMPOSED_BLOCKS} the composition did not write for this run -- an
+ * operator who mounted a `signing` block and turned signing off in the console
+ * -- is therefore absent from the export rather than surviving from the
+ * mount: the composition's absence is itself the operator's edit. So no
+ * container path and no credential from the opened file reaches the template,
+ * and no held setting outlives a run that replaced it. What survives is the
+ * settings the console has no control for and never composes, which the load
+ * names for the operator ({@link ./configLoad}).
  *
  * The two agree because the load refuses a document whose held setting sits
  * inside a block a composition writes: a key-by-key merge is what such a
@@ -292,8 +303,29 @@ function handoffConfigDocument(
   const merged =
     mountedDocument === undefined
       ? composed
-      : { ...mountedDocument, ...composed };
+      : { ...heldTopLevelKeys(mountedDocument), ...composed };
   return serializeExchangeDocument(parseExchangeSpec(merged));
+}
+
+/**
+ * The mounted document's top-level keys OUTSIDE {@link COMPOSED_BLOCKS}: the
+ * held settings the export carries unchanged. A key inside that set is left
+ * out here even when the composition did not end up writing it for this run
+ * (e.g. `signing` with signing off), since the composition's absence of the
+ * block is the operator's edit, not something to carry from the mount.
+ *
+ * {@link COMPOSED_BLOCKS} names blocks the FILE spells (snake_case, e.g.
+ * `linkage_terms`); the mounted document's own keys are the parsed spec's
+ * camelCase, so each is snakeized before the membership check.
+ */
+function heldTopLevelKeys(
+  mountedDocument: ExchangeSpec,
+): Partial<ExchangeSpec> {
+  return Object.fromEntries(
+    Object.entries(mountedDocument).filter(
+      ([key]) => !COMPOSED_BLOCKS.has(snakeizeKey(key)),
+    ),
+  );
 }
 
 /**

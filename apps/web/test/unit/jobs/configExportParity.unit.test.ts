@@ -561,6 +561,45 @@ describe("the settings a loaded configuration keeps in the export", () => {
     ]);
   });
 
+  test("signing turned off in the console drops a mounted signing block", () => {
+    const signing = {
+      mode: "certificate" as const,
+      partnerFingerprint: PARTNER_FINGERPRINT,
+      identityFile: "/home/operator/.psilink/identity.json",
+      receiptOutput: "/home/operator/receipt.json",
+    };
+    const document = mountedDocument({ tokenMaxAgeDays: 30 }, { signing });
+    // No `signing` override: the run's own intent composes no signing block.
+    const exported = exportOver(document);
+    expect(exportedValue(exported, "signing")).toBeUndefined();
+    expect(exported).not.toContain("signing:");
+  });
+
+  test("signing turned on with different values overrides the mounted signing block", () => {
+    const mountedSigning = {
+      mode: "certificate" as const,
+      partnerFingerprint: PARTNER_FINGERPRINT,
+      identityFile: "/home/operator/.psilink/identity.json",
+      receiptOutput: "/home/operator/receipt.json",
+    };
+    const document = mountedDocument(
+      { tokenMaxAgeDays: 30 },
+      { signing: mountedSigning },
+    );
+    const exported = exportOver(document, {
+      signing: {
+        mode: "certificate",
+        partnerFingerprint: CONSOLE_PARTNER_FINGERPRINT,
+      },
+    });
+    expect(exportedValue(exported, "signing.partner_fingerprint")).toBe(
+      CONSOLE_PARTNER_FINGERPRINT,
+    );
+    expect(exportedValue(exported, "signing.identity_file")).toBe(
+      HANDOFF_SIGNING_IDENTITY_PLACEHOLDER,
+    );
+  });
+
   test("a setting the console composes no key for is written back", () => {
     expect(exportOver(mountedDocument({ tokenMaxAgeDays: 30 }))).toContain(
       "token_max_age_days: 30",
@@ -600,6 +639,10 @@ const MOUNTED_RENDEZVOUS_PATH = "/srv/partner-drop";
 
 /** A signing partner fingerprint of the canonical base64url shape. */
 const PARTNER_FINGERPRINT = "C".repeat(42) + "A";
+
+/** A distinct partner fingerprint, standing in for the console run's own
+ * signing values where a test asserts they override the mounted document's. */
+const CONSOLE_PARTNER_FINGERPRINT = "D".repeat(42) + "A";
 
 /** The comment block a psilink-written configuration opens with, above its
  * connection block. */
