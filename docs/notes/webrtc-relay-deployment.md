@@ -443,3 +443,17 @@ Candidate members, by title:
 - **The exchange measured is small.** Two matched records over a dozen linkage
   keys, tens of kilobytes on the wire. Nothing here bounds a relay's behaviour
   under a large exchange.
+
+## Addendum, 2026-09-22: where the credential derivation landed
+
+The per-exchange credential this record recommends has a specified derivation:
+each party derives a relay key from the exchange's shared secret, mints its
+time-limited relay credentials from that key, and relays through a relay its
+own side controls
+([PROTOCOL.md](../spec/PROTOCOL.md#relay-credential-derivation)). The relay's
+per-exchange key table, with registering and revoking a key, follows it.
+
+The next step is the browser's own TURN entry, which
+[The browser qualification, revised](#the-browser-qualification-revised) found
+still required before any restrictive-network claim about a CLI-to-web
+exchange is complete.
