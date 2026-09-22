@@ -1,4 +1,8 @@
-import { describe, expect, test } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+import { afterEach, describe, expect, test } from "vitest";
 import { stringify as stringifyYaml } from "yaml";
 
 import { getDefaultLinkageTerms, snakeizeKeys } from "@psilink/core";
@@ -8,6 +12,7 @@ import {
   carriedThroughFields,
   credentialFieldsNotAdopted,
   disclosedDocument,
+  loadMountedConfiguration,
   readMountedConfiguration,
 } from "@jobs/configLoad";
 
@@ -148,6 +153,72 @@ describe("what the load discloses", () => {
     // The route's own absent-file answer; `readMountedConfiguration` is only
     // reached once bytes exist, so the shape is asserted at the loader below.
     expect(loadDocument(savedSftpDocument()).present).toBe(true);
+  });
+});
+
+describe("a mounted file the load cannot open", () => {
+  const dirs: Array<string> = [];
+
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) {
+      fs.chmodSync(dir, 0o700);
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  function mountDir(): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-configload-"));
+    dirs.push(dir);
+    return dir;
+  }
+
+  function unreadableMountDir(): string {
+    const dir = mountDir();
+    const filePath = path.join(dir, "psilink.yaml");
+    fs.writeFileSync(filePath, "connection: {}");
+    fs.chmodSync(filePath, 0o000);
+    return dir;
+  }
+
+  function refusalFrom(dir: string): string {
+    try {
+      loadMountedConfiguration(dir);
+    } catch (error) {
+      expect(error).toBeInstanceOf(ConfigurationLoadRefusedError);
+      return (error as Error).message;
+    }
+    throw new Error("the load was expected to refuse this mount");
+  }
+
+  test("an absent mount is present: false, not a refusal", () => {
+    expect(loadMountedConfiguration(mountDir())).toEqual({
+      configured: true,
+      present: false,
+      carriedThrough: [],
+      warnings: [],
+    });
+  });
+
+  test("an unreadable file refuses, naming neither errno nor path", () => {
+    const message = refusalFrom(unreadableMountDir());
+    expect(message).toContain("could not");
+    expect(message).not.toContain("EACCES");
+    expect(message).not.toMatch(/\/tmp/);
+  });
+
+  test("a directory at the config path refuses the same way as unreadable", () => {
+    const dir = mountDir();
+    fs.mkdirSync(path.join(dir, "psilink.yaml"));
+    expect(refusalFrom(dir)).toBe(refusalFrom(unreadableMountDir()));
+  });
+
+  test("an over-large file refuses by size, distinctly from unreadable", () => {
+    const dir = mountDir();
+    fs.writeFileSync(path.join(dir, "psilink.yaml"), "x".repeat(1_000_001));
+    const message = refusalFrom(dir);
+    expect(message).toContain("too large");
+    expect(message).not.toMatch(/\/tmp/);
+    expect(message).not.toBe(refusalFrom(unreadableMountDir()));
   });
 });
 

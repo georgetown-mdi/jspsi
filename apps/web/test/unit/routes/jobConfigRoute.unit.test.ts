@@ -138,4 +138,17 @@ describe("GET /api/jobs/config", () => {
       error: expect.stringContaining("retian_disposition"),
     });
   });
+
+  test("an over-large mounted file is a 400 naming no container path", async () => {
+    const dataRoot = enable();
+    fs.writeFileSync(
+      path.join(dataRoot, "psilink.yaml"),
+      "x".repeat(1_000_001),
+    );
+    const response = await load();
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error: string };
+    expect(body.error).toContain("too large");
+    expect(body.error).not.toContain(dataRoot);
+  });
 });

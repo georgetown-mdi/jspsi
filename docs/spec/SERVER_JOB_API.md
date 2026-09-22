@@ -515,7 +515,9 @@ The file is read through the shared sensitive-YAML chokepoint (bounded parse, pa
 
 `{ "configured": true, "present": <bool>, "document"?, "carriedThrough": [ ... ], "warnings": [ ... ] }`.
 
-- `present: false` with an empty `carriedThrough` and `warnings` is a mount holding no configuration. That is the ordinary first run rather than a fault, and it is a `200`: an unreadable or over-large file answers the same way rather than reporting which it was.
+- `present: false` with an empty `carriedThrough` and `warnings` is a mount holding no configuration. That is the ordinary first run rather than a fault, and it is a `200`.
+- A `psilink.yaml` that is there but the console could not read -- a permission, a non-regular file, or a read error -- is a `400 { "error" }` saying a configuration is in the folder but the console could not read it, naming neither the OS error nor the container path.
+- A `psilink.yaml` over the size cap is a `400 { "error" }` naming that it is too large to be a configuration, ahead of any parse.
 - `document` is an explicit projection of the settings the authoring forms edit, written field by field rather than stripped from the parse result, so a field a later schema version adds reaches no browser until the projection states it.
 - `carriedThrough` names the settings the document states that a run composed here does not adopt -- the settings this surface holds without an editor, which the portable-configuration rule requires a consumer to state ([EXCHANGE_FILE.md](EXCHANGE_FILE.md#what-a-consumer-does-with-a-setting-it-cannot-honor)).
 - `warnings` names the credential fields whose value the console cannot pre-fill.
