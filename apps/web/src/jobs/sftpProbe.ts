@@ -49,9 +49,11 @@ export const PROBE_PEER_READ_BUDGET_MS = 2_000;
 
 /**
  * The server-side watchdog: SIGTERM the child at this point so the endpoint's
- * latency is bounded ABOVE the child's 10 s `readyTimeout` (a child that stops on
- * its own timeout exits first and is classified organically), then SIGKILL after
- * a grace if it ignores the term. A watchdog kill is reported as a `timeout`.
+ * latency is bounded ABOVE the child's 10 s `readyTimeout`, then SIGKILL after a
+ * grace if it ignores the term; a watchdog kill is reported as a `timeout`. The
+ * probe dials once, so a host that accepts and answers nothing ends at that
+ * `readyTimeout` instead -- the child exits 69 and the result is `unreachable`,
+ * leaving the watchdog for a child that outlives its own timeout.
  */
 export const PROBE_SIGTERM_MS = 15_000;
 /** The grace before the watchdog escalates SIGTERM to SIGKILL. */

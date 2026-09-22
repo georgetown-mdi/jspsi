@@ -390,6 +390,24 @@ describe("the diagnosis fits inside the probe's own watchdog", () => {
     );
   });
 
+  // The case the two result categories part on: a host that accepts the
+  // connection and answers nothing. The CLI dials it once, so the child spends
+  // its connect timeout and exits 69 inside the watchdog above, and the console
+  // reports `unreachable` rather than the `timeout` a watchdog kill gives.
+  // Driven through a child that exits on its own under the shipping watchdog.
+  test("a child that exits 69 before the watchdog is unreachable, not timeout", async () => {
+    const result = await probeSftpHostKey({
+      host: "sftp.example.org",
+      binaryPath: STUB_CLI_PATH,
+      childEnv: {
+        STUB_EXIT_CODE: "69",
+        STUB_PROBE_STDOUT: "",
+        STUB_DELAY_MS: "50",
+      },
+    });
+    expect(result).toEqual({ kind: "unreachable" });
+  });
+
   // The read budget belongs to the CLI child; apps/web must not import apps/cli
   // (apps consume packages, not each other), so this mirror reads the CLI's own
   // declaration instead. It checks the declared value, not what the child
