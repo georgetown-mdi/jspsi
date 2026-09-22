@@ -4,6 +4,7 @@ import { Alert, VisuallyHidden } from "@mantine/core";
 import { IconAlertCircle } from "@tabler/icons-react";
 
 import {
+  disclosedColumnNames,
   mintExchangeFile,
   sanitizeErrorForDisplay,
   sanitizeForDisplay,
@@ -1389,6 +1390,16 @@ export function InviterScreen() {
           <MountedConfigurationCard
             state={mountedConfiguration}
             sealed={sealed}
+            disclosure={
+              editor === undefined
+                ? undefined
+                : {
+                    disclosedColumns: disclosedColumnNames(
+                      editor.draft.metadata,
+                    ),
+                    records: loadedEnforcementRecords,
+                  }
+            }
             onOpen={() => void openMountedConfiguration()}
             onClose={closeMountedConfiguration}
           />

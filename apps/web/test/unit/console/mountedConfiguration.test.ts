@@ -345,10 +345,10 @@ describe("columns the configuration does not state", () => {
 });
 
 // A commitment the file states about what this party discloses is enforced when
-// the run starts, against the columns the run actually discloses. Where the
-// console has already reported that those columns diverged, that refusal is
-// decided, so the operator meets it here instead of at exit.
-describe("a disclosure commitment the columns can no longer match", () => {
+// the run starts, against the set the run would disclose: core compares the two
+// sets and refuses on any difference. The warning reports exactly that refusal,
+// so it stands where the sets differ and nowhere else.
+describe("a disclosure commitment the run's own columns no longer match", () => {
   const read = mountedConfigurationRead(
     opened({
       disclosedPayloadColumns: ["program_code"],
@@ -358,6 +358,13 @@ describe("a disclosure commitment the columns can no longer match", () => {
       },
     }),
   );
+  const records = {
+    disclosedPayloadColumns: ["program_code"],
+    outboundPayloadConsent: {
+      status: "confirmed" as const,
+      columns: ["program_code"],
+    },
+  };
 
   test("the warning names the records and both ways out", () => {
     const warning = divergedCommitmentWarning([
@@ -371,26 +378,68 @@ describe("a disclosure commitment the columns can no longer match", () => {
     expect(divergedCommitmentWarning([])).toBeUndefined();
   });
 
-  test("it is raised only where the columns diverged", () => {
-    expect(divergedCommitments(read.state)).toEqual([]);
+  test("the set the run discloses matching the commitment raises nothing", () => {
     expect(
-      divergedCommitments(withTermsNotApplied(read.state, ["standardization"])),
+      divergedCommitments(read.state, {
+        disclosedColumns: ["program_code"],
+        records,
+      }),
     ).toEqual([]);
+  });
+
+  test("order and repetition are not a difference of sets", () => {
     expect(
-      divergedCommitments(withTermsNotApplied(read.state, ["metadata"])),
+      divergedCommitments(read.state, {
+        disclosedColumns: ["program_code", "program_code"],
+        records: { disclosedPayloadColumns: ["program_code"] },
+      }),
+    ).toEqual([]);
+  });
+
+  test("a column dropped from the set, and one added to it, each raise it", () => {
+    expect(
+      divergedCommitments(read.state, { disclosedColumns: [], records }),
     ).toEqual(["disclosed_payload_columns", "outbound_payload_consent"]);
+    expect(
+      divergedCommitments(read.state, {
+        disclosedColumns: ["program_code", "dob"],
+        records,
+      }),
+    ).toEqual(["disclosed_payload_columns", "outbound_payload_consent"]);
+  });
+
+  test("a consent record confirming no set has none to differ from", () => {
+    expect(
+      divergedCommitments(read.state, {
+        disclosedColumns: ["dob"],
+        records: { outboundPayloadConsent: { status: "pending" } },
+      }),
+    ).toEqual([]);
   });
 
   test("a document stating no commitment raises nothing", () => {
     const plain = mountedConfigurationRead(opened());
     expect(
-      divergedCommitments(withTermsNotApplied(plain.state, ["metadata"])),
+      divergedCommitments(plain.state, {
+        disclosedColumns: ["dob"],
+        records: {},
+      }),
     ).toEqual([]);
+  });
+
+  test("no file read yet settles no disclosed set, so nothing is said", () => {
+    expect(divergedCommitments(read.state, undefined)).toEqual([]);
+    expect(
+      mountedConfigurationNotices(read.state).some((text) =>
+        text.includes("a run started here is refused"),
+      ),
+    ).toBe(false);
   });
 
   test("it is the last thing said beside the control", () => {
     const notices = mountedConfigurationNotices(
       withTermsNotApplied(read.state, ["metadata"]),
+      { disclosedColumns: [], records },
     );
     expect(notices.at(-1)).toContain("a run started here is refused");
   });

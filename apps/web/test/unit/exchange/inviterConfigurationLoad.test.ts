@@ -1,6 +1,10 @@
 import { describe, expect, test } from "vitest";
 
-import { getDefaultLinkageTerms, inferMetadata } from "@psilink/core";
+import {
+  disclosedColumnNames,
+  getDefaultLinkageTerms,
+  inferMetadata,
+} from "@psilink/core";
 
 import {
   CONFIG_EXCHANGE_FILES,
@@ -215,6 +219,29 @@ function fourOfFiveColumns(): Metadata {
 
 function columnRole(state: InviterScreenState, name: string) {
   return state.editor?.draft.metadata.find((column) => column.name === name);
+}
+
+/** The notices the load control shows for a screen state, read the way the
+ * screen reads them: beside the state, the columns the draft would send to the
+ * partner and the records the open configuration holds. */
+function noticesOf(state: InviterScreenState): Array<string> {
+  return mountedConfigurationNotices(
+    state.mountedConfiguration,
+    state.editor === undefined
+      ? undefined
+      : {
+          disclosedColumns: disclosedColumnNames(state.editor.draft.metadata),
+          records: state.loadedEnforcementRecords,
+        },
+  );
+}
+
+/** Whether the load control warns that a run started here is refused for a
+ * commitment the run's own disclosed set no longer matches. */
+function refusalWarned(state: InviterScreenState): boolean {
+  return noticesOf(state).some((text) =>
+    text.includes("a run started here is refused"),
+  );
 }
 
 describe("every step the document covers is filled in", () => {
@@ -465,9 +492,7 @@ describe("the open configuration holds across the files it is derived over", () 
     expect(closed.loadedConfiguration).toBeUndefined();
     expect(closed.loadedSftpForm).toBeUndefined();
     expect(closed.loadedEnforcementRecords).toEqual({});
-    expect(mountedConfigurationNotices(closed.mountedConfiguration)).toEqual(
-      [],
-    );
+    expect(noticesOf(closed)).toEqual([]);
     expect(
       intentFor(
         inviterServerJobConfig({
@@ -507,6 +532,28 @@ describe("a sealed draft takes no configuration", () => {
     expect(state.loadedConfiguration).toBeUndefined();
     expect(state.loadedEnforcementRecords).toEqual({});
     expect(state.loadedSftpForm).toBeUndefined();
+  });
+
+  test("a close landing after the mint keeps the records on the run", () => {
+    // The records are what put the disclosure commitment back on the intent,
+    // so dropping them after the mint would compose a run with nothing left
+    // for core to enforce.
+    const open = loadedInto(
+      INVITER_SCREEN_INITIAL,
+      sftpDocument({ disclosedPayloadColumns: ["program_code"] }),
+    );
+    const minted: InviterScreenState = {
+      ...open,
+      editor: { sealed: true } as never,
+    };
+    const closed = inviterScreenReducer(minted, {
+      type: "loaded-configuration-discarded",
+    });
+    expect(closed).toBe(minted);
+    expect(closed.loadedEnforcementRecords).toEqual({
+      disclosedPayloadColumns: ["program_code"],
+    });
+    expect(closed.loadedConfiguration).toBeDefined();
   });
 
   test("the control is withheld, naming where a configuration can be opened", () => {
@@ -667,7 +714,7 @@ describe("the records the console cannot edit reach the run unchanged", () => {
 
   test("the notice beside the load names each one", () => {
     const state = loadedInto(INVITER_SCREEN_INITIAL, sftpDocument(records));
-    const notices = mountedConfigurationNotices(state.mountedConfiguration);
+    const notices = noticesOf(state);
     expect(notices).toHaveLength(1);
     for (const field of [
       "expected_payload_columns",
@@ -714,7 +761,7 @@ describe("a loaded configuration reaches the editor once a file is read", () => 
       linkageTerms: getDefaultLinkageTerms("County Health"),
     });
     expect(loaded.loadedConfiguration?.transport).toBeUndefined();
-    const notices = mountedConfigurationNotices(loaded.mountedConfiguration);
+    const notices = noticesOf(loaded);
     expect(notices.some((notice) => notice.includes("shared directory"))).toBe(
       true,
     );
@@ -736,9 +783,7 @@ describe("a loaded configuration reaches the editor once a file is read", () => 
       isPayload: false,
     });
     expect(columnRole(applied, "first_name")?.role).toBe("linkage");
-    expect(mountedConfigurationNotices(applied.mountedConfiguration)).toEqual(
-      [],
-    );
+    expect(noticesOf(applied)).toEqual([]);
   });
 
   test("the document's cleaning steps replace the recommended pipeline", () => {
@@ -758,6 +803,23 @@ describe("a loaded configuration reaches the editor once a file is read", () => 
     );
     expect(cleaned?.input).toBe("first_name");
     expect(cleaned?.steps).toEqual(steps);
+  });
+
+  test("the description the document states rides each column", () => {
+    const described = statedColumns().map((column) =>
+      column.name === "program_code" || column.name === "dob"
+        ? { ...column, description: `what ${column.name} holds` }
+        : column,
+    );
+    const applied = withFileRead(
+      loadedInto(INVITER_SCREEN_INITIAL, sftpDocument({ metadata: described })),
+    );
+    expect(columnRole(applied, "program_code")?.description).toBe(
+      "what program_code holds",
+    );
+    expect(columnRole(applied, "dob")?.description).toBe("what dob holds");
+    expect(columnRole(applied, "first_name")?.description).toBeUndefined();
+    expect(noticesOf(applied)).toEqual([]);
   });
 
   test("a second record identifier the columns rule demotes is named", () => {
@@ -789,9 +851,9 @@ describe("a loaded configuration reaches the editor once a file is read", () => 
     expect(columnRole(applied, "program_code")).toMatchObject({
       role: "identifier",
     });
-    const notice = mountedConfigurationNotices(
-      applied.mountedConfiguration,
-    ).find((text) => text.includes("cannot supply"));
+    const notice = noticesOf(applied).find((text) =>
+      text.includes("cannot supply"),
+    );
     expect(notice).toContain("metadata");
   });
 
@@ -814,9 +876,9 @@ describe("a loaded configuration reaches the editor once a file is read", () => 
         }),
       ),
     );
-    const notice = mountedConfigurationNotices(
-      applied.mountedConfiguration,
-    ).find((text) => text.includes("cannot supply"));
+    const notice = noticesOf(applied).find((text) =>
+      text.includes("cannot supply"),
+    );
     expect(notice).toContain("metadata, standardization");
     expect(columnRole(applied, "household_id")).toBeUndefined();
   });
@@ -845,9 +907,9 @@ describe("a column the configuration does not name is kept back", () => {
   });
 
   test("the notice names the setting and says the file holds more", () => {
-    const notice = mountedConfigurationNotices(
-      applied.mountedConfiguration,
-    ).find((text) => text.includes("does not state under"));
+    const notice = noticesOf(applied).find((text) =>
+      text.includes("does not state under"),
+    );
     expect(notice).toContain("metadata");
     expect(notice).not.toContain("program_code");
   });
@@ -859,7 +921,7 @@ describe("a column the configuration does not name is kept back", () => {
         sftpDocument({ metadata: statedColumns() }),
       ),
     );
-    expect(mountedConfigurationNotices(whole.mountedConfiguration)).toEqual([]);
+    expect(noticesOf(whole)).toEqual([]);
   });
 
   test("with no configuration open the same file still infers", () => {
@@ -917,10 +979,12 @@ describe("the delimiter moves with the read the seal guards", () => {
 });
 
 // A commitment about what this party discloses, held from the file it was opened
-// from, is enforced against the run's own disclosed set when the run starts. The
-// console already knows the columns diverged -- it said so -- so the refusal is
-// decided before the operator starts anything.
-describe("a disclosure commitment over columns this file cannot supply", () => {
+// from, is enforced against the run's own disclosed set when the run starts:
+// core compares the two sets (`assertDisclosureMatchesCommitment`,
+// `assertOutboundPayloadConsented`) and refuses on any difference. The console
+// reports that refusal where the sets differ, and stays quiet where a setting
+// the file could not supply leaves the disclosed set matching all the same.
+describe("a disclosure commitment the run's own columns no longer match", () => {
   const records = {
     disclosedPayloadColumns: ["household_id"],
     outboundPayloadConsent: {
@@ -940,29 +1004,89 @@ describe("a disclosure commitment over columns this file cannot supply", () => {
         sftpDocument({ ...records, metadata: missingColumn }),
       ),
     );
-    const warning = mountedConfigurationNotices(
-      applied.mountedConfiguration,
-    ).find((text) => text.includes("a run started here is refused"));
+    const warning = noticesOf(applied).find((text) =>
+      text.includes("a run started here is refused"),
+    );
     expect(warning).toContain("disclosed_payload_columns");
     expect(warning).toContain("outbound_payload_consent");
     expect(warning).toContain("close this configuration");
     expect(warning).not.toContain("household_id");
   });
 
-  test("the same records over columns this file supplies warn about nothing", () => {
+  test("a commitment holding what the run sends warns about nothing", () => {
     const applied = withFileRead(
       loadedInto(
         INVITER_SCREEN_INITIAL,
         sftpDocument({
           disclosedPayloadColumns: ["program_code"],
-          metadata: statedColumns(),
+          outboundPayloadConsent: {
+            status: "confirmed",
+            columns: ["program_code"],
+          },
+          metadata: inferMetadata(COLUMNS, []),
+        }),
+      ),
+    );
+    expect(refusalWarned(applied)).toBe(false);
+  });
+
+  test("a column the file lacks is not a divergence where it sends none", () => {
+    // The document names a column this file does not have and keeps it back,
+    // so the run discloses exactly what the commitment holds: core lets it
+    // through, and the notice for the setting stands alone.
+    const applied = withFileRead(
+      loadedInto(
+        INVITER_SCREEN_INITIAL,
+        sftpDocument({
+          disclosedPayloadColumns: ["program_code"],
+          metadata: [
+            ...inferMetadata(COLUMNS, []),
+            {
+              name: "household_id",
+              type: "other",
+              role: "ignored",
+              isPayload: false,
+            },
+          ],
         }),
       ),
     );
     expect(
-      mountedConfigurationNotices(applied.mountedConfiguration).some((text) =>
-        text.includes("a run started here is refused"),
+      noticesOf(applied).find((text) => text.includes("cannot supply")),
+    ).toContain("metadata");
+    expect(refusalWarned(applied)).toBe(false);
+  });
+
+  test("a demoted record identifier sends nothing, so it warns of nothing", () => {
+    // The columns rule demotes the first of two record identifiers to ignored,
+    // which the load reports; neither column was ever sent, so the disclosed
+    // set still matches the commitment.
+    const applied = withFileRead(
+      loadedInto(
+        INVITER_SCREEN_INITIAL,
+        sftpDocument({
+          disclosedPayloadColumns: [],
+          metadata: [
+            {
+              name: "client_id",
+              type: "identifier",
+              role: "identifier",
+              isPayload: false,
+            },
+            {
+              name: "program_code",
+              type: "identifier",
+              role: "identifier",
+              isPayload: false,
+            },
+          ],
+        }),
       ),
-    ).toBe(false);
+    );
+    expect(columnRole(applied, "client_id")).toMatchObject({ role: "ignored" });
+    expect(
+      noticesOf(applied).find((text) => text.includes("cannot supply")),
+    ).toContain("metadata");
+    expect(refusalWarned(applied)).toBe(false);
   });
 });

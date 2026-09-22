@@ -726,6 +726,11 @@ export function inviterScreenReducer(
       };
     }
     case "loaded-configuration-discarded":
+      // A sealed draft is an invitation already minted over the records the
+      // load put on the run: dropping them here would compose a run whose
+      // commitment about what this party discloses is gone, with nothing left
+      // for core to enforce at prepare time.
+      if (state.editor?.sealed === true) return state;
       return {
         ...state,
         mountedConfiguration: MOUNTED_CONFIGURATION_UNREAD,

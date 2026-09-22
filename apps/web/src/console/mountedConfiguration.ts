@@ -1,6 +1,9 @@
 import { authoringStateFromDocument } from "./loadedConfig";
 
-import type { LoadedAuthoringState } from "./loadedConfig";
+import type {
+  LoadedAuthoringState,
+  LoadedEnforcementRecords,
+} from "./loadedConfig";
 import type { MountedConfigurationAnswer } from "@psi/jobClient/mountedConfigClient";
 
 /**
@@ -231,11 +234,10 @@ export function columnsNotCoveredNotice(
 }
 
 /**
- * What the operator is told when a commitment the file states about what this
- * party discloses can no longer match what the run would disclose: the columns
- * the document states are not the columns this input file gives, so the run is
- * refused when it starts. Shown while that divergence stands, so it is met here
- * rather than as a failed run.
+ * What the operator is told when the columns this run would send to the partner
+ * are not the columns a commitment the file states holds: core enforces the
+ * commitment against the run's own disclosed set when the run starts, so the
+ * refusal is already decided and is met here rather than as a failed run.
  */
 export function divergedCommitmentWarning(
   fields: ReadonlyArray<string>,
@@ -243,36 +245,80 @@ export function divergedCommitmentWarning(
   if (fields.length === 0) return undefined;
   const one = fields.length === 1;
   return (
-    "This configuration's " +
+    "The columns this exchange would send to your partner are not the " +
+    "columns this configuration's " +
     nameList(fields) +
     (one ? " states" : " state") +
-    " what this party discloses, and your input file cannot supply the " +
-    "columns it names, so a run started here is refused. Change the columns " +
-    "on the next step to match, or close this configuration."
+    ", so a run started here is refused. Change the columns on the next step " +
+    "to match " +
+    (one ? "it" : "them") +
+    ", or close this configuration."
   );
 }
 
+/** What the run the console holds would disclose, and the commitments it keeps
+ * from the file it was opened from: the pair {@link divergedCommitments}
+ * compares. Absent until an input file is read, where no disclosed set is
+ * settled yet. */
+export interface RunDisclosure {
+  /** The columns the draft this screen holds sends to the partner,
+   * `disclosedColumnNames` over its own metadata -- the set core compares the
+   * commitment against. */
+  disclosedColumns: ReadonlyArray<string>;
+  records: LoadedEnforcementRecords;
+}
+
 /** The commitments a loaded document can state about the columns this party
- * discloses. Each is enforced against the run's own disclosed set when the run
- * starts, so a document stating one over columns this file cannot supply is a
- * refusal already decided. */
-const DISCLOSURE_COMMITMENTS: ReadonlyArray<string> = [
-  "disclosed_payload_columns",
-  "outbound_payload_consent",
+ * discloses, named as the file spells them, each beside the column set it
+ * holds. A `pending` consent record confirms no set, so it has none to compare. */
+const DISCLOSURE_COMMITMENTS: ReadonlyArray<{
+  field: string;
+  columnsOf: (
+    records: LoadedEnforcementRecords,
+  ) => ReadonlyArray<string> | undefined;
+}> = [
+  {
+    field: "disclosed_payload_columns",
+    columnsOf: (records) => records.disclosedPayloadColumns,
+  },
+  {
+    field: "outbound_payload_consent",
+    columnsOf: (records) =>
+      records.outboundPayloadConsent?.status === "confirmed"
+        ? records.outboundPayloadConsent.columns
+        : undefined,
+  },
 ];
 
-/** The disclosure commitments an opened configuration states that its own
- * column set no longer reaches, named as the file spells them. Empty where the
- * file supplied every column the document names, which is where the run's
- * disclosed set can still match what the commitment holds. */
+/** Whether a commitment holds exactly the columns the run discloses, the
+ * membership comparison core's own enforcement makes
+ * (`assertDisclosureMatchesCommitment`, `assertOutboundPayloadConsented`):
+ * neither a column dropped from the set nor one added to it matches. */
+function sameColumnSet(
+  committed: ReadonlyArray<string>,
+  disclosed: ReadonlySet<string>,
+): boolean {
+  const committedSet = new Set(committed);
+  return (
+    committedSet.size === disclosed.size &&
+    [...committedSet].every((name) => disclosed.has(name))
+  );
+}
+
+/** The disclosure commitments an opened configuration states that the run's own
+ * disclosed set no longer matches, named as the file spells them. Empty where
+ * every commitment holds exactly what the run would send, which is what core
+ * lets through. */
 export function divergedCommitments(
   state: MountedConfigurationState,
+  run: RunDisclosure | undefined,
 ): Array<string> {
-  if (state.status !== "opened") return [];
-  if (!(state.notApplied ?? []).includes("metadata")) return [];
-  return DISCLOSURE_COMMITMENTS.filter((field) =>
-    state.carriedThrough.includes(field),
-  );
+  if (state.status !== "opened" || run === undefined) return [];
+  const disclosed = new Set(run.disclosedColumns);
+  return DISCLOSURE_COMMITMENTS.filter((commitment) => {
+    const columns = commitment.columnsOf(run.records);
+    return columns !== undefined && !sameColumnSet(columns, disclosed);
+  }).map((commitment) => commitment.field);
 }
 
 /**
@@ -293,9 +339,12 @@ export function mountedConfigurationOfferable(
 /** The whole of what an opened configuration puts beside the control, in the
  * order it renders: what this console cannot run at all, then the carry-through
  * notice, since it is about the run itself, then the credential the operator
- * has to supply, and last what their input file could not supply. */
+ * has to supply, then what their input file could not supply, and last a
+ * commitment the run's own disclosed set no longer matches. `run` is what that
+ * last one is read from, absent until a file is read. */
 export function mountedConfigurationNotices(
   state: MountedConfigurationState,
+  run?: RunDisclosure,
 ): Array<string> {
   if (state.status !== "opened") return [];
   return [
@@ -306,7 +355,7 @@ export function mountedConfigurationNotices(
     credentialWarningNotice(state.warnings),
     termsNotAppliedNotice(state.notApplied ?? []),
     columnsNotCoveredNotice(state.notCovered ?? []),
-    divergedCommitmentWarning(divergedCommitments(state)),
+    divergedCommitmentWarning(divergedCommitments(state, run)),
   ].filter((notice): notice is string => notice !== undefined);
 }
 

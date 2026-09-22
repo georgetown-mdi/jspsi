@@ -17,7 +17,10 @@ import {
   mountedConfigurationOfferable,
 } from "./mountedConfiguration";
 
-import type { MountedConfigurationState } from "./mountedConfiguration";
+import type {
+  MountedConfigurationState,
+  RunDisclosure,
+} from "./mountedConfiguration";
 
 /**
  * The console's offer to open the command-line configuration in its mounted
@@ -61,6 +64,7 @@ function announcementFor(state: MountedConfigurationState): string {
 export function MountedConfigurationCard({
   state,
   sealed,
+  disclosure,
   onOpen,
   onClose,
 }: {
@@ -68,6 +72,10 @@ export function MountedConfigurationCard({
   /** Whether an invitation is already minted from the terms the steps below
    * hold, which withholds the offer. */
   sealed: boolean;
+  /** What the draft below would send to the partner, beside the commitments the
+   * open configuration holds, for the notice that reports a run core refuses.
+   * Absent until a file is read, where no draft settles a disclosed set. */
+  disclosure?: RunDisclosure;
   /** Read the mounted configuration. Offered while nothing is open, so a read
    * that did not answer can be tried again without a page reload. */
   onOpen: () => void;
@@ -76,7 +84,7 @@ export function MountedConfigurationCard({
   onClose: () => void;
 }) {
   const announcement = useDeferredAnnouncement(announcementFor(state));
-  const notices = mountedConfigurationNotices(state);
+  const notices = mountedConfigurationNotices(state, disclosure);
   const offerable = mountedConfigurationOfferable(state, sealed);
   const withheld =
     sealed && (state.status === "unread" || state.status === "unavailable");

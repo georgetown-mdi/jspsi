@@ -296,13 +296,32 @@ export interface LoadedEditorTerms {
   standardization?: Standardization;
 }
 
+/** One column's description as the document states it, over the set the merge
+ * is building. The document states the column set whole, so a column it
+ * describes takes that description and one it leaves undescribed keeps none. */
+function withColumnDescription(
+  metadata: Metadata,
+  name: string,
+  description: string | undefined,
+): Metadata {
+  return metadata.map((column) => {
+    if (column.name !== name) return column;
+    if (description === undefined) {
+      const without = { ...column };
+      delete without.description;
+      return without;
+    }
+    return { ...column, description };
+  });
+}
+
 /**
  * The column set the import binds against: the operator's own inferred columns
- * with each role and type the document states for a column of that name put
- * back, through the same editing helpers the columns step uses, so the
- * single-identifier rule holds exactly as it does for a hand edit. A column the
- * document names that this file does not have leaves the whole setting
- * unapplied, since nothing in the editor can hold it.
+ * with each role, type, and description the document states for a column of
+ * that name put back, through the same editing helpers the columns step uses,
+ * so the single-identifier rule holds exactly as it does for a hand edit. A
+ * column the document names that this file does not have leaves the whole
+ * setting unapplied, since nothing in the editor can hold it.
  *
  * A document stating `metadata` states the column set whole, as the command
  * line reads it (`resolveExchangeInputs` takes the config's metadata in place of
@@ -332,6 +351,7 @@ function metadataWithLoadedColumns(
       column.name,
       disclosureOf(column),
     ).metadata;
+    metadata = withColumnDescription(metadata, column.name, column.description);
   }
   const stated = new Set(loaded.map((column) => column.name));
   const unstated = inferred
