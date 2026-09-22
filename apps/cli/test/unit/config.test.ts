@@ -33,6 +33,7 @@ import {
   assertPartnerFingerprintRecordable,
   assertRetainSweepGuard,
   configWithNamedRuleSetRules,
+  describeConfigSchemaError,
   diffLinkageTerms,
   linkageTermsWithNamedRuleSetRules,
   formatReconcileDiffs,
@@ -4653,6 +4654,63 @@ test("a setting this build does not edit survives a load, an edit, and a save", 
   expect(saved.expectedPayloadColumns).toEqual(["partner_program"]);
   expect(saved.disclosedPayloadColumns).toEqual(["program"]);
   expect(saved.expectedPartnerDeduplicate).toBe(true);
+});
+
+// A schema refusal names its field the way the document the operator reads
+// spells it (docs/spec/EXCHANGE_FILE.md, "How a setting is named"), which the
+// whole-document renderer and the per-block one both take from one path
+// rendering.
+test("a transform-params refusal names the block, and its reason names the param as the file spells it", () => {
+  const terms = cloneTerms(getDefaultLinkageTerms("Agency A"));
+  // A refusal the SCHEMA raises against its own param vocabulary: the empty
+  // output_format refine locates itself at ["params", "outputFormat"], the
+  // camelCase the parse works in.
+  terms.linkageKeys[0].elements[0].transform = [
+    { function: "parse_date", params: { outputFormat: "" } },
+  ];
+  const doc = {
+    connection: { channel: "filedrop", path: "/mnt/share" },
+    linkage_terms: snakeizeKeys(terms),
+  };
+
+  let caught: unknown;
+  try {
+    parseExchangeSpec(doc);
+  } catch (err) {
+    caught = err;
+  }
+  const rendered = describeConfigSchemaError(caught);
+
+  expect(rendered).toContain(
+    "linkage_terms.linkage_keys.0.elements.0.transform.0.params: ",
+  );
+  expect(rendered).toContain("output_format");
+  expect(rendered).not.toContain("outputFormat");
+  expect(rendered).not.toContain("linkageKeys");
+});
+
+test("an unread-key refusal names the block and the key in the file's spelling", () => {
+  const terms = cloneTerms(getDefaultLinkageTerms("Agency A"));
+  // A setting no schema block reads, written into a key entry in the file's
+  // own spelling once the terms are snakeized.
+  (terms.linkageKeys[0] as unknown as Record<string, unknown>).keyWeighting =
+    "equal";
+  const doc = {
+    connection: { channel: "filedrop", path: "/mnt/share" },
+    linkage_terms: snakeizeKeys(terms),
+  };
+
+  let caught: unknown;
+  try {
+    parseExchangeSpec(doc);
+  } catch (err) {
+    caught = err;
+  }
+  const rendered = describeConfigSchemaError(caught);
+
+  expect(rendered).toContain("linkage_terms.linkage_keys.0: ");
+  expect(rendered).toContain("key_weighting");
+  expect(rendered).not.toContain("linkageKeys");
 });
 
 // --- CLI-only entry-sweep flags ----------------------------------------------

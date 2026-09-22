@@ -33,11 +33,15 @@ already renders schema failures through, and the web application's import wordin
 which already names an unrecognized key exactly as the file spells it, needed no
 new branch.
 
-What it cannot see is bounded and stated in the module: an opaque free-form record
-(a transform's `params`) is not entered, since its keys are the author's own and
-pass through verbatim, and where a normalizing schema shortens an array -- the
-payload dictionary collapsing two entries naming one column -- a key is measured
-against every surviving entry rather than a positional counterpart.
+What it cannot see is bounded and stated in the module. An opaque subtree is not
+entered: its keys are the author's own, kept verbatim by both the camelize pre-pass
+and the schema, and `provider_options` is the one key naming such a subtree
+(`OPAQUE_VALUE_KEYS` in `packages/core/src/utils/camelizeKeys.ts`). Where a
+normalizing schema shortens an array -- the payload dictionary collapsing two
+entries naming one column -- a key is measured against every surviving entry rather
+than a positional counterpart. A transform's `params` record is walked like any
+other node and yields no false report, since the schema reads the whole record
+through and the parse result holds every key the document wrote.
 
 ## The three readers
 
@@ -52,7 +56,9 @@ and CLI-only invocation flags written into `connection.options`
 the naming rather than the outcome: a schema refusal named its field by the
 camelCase path the parsed shape uses, so `expected_payload_columns` reached the
 operator as `expectedPayloadColumns`. `describeConfigSchemaError` names each
-segment as the file spells it, for both config-file call sites.
+segment as the file spells it, for both config-file call sites, through the one
+path rendering the per-block renderer beside it takes -- which stops a path at a
+`params` block, whose keys are the author's own.
 
 **The console's job layer** (`apps/web/src/jobs/`). No load path exists to audit.
 The layer composes an exchange file from the console's own intent and validates

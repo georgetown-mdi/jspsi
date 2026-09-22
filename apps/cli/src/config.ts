@@ -1893,87 +1893,101 @@ export type ConfigLinkageSourceResult =
   | { status: "loaded"; source: ConfigLinkageSource };
 
 /**
- * Render a config block's schema issues as `<key path>: <reason>` clauses,
- * so the operator can locate each offending field, mirroring accept's
- * decode-error formatting.
+ * One schema issue as it reaches a renderer here: Zod's own issue fields,
+ * with the nested issues an `invalid_key` wrapper holds.
+ */
+type SchemaIssue = {
+  path?: ReadonlyArray<PropertyKey>;
+  message?: string;
+  code?: string;
+  issues?: ReadonlyArray<{ message: string }>;
+};
+
+/**
+ * One schema-issue path with each segment named as the CONFIG FILE spells it.
+ * Every schema refusal this module renders -- one block's issues, or a whole
+ * document's -- names its path through here.
  *
- * `keys` says how the block was parsed. A block parsed through
- * `camelizeKeys` (`camelized`) yields issue paths in camelCase while the
- * file writes snake_case, so each segment is put back through
- * {@link snakeizeKey}. A block whose schema parses the on-disk form directly
- * (`as-written`) is named verbatim.
+ * `keys` says how the document was parsed. A document parsed through
+ * `camelizeKeys` (`camelized`) yields issue paths in camelCase while the file
+ * writes snake_case, so each segment is put back through {@link snakeizeKey}.
+ * A schema that parses the on-disk form directly (`as-written`) is named
+ * verbatim.
  *
  * A camelized path STOPS at a `params` segment, naming the block rather than
- * the key inside it: that free-form record holds the author's own key, and
- * the camelized form of two different on-disk spellings can collide.
+ * the key inside it: that free-form record holds the author's own key, the
+ * camelized form of two different on-disk spellings can collide, and the
+ * schema's own refusals under it (`parse_date`'s `output_format`, `pad_left`'s
+ * `length`) write the param into the message text in the file's spelling.
+ */
+function schemaIssuePathAsWritten(
+  issuePath: ReadonlyArray<PropertyKey>,
+  keys: "camelized" | "as-written",
+): Array<string> {
+  const paramsIndex = keys === "camelized" ? issuePath.indexOf("params") : -1;
+  const path =
+    paramsIndex >= 0 ? issuePath.slice(0, paramsIndex + 1) : issuePath;
+  // A Zod issue path is PropertyKey[], and Array.join throws a TypeError on a
+  // symbol segment where String() renders it, so this map is a guard rather
+  // than a redundant coercion: an error-formatting path must not fail while
+  // reporting.
+  return path.map((segment) =>
+    keys === "camelized" ? snakeizeKey(String(segment)) : String(segment),
+  );
+}
+
+/**
+ * What one schema issue says went wrong, for a renderer to put after the path.
  *
  * A refused record KEY arrives as Zod's `invalid_key` issue: its own message is
  * the wrapper text `Invalid key in record`, while what the key violated sits on
- * the issues nested under it. Those nested messages are rendered in the
+ * the issues nested under it. Those nested messages are returned in the
  * wrapper's place -- with the path cut at `params`, the reason is the only part
  * left to say what is wrong -- and they are the schema's own fixed literals,
  * naming no key.
  */
+function schemaIssueReason(issue: SchemaIssue): string {
+  const nested = issue.code === "invalid_key" ? (issue.issues ?? []) : [];
+  return nested.length > 0
+    ? nested.map((inner) => inner.message).join(", ")
+    : (issue.message ?? "schema validation failed");
+}
+
+/**
+ * Render a config block's schema issues as `<key path>: <reason>` clauses,
+ * so the operator can locate each offending field, mirroring accept's
+ * decode-error formatting.
+ *
+ * Paths are named as the file spells them ({@link schemaIssuePathAsWritten}),
+ * which is also how {@link describeConfigSchemaError} names the whole-document
+ * case.
+ */
 function describeSchemaIssues(
-  issues: ReadonlyArray<{
-    path: ReadonlyArray<PropertyKey>;
-    message: string;
-    code?: string;
-    issues?: ReadonlyArray<{ message: string }>;
-  }>,
+  issues: ReadonlyArray<SchemaIssue>,
   keys: "camelized" | "as-written",
 ): string {
   return issues
     .map((issue) => {
-      const paramsIndex =
-        keys === "camelized" ? issue.path.indexOf("params") : -1;
-      const path =
-        paramsIndex >= 0 ? issue.path.slice(0, paramsIndex + 1) : issue.path;
-      // A Zod issue path is PropertyKey[], and Array.join throws a TypeError on a
-      // symbol segment where String() renders it, so this map is a guard rather
-      // than a redundant coercion: an error-formatting path must not fail while
-      // reporting.
-      const segments = path.map((segment) =>
-        keys === "camelized" ? snakeizeKey(String(segment)) : String(segment),
-      );
+      const segments = schemaIssuePathAsWritten(issue.path ?? [], keys);
       const at = segments.length > 0 ? `${segments.join(".")}: ` : "";
-      const nested = issue.code === "invalid_key" ? (issue.issues ?? []) : [];
-      const reason =
-        nested.length > 0
-          ? nested.map((inner) => inner.message).join(", ")
-          : issue.message;
-      return `${at}${reason}`;
+      return `${at}${schemaIssueReason(issue)}`;
     })
     .join("; ");
 }
 
 /**
- * One schema-issue path with each segment named as the CONFIG FILE spells it:
- * the exchange schema validates the camelized shape, so an issue locates its
- * field by the camelCase name while the operator reads a snake_case document
- * (the same rewrite {@link describeSchemaIssues} applies to a block's issues).
- *
- * Segments after a `params` one are left verbatim: that free-form record holds
- * the author's own key, and {@link snakeizeKey} is the inverse of the camelize
- * pre-pass only for a key written in the schema's own lowercase words.
- */
-function pathAsTheFileSpellsIt(
-  issuePath: ReadonlyArray<PropertyKey>,
-): Array<PropertyKey> {
-  const paramsIndex = issuePath.indexOf("params");
-  return issuePath.map((segment, index) =>
-    typeof segment === "string" && (paramsIndex < 0 || index <= paramsIndex)
-      ? snakeizeKey(segment)
-      : segment,
-  );
-}
-
-/**
  * A config file's schema failure rendered for the operator: the concise
  * `<path>: <reason>` one-liner {@link rawDecodeErrorDescription} composes, over
- * issue paths named as the file spells them ({@link pathAsTheFileSpellsIt}), so
- * the refusal points at a line the operator can find in their own document
- * (docs/spec/EXCHANGE_FILE.md, "How a setting is named").
+ * the path ({@link schemaIssuePathAsWritten}) and reason
+ * ({@link schemaIssueReason}) a block's issues are rendered with, so the refusal
+ * points at a line the operator can find in their own document
+ * (docs/spec/EXCHANGE_FILE.md, "How a setting is named"). The exchange schema
+ * validates the camelized shape, so its issues are named `camelized`.
+ *
+ * The composition stays with `rawDecodeErrorDescription` rather than with
+ * {@link describeSchemaIssues}: it shows the first issue with a count of the
+ * rest and bounds each path segment, the fit a whole-document refusal naming
+ * every unread key needs.
  *
  * Composed RAW for interpolation into an `Error`, as the description it
  * delegates to is.
@@ -1981,16 +1995,13 @@ function pathAsTheFileSpellsIt(
 export function describeConfigSchemaError(err: unknown): string {
   if (err === null || typeof err !== "object" || !("issues" in err))
     return rawDecodeErrorDescription(err);
-  const { issues } = err as {
-    issues?: Array<{ path?: Array<PropertyKey>; message?: string }>;
-  };
-  if (!Array.isArray(issues)) return rawDecodeErrorDescription(err);
+  const { issues } = err as { issues?: Array<SchemaIssue> };
+  if (!Array.isArray(issues) || issues.length === 0)
+    return rawDecodeErrorDescription(err);
   return rawDecodeErrorDescription({
     issues: issues.map((issue) => ({
-      ...issue,
-      ...(Array.isArray(issue.path)
-        ? { path: pathAsTheFileSpellsIt(issue.path) }
-        : {}),
+      path: schemaIssuePathAsWritten(issue.path ?? [], "camelized"),
+      message: schemaIssueReason(issue),
     })),
   });
 }
