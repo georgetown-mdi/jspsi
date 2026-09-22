@@ -1030,6 +1030,8 @@ The credential is standard base64 with padding. `label` is chosen by the party m
 
 HMAC-SHA-1 appears here only because coturn's credential format fixes it; it is not a psilink security primitive. The credential authorizes use of the relay and nothing else: the exchange's confidentiality and authentication rest on DTLS and the key exchange above, not on it.
 
+**What the relay key grants.** While the relay key is registered with a relay, holding the exchange's shared secret is equivalent to holding access to that relay: the key is computable from the secret, and the relay, not psilink, decides which expiries it honors. The 3600-second ceiling above bounds only the credentials psilink mints; anyone holding the key can mint one with a later expiry. Removing the key from the relay's secrets table is the revocation.
+
 # Post-linkage steps
 
 ## Third-party-verifiable proof of a data flow
