@@ -129,12 +129,18 @@ when a load leg is built, and the fail-closed records name what that leg cannot
 quietly shed.
 
 **The web application's managed import** (`apps/web/src/psi/managed/`). Already the
-rule's model: it refuses a connection field outside the credential-free locator
-subset of the connection's channel, a top-level field outside what it composes,
-and a secret, each naming the fields and never their values. A channel it does
-not run is not among them: such a configuration imports as a configuration only,
-and the limit is met where a run would start
-([MANAGED_EXCHANGE_RECORD.md](../spec/MANAGED_EXCHANGE_RECORD.md#the-configuration-only-record)). It holds `role` and
+rule's model: it refuses a webrtc connection field outside the credential-free
+locator subset, a top-level field outside what it composes, a credential written
+as a value, and a secret, each naming the fields and never their values. A
+channel it does not run is not among them: such a configuration imports as a
+configuration only, and the limit is met where a run would start
+([MANAGED_EXCHANGE_RECORD.md](../spec/MANAGED_EXCHANGE_RECORD.md#the-configuration-only-record)).
+Because nothing runs an sftp record there, it holds every setting of an sftp
+connection unchanged, a credential among them as an `@path` reference it never
+resolves: the refusal is kept for a literal credential, which the browser would
+have to store, and for a webrtc setting the browser run could not apply
+([MANAGED_EXCHANGE_RECORD.md](../spec/MANAGED_EXCHANGE_RECORD.md#the-connection-block-credential-free-by-composition)).
+It holds `role` and
 `token_max_age_days` as local record fields and re-injects both on export, so an
 unedited import and re-export are the same document. Its own audit finding was the
 nested strip, fixed in core above; its bespoke `connection.server` allowlist stays,
@@ -147,7 +153,8 @@ operator wrote.
 two halves: hold the setting unchanged, and tell the operator this surface will not
 let them change it. The holding half is built and tested in both directions. The
 web application's configuration-only page tells it, naming each setting it keeps
-without showing or editing it (`apps/web/src/recurring/managedConfigurationModel.ts`);
+without showing or editing it, and warning separately about each setting that
+names a file by `@path` (`apps/web/src/recurring/managedConfigurationModel.ts`);
 it names them from the stored record, whose keys the parse has camelized, so a key
 the file wrote in camelCase is named in snake_case there rather than as written.
 

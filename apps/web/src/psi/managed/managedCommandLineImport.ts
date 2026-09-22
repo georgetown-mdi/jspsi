@@ -40,14 +40,15 @@
  * connection, and connection.server (the bespoke allowlist below, since the
  * shared schema's own server blocks are not strict). Below those levels, an
  * unknown key is refused by the shared schema's unread-key comparison. The
- * connection and the document may hold only what the app itself composes
- * ({@link ./managedCommandLineDocument.ts}) -- a credential-free locator on the
- * connection's own channel -- which is what keeps a TURN credential, an ICE
- * provisioning block, an SFTP password, private key, or host-key pin, a signing
- * identity path, or an `@path` reference from being stored here and handed back
- * to the CLI by the next export. A shared secret in the file is refused on the
- * same terms: this import brings back configuration, and the key file stays
- * with the machine that runs the exchange.
+ * document may hold only what the app itself composes, and the connection what
+ * a configuration on its channel holds ({@link ./managedCommandLineDocument.ts}):
+ * a credential-free locator on webrtc and filedrop, which keeps a TURN
+ * credential, an ICE provisioning block, or a signing identity path from being
+ * stored here, and the whole connection on sftp, whose record runs nowhere
+ * here. An sftp credential is held as an `@path` reference and refused as a
+ * literal value. A shared secret in the file is refused on the same terms: this
+ * import brings back configuration, and the key file stays with the machine
+ * that runs the exchange.
  */
 
 import { ZodError } from "zod";
@@ -61,9 +62,10 @@ import {
 } from "../exchangeDocumentRefusal";
 
 import {
+  connectionFieldsNotHeld,
   fieldsOutsideComposableDocument,
-  fieldsOutsideLocatorSubset,
-  serverFieldsOutsideLocatorSubset,
+  literalCredentialFields,
+  serverFieldsNotHeld,
 } from "./managedCommandLineDocument";
 import { buildManagedExchangeRecord } from "./managedExchangeRecord";
 
@@ -140,10 +142,10 @@ function importedDocument(raw: unknown): ExchangeSpec {
 }
 
 /**
- * Narrow the document's connection to the credential-free locator this app
- * composes on its channel, or refuse. A hard refusal: a field outside the
- * locator subset is a credential or a path this app would store and hand back
- * to the command line.
+ * Narrow the document's connection to what a configuration on its channel
+ * holds, or refuse. A hard refusal: a field outside it is a credential or a
+ * path this app would store and hand back to the command line, and a literal
+ * credential is a secret this app does not store.
  *
  * The `server` block is measured on the file's own object as well as on the
  * parsed connection: the shared schema's server blocks are not strict, so a key
@@ -156,8 +158,8 @@ function importedConnection(
   const connection = document.connection;
   const outside = [
     ...new Set([
-      ...fieldsOutsideLocatorSubset(withoutRole(connection)),
-      ...serverFieldsOutsideLocatorSubset(
+      ...connectionFieldsNotHeld(withoutRole(connection)),
+      ...serverFieldsNotHeld(
         connection.channel,
         documentValueAt(raw, ["connection", "server"]),
       ),
@@ -171,6 +173,15 @@ function importedConnection(
         outside.join(", ") +
         ". The configuration this app hands back leaves them out, so add " +
         "them back to that file before you run it.",
+    );
+  const literal = literalCredentialFields(connection);
+  if (literal.length > 0)
+    throw new ManagedConfigurationRefusedError(
+      "This configuration writes a credential into the file itself: " +
+        literal.join(", ") +
+        ". This app does not store a credential. Put each in a file of its " +
+        "own, write the setting as @ followed by that file's path, and " +
+        "import it again.",
     );
   return connection;
 }

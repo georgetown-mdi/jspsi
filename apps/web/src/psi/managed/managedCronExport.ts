@@ -26,20 +26,19 @@
  *   refine in {@link ./managedExchangeRecord.ts}); the spelling is the
  *   block's operator-authored, secret-free one, and the block is a strict
  *   object, so a typo fails closed.
- * - It REFUSES any stored document the app could not have composed: a
- *   connection holding a field outside the credential-free locator subset of
- *   its channel, a stored `authentication` block, or a top-level document
- *   field outside the record composer's own input. Each is reachable only by
- *   importing a hand-crafted artifact, whose embedded document validates
- *   against the full exchange schema -- which can represent a TURN
- *   `credential`, a `provider_options` map, an `ice_provision` auth block, a
- *   PeerJS `server.key`/`server.username`, an SFTP password or private key, a
- *   shared secret, and a `signing` block (`identity_file`, `receipt_output`,
- *   `partner_fingerprint`), and the CLI resolves an `@path` in the file it
- *   loads (`apps/cli/src/util/atSignRefs.ts`). Republishing one would aim the
- *   operator's scheduled run at another party's credential file. A connection
- *   on a channel this app does not run exports like any other: exporting it
- *   is how the operator runs it.
+ * - It REFUSES any stored document the app could not have held: a
+ *   connection holding a field outside what a configuration on its channel
+ *   holds, or a literal credential, a stored `authentication` block, or a
+ *   top-level document field outside the record composer's own input. Each is
+ *   reachable only by importing a hand-crafted artifact, whose embedded
+ *   document validates against the full exchange schema -- which can represent
+ *   a TURN `credential`, a `provider_options` map, an `ice_provision` auth
+ *   block, a PeerJS `server.key`/`server.username`, a shared secret, and a
+ *   `signing` block (`identity_file`, `receipt_output`,
+ *   `partner_fingerprint`). A connection on a channel this app does not run
+ *   exports like any other: exporting it is how the operator runs it, and an
+ *   sftp `@path` reference it holds is written back as read, for the CLI to
+ *   resolve (`apps/cli/src/util/atSignRefs.ts`).
  *
  * The key file is a plaintext credential under the CLI key file's own trust
  * model: custody and storage permissions, never a passphrase (the spec's
@@ -51,8 +50,9 @@
 import { ExchangeSpecSchema, serializeExchangeDocument } from "@psilink/core";
 
 import {
+  connectionFieldsNotHeld,
   fieldsOutsideComposableDocument,
-  fieldsOutsideLocatorSubset,
+  literalCredentialFields,
 } from "./managedCommandLineDocument";
 import { keyFileFieldsFromRecord } from "./managedExchangeArtifact";
 
@@ -106,10 +106,10 @@ interface ManagedCronExportFile {
 /**
  * The configuration half of the command-line hand-off: the `psilink.yaml` the
  * CLI loads, and the invocation that runs it. The command names no path from
- * any machine -- the connection is a credential-free locator, and the config
- * and key are read at their defaults -- so it runs in the folder the file is
- * saved to, rather than a template with placeholders to fill. It holds no
- * secret, which is what lets a configuration-only record compose it.
+ * any machine -- the config and key are read at their defaults -- so it runs in
+ * the folder the file is saved to, rather than a template with placeholders to
+ * fill. It holds no secret, which is what lets a configuration-only record
+ * compose it: an sftp credential it names is an `@path` reference.
  */
 export interface ManagedCommandLineConfig {
   /** The `psilink.yaml` half: the exchange-file document, with `role` injected
@@ -131,24 +131,31 @@ export interface ManagedCronExport extends ManagedCommandLineConfig {
 }
 
 /**
- * Narrow a record's stored connection to the credential-free locator the app
- * composes on its channel, refusing any field outside that locator's expansion
- * -- the exchange-file schema alone admits the credential-bearing fields. A
- * hard refusal, not a warning: this is remote content the operator cannot
- * inspect.
+ * Narrow a record's stored connection to what a configuration on its channel
+ * holds, refusing any field outside it -- the exchange-file schema alone
+ * admits the credential-bearing fields -- and any credential stated as a
+ * literal value rather than an `@path`. A hard refusal, not a warning: this is
+ * content the import would have refused, reachable only through a hand-crafted
+ * artifact.
  */
-function locatorConnectionOrRefuse(
-  exchangeFile: ExchangeSpec,
-): ConnectionConfig {
+function heldConnectionOrRefuse(exchangeFile: ExchangeSpec): ConnectionConfig {
   const connection = exchangeFile.connection;
-  const outside = fieldsOutsideLocatorSubset(connection);
+  const outside = connectionFieldsNotHeld(connection);
   if (outside.length > 0)
     throw new Error(
       "a managed exchange is exported to the command line only from the " +
-        `credential-free ${connection.channel} locator this app composes; the ` +
-        "stored connection carries field(s) outside it, which the exported " +
+        `connection settings this app holds on ${connection.channel}; the ` +
+        "stored connection carries field(s) outside them, which the exported " +
         "psilink.yaml would republish for the CLI to resolve. Remove: " +
         outside.join(", "),
+    );
+  const literal = literalCredentialFields(connection);
+  if (literal.length > 0)
+    throw new Error(
+      "a managed exchange's exported psilink.yaml names a credential only as " +
+        "an @path reference; the stored connection states one as a value. " +
+        "Remove: " +
+        literal.join(", "),
     );
   return connection;
 }
@@ -206,7 +213,7 @@ function assertComposableDocumentFields(document: ExchangeSpec): void {
       "a managed exchange is exported to the command line only from the " +
         "document this app composes (the agreed linkage terms, this party's " +
         "metadata, standardization, and payload commitments, and the " +
-        "credential-free connection locator); the stored document carries " +
+        "connection); the stored document carries " +
         "field(s) outside it, which the exported psilink.yaml would republish " +
         "for the CLI to open, write, or pin. Remove: " +
         outside.join(", "),
@@ -222,8 +229,8 @@ function assertComposableDocumentFields(document: ExchangeSpec): void {
  * would not accept fails here rather than at the operator's first scheduled
  * run.
  *
- * @throws {Error} if the stored connection is not a credential-free locator,
- *   a webrtc record holds no side, the stored document holds an
+ * @throws {Error} if the stored connection holds a field or a literal
+ *   credential the app does not hold, a webrtc record holds no side, the stored document holds an
  *   `authentication` block, or it holds a top-level field the app does not
  *   compose.
  * @throws {ZodError} if the composed document fails exchange-file validation.
@@ -231,7 +238,7 @@ function assertComposableDocumentFields(document: ExchangeSpec): void {
 function composeCronExportDocument(
   record: ManagedExchangeRecord,
 ): ExchangeSpec {
-  const connection = locatorConnectionOrRefuse(record.exchangeFile);
+  const connection = heldConnectionOrRefuse(record.exchangeFile);
   assertNoStoredAuthentication(record.exchangeFile);
   const document = ExchangeSpecSchema.parse({
     ...record.exchangeFile,
@@ -264,8 +271,8 @@ function serializeKeyFile(fields: ManagedExchangeKeyFields): string {
  * `[options] INPUT_FILE [OUTPUT_FILE]`, with the config and key read at their
  * defaults (`apps/cli/src/commands/exchange.ts`).
  *
- * @throws {Error} if the record's stored connection is not a credential-free
- *   locator, or its stored document holds an `authentication` block or a
+ * @throws {Error} if the record's stored connection holds a field or a
+ *   literal credential the app does not hold, or its stored document holds an `authentication` block or a
  *   top-level field the app does not compose.
  * @throws {ZodError} if the composed document fails exchange-file validation.
  */
@@ -291,8 +298,8 @@ export function composeManagedCronExportConfig(
  * record type is the runnable one, so the key half cannot be asked of a record
  * that holds no secret.
  *
- * @throws {Error} if the record's stored connection is not a credential-free
- *   locator, or its stored document holds an `authentication` block or a
+ * @throws {Error} if the record's stored connection holds a field or a
+ *   literal credential the app does not hold, or its stored document holds an `authentication` block or a
  *   top-level field the app does not compose.
  * @throws {ZodError} if the composed document fails exchange-file validation.
  */

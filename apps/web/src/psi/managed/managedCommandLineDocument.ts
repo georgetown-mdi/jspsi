@@ -5,22 +5,24 @@
  * ({@link ./managedCommandLineImport.ts}).
  *
  * The rule is an allowlist measured off the app's own composition rather than a
- * list restated here: the connection may hold only what a credential-free
- * locator on its own channel expands to ({@link connectionFromLocator}), and the
- * document only the top-level fields the record composer produces
+ * list restated here: the connection may hold what a credential-free locator on
+ * its own channel expands to ({@link connectionFromLocator}), and the document
+ * only the top-level fields the record composer produces
  * ({@link composeManagedExchangeFile}), plus the `authentication` block the
  * export injects from the local max-age policy and the `retentionDisposition`
  * the record spec sanctions as operator-authored free text
  * (docs/spec/MANAGED_EXCHANGE_RECORD.md). The shared exchange-file schema is
  * wider than both: it can represent a TURN `credential`, a `provider_options`
  * map, an `ice_provision` auth block, a PeerJS `server.key`/`server.username`,
- * an SFTP `password`, `private_key`, `private_key_passphrase`, host-key pin,
- * `proxy` or `provision` block, a shared secret, and a `signing` block
- * (`identity_file`, `receipt_output`, `partner_fingerprint`), and the CLI
- * resolves an `@path` in the file it loads (`apps/cli/src/util/atSignRefs.ts`).
- * Exporting one would republish the operator's own credential file for a
- * scheduled run to open; importing one would store a partner-supplied path for
- * this app to hand back to the CLI on the next export.
+ * a shared secret, and a `signing` block (`identity_file`, `receipt_output`,
+ * `partner_fingerprint`), and the CLI resolves an `@path` in the file it loads
+ * (`apps/cli/src/util/atSignRefs.ts`).
+ *
+ * An sftp connection is held whole beyond its locator: a record on sftp runs
+ * nowhere in this app, so every setting of its connection is only written back
+ * to the file psilink runs. A credential in it is held as an `@path` reference
+ * and refused as a literal value ({@link literalCredentialFields}): the browser
+ * does not resolve a reference, and it does not store a secret.
  *
  * Each leg words its own refusal -- what an operator does about a stored field
  * they cannot see differs from what they do about a line in the file in front of
@@ -40,6 +42,8 @@ import type {
   ConnectionConfig,
   ExchangeLocator,
   ExchangeSpec,
+  HttpAuth,
+  SFTPConnectionConfig,
   WebRTCExchangeLocator,
 } from "@psilink/core";
 import type { ManagedExchangeFileComposition } from "./managedExchangeRecord";
@@ -89,9 +93,9 @@ const WIDEST_PROBE_LOCATORS: {
   },
 };
 
-/** The field names a credential-free locator expands to on one channel: at the
- * connection, and at its nested `server` where the channel has one. */
-interface LocatorFields {
+/** The field names a configuration holds on one channel: at the connection,
+ * and at its nested `server` where the channel has one. */
+interface HeldConnectionFields {
   connection: ReadonlySet<string>;
   server: ReadonlySet<string>;
 }
@@ -103,7 +107,9 @@ interface LocatorFields {
  * (docs/spec/MANAGED_EXCHANGE_RECORD.md, "The connection block: credential-free
  * by composition").
  */
-function credentialFreeLocatorFields(channel: LocatorChannel): LocatorFields {
+function credentialFreeLocatorFields(
+  channel: LocatorChannel,
+): HeldConnectionFields {
   const composed = connectionFromLocator(WIDEST_PROBE_LOCATORS[channel]);
   if (composed.channel !== channel)
     throw new Error(
@@ -119,26 +125,57 @@ function credentialFreeLocatorFields(channel: LocatorChannel): LocatorFields {
   };
 }
 
-const CREDENTIAL_FREE_LOCATOR_FIELDS: Record<LocatorChannel, LocatorFields> = {
+/** The sftp connection fields held beyond the locator's expansion. */
+const SFTP_HELD_CONNECTION_FIELDS = [
+  "proxy",
+  "providerOptions",
+] as const satisfies ReadonlyArray<keyof SFTPConnectionConfig>;
+
+/** The sftp `server` fields held beyond the locator's expansion. */
+const SFTP_HELD_SERVER_FIELDS = [
+  "password",
+  "privateKey",
+  "privateKeyPassphrase",
+  "keyboardInteractive",
+  "hostKeyFingerprint",
+  "provision",
+] as const satisfies ReadonlyArray<keyof SFTPConnectionConfig["server"]>;
+
+function withHeldFields(
+  locator: HeldConnectionFields,
+  connection: ReadonlyArray<string>,
+  server: ReadonlyArray<string>,
+): HeldConnectionFields {
+  return {
+    connection: new Set([...locator.connection, ...connection]),
+    server: new Set([...locator.server, ...server]),
+  };
+}
+
+const HELD_CONNECTION_FIELDS: Record<LocatorChannel, HeldConnectionFields> = {
   webrtc: credentialFreeLocatorFields("webrtc"),
-  sftp: credentialFreeLocatorFields("sftp"),
+  sftp: withHeldFields(
+    credentialFreeLocatorFields("sftp"),
+    SFTP_HELD_CONNECTION_FIELDS,
+    SFTP_HELD_SERVER_FIELDS,
+  ),
   filedrop: credentialFreeLocatorFields("filedrop"),
 };
 
 /**
- * A connection's fields that a credential-free locator on its own channel does
- * not expand to, named in the operator's own snake_case spelling so a refusal
- * points at the lines to remove, and sorted so two runs name them in one order.
- * A webrtc `role` is outside the subset: the export injects it and the import
- * reads it into the record's local `side`, so a caller that has consumed it
- * passes a connection without it.
+ * A connection's fields a configuration on its channel does not hold, named in
+ * the operator's own snake_case spelling so a refusal points at the lines to
+ * remove, and sorted so two runs name them in one order. A webrtc `role` is
+ * outside the held set: the export injects it and the import reads it into
+ * the record's local `side`, so a caller that has consumed it passes a
+ * connection without it.
  */
-export function fieldsOutsideLocatorSubset(
+export function connectionFieldsNotHeld(
   connection: ConnectionConfig,
 ): Array<string> {
-  const allowed = CREDENTIAL_FREE_LOCATOR_FIELDS[connection.channel];
+  const held = HELD_CONNECTION_FIELDS[connection.channel];
   const outside = Object.keys(connection).filter(
-    (field) => !allowed.connection.has(field),
+    (field) => !held.connection.has(field),
   );
   // Typed as required where the channel has one, but this gate runs on shapes
   // that reached it without the record read path's validation, so the nested
@@ -151,35 +188,180 @@ export function fieldsOutsideLocatorSubset(
   return [
     ...outside.map((field) => snakeizeKey(field)),
     ...serverFields
-      .filter((field) => !allowed.server.has(field))
+      .filter((field) => !held.server.has(field))
       .map((field) => `server.${snakeizeKey(field)}`),
   ].sort();
 }
 
 /**
- * The keys a FILE's own `connection.server` block holds outside the locator
- * subset of the connection's channel, named verbatim under the block and
- * sorted. The shared exchange-file schema's server blocks are not strict, so a
- * key outside one is stripped by the parse and never reaches
- * {@link fieldsOutsideLocatorSubset}: reading the document the operator wrote
- * is what refuses such a line rather than trimming it away. The allowlist is
+ * The keys a FILE's own `connection.server` block holds outside what a
+ * configuration on the connection's channel holds, named verbatim under the
+ * block and sorted. The shared exchange-file schema's server blocks are not
+ * strict, so a key outside one is stripped by the parse and never reaches
+ * {@link connectionFieldsNotHeld}: reading the document the operator wrote is
+ * what refuses such a line rather than trimming it away. The allowlist is
  * compared in both spellings, since these keys have not been through the
  * camelize pre-pass the parsed connection's have.
  */
-export function serverFieldsOutsideLocatorSubset(
+export function serverFieldsNotHeld(
   channel: LocatorChannel,
   server: unknown,
 ): Array<string> {
   if (typeof server !== "object" || server === null) return [];
-  const locatorServerFields = CREDENTIAL_FREE_LOCATOR_FIELDS[channel].server;
+  const heldServerFields = HELD_CONNECTION_FIELDS[channel].server;
   const allowed = new Set([
-    ...locatorServerFields,
-    ...[...locatorServerFields].map((field) => snakeizeKey(field)),
+    ...heldServerFields,
+    ...[...heldServerFields].map((field) => snakeizeKey(field)),
   ]);
   return Object.keys(server)
     .filter((field) => !allowed.has(field))
     .map((field) => `server.${field}`)
     .sort();
+}
+
+/**
+ * The settings a connection states beyond its channel's credential-free
+ * locator, named as the file spells them under `connection` and sorted: on
+ * sftp, each held field present; on any other channel, none, since nothing
+ * beyond the locator is held there.
+ */
+export function connectionSettingsBeyondLocator(
+  connection: ConnectionConfig,
+): Array<string> {
+  if (connection.channel !== "sftp") return [];
+  const { server } = connection;
+  return [
+    ...SFTP_HELD_CONNECTION_FIELDS.filter(
+      (field) => connection[field] !== undefined,
+    ).map((field) => `connection.${snakeizeKey(field)}`),
+    ...SFTP_HELD_SERVER_FIELDS.filter(
+      (field) => server[field] !== undefined,
+    ).map((field) => `connection.server.${snakeizeKey(field)}`),
+  ].sort();
+}
+
+/** One value a connection states where psilink reads an `@path` as a file,
+ * named as the file spells the setting. */
+interface FileReadableValue {
+  field: string;
+  value: unknown;
+  /** Whether a literal value here is a credential the browser must not store. */
+  credential: boolean;
+}
+
+function httpAuthValues(
+  field: string,
+  auth: HttpAuth | undefined,
+): Array<FileReadableValue> {
+  if (auth === undefined) return [];
+  return [
+    { field: `${field}.bearer`, value: auth.bearer, credential: true },
+    { field: `${field}.password`, value: auth.password, credential: true },
+  ];
+}
+
+/** Every string a `provider_options` value holds, at any depth. */
+function stringLeaves(value: unknown): Array<string> {
+  if (typeof value === "string") return [value];
+  if (Array.isArray(value)) return value.flatMap(stringLeaves);
+  if (typeof value === "object" && value !== null)
+    return Object.values(value).flatMap(stringLeaves);
+  return [];
+}
+
+/**
+ * The values an sftp connection states where the CLI resolves an `@path`
+ * (`resolveExchangeSpecRefs`, `apps/cli/src/util/atSignRefs.ts`). Every one is
+ * a credential but the host-key pin. A `provider_options` string is counted as
+ * one too: the map is passed to the SFTP library as written, a password or key
+ * among its options is indistinguishable here from any other string, and its
+ * keys are named verbatim because the case conversion leaves them alone.
+ */
+function sftpFileReadableValues(
+  connection: SFTPConnectionConfig,
+): Array<FileReadableValue> {
+  const { server } = connection;
+  const pins =
+    server.hostKeyFingerprint === undefined
+      ? []
+      : [server.hostKeyFingerprint].flat();
+  return [
+    {
+      field: "connection.server.password",
+      value: server.password,
+      credential: true,
+    },
+    {
+      field: "connection.server.private_key",
+      value: server.privateKey,
+      credential: true,
+    },
+    {
+      field: "connection.server.private_key_passphrase",
+      value: server.privateKeyPassphrase,
+      credential: true,
+    },
+    ...pins.map((pin) => ({
+      field: "connection.server.host_key_fingerprint",
+      value: pin,
+      credential: false,
+    })),
+    ...httpAuthValues(
+      "connection.server.provision.auth",
+      server.provision?.auth,
+    ),
+    ...httpAuthValues("connection.proxy.auth", connection.proxy?.auth),
+    ...Object.entries(connection.providerOptions ?? {}).flatMap(
+      ([key, value]) =>
+        stringLeaves(value).map((leaf) => ({
+          field: `connection.provider_options.${key}`,
+          value: leaf,
+          credential: true,
+        })),
+    ),
+  ];
+}
+
+function isFileReference(value: unknown): value is string {
+  return typeof value === "string" && value.startsWith("@");
+}
+
+function namedOnce(values: ReadonlyArray<FileReadableValue>): Array<string> {
+  return [...new Set(values.map(({ field }) => field))].sort();
+}
+
+/**
+ * The settings a connection states a credential in as a literal value rather
+ * than an `@path` reference, named as the file spells them and sorted. This app
+ * holds a credential only as a reference, so each of these is refused.
+ */
+export function literalCredentialFields(
+  connection: ConnectionConfig,
+): Array<string> {
+  if (connection.channel !== "sftp") return [];
+  return namedOnce(
+    sftpFileReadableValues(connection).filter(
+      ({ value, credential }) =>
+        credential && value !== undefined && !isFileReference(value),
+    ),
+  );
+}
+
+/**
+ * The settings a connection states as an `@path` reference, named as the file
+ * spells them and sorted. This browser never reads the file one names; the
+ * exported document keeps each reference as written, and psilink reads that
+ * file on the machine that runs it.
+ */
+export function fileReferenceFields(
+  connection: ConnectionConfig,
+): Array<string> {
+  if (connection.channel !== "sftp") return [];
+  return namedOnce(
+    sftpFileReadableValues(connection).filter(({ value }) =>
+      isFileReference(value),
+    ),
+  );
 }
 
 /**

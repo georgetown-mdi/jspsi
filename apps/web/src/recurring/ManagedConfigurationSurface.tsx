@@ -28,6 +28,8 @@ import {
 } from "./managedDetailModel";
 import {
   configurationOnlyLead,
+  fileReferenceExportNote,
+  fileReferenceNotice,
   heldSettingsNotice,
   pendingOutboundConsentNotice,
   sftpCredentialNote,
@@ -57,9 +59,9 @@ const UNNAMED_CONFIGURATION_TITLE = "Imported configuration";
  *
  * What it tells the operator is derived from the record, so the import lands on
  * it and every later visit shows it alike: why nothing here runs the exchange,
- * naming the channel where that is the reason, then the settings kept unchanged
- * without an editor, then a pending outbound payload consent
- * ({@link ./managedConfigurationModel.ts}).
+ * naming the channel where that is the reason, then the settings naming a file
+ * by `@path` and a pending outbound payload consent, then the settings kept
+ * unchanged without an editor ({@link ./managedConfigurationModel.ts}).
  *
  * The agreed terms are read-only, as they are for a browser-run exchange: they
  * are the partnership's, not this browser's, and exchanging on different ones is
@@ -80,6 +82,7 @@ export function ManagedConfigurationSurface({
 }) {
   const heldNotice = heldSettingsNotice(record);
   const consentNotice = pendingOutboundConsentNotice(record);
+  const referenceNotice = fileReferenceNotice(record);
   return (
     <AppPage>
       <main className={styles.work}>
@@ -87,6 +90,16 @@ export function ManagedConfigurationSurface({
           {record.label === "" ? UNNAMED_CONFIGURATION_TITLE : record.label}
         </h1>
         <p className={styles.sub}>{configurationOnlyLead(record)}</p>
+        {referenceNotice !== undefined && (
+          <Alert
+            color="yellow"
+            title="Files psilink reads when it runs"
+            mt="sm"
+            mb="sm"
+          >
+            {referenceNotice}
+          </Alert>
+        )}
         {consentNotice !== undefined && (
           <Alert
             color="yellow"
@@ -187,6 +200,7 @@ function ConfigurationExportPanel({
   const { composed, cronLine, taskSchedulerLine } = state;
   const configFile = composed.config;
   const credentialNote = sftpCredentialNote(record);
+  const referenceNote = fileReferenceExportNote(record);
   return (
     <div className={styles.callout}>
       <h2 className={styles.eyebrow}>Run it from the command line</h2>
@@ -198,6 +212,9 @@ function ConfigurationExportPanel({
       </p>
       {credentialNote !== undefined && (
         <p className={styles.small}>{credentialNote}</p>
+      )}
+      {referenceNote !== undefined && (
+        <p className={styles.small}>{referenceNote}</p>
       )}
       <Button
         mt="sm"

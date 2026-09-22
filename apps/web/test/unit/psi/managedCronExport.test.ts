@@ -313,6 +313,50 @@ describe("a record that is not a webrtc exchange", () => {
       expect(exported).toEqual(record.exchangeFile);
     },
   );
+
+  /** A configuration-only sftp record whose server states `server` lines. */
+  function sftpRecordWith(server: Record<string, unknown>) {
+    const connection = connectionFromLocator(nonWebrtcLocators[1][1]);
+    if (connection.channel !== "sftp") throw new Error("not an sftp locator");
+    return buildManagedExchangeRecord({
+      label: "Riverbend quarterly",
+      exchangeFile: assembleExchangeSpec({
+        connection: {
+          ...connection,
+          server: { ...connection.server, ...server },
+        },
+        linkageTerms,
+      }),
+    });
+  }
+
+  test("writes an sftp @path credential and host-key pin back as stored", () => {
+    const record = sftpRecordWith({
+      privateKey: "@/keys/exchange_key",
+      privateKeyPassphrase: "@/keys/exchange_key.passphrase",
+      hostKeyFingerprint: `SHA256:${"A".repeat(43)}`,
+    });
+    const { text } = composeManagedCronExportConfig(record).config;
+
+    expect(text).toContain('private_key: "@/keys/exchange_key"');
+    expect(
+      parseExchangeSpec(parseSensitiveYaml(text, "exported psilink.yaml")),
+    ).toEqual(record.exchangeFile);
+  });
+
+  test("refuses an sftp credential stored as a value, naming it and not echoing it", () => {
+    const record = sftpRecordWith({ password: "stored-password-not-echoed" });
+
+    let message = "";
+    try {
+      composeManagedCronExportConfig(record);
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+
+    expect(message).toContain("connection.server.password");
+    expect(message).not.toContain("stored-password-not-echoed");
+  });
 });
 
 /** A record as a hand-crafted artifact import produces one. The import path

@@ -273,15 +273,16 @@ describe("accepting a configuration on a channel this app does not run", () => {
     expect(message).toContain("connection.role");
   });
 
-  test("an SFTP private key is refused by field name, never its path", () => {
-    const privateKey = "@/home/operator/.ssh/key-not-in-any-message";
-    const message = refusal(
+  test("an SFTP private key named by @path is held as written", () => {
+    const privateKey = "@/home/operator/.ssh/exchange_key";
+    const record = readManagedCommandLineConfiguration(
       configText(sftpDocumentWithServerLine({ privateKey })),
     );
 
-    expect(message).toContain("server.private_key");
-    expect(message).toContain("add them back");
-    expect(message).not.toContain(privateKey);
+    const { connection } = record.exchangeFile;
+    expect(connection.channel === "sftp" && connection.server.privateKey).toBe(
+      privateKey,
+    );
   });
 
   test("an SFTP password written into the file is refused, never echoed", () => {
@@ -290,20 +291,110 @@ describe("accepting a configuration on a channel this app does not run", () => {
       configText(sftpDocumentWithServerLine({ password })),
     );
 
-    expect(message).toContain("server.password");
+    expect(message).toContain("connection.server.password");
+    expect(message).toContain("write the setting as @");
     expect(message).not.toContain(password);
   });
 
-  test("an SFTP host-key pin is refused by field name", () => {
-    const message = refusal(
+  test.each([
+    ["private_key", { privateKey: "-----BEGIN OPENSSH PRIVATE KEY-----" }],
+    [
+      "private_key_passphrase",
+      { privateKey: "@/keys/exchange_key", privateKeyPassphrase: "words" },
+    ],
+  ])("an SFTP %s written into the file is refused by name", (field, line) => {
+    const message = refusal(configText(sftpDocumentWithServerLine(line)));
+
+    expect(message).toContain(`connection.server.${field}`);
+    for (const value of Object.values(line))
+      if (!value.startsWith("@")) expect(message).not.toContain(value);
+  });
+
+  test("an SFTP host-key pin and keyboard_interactive are held as written", () => {
+    const hostKeyFingerprint = [`SHA256:${"A".repeat(43)}`, "@/pins/second"];
+    const record = readManagedCommandLineConfiguration(
       configText(
         sftpDocumentWithServerLine({
-          hostKeyFingerprint: `SHA256:${"A".repeat(43)}`,
+          password: "@/secrets/sftp-password",
+          keyboardInteractive: true,
+          hostKeyFingerprint,
         }),
       ),
     );
 
-    expect(message).toContain("server.host_key_fingerprint");
+    const { connection } = record.exchangeFile;
+    if (connection.channel !== "sftp") throw new Error("not an sftp record");
+    expect(connection.server.hostKeyFingerprint).toEqual(hostKeyFingerprint);
+    expect(connection.server.keyboardInteractive).toBe(true);
+  });
+
+  test("a proxy, provisioning endpoint, and provider options are held with @path credentials", () => {
+    const document = sftpDocumentWithServerLine({
+      provision: {
+        host: "wake.example.org",
+        auth: { bearer: "@/secrets/wake.bearer" },
+      },
+    });
+    const record = readManagedCommandLineConfiguration(
+      configText({
+        ...document,
+        connection: {
+          ...document.connection,
+          proxy: {
+            host: "proxy.example.org",
+            auth: { username: "relay", password: "@/secrets/proxy.password" },
+          },
+          providerOptions: {
+            readyTimeout: 20000,
+            passphrase: "@/secrets/key.passphrase",
+          },
+        },
+      }),
+    );
+
+    const { connection } = record.exchangeFile;
+    if (connection.channel !== "sftp") throw new Error("not an sftp record");
+    expect(connection.server.provision?.auth?.bearer).toBe(
+      "@/secrets/wake.bearer",
+    );
+    expect(connection.proxy?.auth).toEqual({
+      username: "relay",
+      password: "@/secrets/proxy.password",
+    });
+    expect(connection.providerOptions).toEqual({
+      readyTimeout: 20000,
+      passphrase: "@/secrets/key.passphrase",
+    });
+  });
+
+  test("a literal credential in a proxy, provisioning auth, or provider option is refused", () => {
+    const secrets = [
+      "bearer-not-echoed",
+      "proxy-not-echoed",
+      "option-not-echoed",
+    ];
+    const document = sftpDocumentWithServerLine({
+      provision: { host: "wake.example.org", auth: { bearer: secrets[0] } },
+    });
+    const message = refusal(
+      configText({
+        ...document,
+        connection: {
+          ...document.connection,
+          proxy: {
+            host: "proxy.example.org",
+            auth: { username: "relay", password: secrets[1] },
+          },
+          providerOptions: { algorithms: { cipher: [secrets[2]] } },
+        },
+      }),
+    );
+
+    expect(message).toContain(
+      "connection.provider_options.algorithms, connection.proxy.auth.password, " +
+        "connection.server.provision.auth.bearer",
+    );
+    for (const secret of secrets) expect(message).not.toContain(secret);
   });
 
   test("a key outside the schema under an SFTP server block is refused, not trimmed", () => {
@@ -604,9 +695,27 @@ describe("import, edit, and export on every channel", () => {
     connection: { ...connectionFromLocator(webrtcLocator), role: "acceptor" },
   };
 
+  const sftpDocument = documentOn(sftpLocator, heldSettings);
+  const sftpConnection = sftpDocument.connection as SFTPConnectionConfig;
+  const sftpDocumentWithCredential = {
+    ...sftpDocument,
+    connection: {
+      ...sftpConnection,
+      server: {
+        ...sftpConnection.server,
+        password: "@secret.txt",
+        hostKeyFingerprint: `SHA256:${"B".repeat(42)}A`,
+      },
+    },
+  };
+
   test.each([
     ["webrtc", webrtcDocument],
-    ["sftp", documentOn(sftpLocator, heldSettings)],
+    ["sftp", sftpDocument],
+    [
+      "sftp with an @path password and a host-key pin",
+      sftpDocumentWithCredential,
+    ],
     ["filedrop", documentOn(filedropLocator, heldSettings)],
   ] as const)(
     "a %s configuration comes back with the edits and nothing dropped",

@@ -1168,16 +1168,23 @@ What the import accepts is what this app can hold:
   longer matches the format psilink reads is refused naming the fields to fix,
   spelled as the file spells them, so the operator goes back to the line rather
   than to the app.
-- **A credential-free connection.** The connection may hold what this app
-  composes for its channel: a rendezvous address for webrtc; a host, port,
-  username, folders, and `options` for sftp; the folders and `options` for
-  filedrop. A TURN credential, an ICE provisioning block, an SFTP password,
-  private key, passphrase, or host-key pin, a proxy or provisioning block, a
-  signing identity or receipt path -- anything else -- is refused rather than
-  stored, by field name, and whether the file writes it as a value or as an
-  `@path`. The next export would hand it straight back to the command line, and
-  this browser cannot tell what a path on another machine opens. The refusal says
-  to add those lines back to the file this app hands back before running it.
+- **A connection this app can hold.** A webrtc connection may hold what this
+  app composes for it, a rendezvous address; a TURN credential, an ICE
+  provisioning block, or a PeerJS server key is refused by field name, since
+  this browser runs a webrtc exchange and could not apply them. A filedrop
+  connection holds its folders and `options`. An sftp connection is held whole
+  -- host, port, username, folders, `options`, `host_key_fingerprint`,
+  `keyboard_interactive`, `proxy`, `provision`, and `provider_options` -- since
+  nothing here runs it and each setting goes back into the file psilink runs.
+  A signing identity or receipt path is refused on every channel.
+- **Credentials as `@path` references, never as values.** An sftp `password`,
+  `private_key`, or `private_key_passphrase`, the `bearer` or `password` of a
+  `proxy` or `provision` block's `auth`, and any string in `provider_options`
+  (which psilink hands to the SFTP library as written, so this app cannot tell
+  a credential there from any other option) is held when the file writes it as
+  `@` and a path, and refused, by field name, when the file writes the value
+  itself: this browser does not store a secret. The refusal says to put the
+  value in a file of its own and write the setting as `@` and that file's path.
 - **No shared secret.** A configuration naming one in its `authentication` block
   is refused: the key file stays where the exchange runs. psilink reads the secret
   from `.psilink.key` and refuses it in `psilink.yaml` for the same reason.
@@ -1193,22 +1200,28 @@ terms is a new exchange, agreed with the partner. An import that is not edited
 exports back to the same configuration, and an edited one exports back with the
 edits and every other setting as the file stated it.
 
-The page states two more things where they apply:
+The page states three more things where they apply:
 
 - **The settings it keeps without showing them.** Every setting of the file
   other than the connection and the agreed terms the page shows -- `metadata`,
-  `retention_disposition`, a connection's `options`, and the rest -- is kept
-  unchanged and named, in the file's own snake_case, with a pointer to the file as
-  the place to edit it.
+  `retention_disposition`, a connection's `options`, an sftp connection's
+  credential references, host-key pin, and the rest -- is kept unchanged and
+  named, in the file's own snake_case, with a pointer to the file as the place to
+  edit it.
+- **The files it names by `@path`.** This browser never opens the file an
+  `@path` names. The page warns, naming each such setting and never its path,
+  that the psilink.yaml it hands back keeps the reference as the file wrote it
+  and psilink reads that file on the machine that runs the exchange; the export
+  panel repeats the names.
 - **A pending outbound payload consent.** A configuration whose
   `outbound_payload_consent` is pending is refused by psilink at any run that
   shares results with the partner until the columns are confirmed, which it asks
   for at a terminal. The page says so, so a scheduled run is not the first place
   the operator meets that refusal.
 
-An exported SFTP configuration also names no credential and no host key, since
-the import kept neither: the page says to add `private_key` or `password` (as an
-`@path`) and `host_key_fingerprint` under `connection.server` before running it.
+An SFTP configuration that names no credential or no host key exports without
+one: the export panel says to add `private_key` or `password` (as an `@path`),
+`host_key_fingerprint`, or both under `connection.server` before running it.
 
 ## Desync detection and recovery
 

@@ -180,6 +180,41 @@ describe("the surface of a configuration on a channel this app does not run", ()
       null,
     );
   });
+
+  test("warns about a credential named by @path, on the page and the export", async () => {
+    const connection = connectionFromLocator({
+      channel: "sftp",
+      host: "sftp.example.org",
+      path: "/exchange",
+    });
+    if (connection.channel !== "sftp") throw new Error("not an sftp locator");
+    const created = await createManagedExchange({
+      label: "Riverbend quarterly",
+      exchangeFile: assembleExchangeSpec({
+        connection: {
+          ...connection,
+          server: { ...connection.server, password: "@/secrets/sftp-password" },
+        },
+        linkageTerms,
+      }),
+    });
+
+    app.render(createElement(ManagedRunSurface, { id: created.id }));
+
+    await expect
+      .element(page.getByText("Files psilink reads when it runs"))
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText("The file keeps connection.server.password as an @", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+    expect(
+      page.getByText("/secrets/sftp-password", { exact: false }).query(),
+    ).toBe(null);
+  });
 });
 
 describe("the list row of an imported configuration", () => {

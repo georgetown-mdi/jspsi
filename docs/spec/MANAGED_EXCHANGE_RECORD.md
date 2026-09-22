@@ -191,17 +191,38 @@ outside the allowlist rather than letting the non-strict webrtc connection
 schema silently strip it. The composition rule, not a strip pass, is the
 enforcement.
 
-A configuration-only record on `sftp` or `filedrop` holds that channel's
-credential-free locator subset under the same rule: what `connectionFromLocator`'s
-arm for the channel expands to -- for `sftp`, `server.host`, `server.port`,
-`server.username`, the `server` folder fields (`path`, `inbound_path`,
-`outbound_path`), and `options`; for `filedrop`, the folder fields and `options`.
-No `password`, `private_key`, `private_key_passphrase`, `host_key_fingerprint`,
-`keyboard_interactive`, `provision`, `proxy`, or `provider_options` entry is
-admitted, as a value or as an `@path`. The command-line import and export apply
-one allowlist, measured off those arms
-(`apps/web/src/psi/managed/managedCommandLineDocument.ts`), so neither leg holds
-a field the other would refuse.
+A configuration-only record on `filedrop` holds that channel's credential-free
+locator subset under the same rule: what `connectionFromLocator`'s arm for the
+channel expands to, the folder fields and `options`.
+
+A configuration-only record on `sftp` holds the whole connection the shared
+schema admits: the locator subset (`server.host`, `server.port`,
+`server.username`, the `server` folder fields `path`, `inbound_path`, and
+`outbound_path`, and `options`) and, beyond it, `server.password`,
+`server.private_key`, `server.private_key_passphrase`,
+`server.keyboard_interactive`, `server.host_key_fingerprint`,
+`server.provision`, `proxy`, and `provider_options`. Nothing in this app runs an
+sftp record, so each of these is held unchanged for the file psilink runs
+(EXCHANGE_FILE.md, "What a consumer does with a setting it cannot honor"). A
+credential among them is held only as an `@path` reference, never as a value:
+
+- **Credential positions.** `server.password`, `server.private_key`,
+  `server.private_key_passphrase`, the `bearer` and `password` of
+  `server.provision.auth` and `proxy.auth`, and every string in
+  `provider_options` -- the positions the CLI resolves an `@path` in, less the
+  host-key pin. `provider_options` is passed to the SFTP library as written, so a
+  string in it cannot be told from a credential and is counted as one.
+- **The rule.** A credential position holding a string that does not begin with
+  `@` is refused by the command-line import and by the export, naming the
+  setting and never its value. One holding an `@path` is held and exported
+  byte-for-byte. The browser never reads the file an `@path` names, and the
+  configuration page names each such setting (the host-key pin included) with a
+  warning that psilink reads that file on the machine that runs the exported
+  document.
+
+The command-line import and export apply one rule, measured off the locator arms
+plus the sftp held set (`apps/web/src/psi/managed/managedCommandLineDocument.ts`),
+so neither leg holds a field the other would refuse.
 
 #### Role: a local `side` field, not the document
 

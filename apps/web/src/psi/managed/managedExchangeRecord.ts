@@ -292,8 +292,10 @@ export interface ManagedExchangeRecord {
    * This party's exchange-file document, verbatim: the validated
    * {@link ExchangeSpec} both applications share. Contains no `authentication`
    * block (the secret lives in {@link sharedSecret}) and its connection block is
-   * composed from a credential-free locator, so no credential is representable
-   * (see {@link composeManagedExchangeFile}).
+   * composed from a credential-free locator (see
+   * {@link composeManagedExchangeFile}), except a configuration-only sftp
+   * record's, which holds the imported connection with each credential as an
+   * `@path` reference (./managedCommandLineDocument.ts).
    */
   exchangeFile: ExchangeSpec;
   /** This party's side of the partnership; dispatches a re-run to the matching

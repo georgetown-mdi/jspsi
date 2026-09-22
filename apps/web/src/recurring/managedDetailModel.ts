@@ -152,12 +152,12 @@ function folderRows(folders: {
 
 /**
  * The read-only connection rows for the configuration view: the channel and
- * where the exchange meets the partner. A managed record's connection is a
- * credential-free locator on its channel (see
- * docs/spec/MANAGED_EXCHANGE_RECORD.md, "The connection block"), so what is
- * shown is an address and its folders, never a credential -- no `server.key`,
- * no password or private key is representable in the stored document. An SFTP
- * `username` is the one identity field the locator holds, and it is shown.
+ * where the exchange meets the partner: the fields of a credential-free
+ * locator on its channel (see docs/spec/MANAGED_EXCHANGE_RECORD.md, "The
+ * connection block"), so what is shown is an address and its folders, never a
+ * credential. An sftp record's other connection settings -- credential
+ * references included -- are held without being shown. An SFTP `username` is
+ * the one identity field the locator holds, and it is shown.
  */
 export function connectionRows(exchangeFile: ExchangeSpec): Array<ConfigRow> {
   const { connection } = exchangeFile;
