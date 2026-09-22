@@ -5,10 +5,12 @@ import path from "node:path";
 import { afterEach, beforeAll, describe, expect, test } from "vitest";
 
 import {
+  ExchangeSpecSchema,
   parseExchangeSpec,
   parseSensitiveJson,
   parseSensitiveYaml,
   serializeExchangeDocument,
+  snakeizeKey,
   snakeizeKeys,
 } from "@psilink/core";
 
@@ -18,7 +20,9 @@ import {
   HANDOFF_SIGNING_IDENTITY_PLACEHOLDER,
   buildJobHandoff,
 } from "@jobs/handoff";
+
 import {
+  COMPOSED_BLOCKS,
   carriedThroughFields,
   disclosedDocument,
   mountedConfigurationDocument,
@@ -630,6 +634,23 @@ describe("the settings a loaded configuration keeps in the export", () => {
 
   test("a console that opened no configuration exports its composition", () => {
     expect(exportOver(undefined)).not.toContain("authentication");
+  });
+});
+
+describe("the blocks the export holds from the mounted document are pinned", () => {
+  test("authentication is the only block held outside the composed ones", () => {
+    const held = Object.keys(ExchangeSpecSchema.shape)
+      .map((key) => snakeizeKey(key))
+      .filter((key) => !COMPOSED_BLOCKS.has(key))
+      .sort();
+    expect(
+      held,
+      "the hand-off holds every top-level block of the mounted document that " +
+        "sits outside COMPOSED_BLOCKS, so a new block in core's " +
+        "ExchangeSpecSchema must be either composed by this console or added " +
+        "to the load's credential-name refusals (credentialFieldsNotAdopted) " +
+        "before it may be held.",
+    ).toEqual(["authentication"]);
   });
 });
 
