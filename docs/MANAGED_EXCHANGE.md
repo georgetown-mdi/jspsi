@@ -1180,9 +1180,10 @@ What the import accepts is what this app can hold:
 - **Credentials as `@path` references, never as values.** An sftp `password`,
   `private_key`, or `private_key_passphrase`, the `bearer` or `password` of a
   `proxy` or `provision` block's `auth`, and a `password`, `passphrase`,
-  `privateKey`, or `private_key` in `provider_options` is held when the file
-  writes it as `@` and a path, and refused, by field name, when the file
-  writes the value itself: this browser does not store a secret. The refusal
+  `privateKey`, or `private_key` key in `provider_options`, in any letter case
+  and at any depth, is held when the file writes it as `@` and a path, and
+  refused, by field name, when the file writes any other value, a number or
+  `true` included: this browser does not store a secret. The refusal
   says to put the value in a file of its own and write the setting as `@` and
   that file's path. Any other `provider_options` setting, such as a cipher
   list, is held as written.

@@ -420,6 +420,74 @@ describe("accepting a configuration on a channel this app does not run", () => {
     },
   );
 
+  test.each([
+    { case: "a numeric password", options: { password: 482915 } },
+    { case: "a boolean passphrase", options: { passphrase: true } },
+  ])("$case under provider options is refused by name", ({ options }) => {
+    const [[key, value]] = Object.entries(options);
+    const document = sftpDocumentWithServerLine({});
+    const source = configText({
+      ...document,
+      connection: { ...document.connection, providerOptions: options },
+    });
+    expect(source).toContain(`${key}: ${String(value)}\n`);
+
+    const message = refusal(source);
+
+    expect(message).toContain(`connection.provider_options.${key}`);
+    expect(message).not.toContain(String(value));
+  });
+
+  test("a credential key in another case or nested deeper is refused by its path", () => {
+    const document = sftpDocumentWithServerLine({});
+    const message = refusal(
+      configText({
+        ...document,
+        connection: {
+          ...document.connection,
+          providerOptions: {
+            Password: "upper-not-echoed",
+            algorithms: {
+              cipher: ["aes256-gcm@openssh.com"],
+              password: "nested-not-echoed",
+            },
+          },
+        },
+      }),
+    );
+
+    expect(message).toContain(
+      "connection.provider_options.Password, " +
+        "connection.provider_options.algorithms.password",
+    );
+    expect(message).not.toContain(
+      "connection.provider_options.algorithms.cipher",
+    );
+    expect(message).not.toContain("upper-not-echoed");
+    expect(message).not.toContain("nested-not-echoed");
+  });
+
+  test("an @path under a respelled or nested credential key is held", () => {
+    const providerOptions = {
+      PASSPHRASE: "@/secrets/key.passphrase",
+      algorithms: {
+        cipher: ["aes256-gcm@openssh.com"],
+        password: "@/secrets/nested.password",
+      },
+    };
+    const document = sftpDocumentWithServerLine({});
+    const record = readManagedCommandLineConfiguration(
+      configText({
+        ...document,
+        connection: { ...document.connection, providerOptions },
+      }),
+    );
+
+    const { connection } = record.exchangeFile;
+    if (connection.channel !== "sftp") throw new Error("not an sftp record");
+    expect(connection.providerOptions).toEqual(providerOptions);
+  });
+
   test("a literal cipher option is held and comes back unchanged on export", () => {
     const providerOptions = {
       algorithms: { cipher: ["aes256-gcm@openssh.com", "aes128-ctr"] },

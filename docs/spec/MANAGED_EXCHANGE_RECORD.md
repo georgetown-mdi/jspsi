@@ -208,14 +208,16 @@ credential among them is held only as an `@path` reference, never as a value:
 
 - **Credential positions.** `server.password`, `server.private_key`,
   `server.private_key_passphrase`, the `bearer` and `password` of
-  `server.provision.auth` and `proxy.auth`, and every string under a
-  `provider_options` key the SFTP option passthrough names as a credential:
-  `password`, `passphrase`, `privateKey`, or `private_key`
-  ([EXCHANGE_REFERENCE.md](../EXCHANGE_REFERENCE.md#connectionprovider_options)).
+  `server.provision.auth` and `proxy.auth`, and the value of every key, at any
+  depth under `provider_options`, that matches case-insensitively a key the SFTP
+  option passthrough names as a credential: `password`, `passphrase`,
+  `privateKey`, or `private_key`
+  ([EXCHANGE_REFERENCE.md](../EXCHANGE_REFERENCE.md#connectionprovider_options)),
+  named by its dotted key path.
   Every other `provider_options` key is transport tuning, a cipher list for
   one, and is held unchanged whether it is written as a value or an `@path`.
-- **The rule.** A credential position holding a string that does not begin with
-  `@` is refused by the command-line import and by the export, naming the
+- **The rule.** A credential position holding anything but a string that begins
+  with `@` is refused by the command-line import and by the export, naming the
   setting and never its value. One holding an `@path` is held and exported
   byte-for-byte. The browser never reads the file an `@path` names, and the
   configuration page names each setting written as one (the host-key pin and
