@@ -267,6 +267,9 @@ test("every commented OPTIONAL section is valid when uncommented", async () => {
     "retention_disposition",
     "include_own_columns",
     "expected_payload_columns",
+    "disclosed_payload_columns",
+    "outbound_payload_consent",
+    "expected_partner_deduplicate",
   ]) {
     const section = YAML.parse(
       uncommentOptionalSection(OPTIONAL_SECTIONS, key),
@@ -279,6 +282,59 @@ test("every commented OPTIONAL section is valid when uncommented", async () => {
       `${key} invalid when uncommented`,
     ).not.toThrow();
   }
+});
+
+test("the commented sections nested under an active block are valid when uncommented", async () => {
+  // These examples sit inside a block the template already writes active, so
+  // each is merged into that block rather than beside it, and the parsed value
+  // is asserted so an extraction that yields nothing cannot pass.
+  const base = YAML.parse(
+    renderConfigTemplate(await buildTemplateData(undefined, "Org")),
+  ) as Record<string, Record<string, unknown>>;
+  const nested = (paragraphMarker: string, key: string) =>
+    YAML.parse(
+      uncommentOptionalSection(OPTIONAL_SECTIONS, key, paragraphMarker),
+    ) as Record<string, Record<string, unknown>>;
+
+  const webrtc = nested("channel: webrtc", "connection");
+  const webrtcSpec = parseExchangeSpec({
+    ...base,
+    connection: webrtc.connection,
+  });
+  expect(webrtcSpec.connection).toMatchObject({
+    channel: "webrtc",
+    role: "inviter",
+    server: { key: "peerjs" },
+    stun: ["stun:stun.example.org:3478"],
+    turn: [{ url: "turns:relay.example.org:443?transport=tcp" }],
+    iceTransportPolicy: "all",
+  });
+
+  const unexpected = nested("unexpected_files: warn", "connection");
+  const unexpectedSpec = parseExchangeSpec({
+    ...base,
+    connection: {
+      ...base.connection,
+      options: {
+        ...(base.connection.options as object),
+        ...(unexpected.connection.options as object),
+      },
+    },
+  });
+  expect(unexpectedSpec.connection.options).toMatchObject({
+    unexpectedFiles: "warn",
+  });
+
+  const agreement = nested("legal_agreement:", "linkage_terms");
+  const agreementSpec = parseExchangeSpec({
+    ...base,
+    linkage_terms: { ...base.linkage_terms, ...agreement.linkage_terms },
+  });
+  expect(agreementSpec.linkageTerms.legalAgreement).toEqual({
+    reference: "MOU-2025-0042",
+    purpose: "Audit and evaluation of the State tutoring program",
+    expirationDate: "2027-12-31",
+  });
 });
 
 // --- buildTemplateData: inference --------------------------------------------
@@ -913,12 +969,21 @@ test("handler: a `-`-leading input positional is not treated as an option", asyn
  * un-comment it. Sections are blank-line-separated paragraphs of prose followed
  * by a commented YAML example; the example begins at the last `# <key>:` line in
  * the paragraph (the prose may mention the key earlier) and runs to its end.
+ * `paragraphMarker` picks among paragraphs whose examples share a key.
  */
-function uncommentOptionalSection(block: string, key: string): string {
+function uncommentOptionalSection(
+  block: string,
+  key: string,
+  paragraphMarker = "",
+): string {
   const header = new RegExp(`^#\\s*${key}:`);
   const paragraph = block
     .split("\n\n")
-    .find((p) => p.split("\n").some((l) => header.test(l)));
+    .find(
+      (p) =>
+        p.includes(paragraphMarker) &&
+        p.split("\n").some((l) => header.test(l)),
+    );
   if (paragraph === undefined)
     throw new Error(`no commented section for ${key}`);
   const lines = paragraph.split("\n");

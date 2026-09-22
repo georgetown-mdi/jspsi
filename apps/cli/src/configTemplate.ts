@@ -71,7 +71,8 @@ export const FIELD_DOCS: Array<{ path: Array<string>; lines: Array<string> }> =
       lines: [
         "How to reach your exchange partner. channel is sftp here (the primary CLI",
         "transport); filedrop (a shared mounted directory) and webrtc are also",
-        "supported. The block each one takes is at",
+        "supported, and a commented webrtc block is at the end of this file. The",
+        "block each one takes is at",
         CONNECTION_BLOCK_DOC_URL,
       ],
     },
@@ -245,6 +246,48 @@ export const FIELD_DOCS: Array<{ path: Array<string>; lines: Array<string> }> =
 // @internal exported so a test un-comments each example and validates it against
 // the schema -- an operator who enables a section must get a loadable config.
 export const OPTIONAL_SECTIONS = `# --- Optional sections (uncomment and edit to enable) ------------------------
+
+# A webrtc connection, in place of the sftp block above: a direct channel
+# between the two parties, set up through a peer-coordination server. role is
+# inviter on the party that issued the invitation and acceptor on the other;
+# 'psilink accept' writes this block for you. key is the coordination server's
+# API key (default peerjs). stun replaces the built-in STUN server list. turn
+# names relay servers for networks where a direct connection fails (write the
+# credential as an @path); ice_transport_policy: relay uses those relays only.
+# connection:
+#   channel: webrtc
+#   server:
+#     host: REPLACE_WITH_COORDINATION_SERVER_HOST
+#     port: 443
+#     key: peerjs
+#   role: inviter
+#   stun:
+#     - "stun:stun.example.org:3478"
+#   turn:
+#     - url: "turns:relay.example.org:443?transport=tcp"
+#       username: REPLACE_WITH_TURN_USERNAME
+#       credential: "@./turn-credential.txt"
+#   ice_transport_policy: all
+
+# unexpected_files (sftp and filedrop): what to do when a file that is not part
+# of the exchange appears in the shared directory during it. error stops the
+# exchange, warn logs the file and continues, ignore skips it. Unset, it is
+# error, or warn when retain_files or lockless_rendezvous is set. Your own
+# setting: your partner may use another. Add it under connection.options above:
+# connection:
+#   options:
+#     unexpected_files: warn
+
+# legal_agreement: the data sharing agreement authorizing this exchange, the
+# purpose of this disclosure under it, and the agreement's expiration date,
+# recorded in both parties' exchange records. Both parties must write identical
+# values or the exchange is cancelled, and it fails once expiration_date has
+# passed. Add it under linkage_terms above:
+# linkage_terms:
+#   legal_agreement:
+#     reference: "MOU-2025-0042"
+#     purpose: "Audit and evaluation of the State tutoring program"
+#     expiration_date: "2027-12-31"
 
 # authentication: partner shared-secret policy. The secret itself lives in the
 # key file, never here; only policy belongs in the config.
