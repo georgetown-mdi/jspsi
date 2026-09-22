@@ -8,13 +8,12 @@ import { useDeferredAnnouncement } from "@components/useDeferredAnnouncement";
 import {
   CLOSE_CONFIGURATION_LABEL,
   CONFIGURATION_LOAD_SEALED,
-  CONFIGURATION_OPENED,
   CONFIGURATION_READ_UNAVAILABLE,
   NO_CONFIGURATION_IN_FOLDER,
   OPEN_CONFIGURATION_INVITATION,
   OPEN_CONFIGURATION_LABEL,
-  divergedCommitmentWarning,
-  divergedCommitments,
+  configurationOpenedMessage,
+  divergedCommitmentNotice,
   mountedConfigurationNotices,
   mountedConfigurationOfferable,
 } from "./mountedConfiguration";
@@ -99,9 +98,7 @@ export function DivergedCommitmentNotice({
    * commitments the open configuration holds. Absent until a file is read. */
   disclosure?: RunDisclosure;
 }) {
-  const warning = divergedCommitmentWarning(
-    divergedCommitments(state, disclosure),
-  );
+  const warning = divergedCommitmentNotice(state, disclosure);
   return <NoticesAlert notices={warning === undefined ? [] : [warning]} />;
 }
 
@@ -167,7 +164,7 @@ export function MountedConfigurationCard({
       {state.status === "opened" && (
         <>
           <Alert color="blue" role="presentation" title={OPENED_TITLE}>
-            <Text size="sm">{CONFIGURATION_OPENED}</Text>
+            <Text size="sm">{configurationOpenedMessage(state)}</Text>
           </Alert>
           {!sealed && (
             <Button size="xs" variant="default" onClick={onClose}>

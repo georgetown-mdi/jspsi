@@ -15,9 +15,7 @@
  * - a document the shared exchange-file schema rejects, an unread key included
  *   (docs/spec/EXCHANGE_FILE.md, "What a consumer does with a setting it cannot
  *   honor");
- * - a `connection` on a channel the console does not conduct -- it runs sftp and
- *   filedrop, and a webrtc exchange belongs to the command line or the web
- *   application (docs/CONSOLE.md);
+ * - a `connection` on a channel outside {@link OPENED_CHANNELS};
  * - an `authentication` block holding a shared secret or an expiry, which the
  *   console reads from the key file beside the configuration rather than from
  *   the document;
@@ -25,6 +23,12 @@
  *   composed here could not state back ({@link assertRecordsSurvive});
  * - a setting inside a block the composition writes, which the export could not
  *   write back unchanged ({@link assertHeldSettingsSurvive}).
+ *
+ * A configuration on a channel the console opens but does not conduct -- webrtc
+ * -- is not refused here: the browser edits its settings and withholds the
+ * run, and the edits are saved back into the file ({@link ./configHandBack}).
+ * Its `connection` is neither disclosed nor measured, since no run here
+ * composes or replaces it.
  *
  * A `@path` credential reference is a WARNING and not a refusal: the operator
  * owns this mount and the reference is their own choice, so the load proceeds
@@ -54,8 +58,9 @@ import {
   refusedDocumentFields,
 } from "@psi/exchangeDocumentRefusal";
 
+import { JOB_FILE_NAMES, isJobChannel } from "./intentSchemas";
+
 import { composeConfigDocument, composeSftpConfigSpec } from "./intentConfig";
-import { JOB_FILE_NAMES } from "./intentSchemas";
 import { resolveWorkdirFile } from "./workdir";
 
 import type {
@@ -106,10 +111,18 @@ const OVER_LARGE_CONFIGURATION_MESSAGE =
   "exchange configuration. Check that it is the file psilink runs " +
   "under, then open it again.";
 
-/** The channels the console conducts. A `connection` on any other is refused by
- * channel: the console drives the containerized CLI over a mounted folder or an
- * SFTP host, and nothing here dials a peer. */
-const CONSOLE_CHANNELS: ReadonlySet<string> = new Set(["sftp", "filedrop"]);
+/** A channel the console opens a configuration on. */
+type OpenedChannel = "sftp" | "filedrop" | "webrtc";
+
+/** The channels the console opens a configuration on: an allowlist, so a channel
+ * a later schema version adds is refused until it is named here. Only the job
+ * channels ({@link isJobChannel}) are conducted; a configuration on another is
+ * opened for editing with its run withheld. */
+const OPENED_CHANNELS: ReadonlySet<string> = new Set<OpenedChannel>([
+  "sftp",
+  "filedrop",
+  "webrtc",
+]);
 
 /**
  * The SFTP connection as the response states it: the fields the console's
@@ -162,7 +175,7 @@ export interface DisclosedFileSyncOptions {
  * added to the shared schema reaches no browser until this states it.
  */
 export interface DisclosedExchangeDocument {
-  channel: "sftp" | "filedrop";
+  channel: OpenedChannel;
   server?: DisclosedSftpServer;
   options?: DisclosedFileSyncOptions;
   linkageTerms: ExchangeSpec["linkageTerms"];
@@ -396,13 +409,18 @@ export const COMPOSED_BLOCKS: ReadonlySet<string> = new Set(
  * The document's settings no composition here writes, credential fields
  * excepted: the hand-off replaces each of those with a placeholder, and the
  * response names them in its warnings ({@link credentialFieldsNotAdopted})
- * rather than as settings it keeps.
+ * rather than as settings it keeps. A `connection` on a channel the console
+ * does not conduct is left out whole: no run here composes one over it.
  */
 function unadoptedFields(document: ExchangeSpec): Array<string> {
   const credentials = new Set(credentialFieldsNotAdopted(document));
+  const conducted = isJobChannel(document.connection.channel);
   return documentKeyPaths(document)
     .filter(
-      (field) => !COMPOSED_FIELD_PATHS.has(field) && !credentials.has(field),
+      (field) =>
+        !COMPOSED_FIELD_PATHS.has(field) &&
+        !credentials.has(field) &&
+        (conducted || field.split(".")[0] !== "connection"),
     )
     .sort();
 }
@@ -530,17 +548,16 @@ function parsedDocument(raw: unknown): ExchangeSpec {
   );
 }
 
-/** Refuse a channel the console does not conduct, naming it as the file spells
- * it and saying where the exchange runs instead. */
-function consoleChannel(document: ExchangeSpec): "sftp" | "filedrop" {
+/** Refuse a channel outside {@link OPENED_CHANNELS}, naming it as the file
+ * spells it and saying where the exchange runs instead. */
+function openedChannel(document: ExchangeSpec): OpenedChannel {
   const { channel } = document.connection;
-  if (!CONSOLE_CHANNELS.has(channel))
+  if (!OPENED_CHANNELS.has(channel))
     throw new ConfigurationLoadRefusedError(
-      `This configuration runs over ${channel}. The console conducts sftp and ` +
-        "shared-folder exchanges only, so it cannot open this one. Run it " +
-        "with psilink on the command line instead.",
+      `This configuration runs over ${channel}, which the console cannot ` +
+        "open. Run it with psilink on the command line instead.",
     );
-  return channel as "sftp" | "filedrop";
+  return channel;
 }
 
 /**
@@ -681,7 +698,7 @@ export function disclosedDocument(
       ? connection.options
       : undefined;
   return {
-    channel: consoleChannel(document),
+    channel: openedChannel(document),
     ...(connection.channel === "sftp"
       ? { server: disclosedServer(document) }
       : {}),
@@ -727,14 +744,14 @@ export function disclosedDocument(
 
 /**
  * Read one configuration document from its source text: the sensitive-parse
- * chokepoint, the shared schema, then the console's own three refusals.
+ * chokepoint, the shared schema, then the console's own refusals.
  *
  * @throws {ConfigurationLoadRefusedError} when the file is not a configuration
  *   the console can open.
  */
 export function mountedConfigurationDocument(source: string): ExchangeSpec {
   const document = parsedDocument(parsedYaml(source));
-  consoleChannel(document);
+  openedChannel(document);
   assertNoStatedSecret(document);
   assertRecordsSurvive(document);
   assertHeldSettingsSurvive(document);
@@ -859,16 +876,46 @@ function mountedConfigurationSource(dataRoot: string): string | null {
  * Undefined on every fault, a mount holding no configuration included, rather
  * than a refusal: a file this console could not have opened is not one the run
  * was composed from, and the export then states exactly what the console
- * composed.
+ * composed. A configuration on a channel the console does not conduct is
+ * undefined the same way, since the browser withholds its run.
  */
 export function mountedExchangeDocument(
   dataRoot: string,
 ): ExchangeSpec | undefined {
   try {
     const source = mountedConfigurationSource(dataRoot);
-    return source === null ? undefined : mountedConfigurationDocument(source);
+    if (source === null) return undefined;
+    const document = mountedConfigurationDocument(source);
+    return isJobChannel(document.connection.channel) ? document : undefined;
   } catch (error) {
     if (error instanceof ConfigurationLoadRefusedError) return undefined;
     throw error;
   }
+}
+
+/**
+ * The mounted configuration a hand-back is written over: the document the
+ * operator opened on a channel the console does not conduct, read again at the
+ * moment of the write so the connection it keeps is the one the file holds now.
+ *
+ * @throws {ConfigurationLoadRefusedError} when the mount holds no configuration,
+ *   one the console cannot open, or one on a channel the console runs itself --
+ *   a file changed on disk since it was opened.
+ */
+export function mountedUnconductedDocument(dataRoot: string): ExchangeSpec {
+  const source = mountedConfigurationSource(dataRoot);
+  if (source === null)
+    throw new ConfigurationLoadRefusedError(
+      "Your working folder no longer holds a psilink.yaml to save these " +
+        "changes to. Put the configuration back, then open it again.",
+    );
+  const document = mountedConfigurationDocument(source);
+  const { channel } = document.connection;
+  if (isJobChannel(channel))
+    throw new ConfigurationLoadRefusedError(
+      `The psilink.yaml in your working folder has changed since you opened ` +
+        `it, and runs over ${channel} now. Close the configuration and open ` +
+        "it again.",
+    );
+  return document;
 }

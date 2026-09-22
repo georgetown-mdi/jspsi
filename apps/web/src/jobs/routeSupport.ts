@@ -191,6 +191,14 @@ export const MAX_SFTP_PROBE_BODY_BYTES = 4 * 1024;
 export const MAX_SIGNING_FINGERPRINT_BODY_BYTES = 4 * 1024;
 
 /**
+ * The byte cap on a `PUT /api/jobs/config` hand-back body: the linkage terms,
+ * the column metadata, and the cleaning pipeline, each bounded by the schema,
+ * plus a few short settings. No input file is representable, so it sits far
+ * below the create cap; an oversized body is a `413` before any parse.
+ */
+export const MAX_CONFIG_HAND_BACK_BODY_BYTES = 32 * 1024 ** 2;
+
+/**
  * The outcome of reading a job request body under a byte cap:
  * - `too-large`: the body exceeded the cap (mapped to 413).
  * - `invalid`: the body was absent, failed part-way through the stream, was not

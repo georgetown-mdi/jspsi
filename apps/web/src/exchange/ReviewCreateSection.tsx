@@ -45,6 +45,7 @@ import {
   SFTP_CONNECTION_TUNING,
   connectionTuningProblems,
 } from "@console/connectionTuningModel";
+import { CONFIGURATION_SAVED } from "@console/mountedConfiguration";
 import { ConnectionTuningCard } from "@console/ConnectionTuningCard";
 import { ExchangeFilesCard } from "@console/ExchangeFilesCard";
 import { ReceiptsCard } from "@console/ReceiptsCard";
@@ -60,6 +61,7 @@ import type { AcquiredCsv, InviterEditor } from "@psi/inviterEditor";
 import type { SpineProblem, SpineTarget } from "@psi/inviterModel";
 import type { Transport } from "@psi/transportChooser";
 
+import type { ConfigurationSaveState } from "@console/mountedConfiguration";
 import type { ConnectionTuningDraft } from "@console/connectionTuningModel";
 import type { ExchangeFilesDraft } from "@console/exchangeFilesModel";
 import type { JobRendezvousConfig } from "@psi/jobClient/workInputClient";
@@ -99,6 +101,8 @@ export function ReviewCreateSection({
   sftpConnection,
   loadedSftpForm,
   sftpSaveFilePreferred,
+  runWithheld,
+  connectionSettingsHeld,
   rendezvous,
   exchangeFiles,
   onExchangeFiles,
@@ -118,6 +122,8 @@ export function ReviewCreateSection({
   onReset,
   onCreate,
   onNavigate,
+  configurationSave,
+  onSaveConfiguration,
 }: {
   editor: InviterEditor;
   csv: AcquiredCsv;
@@ -133,6 +139,14 @@ export function ReviewCreateSection({
   /** Whether the operator chose to run SFTP through their own
    * command-line tool (save-a-file) instead of authoring a connection here. */
   sftpSaveFilePreferred: boolean;
+  /** Why the configuration opened from the mounted folder withholds the run,
+   * undefined where nothing withholds it (`runWithheldReason`). */
+  runWithheld?: string;
+  /** Why the file-handling and connection-tuning cards take no edits, standing
+   * in for them: the opened configuration's connection block is saved as the
+   * file states it (`connectionSettingsHeldNotice`). Undefined where the
+   * cards edit the run's connection. */
+  connectionSettingsHeld?: string;
   /** The console's rendezvous provisioning, or undefined before it resolves (or
    * off a console). The filedrop card runs here when it reports a mount and renders
    * disabled with the console's own reason when it does not; a split pair also
@@ -169,6 +183,13 @@ export function ReviewCreateSection({
   onReset: () => void;
   onCreate: () => void;
   onNavigate: (target: SpineTarget) => void;
+  /** Where saving the opened configuration back to the folder stands, beside
+   * {@link onSaveConfiguration}. */
+  configurationSave?: ConfigurationSaveState;
+  /** Save the settings these steps edit into the opened configuration's file.
+   * Offered only where that configuration withholds the run
+   * ({@link runWithheld}), since a run hands back its own configuration. */
+  onSaveConfiguration?: () => void;
 }) {
   const consoleBuild = isConsoleBuild();
   const online = useOnlineStatus();
@@ -244,13 +265,15 @@ export function ReviewCreateSection({
     transport !== "browser" &&
     available.options.find((option) => option.transport === transport)
       ?.runMode === "server-job";
+  const connectionSettingsEditable =
+    exchangeFilesOffered && connectionSettingsHeld === undefined;
   // A combination core refuses is a form problem here, before the invitation is
   // sealed, rather than a job that fails at composition or at rendezvous.
   const exchangeFilesBlocked =
-    exchangeFilesOffered &&
+    connectionSettingsEditable &&
     exchangeFilesProblems(exchangeFiles, CONFIG_EXCHANGE_FILES).length > 0;
   const connectionTuningBlocked =
-    exchangeFilesOffered &&
+    connectionSettingsEditable &&
     connectionTuningProblems(connectionTuning).length > 0;
   const runDiagnosticsBlocked =
     exchangeFilesOffered && runDiagnosticsProblems(runDiagnostics).length > 0;
@@ -288,6 +311,7 @@ export function ReviewCreateSection({
   const offlineBlocked =
     !online && transportRunMode(available, transport) !== "save-file";
   const createStatus = inviterCreateStatus({
+    runWithheld,
     offlineBlocked,
     connectionIncomplete,
     splitDirectoryProblem,
@@ -304,6 +328,9 @@ export function ReviewCreateSection({
   // Voiced when the create gate flips either way; deferred so a blocked state
   // present when the section mounts still announces.
   const readiness = useDeferredAnnouncement(createStatus.announcement);
+  const saveOffered =
+    runWithheld !== undefined && onSaveConfiguration !== undefined;
+  const configurationSaving = configurationSave?.status === "saving";
   return (
     <>
       <p className={styles.eyebrow}>Step 3 of 3</p>
@@ -404,16 +431,24 @@ export function ReviewCreateSection({
       </fieldset>
       {exchangeFilesOffered && (
         <>
-          <ExchangeFilesCard
-            draft={exchangeFiles}
-            capabilities={CONFIG_EXCHANGE_FILES}
-            onChange={onExchangeFiles}
-          />
-          <ConnectionTuningCard
-            draft={connectionTuning}
-            capabilities={tuningCapabilities}
-            onChange={onConnectionTuning}
-          />
+          {connectionSettingsEditable ? (
+            <>
+              <ExchangeFilesCard
+                draft={exchangeFiles}
+                capabilities={CONFIG_EXCHANGE_FILES}
+                onChange={onExchangeFiles}
+              />
+              <ConnectionTuningCard
+                draft={connectionTuning}
+                capabilities={tuningCapabilities}
+                onChange={onConnectionTuning}
+              />
+            </>
+          ) : (
+            <p className={`${styles.small} ${styles.sub}`}>
+              {connectionSettingsHeld}
+            </p>
+          )}
           <RunDiagnosticsCard
             draft={runDiagnostics}
             onChange={onRunDiagnostics}
@@ -498,6 +533,31 @@ export function ReviewCreateSection({
           {readiness}
         </p>
       </VisuallyHidden>
+      {saveOffered && (
+        <div className={styles.workFoot}>
+          <Button
+            disabled={problems.length > 0}
+            loading={configurationSaving}
+            onClick={onSaveConfiguration}
+          >
+            Save changes to psilink.yaml
+          </Button>
+          <p
+            role="status"
+            className={
+              configurationSave?.status === "failed"
+                ? `${styles.statusLine} ${styles.statusLineDanger}`
+                : `${styles.statusLine} ${styles.statusLineOk}`
+            }
+          >
+            {configurationSave?.status === "saved"
+              ? CONFIGURATION_SAVED
+              : configurationSave?.status === "failed"
+                ? configurationSave.message
+                : ""}
+          </p>
+        </div>
+      )}
       <div className={styles.workFoot}>
         <Button disabled={!canCreate} loading={minting} onClick={onCreate}>
           Create the invitation

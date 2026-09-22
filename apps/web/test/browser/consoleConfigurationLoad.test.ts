@@ -12,12 +12,14 @@ import { getDefaultLinkageTerms } from "@psilink/core";
 
 import {
   CLOSE_CONFIGURATION_LABEL,
+  CONFIGURATION_SAVED,
   NO_CONFIGURATION_IN_FOLDER,
   OPEN_CONFIGURATION_LABEL,
 } from "@console/mountedConfiguration";
 import { InviterScreen } from "@exchange/InviterScreen";
 import { isolatedColumnName } from "@components/ColumnName";
 
+import { disclosureToggle, openDisclosure } from "./collapsePanels";
 import { createAppMount } from "./renderApp";
 
 // The load offer as the operator meets it on the file step: the three states the
@@ -98,6 +100,9 @@ function openedBody(document: unknown): unknown {
   };
 }
 
+/** Each body a `PUT /api/jobs/config` sent, in order. */
+const savedBodies: Array<unknown> = [];
+
 /** Answer the console's job API, with `GET /api/jobs/config` under this test's
  * control. The work directory is empty and nothing else is provisioned unless
  * the test says otherwise. */
@@ -118,6 +123,10 @@ function stubConfigRoute(
             headers: { "Content-Type": "application/json" },
           }),
         );
+      if (url === "/api/jobs/config" && init?.method === "PUT") {
+        savedBodies.push(JSON.parse(String(init.body)) as unknown);
+        return json({ written: true });
+      }
       if (url === "/api/jobs/config") return json(answer.body, answer.status);
       if (url === "/api/jobs/inputs")
         return json({ configured: true, files: mount.files ?? [] });
@@ -164,6 +173,7 @@ afterEach(() => {
   // test's idle screen does not re-attach to a prior run's id.
   window.localStorage.clear();
   vi.unstubAllGlobals();
+  savedBodies.splice(0);
 });
 
 describe("the load offer on the file step", () => {
@@ -231,8 +241,8 @@ describe("the load offer on the file step", () => {
 
   test("a refusal shows the console's own text and offers no partial form", async () => {
     const error =
-      "This configuration runs over webrtc. The console conducts sftp and " +
-      "shared-folder exchanges only, so it cannot open this one.";
+      "The psilink.yaml in your working folder is not a psilink exchange " +
+      "configuration. Check the file, then open it again.";
     stubConfigRoute({ status: 400, body: { error } });
     app.render(createElement(InviterScreen));
     await page.getByRole("button", { name: OPEN_CONFIGURATION_LABEL }).click();
@@ -280,6 +290,76 @@ describe("the open configuration over the files it is derived across", () => {
         ),
       )
       .toHaveValue("ignored");
+  });
+
+  test("a webrtc configuration opens for review and holds the create", async () => {
+    stubConfigRoute(
+      {
+        status: 200,
+        body: openedBody({
+          channel: "webrtc",
+          linkageTerms: CONFIG_DOCUMENT.linkageTerms,
+          metadata: STATED_COLUMNS,
+        }),
+      },
+      {
+        files: [CLIENTS_FILE],
+        sftp: {
+          configured: true,
+          host: "sftp.partner.example",
+          port: 22,
+          path: "/exchange",
+        },
+      },
+    );
+    app.render(createElement(InviterScreen));
+    await userEvent.fill(page.getByLabelText("Your name"), "Dana Okafor");
+    await openConfiguration();
+    await expect
+      .element(page.getByText(/runs over webrtc/).first())
+      .toBeInTheDocument();
+    await commitFile();
+    await page
+      .getByRole("button", { name: "Continue to matching & sharing" })
+      .click();
+    await page
+      .getByRole("button", { name: "Continue to review & create" })
+      .click();
+    await expect
+      .element(page.getByRole("button", { name: "Create the invitation" }))
+      .toBeDisabled();
+    await expect
+      .element(page.getByText(/cannot run this webrtc configuration/).first())
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText(/webrtc connection, its tuning and file handling/),
+      )
+      .toBeInTheDocument();
+    await expect
+      .element(disclosureToggle(/Connection tuning/))
+      .not.toBeInTheDocument();
+    await page
+      .getByRole("button", { name: "Save changes to psilink.yaml" })
+      .click();
+    await expect
+      .element(page.getByText(CONFIGURATION_SAVED).first())
+      .toBeInTheDocument();
+    expect(savedBodies).toHaveLength(1);
+    expect(savedBodies[0]).toMatchObject({
+      linkageTerms: { identity: "County Health" },
+      signing: { mode: "none" },
+    });
+    expect(savedBodies[0]).not.toHaveProperty("connection");
+
+    await openDisclosure(/Receipts and record keeping/);
+    await userEvent.fill(
+      page.getByLabelText("Retention note for your own record"),
+      "Destroyed after 90 days.",
+    );
+    await expect
+      .element(page.getByText(CONFIGURATION_SAVED).first())
+      .not.toBeInTheDocument();
   });
 
   test("an invitation created while it is open withholds both controls", async () => {
@@ -367,6 +447,16 @@ describe("the divergence warning on the step that resolves it", () => {
     // What the load says about itself stays on the file step: the carry-through
     // notice names this same record there and does not follow it here.
     expect(page.getByText(/has no control for/).query()).toBeNull();
+  });
+
+  test("a webrtc configuration's diverged commitment names the command line", async () => {
+    await goToColumns({ ...COMMITTED, channel: "webrtc" });
+    await expect
+      .element(
+        page.getByText(/psilink on the command line refuses to run the file/),
+      )
+      .toBeInTheDocument();
+    expect(page.getByText(/a run started here is refused/).query()).toBeNull();
   });
 
   test("a configuration whose commitment holds says nothing here", async () => {

@@ -7,6 +7,7 @@ import {
 } from "./jobApiBody";
 
 import type { DisclosedExchangeDocument } from "@jobs/configLoad";
+import type { JobConfigurationHandBack } from "@jobs/intentSchemas";
 
 /**
  * The browser's read of `GET /api/jobs/config`: the command-line configuration
@@ -59,7 +60,12 @@ function namesOf(value: unknown): Array<string> | null {
  * route, narrowed here against a body that is not it. */
 function documentOf(value: unknown): DisclosedExchangeDocument | null {
   if (!isRecord(value)) return null;
-  if (value.channel !== "sftp" && value.channel !== "filedrop") return null;
+  if (
+    value.channel !== "sftp" &&
+    value.channel !== "filedrop" &&
+    value.channel !== "webrtc"
+  )
+    return null;
   if (!isRecord(value.linkageTerms)) return null;
   return value as unknown as DisclosedExchangeDocument;
 }
@@ -104,6 +110,64 @@ export async function fetchMountedConfiguration(
     if (document === null || carriedThrough === null || warnings === null)
       return { kind: "unavailable" };
     return { kind: "opened", document, carriedThrough, warnings };
+  } catch {
+    return { kind: "unavailable" };
+  }
+}
+
+/** What one hand-back of the opened configuration answers. */
+export type ConfigurationHandBackAnswer =
+  /** The console wrote the settings into the `psilink.yaml` in the folder. */
+  | { kind: "written" }
+  /** The console refused, in its own words: what stopped it and what to do. */
+  | { kind: "refused"; error: string }
+  /** The request did not answer -- a network fault, or a non-2xx that is not
+   * a refusal. */
+  | { kind: "unavailable" };
+
+/** The refusal text when a 400 carried none. */
+const UNNAMED_HAND_BACK_REFUSAL =
+  "The console did not save your changes to psilink.yaml. Check the " +
+  "settings, then save again.";
+
+/**
+ * Hand the settings the authoring steps edit back into the configuration the
+ * operator opened (`PUT /api/jobs/config`), for a channel the console does not
+ * conduct. The console keeps the file's connection itself, so nothing of it is
+ * sent or read back.
+ */
+export async function saveOpenedConfiguration(
+  handBack: JobConfigurationHandBack,
+  fetchImpl: typeof fetch = fetch,
+): Promise<ConfigurationHandBackAnswer> {
+  try {
+    const response = await fetchImpl("/api/jobs/config", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(handBack),
+    });
+    if (response.status === 400) {
+      const body: unknown = await readJsonOrNull(
+        response,
+        MAX_JOB_STATUS_RESPONSE_BYTES,
+      );
+      const error = isRecord(body) ? body.error : undefined;
+      return {
+        kind: "refused",
+        error:
+          typeof error === "string" && error.length > 0
+            ? error
+            : UNNAMED_HAND_BACK_REFUSAL,
+      };
+    }
+    if (!response.ok) return { kind: "unavailable" };
+    const body: unknown = await readJsonOrNull(
+      response,
+      MAX_JOB_STATUS_RESPONSE_BYTES,
+    );
+    return isRecord(body) && body.written === true
+      ? { kind: "written" }
+      : { kind: "unavailable" };
   } catch {
     return { kind: "unavailable" };
   }

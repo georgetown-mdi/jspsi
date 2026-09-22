@@ -13,13 +13,17 @@ import {
   composeSftpConfigSpec,
 } from "./intentConfig";
 
+import { isJobChannel } from "./intentSchemas";
+
+import type { ExchangeSpec, SigningConfig } from "@psilink/core";
 import type {
+  JobConfigurationHandBack,
   JobCreateIntent,
   JobExchangeIntent,
+  JobHandBackSigning,
   JobSigningPaths,
   JobZeroSetupIntent,
 } from "./intentSchemas";
-import type { ExchangeSpec } from "@psilink/core";
 import type { JobSftpServerEntry } from "./sftpServer";
 
 /**
@@ -326,6 +330,89 @@ function heldTopLevelKeys(
       ([key]) => !COMPOSED_BLOCKS.has(snakeizeKey(key)),
     ),
   );
+}
+
+/**
+ * The configuration handed back into the mount for a document on a channel the
+ * console does not conduct: the settings the authoring steps edit, from
+ * `handBack`, written over the document the operator opened, through the same
+ * merge and writer as a run's template ({@link handoffConfigDocument}).
+ *
+ * Everything else comes from `mountedDocument` on the server: its `connection`
+ * whole and unchanged, credentials included, since the file stays on this
+ * machine and no browser reads it; the enforcement records no step edits; and
+ * every top-level key outside {@link COMPOSED_BLOCKS}. Handed back the values it
+ * opened with, a document is written as `serializeExchangeDocument` writes it.
+ *
+ * @throws {ZodError} if the merged document fails exchange-file validation.
+ */
+export function handBackConfigDocument(
+  handBack: JobConfigurationHandBack,
+  mountedDocument: ExchangeSpec,
+): string {
+  if (isJobChannel(mountedDocument.connection.channel))
+    throw new Error(
+      "a hand-back reached compose for a channel the console runs as a job",
+    );
+  const {
+    expectedPayloadColumns,
+    expectedPartnerDeduplicate,
+    disclosedPayloadColumns,
+    outboundPayloadConsent,
+  } = mountedDocument;
+  const {
+    metadata,
+    standardization,
+    includeOwnColumns,
+    csvDelimiter,
+    retentionDisposition,
+  } = handBack;
+  const signing = handBackSigning(handBack.signing, mountedDocument.signing);
+  const composed: ExchangeSpec = {
+    connection: mountedDocument.connection,
+    linkageTerms: handBack.linkageTerms,
+    ...(metadata !== undefined ? { metadata } : {}),
+    ...(standardization !== undefined ? { standardization } : {}),
+    ...(expectedPayloadColumns !== undefined ? { expectedPayloadColumns } : {}),
+    ...(outboundPayloadConsent !== undefined ? { outboundPayloadConsent } : {}),
+    ...(expectedPartnerDeduplicate !== undefined
+      ? { expectedPartnerDeduplicate }
+      : {}),
+    ...(disclosedPayloadColumns !== undefined
+      ? { disclosedPayloadColumns }
+      : {}),
+    ...(signing !== undefined ? { signing } : {}),
+    ...(retentionDisposition !== undefined ? { retentionDisposition } : {}),
+    ...(includeOwnColumns !== undefined ? { includeOwnColumns } : {}),
+    ...(csvDelimiter !== undefined ? { csvDelimiter } : {}),
+  };
+  return handoffConfigDocument(composed, mountedDocument);
+}
+
+/**
+ * The `signing` block a hand-back writes. A mode the file already states keeps
+ * its block unchanged; `certificate` keeps the file's identity and receipt
+ * paths, which are the operator's own, and names the placeholder identity where
+ * the file names none; `none` writes no block, the CLI's "sign nothing".
+ */
+function handBackSigning(
+  choice: JobHandBackSigning,
+  mounted: SigningConfig | undefined,
+): SigningConfig | undefined {
+  if (choice.mode === "certificate")
+    return {
+      mode: "certificate",
+      identityFile:
+        mounted?.identityFile ?? HANDOFF_SIGNING_IDENTITY_PLACEHOLDER,
+      ...(choice.partnerFingerprint !== undefined
+        ? { partnerFingerprint: choice.partnerFingerprint }
+        : {}),
+      ...(mounted?.receiptOutput !== undefined
+        ? { receiptOutput: mounted.receiptOutput }
+        : {}),
+    };
+  if (mounted !== undefined && mounted.mode === choice.mode) return mounted;
+  return choice.mode === "none" ? undefined : { mode: choice.mode };
 }
 
 /**

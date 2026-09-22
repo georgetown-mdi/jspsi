@@ -449,7 +449,11 @@ describe("the create gate and the two sentences that state it", () => {
   );
   if (DIVERGENCE_STATEMENT === undefined)
     throw new Error("the diverging draft above states no divergence");
+  const RUN_WITHHELD =
+    "The console cannot run this webrtc configuration: it conducts sftp and " +
+    "filedrop exchanges only.";
   const clearGates: InviterCreateGates = {
+    runWithheld: undefined,
     offlineBlocked: false,
     connectionIncomplete: false,
     splitDirectoryProblem: undefined,
@@ -470,6 +474,12 @@ describe("the create gate and the two sentences that state it", () => {
     statusLine: string;
     announcement: string;
   }> = [
+    {
+      gate: "runWithheld",
+      gates: { ...clearGates, runWithheld: RUN_WITHHELD },
+      statusLine: RUN_WITHHELD,
+      announcement: RUN_WITHHELD,
+    },
     {
       gate: "offlineBlocked",
       gates: { ...clearGates, offlineBlocked: true },
@@ -567,6 +577,18 @@ describe("the create gate and the two sentences that state it", () => {
     expect(many.announcement).toBe(
       "3 problems above must be resolved before you can create.",
     );
+  });
+
+  test("a withheld run speaks ahead of every other gate", () => {
+    const status = inviterCreateStatus({
+      ...clearGates,
+      runWithheld: RUN_WITHHELD,
+      offlineBlocked: true,
+      problemCount: 2,
+    });
+    expect(status.ready).toBe(false);
+    expect(status.statusLine).toBe(RUN_WITHHELD);
+    expect(status.announcement).toBe(RUN_WITHHELD);
   });
 
   test("offline speaks ahead of the settings no edit here can outrun", () => {

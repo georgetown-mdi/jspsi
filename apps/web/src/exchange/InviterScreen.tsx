@@ -1,4 +1,11 @@
-import { Fragment, useEffect, useMemo, useReducer, useRef } from "react";
+import {
+  Fragment,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from "react";
 
 import { Alert, VisuallyHidden } from "@mantine/core";
 import { IconAlertCircle } from "@tabler/icons-react";
@@ -119,8 +126,18 @@ import {
   DivergedCommitmentNotice,
   MountedConfigurationCard,
 } from "@console/MountedConfigurationCard";
+import {
+  configurationSaveShown,
+  configurationSaveState,
+  connectionSettingsHeldNotice,
+  runWithheldReason,
+} from "@console/mountedConfiguration";
+import {
+  fetchMountedConfiguration,
+  saveOpenedConfiguration,
+} from "@psi/jobClient/mountedConfigClient";
+import { configurationHandBack } from "@console/configurationHandBack";
 import { editorWithLoadedTerms } from "@console/loadedConfig";
-import { fetchMountedConfiguration } from "@psi/jobClient/mountedConfigClient";
 
 import {
   INVITER_SCREEN_INITIAL,
@@ -181,6 +198,7 @@ import type { JobInputSource } from "@psi/jobClient/serverJobExchangeDriver";
 import type { ProfiledJobInput } from "@psi/jobClient/workInputClient";
 
 import type { ColumnSamples } from "@psi/columnSamples";
+import type { ConfigurationSaveState } from "@console/mountedConfiguration";
 import type { DisclosureChoice } from "@psi/metadataEditing";
 import type { InviterSpineStep } from "./inviterScreenModel";
 import type { ManageOfferChoices } from "./manageOfferModel";
@@ -400,6 +418,43 @@ export function InviterScreen() {
       type: "mounted-configuration-read",
       answer: await fetchMountedConfiguration(),
     });
+  }
+
+  // Where saving the opened configuration back to the folder stands. Cleared
+  // when a configuration is opened or closed, since a save names the file
+  // that was open.
+  const [configurationSave, setConfigurationSave] =
+    useState<ConfigurationSaveState>({ status: "idle" });
+  useEffect(() => {
+    setConfigurationSave({ status: "idle" });
+  }, [mountedConfiguration.status]);
+
+  // The hand-back the steps hold now, where the opened configuration is one
+  // the console saves back rather than runs: what a save sends, and what a
+  // written save is compared against to say whether it still holds.
+  const saveBackOffered = runWithheldReason(mountedConfiguration) !== undefined;
+  const currentHandBack = useMemo(() => {
+    if (!saveBackOffered || editor === undefined) return undefined;
+    const validation = reviewValidation(editor);
+    if (!validation.canGenerate || validation.terms === undefined)
+      return undefined;
+    return configurationHandBack({
+      editor,
+      terms: validation.terms,
+      csvDelimiter,
+      receipts,
+    });
+  }, [saveBackOffered, editor, csvDelimiter, receipts]);
+
+  // Write the settings these steps edit into the opened configuration's file,
+  // for a channel the console does not conduct: the console keeps the file's
+  // connection itself, so the save sends only what the steps hold.
+  async function saveConfiguration(): Promise<void> {
+    if (currentHandBack === undefined) return;
+    const sent = currentHandBack;
+    setConfigurationSave({ status: "saving" });
+    const answer = await saveOpenedConfiguration(sent);
+    setConfigurationSave(configurationSaveState(answer, sent));
   }
 
   // Close the open configuration: it stops being an input here, so the draft
@@ -1494,6 +1549,15 @@ export function InviterScreen() {
                 sftpConnection={sftpConnection}
                 loadedSftpForm={loadedSftpForm}
                 sftpSaveFilePreferred={sftpSaveFilePreferred}
+                runWithheld={runWithheldReason(mountedConfiguration)}
+                connectionSettingsHeld={connectionSettingsHeldNotice(
+                  mountedConfiguration,
+                )}
+                configurationSave={configurationSaveShown(
+                  configurationSave,
+                  currentHandBack,
+                )}
+                onSaveConfiguration={() => void saveConfiguration()}
                 rendezvous={rendezvous}
                 exchangeFiles={exchangeFiles}
                 onExchangeFiles={(draft) =>

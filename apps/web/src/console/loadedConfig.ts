@@ -104,7 +104,9 @@ export interface LoadedEnforcementRecords {
 
 /** Everything a loaded configuration puts into the console's authoring state. */
 export interface LoadedAuthoringState {
-  channel: "sftp" | "filedrop";
+  /** The channel the file states, a webrtc one included: the console opens it
+   * for editing and withholds its run. */
+  channel: DisclosedExchangeDocument["channel"];
   /** The connection form, pre-filled except for the credential. Absent for a
    * filedrop configuration, which names no host. */
   sftpForm?: SftpConnectionFormValues;

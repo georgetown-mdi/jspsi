@@ -413,17 +413,18 @@ export interface JobSigningChoice {
   identityLocation?: JobSigningIdentityLocation;
 }
 
+const partnerFingerprintSchema = z
+  .string()
+  .regex(
+    FINGERPRINT_REGEX,
+    "partnerFingerprint must be an unpadded base64url SHA-256 digest (43 " +
+      "characters), as 'psilink fingerprint' prints it",
+  );
+
 const jobSigningChoiceSchema: z.ZodType<JobSigningChoice> = z
   .object({
     mode: z.enum(["none", "certificate"]),
-    partnerFingerprint: z
-      .string()
-      .regex(
-        FINGERPRINT_REGEX,
-        "partnerFingerprint must be an unpadded base64url SHA-256 digest (43 " +
-          "characters), as 'psilink fingerprint' prints it",
-      )
-      .optional(),
+    partnerFingerprint: partnerFingerprintSchema.optional(),
     identityLocation: jobSigningIdentityLocationSchema.optional(),
   })
   .strict()
@@ -849,6 +850,22 @@ export type JobZeroSetupIntent =
  */
 export type JobCreateIntent = JobExchangeIntent | JobZeroSetupIntent;
 
+/** The channel a console job conducts, which every job intent discriminates on. */
+export type JobChannel = JobCreateIntent["channel"];
+
+/** The channels a console job conducts, as the configuration file spells them. */
+const JOB_CHANNELS: ReadonlySet<string> = new Set<JobChannel>([
+  "sftp",
+  "filedrop",
+]);
+
+/** Whether the console conducts an exchange over `channel`: an allowlist, so a
+ * channel a later schema version adds is one the console does not run until it
+ * is named here. */
+export function isJobChannel(channel: string): channel is JobChannel {
+  return JOB_CHANNELS.has(channel);
+}
+
 /**
  * Upper bound on the `inputCsv` string length, anchored to the browser intake's
  * own file-size gate ({@link MAX_CSV_FILE_BYTES}, 100 MiB): a CSV that passed
@@ -1178,7 +1195,7 @@ function withDefaultExchangeMode(raw: unknown): unknown {
  * `jobSigningChoiceSchema`, which sees only the signing block.
  */
 function certificateModeNamesThisParty(intent: {
-  signing?: JobSigningChoice;
+  signing?: { mode: string };
   linkageTerms: LinkageTerms;
 }): boolean {
   if (intent.signing?.mode !== "certificate") return true;
@@ -1330,6 +1347,76 @@ export const jobCreateIntentSchema: z.ZodType<JobCreateIntent> = z
       intent.mode !== "exchange" || certificateModeNamesThisParty(intent),
     UNNAMED_CERTIFICATE_PARTY_ISSUE,
   );
+
+/**
+ * The receipt-signing choice a hand-back states: the review step's mode, the
+ * one the file states (`session-derived` included) when the operator left it,
+ * and the partner pin under `certificate`. No identity location: the file keeps
+ * the identity path it names, since the console's own paths are not the
+ * operator's.
+ */
+export interface JobHandBackSigning {
+  mode: SigningConfig["mode"];
+  partnerFingerprint?: string;
+}
+
+/**
+ * The settings the console's authoring steps edit, handed back into the
+ * configuration the operator opened on a channel the console does not conduct
+ * (`PUT /api/jobs/config`). The document's `connection`, its enforcement
+ * records, and every setting no step edits are taken from the mounted file on
+ * the server, so none of them is representable here.
+ */
+export interface JobConfigurationHandBack {
+  linkageTerms: LinkageTerms;
+  metadata?: Metadata;
+  standardization?: Standardization;
+  includeOwnColumns?: OwnColumnSelection;
+  csvDelimiter?: string;
+  signing: JobHandBackSigning;
+  retentionDisposition?: string;
+}
+
+const jobHandBackSigningSchema: z.ZodType<JobHandBackSigning> = z
+  .strictObject({
+    mode: z.enum(["none", "session-derived", "certificate"]),
+    partnerFingerprint: partnerFingerprintSchema.optional(),
+  })
+  .refine(
+    (signing) =>
+      signing.mode === "certificate" ||
+      signing.partnerFingerprint === undefined,
+    {
+      message:
+        "partnerFingerprint is only admissible with signing mode 'certificate'",
+      path: ["partnerFingerprint"],
+    },
+  );
+
+/**
+ * Zod schema for a {@link JobConfigurationHandBack}. `.strict()`, so no
+ * `connection`, path, host, or credential field is representable; every field
+ * is bounded exactly as on the job intent.
+ */
+export const jobConfigurationHandBackSchema: z.ZodType<JobConfigurationHandBack> =
+  z
+    .strictObject({
+      linkageTerms: jobExchangeIntentCommonFields.linkageTerms,
+      metadata: jobExchangeIntentCommonFields.metadata,
+      standardization: jobExchangeIntentCommonFields.standardization,
+      includeOwnColumns: jobExchangeIntentCommonFields.includeOwnColumns,
+      csvDelimiter: jobExchangeIntentCommonFields.csvDelimiter,
+      signing: jobHandBackSigningSchema,
+      retentionDisposition: jobExchangeIntentCommonFields.retentionDisposition,
+    })
+    .refine(certificateModeNamesThisParty, UNNAMED_CERTIFICATE_PARTY_ISSUE);
+
+/**
+ * The copy of the mounted `psilink.yaml` a save of an opened configuration keeps
+ * beside it, holding the file as it was before that save (`PUT
+ * /api/jobs/config`). Each save replaces the one before.
+ */
+export const PREVIOUS_CONFIGURATION_FILE_NAME = "psilink.yaml.previous";
 
 /**
  * The fixed, server-chosen file names inside a job workdir. The client never

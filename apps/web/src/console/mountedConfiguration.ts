@@ -1,10 +1,19 @@
+import {
+  PREVIOUS_CONFIGURATION_FILE_NAME,
+  isJobChannel,
+} from "@jobs/intentSchemas";
+
 import { authoringStateFromDocument } from "./loadedConfig";
 
+import type {
+  ConfigurationHandBackAnswer,
+  MountedConfigurationAnswer,
+} from "@psi/jobClient/mountedConfigClient";
+import type { JobChannel, JobConfigurationHandBack } from "@jobs/intentSchemas";
 import type {
   LoadedAuthoringState,
   LoadedEnforcementRecords,
 } from "./loadedConfig";
-import type { MountedConfigurationAnswer } from "@psi/jobClient/mountedConfigClient";
 
 /**
  * The console's offer to open the command-line configuration sitting in its
@@ -23,10 +32,18 @@ import type { MountedConfigurationAnswer } from "@psi/jobClient/mountedConfigCli
  * intent the run submits, so the configuration composed for that run states it
  * exactly as the file did (docs/spec/EXCHANGE_FILE.md, "The records that must
  * survive"). Having no control, each one is named in the carry-through notice.
+ *
+ * A configuration on a channel the console does not conduct opens all the same:
+ * the steps below start from it and save back into its file, and the run is
+ * withheld by the one derived field {@link runWithheldReason} reads, which
+ * names the channel.
  */
 
 /** The channel a configuration the console can open runs over. */
 export type LoadedChannel = LoadedAuthoringState["channel"];
+
+/** A channel the console opens a configuration on but does not conduct. */
+type UnconductedChannel = Exclude<LoadedChannel, JobChannel>;
 
 /** What the load control shows. */
 export type MountedConfigurationState =
@@ -45,12 +62,16 @@ export type MountedConfigurationState =
    * supply and `notCovered` the settings whose own column set does not reach
    * every column that file has, both settled once the held terms reach it;
    * `pendingOutboundConsent` is the consent record the file states as pending,
-   * which no run that shares results with the partner gets past. */
+   * which no run that shares results with the partner gets past.
+   * `notConducted` is the file's channel where the console conducts no
+   * exchange over it at all, derived once at the read: it withholds the run
+   * and replaces every notice about the run with the one naming the channel. */
   | {
       status: "opened";
       carriedThrough: Array<string>;
       warnings: Array<string>;
-      transportUnavailable?: LoadedChannel;
+      notConducted?: UnconductedChannel;
+      transportUnavailable?: JobChannel;
       notApplied?: Array<string>;
       notCovered?: Array<string>;
       pendingOutboundConsent?: boolean;
@@ -99,6 +120,123 @@ export const CONFIGURATION_OPENED =
   "Opened the configuration in your folder. Every step below starts from it, " +
   "and you can change anything before you run the exchange.";
 
+/** What the control says once a configuration the console cannot run is open. */
+export const CONFIGURATION_OPENED_FOR_REVIEW =
+  "Opened the configuration in your folder. Every step below starts from it, " +
+  "and you can change anything before you save it back.";
+
+/** The line under the open control for an opened state. */
+export function configurationOpenedMessage(
+  state: MountedConfigurationState,
+): string {
+  return state.status === "opened" && state.notConducted !== undefined
+    ? CONFIGURATION_OPENED_FOR_REVIEW
+    : CONFIGURATION_OPENED;
+}
+
+/** What the operator is told beside the load about a configuration on a channel
+ * the console does not conduct, naming the channel as the file spells it. */
+export function channelNotConductedNotice(channel: UnconductedChannel): string {
+  return (
+    `This configuration runs over ${channel}, and the console conducts sftp ` +
+    "and filedrop exchanges only. Change its settings in the steps below, " +
+    `then save them to psilink.yaml on the review step: its ${channel} ` +
+    "connection is kept exactly as your file states it. Run the saved file " +
+    `with psilink on the command line, which conducts ${channel} exchanges.`
+  );
+}
+
+/**
+ * Why the review step withholds its run control, or undefined where nothing
+ * open withholds it: a configuration on a channel the console does not
+ * conduct. Read off the state the load derived once, so no run starts and then
+ * fails on the channel.
+ */
+export function runWithheldReason(
+  state: MountedConfigurationState,
+): string | undefined {
+  if (state.status !== "opened" || state.notConducted === undefined)
+    return undefined;
+  return (
+    `The console cannot run this ${state.notConducted} configuration: it ` +
+    "conducts sftp and filedrop exchanges only. Save your changes to " +
+    "psilink.yaml, then run it with psilink on the command line."
+  );
+}
+
+/**
+ * The sentence standing in for the cards that edit an opened configuration's
+ * connection block -- connection tuning and file handling -- where the console
+ * keeps that block exactly as the file states it, so an edit there would reach
+ * nothing. Undefined where the cards edit the run's connection.
+ */
+export function connectionSettingsHeldNotice(
+  state: MountedConfigurationState,
+): string | undefined {
+  if (state.status !== "opened" || state.notConducted === undefined)
+    return undefined;
+  return (
+    `This configuration's ${state.notConducted} connection, its tuning and ` +
+    "file handling included, is saved exactly as your file states it. Edit " +
+    "it in psilink.yaml on the command line."
+  );
+}
+
+/** Where saving the opened configuration back to the folder stands. A save
+ * that was written holds the hand-back it sent, as JSON, so whether the steps
+ * still hold what was saved is derived by comparison
+ * ({@link configurationSaveShown}). */
+export type ConfigurationSaveState =
+  | { status: "idle" }
+  | { status: "saving" }
+  | { status: "saved"; handBack: string }
+  | { status: "failed"; message: string };
+
+/** What the review step says once the settings are written to the folder. */
+export const CONFIGURATION_SAVED =
+  "Saved your changes to psilink.yaml in your working folder, with its " +
+  "connection as your file stated it. The file as it was before this save " +
+  `is kept beside it as ${PREVIOUS_CONFIGURATION_FILE_NAME}. Run it with ` +
+  "psilink on the command line.";
+
+/** What the review step says when the save did not answer. */
+export const CONFIGURATION_SAVE_UNAVAILABLE =
+  "The console did not answer, so your changes were not saved to " +
+  "psilink.yaml. Save again.";
+
+/** The save state one answer from the console leaves for `sent`, the hand-back
+ * the save sent. */
+export function configurationSaveState(
+  answer: ConfigurationHandBackAnswer,
+  sent: JobConfigurationHandBack,
+): ConfigurationSaveState {
+  switch (answer.kind) {
+    case "written":
+      return { status: "saved", handBack: JSON.stringify(sent) };
+    case "refused":
+      return { status: "failed", message: answer.error };
+    case "unavailable":
+      return { status: "failed", message: CONFIGURATION_SAVE_UNAVAILABLE };
+  }
+}
+
+/**
+ * The save state the review step shows: a written save is shown as saved only
+ * while `current`, the hand-back the steps hold now, is the one it sent, and
+ * as idle once the steps hold anything else.
+ */
+export function configurationSaveShown(
+  save: ConfigurationSaveState,
+  current: JobConfigurationHandBack | undefined,
+): ConfigurationSaveState {
+  if (
+    save.status === "saved" &&
+    (current === undefined || JSON.stringify(current) !== save.handBack)
+  )
+    return { status: "idle" };
+  return save;
+}
+
 /**
  * The records this flow holds without an editor, as the file spells them beside
  * the field the load reads them into. An invitation authored here states none of
@@ -118,7 +256,7 @@ const RECORDS_WITH_NO_CONTROL: ReadonlyArray<
  * has nothing to run it over: the review step keeps the transport it already
  * had, and each case names what would make the file's own channel runnable
  * here -- a mounted shared folder, or an authored SFTP connection. */
-const TRANSPORT_UNAVAILABLE_NOTICE: Record<LoadedChannel, string> = {
+const TRANSPORT_UNAVAILABLE_NOTICE: Record<JobChannel, string> = {
   sftp:
     "This configuration runs over SFTP, and this console has no SFTP " +
     "connection to run it with. Author one in the connection step below, or " +
@@ -281,21 +419,45 @@ export const PENDING_OUTBOUND_CONSENT_WARNING =
  * are not the columns a commitment the file states holds: core enforces the
  * commitment against the run's own disclosed set when the run starts, so the
  * refusal is already decided and is met here rather than as a failed run.
+ * `conductedHere` false is a configuration the console only saves back, whose
+ * refusal is met by the command-line run of the saved file instead.
  */
 export function divergedCommitmentWarning(
   fields: ReadonlyArray<string>,
+  conductedHere = true,
 ): string | undefined {
   if (fields.length === 0) return undefined;
   const one = fields.length === 1;
+  const refusal = conductedHere
+    ? ", so a run started here is refused. Change the columns on the next " +
+      "step to match " +
+      (one ? "it" : "them") +
+      ", or close this configuration."
+    : ", so psilink on the command line refuses to run the file you save " +
+      "here. Change the columns on the next step to match " +
+      (one ? "it" : "them") +
+      ", or invite your partner again so a new invitation states these columns.";
   return (
     "The columns this exchange would send to your partner are not the " +
     "columns this configuration's " +
     nameList(fields) +
     (one ? " states" : " state") +
-    ", so a run started here is refused. Change the columns on the next step " +
-    "to match " +
-    (one ? "it" : "them") +
-    ", or close this configuration."
+    refusal
+  );
+}
+
+/** The diverged-commitment warning for the configuration open in `state`, in
+ * the variant for whether the console conducts it. The divergence is a
+ * property of the document the steps hold, so it is derived on every channel:
+ * a save hands the file's commitments back unchanged beside the edited
+ * columns. */
+export function divergedCommitmentNotice(
+  state: MountedConfigurationState,
+  run: RunDisclosure | undefined,
+): string | undefined {
+  return divergedCommitmentWarning(
+    divergedCommitments(state, run),
+    state.status !== "opened" || state.notConducted === undefined,
   );
 }
 
@@ -393,12 +555,22 @@ export function mountedConfigurationOfferable(
  * has to supply, then what their input file could not supply, then a consent
  * record the file states as pending, and last a commitment the run's own
  * disclosed set no longer matches. `run` is what that last one is read from,
- * absent until a file is read. */
+ * absent until a file is read. A configuration the console does not conduct
+ * puts the notice naming its channel in place of every one about a run here,
+ * and keeps the two about what the steps below hold and the diverged
+ * commitment, which the command-line run of the saved file meets. */
 export function mountedConfigurationNotices(
   state: MountedConfigurationState,
   run?: RunDisclosure,
 ): Array<string> {
   if (state.status !== "opened") return [];
+  if (state.notConducted !== undefined)
+    return [
+      channelNotConductedNotice(state.notConducted),
+      termsNotAppliedNotice(state.notApplied ?? []),
+      columnsNotCoveredNotice(state.notCovered ?? []),
+      divergedCommitmentNotice(state, run),
+    ].filter((notice): notice is string => notice !== undefined);
   return [
     state.transportUnavailable === undefined
       ? undefined
@@ -410,7 +582,7 @@ export function mountedConfigurationNotices(
     state.pendingOutboundConsent === true
       ? PENDING_OUTBOUND_CONSENT_WARNING
       : undefined,
-    divergedCommitmentWarning(divergedCommitments(state, run)),
+    divergedCommitmentNotice(state, run),
   ].filter((notice): notice is string => notice !== undefined);
 }
 
@@ -420,7 +592,7 @@ export function mountedConfigurationNotices(
  * transport and so withholds none. */
 export function withUnavailableTransport(
   state: MountedConfigurationState,
-  channel: LoadedChannel,
+  channel: JobChannel,
 ): MountedConfigurationState {
   if (state.status !== "opened") return state;
   return { ...state, transportUnavailable: channel };
@@ -472,6 +644,9 @@ export function mountedConfigurationRead(answer: MountedConfigurationAnswer): {
             ]),
           ].sort(),
           warnings: answer.warnings,
+          ...(isJobChannel(loaded.channel)
+            ? {}
+            : { notConducted: loaded.channel }),
           ...(loaded.records.outboundPayloadConsent?.status === "pending"
             ? { pendingOutboundConsent: true }
             : {}),

@@ -4,24 +4,38 @@ import { getDefaultLinkageTerms } from "@psilink/core";
 
 import {
   CONFIGURATION_LOAD_SEALED,
+  CONFIGURATION_OPENED,
+  CONFIGURATION_OPENED_FOR_REVIEW,
   CONFIGURATION_READ_UNAVAILABLE,
+  CONFIGURATION_SAVED,
+  CONFIGURATION_SAVE_UNAVAILABLE,
   MOUNTED_CONFIGURATION_UNREAD,
   NO_CONFIGURATION_IN_FOLDER,
   PENDING_OUTBOUND_CONSENT_WARNING,
   carriedThroughNotice,
+  channelNotConductedNotice,
   columnsNotCoveredNotice,
+  configurationOpenedMessage,
+  configurationSaveShown,
+  configurationSaveState,
+  connectionSettingsHeldNotice,
   credentialWarningNotice,
+  divergedCommitmentNotice,
   divergedCommitmentWarning,
   divergedCommitments,
   mountedConfigurationNotices,
   mountedConfigurationOfferable,
   mountedConfigurationRead,
+  runWithheldReason,
   termsNotAppliedNotice,
   withTermsNotApplied,
   withUnavailableTransport,
 } from "@console/mountedConfiguration";
 
+import { PREVIOUS_CONFIGURATION_FILE_NAME } from "@jobs/intentSchemas";
+
 import type { DisclosedExchangeDocument } from "@jobs/configLoad";
+import type { JobConfigurationHandBack } from "@jobs/intentSchemas";
 import type { MountedConfigurationAnswer } from "@psi/jobClient/mountedConfigClient";
 
 // The load offer as a value: which of the three states each answer lands in, and
@@ -29,6 +43,13 @@ import type { MountedConfigurationAnswer } from "@psi/jobClient/mountedConfigCli
 // -- a setting's value can be a credential, which is why the console's own route
 // names rather than sends both lists -- so the sweep below drives a document whose
 // every value is distinctive and refuses to find one in any notice.
+
+/** A hand-back a save sends, for the save states below. */
+const HAND_BACK: JobConfigurationHandBack = {
+  linkageTerms: getDefaultLinkageTerms("County Health"),
+  csvDelimiter: "|",
+  signing: { mode: "none" },
+};
 
 const FINGERPRINT = "SHA256:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBA";
 
@@ -72,13 +93,12 @@ describe("each answer lands the control in one state", () => {
   });
 
   test("a refusal shows the console's own text and fills nothing", () => {
-    // The channel refusal the route raises for a webrtc document: it reaches the
-    // operator whole, and no step is filled from a document the console will not
-    // run.
+    // A refusal the route raises reaches the operator whole, and no step is
+    // filled from a document the console would not open.
     const error =
-      "This configuration runs over webrtc. The console conducts sftp and " +
-      "shared-folder exchanges only, so it cannot open this one. Run it with " +
-      "psilink on the command line instead.";
+      "The psilink.yaml in your working folder is not a valid psilink " +
+      "configuration. Fix this setting in the file, then open it again: " +
+      "connection.server.port.";
     const read = mountedConfigurationRead({ kind: "refused", error });
     expect(read.state).toEqual({ status: "refused", error });
     expect(read.loaded).toBeUndefined();
@@ -99,6 +119,205 @@ describe("each answer lands the control in one state", () => {
     });
     expect(read.loaded?.channel).toBe("sftp");
     expect(read.loaded?.sftpForm?.host).toBe("sftp.partner.example");
+  });
+});
+
+describe("a configuration on a channel the console does not conduct", () => {
+  function openedWebrtc(
+    overrides: Partial<DisclosedExchangeDocument> = {},
+    carriedThrough: Array<string> = ["authentication.token_max_age_days"],
+  ): MountedConfigurationAnswer {
+    return {
+      kind: "opened",
+      document: {
+        channel: "webrtc",
+        linkageTerms: getDefaultLinkageTerms("County Health"),
+        ...overrides,
+      },
+      carriedThrough,
+      warnings: [],
+    };
+  }
+
+  test("opens with its channel named on the state, and every step seeded", () => {
+    const read = mountedConfigurationRead(
+      openedWebrtc({ csvDelimiter: "|", retentionDisposition: "Filed." }),
+    );
+    expect(read.state).toEqual({
+      status: "opened",
+      carriedThrough: ["authentication.token_max_age_days"],
+      warnings: [],
+      notConducted: "webrtc",
+    });
+    expect(read.loaded?.channel).toBe("webrtc");
+    expect(read.loaded?.sftpForm).toBeUndefined();
+    expect(read.loaded?.csvDelimiter.option).toBe("|");
+    expect(read.loaded?.receipts.retentionDisposition).toBe("Filed.");
+  });
+
+  test("withholds the run, naming the channel and what the console runs", () => {
+    const { state } = mountedConfigurationRead(openedWebrtc());
+    const reason = runWithheldReason(state);
+    expect(reason).toContain("webrtc");
+    expect(reason).toContain("sftp and filedrop");
+    expect(reason).toMatch(/psilink on the command line/);
+    expect(reason).toMatch(/Save your changes to psilink\.yaml/);
+  });
+
+  test("a channel the console conducts withholds nothing", () => {
+    expect(runWithheldReason(mountedConfigurationRead(opened()).state)).toBe(
+      undefined,
+    );
+    expect(
+      runWithheldReason(
+        mountedConfigurationRead(opened({ channel: "filedrop" })).state,
+      ),
+    ).toBeUndefined();
+    expect(runWithheldReason({ status: "unread" })).toBeUndefined();
+    expect(
+      runWithheldReason({ status: "refused", error: "no" }),
+    ).toBeUndefined();
+  });
+
+  test("the channel notice stands in place of every notice about a run", () => {
+    const { state } = mountedConfigurationRead(
+      openedWebrtc({
+        outboundPayloadConsent: { status: "pending" },
+        disclosedPayloadColumns: ["own_notes"],
+      }),
+    );
+    const notices = mountedConfigurationNotices(state, {
+      disclosedColumns: ["own_notes"],
+      sharesWithPartner: true,
+      records: { disclosedPayloadColumns: ["own_notes"] },
+    });
+    expect(notices).toEqual([channelNotConductedNotice("webrtc")]);
+    expect(notices[0]).toContain("runs over webrtc");
+    expect(notices[0]).toMatch(/save them to psilink\.yaml/);
+    expect(notices[0]).toMatch(/connection is kept exactly as your file/);
+  });
+
+  test("a draft that changes the disclosed columns is reported", () => {
+    const records = {
+      disclosedPayloadColumns: ["own_notes"],
+      outboundPayloadConsent: {
+        status: "confirmed" as const,
+        columns: ["own_notes"],
+      },
+    };
+    const { state } = mountedConfigurationRead(openedWebrtc(records));
+    const edited = {
+      disclosedColumns: ["own_notes", "dob"],
+      sharesWithPartner: true,
+      records,
+    };
+    expect(divergedCommitments(state, edited)).toEqual([
+      "disclosed_payload_columns",
+      "outbound_payload_consent",
+    ]);
+    const notice = divergedCommitmentNotice(state, edited);
+    expect(notice).toContain("disclosed_payload_columns");
+    expect(notice).toMatch(/psilink on the command line refuses to run/);
+    expect(notice).toMatch(/invite your partner again/);
+    expect(notice).not.toMatch(/a run started here/);
+    expect(mountedConfigurationNotices(state, edited)).toEqual([
+      channelNotConductedNotice("webrtc"),
+      notice,
+    ]);
+  });
+
+  test("an unchanged draft reports no diverged commitment", () => {
+    const records = { disclosedPayloadColumns: ["own_notes"] };
+    const { state } = mountedConfigurationRead(openedWebrtc(records));
+    const unchanged = {
+      disclosedColumns: ["own_notes"],
+      sharesWithPartner: true,
+      records,
+    };
+    expect(divergedCommitments(state, unchanged)).toEqual([]);
+    expect(divergedCommitmentNotice(state, unchanged)).toBeUndefined();
+  });
+
+  test("a save leaves the state its answer names", () => {
+    expect(configurationSaveState({ kind: "written" }, HAND_BACK)).toEqual({
+      status: "saved",
+      handBack: JSON.stringify(HAND_BACK),
+    });
+    expect(
+      configurationSaveState(
+        { kind: "refused", error: "Change them." },
+        HAND_BACK,
+      ),
+    ).toEqual({ status: "failed", message: "Change them." });
+    expect(configurationSaveState({ kind: "unavailable" }, HAND_BACK)).toEqual({
+      status: "failed",
+      message: CONFIGURATION_SAVE_UNAVAILABLE,
+    });
+  });
+
+  test("a written save is shown while the steps hold what it sent", () => {
+    const saved = configurationSaveState({ kind: "written" }, HAND_BACK);
+    expect(configurationSaveShown(saved, { ...HAND_BACK })).toEqual(saved);
+  });
+
+  test("a written save is not shown once the steps hold anything else", () => {
+    const saved = configurationSaveState({ kind: "written" }, HAND_BACK);
+    expect(
+      configurationSaveShown(saved, { ...HAND_BACK, csvDelimiter: ";" }),
+    ).toEqual({ status: "idle" });
+    expect(configurationSaveShown(saved, undefined)).toEqual({
+      status: "idle",
+    });
+    const failed = configurationSaveState({ kind: "unavailable" }, HAND_BACK);
+    expect(
+      configurationSaveShown(failed, { ...HAND_BACK, csvDelimiter: ";" }),
+    ).toEqual(failed);
+  });
+
+  test("the saved message names the copy of the file kept beside it", () => {
+    expect(CONFIGURATION_SAVED).toContain(PREVIOUS_CONFIGURATION_FILE_NAME);
+  });
+
+  test("its connection settings are held from the file, with a sentence", () => {
+    const notice = connectionSettingsHeldNotice(
+      mountedConfigurationRead(openedWebrtc()).state,
+    );
+    expect(notice).toContain("webrtc connection");
+    expect(notice).toMatch(/exactly as your file states it/);
+    expect(notice).toMatch(/on the command line/);
+  });
+
+  test("a channel the console conducts holds no connection setting", () => {
+    expect(
+      connectionSettingsHeldNotice(mountedConfigurationRead(opened()).state),
+    ).toBeUndefined();
+    expect(
+      connectionSettingsHeldNotice(
+        mountedConfigurationRead(opened({ channel: "filedrop" })).state,
+      ),
+    ).toBeUndefined();
+    expect(connectionSettingsHeldNotice({ status: "unread" })).toBeUndefined();
+  });
+
+  test("what the input file cannot supply is still named after it", () => {
+    const { state } = mountedConfigurationRead(openedWebrtc());
+    const notices = mountedConfigurationNotices(
+      withTermsNotApplied(state, ["metadata"], ["metadata"]),
+    );
+    expect(notices).toHaveLength(3);
+    expect(notices[0]).toContain("webrtc");
+    expect(notices[1]).toContain("metadata");
+  });
+
+  test("the control says the configuration is open for review", () => {
+    expect(
+      configurationOpenedMessage(
+        mountedConfigurationRead(openedWebrtc()).state,
+      ),
+    ).toBe(CONFIGURATION_OPENED_FOR_REVIEW);
+    expect(
+      configurationOpenedMessage(mountedConfigurationRead(opened()).state),
+    ).toBe(CONFIGURATION_OPENED);
   });
 });
 
