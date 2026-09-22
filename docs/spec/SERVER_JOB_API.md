@@ -84,6 +84,7 @@ The loopback Host-allowlist closes DNS rebinding, a standard technique the Origi
 | `GET` | `/api/jobs/inputs/profile` | `200` profile JSON | Query parameter `name` (required): a single admissible path segment (the same shape rule the listing above applies), resolved against the work-input directory; absent or inadmissible is a `404`. Query parameter `delimiter` (optional): the field delimiter the pass reads the file by, held to the create intent's own `csvDelimiter` grade -- absent reads commas, and a value the grade refuses is a bare `400` rather than a read by a delimiter nobody chose. The columns this reports become the party's linkage terms, so it is the same choice the composed config states. The body is `name`, `sizeBytes`, `modifiedAt`, `rowCount`, `columns`, an optional inferred `dateInputFormat`, and `columnSamples` -- one entry per column, every column in the header, each with the first 5 (`PREVIEW_SAMPLE_SIZE`) non-empty values found for that column scanning rows from the top of the file, held verbatim as the input's own raw cell text: profiling a file discloses sampled real content across every column, not only its shape. `404` also when the work-input directory does not resolve or the name resolves to no regular file. `400` `{ "error": "<code>" }` (`too_large`, `not_a_csv`, or `parse_failed`) when the streaming parse cannot profile the file on one of those closed grounds, or a bare `400` on any other profiling fault; the code is a closed set that never includes the underlying path or a cell's bytes. |
 | `POST` | `/api/jobs/inputs/coverage` | `200` `{ "rates": [ ... ] }` | Body `{ "name", "standardization", "csvDelimiter"? }`, read under a 1 MiB cap (`MAX_COVERAGE_BODY_BYTES`): `name` is 1-255 characters and must resolve to an admissible regular file in the work-input directory; `csvDelimiter` takes the create intent's own grade, so the sweep reads the file the way the run will and an absent one reads commas; `standardization` is core's `StandardizationSchema` plus this route's own bounds (the transformation and step counts, `output`/`input` length, and a per-step compiled-regex source-length cap for the functions that compile one, since RE2JS's compile cost lands on this event loop even though its execution is linear-time). Sweeps the named input's per-field non-empty coverage under that standardization in a single streaming pass. `413` when the body exceeds the cap. `400` on unparseable JSON, a schema violation (an unknown field included, since the schema is `.strict()`, or an over-length compiled pattern), or any other sweep fault. `404` when the work-input directory does not resolve or `name` is inadmissible or unknown. `499` when the client disconnects or supersedes the sweep before it completes (`request.signal` aborts the in-progress pass; no client reads this response). |
 | `GET` | `/api/jobs/mounts/secrets/entries` | `200` `{ "configured", "readable", "entries" }` | List the mounted secrets directory the operator browses for a credential file, and for the signing identity's location (see [The secrets mount and browsing](#the-secrets-mount-and-browsing)). |
+| `GET` | `/api/jobs/config` | `200` `{ "configured", "present", "document"?, "carriedThrough", "warnings" }` | The command-line configuration mounted at `<dataRoot>/psilink.yaml`, projected to the settings the authoring forms edit. `present: false` when the mount holds none. `400` `{ "error" }` -- naming settings as the FILE spells them, never a value -- for a document off the shared schema, one on a channel the console does not conduct, or one stating a shared secret (see [Loading a configuration from the mount](#loading-a-configuration-from-the-mount)). |
 
 ### Job id and the traversal guard
 
@@ -376,7 +377,7 @@ The connection is frozen once authored: changing the host or pin means re-author
 
 ### `GET /api/jobs/sftp`
 
-Returns the authored connection as an explicitly mapped, credential-free projection: `{ "configured": false }` when none is authored, else `{ "configured": true, "host": "...", "port"?: <int>, "path"?: "...", "inboundPath"?: "...", "outboundPath"?: "...", "credentialWarnings": [ "..." ] }` and nothing else -- no username, no credential references (which would reveal the secret-mount filesystem layout), no fingerprint. The remote directory appears in whichever single form the connection holds; the browser reads a half pair, or a pair beside `path`, as no connection at all rather than half a layout. `credentialWarnings` holds the non-blocking credential-containment warnings the credential rule above produces (empty when every credential resolves outside the excluded directories), so a console reload re-surfaces them. An enabled API with no connection serves `200 { "configured": false }`, the same shape family and gate as `GET /api/jobs/rendezvous` (a `404` there means the API is disabled). The console web build uses this to gate the run-SFTP-here behavior and to author an invitation's sftp endpoint from the locator. The static `sftp` segment cannot be captured as a job id: ids are validated as canonical v4 UUIDs before any use, which `sftp` is not.
+Returns the authored connection as an explicitly mapped, credential-free projection: `{ "configured": false }` when none is authored, else `{ "configured": true, "host": "...", "port"?: <int>, "path"?: "...", "inboundPath"?: "...", "outboundPath"?: "...", "credentialWarnings": [ "..." ] }` and nothing else -- no username, no credential references (which would reveal the secret-mount filesystem layout), no fingerprint. `GET /api/jobs/config` discloses the username and the host-key fingerprint of a connection it reads out of the MOUNTED configuration, and this endpoint still does not: the two answer different questions. This one reports the connection the console itself holds, which the browser needs only to know it exists and where it points; that one pre-fills an authoring form whose username and fingerprint fields the operator is about to edit. Neither discloses a credential reference. The remote directory appears in whichever single form the connection holds; the browser reads a half pair, or a pair beside `path`, as no connection at all rather than half a layout. `credentialWarnings` holds the non-blocking credential-containment warnings the credential rule above produces (empty when every credential resolves outside the excluded directories), so a console reload re-surfaces them. An enabled API with no connection serves `200 { "configured": false }`, the same shape family and gate as `GET /api/jobs/rendezvous` (a `404` there means the API is disabled). The console web build uses this to gate the run-SFTP-here behavior and to author an invitation's sftp endpoint from the locator. The static `sftp` segment cannot be captured as a job id: ids are validated as canonical v4 UUIDs before any use, which `sftp` is not.
 
 ## Authoring the SFTP connection
 
@@ -503,6 +504,44 @@ The body mirrors the input listing's shape family:
 - `{ "configured": false, "readable": true, "entries": [] }` when `JOB_SECRETS_DIR` is unset (the mount is unavailable).
 - `{ "configured": true, "readable": true, "entries": [ { "name": "...", "kind": "dir" | "file" }, ... ] }` for a readable directory, entries sorted by name and filtered to admissible names.
 - `{ "configured": true, "readable": false, "entries": [] }` when the subpath is inadmissible, escapes the mount (lexically or by realpath), or cannot be enumerated -- reported as a bare boolean, so a mis-mount or a traversal attempt reveals neither the errno nor the absolute path.
+
+## Loading a configuration from the mount
+
+`GET /api/jobs/config` reads the command-line configuration at `<dataRoot>/psilink.yaml` -- the file a `psilink invite --save` run wrote, or one the operator authored by hand -- so the console's authoring forms start from the exchange they already run. The read is server-side: the console shows the browser no container path, and the key file `.psilink.key` sits beside the configuration, so a browser file pick would put both in reach.
+
+The file is read through the shared sensitive-YAML chokepoint (bounded parse, path-only errors) and then core's own exchange-file schema, the same chain the web application's configuration import uses.
+
+### The body
+
+`{ "configured": true, "present": <bool>, "document"?, "carriedThrough": [ ... ], "warnings": [ ... ] }`.
+
+- `present: false` with an empty `carriedThrough` and `warnings` is a mount holding no configuration. That is the ordinary first run rather than a fault, and it is a `200`: an unreadable or over-large file answers the same way rather than reporting which it was.
+- `document` is an explicit projection of the settings the authoring forms edit, written field by field rather than stripped from the parse result, so a field a later schema version adds reaches no browser until the projection states it.
+- `carriedThrough` names the settings the document states that a run composed here does not adopt -- the settings this surface holds without an editor, which the portable-configuration rule requires a consumer to state ([EXCHANGE_FILE.md](EXCHANGE_FILE.md#what-a-consumer-does-with-a-setting-it-cannot-honor)).
+- `warnings` names the credential fields whose value the console cannot pre-fill.
+
+Both lists hold NAMES only, as the FILE spells them: snake_case under the path of the block holding them (`connection.server.password`, `signing.receipt_output`). A setting's value can be a credential, and it enters neither list nor any refusal.
+
+### What it discloses
+
+The projection holds the connection's `host`, `port`, remote directory (`path`, or the `inbound_path`/`outbound_path` pair), `username`, `host_key_fingerprint`, `keyboard_interactive`, and a `credentialMethod` naming WHICH credential the file states; the connection's tuning `options`; the linkage terms, metadata, and standardization; `csv_delimiter`, `include_own_columns`, `retention_disposition`, `expected_payload_columns`, `expected_partner_deduplicate`, `disclosed_payload_columns`, and `outbound_payload_consent`; and the `signing` block's `mode` and `partner_fingerprint`.
+
+It holds none of: a `password`, `private_key`, or `private_key_passphrase` value, an `@path` reference among them; `authentication` in any form; `signing.identity_file` or `signing.receipt_output`; or any absolute path of the console's own.
+
+### What it refuses
+
+A `400 { "error": "..." }`, in each case naming the settings to fix as the file spells them:
+
+- a document the shared exchange-file schema rejects, a key no schema block reads included -- the refusal the portable-configuration rule rests on;
+- a `connection` on a channel the console does not conduct. It runs `sftp` and `filedrop`; a `webrtc` exchange belongs to the command line or the web application;
+- an `authentication` block stating `shared_secret` or `expires`. The console reads the shared secret from the key file beside the configuration and writes a fresh one per run;
+- a document stating one of the three records whose absence turns an enforcement off (`expected_payload_columns`, `expected_partner_deduplicate`, `disclosed_payload_columns`) that a run composed here could not state back. It has no hold-unchanged fallback: holding a record no run enforces is the same failure one exchange later ([EXCHANGE_FILE.md](EXCHANGE_FILE.md#the-records-that-must-survive)).
+
+### How the held list is measured
+
+`carriedThrough` is measured rather than listed. The console composes probe documents through its own composers -- the sftp one, and the filedrop one in both its single-folder and split forms -- and reports every setting the loaded document states that no probe holds. A field a composer stops emitting is therefore reported as held rather than going on being claimed as adopted.
+
+Subtracted from the probes' settings are the ones a composition fills from the console's own resources rather than from the document: the rendezvous folder (`connection.path`, `connection.inbound_path`, `connection.outbound_path`) and the two signing paths (`signing.identity_file`, `signing.receipt_output`). A run here writes its own value for each, so a document stating one has it held rather than adopted.
 
 ## Workdir layout
 

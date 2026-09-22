@@ -80,6 +80,12 @@ function outboundPayloadConsentFor(
  * fallback); an empty array is forwarded verbatim -- it means "receive
  * nothing" -- and only an omitted field reconciles lazily.
  *
+ * `disclosedPayloadColumns`, when present, is forwarded verbatim as the
+ * config's `disclosed_payload_columns`: this party's send-side commitment,
+ * which a console run inherits from a loaded configuration rather than
+ * authoring. An empty array is forwarded as written -- a strict "disclose
+ * nothing" -- and only an omitted field reconciles lazily.
+ *
  * `expectedPartnerDeduplicate`, when present, is forwarded as the config's
  * `expected_partner_deduplicate`: the CLI holds the inviter's presented
  * `deduplicate` to the value its invitation declared and refuses a
@@ -120,6 +126,7 @@ export function composeConfigDocument(
     standardization,
     expectedPayloadColumns,
     expectedPartnerDeduplicate,
+    disclosedPayloadColumns,
     retentionDisposition,
     includeOwnColumns,
     csvDelimiter,
@@ -145,6 +152,9 @@ export function composeConfigDocument(
     ...(expectedPartnerDeduplicate !== undefined
       ? { expectedPartnerDeduplicate }
       : {}),
+    ...(disclosedPayloadColumns !== undefined
+      ? { disclosedPayloadColumns }
+      : {}),
     ...(signing !== undefined ? { signing } : {}),
     ...(retentionDisposition !== undefined ? { retentionDisposition } : {}),
     ...(includeOwnColumns !== undefined ? { includeOwnColumns } : {}),
@@ -154,8 +164,11 @@ export function composeConfigDocument(
 }
 
 /**
- * Compose the CLI config document for an sftp job from a validated sftp intent
- * and the operator-authored server entry.
+ * Compose the validated exchange spec an sftp job runs under, from a validated
+ * sftp intent and the operator-authored server entry. Exported as the spec
+ * rather than only the serialized document so the mount load can measure which
+ * document fields this composition emits at all, instead of restating them
+ * ({@link ./configLoad}).
  *
  * The connection's `server` block is exactly the authored entry: every
  * host, port, identity, and credential-reference field is server-side data
@@ -164,7 +177,8 @@ export function composeConfigDocument(
  * the CLI child resolves at exchange time, so no secret byte transits this
  * process. The client's `linkageTerms`, `metadata`, `standardization`,
  * `expectedPayloadColumns`, `expectedPartnerDeduplicate`,
- * `outbound_payload_consent`, `signing`, `retention_disposition`,
+ * `disclosedPayloadColumns`, `outbound_payload_consent`, `signing`,
+ * `retention_disposition`,
  * `include_own_columns`, and `csv_delimiter` are
  * composed as they are on the filedrop path; `options` is the same
  * numeric/boolean/enum subset, plus the `connectionPerPoll` dialing mode
@@ -173,22 +187,22 @@ export function composeConfigDocument(
  * This path does not use `mintExchangeFile`: its {@link ExchangeFileInput}
  * typing makes credentials unrepresentable, an invariant shared with the
  * browser minting flow that must not admit the console's credential-reference
- * entries. Instead the exchange spec is assembled directly, validated
- * through core's {@link ExchangeSpecSchema}, and serialized with the same
- * snakeize + yaml discipline `mintExchangeFile` uses. No `authentication`
- * block is ever assembled; the shared secret rides the key file.
+ * entries. Instead the exchange spec is assembled directly and validated
+ * through core's {@link ExchangeSpecSchema}. No `authentication` block is ever
+ * assembled; the shared secret rides the key file.
  */
-export function composeSftpConfigDocument(
+export function composeSftpConfigSpec(
   intent: JobSftpExchangeIntent,
   serverEntry: JobSftpServerEntry,
   signingPaths?: JobSigningPaths,
-): string {
+): ExchangeSpec {
   const options = intentOptionsToFileSyncOptions(intent.options);
   const {
     metadata,
     standardization,
     expectedPayloadColumns,
     expectedPartnerDeduplicate,
+    disclosedPayloadColumns,
     retentionDisposition,
     includeOwnColumns,
     csvDelimiter,
@@ -209,13 +223,29 @@ export function composeSftpConfigDocument(
     ...(expectedPartnerDeduplicate !== undefined
       ? { expectedPartnerDeduplicate }
       : {}),
+    ...(disclosedPayloadColumns !== undefined
+      ? { disclosedPayloadColumns }
+      : {}),
     ...(signing !== undefined ? { signing } : {}),
     ...(retentionDisposition !== undefined ? { retentionDisposition } : {}),
     ...(includeOwnColumns !== undefined ? { includeOwnColumns } : {}),
     ...(csvDelimiter !== undefined ? { csvDelimiter } : {}),
   };
-  const validated = ExchangeSpecSchema.parse(assembled);
-  return stringifyYaml(snakeizeKeys(validated));
+  return ExchangeSpecSchema.parse(assembled);
+}
+
+/**
+ * The sftp config document: {@link composeSftpConfigSpec}'s validated spec under
+ * the same snakeize + yaml discipline `mintExchangeFile` uses.
+ */
+export function composeSftpConfigDocument(
+  intent: JobSftpExchangeIntent,
+  serverEntry: JobSftpServerEntry,
+  signingPaths?: JobSigningPaths,
+): string {
+  return stringifyYaml(
+    snakeizeKeys(composeSftpConfigSpec(intent, serverEntry, signingPaths)),
+  );
 }
 
 /**

@@ -1,0 +1,616 @@
+/**
+ * Reading the command-line `psilink.yaml` the operator mounted into the
+ * console's working directory, so the authoring forms start from the
+ * configuration they already run rather than from an empty form.
+ *
+ * The file is read server-side and never handed to the browser whole. What the
+ * response holds is an explicitly mapped projection of the settings the
+ * authoring forms edit: the browser needs a host to show in a field, not the
+ * `@path` whose value is a credential, and not the container path the console
+ * keeps on this side of the API throughout (docs/spec/SERVER_JOB_API.md).
+ *
+ * Three refusals, each naming the setting as the FILE spells it
+ * ({@link ../psi/exchangeDocumentRefusal}):
+ *
+ * - a document the shared exchange-file schema rejects, an unread key included
+ *   (docs/spec/EXCHANGE_FILE.md, "What a consumer does with a setting it cannot
+ *   honor");
+ * - a `connection` on a channel the console does not conduct -- it runs sftp and
+ *   filedrop, and a webrtc exchange belongs to the command line or the web
+ *   application (docs/CONSOLE.md);
+ * - an `authentication` block holding a shared secret or an expiry, which the
+ *   console reads from the key file beside the configuration rather than from
+ *   the document.
+ *
+ * A `@path` credential reference is a WARNING and not a refusal: the operator
+ * owns this mount and the reference is their own choice, so the load proceeds
+ * and the response names the field whose credential the console cannot pre-fill
+ * ({@link credentialFieldsNotAdopted}).
+ *
+ * Nothing the console cannot edit is dropped. {@link carriedThroughFields}
+ * measures which of the document's settings a run composed here does not adopt,
+ * by composing probes and diffing key paths against them rather than restating a
+ * list, and the response names them so the operator knows which settings this
+ * surface holds without an editor.
+ */
+
+import fs from "node:fs";
+
+import { ZodError } from "zod";
+
+import {
+  getDefaultLinkageTerms,
+  parseExchangeSpec,
+  parseSensitiveYaml,
+  snakeizeKey,
+} from "@psilink/core";
+
+import {
+  namedFieldList,
+  refusedDocumentFields,
+} from "@psi/exchangeDocumentRefusal";
+
+import { composeConfigDocument, composeSftpConfigSpec } from "./intentConfig";
+import { JOB_FILE_NAMES } from "./intentSchemas";
+import { resolveWorkdirFile } from "./workdir";
+
+import type { ExchangeSpec, SigningConfig } from "@psilink/core";
+import type {
+  JobExchangeIntentBase,
+  JobFiledropExchangeIntent,
+  JobSftpExchangeIntent,
+} from "./intentSchemas";
+
+/**
+ * Upper bound, in bytes, on the configuration file this load will read, applied
+ * before the bounded parse. The same cap the browser's own configuration import
+ * takes ({@link ../psi/managed/managedCommandLineImport}): both are small
+ * operator-held documents.
+ */
+const MAX_CONFIGURATION_FILE_BYTES = 1_000_000;
+
+/**
+ * Raised when the mounted file is not a configuration the console can open. Its
+ * message reaches the operator, so it states what the file holds and what to do
+ * about it, naming FIELD NAMES only -- a setting's value can be a credential.
+ */
+export class ConfigurationLoadRefusedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ConfigurationLoadRefusedError";
+  }
+}
+
+/** The channels the console conducts. A `connection` on any other is refused by
+ * channel: the console drives the containerized CLI over a mounted folder or an
+ * SFTP host, and nothing here dials a peer. */
+const CONSOLE_CHANNELS: ReadonlySet<string> = new Set(["sftp", "filedrop"]);
+
+/**
+ * The SFTP connection as the response states it: the fields the console's
+ * connection form edits, and a `credentialMethod` naming WHICH credential the
+ * file states rather than the credential itself. `username` and
+ * `hostKeyFingerprint` are here because the form edits both; the credential,
+ * its passphrase, and every `@path` among them are not, and no value of theirs
+ * leaves the server.
+ */
+export interface DisclosedSftpServer {
+  host: string;
+  port?: number;
+  path?: string;
+  inboundPath?: string;
+  outboundPath?: string;
+  username?: string;
+  hostKeyFingerprint?: string | Array<string>;
+  keyboardInteractive?: boolean;
+  credentialMethod?: "password" | "private_key";
+}
+
+/** The `signing` settings the receipts card edits. The identity file and the
+ * receipt output are the console's own paths, so neither is disclosed. */
+export interface DisclosedSigning {
+  mode: SigningConfig["mode"];
+  partnerFingerprint?: string;
+}
+
+/**
+ * The document as the browser receives it: the authoring forms' own fields and
+ * nothing else. Not an {@link ExchangeSpec} -- it is a projection, so a field
+ * added to the shared schema reaches no browser until this states it.
+ */
+export interface DisclosedExchangeDocument {
+  channel: "sftp" | "filedrop";
+  server?: DisclosedSftpServer;
+  options?: Record<string, unknown>;
+  linkageTerms: ExchangeSpec["linkageTerms"];
+  metadata?: ExchangeSpec["metadata"];
+  standardization?: ExchangeSpec["standardization"];
+  expectedPayloadColumns?: Array<string>;
+  expectedPartnerDeduplicate?: boolean;
+  disclosedPayloadColumns?: Array<string>;
+  outboundPayloadConsent?: ExchangeSpec["outboundPayloadConsent"];
+  includeOwnColumns?: ExchangeSpec["includeOwnColumns"];
+  csvDelimiter?: string;
+  retentionDisposition?: string;
+  signing?: DisclosedSigning;
+}
+
+/** The body `GET /api/jobs/config` answers with. `present: false` is a console
+ * whose mount holds no configuration, which is the ordinary first run rather
+ * than a fault. */
+export interface LoadedConfigurationResponse {
+  configured: boolean;
+  present: boolean;
+  document?: DisclosedExchangeDocument;
+  carriedThrough: Array<string>;
+  warnings: Array<string>;
+}
+
+/**
+ * The intent fields every composition probe below states, each optional field
+ * among them present, so what the probes measure is the widest document this
+ * console composes rather than the narrowest.
+ */
+function probeIntentFields(): JobExchangeIntentBase {
+  return {
+    linkageTerms: probeLinkageTerms(),
+    sharedSecret: "",
+    expectedPayloadColumns: [],
+    expectedPartnerDeduplicate: false,
+    disclosedPayloadColumns: [],
+    includeOwnColumns: "all",
+    csvDelimiter: "|",
+    retentionDisposition: "composition probe",
+    side: "acceptor",
+    signing: { mode: "certificate", partnerFingerprint: PROBE_FINGERPRINT },
+    options: {
+      pollIntervalMs: 1000,
+      peerTimeoutMs: 1000,
+      serverConnectTimeoutMs: 1000,
+      maxReconnectAttempts: 1,
+      timestampInFilename: true,
+      locklessRendezvous: true,
+      peerId: "probe",
+      retainFiles: true,
+      unexpectedFiles: "warn",
+    },
+  };
+}
+
+/** The paths a certificate-mode composition names. Server-chosen on every run,
+ * so a loaded document's own two are replaced rather than held. */
+const PROBE_SIGNING_PATHS = {
+  identityFile: "/probe/identity.json",
+  receiptOutput: "/probe/receipt",
+};
+
+/** The widest sftp composition this console emits, as a validated spec. */
+function sftpProbeSpec(): ExchangeSpec {
+  const intent: JobSftpExchangeIntent = {
+    ...probeIntentFields(),
+    channel: "sftp",
+    options: { ...probeIntentFields().options, connectionPerPoll: true },
+  };
+  return composeSftpConfigSpec(
+    intent,
+    {
+      host: "probe.invalid",
+      port: 22,
+      path: "/probe",
+      username: "probe",
+      password: "@/probe",
+      keyboardInteractive: true,
+      hostKeyFingerprint: PROBE_HOST_KEY_FINGERPRINT,
+    },
+    PROBE_SIGNING_PATHS,
+  );
+}
+
+/**
+ * A filedrop composition, in whichever rendezvous form the console was
+ * provisioned for. Both are probed: a console with one shared folder composes
+ * `path` and a split one composes the `inbound_path`/`outbound_path` pair, and
+ * a setting either form emits is one this console writes rather than holds.
+ */
+function filedropProbeSpec(split: boolean): ExchangeSpec {
+  const intent: JobFiledropExchangeIntent = {
+    ...probeIntentFields(),
+    channel: "filedrop",
+  };
+  const document = composeConfigDocument(
+    intent,
+    "/probe/rendezvous",
+    split ? "/probe/rendezvous-outbound" : undefined,
+    PROBE_SIGNING_PATHS,
+  );
+  return parseExchangeSpec(
+    parseSensitiveYaml(document, "console composition probe"),
+  );
+}
+
+/** A host-key fingerprint of the canonical shape, for the composition probe
+ * alone: core's schema grades the value, and the probe never dials. */
+const PROBE_HOST_KEY_FINGERPRINT =
+  "SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+
+/** A signing fingerprint of the canonical shape, for the composition probe. */
+const PROBE_FINGERPRINT = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+
+/**
+ * The linkage terms the composition probe states: core's own defaults with both
+ * halves of `output` on, since a party that shares its result is the one whose
+ * composition derives an `outbound_payload_consent` record. Only the composed
+ * document's KEYS are read, never what they hold.
+ */
+function probeLinkageTerms(): ExchangeSpec["linkageTerms"] {
+  const terms = getDefaultLinkageTerms("composition probe");
+  return { ...terms, output: { expectsOutput: true, shareWithPartner: true } };
+}
+
+/**
+ * The blocks a composition emits KEY BY KEY, so a setting inside one the
+ * composition does not emit is held without an editor and belongs in the
+ * carried-through notice. Every other block is adopted or held whole -- the
+ * linkage terms, the metadata, the standardization pipeline -- and comparing
+ * inside one would name a key the composition simply did not need for its
+ * probe values.
+ */
+const BLOCKS_READ_KEY_BY_KEY: ReadonlySet<string> = new Set([
+  "connection",
+  "connection.server",
+  "connection.options",
+  "signing",
+  "authentication",
+]);
+
+/**
+ * Every setting a document states, as the FILE spells it: snake_case keys under
+ * the path of the block holding them, descending only into the blocks composed
+ * key by key ({@link BLOCKS_READ_KEY_BY_KEY}).
+ */
+function documentKeyPaths(value: unknown, parent = ""): Array<string> {
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    return [];
+  return Object.entries(value).flatMap(([key, nested]) => {
+    const camelPath = parent === "" ? key : `${parent}.${key}`;
+    if (BLOCKS_READ_KEY_BY_KEY.has(camelPath))
+      return documentKeyPaths(nested, camelPath);
+    return [camelPath.split(".").map(snakeizeKey).join(".")];
+  });
+}
+
+/**
+ * The settings a composition fills from the console's OWN resources rather than
+ * from the document it opened: the rendezvous folder it was provisioned with,
+ * and the two paths it serves a signing identity and a receipt from. A run here
+ * writes its own value for each, so the document's value is not adopted and is
+ * held unchanged instead.
+ *
+ * Subtracting these is the one judgement in the measure below, and it fails
+ * safe in the direction that matters: a key that leaves the composers leaves
+ * this set's effect with it and is reported as held, while a NEW console-filled
+ * key added to a composer and not named here would be reported as adopted.
+ */
+const CONSOLE_FILLED_FIELDS: ReadonlySet<string> = new Set([
+  "connection.path",
+  "connection.inbound_path",
+  "connection.outbound_path",
+  "signing.identity_file",
+  "signing.receipt_output",
+]);
+
+/**
+ * The settings this console's compositions adopt from a document at all, over
+ * every channel and rendezvous form it composes. Measured once off the composers
+ * themselves, so a field they stop emitting shows up as held rather than in a
+ * restated list that would go on claiming it.
+ */
+const COMPOSED_FIELD_PATHS: ReadonlySet<string> = new Set(
+  [
+    ...documentKeyPaths(sftpProbeSpec()),
+    ...documentKeyPaths(filedropProbeSpec(false)),
+    ...documentKeyPaths(filedropProbeSpec(true)),
+  ].filter((field) => !CONSOLE_FILLED_FIELDS.has(field)),
+);
+
+/**
+ * The document's settings the console's composition never emits, named as the
+ * file spells them and sorted. Measured against {@link widestComposedSpec}: a
+ * key path the widest composition does not hold is one no form here edits and
+ * no run here writes, so the document holds it unchanged.
+ */
+export function carriedThroughFields(document: ExchangeSpec): Array<string> {
+  return documentKeyPaths(document)
+    .filter((field) => !COMPOSED_FIELD_PATHS.has(field))
+    .sort();
+}
+
+/**
+ * The three records whose ABSENCE is a valid state turning an enforcement off,
+ * so a load that could not put one back into the composed document would
+ * silently release this party from it (docs/spec/EXCHANGE_FILE.md, "The records
+ * that must survive"). Named here as the file spells them; whether the
+ * composition still emits each is measured, never assumed.
+ */
+const RECORDS_THAT_MUST_SURVIVE: ReadonlyArray<string> = [
+  "expected_payload_columns",
+  "expected_partner_deduplicate",
+  "disclosed_payload_columns",
+];
+
+/**
+ * Refuse a load that would lose one of {@link RECORDS_THAT_MUST_SURVIVE}: the
+ * document states it and this console's composition has no key to put it back
+ * in. It cannot be held unchanged instead -- holding a record no run enforces is
+ * the same failure one exchange later.
+ */
+function assertRecordsSurvive(document: ExchangeSpec): void {
+  const stated = new Set(documentKeyPaths(document));
+  const lost = RECORDS_THAT_MUST_SURVIVE.filter(
+    (field) => stated.has(field) && !COMPOSED_FIELD_PATHS.has(field),
+  );
+  if (lost.length === 0) return;
+  throw new ConfigurationLoadRefusedError(
+    "This configuration states " +
+      (lost.length === 1 ? "a setting" : "settings") +
+      " the console cannot run and cannot keep, and each one turns off a " +
+      "check this exchange is held to: " +
+      lost.join(", ") +
+      ". Run this configuration with psilink on the command line instead.",
+  );
+}
+
+/**
+ * The mounted file's bytes as a document, through the shared sensitive-parse
+ * chokepoint (bounded parse, path-only errors). A file that is not YAML is
+ * refused in the console's own words rather than by the parser's: the parser's
+ * message locates a byte offset the operator cannot act on, and this reaches
+ * them as the reason the load stopped.
+ */
+function parsedYaml(source: string): unknown {
+  try {
+    return parseSensitiveYaml(source, "mounted exchange configuration");
+  } catch {
+    throw new ConfigurationLoadRefusedError(
+      "The psilink.yaml in your working folder could not be read as YAML. " +
+        "Check the file for a formatting mistake, then open it again.",
+    );
+  }
+}
+
+/** The document the shared exchange-file schema reads out of the mounted file,
+ * refused in the console's own words: the operator edits this file by hand, so
+ * a setting it rejects is a line they can fix. */
+function parsedDocument(raw: unknown): ExchangeSpec {
+  try {
+    return parseExchangeSpec(raw);
+  } catch (error) {
+    if (!(error instanceof ZodError)) throw error;
+    const fields = refusedDocumentFields(error, raw);
+    throw new ConfigurationLoadRefusedError(
+      fields.length === 0
+        ? "The psilink.yaml in your working folder is not a psilink exchange " +
+            "configuration. Check the file, then open it again."
+        : "The psilink.yaml in your working folder is not a valid psilink " +
+            "configuration. " +
+            (fields.length === 1 ? "Fix this setting" : "Fix these settings") +
+            " in the file, then open it again: " +
+            namedFieldList(fields) +
+            ".",
+    );
+  }
+}
+
+/** Refuse a channel the console does not conduct, naming it as the file spells
+ * it and saying where the exchange runs instead. */
+function consoleChannel(document: ExchangeSpec): "sftp" | "filedrop" {
+  const { channel } = document.connection;
+  if (!CONSOLE_CHANNELS.has(channel))
+    throw new ConfigurationLoadRefusedError(
+      `This configuration runs over ${channel}. The console conducts sftp and ` +
+        "shared-folder exchanges only, so it cannot open this one. Run it " +
+        "with psilink on the command line instead.",
+    );
+  return channel as "sftp" | "filedrop";
+}
+
+/**
+ * Refuse an `authentication` block holding the secret or its expiry. The
+ * console reads the shared secret from the key file beside the configuration
+ * and writes a fresh one per run, so a secret in the document is a value it
+ * would neither use nor be able to keep. `token_max_age_days` is held
+ * unchanged, which {@link carriedThroughFields} names.
+ */
+function assertNoStatedSecret(document: ExchangeSpec): void {
+  const authentication = document.authentication;
+  if (authentication === undefined) return;
+  const named = [
+    ...(authentication.sharedSecret !== undefined ? ["shared_secret"] : []),
+    ...(authentication.expires !== undefined ? ["expires"] : []),
+  ];
+  if (named.length === 0) return;
+  throw new ConfigurationLoadRefusedError(
+    "This configuration's authentication block states " +
+      named.join(" and ") +
+      ". The console reads the shared secret from the .psilink.key file " +
+      "beside the configuration, so remove " +
+      (named.length === 1 ? "that line" : "those lines") +
+      " and open it again.",
+  );
+}
+
+/**
+ * The credential fields the load reads and cannot pre-fill, named as the file
+ * spells them and sorted. Names only -- a credential's value is the whole reason
+ * this list exists.
+ *
+ * A warning rather than a refusal: the operator owns this mount and the
+ * reference is their own choice, so the load proceeds and the connection form
+ * opens with the credential empty for them to pick or type again. A `@path`
+ * reference and a literal value draw the same warning, since neither leaves the
+ * server.
+ */
+export function credentialFieldsNotAdopted(
+  document: ExchangeSpec,
+): Array<string> {
+  const { connection } = document;
+  if (connection.channel !== "sftp") return [];
+  const server = connection.server;
+  return (
+    [
+      ["connection.server.password", server.password],
+      ["connection.server.private_key", server.privateKey],
+      ["connection.server.private_key_passphrase", server.privateKeyPassphrase],
+    ] as ReadonlyArray<[string, string | undefined]>
+  )
+    .filter(([, value]) => value !== undefined)
+    .map(([field]) => field)
+    .sort();
+}
+
+/** The connection form's own fields, read off an sftp connection. */
+function disclosedServer(document: ExchangeSpec): DisclosedSftpServer {
+  const { connection } = document;
+  if (connection.channel !== "sftp")
+    throw new Error("disclosedServer read a connection that is not sftp");
+  const server = connection.server;
+  return {
+    host: server.host,
+    ...(server.port !== undefined ? { port: server.port } : {}),
+    ...(server.path !== undefined ? { path: server.path } : {}),
+    ...(server.inboundPath !== undefined
+      ? { inboundPath: server.inboundPath }
+      : {}),
+    ...(server.outboundPath !== undefined
+      ? { outboundPath: server.outboundPath }
+      : {}),
+    ...(server.username !== undefined ? { username: server.username } : {}),
+    ...(server.hostKeyFingerprint !== undefined
+      ? { hostKeyFingerprint: server.hostKeyFingerprint }
+      : {}),
+    ...(server.keyboardInteractive !== undefined
+      ? { keyboardInteractive: server.keyboardInteractive }
+      : {}),
+    ...(server.privateKey !== undefined
+      ? { credentialMethod: "private_key" as const }
+      : server.password !== undefined
+        ? { credentialMethod: "password" as const }
+        : {}),
+  };
+}
+
+/**
+ * The parsed document as the browser receives it. An explicit mapping rather
+ * than a strip of the parsed object: every disclosed field is written here by
+ * name, so a credential, a container path, or a field a later schema version
+ * adds reaches no browser until this function states it.
+ */
+export function disclosedDocument(
+  document: ExchangeSpec,
+): DisclosedExchangeDocument {
+  const { connection } = document;
+  const options = connection.options;
+  return {
+    channel: consoleChannel(document),
+    ...(connection.channel === "sftp"
+      ? { server: disclosedServer(document) }
+      : {}),
+    ...(options !== undefined ? { options: { ...options } } : {}),
+    linkageTerms: document.linkageTerms,
+    ...(document.metadata !== undefined ? { metadata: document.metadata } : {}),
+    ...(document.standardization !== undefined
+      ? { standardization: document.standardization }
+      : {}),
+    ...(document.expectedPayloadColumns !== undefined
+      ? { expectedPayloadColumns: document.expectedPayloadColumns }
+      : {}),
+    ...(document.expectedPartnerDeduplicate !== undefined
+      ? { expectedPartnerDeduplicate: document.expectedPartnerDeduplicate }
+      : {}),
+    ...(document.disclosedPayloadColumns !== undefined
+      ? { disclosedPayloadColumns: document.disclosedPayloadColumns }
+      : {}),
+    ...(document.outboundPayloadConsent !== undefined
+      ? { outboundPayloadConsent: document.outboundPayloadConsent }
+      : {}),
+    ...(document.includeOwnColumns !== undefined
+      ? { includeOwnColumns: document.includeOwnColumns }
+      : {}),
+    ...(document.csvDelimiter !== undefined
+      ? { csvDelimiter: document.csvDelimiter }
+      : {}),
+    ...(document.retentionDisposition !== undefined
+      ? { retentionDisposition: document.retentionDisposition }
+      : {}),
+    ...(document.signing !== undefined
+      ? {
+          signing: {
+            mode: document.signing.mode,
+            ...(document.signing.partnerFingerprint !== undefined
+              ? { partnerFingerprint: document.signing.partnerFingerprint }
+              : {}),
+          },
+        }
+      : {}),
+  };
+}
+
+/**
+ * Read one configuration document from its source text: the sensitive-parse
+ * chokepoint, the shared schema, then the console's own three refusals.
+ *
+ * @throws {ConfigurationLoadRefusedError} when the file is not a configuration
+ *   the console can open.
+ */
+export function readMountedConfiguration(
+  source: string,
+): LoadedConfigurationResponse {
+  const raw = parsedYaml(source);
+  const document = parsedDocument(raw);
+  consoleChannel(document);
+  assertNoStatedSecret(document);
+  assertRecordsSurvive(document);
+  return {
+    configured: true,
+    present: true,
+    document: disclosedDocument(document),
+    carriedThrough: carriedThroughFields(document),
+    warnings: credentialFieldsNotAdopted(document),
+  };
+}
+
+/**
+ * Load the configuration mounted at `<dataRoot>/psilink.yaml`. An absent file is
+ * `present: false` and no error: a console whose operator has authored nothing
+ * yet is the ordinary first run. A file too large to be a configuration is
+ * refused ahead of the parse.
+ *
+ * @throws {ConfigurationLoadRefusedError} when the file is not a configuration
+ *   the console can open.
+ */
+export function loadMountedConfiguration(
+  dataRoot: string,
+): LoadedConfigurationResponse {
+  const absent = {
+    configured: true,
+    present: false,
+    carriedThrough: [],
+    warnings: [],
+  };
+  const filePath = resolveWorkdirFile(dataRoot, JOB_FILE_NAMES.config);
+  if (filePath === null) return absent;
+  let source: string;
+  try {
+    if (fs.statSync(filePath).size > MAX_CONFIGURATION_FILE_BYTES)
+      throw new ConfigurationLoadRefusedError(
+        "The psilink.yaml in your working folder is too large to be an " +
+          "exchange configuration. Check that it is the file psilink runs " +
+          "under, then open it again.",
+      );
+    source = fs.readFileSync(filePath, "utf8");
+  } catch (error) {
+    if (error instanceof ConfigurationLoadRefusedError) throw error;
+    return absent;
+  }
+  return readMountedConfiguration(source);
+}
