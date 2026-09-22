@@ -140,16 +140,20 @@ sharply:
   `expected_payload_columns`, `expected_partner_deduplicate`), so stripping a
   misspelling of one would silently disable the control it names; that hazard
   governs the whole top level rather than being spot-checked key by key.
-- **An unknown field inside a spec block is silently stripped.** The blocks
+- **An unknown field inside a spec block is rejected loudly too.** The blocks
   themselves (`linkage_terms`, `metadata`, `standardization`, `connection`) strip
   unrecognized keys on parse, the `connection` union's webrtc member excepted
-  (below). That property, not any one schema kind, is what this case rests on:
-  the blocks are built from different Zod constructs -- an object
-  for `linkage_terms`, an array for `metadata` and `standardization`, a
-  discriminated union for `connection` -- and strip is the behavior they share. A
-  newer web app that adds an optional field within one of them drops that field on
-  load; the exchange runs on the fields the older CLI does understand. This is a
-  silent narrowing, not a loud rejection.
+  (below): they are built from different Zod constructs -- an object for
+  `linkage_terms`, an array for `metadata` and `standardization`, a discriminated
+  union for `connection` -- and strip is the behavior they share. `parseExchangeSpec`
+  does not leave it there. It compares the document against its own parse result
+  and reports every key the parse did not read as an `unrecognized_keys` issue at
+  the block holding it, naming the key in the file's own snake_case spelling
+  (`packages/core/src/config/unreadKeys.ts`), so an older CLI reads a newer web
+  app's added field as a load-time failure rather than running one field short.
+  What makes the strip unacceptable on its own is the writer side: a consumer that
+  loads a file, edits part of it, and saves it writes the PARSE RESULT, so a
+  stripped key is gone from the next file too (the rule below).
 - **An unknown enum value is rejected loudly.** A field whose value changed to
   one an older schema does not accept -- a new `algorithm`, a new
   `linkage_strategy`, a new semantic `type`, a new `channel` -- is a
@@ -169,10 +173,9 @@ sharply:
   locator-composed webrtc connection holds `server` alone, so both matter only
   for an operator-edited config.
 
-The critical property across all four cases: an incompatibility is reported as
-a loud load-time validation error (or, for a stripped unknown field within a
-block, a run over the understood subset), never a silent reinterpretation of a
-value into something it did not mean.
+The critical property across all four cases: an incompatibility is reported as a
+loud load-time validation error, never a silent reinterpretation of a value into
+something it did not mean and never a run over a subset of what the file states.
 
 ### What is not promised
 
@@ -184,6 +187,61 @@ incompatible file fails validation with a named field rather than loading with a
 misread value -- not a promise that the break will not happen. An operator who
 downloads a file should run it against a CLI of the matching generation, and
 re-mint (or re-invite) rather than hand-migrate a file across a breaking change.
+
+## What a consumer does with a setting it cannot honor
+
+A configuration is a configuration: one file, valid against one schema, readable
+wherever psilink runs. Three applications read it -- the CLI, the console, and the
+web application -- and they do not run the same exchanges or offer the same
+editors, so a file valid against the schema can name a setting the application in
+front of it cannot run.
+
+This is a different question from the version-skew cases above, and the two are
+settled separately: there the field is one the BUILD does not know, here it is one
+the build knows and the CONTEXT cannot run.
+
+### The three outcomes
+
+A consumer reading an exchange file MUST take exactly one of these for every
+setting the file states.
+
+- **Honor it.** The setting is read and applied, or it is enforced -- the ordinary
+  case, and the only one that needs no words to the operator.
+- **Hold it unchanged.** A consumer that cannot apply or edit a setting but can
+  keep it MUST write it back out with the value it read, and MUST state which
+  settings it holds without an editor, so the operator knows what this surface
+  will not let them change and where to change it instead.
+- **Refuse the load.** A consumer that can neither apply nor hold a setting
+  refuses the whole document, naming the setting and the limit that stops it --
+  as the web application refuses a `connection` on a channel it does not run.
+
+Dropping a setting is not among them. A consumer MUST NOT load a document with a
+setting silently discarded, and MUST NOT write a document short of a setting the
+one it read stated. That rule is what the unread-key refusal above enforces for a
+key no schema block reads, and it is why `saveConfig` and the web application's
+export write a document holding every field their input held.
+
+### The records that must survive
+
+Three per-party records are fail-closed: their ABSENCE is a valid state that turns
+the control off, so a consumer that loses one silently disables an enforcement the
+operator wrote.
+
+- `expected_payload_columns` -- the receive-side enforcement record.
+- `expected_partner_deduplicate` -- the terms-side enforcement record.
+- `disclosed_payload_columns` -- the send-side commitment.
+
+A consumer that would drop one of these refuses the load instead. It has no
+"hold it unchanged" option to fall back on: holding a record it cannot enforce is
+the same failure, one exchange later.
+
+### How a setting is named
+
+Every refusal and every notice names the setting as the FILE spells it:
+snake_case, under the path of the block holding it (`connection.server.port`,
+`linkage_terms.deduplicate`), rather than the camelCase of the parsed shape. A
+name is all that is named -- a setting's VALUE can be a credential and stays out
+of both.
 
 ## Payload-disclosure consent
 

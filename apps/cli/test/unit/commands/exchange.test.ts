@@ -575,7 +575,7 @@ test("a name-class character in expected_payload_columns is refused at config lo
     message = (err as Error).message;
   }
   expect(message).toContain("is not a valid exchange spec");
-  expect(message).toContain("expectedPayloadColumns.0");
+  expect(message).toContain("expected_payload_columns.0");
   expect(message).toContain(
     "must not contain a control or text-direction character",
   );
@@ -821,11 +821,34 @@ test("warnAndStripInjectedAuthFields strips injected fields but keeps a policy f
   expect(mockState.warnings).toHaveLength(2);
 });
 
-test("an authentication block placed under connection is ignored", () => {
-  // The old (pre-refactor) location: authentication nested under connection is no
-  // longer part of the connection schema, so Zod strips it silently and the key
-  // file token still provides the secret. No warning is emitted (the loader only
-  // inspects the top-level block).
+test("a setting nested under a block, which nothing reads, is refused by name", () => {
+  // A misspelling or a newer application's field inside a block: the blocks
+  // below the top level strip on parse, and a load that ran on the stripped
+  // document would write it back out a line short of what the operator wrote.
+  fs.writeFileSync(
+    configFile,
+    YAML.stringify({
+      ...minimalSFTPConfig,
+      linkageTerms: { ...minimalLinkageTerms, deduplicat: true },
+    }),
+  );
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
+  expect(() => loadConfig(baseOptions())).toThrow(UsageError);
+  let message = "";
+  try {
+    loadConfig(baseOptions());
+  } catch (err) {
+    message = (err as Error).message;
+  }
+  expect(message).toContain("is not a valid exchange spec");
+  expect(message).toContain("deduplicat");
+});
+
+test("an authentication block placed under connection is refused, not ignored", () => {
+  // A misplaced block: authentication belongs at the top level, and the
+  // connection schema has no such field. The load names the line instead of
+  // running on a file whose block does nothing, which would leave the operator
+  // believing a token-age policy or a secret they wrote was in force.
   const configWithMisplacedAuth = {
     ...minimalSFTPConfig,
     connection: {
@@ -835,11 +858,16 @@ test("an authentication block placed under connection is ignored", () => {
   };
   fs.writeFileSync(configFile, YAML.stringify(configWithMisplacedAuth));
   saveKeyFile(keyFile, { sharedSecret: TOKEN_B });
-  const result = loadConfig(baseOptions());
-  expect(result.authentication.sharedSecret).toBe(TOKEN_B);
-  expect(
-    mockState.warnings.some((m) => m.includes("shared_secret is set")),
-  ).toBe(false);
+  expect(() => loadConfig(baseOptions())).toThrow(UsageError);
+  let message = "";
+  try {
+    loadConfig(baseOptions());
+  } catch (err) {
+    message = (err as Error).message;
+  }
+  expect(message).toContain("is not a valid exchange spec");
+  expect(message).toContain("authentication");
+  expect(message).not.toContain(TOKEN_A);
 });
 
 // --- webrtc channel ----------------------------------------------------------

@@ -39,6 +39,7 @@ import {
   partnerPinIsPresent,
   quoteTermsValue,
   quoteTermsValueList,
+  rawDecodeErrorDescription,
   redactAndRenderOperatorSuppliedText,
   redactAndSanitizeForDisplay,
   redactPrivateKeyMaterial,
@@ -1944,6 +1945,54 @@ function describeSchemaIssues(
       return `${at}${reason}`;
     })
     .join("; ");
+}
+
+/**
+ * One schema-issue path with each segment named as the CONFIG FILE spells it:
+ * the exchange schema validates the camelized shape, so an issue locates its
+ * field by the camelCase name while the operator reads a snake_case document
+ * (the same rewrite {@link describeSchemaIssues} applies to a block's issues).
+ *
+ * Segments after a `params` one are left verbatim: that free-form record holds
+ * the author's own key, and {@link snakeizeKey} is the inverse of the camelize
+ * pre-pass only for a key written in the schema's own lowercase words.
+ */
+function pathAsTheFileSpellsIt(
+  issuePath: ReadonlyArray<PropertyKey>,
+): Array<PropertyKey> {
+  const paramsIndex = issuePath.indexOf("params");
+  return issuePath.map((segment, index) =>
+    typeof segment === "string" && (paramsIndex < 0 || index <= paramsIndex)
+      ? snakeizeKey(segment)
+      : segment,
+  );
+}
+
+/**
+ * A config file's schema failure rendered for the operator: the concise
+ * `<path>: <reason>` one-liner {@link rawDecodeErrorDescription} composes, over
+ * issue paths named as the file spells them ({@link pathAsTheFileSpellsIt}), so
+ * the refusal points at a line the operator can find in their own document
+ * (docs/spec/EXCHANGE_FILE.md, "How a setting is named").
+ *
+ * Composed RAW for interpolation into an `Error`, as the description it
+ * delegates to is.
+ */
+export function describeConfigSchemaError(err: unknown): string {
+  if (err === null || typeof err !== "object" || !("issues" in err))
+    return rawDecodeErrorDescription(err);
+  const { issues } = err as {
+    issues?: Array<{ path?: Array<PropertyKey>; message?: string }>;
+  };
+  if (!Array.isArray(issues)) return rawDecodeErrorDescription(err);
+  return rawDecodeErrorDescription({
+    issues: issues.map((issue) => ({
+      ...issue,
+      ...(Array.isArray(issue.path)
+        ? { path: pathAsTheFileSpellsIt(issue.path) }
+        : {}),
+    })),
+  });
 }
 
 /**

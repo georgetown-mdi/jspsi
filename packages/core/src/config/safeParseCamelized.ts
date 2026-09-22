@@ -16,6 +16,12 @@ import {
  * gets a non-throwing result. Any other throw propagates unchanged. The
  * throwing `parseX` siblings call `camelizeKeys` directly instead; their
  * partner-wire call sites (`protocolSetup.ts`) catch the bound error there.
+ * `afterParse` is a rule a schema cannot state about itself, read on a
+ * successful parse and against the camelized input the schema saw: the
+ * exchange file's unread-key rule (`unreadKeys.ts`) is the one caller. Any
+ * issues it reports turn the result into a failure carrying them, so a caller
+ * cannot reach a value the rule refuses.
+ *
  * Internal to `@psilink/core`: not re-exported, not a stable public API.
  *
  * @internal
@@ -24,6 +30,7 @@ export function safeParseCamelized<T>(
   schema: z.ZodType<T>,
   raw: unknown,
   widthBoundedKeys?: ReadonlyMap<string, number>,
+  afterParse?: (camelized: unknown, parsed: T) => Array<z.core.$ZodIssue>,
 ): z.ZodSafeParseResult<T> {
   let camelized: unknown;
   try {
@@ -45,5 +52,10 @@ export function safeParseCamelized<T>(
       };
     throw err;
   }
-  return schema.safeParse(camelized);
+  const result = schema.safeParse(camelized);
+  if (!result.success || afterParse === undefined) return result;
+  const issues = afterParse(camelized, result.data);
+  return issues.length === 0
+    ? result
+    : { success: false, error: new z.ZodError(issues) as z.ZodError<T> };
 }

@@ -2,6 +2,7 @@ import { z } from "zod";
 import { maxCodeUnits } from "../utils/maxCodeUnits.js";
 import { camelizeKeys } from "../utils/camelizeKeys.js";
 import { safeParseCamelized } from "./safeParseCamelized.js";
+import { unreadKeyIssues } from "./unreadKeys.js";
 import {
   columnsNamedOnce,
   LinkageTermsSchema,
@@ -209,16 +210,33 @@ export type ExchangeSpec = z.infer<typeof ExchangeSpecSchema>;
  * Snake_case keys are converted to camelCase before validation, so JSON/YAML
  * from disk can be passed directly.
  *
- * @throws {ZodError} if validation fails.
+ * A key the schema would have dropped instead of read is refused here rather
+ * than stripped, wherever in the document it sits: a consumer writes the parse
+ * result back out, so a dropped key is a setting the operator wrote and the next
+ * file does not hold ({@link unreadKeyIssues}; docs/spec/EXCHANGE_FILE.md, "What
+ * a consumer does with a setting it cannot honor").
+ *
+ * @throws {ZodError} if validation fails, or if the document holds a key the
+ *   schema does not read.
  */
 export function parseExchangeSpec(raw: unknown): ExchangeSpec {
-  return ExchangeSpecSchema.parse(camelizeKeys(raw));
+  const camelized = camelizeKeys(raw);
+  const parsed = ExchangeSpecSchema.parse(camelized);
+  const unread = unreadKeyIssues(camelized, parsed);
+  if (unread.length > 0) throw new z.ZodError(unread);
+  return parsed;
 }
 
 /**
- * Non-throwing version of {@link parseExchangeSpec}. Honors the "safe" contract
- * for the {@link camelizeKeys} bounds too -- see {@link safeParseCamelized}.
+ * Non-throwing version of {@link parseExchangeSpec}, holding the same unread-key
+ * rule. Honors the "safe" contract for the {@link camelizeKeys} bounds too --
+ * see {@link safeParseCamelized}.
  */
 export function safeParseExchangeSpec(raw: unknown) {
-  return safeParseCamelized(ExchangeSpecSchema, raw);
+  return safeParseCamelized(
+    ExchangeSpecSchema,
+    raw,
+    undefined,
+    unreadKeyIssues,
+  );
 }

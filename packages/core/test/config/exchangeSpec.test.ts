@@ -13,6 +13,8 @@ import {
   NAME_SHAPE_MESSAGE,
 } from "../../src/config/linkageTermsSchema";
 import { reconcileReceivedPayload } from "../../src/payloadExchange";
+import { unreadKeyIssues } from "../../src/config/unreadKeys";
+import { camelizeKeys } from "../../src/utils/camelizeKeys";
 
 // Minimal valid components used as a base.
 const minimalLinkageTerms = {
@@ -578,4 +580,116 @@ test("includeOwnColumns: a count-only exchange refuses the key at parse", () => 
   expect(issue?.message).toContain("include_own_columns");
   expect(issue?.message).toContain("count-only");
   expect(issue?.path).toEqual(["includeOwnColumns"]);
+});
+
+// --- Keys the parse does not read --------------------------------------------
+
+// Every consumer of this schema writes its parse result back out, so a key the
+// parse drops is a setting the operator wrote and the next file does not hold.
+// The top level is strict and refuses one itself; these pin the blocks below it,
+// which strip (docs/spec/EXCHANGE_FILE.md, "What a consumer does with a setting
+// it cannot honor").
+
+test("a key no block reads is refused, naming it as the file spells it", () => {
+  const result = safeParseExchangeSpec({
+    ...minimalSpec,
+    linkage_terms: { ...minimalLinkageTerms, mystery_setting: "held" },
+  });
+  expect(result.success).toBe(false);
+  const issue = result.error?.issues[0];
+  expect(issue?.code).toBe("unrecognized_keys");
+  expect(issue?.path).toEqual(["linkageTerms"]);
+  expect(issue?.message).toContain("mystery_setting");
+  expect(issue?.message).not.toContain("mysterySetting");
+});
+
+test("no load yields a document with a setting dropped, at any depth", () => {
+  // The one chokepoint every reader of an exchange file loads through: the CLI's
+  // config load, the web application's command-line import, and whatever the
+  // console grows. A document holding a setting no schema block reads has no
+  // load result at all, so none of them can run on one.
+  const nested: ReadonlyArray<[string, Record<string, unknown>]> = [
+    ["connection", { ...minimalConnection, mystery_setting: 1 }],
+    [
+      "connection.server",
+      { ...minimalConnection, server: { host: "api.peerjs.com", extra: 1 } },
+    ],
+    [
+      "linkage_terms.output",
+      {
+        ...minimalLinkageTerms,
+        output: { expectsOutput: true, shareWithPartner: false, extra: 1 },
+      },
+    ],
+  ];
+  for (const [where, block] of nested) {
+    const spec = where.startsWith("connection")
+      ? { ...minimalSpec, connection: block }
+      : { ...minimalSpec, linkageTerms: block };
+    const result = safeParseExchangeSpec(spec);
+    expect(result.success, where).toBe(false);
+    expect(result.data, where).toBeUndefined();
+    expect(() => parseExchangeSpec(spec), where).toThrow(ZodError);
+  }
+});
+
+test("a key no block reads is refused inside an array element", () => {
+  const result = safeParseExchangeSpec({
+    ...minimalSpec,
+    metadata: [
+      {
+        name: "program",
+        type: "other",
+        role: "payload",
+        is_payload: true,
+        mystery_setting: "held",
+      },
+    ],
+  });
+  expect(result.success).toBe(false);
+  expect(result.error?.issues[0]?.path).toEqual(["metadata", 0]);
+  expect(result.error?.issues[0]?.message).toContain("mystery_setting");
+});
+
+test("every key of a document that parses survives into the parse result", () => {
+  // The rule the refusals above serve: what the parse returns is what the next
+  // writer writes, so a document this schema accepts has lost nothing. Walked
+  // over a spec holding every block rather than asserted field by field.
+  const whole = {
+    ...minimalSpec,
+    metadata: [
+      { name: "program", type: "other", role: "payload", is_payload: true },
+    ],
+    standardization: [{ output: "last_name", input: "LAST_NAME", steps: [] }],
+    retention_disposition: "Filed with the program office for seven years.",
+    expected_payload_columns: ["partner_program"],
+    disclosed_payload_columns: ["program"],
+    expected_partner_deduplicate: true,
+    include_own_columns: "all",
+    csv_delimiter: "|",
+  };
+  const parsed = parseExchangeSpec(whole) as Record<string, unknown>;
+  const camelized = camelizeKeys(whole) as Record<string, unknown>;
+  expect(unreadKeyIssues(camelized, parsed)).toEqual([]);
+  for (const key of Object.keys(camelized)) expect(parsed).toHaveProperty(key);
+});
+
+test("a repeated payload column is collapsed without reporting its keys unread", () => {
+  // The one normalization that shortens an array: two entries naming one column
+  // collapse to the first. The survivor holds the same keys, so the walk reports
+  // nothing, and the collapse stays a normalization rather than becoming a
+  // refusal.
+  const parsed = parseExchangeSpec({
+    ...minimalSpec,
+    linkage_terms: {
+      ...minimalLinkageTerms,
+      payload: {
+        send: [
+          { name: "program", description: "the program enrolled in" },
+          { name: "program" },
+        ],
+      },
+    },
+  });
+  expect(parsed.linkageTerms.payload?.send).toHaveLength(1);
 });

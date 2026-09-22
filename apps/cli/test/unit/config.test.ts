@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import YAML from "yaml";
+import { ZodError } from "zod";
 import {
   bareTermsValue,
   COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
@@ -4608,12 +4609,58 @@ test("loadConfigLinkageSource rejects a non-mapping top-level value", () => {
   );
 });
 
+// --- A configuration is portable ---------------------------------------------
+
+test("a setting this build does not edit survives a load, an edit, and a save", () => {
+  // The rule every reader of the shared schema holds: what a consumer writes
+  // back out holds every setting the file it read stated, whether or not that
+  // consumer has anything to do with the setting (docs/spec/EXCHANGE_FILE.md,
+  // "What a consumer does with a setting it cannot honor"). The CLI has no
+  // editor for any of these -- they are the operator's own lines -- so a save
+  // after an edit elsewhere is what would lose them.
+  const configPath = path.join(dir, "psilink.yaml");
+  const written = {
+    connection: { channel: "filedrop", path: "/mnt/share" },
+    linkage_terms: getDefaultLinkageTerms("Agency A"),
+    metadata: [
+      { name: "program", type: "other", role: "payload", is_payload: true },
+    ],
+    standardization: [{ output: "last_name", input: "LAST_NAME", steps: [] }],
+    retention_disposition: "Filed with the program office for seven years.",
+    expected_payload_columns: ["partner_program"],
+    disclosed_payload_columns: ["program"],
+    expected_partner_deduplicate: true,
+    csv_delimiter: "|",
+  };
+  fs.writeFileSync(configPath, YAML.stringify(written));
+
+  const loaded = parseExchangeSpec(
+    YAML.parse(fs.readFileSync(configPath, "utf8")),
+  );
+  saveConfig(configPath, {
+    ...loaded,
+    linkageTerms: { ...loaded.linkageTerms, identity: "Agency A, renamed" },
+  });
+  const saved = parseExchangeSpec(
+    YAML.parse(fs.readFileSync(configPath, "utf8")),
+  );
+
+  expect(saved.linkageTerms.identity).toBe("Agency A, renamed");
+  expect(saved.retentionDisposition).toBe(written.retention_disposition);
+  expect(saved.standardization).toEqual(loaded.standardization);
+  expect(saved.metadata).toEqual(loaded.metadata);
+  expect(saved.csvDelimiter).toBe("|");
+  expect(saved.expectedPayloadColumns).toEqual(["partner_program"]);
+  expect(saved.disclosedPayloadColumns).toEqual(["program"]);
+  expect(saved.expectedPartnerDeduplicate).toBe(true);
+});
+
 // --- CLI-only entry-sweep flags ----------------------------------------------
 
 test("connection.options.sweep_exchange_files is not a persistable config field (CLI-only)", () => {
   // The entry sweep is invocation-scoped: FileSyncOptionsSchema has no such
-  // field, so the snake_case key is stripped at parse rather than flowing into
-  // the connection options (where open() would otherwise read it).
+  // field, so a config naming it is refused at parse -- naming both lines -- and
+  // the value never reaches the connection options open() reads.
   const configPath = path.join(dir, "psilink.yaml");
   const spec: ExchangeSpec = {
     connection: { channel: "filedrop", path: "/mnt/share" },
@@ -4628,11 +4675,9 @@ test("connection.options.sweep_exchange_files is not a persistable config field 
     sweep_exchange_files: true,
     force_retain_sweep: true,
   };
-  const parsed = parseExchangeSpec(raw);
-  const options = parsed.connection.options as
-    Record<string, unknown> | undefined;
-  expect(options?.["sweepExchangeFiles"]).toBeUndefined();
-  expect(options?.["forceRetainSweep"]).toBeUndefined();
+  expect(() => parseExchangeSpec(raw)).toThrow(ZodError);
+  expect(() => parseExchangeSpec(raw)).toThrow("sweep_exchange_files");
+  expect(() => parseExchangeSpec(raw)).toThrow("force_retain_sweep");
 });
 
 test("assertRetainSweepGuard: --force-retain-sweep alone is a UsageError; other combinations pass", () => {
