@@ -6,9 +6,11 @@ title: "What a connect timeout bounds: one attempt or the whole dial"
 
 _Status: decided and built. psilink's connect budget bounds one attempt, as
 `curl --connect-timeout` and OpenSSH's `ConnectTimeout` do; `probe-host-key`
-dials once, so its `--connect-timeout` is the whole wait. The normative rows
-are in [CHANNEL_SECURITY.md](../spec/CHANNEL_SECURITY.md#connect-probe-bound)
-and the operator-facing description in
+dials once, so its `--connect-timeout` is the whole wait, plus at most two
+further seconds diagnosing a dial that fails before the peer identifies
+itself. The normative rows are in
+[CHANNEL_SECURITY.md](../spec/CHANNEL_SECURITY.md#connect-probe-bound) and
+the operator-facing description in
 [EXCHANGE_REFERENCE.md](../EXCHANGE_REFERENCE.md); this note is kept for the
 measurements and the reasoning. See [docs/notes/README.md](README.md)._
 
