@@ -190,10 +190,48 @@ export function composedConnection(composed: string): Record<string, unknown> {
   return connection;
 }
 
-/** How long {@link awaitJobTerminalState} waits for a spawned child to exit. The
- * stub exits in milliseconds; a caller driving the real built CLI, whose startup
- * dominates, passes a longer bound. */
-const CHILD_EXIT_TIMEOUT_MS = 5_000;
+/** How long {@link awaitJobTerminalState} waits for a spawned child to exit by
+ * default. The stub exits in milliseconds; a caller driving the real built CLI,
+ * whose startup dominates, passes a longer bound. */
+const DEFAULT_TERMINAL_TIMEOUT_MS = 5_000;
+
+/** The connection portion of a filedrop zero-setup argv, shared by the argv
+ * builder's own unit tests and the interop suite that hands the same argv to
+ * the real CLI parser. A directory that does not exist is by design: every
+ * case fails at the input file, before the CLI opens a transport, so no case
+ * can reach a network or a rendezvous. */
+export const RENDEZVOUS_URL = "file:///srv/jobs/abc/rendezvous";
+
+/** The wait for a spawned child's terminal state in the argv-capture tests:
+ * generous next to the stub's near-instant exit, and (for the interop suite)
+ * the real built CLI's cold start. */
+export const CHILD_EXIT_TIMEOUT_MS = 60_000;
+
+/**
+ * Tracks scratch directories created for one test file so each can be removed
+ * once its test finishes. Returns the `scratchDir` helper to call per test and
+ * the `cleanup` function to register on `afterEach`, kept separate from that
+ * registration: a shared util that registers a vitest hook at import time is a
+ * hidden side effect.
+ */
+export function trackScratchDirs(): {
+  scratchDir: (label: string) => string;
+  cleanup: () => void;
+} {
+  const dirs: Array<string> = [];
+  return {
+    scratchDir(label: string): string {
+      const dir = tempDataRoot(label);
+      fs.mkdirSync(dir, { recursive: true });
+      dirs.push(dir);
+      return dir;
+    },
+    cleanup(): void {
+      for (const dir of dirs.splice(0))
+        fs.rmSync(dir, { recursive: true, force: true });
+    },
+  };
+}
 
 /**
  * Await the terminal state of a job spawned through a `cliDriver` entry point.
@@ -204,7 +242,7 @@ const CHILD_EXIT_TIMEOUT_MS = 5_000;
  */
 export async function awaitJobTerminalState(
   spawn: (onTerminal: (state: JobTerminalState) => void) => void,
-  timeoutMs: number = CHILD_EXIT_TIMEOUT_MS,
+  timeoutMs: number = DEFAULT_TERMINAL_TIMEOUT_MS,
 ): Promise<JobTerminalState> {
   // A wrapper object, not a bare local: the terminal is set from the driver's
   // callback, which TypeScript's control-flow analysis would otherwise narrow a

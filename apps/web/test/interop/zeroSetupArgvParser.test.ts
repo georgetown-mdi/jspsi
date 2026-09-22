@@ -25,11 +25,13 @@ import {
 } from "@jobs/intentArgv";
 
 import {
+  CHILD_EXIT_TIMEOUT_MS,
+  RENDEZVOUS_URL,
   awaitJobTerminalState,
   captureExchangeArgv,
   captureZeroSetupArgv,
-  tempDataRoot,
   testSplitSftpServerEntry,
+  trackScratchDirs,
 } from "../utils/jobFixtures";
 
 import { cliIsBuilt } from "./cliParty";
@@ -55,15 +57,6 @@ const CLI_ENTRY = resolveCliBinaryPath({});
 /** The CLI's usage exit (EX_USAGE), which its parser takes on an unknown option. */
 const EXIT_USAGE = 64;
 
-/** The connection portion of a filedrop zero-setup argv. A directory that does not
- * exist is by design: every case here fails at the input file, before the CLI opens
- * a transport, so no case can reach a network or a rendezvous. */
-const RENDEZVOUS_URL = "file:///srv/jobs/abc/rendezvous";
-
-/** The wait for a spawned child's terminal state here: generous next to the stub's
- * near-instant exit, because the same bound covers the real CLI's cold start. */
-const CHILD_EXIT_TIMEOUT_MS = 60_000;
-
 /**
  * The budget for every test below: vitest's default is the wrong scale, since
  * each spawns up to two sequential real node children -- the stub, then the
@@ -76,20 +69,9 @@ const CHILD_EXIT_TIMEOUT_MS = 60_000;
 const SPAWNS_PER_TEST = 2;
 const SPAWN_TEST_TIMEOUT_MS = SPAWNS_PER_TEST * CHILD_EXIT_TIMEOUT_MS + 10_000;
 
-const dirs: Array<string> = [];
+const { scratchDir, cleanup } = trackScratchDirs();
 
-afterEach(() => {
-  for (const dir of dirs.splice(0))
-    fs.rmSync(dir, { recursive: true, force: true });
-});
-
-/** A scratch directory for one spawn, removed after the test. */
-function scratchDir(label: string): string {
-  const dir = tempDataRoot(label);
-  fs.mkdirSync(dir, { recursive: true });
-  dirs.push(dir);
-  return dir;
-}
+afterEach(cleanup);
 
 /**
  * The zero-setup file-sync tokens the console emits for an operator who switched
