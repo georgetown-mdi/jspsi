@@ -61,6 +61,7 @@ import {
   signingIdentityTargetExists,
 } from "./signingIdentity";
 import { buildJobHandoff } from "./handoff";
+import { mountedExchangeDocument } from "./configLoad";
 import { probeSftpHostKey } from "./sftpProbe";
 import { removeSftpCredentialFile } from "./sftpScratch";
 import { validateAuthoredSftpServer } from "./sftpServer";
@@ -972,9 +973,11 @@ export class JobManager {
         ? this.signingPathsFor(workdir, identityPath).receiptOutput
         : null;
 
+    const mountedDocument = mountedExchangeDocument(this.dataRoot);
     const handoff = buildJobHandoff(intent, serverEntry, {
       credentialPasted: this.authoredMaterializedCredentialPath !== undefined,
       filedropSplit: this.jobRendezvousOutboundDir !== undefined,
+      ...(mountedDocument !== undefined ? { mountedDocument } : {}),
     });
 
     const record: JobRecord = {

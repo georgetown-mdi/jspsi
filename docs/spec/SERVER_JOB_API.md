@@ -192,6 +192,10 @@ A client offers the download only when `receiptAvailable` on the status route is
 
 `usedKeyFile` is true for the exchange mode (a `.psilink.key` the operator must copy), false for the zero-setup mode (which has no shared secret). `credentialPasted` is true only for an sftp run whose credential was a pasted, materialized value (the panel then tells the operator to save it to a file); it is always false on the filedrop channel. `usedSigningIdentity` is true for a `certificate`-mode exchange, and drives the panel's carry-the-key caveat: the signing key is a file rather than a setting, and the scheduled run must load the same one -- a fresh `psilink fingerprint` on the scheduling machine mints a different key with a different fingerprint, which the partner's pin then rejects. The `template` is discriminated on `kind`: an exchange run yields a `config` (the `psilink.yaml` document, recomposed through the same functions the live run used), a zero-setup run a `command` (the argv tokens of the `psilink URL INPUT OUTPUT` form).
 
+The `config` text is written by core's `serializeExchangeDocument` -- the writer the CLI's own `saveConfig` calls -- over a document `parseExchangeSpec` has validated, so the template is the file psilink would write for those settings, guidance comments included, and a document that fails validation is refused here rather than at the operator's first scheduled run. What that writer does and does not preserve is in [EXCHANGE_FILE.md](EXCHANGE_FILE.md#writing-a-configuration-back).
+
+Where the console's mounted working folder holds a configuration the console can open (see [Loading a configuration from the mount](#loading-a-configuration-from-the-mount)), the template is that document with the run's composition written over it, top-level key by top-level key. Every block the composition emits is the composition's alone -- the connection, the linkage terms, the signing paths, each already placeholdered by the invariants below -- so no path or credential from the opened file reaches the template; what survives is the settings the console composes no key for, which the load names for the operator. A mount holding no configuration, or one the console would refuse, contributes nothing and the template is the composition alone.
+
 Two invariants hold by construction and are pinned by tests:
 
 - **No secret.** The response never includes the shared secret, the key-file body, or an inline credential value. The exchange config holds the credential only as an `@path` reference (the secret rides the key file, which never crosses this API), and the zero-setup command has no secret at all.
@@ -548,6 +552,8 @@ A `400 { "error": "..." }`, in each case naming the settings to fix as the file 
 A credential field is never in both lists. The operator authors the credential again and the composition writes what they author, so `connection.server.password`, `connection.server.private_key`, and `connection.server.private_key_passphrase` are reported in `warnings` alone; probing one credential shape only would report the other's fields as settings the console keeps unchanged, which would read as the file's reference surviving a re-author that overwrites it.
 
 Subtracted from the probes' settings are the ones a composition fills from the console's own resources rather than from the document: the rendezvous folder (`connection.path`, `connection.inbound_path`, `connection.outbound_path`) and the two signing paths (`signing.identity_file`, `signing.receipt_output`). A run here writes its own value for each, so a document stating one has it held rather than adopted.
+
+Holding a setting is what the export then acts on: the same document is the base the run's hand-off template is written over (see [The recurring-run hand-off](#the-recurring-run-hand-off)), so a setting reported as held is one the operator gets back unchanged in the file they schedule.
 
 ## Workdir layout
 

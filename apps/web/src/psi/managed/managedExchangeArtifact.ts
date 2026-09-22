@@ -11,9 +11,9 @@
  * The artifact is the browser analog of handing over `psilink.yaml` plus
  * `.psilink.key` together, kept CLI-separable rather than becoming a third format:
  *
- * - `exchangeDocument` embeds the exchange-file document as a valid `psilink.yaml`
- *   (the same snake_case YAML the CLI loads, produced through the same discipline
- *   the mint layer uses on its validated spec);
+ * - `exchangeDocument` embeds the exchange-file document as a valid `psilink.yaml`,
+ *   written by core's `serializeExchangeDocument` -- the writer psilink's own
+ *   `saveConfig` uses, so the embedded half is the file the CLI would write;
  * - `key` is the `.psilink.key` pair -- `sharedSecret` and, when a bound is in
  *   force, `expires` -- so the secret half maps onto a valid key file;
  * - `local` holds the browser-only fields the two CLI artifacts do not
@@ -43,10 +43,8 @@ import {
   parseExchangeSpec,
   parseSensitiveJson,
   parseSensitiveYaml,
-  snakeizeKeys,
+  serializeExchangeDocument,
 } from "@psilink/core";
-
-import { stringify as stringifyYaml } from "yaml";
 
 import { z } from "zod";
 
@@ -134,18 +132,6 @@ interface ManagedExchangeArtifact {
   key: ManagedExchangeKeyFields;
   /** The browser-only fields (see {@link ManagedExchangeArtifactLocal}). */
   local: ManagedExchangeArtifactLocal;
-}
-
-/**
- * Serialize a validated exchange-file document to the snake_case YAML the CLI
- * loads, through the same {@link snakeizeKeys} + yaml `stringify` discipline the
- * mint layer applies to its validated spec. The one place a browser-held document
- * becomes `psilink.yaml` text: the artifact's embedded half and the CLI cron
- * export's config file share it rather than running two serializers that could
- * drift on the encoding a CLI load depends on.
- */
-export function serializeExchangeDocument(exchangeFile: ExchangeSpec): string {
-  return stringifyYaml(snakeizeKeys(exchangeFile));
 }
 
 /**

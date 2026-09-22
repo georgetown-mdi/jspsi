@@ -8,9 +8,9 @@
  * This module is the pure half -- no download, no store write, no spend.
  *
  * - It SPLITS the export artifact rather than serializing a second format.
- *   The config text and the key fields come from the artifact module's own
- *   two derivations ({@link serializeExchangeDocument},
- *   {@link keyFileFieldsFromRecord}), which are the CLI's own file shapes
+ *   The config text is core's {@link serializeExchangeDocument}, the writer
+ *   psilink's own `saveConfig` uses, and the key fields are the artifact
+ *   module's {@link keyFileFieldsFromRecord}: the CLI's own file shapes
  *   (docs/spec/MANAGED_EXCHANGE_RECORD.md, "Export artifact"). This adds only
  *   the two files' framing and the two fields the artifact does not hold.
  * - It INJECTS `connection.role` from the record's local `side`, at export
@@ -46,16 +46,13 @@
  * and any `expires` ride the key file alone.
  */
 
-import { ExchangeSpecSchema } from "@psilink/core";
+import { ExchangeSpecSchema, serializeExchangeDocument } from "@psilink/core";
 
 import {
   fieldsOutsideComposableDocument,
   fieldsOutsideLocatorSubset,
 } from "./managedCommandLineDocument";
-import {
-  keyFileFieldsFromRecord,
-  serializeExchangeDocument,
-} from "./managedExchangeArtifact";
+import { keyFileFieldsFromRecord } from "./managedExchangeArtifact";
 
 import type { ExchangeSpec, WebRTCConnectionConfig } from "@psilink/core";
 import type {

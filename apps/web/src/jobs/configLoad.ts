@@ -688,14 +688,26 @@ export function disclosedDocument(
  * @throws {ConfigurationLoadRefusedError} when the file is not a configuration
  *   the console can open.
  */
-export function readMountedConfiguration(
-  source: string,
-): LoadedConfigurationResponse {
-  const raw = parsedYaml(source);
-  const document = parsedDocument(raw);
+export function mountedConfigurationDocument(source: string): ExchangeSpec {
+  const document = parsedDocument(parsedYaml(source));
   consoleChannel(document);
   assertNoStatedSecret(document);
   assertRecordsSurvive(document);
+  return document;
+}
+
+/**
+ * The same read as a response body: the settings the authoring forms edit, the
+ * ones the console holds without an editor, and the credential fields it cannot
+ * pre-fill.
+ *
+ * @throws {ConfigurationLoadRefusedError} when the file is not a configuration
+ *   the console can open.
+ */
+export function readMountedConfiguration(
+  source: string,
+): LoadedConfigurationResponse {
+  const document = mountedConfigurationDocument(source);
   return {
     configured: true,
     present: true,
@@ -714,6 +726,27 @@ export function readMountedConfiguration(
  * something in the folder to fix rather than being pointed at authoring a
  * configuration that already exists.
  *
+ * @throws {ConfigurationLoadRefusedError} when the file is not a configuration
+ *   the console can open.
+ */
+export function loadMountedConfiguration(
+  dataRoot: string,
+): LoadedConfigurationResponse {
+  const source = mountedConfigurationSource(dataRoot);
+  if (source === null)
+    return {
+      configured: true,
+      present: false,
+      carriedThrough: [],
+      warnings: [],
+    };
+  return readMountedConfiguration(source);
+}
+
+/**
+ * The mounted configuration's bytes, or null where the mount holds no such file
+ * at all.
+ *
  * Every check and the read itself go through the one descriptor `openSync`
  * returns, so nothing between them can swap what `psilink.yaml` names. An
  * open failure is absent only when the entry does not exist (`ENOENT`);
@@ -722,20 +755,12 @@ export function readMountedConfiguration(
  * one byte past the cap, so an over-large file is caught by what arrives
  * rather than by a size `fstat` reported earlier.
  *
- * @throws {ConfigurationLoadRefusedError} when the file is not a configuration
- *   the console can open.
+ * @throws {ConfigurationLoadRefusedError} when a file IS there and the console
+ *   cannot read it -- unreadable, not a regular file, or over the size cap.
  */
-export function loadMountedConfiguration(
-  dataRoot: string,
-): LoadedConfigurationResponse {
-  const absent = {
-    configured: true,
-    present: false,
-    carriedThrough: [],
-    warnings: [],
-  };
+function mountedConfigurationSource(dataRoot: string): string | null {
   const filePath = resolveWorkdirFile(dataRoot, JOB_FILE_NAMES.config);
-  if (filePath === null) return absent;
+  if (filePath === null) return null;
   let fd: number;
   try {
     // O_NONBLOCK, not the plain "r" flag: opening a FIFO for read-only blocks
@@ -746,7 +771,7 @@ export function loadMountedConfiguration(
     // are unchanged.
     fd = fs.openSync(filePath, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return absent;
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw new ConfigurationLoadRefusedError(UNREADABLE_CONFIGURATION_MESSAGE);
   }
   try {
@@ -774,10 +799,31 @@ export function loadMountedConfiguration(
     }
     if (bytesRead > MAX_CONFIGURATION_FILE_BYTES)
       throw new ConfigurationLoadRefusedError(OVER_LARGE_CONFIGURATION_MESSAGE);
-    return readMountedConfiguration(
-      buffer.subarray(0, bytesRead).toString("utf8"),
-    );
+    return buffer.subarray(0, bytesRead).toString("utf8");
   } finally {
     fs.closeSync(fd);
+  }
+}
+
+/**
+ * The mounted configuration as a parsed document, for the export a run composes
+ * ({@link ./handoff}): the settings it states that a composition here does not
+ * emit are written back unchanged from this one, so the file the operator takes
+ * to the command line states everything the file they opened stated.
+ *
+ * Undefined on every fault, a mount holding no configuration included, rather
+ * than a refusal: a file this console could not have opened is not one the run
+ * was composed from, and the export then states exactly what the console
+ * composed.
+ */
+export function mountedExchangeDocument(
+  dataRoot: string,
+): ExchangeSpec | undefined {
+  try {
+    const source = mountedConfigurationSource(dataRoot);
+    return source === null ? undefined : mountedConfigurationDocument(source);
+  } catch (error) {
+    if (error instanceof ConfigurationLoadRefusedError) return undefined;
+    throw error;
   }
 }
