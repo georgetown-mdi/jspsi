@@ -25,6 +25,7 @@ import type {
   EntityClusterSummary,
   LinkageTerms,
   Metadata,
+  OutboundPayloadConsent,
   OwnColumnSelection,
   ResolvedMatching,
   Standardization,
@@ -117,6 +118,20 @@ export interface ServerJobExchangeDriverConfig {
    * inviter path leaves it undefined -- the commitment is the acceptor's, and
    * an absent field binds nothing. */
   expectedPartnerDeduplicate?: boolean;
+  /** This party's SEND-side commitment: the columns, in its own namespace, it
+   * promised to disclose when the exchange was established. Absent for an
+   * exchange authored in the console -- the mint writes the commitment, not the
+   * run -- and present where a configuration opened from the mount states one,
+   * whose absence from the composed config would release this party from what it
+   * promised. Forwarded whenever present, an empty array included. */
+  disclosedPayloadColumns?: Array<string>;
+  /** This party's recorded consent to its own outbound set, as a configuration
+   * opened from the mount states it. Absent for an exchange authored in the
+   * console -- the mint is this party's own statement of what it discloses --
+   * and present where the file states one, whose absence from the composed
+   * config would leave a later run held to no set at all. Forwarded whenever
+   * present, a pending record included. */
+  outboundPayloadConsent?: OutboundPayloadConsent;
   /** Which of this party's own input columns the console's composed config
    * writes into its result file beside the partner's values -- the local
    * `include_own_columns` key, decided at the mint. Local: it changes only the
@@ -1118,8 +1133,13 @@ function relayedTerminalErrorOf(event: RelayEvent): RelayedTerminalError {
 /** Build the {@link JobExchangeIntent} a run POSTs from the driver config: the
  * `transport` picks the arm (neither adds a connection field -- the sftp arm
  * has no `remote`, the console runs the one authored connection), and
- * everything after the discriminant is channel-independent. */
-function intentFor(config: ServerJobExchangeDriverConfig): JobExchangeIntent {
+ * everything after the discriminant is channel-independent.
+ *
+ * @internal
+ */
+export function intentFor(
+  config: ServerJobExchangeDriverConfig,
+): JobExchangeIntent {
   const {
     transport,
     side,
@@ -1130,6 +1150,8 @@ function intentFor(config: ServerJobExchangeDriverConfig): JobExchangeIntent {
     standardization,
     expectedPayloadColumns,
     expectedPartnerDeduplicate,
+    disclosedPayloadColumns,
+    outboundPayloadConsent,
     includeOwnColumns,
     csvDelimiter,
     options,
@@ -1149,6 +1171,10 @@ function intentFor(config: ServerJobExchangeDriverConfig): JobExchangeIntent {
     ...(expectedPartnerDeduplicate !== undefined
       ? { expectedPartnerDeduplicate }
       : {}),
+    ...(disclosedPayloadColumns !== undefined
+      ? { disclosedPayloadColumns }
+      : {}),
+    ...(outboundPayloadConsent !== undefined ? { outboundPayloadConsent } : {}),
     ...(includeOwnColumns !== undefined ? { includeOwnColumns } : {}),
     ...(csvDelimiter !== undefined ? { csvDelimiter } : {}),
     ...(options !== undefined ? { options } : {}),

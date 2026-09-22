@@ -12,9 +12,10 @@ import { failureFor } from "@exchange/useInviterExchange";
 
 // What the console tells an operator about each of core's five terms-time pin
 // refusals. Core's own messages name configuration keys -- the command line's
-// remedy, and not one a console operator can take, since the console composes a
-// fresh configuration for every run -- so the seat that renders a relayed
-// refusal shows console copy naming the receipts card's own controls instead.
+// remedy, and not one a console operator can take, since the console writes the
+// configuration each run is driven by itself -- so the seat that renders a
+// relayed refusal shows console copy naming the receipts card's own controls
+// instead.
 
 const REFUSALS = Object.entries(PARTNER_CERTIFICATE_REFUSAL_MESSAGES);
 

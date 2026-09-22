@@ -187,12 +187,26 @@ export interface LoadedConfigurationResponse {
 /**
  * The intent fields every composition probe below states, each optional field
  * among them present, so what the probes measure is the widest document this
- * console composes rather than the narrowest.
+ * console composes rather than the narrowest. The column roles and the cleaning
+ * pipeline are among them: the columns step edits both and a run here writes
+ * what that step holds, so a document stating either is adopted rather than
+ * held. Only the composed document's KEYS are read, never these values.
  */
 function probeIntentFields(): JobExchangeIntentBase {
   return {
     linkageTerms: probeLinkageTerms(),
     sharedSecret: "",
+    metadata: [
+      {
+        name: "probe_column",
+        type: "other",
+        role: "ignored",
+        isPayload: false,
+      },
+    ],
+    standardization: [
+      { output: "probe_field", input: "probe_column", steps: [] },
+    ],
     expectedPayloadColumns: [],
     expectedPartnerDeduplicate: false,
     disclosedPayloadColumns: [],

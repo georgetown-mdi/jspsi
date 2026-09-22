@@ -1,16 +1,10 @@
-import {
-  Fragment,
-  useEffect,
-  useMemo,
-  useReducer,
-  useRef,
-  useState,
-} from "react";
+import { Fragment, useEffect, useMemo, useReducer, useRef } from "react";
 
 import { Alert, VisuallyHidden } from "@mantine/core";
 import { IconAlertCircle } from "@tabler/icons-react";
 
 import {
+  disclosedColumnNames,
   mintExchangeFile,
   sanitizeErrorForDisplay,
   sanitizeForDisplay,
@@ -120,6 +114,13 @@ import {
   splitDirectoryRetainProblem,
 } from "@console/sftpConnectionChoice";
 import { consoleAcquiredCsv } from "@console/consoleAcquiredCsv";
+
+import {
+  DivergedCommitmentNotice,
+  MountedConfigurationCard,
+} from "@console/MountedConfigurationCard";
+import { editorWithLoadedTerms } from "@console/loadedConfig";
+import { fetchMountedConfiguration } from "@psi/jobClient/mountedConfigClient";
 
 import {
   INVITER_SCREEN_INITIAL,
@@ -322,6 +323,7 @@ export function InviterScreen() {
     connectionTuning,
     consoleSource,
     createAlert,
+    delimiterChoice,
     demoActive,
     editor,
     editorAnnouncement,
@@ -330,8 +332,13 @@ export function InviterScreen() {
     intakeAlert,
     invitation,
     lastSpineStep,
+    loadedConfiguration,
+    loadedEnforcementRecords,
+    loadedSftpForm,
+    loadedTermsFile,
     manageOffer,
     minting,
+    mountedConfiguration,
     name,
     reading,
     receipts,
@@ -349,12 +356,6 @@ export function InviterScreen() {
     sourceHandle,
   } = screenState;
 
-  // How this party's own file is read and its own result file written. Local
-  // component state rather than reducer state: nothing derived from the read
-  // depends on it, and every consumer takes the resolved character.
-  const [delimiterChoice, setDelimiterChoice] = useState<CsvDelimiterChoice>(
-    INITIAL_CSV_DELIMITER_CHOICE,
-  );
   const delimiterResolution = resolveCsvDelimiter(delimiterChoice);
   const csvDelimiter = delimiterResolution.ok
     ? delimiterResolution.delimiter
@@ -366,7 +367,7 @@ export function InviterScreen() {
   // refused choice reads nothing -- the field states the refusal and the intake
   // is closed until it resolves.
   function changeDelimiter(choice: CsvDelimiterChoice) {
-    setDelimiterChoice(choice);
+    dispatch({ type: "delimiter-chosen", choice });
     const resolution = resolveCsvDelimiter(choice);
     if (!resolution.ok || sourceFile === undefined) return;
     void readFile(sourceFile, resolution.delimiter);
@@ -388,6 +389,60 @@ export function InviterScreen() {
       cancelled = true;
     };
   }, [sftpInfo]);
+
+  // Open the configuration the operator mounted. The read answers here and the
+  // reducer decides what it may change, the delimiter included: an invitation
+  // minted while this fetch is in flight leaves every field the document states
+  // where the sealed terms had it.
+  async function openMountedConfiguration(): Promise<void> {
+    dispatch({ type: "mounted-configuration-reading" });
+    dispatch({
+      type: "mounted-configuration-read",
+      answer: await fetchMountedConfiguration(),
+    });
+  }
+
+  // Close the open configuration: it stops being an input here, so the draft
+  // falls back to what the file's own headers infer and the reducer drops
+  // everything else the load filled.
+  function closeMountedConfiguration() {
+    dispatch({
+      type: "loaded-configuration-discarded",
+      ...(acquired !== undefined
+        ? { editor: editorFromCsv(name, acquired) }
+        : {}),
+    });
+  }
+
+  // The open configuration's terms over the file the file step holds: the
+  // import rebuilds each field's binding against the operator's own columns, so
+  // it runs once the file is read and again for the next file read while the
+  // configuration is open -- a draft seeded from a file's headers alone would
+  // disclose a column the configuration states is kept back. The own-column
+  // choice goes on first, because the import reads it off the draft it rebuilds
+  // from. The transport the file's channel selects goes on in the reducer,
+  // which holds it.
+  useEffect(() => {
+    if (
+      loadedConfiguration === undefined ||
+      editor === undefined ||
+      acquired === undefined ||
+      loadedTermsFile === acquired
+    )
+      return;
+    const applied = editorWithLoadedTerms(
+      editorWithIncludeOwnColumns(editor, loadedConfiguration.ownColumns),
+      acquired,
+      loadedConfiguration,
+    );
+    dispatch({
+      type: "loaded-terms-applied",
+      file: acquired,
+      editor: applied.editor,
+      notApplied: applied.notApplied,
+      notCovered: applied.notCovered,
+    });
+  }, [acquired, editor, loadedConfiguration, loadedTermsFile]);
 
   // Fetch the console's rendezvous mount once on a console build; the mount is
   // boot-static on the server, so one fetch per console serves the session. The
@@ -466,6 +521,7 @@ export function InviterScreen() {
     options: runOptions,
     runDiagnostics: runDiagnosticsIntentFields(runDiagnostics),
     receipts: receiptsIntentFields(receipts),
+    loadedEnforcementRecords,
     ...(csvDelimiter !== undefined ? { csvDelimiter } : {}),
   });
 
@@ -884,7 +940,10 @@ export function InviterScreen() {
   // a sample inviter name so step 1 lands complete. The mint path stays
   // demo-free -- from here the visitor drives every real step by hand.
   function loadSample() {
-    setDelimiterChoice(INITIAL_CSV_DELIMITER_CHOICE);
+    dispatch({
+      type: "delimiter-chosen",
+      choice: INITIAL_CSV_DELIMITER_CHOICE,
+    });
     void readFile(sampleInviterFile(), undefined, {
       name: SAMPLE_INVITER_NAME,
     });
@@ -1199,6 +1258,19 @@ export function InviterScreen() {
   const fileReady = name.trim().length > 0 && linkable;
   const sealed = editor?.sealed === true;
 
+  // What an open configuration's commitments are read against: the set this
+  // draft would send and the direction it would send it in. Absent until a file
+  // is read, where no draft settles either.
+  const runDisclosure =
+    editor === undefined
+      ? undefined
+      : {
+          disclosedColumns: disclosedColumnNames(editor.draft.metadata),
+          sharesWithPartner: outputForDirection(editor.draft.outputDirection)
+            .shareWithPartner,
+          records: loadedEnforcementRecords,
+        };
+
   // Inside a Customize tab no spine step is current; the step the operator
   // came from stays navigable like any completed step. The share and save
   // sections have their own rails, so neither is a Customize tab.
@@ -1330,6 +1402,15 @@ export function InviterScreen() {
         {isConsoleBuild() && section === "file" && acquired === undefined && (
           <RecoveredExchangePanel />
         )}
+        {isConsoleBuild() && section === "file" && (
+          <MountedConfigurationCard
+            state={mountedConfiguration}
+            sealed={sealed}
+            disclosure={runDisclosure}
+            onOpen={() => void openMountedConfiguration()}
+            onClose={closeMountedConfiguration}
+          />
+        )}
         {section === "file" && (
           <YourFileSection
             name={name}
@@ -1354,6 +1435,12 @@ export function InviterScreen() {
             }}
             onLoadSample={loadSample}
             onDownloadSamples={downloadSampleCsvs}
+          />
+        )}
+        {isConsoleBuild() && section === "columns" && (
+          <DivergedCommitmentNotice
+            state={mountedConfiguration}
+            disclosure={runDisclosure}
           />
         )}
         {section === "columns" &&
@@ -1404,6 +1491,7 @@ export function InviterScreen() {
                 problems={openProblems}
                 minting={minting}
                 sftpConnection={sftpConnection}
+                loadedSftpForm={loadedSftpForm}
                 sftpSaveFilePreferred={sftpSaveFilePreferred}
                 rendezvous={rendezvous}
                 exchangeFiles={exchangeFiles}

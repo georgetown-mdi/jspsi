@@ -9,9 +9,10 @@ import type { PartnerCertificateRefusalKind } from "@psilink/core";
  * Core's own messages state the cause and then a remedy in configuration keys
  * -- replace `signing.partner_fingerprint`, set `signing.mode` -- which is the
  * command line's instruction and not one a console operator can take: the
- * console composes a fresh configuration for every run, and the controls they
- * do hold are the receipts card's own fields. Each message here states the same
- * cause in the console's words and names those controls instead.
+ * console writes the configuration each run is driven by itself, and the
+ * controls the operator does hold are the receipts card's own fields. Each
+ * message here states the same cause in the console's words and names those
+ * controls instead.
  *
  * The refusal is identified from the whole literal core raised, found in the
  * failure text the relay delivered. That text holds the refusal whole on the

@@ -69,6 +69,7 @@ import type {
 import type { ExchangeDriver } from "@psi/exchangeDriver";
 import type { GeneratedInvitation } from "@psi/invitation";
 import type { JobExchangeOptions } from "@jobs/intentSchemas";
+import type { LoadedEnforcementRecords } from "@console/loadedConfig";
 import type { ReceiptsIntentFields } from "@psi/receiptsModel";
 import type { RunDiagnosticsIntentFields } from "@psi/runDiagnosticsModel";
 import type { RunOutputs } from "@psi/runOutputs";
@@ -403,8 +404,13 @@ export function failureFor(
  * `side` is the inviter's, so the config has no `outbound_payload_consent` --
  * this party authored its own outbound set at mint, and the invitation is
  * that statement. The acceptor's outbound set is unauthored and recorded
- * instead (see `acceptorServerJobConfig`); likewise only the acceptor sets
- * `expectedPayloadColumns`.
+ * instead (see `acceptorServerJobConfig`).
+ *
+ * `loadedEnforcementRecords` are the records a configuration opened from the
+ * mount states and this console has no control for. An invitation authored here
+ * states none of its own, so they ride to the intent as the file stated them
+ * and the composed configuration states them back (docs/spec/EXCHANGE_FILE.md,
+ * "The records that must survive").
  *
  * Pure and exported so the derivation is the tested boundary, pinned without
  * running the hook.
@@ -419,6 +425,7 @@ export function inviterServerJobConfig({
   options,
   runDiagnostics,
   receipts,
+  loadedEnforcementRecords,
 }: {
   minted: Pick<
     GeneratedInvitation,
@@ -445,6 +452,9 @@ export function inviterServerJobConfig({
   /** The review step's receipt-signing and retention choices, forwarded to the
    * intent unchanged. */
   receipts?: ReceiptsIntentFields;
+  /** The enforcement records a loaded configuration stated, forwarded unchanged.
+   * Absent for an exchange authored here, which states none. */
+  loadedEnforcementRecords?: LoadedEnforcementRecords;
 }): ServerJobExchangeDriverConfig {
   return {
     transport,
@@ -463,6 +473,7 @@ export function inviterServerJobConfig({
     ...(options !== undefined ? { options } : {}),
     ...(runDiagnostics !== undefined ? { runDiagnostics } : {}),
     ...(receipts !== undefined ? { receipts } : {}),
+    ...loadedEnforcementRecords,
   };
 }
 
@@ -490,6 +501,7 @@ export function useInviterExchange({
   options,
   runDiagnostics,
   receipts,
+  loadedEnforcementRecords,
 }: {
   invitation: GeneratedInvitation | undefined;
   inviterName: string;
@@ -523,6 +535,10 @@ export function useInviterExchange({
    * intent unchanged; unused on the browser path, which produces no CLI config and
    * signs no receipt. */
   receipts?: ReceiptsIntentFields;
+  /** The enforcement records a configuration opened from the mount stated,
+   * forwarded to the intent unchanged; unused on the browser path, which
+   * composes no configuration. */
+  loadedEnforcementRecords?: LoadedEnforcementRecords;
 }): {
   run: ExchangeRun;
   outputs: RunOutputs | undefined;
@@ -716,6 +732,9 @@ export function useInviterExchange({
           ...(options !== undefined ? { options } : {}),
           ...(runDiagnostics !== undefined ? { runDiagnostics } : {}),
           ...(receipts !== undefined ? { receipts } : {}),
+          ...(loadedEnforcementRecords !== undefined
+            ? { loadedEnforcementRecords }
+            : {}),
         }),
         // Persist the created job's id so a reload or hard tab close can re-attach
         // to the console's run, and track it for the deliberate-discard paths.

@@ -56,8 +56,8 @@ export function recordedPartnerFingerprint(
  * The console's own first-contact notice. It states what was pinned, what that
  * pin is authenticated by, and the out-of-band comparison that is the only
  * thing which strengthens it -- and asks the operator to keep the value, since
- * the console composes a fresh configuration for every run and the next one
- * pins nothing unless they enter it.
+ * a pin adopted mid-run is not written back into the configuration in the
+ * mounted folder and the next run pins nothing unless they enter it.
  *
  * Names no file: the configuration the value went into is inside the console's
  * container, and this run's own files are the operator's downloads.
@@ -78,8 +78,8 @@ export function partnerCertificatePinnedNotice(
     "signing certificate your partner presented. That pin is authenticated " +
     `by the channel the invitation travelled and nothing else. ${value} ` +
     "Enter it under your partner's fingerprint before the next exchange: " +
-    "this console composes a fresh configuration for every run, so a pin it " +
-    "adopted is not carried forward on its own."
+    "this run's pin is not written back into the configuration in your " +
+    "folder, so nothing carries it forward on its own."
   );
 }
 
@@ -92,8 +92,8 @@ export function partnerCertificatePinnedNotice(
  * One sentence answers both, since what the operator has to do is the same:
  * each CLI message names the configuration file the pin goes into, and offers
  * an edit of that file or a writable mount of it -- a path inside this
- * container, and two remedies a console operator cannot act on, the console
- * composing a fresh configuration for every run.
+ * container, and two remedies a console operator cannot act on, since the
+ * console writes the configuration each run is driven by itself.
  */
 export const PARTNER_PIN_UNRECORDABLE_FAILURE =
   "This exchange signs receipts and has no partner fingerprint on file, so it " +

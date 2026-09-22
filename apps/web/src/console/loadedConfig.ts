@@ -16,10 +16,12 @@
  * (`credentialFieldsNotAdopted` and `carriedThroughFields`, `@jobs/configLoad`),
  * since the values that decide them stay server-side.
  *
- * The linkage terms reach the invitation editor through `editorWithImportedTerms`
- * (`@psi/inviterEditor`), which needs the operator's own CSV: it rebuilds each
- * field's binding against their columns. That is a sequencing constraint, not a
- * mapping one -- the terms are held here until the input step has a file.
+ * The linkage terms, the column roles, and the cleaning pipeline reach the
+ * invitation editor together, through `editorWithLoadedTerms`, which needs the
+ * operator's own CSV: the import rebuilds each field's binding against their
+ * columns. That is a sequencing constraint, not a mapping one -- the three are
+ * held until the input step has a file. What their own file cannot supply comes
+ * back by name for the notice beside the load control.
  */
 
 import {
@@ -27,24 +29,40 @@ import {
   CSV_DELIMITER_OTHER,
   INITIAL_CSV_DELIMITER_CHOICE,
 } from "@components/csvDelimiterChoice";
+import { isDisclosedToPartner } from "@psilink/core";
+
 import { OWN_COLUMNS_DEFAULT } from "@psi/ownColumnsModel";
+
+import {
+  disclosureOf,
+  setColumnDisclosure,
+  setColumnType,
+} from "@psi/metadataEditing";
+import {
+  editorWithFieldInput,
+  editorWithFieldSteps,
+  editorWithImportedTerms,
+} from "@psi/inviterEditor";
 
 import { CONNECTION_TUNING_DEFAULT } from "./connectionTuningModel";
 import { EMPTY_SFTP_FORM } from "./sftpConnectionForm";
 import { EXCHANGE_FILES_DEFAULT } from "./exchangeFilesModel";
 
+import type { AcquiredCsv, InviterEditor } from "@psi/inviterEditor";
 import type {
-  DisclosedExchangeDocument,
-  DisclosedFileSyncOptions,
-  DisclosedSftpServer,
-} from "@jobs/configLoad";
-import type {
+  ColumnMetadata,
   LinkageTerms,
   Metadata,
   OutboundPayloadConsent,
   Standardization,
 } from "@psilink/core";
+import type {
+  DisclosedExchangeDocument,
+  DisclosedFileSyncOptions,
+  DisclosedSftpServer,
+} from "@jobs/configLoad";
 import type { CsvDelimiterChoice } from "@components/csvDelimiterChoice";
+import type { DisclosureChoice } from "@psi/metadataEditing";
 import type { OwnColumnsChoice } from "@psi/ownColumnsModel";
 import type { ReceiptsSigningMode } from "@psi/receiptsModel";
 
@@ -270,5 +288,176 @@ export function authoringStateFromDocument(
     ...(document.standardization !== undefined
       ? { standardization: document.standardization }
       : {}),
+  };
+}
+
+/** The parts of a loaded document the invitation editor takes once the input
+ * file is read: the matching terms, and the column roles and cleaning pipeline
+ * the document states for this party's own columns. */
+export interface LoadedEditorTerms {
+  linkageTerms: LinkageTerms;
+  metadata?: Metadata;
+  standardization?: Standardization;
+}
+
+/** One column's description as the document states it, over the set the merge
+ * is building. The document states the column set whole, so a column it
+ * describes takes that description and one it leaves undescribed keeps none. */
+function withColumnDescription(
+  metadata: Metadata,
+  name: string,
+  description: string | undefined,
+): Metadata {
+  return metadata.map((column) => {
+    if (column.name !== name) return column;
+    if (description === undefined) {
+      const without = { ...column };
+      delete without.description;
+      return without;
+    }
+    return { ...column, description };
+  });
+}
+
+/**
+ * The disclosure choice a loaded column takes, read from what core transmits it
+ * as ({@link isDisclosedToPartner}) rather than from its `role` alone, so the
+ * merged draft sends exactly the columns the document sends.
+ *
+ * The columns step holds `role` and `isPayload` as one collapsed choice, so a
+ * pair core admits off that diagonal has no choice of its own: a `role: payload`
+ * column with `is_payload: false` sends nothing and takes `ignored`, while a
+ * `role: linkage` or `role: identifier` column with `is_payload: true` does
+ * send, so it takes `payload` and loses its matching or identifier half. Each
+ * such pair is reported by the merge rather than passed over as applied.
+ */
+function loadedDisclosureOf(column: ColumnMetadata): DisclosureChoice {
+  if (isDisclosedToPartner(column)) return "payload";
+  return column.role === "payload" ? "ignored" : disclosureOf(column);
+}
+
+/**
+ * The column set the import binds against: the operator's own inferred columns
+ * with each role, type, and description the document states for a column of
+ * that name put back, through the same editing helpers the columns step uses,
+ * so the single-identifier rule holds exactly as it does for a hand edit. A
+ * column the document names that this file does not have leaves the whole
+ * setting unapplied, since nothing in the editor can hold it.
+ *
+ * A document stating `metadata` states the column set whole, as the command
+ * line reads it (`resolveExchangeInputs` takes the config's metadata in place of
+ * inference, never beside it), so a file column the document does not name is
+ * held back at `ignored` rather than keeping inference's disclosed default.
+ * `covered` reports whether the document's set reached every column the file
+ * has, for the notice beside the load control.
+ *
+ * What the merge lands on is read back against the `role` and `is_payload` the
+ * document states for each column, so a pair the columns step cannot hold --
+ * the off-diagonal ones {@link loadedDisclosureOf} collapses, and a column the
+ * single-identifier rule demoted, a document naming two identifier columns
+ * keeping the last one and sending the other to `ignored` -- counts as a
+ * setting this file could not take whole, rather than a silent divergence
+ * between the run and the file it was opened from.
+ */
+function metadataWithLoadedColumns(
+  inferred: Metadata,
+  loaded: Metadata | undefined,
+): { metadata: Metadata; whole: boolean; covered: boolean } {
+  if (loaded === undefined)
+    return { metadata: inferred, whole: true, covered: true };
+  let metadata = inferred;
+  for (const column of loaded) {
+    if (!metadata.some((own) => own.name === column.name)) continue;
+    metadata = setColumnType(metadata, column.name, column.type).metadata;
+    metadata = setColumnDisclosure(
+      metadata,
+      column.name,
+      loadedDisclosureOf(column),
+    ).metadata;
+    metadata = withColumnDescription(metadata, column.name, column.description);
+  }
+  const stated = new Set(loaded.map((column) => column.name));
+  const unstated = inferred
+    .filter((own) => !stated.has(own.name))
+    .map((own) => own.name);
+  for (const name of unstated) {
+    metadata = setColumnDisclosure(metadata, name, "ignored").metadata;
+  }
+  const whole = loaded.every((column) => {
+    const own = metadata.find((merged) => merged.name === column.name);
+    return (
+      own !== undefined &&
+      own.role === column.role &&
+      own.isPayload === column.isPayload
+    );
+  });
+  return { metadata, whole, covered: unstated.length === 0 };
+}
+
+/**
+ * Put a loaded configuration's terms, columns, and cleaning into the editor,
+ * against the file the operator read: the import rebuilds every binding over
+ * their own columns ({@link editorWithImportedTerms}), so nothing here can run
+ * before a file is read.
+ *
+ * The document's own cleaning is adopted per field, over the binding the import
+ * reconstructed, for a field the import declared whose input the document binds
+ * to a `role: linkage` column -- the rule the import's own reconstruction binds
+ * by, so a configuration cannot clean a column into a matching key that this
+ * party's roles do not offer for matching.
+ *
+ * A setting the operator's file cannot supply whole is named rather than
+ * dropped, as the file spells it, for the notice beside the load control: a
+ * document column the file does not have, or a cleaned field whose binding
+ * could not be placed, leaves that setting named there. `notCovered` names the
+ * other direction, the file holding columns the document's own set does not
+ * state, each of which is held back rather than disclosed.
+ */
+export function editorWithLoadedTerms(
+  editor: InviterEditor,
+  csv: AcquiredCsv,
+  loaded: LoadedEditorTerms,
+): {
+  editor: InviterEditor;
+  notApplied: Array<string>;
+  notCovered: Array<string>;
+} {
+  if (editor.sealed === true) return { editor, notApplied: [], notCovered: [] };
+  const columns = metadataWithLoadedColumns(
+    editor.seed.metadata,
+    loaded.metadata,
+  );
+  let next = editorWithImportedTerms(
+    editor,
+    csv,
+    loaded.linkageTerms,
+    columns.metadata,
+  );
+  let cleaningWhole = true;
+  for (const transformation of loaded.standardization ?? []) {
+    const declared = next.draft.standardization.some(
+      (declaration) => declaration.output === transformation.output,
+    );
+    const bindable = columns.metadata.some(
+      (column) =>
+        column.name === transformation.input && column.role === "linkage",
+    );
+    if (!declared || !bindable) {
+      cleaningWhole = false;
+      continue;
+    }
+    next = editorWithFieldSteps(
+      editorWithFieldInput(next, transformation.output, transformation.input),
+      transformation.output,
+      transformation.steps,
+    );
+  }
+  return {
+    editor: next,
+    notApplied: [
+      ...(columns.whole ? [] : ["metadata"]),
+      ...(cleaningWhole ? [] : ["standardization"]),
+    ],
+    notCovered: columns.covered ? [] : ["metadata"],
   };
 }

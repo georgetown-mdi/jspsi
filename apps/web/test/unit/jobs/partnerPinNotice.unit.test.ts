@@ -221,10 +221,11 @@ describe("the notice states the pin without naming a file", () => {
     expect(notice).toContain(ADOPTED_FINGERPRINT);
     expect(notice).toMatch(/channel the invitation travelled/);
     expect(notice).toMatch(/psilink fingerprint/);
-    // The console composes a fresh configuration per run, so an adopted pin is
-    // lost unless the operator enters it -- unlike a command-line run, which
-    // records it in the file it was passed.
+    // An adopted pin is not written back into the configuration in the mounted
+    // folder, so it is lost unless the operator enters it -- unlike a
+    // command-line run, which records it in the file it was passed.
     expect(notice).toMatch(/before the next exchange/);
+    expect(notice).toMatch(/not written back/);
   });
 
   test("a value it could not read back leaves the pin stated and the value out", () => {

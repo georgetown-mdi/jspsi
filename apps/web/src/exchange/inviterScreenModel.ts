@@ -1,5 +1,6 @@
 import {
   editorWithIdentity,
+  editorWithTransport,
   sealEditor,
   unsealEditor,
 } from "@psi/inviterEditor";
@@ -10,8 +11,18 @@ import {
 } from "@psi/runDiagnosticsModel";
 import { RECEIPTS_DEFAULT } from "@psi/receiptsModel";
 
+import {
+  MOUNTED_CONFIGURATION_UNREAD,
+  mountedConfigurationRead,
+  withTermsNotApplied,
+  withUnavailableTransport,
+} from "@console/mountedConfiguration";
+
+import { availableTransports, transportOffered } from "@psi/transportChooser";
+
 import { CONNECTION_TUNING_DEFAULT } from "@console/connectionTuningModel";
 import { EXCHANGE_FILES_DEFAULT } from "@console/exchangeFilesModel";
+import { INITIAL_CSV_DELIMITER_CHOICE } from "@components/csvDelimiterChoice";
 
 import { EMPTY_SAVE_FIELDS } from "./saveExchangeModel";
 import { MANAGE_OFFER_IDLE } from "./manageOfferModel";
@@ -33,7 +44,16 @@ import type { RunDiagnosticsDraft } from "@psi/runDiagnosticsModel";
 import type { SftpConnectionInfo } from "@psi/jobClient/serverJobExchangeDriver";
 
 import type { ConnectionTuningDraft } from "@console/connectionTuningModel";
+import type { CsvDelimiterChoice } from "@components/csvDelimiterChoice";
 import type { ExchangeFilesDraft } from "@console/exchangeFilesModel";
+
+import type { LinkageTerms, Metadata, Standardization } from "@psilink/core";
+import type { LoadedEnforcementRecords } from "@console/loadedConfig";
+import type { MountedConfigurationAnswer } from "@psi/jobClient/mountedConfigClient";
+import type { MountedConfigurationState } from "@console/mountedConfiguration";
+import type { OwnColumnsChoice } from "@psi/ownColumnsModel";
+import type { SftpConnectionFormValues } from "@console/sftpConnectionForm";
+import type { Transport } from "@psi/transportChooser";
 
 import type { AlertContent } from "@components/csvIntake";
 import type { SftpConnectionProjection } from "@jobs/jobManager";
@@ -166,11 +186,59 @@ export interface InviterScreenState {
   /** The operator's receipt-signing and retention choices for the same run, held
    * beside the three drafts above for the same reasons. */
   receipts: ReceiptsDraft;
+  /** How this party's own file is read and its own result file written. Held
+   * here rather than beside the file step's controls because a loaded
+   * configuration states it: a read that the seal refuses must leave it where
+   * the sealed terms had it, which only the guard this reducer applies can
+   * decide. */
+  delimiterChoice: CsvDelimiterChoice;
   /** Whether the live spine holds the synthetic sample rather than a real file. */
   demoActive: boolean;
   /** The offer's progress and, for a failed deposit, what it was about when a
    * column name explains it. */
   manageOffer: ManageOfferState;
+  /** The load of the configuration mounted beside the working directory: what
+   * the offer shows, and the two notices it renders beside itself. */
+  mountedConfiguration: MountedConfigurationState;
+  /** The connection form a loaded configuration seeds, for the review step's
+   * SFTP card. Undefined where no configuration is open or the open one names no
+   * host, in which case the card starts from the empty form. */
+  loadedSftpForm: SftpConnectionFormValues | undefined;
+  /** The terms the open configuration states, held for as long as it is open:
+   * the import rebuilds each field's binding against the operator's own
+   * columns, so it runs against whichever file the file step holds
+   * (`editorWithImportedTerms`, `@psi/inviterEditor`) and runs again for the
+   * next one. Undefined where no configuration is open. */
+  loadedConfiguration: LoadedConfigurationTerms | undefined;
+  /** The input file the open configuration's terms are in force over, held by
+   * identity: a file the terms have not reached is one the screen applies them
+   * to. Undefined before they reach a file, and while none is open. */
+  loadedTermsFile: AcquiredCsv | undefined;
+  /** The enforcement records a loaded configuration states and this flow has no
+   * control for, held so the run's composed configuration states each as the
+   * file did (docs/spec/EXCHANGE_FILE.md, "The records that must survive").
+   * Empty where no configuration is open, or the open one states none. */
+  loadedEnforcementRecords: LoadedEnforcementRecords;
+}
+
+/** What the open configuration states about the terms, every part of it an
+ * argument of the one import that rebuilds the draft against the operator's own
+ * columns, so they move together. It is an input to the screen for as long as
+ * the configuration is open: the draft the file step seeds is derived from it
+ * and the file together, for whichever file the operator commits, and only
+ * discarding the configuration drops it.
+ *
+ * `transport` is the transport the file's own channel runs over, present only
+ * where this console offers it -- an unoffered one is named beside the load
+ * control instead ({@link withUnavailableTransport}). `metadata` and
+ * `standardization` are the document's own column roles and cleaning pipeline,
+ * adopted over the inference the file's headers alone would give. */
+export interface LoadedConfigurationTerms {
+  linkageTerms: LinkageTerms;
+  ownColumns: OwnColumnsChoice;
+  transport?: Transport;
+  metadata?: Metadata;
+  standardization?: Standardization;
 }
 
 /** The console before a visitor has done anything: step 1, no file, no draft, and
@@ -205,8 +273,14 @@ export const INVITER_SCREEN_INITIAL: InviterScreenState = {
   connectionTuning: CONNECTION_TUNING_DEFAULT,
   runDiagnostics: RUN_DIAGNOSTICS_DEFAULT,
   receipts: RECEIPTS_DEFAULT,
+  delimiterChoice: INITIAL_CSV_DELIMITER_CHOICE,
   demoActive: false,
   manageOffer: MANAGE_OFFER_IDLE,
+  mountedConfiguration: MOUNTED_CONFIGURATION_UNREAD,
+  loadedSftpForm: undefined,
+  loadedConfiguration: undefined,
+  loadedTermsFile: undefined,
+  loadedEnforcementRecords: {},
 };
 
 /** Everything that moves the inviter console. */
@@ -320,12 +394,39 @@ export type InviterScreenAction =
   | { type: "connection-tuning-chosen"; draft: ConnectionTuningDraft }
   | { type: "run-diagnostics-chosen"; draft: RunDiagnosticsDraft }
   | { type: "receipts-chosen"; draft: ReceiptsDraft }
+  /** The field delimiter this party's file is read by was chosen. The screen
+   * re-reads the file by it; nothing else here depends on the read. */
+  | { type: "delimiter-chosen"; choice: CsvDelimiterChoice }
   /** The keys tab's expert authoring switch moved. */
   | { type: "expert-mode-chosen"; expertMode: boolean }
   /** The managed-exchange deposit began, landed, or failed. */
   | { type: "manage-offer-started" }
   | { type: "manage-offer-deposited" }
-  | { type: "manage-offer-failed"; refusal?: AlertContent };
+  | { type: "manage-offer-failed"; refusal?: AlertContent }
+  /** A read of the mounted configuration is in flight. */
+  | { type: "mounted-configuration-reading" }
+  /** The read answered. A configuration that opens fills every card the document
+   * covers in one action, so no step is left showing a value from another
+   * configuration; a refusal or an absent mount fills none. */
+  | { type: "mounted-configuration-read"; answer: MountedConfigurationAnswer }
+  /** The open configuration's terms reached the file the import binds them
+   * against, with the settings that file's own columns could not supply named
+   * for the notice beside the load control. The transport the loaded channel
+   * selects rides those terms, so it goes on the editor the import rebuilt, and
+   * the file they are now in force over is booked beside them. */
+  | {
+      type: "loaded-terms-applied";
+      file: AcquiredCsv;
+      editor: InviterEditor;
+      notApplied?: ReadonlyArray<string>;
+      notCovered?: ReadonlyArray<string>;
+    }
+  /** The operator closed the open configuration: it stops being an input, so
+   * every card and draft it seeded returns to its own authoring default along
+   * with the terms, the records, the connection form and the notices, and the
+   * draft falls back to what the file's own headers infer. `editor` is that
+   * inference, absent where the file step holds no file to infer from. */
+  | { type: "loaded-configuration-discarded"; editor?: InviterEditor };
 
 /** The state a discarded or cleared read leaves: no file, no profile, no draft,
  * and no sample marker, so nothing downstream vouches for a file that is gone. */
@@ -419,6 +520,12 @@ export function inviterScreenReducer(
         consoleSource: action.source,
         acquired: action.acquired,
         editor: action.editor,
+        // The draft stands, so an open configuration's terms stand with it over
+        // the re-profiled file and the screen re-derives nothing.
+        loadedTermsFile:
+          state.loadedTermsFile === state.acquired
+            ? action.acquired
+            : state.loadedTermsFile,
         savedExchange: undefined,
         editorAnnouncement: action.announcement,
       };
@@ -524,6 +631,8 @@ export function inviterScreenReducer(
       return { ...state, runDiagnostics: action.draft };
     case "receipts-chosen":
       return { ...state, receipts: action.draft };
+    case "delimiter-chosen":
+      return { ...state, delimiterChoice: action.choice };
     case "expert-mode-chosen":
       return { ...state, expertMode: action.expertMode };
     case "manage-offer-started":
@@ -537,6 +646,110 @@ export function inviterScreenReducer(
           status: "error",
           ...(action.refusal !== undefined ? { refusal: action.refusal } : {}),
         },
+      };
+    case "mounted-configuration-reading":
+      if (state.editor?.sealed === true) return state;
+      return { ...state, mountedConfiguration: { status: "reading" } };
+    case "mounted-configuration-read": {
+      // A sealed draft is an invitation already minted from other terms: the
+      // load would fill the cards and the records while leaving those terms
+      // untouched, so there is nothing here a read may do.
+      if (state.editor?.sealed === true) return state;
+      const read = mountedConfigurationRead(action.answer);
+      const loaded = read.loaded;
+      if (loaded === undefined)
+        return { ...state, mountedConfiguration: read.state };
+      // The file's own channel against the console's transport matrix -- the
+      // build this offer is rendered on (`InviterScreen`). An unresolved mount
+      // reads as no mount, the same conservative reading the chooser itself
+      // gives it, so the load never selects a transport this console has not
+      // confirmed it can run.
+      const offered = transportOffered(
+        availableTransports(
+          true,
+          state.sftpInfo?.connection != null,
+          state.rendezvous?.configured === true,
+        ),
+        loaded.channel,
+      );
+      return {
+        ...state,
+        mountedConfiguration: offered
+          ? read.state
+          : withUnavailableTransport(read.state, loaded.channel),
+        connectionTuning: loaded.connectionTuning,
+        exchangeFiles: loaded.exchangeFiles,
+        receipts: {
+          ...state.receipts,
+          mode: loaded.receipts.mode,
+          partnerFingerprint: loaded.receipts.partnerFingerprint,
+          retentionDisposition: loaded.receipts.retentionDisposition,
+        },
+        delimiterChoice: loaded.csvDelimiter,
+        loadedSftpForm: loaded.sftpForm,
+        loadedConfiguration: {
+          linkageTerms: loaded.linkageTerms,
+          ownColumns: loaded.ownColumns,
+          ...(offered ? { transport: loaded.channel } : {}),
+          ...(loaded.metadata !== undefined
+            ? { metadata: loaded.metadata }
+            : {}),
+          ...(loaded.standardization !== undefined
+            ? { standardization: loaded.standardization }
+            : {}),
+        },
+        loadedTermsFile: undefined,
+        loadedEnforcementRecords: loaded.records,
+      };
+    }
+    case "loaded-terms-applied": {
+      // The draft was rebuilt against the file the screen held when the import
+      // ran. A commit or a void landing first leaves that file off the step, and
+      // a draft built over a file the console no longer holds is not one to
+      // seat -- the next file carries the terms instead.
+      if (action.file !== state.acquired) return state;
+      const transport = state.loadedConfiguration?.transport;
+      return {
+        ...state,
+        editor:
+          transport === undefined
+            ? action.editor
+            : editorWithTransport(action.editor, transport),
+        mountedConfiguration: withTermsNotApplied(
+          state.mountedConfiguration,
+          action.notApplied ?? [],
+          action.notCovered ?? [],
+        ),
+        loadedTermsFile: action.file,
+        editorAnnouncement:
+          "Loaded the configuration's matching terms. Review them before creating.",
+      };
+    }
+    case "loaded-configuration-discarded":
+      // A sealed draft is an invitation already minted over the records the
+      // load put on the run: dropping them here would compose a run whose
+      // commitment about what this party discloses is gone, with nothing left
+      // for core to enforce at prepare time.
+      if (state.editor?.sealed === true) return state;
+      return {
+        ...state,
+        mountedConfiguration: MOUNTED_CONFIGURATION_UNREAD,
+        loadedConfiguration: undefined,
+        loadedTermsFile: undefined,
+        loadedSftpForm: undefined,
+        loadedEnforcementRecords: {},
+        connectionTuning: CONNECTION_TUNING_DEFAULT,
+        exchangeFiles: EXCHANGE_FILES_DEFAULT,
+        receipts: {
+          ...state.receipts,
+          mode: RECEIPTS_DEFAULT.mode,
+          partnerFingerprint: RECEIPTS_DEFAULT.partnerFingerprint,
+          retentionDisposition: RECEIPTS_DEFAULT.retentionDisposition,
+        },
+        delimiterChoice: INITIAL_CSV_DELIMITER_CHOICE,
+        ...(action.editor !== undefined ? { editor: action.editor } : {}),
+        editorAnnouncement:
+          "Closed the configuration. These terms come from your own file's columns.",
       };
   }
 }
