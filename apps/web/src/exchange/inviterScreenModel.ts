@@ -41,6 +41,7 @@ import type { ConnectionTuningDraft } from "@console/connectionTuningModel";
 import type { ExchangeFilesDraft } from "@console/exchangeFilesModel";
 
 import type { LinkageTerms } from "@psilink/core";
+import type { LoadedEnforcementRecords } from "@console/loadedConfig";
 import type { MountedConfigurationAnswer } from "@psi/jobClient/mountedConfigClient";
 import type { MountedConfigurationState } from "@console/mountedConfiguration";
 import type { OwnColumnsChoice } from "@psi/ownColumnsModel";
@@ -194,6 +195,11 @@ export interface InviterScreenState {
    * columns, so it cannot run before one is read (`editorWithImportedTerms`,
    * `@psi/inviterEditor`). Cleared the moment they are applied. */
   pendingLoadedTerms: PendingLoadedTerms | undefined;
+  /** The enforcement records a loaded configuration states and this flow has no
+   * control for, held so the run's composed configuration states each as the
+   * file did (docs/spec/EXCHANGE_FILE.md, "The records that must survive").
+   * Empty where no configuration is open, or the open one states none. */
+  loadedEnforcementRecords: LoadedEnforcementRecords;
 }
 
 /** The terms and own-column choice a load holds until a file is read. Both move
@@ -240,6 +246,7 @@ export const INVITER_SCREEN_INITIAL: InviterScreenState = {
   mountedConfiguration: MOUNTED_CONFIGURATION_UNREAD,
   loadedSftpForm: undefined,
   pendingLoadedTerms: undefined,
+  loadedEnforcementRecords: {},
 };
 
 /** Everything that moves the inviter console. */
@@ -602,6 +609,7 @@ export function inviterScreenReducer(
           linkageTerms: loaded.linkageTerms,
           ownColumns: loaded.ownColumns,
         },
+        loadedEnforcementRecords: loaded.records,
       };
     }
     case "loaded-terms-applied":

@@ -88,35 +88,44 @@ describe("each answer lands the control in one state", () => {
   });
 });
 
-describe("a record this flow cannot state back refuses the load", () => {
+describe("a record this flow has no control for opens and is named", () => {
   test.each([
     ["expectedPayloadColumns", "expected_payload_columns", ["program_code"]],
     ["expectedPartnerDeduplicate", "expected_partner_deduplicate", true],
     ["disclosedPayloadColumns", "disclosed_payload_columns", ["program_code"]],
-  ] as const)("%s is refused by name", (field, spelling, value) => {
-    const read = mountedConfigurationRead(opened({ [field]: value }));
-    expect(read.loaded).toBeUndefined();
-    expect(read.state.status).toBe("refused");
-    if (read.state.status !== "refused") throw new Error("expected a refusal");
-    expect(read.state.error).toContain(spelling);
-    expect(read.state.error).toMatch(/psilink on the command line/);
-  });
+  ] as const)(
+    "%s is held and named as the file spells it",
+    (field, spelling, value) => {
+      const read = mountedConfigurationRead(opened({ [field]: value }));
+      expect(read.loaded?.records[field]).toEqual(value);
+      if (read.state.status !== "opened")
+        throw new Error("expected an open configuration");
+      expect(read.state.carriedThrough).toContain(spelling);
+      const notice = mountedConfigurationNotices(read.state)[0];
+      expect(notice).toContain(spelling);
+      expect(notice).toContain("keeps it unchanged");
+    },
+  );
 
-  test("all three are named in one refusal", () => {
+  test("all three are named beside the settings the route itself held", () => {
     const read = mountedConfigurationRead(
-      opened({
-        expectedPayloadColumns: [],
-        expectedPartnerDeduplicate: false,
-        disclosedPayloadColumns: [],
-      }),
+      opened(
+        {
+          expectedPayloadColumns: [],
+          expectedPartnerDeduplicate: false,
+          disclosedPayloadColumns: [],
+        },
+        ["signing.receipt_output"],
+      ),
     );
-    if (read.state.status !== "refused") throw new Error("expected a refusal");
-    for (const field of [
-      "expected_payload_columns",
-      "expected_partner_deduplicate",
+    if (read.state.status !== "opened")
+      throw new Error("expected an open configuration");
+    expect(read.state.carriedThrough).toEqual([
       "disclosed_payload_columns",
-    ])
-      expect(read.state.error).toContain(field);
+      "expected_partner_deduplicate",
+      "expected_payload_columns",
+      "signing.receipt_output",
+    ]);
   });
 });
 

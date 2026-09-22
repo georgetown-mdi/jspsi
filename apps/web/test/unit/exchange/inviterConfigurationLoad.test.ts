@@ -16,6 +16,7 @@ import { RECEIPTS_DEFAULT, receiptsIntentFields } from "@psi/receiptsModel";
 
 import { EMPTY_SFTP_FORM } from "@console/sftpConnectionForm";
 import { csvDelimiterFromDocument } from "@console/loadedConfig";
+import { mountedConfigurationNotices } from "@console/mountedConfiguration";
 import { resolveCsvDelimiter } from "@components/csvDelimiterChoice";
 
 import {
@@ -23,7 +24,11 @@ import {
   inviterScreenReducer,
 } from "@exchange/inviterScreenModel";
 
+import { composeSftpConfigSpec } from "@jobs/intentConfig";
+import { intentFor } from "@psi/jobClient/serverJobExchangeDriver";
 import { inviterServerJobConfig } from "@exchange/useInviterExchange";
+
+import { testSftpServerEntry } from "../../utils/jobFixtures";
 
 import type { DisclosedExchangeDocument } from "@jobs/configLoad";
 import type { InviterScreenState } from "@exchange/inviterScreenModel";
@@ -41,7 +46,9 @@ const PARTNER_FINGERPRINT = "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCA";
 
 /** A `psilink invite --save` sftp document: a host and pin, both cards' tuning,
  * a non-default delimiter, own columns, a signed receipt and a retention note. */
-function sftpDocument(): DisclosedExchangeDocument {
+function sftpDocument(
+  overrides: Partial<DisclosedExchangeDocument> = {},
+): DisclosedExchangeDocument {
   return {
     channel: "sftp",
     server: {
@@ -69,6 +76,7 @@ function sftpDocument(): DisclosedExchangeDocument {
     csvDelimiter: "|",
     retentionDisposition: "Filed with the 2026 cohort, kept seven years.",
     signing: { mode: "certificate", partnerFingerprint: PARTNER_FINGERPRINT },
+    ...overrides,
   };
 }
 
@@ -317,5 +325,61 @@ describe("a run started from a loaded configuration composes what a hand-authore
       },
     });
     expect(driverConfigFor(loaded)).toEqual(driverConfigFor(authored));
+  });
+});
+
+// The three records whose absence turns an enforcement off. The console has no
+// control for any of them, so an opened document's values ride the authoring
+// state into the intent the run submits, and the configuration composed for that
+// run states each one as the file did.
+describe("the records the console cannot edit reach the run unchanged", () => {
+  const records = {
+    expectedPayloadColumns: ["partner_program"],
+    expectedPartnerDeduplicate: false,
+    disclosedPayloadColumns: ["program_code"],
+  };
+
+  /** The intent a document stating all three submits when it is opened and
+   * started with nothing touched. */
+  function intentFromUntouchedLoad() {
+    const state = loadedInto(INVITER_SCREEN_INITIAL, sftpDocument(records));
+    return intentFor(
+      inviterServerJobConfig({
+        minted: {
+          linkageTerms: getDefaultLinkageTerms("County Health"),
+          sharedSecret: "a".repeat(43),
+        },
+        inputSource: { kind: "workFile", name: "cohort.csv" },
+        transport: { channel: "sftp" },
+        loadedEnforcementRecords: state.loadedEnforcementRecords,
+      }),
+    );
+  }
+
+  test("the intent states all three with the file's values", () => {
+    expect(intentFromUntouchedLoad()).toMatchObject(records);
+  });
+
+  test("the composed configuration states all three", () => {
+    const intent = intentFromUntouchedLoad();
+    if (intent.channel !== "sftp") throw new Error("expected an sftp intent");
+    const spec = composeSftpConfigSpec(intent, testSftpServerEntry());
+    expect(spec.expectedPayloadColumns).toEqual(records.expectedPayloadColumns);
+    expect(spec.expectedPartnerDeduplicate).toBe(false);
+    expect(spec.disclosedPayloadColumns).toEqual(
+      records.disclosedPayloadColumns,
+    );
+  });
+
+  test("the notice beside the load names each one", () => {
+    const state = loadedInto(INVITER_SCREEN_INITIAL, sftpDocument(records));
+    const notices = mountedConfigurationNotices(state.mountedConfiguration);
+    expect(notices).toHaveLength(1);
+    for (const field of [
+      "expected_payload_columns",
+      "expected_partner_deduplicate",
+      "disclosed_payload_columns",
+    ])
+      expect(notices[0]).toContain(field);
   });
 });

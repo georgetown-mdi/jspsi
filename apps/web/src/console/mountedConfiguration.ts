@@ -14,13 +14,12 @@ import type { MountedConfigurationAnswer } from "@psi/jobClient/mountedConfigCli
  * can be a credential, which is why the server names rather than sends the two
  * lists ({@link ../jobs/configLoad}), and nothing here reverses that.
  *
- * The three records whose absence turns an enforcement off have no control and
- * no composed key on the invitation-authoring path this offer sits in: they are
- * the acceptor's commitments, and the invitation authored here is this party's
- * own statement of its terms. A document stating one is refused by name rather
- * than opened with the record dropped, which would release the exchange from a
- * check one exchange later (docs/spec/EXCHANGE_FILE.md, "The records that must
- * survive").
+ * The three records whose absence turns an enforcement off have no control on
+ * the invitation-authoring path this offer sits in. A document stating one is
+ * opened with its value held: the record rides the authoring state into the
+ * intent the run submits, so the configuration composed for that run states it
+ * exactly as the file did (docs/spec/EXCHANGE_FILE.md, "The records that must
+ * survive"). Having no control, each one is named in the carry-through notice.
  */
 
 /** What the load control shows. */
@@ -70,12 +69,12 @@ export const CONFIGURATION_OPENED =
   "and you can change anything before you run the exchange.";
 
 /**
- * The records this flow neither composes nor holds, as the file spells them
- * beside the field the load reads them into. Each is the acceptor's own
- * commitment, so an invitation authored here has no control that would edit one
- * and no composed key that would put one back.
+ * The records this flow holds without an editor, as the file spells them beside
+ * the field the load reads them into. An invitation authored here states none of
+ * its own, so each rides the run unchanged and the command line is where a value
+ * is edited.
  */
-const RECORDS_THIS_FLOW_CANNOT_STATE: ReadonlyArray<
+const RECORDS_WITH_NO_CONTROL: ReadonlyArray<
   [keyof LoadedAuthoringState["records"], string]
 > = [
   ["expectedPayloadColumns", "expected_payload_columns"],
@@ -89,26 +88,16 @@ function nameList(fields: ReadonlyArray<string>): string {
 }
 
 /**
- * The refusal for a document stating a record this flow cannot put back, or
- * undefined when it states none. A refusal rather than a carry-through: the
- * console writes a whole configuration for the run it starts, so a record it
- * held without stating would be a check this exchange is no longer held to.
+ * The records a loaded document states that this flow has no control for, named
+ * as the file spells them, for the carry-through notice. Each is composed back
+ * into the run's own configuration all the same.
  */
-export function recordsThisFlowCannotState(
+export function recordsWithNoControl(
   loaded: LoadedAuthoringState,
-): string | undefined {
-  const stated = RECORDS_THIS_FLOW_CANNOT_STATE.filter(
+): Array<string> {
+  return RECORDS_WITH_NO_CONTROL.filter(
     ([key]) => loaded.records[key] !== undefined,
   ).map(([, field]) => field);
-  if (stated.length === 0) return undefined;
-  return (
-    "This configuration states " +
-    (stated.length === 1 ? "a setting" : "settings") +
-    " an invitation authored here cannot state back, and each one is a check " +
-    "your partner is held to: " +
-    nameList(stated) +
-    ". Run this configuration with psilink on the command line instead."
-  );
 }
 
 /**
@@ -171,9 +160,8 @@ export function mountedConfigurationNotices(
 
 /**
  * The state and, for a load that proceeds, the authoring state it hands the
- * screen. A refusal -- the route's own, or this flow's record refusal -- yields
- * no authoring state at all, so no step is partly filled from a document the
- * console would not run.
+ * screen. A refusal yields no authoring state at all, so no step is partly
+ * filled from a document the console would not run.
  */
 export function mountedConfigurationRead(answer: MountedConfigurationAnswer): {
   state: MountedConfigurationState;
@@ -188,13 +176,15 @@ export function mountedConfigurationRead(answer: MountedConfigurationAnswer): {
       return { state: { status: "refused", error: answer.error } };
     case "opened": {
       const loaded = authoringStateFromDocument(answer.document);
-      const refusal = recordsThisFlowCannotState(loaded);
-      if (refusal !== undefined)
-        return { state: { status: "refused", error: refusal } };
       return {
         state: {
           status: "opened",
-          carriedThrough: answer.carriedThrough,
+          carriedThrough: [
+            ...new Set([
+              ...answer.carriedThrough,
+              ...recordsWithNoControl(loaded),
+            ]),
+          ].sort(),
           warnings: answer.warnings,
         },
         loaded,

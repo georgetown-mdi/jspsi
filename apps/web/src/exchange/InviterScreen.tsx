@@ -334,6 +334,7 @@ export function InviterScreen() {
     intakeAlert,
     invitation,
     lastSpineStep,
+    loadedEnforcementRecords,
     loadedSftpForm,
     manageOffer,
     minting,
@@ -506,6 +507,7 @@ export function InviterScreen() {
     options: runOptions,
     runDiagnostics: runDiagnosticsIntentFields(runDiagnostics),
     receipts: receiptsIntentFields(receipts),
+    loadedEnforcementRecords,
     ...(csvDelimiter !== undefined ? { csvDelimiter } : {}),
   });
 
