@@ -51,8 +51,8 @@ import {
   safeParseConnectionConfig,
   safeParseFileSyncOptions,
   safeParseLinkageTermsTheReaderWrote,
-  safeParseMetadata,
-  safeParseStandardization,
+  safeParseMetadataTheReaderWrote,
+  safeParseStandardizationTheReaderWrote,
   sanitizeForDisplay,
   serializeExchangeDocument,
   snakeizeKey,
@@ -2029,6 +2029,12 @@ export type NamedRuleSetRules = "from-the-named-set" | "as-written";
  * parsed and validated; the connection block is excluded by design, so a
  * still-placeholder one does not fail the read.
  *
+ * Each of those three blocks is read through the entry point that refuses a
+ * key its schema would drop rather than read, the rule `parseExchangeSpec`
+ * holds over the whole file (docs/spec/EXCHANGE_FILE.md, "What a consumer does
+ * with a setting it cannot honor"), so a file `psilink exchange` refuses is not
+ * one `psilink invite` mints an invitation from.
+ *
  * Every other defect is a {@link UsageError}: a config present at the path
  * is treated as intentional, so a broken one is reported for the user to
  * fix. Top-level keys are read as either the written snake_case form or
@@ -2099,16 +2105,16 @@ export function readConfigLinkageSource(
         describeSchemaIssues(result.error.issues, "camelized"),
     );
 
-  // The explicit standardization is optional. safeParseStandardization camelizes
-  // the on-disk snake_case keys (a step's `input_format`) before validating,
-  // like linkage_terms above and like the `parseExchangeSpec` the run path reads
-  // the same block through, so a step's params meet the declared-type check and
-  // the function library under the one spelling both look up. An invalid block
-  // is reported as a usage error, like invalid linkage_terms above.
+  // The explicit standardization is optional. The parse camelizes the on-disk
+  // snake_case keys (a step's `input_format`) before validating, like
+  // linkage_terms above and like the `parseExchangeSpec` the run path reads the
+  // same block through, so a step's params meet the declared-type check and the
+  // function library under the one spelling both look up. An invalid block is
+  // reported as a usage error, like invalid linkage_terms above.
   const rawStd = obj["standardization"];
   let standardization: Standardization | undefined;
   if (rawStd !== undefined) {
-    const stdResult = safeParseStandardization(rawStd);
+    const stdResult = safeParseStandardizationTheReaderWrote(rawStd);
     if (!stdResult.success)
       throw configFileRefusal(
         configPath,
@@ -2118,7 +2124,7 @@ export function readConfigLinkageSource(
     standardization = stdResult.data;
   }
 
-  // The explicit metadata is optional. safeParseMetadata camelizes the on-disk
+  // The explicit metadata is optional. The parse camelizes the on-disk
   // snake_case keys (e.g. `is_payload`) before validating, like linkage_terms
   // above. An invalid block is reported as a usage error rather than silently
   // dropped, so the satisfiability check cannot fall back to name inference on a
@@ -2126,7 +2132,7 @@ export function readConfigLinkageSource(
   const rawMetadata = obj["metadata"];
   let metadata: Metadata | undefined;
   if (rawMetadata !== undefined) {
-    const metaResult = safeParseMetadata(rawMetadata);
+    const metaResult = safeParseMetadataTheReaderWrote(rawMetadata);
     if (!metaResult.success)
       throw configFileRefusal(
         configPath,

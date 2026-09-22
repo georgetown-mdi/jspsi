@@ -6,6 +6,7 @@ import { SEMANTIC_TYPES } from "../types";
 import { COUNT_ONLY_SHAPE_REFUSALS } from "../linkageTermsPolicy.js";
 import { MAX_NAME_LENGTH, NAME_SHAPE_PATTERN } from "./linkageTermsSchema.js";
 import { safeParseCamelized } from "./safeParseCamelized.js";
+import { droppedSettingIssues } from "./unreadKeys.js";
 
 import type { Algorithm, SemanticType } from "../types";
 
@@ -247,6 +248,23 @@ export const MetadataSchema = z.array(ColumnMetadataSchema).refine(
  */
 export function safeParseMetadata(raw: unknown) {
   return safeParseCamelized(MetadataSchema, raw);
+}
+
+/**
+ * {@link safeParseMetadata} for the `metadata` block of a document the reading
+ * party WROTE -- an operator's own configuration file. Identical in what it
+ * admits, with one addition: a key this schema would drop rather than read is
+ * refused ({@link droppedSettingIssues}), as the whole-file read of the same
+ * block refuses it, so a command that writes the file back out cannot write it
+ * short of a setting the operator stated.
+ */
+export function safeParseMetadataTheReaderWrote(raw: unknown) {
+  return safeParseCamelized(
+    MetadataSchema,
+    raw,
+    undefined,
+    (camelized, parsed) => droppedSettingIssues(raw, camelized, parsed),
+  );
 }
 
 // --- Metadata Inference ------------------------------------------------------

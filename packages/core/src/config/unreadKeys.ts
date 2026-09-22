@@ -23,15 +23,15 @@
  * Both report Zod issues, the shape a schema's own refusal takes, so a reader
  * that already words a refusal from those issues words these with no code of its
  * own.
+ *
+ * A third pass ({@link unrecognizedKeysAsWritten}) names the keys of every such
+ * issue -- the two above and the ones the strict blocks raise themselves -- as
+ * the raw document spells them, the one place that naming is decided.
  */
 
 import { z } from "zod";
 
-import {
-  camelizeKey,
-  OPAQUE_VALUE_KEYS,
-  snakeizeKey,
-} from "../utils/camelizeKeys.js";
+import { camelizeKey, OPAQUE_VALUE_KEYS } from "../utils/camelizeKeys.js";
 
 /** An object with keys to compare: an array is walked by element instead. */
 function isKeyedObject(value: unknown): value is Record<string, unknown> {
@@ -39,10 +39,22 @@ function isKeyedObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * What an `unrecognized_keys` issue says, in the wording Zod's own strict
+ * objects use, so a refusal this module raises and one the schema raises read
+ * alike and {@link unrecognizedKeysAsWritten} can reword either.
+ */
+function unrecognizedKeysMessage(keys: ReadonlyArray<string>): string {
+  const named = keys.map((key) => `"${key}"`).join(", ");
+  return keys.length === 1
+    ? `Unrecognized key: ${named}`
+    : `Unrecognized keys: ${named}`;
+}
+
+/**
  * The issue one block's dropped keys raise: the block's own path with the keys
- * on `keys`, as a strict object's refusal reports them, and a message naming
- * each key in the snake_case the document writes ({@link snakeizeKey}, whose
- * limit on a key outside that convention is its own).
+ * on `keys`, as a strict object's refusal reports them. The keys are the
+ * camelized document's, which {@link unrecognizedKeysAsWritten} puts back into
+ * the document's own spelling.
  *
  * It holds no `input`, as a strict object's own refusal holds none: the block a
  * dropped key sits in can hold a credential, and `ZodError.message` renders
@@ -52,15 +64,11 @@ function unreadKeysIssue(
   path: ReadonlyArray<PropertyKey>,
   keys: ReadonlyArray<string>,
 ): z.core.$ZodIssue {
-  const named = keys.map((key) => `"${snakeizeKey(key)}"`).join(", ");
   return {
     code: "unrecognized_keys",
     keys: [...keys],
     path: [...path],
-    message:
-      keys.length === 1
-        ? `Unrecognized key: ${named}`
-        : `Unrecognized keys: ${named}`,
+    message: unrecognizedKeysMessage(keys),
   };
 }
 
@@ -363,4 +371,119 @@ export function collidingKeyIssues(
   const issues: Array<z.core.$ZodIssue> = [];
   collectCollidingKeys(rawDocument, [], issues);
   return issues;
+}
+
+/**
+ * The key one raw object writes for a camelized name: the sibling that
+ * {@link camelizeKey} reads as that name, or the name itself where the object
+ * holds no such sibling -- a caller that passed an already-camelized value, and
+ * a key the case conversion leaves alone.
+ */
+function keyAsWritten(node: unknown, camelizedKey: string): string {
+  if (!isKeyedObject(node) || Object.hasOwn(node, camelizedKey))
+    return camelizedKey;
+  return (
+    Object.keys(node).find((key) => camelizeKey(key) === camelizedKey) ??
+    camelizedKey
+  );
+}
+
+/** The raw document's node at one issue path, whose segments are camelized. */
+function nodeAtPath(
+  document: unknown,
+  path: ReadonlyArray<PropertyKey>,
+): unknown {
+  let node = document;
+  for (const segment of path) {
+    if (Array.isArray(node)) {
+      node = node[Number(segment)];
+      continue;
+    }
+    if (!isKeyedObject(node)) return undefined;
+    node = node[keyAsWritten(node, String(segment))];
+  }
+  return node;
+}
+
+/**
+ * One `unrecognized_keys` message with each renamed key put back into the
+ * spelling the document holds. A message of this kind names the keys the issue
+ * holds and nothing else of the document, so substituting them leaves the rest
+ * of the wording as its author wrote it -- a block's own guidance for the
+ * operator (`connection.ts`) as much as Zod's default.
+ *
+ * Longest key first, so one key that is the start of another is not rewritten
+ * inside it.
+ */
+function messageNamingWrittenKeys(
+  message: string,
+  keys: ReadonlyArray<string>,
+  written: ReadonlyArray<string>,
+): string {
+  return keys
+    .map((key, index) => [key, written[index]] as const)
+    .sort(([left], [right]) => right.length - left.length)
+    .reduce((worded, [key, name]) => worded.split(key).join(name), message);
+}
+
+/**
+ * Every `unrecognized_keys` issue of a camelize-then-parse refusal, with each
+ * key named as the RAW document spells it and the message reworded to match:
+ * the schema works on the camelized shape, so a key it reports is the case
+ * conversion's output rather than a line the operator's file holds
+ * (docs/spec/EXCHANGE_FILE.md, "How a setting is named"). Every other issue is
+ * returned unchanged, keys and message both.
+ *
+ * The key is looked up rather than converted back, so a document that writes it
+ * in camelCase or outside either convention (`Mystery-Key`) is named the way it
+ * wrote it, which no conversion of the camelized name would yield.
+ *
+ * An issue whose keys the document already writes that way is returned
+ * untouched: there is nothing to rename, which is the state the collision issue
+ * below is always in ({@link collidingKeysIssue} names two spellings the
+ * document holds side by side).
+ *
+ * @internal not a stable public API.
+ */
+export function unrecognizedKeysAsWritten(
+  rawDocument: unknown,
+  issues: ReadonlyArray<z.core.$ZodIssue>,
+): Array<z.core.$ZodIssue> {
+  return issues.map((issue) => {
+    if (issue.code !== "unrecognized_keys") return issue;
+    const node = nodeAtPath(rawDocument, issue.path ?? []);
+    const written = issue.keys.map((key) => keyAsWritten(node, key));
+    if (written.every((key, index) => key === issue.keys[index])) return issue;
+    return {
+      ...issue,
+      keys: written,
+      message: messageNamingWrittenKeys(issue.message, issue.keys, written),
+    };
+  });
+}
+
+/**
+ * Every setting a document states that its parse result does not hold, as Zod
+ * issues naming each key as the document wrote it: a key no block read, an
+ * entry the one-entry-per-column collapse dropped, and a setting written under
+ * two spellings of one key.
+ *
+ * The whole of the unread-key rule for a caller holding a successful parse,
+ * applied to a whole exchange file (`parseExchangeSpec`) or to one block of it
+ * read on its own.
+ *
+ * @param rawDocument the document as the file writes it.
+ * @param camelizedDocument the same document as the schema read it.
+ * @param parsed the schema's parse result.
+ * @internal not a stable public API.
+ */
+export function droppedSettingIssues(
+  rawDocument: unknown,
+  camelizedDocument: unknown,
+  parsed: unknown,
+): Array<z.core.$ZodIssue> {
+  return unrecognizedKeysAsWritten(rawDocument, [
+    ...collidingKeyIssues(rawDocument),
+    ...unreadKeyIssues(camelizedDocument, parsed),
+  ]);
 }

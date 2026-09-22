@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { camelizeKeys, snakeizeKey } from "../utils/camelizeKeys.js";
+import { camelizeKeys } from "../utils/camelizeKeys.js";
 import { safeParseCamelized } from "./safeParseCamelized.js";
 import { randomBytes, toBase64Url } from "../utils/crypto.js";
 import { pathsResolveToSameDir } from "../utils/pathCompare.js";
@@ -922,15 +922,15 @@ export type ConnectionConfig =
 // Type safety is enforced at the ConnectionConfigSchema level instead.
 
 /**
- * Name the keys a webrtc connection does not define, in the snake_case the
- * operator's document spells them.
+ * Name the keys a webrtc connection does not define.
  *
- * Validation runs on the camelized shape, so a Zod issue names the camelCase
- * form of whatever the file held; {@link snakeizeKey} puts each back the way
- * the document writes it, which is the spelling an operator can search for.
+ * Validation runs on the camelized shape, so the keys here are the camelCase
+ * form of whatever the file held; the parse names each one back the way the
+ * document writes it (`unreadKeys.ts`, `unrecognizedKeysAsWritten`), which is
+ * the spelling an operator can search their own file for.
  */
 function unknownWebRtcKeysMessage(keys: ReadonlyArray<string>): string {
-  const named = keys.map(snakeizeKey).join(", ");
+  const named = keys.join(", ");
   return keys.length === 1
     ? `a webrtc connection has no key ${named}; correct the spelling or remove it`
     : `a webrtc connection has no keys ${named}; correct the spelling or remove them`;

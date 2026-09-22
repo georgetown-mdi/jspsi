@@ -93,6 +93,29 @@ segment as the file spells it, for both config-file call sites, through the one
 path rendering the per-block renderer beside it takes -- which stops a path at a
 `params` block, whose keys are the author's own.
 
+The renderer names the path; the KEY an `unrecognized_keys` refusal reports is
+named in core, where the raw document is in hand. `unrecognizedKeysAsWritten`
+looks each key up among the document's own siblings rather than converting the
+camelized name back, so a key authored in camelCase, or outside both conventions,
+is named the spelling its author used. It runs over every such refusal, the ones
+the strict blocks raise themselves included (the top level and `authentication`,
+worded by Zod over the camelized shape), so one key reaches the operator one way
+whichever block holds it.
+
+That application reads the same file a second way, which is one reader's other
+path rather than a fourth reader (`readConfigLinkageSource`,
+`apps/cli/src/config.ts`). `psilink invite` and `psilink verify-receipt` do not
+load the whole file: they read `linkage_terms`, `standardization`, and
+`metadata` block by block, leaving the connection out so a still-placeholder one
+does not fail the read. Each block has its own parse entry point, and those
+strip -- so a file `psilink exchange` refused was a file `psilink invite` minted
+an invitation from, over terms narrowed by whatever the strip took, with nothing
+said to either party. All three blocks are read through the entry point that
+applies the same comparison
+(`safeParseLinkageTermsTheReaderWrote` and the `TheReaderWrote` siblings for the
+other two), so one file is accepted by both commands or refused by both, and
+refused naming the same key.
+
 **The console's job layer** (`apps/web/src/jobs/`). No load path exists to audit.
 The layer composes an exchange file from the console's own intent and validates
 what it composed; nothing there reads an operator's document. The rule reaches it

@@ -3990,6 +3990,38 @@ test("loadConfigLinkageSource rejects a config with an invalid metadata block", 
   expect(() => loadConfigLinkageSource(configPath)).toThrow("invalid metadata");
 });
 
+test("loadConfigLinkageSource refuses an unread key the run path refuses", () => {
+  // invite reads the file through here and mints an invitation from what it
+  // returns, while exchange reads the same file through parseExchangeSpec. A
+  // key this read stripped would put the operator's own narrowed terms on an
+  // invitation, over a file the next exchange refuses.
+  const configPath = path.join(dir, "psilink.yaml");
+  const document = {
+    connection: { channel: "filedrop", path: "/mnt/share" },
+    linkage_terms: {
+      ...(snakeizeKeys(getDefaultLinkageTerms("Agency A")) as object),
+      zz_probe_key: "held",
+    },
+  };
+  fs.writeFileSync(configPath, YAML.stringify(document));
+  let runPath = "";
+  try {
+    parseExchangeSpec(document);
+  } catch (err) {
+    runPath = describeConfigSchemaError(err);
+  }
+  expect(runPath).toContain('Unrecognized key: "zz_probe_key"');
+  expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
+  let inviteRead = "";
+  try {
+    loadConfigLinkageSource(configPath);
+  } catch (err) {
+    inviteRead = (err as Error).message;
+  }
+  expect(inviteRead).toContain("has invalid linkage_terms");
+  expect(inviteRead).toContain('Unrecognized key: "zz_probe_key"');
+});
+
 test("loadConfigLinkageSource rejects a config with no linkage_terms", () => {
   const configPath = path.join(dir, "psilink.yaml");
   fs.writeFileSync(

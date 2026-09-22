@@ -844,6 +844,33 @@ test("a setting nested under a block, which nothing reads, is refused by name", 
   expect(message).toContain("deduplicat");
 });
 
+test("a strict block's refusal names the key as the config file writes it", () => {
+  // The top level and `authentication` refuse an unknown key through the
+  // schema's own wording, over the camelized shape it reads. The operator is
+  // reading the snake_case file they wrote, and the line they have to find is
+  // the one the refusal names.
+  const cases: ReadonlyArray<[string, Record<string, unknown>]> = [
+    ["top level", { ...minimalSFTPConfig, zz_probe_key: "held" }],
+    [
+      "authentication",
+      { ...minimalSFTPConfig, authentication: { zz_probe_key: "held" } },
+    ],
+  ];
+  for (const [where, config] of cases) {
+    fs.writeFileSync(configFile, YAML.stringify(config));
+    saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
+    let message = "";
+    try {
+      loadConfig(baseOptions());
+    } catch (err) {
+      message = (err as Error).message;
+    }
+    expect(message, where).toContain("is not a valid exchange spec");
+    expect(message, where).toContain('Unrecognized key: "zz_probe_key"');
+    expect(message, where).not.toContain("zzProbeKey");
+  }
+});
+
 test("an authentication block placed under connection is refused, not ignored", () => {
   // A misplaced block: authentication belongs at the top level, and the
   // connection schema has no such field. The load names the line instead of

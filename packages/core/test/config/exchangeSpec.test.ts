@@ -5,12 +5,17 @@ import {
   parseExchangeSpec,
   safeParseExchangeSpec,
 } from "../../src/config/exchangeSpec";
-import { METADATA_NAME_SHAPE_MESSAGE } from "../../src/config/metadata";
+import {
+  METADATA_NAME_SHAPE_MESSAGE,
+  safeParseMetadataTheReaderWrote,
+} from "../../src/config/metadata";
+import { safeParseStandardizationTheReaderWrote } from "../../src/config/standardizationSchema";
 import {
   MAX_PAYLOAD_ENTRIES,
   MAX_TEXT_LENGTH,
   MAX_TRANSFORM_PARAM_LENGTH,
   NAME_SHAPE_MESSAGE,
+  safeParseLinkageTermsTheReaderWrote,
 } from "../../src/config/linkageTermsSchema";
 import { reconcileReceivedPayload } from "../../src/payloadExchange";
 import { unreadKeyIssues } from "../../src/config/unreadKeys";
@@ -601,6 +606,96 @@ test("a key no block reads is refused, naming it as the file spells it", () => {
   expect(issue?.path).toEqual(["linkageTerms"]);
   expect(issue?.message).toContain("mystery_setting");
   expect(issue?.message).not.toContain("mysterySetting");
+});
+
+test("an unread key is named in the spelling the file writes, not snake_case", () => {
+  // Both spellings reach the schema, so an operator's own key arrives here as
+  // the case conversion left it. Converting that name back to snake_case names
+  // a line the file does not hold -- "zz_probe_key" for a camelCase key, and
+  // for a key outside either convention a name no writer would recognize.
+  for (const key of ["zzProbeKey", "Mystery-Key"]) {
+    const result = safeParseExchangeSpec({
+      ...minimalSpec,
+      linkageTerms: { ...minimalLinkageTerms, [key]: "held" },
+    });
+    expect(result.success, key).toBe(false);
+    expect(result.error?.issues[0]?.message, key).toBe(
+      `Unrecognized key: "${key}"`,
+    );
+  }
+});
+
+test("one unread key that begins another is named without swallowing it", () => {
+  // Two keys named in one refusal, where the camelized form of the first is the
+  // start of the second's: naming them in the order written would rewrite the
+  // shorter one inside the longer.
+  const result = safeParseExchangeSpec({
+    ...minimalSpec,
+    linkageTerms: {
+      ...minimalLinkageTerms,
+      zz_probe: "held",
+      zz_probe_key: "held",
+    },
+  });
+  expect(result.success).toBe(false);
+  expect(result.error?.issues[0]?.message).toBe(
+    'Unrecognized keys: "zz_probe", "zz_probe_key"',
+  );
+});
+
+test("a strict block names its unrecognized key as the file spells it too", () => {
+  // The top level and `authentication` raise their own refusal, worded by Zod
+  // over the camelized shape. Naming the same key two ways depending on which
+  // block holds it leaves the operator searching for a line that is there.
+  const cases: ReadonlyArray<[Record<string, unknown>, Array<string>]> = [
+    [{ ...minimalSpec, zz_probe_key: "held" }, []],
+    [
+      { ...minimalSpec, authentication: { zz_probe_key: "held" } },
+      ["authentication"],
+    ],
+  ];
+  for (const [spec, path] of cases) {
+    const result = safeParseExchangeSpec(spec);
+    expect(result.success).toBe(false);
+    expect(result.error?.issues[0]?.path).toEqual(path);
+    expect(result.error?.issues[0]?.message).toBe(
+      'Unrecognized key: "zz_probe_key"',
+    );
+    expect(() => parseExchangeSpec(spec)).toThrow("zz_probe_key");
+  }
+});
+
+test("a block read on its own refuses a key no part of it reads", () => {
+  // The CLI reads `linkage_terms`, `standardization`, and `metadata` block by
+  // block as well as through the whole file, and mints an invitation from what
+  // that read returns. A block entry point that stripped what the whole-file
+  // read refuses would mint from a document narrowed in silence.
+  const blocks: ReadonlyArray<
+    [(raw: unknown) => { success: boolean }, unknown]
+  > = [
+    [
+      safeParseLinkageTermsTheReaderWrote,
+      { ...minimalLinkageTerms, zz_probe_key: "held" },
+    ],
+    [
+      safeParseStandardizationTheReaderWrote,
+      [{ output: "last_name", input: "LAST_NAME", steps: [], zz_probe_key: 1 }],
+    ],
+    [
+      safeParseMetadataTheReaderWrote,
+      [
+        {
+          name: "program",
+          type: "other",
+          role: "payload",
+          is_payload: true,
+          zz_probe_key: 1,
+        },
+      ],
+    ],
+  ];
+  for (const [safeParse, block] of blocks)
+    expect(safeParse(block).success).toBe(false);
 });
 
 test("no load yields a document with a setting dropped, at any depth", () => {

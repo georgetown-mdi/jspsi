@@ -5,6 +5,7 @@ import {
   NestingDepthExceededError,
   NodeCountExceededError,
 } from "../utils/camelizeKeys.js";
+import { unrecognizedKeysAsWritten } from "./unreadKeys.js";
 
 /**
  * Shared camelize-then-`safeParse` behind every `safeParseX` config helper.
@@ -21,6 +22,10 @@ import {
  * exchange file's unread-key rule (`unreadKeys.ts`) is the one caller. Any
  * issues it reports turn the result into a failure carrying them, so a caller
  * cannot reach a value the rule refuses.
+ *
+ * The schema reads the camelized shape, so a key it refuses as unrecognized is
+ * named here as the raw document spells it
+ * ({@link unrecognizedKeysAsWritten}).
  *
  * Internal to `@psilink/core`: not re-exported, not a stable public API.
  *
@@ -53,7 +58,14 @@ export function safeParseCamelized<T>(
     throw err;
   }
   const result = schema.safeParse(camelized);
-  if (!result.success || afterParse === undefined) return result;
+  if (!result.success)
+    return {
+      success: false,
+      error: new z.ZodError(
+        unrecognizedKeysAsWritten(raw, result.error.issues),
+      ) as z.ZodError<T>,
+    };
+  if (afterParse === undefined) return result;
   const issues = afterParse(camelized, result.data);
   return issues.length === 0
     ? result
