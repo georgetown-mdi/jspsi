@@ -426,6 +426,7 @@ export function inviterServerJobConfig({
   runDiagnostics,
   receipts,
   loadedEnforcementRecords,
+  mountedConfigurationOpened,
 }: {
   minted: Pick<
     GeneratedInvitation,
@@ -455,6 +456,10 @@ export function inviterServerJobConfig({
   /** The enforcement records a loaded configuration stated, forwarded unchanged.
    * Absent for an exchange authored here, which states none. */
   loadedEnforcementRecords?: LoadedEnforcementRecords;
+  /** Whether the operator opened the mounted configuration for this exchange,
+   * forwarded unchanged. False for an exchange authored here, whose hand-off
+   * then merges nothing from the mount. */
+  mountedConfigurationOpened?: boolean;
 }): ServerJobExchangeDriverConfig {
   return {
     transport,
@@ -473,6 +478,9 @@ export function inviterServerJobConfig({
     ...(options !== undefined ? { options } : {}),
     ...(runDiagnostics !== undefined ? { runDiagnostics } : {}),
     ...(receipts !== undefined ? { receipts } : {}),
+    ...(mountedConfigurationOpened !== undefined
+      ? { mountedConfigurationOpened }
+      : {}),
     ...loadedEnforcementRecords,
   };
 }
@@ -502,6 +510,7 @@ export function useInviterExchange({
   runDiagnostics,
   receipts,
   loadedEnforcementRecords,
+  mountedConfigurationOpened,
 }: {
   invitation: GeneratedInvitation | undefined;
   inviterName: string;
@@ -539,6 +548,11 @@ export function useInviterExchange({
    * forwarded to the intent unchanged; unused on the browser path, which
    * composes no configuration. */
   loadedEnforcementRecords?: LoadedEnforcementRecords;
+  /** Whether the operator opened the mounted configuration for this exchange,
+   * forwarded to the intent so the run's hand-off merges that document rather
+   * than whatever sits in the mount; unused on the browser path, which has no
+   * mount and composes no configuration. */
+  mountedConfigurationOpened?: boolean;
 }): {
   run: ExchangeRun;
   outputs: RunOutputs | undefined;
@@ -734,6 +748,9 @@ export function useInviterExchange({
           ...(receipts !== undefined ? { receipts } : {}),
           ...(loadedEnforcementRecords !== undefined
             ? { loadedEnforcementRecords }
+            : {}),
+          ...(mountedConfigurationOpened !== undefined
+            ? { mountedConfigurationOpened }
             : {}),
         }),
         // Persist the created job's id so a reload or hard tab close can re-attach

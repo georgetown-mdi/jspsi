@@ -522,6 +522,7 @@ export function InviterScreen() {
     runDiagnostics: runDiagnosticsIntentFields(runDiagnostics),
     receipts: receiptsIntentFields(receipts),
     loadedEnforcementRecords,
+    mountedConfigurationOpened: mountedConfiguration.status === "opened",
     ...(csvDelimiter !== undefined ? { csvDelimiter } : {}),
   });
 

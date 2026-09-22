@@ -173,6 +173,23 @@ describe("jobExchangeIntentSchema validates metadata and standardization", () =>
       ).toBe(true);
   });
 
+  test("accepts mountedConfigurationOpened, both booleans", () => {
+    for (const opened of [false, true])
+      expect(
+        jobExchangeIntentSchema.safeParse(
+          validIntent({ mountedConfigurationOpened: opened }),
+        ).success,
+      ).toBe(true);
+  });
+
+  test("rejects a non-boolean mountedConfigurationOpened", () => {
+    // Only a boolean decides whether the hand-off reads the mount, so a truthy
+    // string is refused at this boundary rather than merging a document the
+    // operator never opened.
+    const intent = { ...validIntent(), mountedConfigurationOpened: "true" };
+    expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(false);
+  });
+
   test("rejects a non-boolean expectedPartnerDeduplicate", () => {
     // A string reaching the composed config would be refused by core's schema at
     // config-parse time on the console, after the job was created; refusing it

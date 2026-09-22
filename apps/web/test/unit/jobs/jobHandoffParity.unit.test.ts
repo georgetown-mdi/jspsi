@@ -232,6 +232,12 @@ const EXCHANGE_INTENT_ROUTES: Record<
       "it selects whether an acceptance DERIVES a consent record when the " +
       "intent states none; the record itself graduates under its own field",
   },
+  mountedConfigurationOpened: {
+    carries: "nothing",
+    because:
+      "it selects whether the template is written over the mounted document; " +
+      "what that document holds graduates as the held keys themselves",
+  },
   options: { carries: "tuningOptions" },
   eventStream: {
     carries: "nothing",

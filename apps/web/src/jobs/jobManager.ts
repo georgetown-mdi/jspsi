@@ -973,7 +973,13 @@ export class JobManager {
         ? this.signingPathsFor(workdir, identityPath).receiptOutput
         : null;
 
-    const mountedDocument = mountedExchangeDocument(this.dataRoot);
+    // The hand-off's merge base is the document the operator opened, so a run
+    // authored here from scratch takes no held setting from a configuration
+    // sitting in the mount that nobody read.
+    const mountedDocument =
+      intent.mode !== "zeroSetup" && intent.mountedConfigurationOpened === true
+        ? mountedExchangeDocument(this.dataRoot)
+        : undefined;
     const handoff = buildJobHandoff(intent, serverEntry, {
       credentialPasted: this.authoredMaterializedCredentialPath !== undefined,
       filedropSplit: this.jobRendezvousOutboundDir !== undefined,

@@ -152,7 +152,8 @@ function mountedSharedSecret(mount: string): string {
  * The exchange the console runs for the configuration it opened: the settings
  * the document states, through the production load and the console's own
  * mapping. The linkage terms, metadata, and standardization are the file's,
- * unedited.
+ * unedited, and the intent reports the configuration as opened, which is what
+ * has the run's hand-off merge the mounted document.
  */
 function intentFromMount(mount: string): JobFiledropExchangeIntent {
   const response = loadMountedConfiguration(mount);
@@ -168,6 +169,7 @@ function intentFromMount(mount: string): JobFiledropExchangeIntent {
     linkageTerms: loaded.linkageTerms,
     sharedSecret: mountedSharedSecret(mount),
     inputFile: { name: "input.csv" },
+    mountedConfigurationOpened: true,
     ...(loaded.metadata !== undefined ? { metadata: loaded.metadata } : {}),
     ...(loaded.standardization !== undefined
       ? { standardization: loaded.standardization }

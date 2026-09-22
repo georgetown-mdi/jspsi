@@ -145,6 +145,11 @@ export interface ServerJobExchangeDriverConfig {
    * Absent composes no key, so the run reads and writes commas. */
   csvDelimiter?: string;
   options?: JobExchangeOptions;
+  /** Whether this run's settings came from the configuration the operator
+   * opened off the mount. Forwarded to the intent, where it decides whether the
+   * recurring-run hand-off merges the mounted document into its template: a run
+   * authored in the console states nothing from a file nobody read. */
+  mountedConfigurationOpened?: boolean;
   /** The operator's per-run diagnostic and recovery choices, forwarded to the
    * intent unchanged ({@link RunDiagnosticsIntentFields}). Absent for a run
    * that asked for neither. */
@@ -1155,6 +1160,7 @@ export function intentFor(
     includeOwnColumns,
     csvDelimiter,
     options,
+    mountedConfigurationOpened,
     runDiagnostics,
     receipts,
   } = config;
@@ -1178,6 +1184,9 @@ export function intentFor(
     ...(includeOwnColumns !== undefined ? { includeOwnColumns } : {}),
     ...(csvDelimiter !== undefined ? { csvDelimiter } : {}),
     ...(options !== undefined ? { options } : {}),
+    ...(mountedConfigurationOpened !== undefined
+      ? { mountedConfigurationOpened }
+      : {}),
     ...runDiagnostics,
     ...receipts,
     eventStream: true,
