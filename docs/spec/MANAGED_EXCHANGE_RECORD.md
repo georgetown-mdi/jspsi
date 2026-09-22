@@ -132,8 +132,12 @@ rotates, re-invites, hands off, or backs up an exchange takes the narrowed recor
 type that holds a secret (`RunnableManagedExchangeRecord`), so a configuration-only
 record cannot be handed to one: the surfaces narrow first and show the
 configuration-only state where the narrowing fails, and the unattended tick skips
-such a record. There is no transition into or out of the state, and no stored
-marker to disagree with the record.
+such a record. Where the type is erased the narrowing is made again at runtime: a
+store entry point takes the record's `id`, which carries no shape, so the
+rotation and re-invite writes narrow the record they read INSIDE the transaction
+and refuse a configuration-only one there, aborting the transaction with the
+record still holding no secret. There is no transition into or out of the state,
+and no stored marker to disagree with the record.
 
 **It holds nothing a run or a secret produces.** The record schema refuses a
 configuration-only record that also holds `expires` (a bound on a secret it does

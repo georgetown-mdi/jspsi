@@ -567,6 +567,23 @@ describe("field-scoped rotation write", () => {
     );
   });
 
+  test("a configuration-only record refuses the rotation and stays keyless", async () => {
+    // The entry point takes an `id`, which carries no shape, so the record read
+    // inside the transaction is what the rotation is narrowed on.
+    const created = await createManagedExchange(
+      newExchange({ sharedSecret: undefined }),
+    );
+    await expect(
+      persistManagedExchangeRotation(created.id, {
+        sharedSecret: generateSharedSecret(),
+        expires: null,
+      }),
+    ).rejects.toThrow(/configuration only/);
+    expect(
+      (await getManagedExchange(created.id))?.sharedSecret,
+    ).toBeUndefined();
+  });
+
   test("rotating a missing id rejects", async () => {
     await expect(
       persistManagedExchangeRotation("no-such-id", {

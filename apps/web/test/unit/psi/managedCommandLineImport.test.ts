@@ -241,6 +241,30 @@ describe("refusing what this app cannot hold", () => {
     expect(message).toContain("import it again");
   });
 
+  test("a key outside the schema is named, not mistaken for another file", () => {
+    const message = refusal(
+      configText(commandLineDocument({ surprise_field: "hand-edited line" })),
+    );
+
+    expect(message).toContain("surprise_field");
+    expect(message).toContain("import it again");
+  });
+
+  test("a key outside the schema under a block is named with its block", () => {
+    const document = commandLineDocument();
+    const message = refusal(
+      configText({
+        ...document,
+        connection: {
+          ...(document.connection as WebRTCConnectionConfig),
+          secret_sauce: "hand-edited line",
+        },
+      }),
+    );
+
+    expect(message).toContain("connection.secret_sauce");
+  });
+
   test("a refused field is named as the file spells it, not as Zod saw it", () => {
     const document = commandLineDocument({ csvDelimiter: ";;" });
     const connection = document.connection as WebRTCConnectionConfig;

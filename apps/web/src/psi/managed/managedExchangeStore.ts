@@ -536,13 +536,13 @@ async function readModifyWriteRecord(
  * `transform` must be synchronous (Zod validation is) or the transaction
  * auto-commits before the writes are issued.
  */
-async function readModifyWriteRotation(
+async function readModifyWriteRotation<T extends ManagedExchangeRecord>(
   id: string,
-  transform: (stored: unknown) => ManagedExchangeRecord,
-): Promise<ManagedExchangeRecord> {
+  transform: (stored: unknown) => T,
+): Promise<T> {
   const db = await openManagedExchangeDatabase();
   try {
-    return await new Promise<ManagedExchangeRecord>((resolve, reject) => {
+    return await new Promise<T>((resolve, reject) => {
       const transaction = db.transaction(
         [MANAGED_EXCHANGE_STORE_NAME, MANAGED_EXCHANGE_LOCAL_STORE_NAME],
         "readwrite",
@@ -552,7 +552,7 @@ async function readModifyWriteRotation(
       const local = transaction.objectStore(MANAGED_EXCHANGE_LOCAL_STORE_NAME);
       const read = records.get(id);
       const readLocal = local.get(id);
-      let written: ManagedExchangeRecord;
+      let written: T;
       let failure: unknown;
       const applyWhenReady = () => {
         if (read.readyState !== "done" || readLocal.readyState !== "done")
@@ -838,6 +838,9 @@ export type ManagedRetakeOutcome =
  * transaction, with or without a key ({@link clearHandedOffLastRun}); every other
  * entry stays, as does everything else about the record.
  *
+ * @throws {Error} if the stored record holds a configuration only and the key
+ *   would install a secret on it ({@link runnableManagedExchangeOrRefuse}); the
+ *   transaction aborts, leaving the record as it stood.
  * @throws {ZodError} if the stored record or sibling entry is invalid, or the key
  *   produces an invalid record; the transaction aborts and nothing is written.
  */
@@ -901,10 +904,13 @@ async function retakeSpentCopy(
           const advanced =
             key !== undefined && key.sharedSecret !== stored.sharedSecret;
           const rotated = advanced
-            ? applyManagedExchangeRotation(stored, {
-                sharedSecret: key.sharedSecret,
-                expires: key.expires ?? null,
-              })
+            ? applyManagedExchangeRotation(
+                runnableManagedExchangeOrRefuse(stored),
+                {
+                  sharedSecret: key.sharedSecret,
+                  expires: key.expires ?? null,
+                },
+              )
             : stored;
           const retaken = clearHandedOffLastRun(rotated);
           if (retaken !== stored) records.put(retaken);
@@ -1021,7 +1027,10 @@ export async function updateManagedExchangeLocalFields(
  * ordering awaits before the data exchange begins (see
  * docs/spec/MANAGED_EXCHANGE_RECORD.md).
  *
- * @throws {Error} if no record with `id` exists.
+ * @throws {Error} if no record with `id` exists, or if the stored record holds a
+ *   configuration only ({@link runnableManagedExchangeOrRefuse}): the `id` carries
+ *   no shape, so the record read inside the transaction is what the rotation is
+ *   narrowed on, and the transaction aborts with the record still keyless.
  * @throws {ZodError} if the stored value is not a valid v3 record or the rotation
  *   produces an invalid one; the transaction aborts and nothing is written.
  */
@@ -1029,13 +1038,14 @@ export async function persistManagedExchangeRotation(
   id: string,
   rotation: ManagedExchangeRotation,
 ): Promise<RunnableManagedExchangeRecord> {
-  const rotated = await readModifyWriteRotation(id, (stored) => {
+  return readModifyWriteRotation(id, (stored) => {
     if (stored === undefined)
       throw new Error(`no managed exchange with id ${id}`);
-    const existing = parseManagedExchangeRecord(stored);
+    const existing = runnableManagedExchangeOrRefuse(
+      parseManagedExchangeRecord(stored),
+    );
     return applyManagedExchangeRotation(existing, rotation);
   });
-  return runnableManagedExchangeOrRefuse(rotated);
 }
 
 /**
@@ -1084,7 +1094,9 @@ export class ManagedReinviteWithheldError extends Error {
  * replaces, so a re-invite landing beside a run's own rotation would discard one
  * of the two.
  *
- * @throws {Error} if no record with `id` exists.
+ * @throws {Error} if no record with `id` exists, or if the stored record holds a
+ *   configuration only, narrowed inside the transaction exactly as
+ *   {@link persistManagedExchangeRotation} narrows it.
  * @throws {ManagedExchangeLockUnavailableError} if a run of this record holds the
  *   lock; no transaction is opened and nothing is written.
  * @throws {ManagedReinviteWithheldError} if the stored record has a standing
@@ -1096,14 +1108,16 @@ export class ManagedReinviteWithheldError extends Error {
 export async function persistManagedExchangeReinvite(
   id: string,
   rotation: ManagedExchangeRotation,
-): Promise<ManagedExchangeRecord> {
+): Promise<RunnableManagedExchangeRecord> {
   return withManagedExchangeLock(
     id,
     () =>
       readModifyWriteRotation(id, (stored) => {
         if (stored === undefined)
           throw new Error(`no managed exchange with id ${id}`);
-        const existing = parseManagedExchangeRecord(stored);
+        const existing = runnableManagedExchangeOrRefuse(
+          parseManagedExchangeRecord(stored),
+        );
         if (standingCompromiseResponse(existing) !== undefined)
           throw new ManagedReinviteWithheldError(id);
         return applyManagedExchangeReinviteRotation(existing, rotation);

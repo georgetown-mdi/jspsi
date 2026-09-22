@@ -555,6 +555,12 @@ export function runnableManagedExchange(
  * record's shape; this is the boundary that refuses one reached anyway, rather
  * than composing a file with an empty secret in it.
  *
+ * It is also the runtime half of the narrowing where the type is erased: a
+ * store entry point takes the record's `id`, which carries no shape, so the
+ * rotation and re-invite writes narrow the record they read inside the
+ * transaction and abort it here rather than writing a secret onto a record that
+ * holds none (see {@link ./managedExchangeStore.ts}).
+ *
  * @throws {Error} if the record holds no shared secret.
  */
 export function runnableManagedExchangeOrRefuse(
@@ -563,8 +569,8 @@ export function runnableManagedExchangeOrRefuse(
   if (!runnableManagedExchange(record))
     throw new Error(
       "this exchange holds a configuration only: its shared secret stayed " +
-        "with the command line, so there is nothing here to back up, hand " +
-        "off, or run",
+        "with the command line, so there is nothing here to rotate, " +
+        "re-invite from, back up, hand off, or run",
     );
   return record;
 }
@@ -822,7 +828,7 @@ export interface ManagedExchangeRotation {
  * @throws {ZodError} if the rotated record is invalid (a malformed secret).
  */
 export function applyManagedExchangeRotation(
-  record: ManagedExchangeRecord,
+  record: RunnableManagedExchangeRecord,
   rotation: ManagedExchangeRotation,
 ): RunnableManagedExchangeRecord {
   const next: ManagedExchangeRecord = {
@@ -849,7 +855,7 @@ export function applyManagedExchangeRotation(
  * @throws {ZodError} if the rotated record is invalid (a malformed secret).
  */
 export function applyManagedExchangeReinviteRotation(
-  record: ManagedExchangeRecord,
+  record: RunnableManagedExchangeRecord,
   rotation: ManagedExchangeRotation,
 ): RunnableManagedExchangeRecord {
   const next: ManagedExchangeRecord = {

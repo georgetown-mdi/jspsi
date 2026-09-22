@@ -109,18 +109,26 @@ function documentFieldPath(path: ReadonlyArray<PropertyKey>): string {
 }
 
 /**
+ * The fields one Zod issue names, as the FILE spells them. A key outside the
+ * schema is reported at its PARENT object's path -- empty for a top-level key --
+ * with the offending names on `keys`, so naming the key itself takes joining
+ * each of them onto that path. Every other issue names the field its path
+ * points at, and an issue at the document root names none.
+ */
+function refusedFields(issue: ZodError["issues"][number]): Array<string> {
+  if (issue.code === "unrecognized_keys")
+    return issue.keys.map((key) => documentFieldPath([...issue.path, key]));
+  const field = documentFieldPath(issue.path);
+  return field === "" ? [] : [field];
+}
+
+/**
  * What a schema refusal tells the operator: which lines of their own file to
  * fix. Only field names are named -- never an issue message, which a built-in
  * Zod code can compose out of the offending value.
  */
 function schemaRefusal(error: ZodError): ManagedConfigurationRefusedError {
-  const fields = [
-    ...new Set(
-      error.issues
-        .map((issue) => documentFieldPath(issue.path))
-        .filter((field) => field !== ""),
-    ),
-  ];
+  const fields = [...new Set(error.issues.flatMap(refusedFields))];
   if (fields.length === 0)
     return new ManagedConfigurationRefusedError(
       "This file is not a psilink exchange configuration. Check that you " +

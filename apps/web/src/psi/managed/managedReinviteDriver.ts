@@ -20,8 +20,8 @@ import { invitationLocation } from "../invitationLocation";
 import { composeManagedReinvite } from "./managedReinvite";
 import { persistManagedExchangeReinvite } from "./managedExchangeStore";
 
-import type { ManagedExchangeRecord } from "./managedExchangeRecord";
 import type { ManagedReinvite } from "./managedReinvite";
+import type { RunnableManagedExchangeRecord } from "./managedExchangeRecord";
 
 /** The dependencies the re-invite driver injects, defaulted to the real platform
  * wiring but overridable in a test. */
@@ -54,7 +54,7 @@ interface ManagedReinviteResult {
   /** The shareable invitation artifacts (link, code, setup expiry). */
   reinvite: ManagedReinvite;
   /** The persisted record after the re-invite rotation. */
-  record: ManagedExchangeRecord;
+  record: RunnableManagedExchangeRecord;
 }
 
 /**
@@ -75,7 +75,7 @@ interface ManagedReinviteResult {
  * @throws {ManagedReinviteWithheldError} if the record holds a standing compromise.
  */
 export async function reinviteManagedExchange(
-  record: ManagedExchangeRecord,
+  record: RunnableManagedExchangeRecord,
   deps: ManagedReinviteDriverDeps = defaultDeps,
 ): Promise<ManagedReinviteResult> {
   const reinvite = await composeManagedReinvite(record, deps.location(), {

@@ -11,15 +11,19 @@ import {
   MANAGED_EXCHANGE_SCHEMA_VERSION,
   NO_STANDING_CONDITION,
   composeManagedExchangeFile,
+  runnableManagedExchangeOrRefuse,
 } from "@psi/managed/managedExchangeRecord";
 import {
   canReinviteFromRecord,
   composeManagedReinvite,
 } from "@psi/managed/managedReinvite";
 
+import type {
+  ManagedExchangeRecord,
+  RunnableManagedExchangeRecord,
+} from "@psi/managed/managedExchangeRecord";
 import type { InvitationLocation } from "@psi/invitation";
 import type { InvitationToken } from "@psilink/core";
-import type { ManagedExchangeRecord } from "@psi/managed/managedExchangeRecord";
 
 // Fast re-invite from a stored record, tested in Node: the fresh invitation is
 // composed from the record's OWN document (terms + committed send set), mints only a
@@ -50,8 +54,8 @@ const location: InvitationLocation = {
 
 function inviterRecord(
   overrides: Partial<ManagedExchangeRecord> = {},
-): ManagedExchangeRecord {
-  return {
+): RunnableManagedExchangeRecord {
+  return runnableManagedExchangeOrRefuse({
     schemaVersion: MANAGED_EXCHANGE_SCHEMA_VERSION,
     id: "abc",
     label: "Riverbend quarterly",
@@ -68,7 +72,7 @@ function inviterRecord(
     sharedSecret: STORED_SECRET,
     standingCondition: NO_STANDING_CONDITION,
     ...overrides,
-  };
+  });
 }
 
 const seams = {

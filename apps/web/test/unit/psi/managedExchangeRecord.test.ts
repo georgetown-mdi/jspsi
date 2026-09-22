@@ -40,6 +40,7 @@ import type {
   ManagedExchangeSchedule,
   ManagedStandingCondition,
   NewManagedExchange,
+  RunnableManagedExchangeRecord,
 } from "@psi/managed/managedExchangeRecord";
 import type { WebRTCExchangeLocator } from "@psilink/core";
 
@@ -69,6 +70,16 @@ function newExchange(
     sharedSecret: generateSharedSecret(),
     ...overrides,
   };
+}
+
+/** A stored record narrowed the way every rotation caller narrows one: the
+ * rotation and re-invite entry points take the record type that holds a secret. */
+function runnableRecord(
+  overrides: Partial<NewManagedExchange> = {},
+): RunnableManagedExchangeRecord {
+  return runnableManagedExchangeOrRefuse(
+    buildManagedExchangeRecord(newExchange(overrides)),
+  );
 }
 
 const schedule: ManagedExchangeSchedule = {
@@ -518,7 +529,7 @@ describe("applyManagedExchangeLocalEdits", () => {
 
 describe("applyManagedExchangeRotation", () => {
   test("a string expires sets the bound; the secret advances", () => {
-    const record = buildManagedExchangeRecord(newExchange());
+    const record = runnableRecord();
     const rotatedSecret = generateSharedSecret();
     const rotated = applyManagedExchangeRotation(record, {
       sharedSecret: rotatedSecret,
@@ -529,9 +540,7 @@ describe("applyManagedExchangeRotation", () => {
   });
 
   test("a null expires deletes the key, not merely sets it undefined", () => {
-    const record = buildManagedExchangeRecord(
-      newExchange({ expires: "2026-04-06T14:00:00.000Z" }),
-    );
+    const record = runnableRecord({ expires: "2026-04-06T14:00:00.000Z" });
     const rotated = applyManagedExchangeRotation(record, {
       sharedSecret: generateSharedSecret(),
       expires: null,
@@ -540,9 +549,7 @@ describe("applyManagedExchangeRotation", () => {
   });
 
   test("touches only the rotation fields; everything else survives", () => {
-    const record = buildManagedExchangeRecord(
-      newExchange({ tokenMaxAgeDays: 90, schedule }),
-    );
+    const record = runnableRecord({ tokenMaxAgeDays: 90, schedule });
     const rotated = applyManagedExchangeRotation(record, {
       sharedSecret: generateSharedSecret(),
       expires: null,
@@ -556,7 +563,7 @@ describe("applyManagedExchangeRotation", () => {
   });
 
   test("rejects a malformed rotated secret at this pure layer", () => {
-    const record = buildManagedExchangeRecord(newExchange());
+    const record = runnableRecord();
     expect(() =>
       applyManagedExchangeRotation(record, {
         sharedSecret: "not-a-secret",
@@ -566,9 +573,7 @@ describe("applyManagedExchangeRotation", () => {
   });
 
   test("does not mutate the input record", () => {
-    const record = buildManagedExchangeRecord(
-      newExchange({ expires: "2026-04-06T14:00:00.000Z" }),
-    );
+    const record = runnableRecord({ expires: "2026-04-06T14:00:00.000Z" });
     const originalSecret = record.sharedSecret;
     applyManagedExchangeRotation(record, {
       sharedSecret: generateSharedSecret(),
@@ -587,9 +592,7 @@ describe("applyManagedExchangeReinviteRotation", () => {
   };
 
   test("rotates the secret AND drops the consumed lastRun", () => {
-    const record = buildManagedExchangeRecord(
-      newExchange({ lastRun: authFailure }),
-    );
+    const record = runnableRecord({ lastRun: authFailure });
     const rotatedSecret = generateSharedSecret();
     const rotated = applyManagedExchangeReinviteRotation(record, {
       sharedSecret: rotatedSecret,
@@ -601,7 +604,7 @@ describe("applyManagedExchangeReinviteRotation", () => {
   });
 
   test("clears lastRun even when there was none (a no-op drop)", () => {
-    const record = buildManagedExchangeRecord(newExchange());
+    const record = runnableRecord();
     const rotated = applyManagedExchangeReinviteRotation(record, {
       sharedSecret: generateSharedSecret(),
       expires: null,
@@ -610,9 +613,11 @@ describe("applyManagedExchangeReinviteRotation", () => {
   });
 
   test("restamps expires from the rotation and touches nothing else", () => {
-    const record = buildManagedExchangeRecord(
-      newExchange({ tokenMaxAgeDays: 90, schedule, lastRun: authFailure }),
-    );
+    const record = runnableRecord({
+      tokenMaxAgeDays: 90,
+      schedule,
+      lastRun: authFailure,
+    });
     const rotated = applyManagedExchangeReinviteRotation(record, {
       sharedSecret: generateSharedSecret(),
       expires: "2026-10-06T14:00:00.000Z",
@@ -624,9 +629,7 @@ describe("applyManagedExchangeReinviteRotation", () => {
   });
 
   test("does not mutate the input record", () => {
-    const record = buildManagedExchangeRecord(
-      newExchange({ lastRun: authFailure }),
-    );
+    const record = runnableRecord({ lastRun: authFailure });
     applyManagedExchangeReinviteRotation(record, {
       sharedSecret: generateSharedSecret(),
       expires: null,
@@ -1335,11 +1338,13 @@ describe("the standing condition across the bookkeeping writes", () => {
   const laterAt = "2026-07-14T13:00:00.000Z";
   const standing: ManagedStandingCondition = { since: raisedAt, kind: "auth" };
 
-  function withCondition(): ManagedExchangeRecord {
-    return applyManagedExchangeLastRun(
-      buildManagedExchangeRecord(newExchange({ schedule })),
-      { at: raisedAt, outcome: "failed", failureKind: "auth" },
-      Date.parse(raisedAt),
+  function withCondition(): RunnableManagedExchangeRecord {
+    return runnableManagedExchangeOrRefuse(
+      applyManagedExchangeLastRun(
+        buildManagedExchangeRecord(newExchange({ schedule })),
+        { at: raisedAt, outcome: "failed", failureKind: "auth" },
+        Date.parse(raisedAt),
+      ),
     );
   }
 
@@ -1497,11 +1502,13 @@ describe("the operator's compromise response", () => {
   const answeredAt = "2026-07-14T15:00:00.000Z";
   const laterAt = "2026-07-14T18:00:00.000Z";
 
-  function withCondition(): ManagedExchangeRecord {
-    return applyManagedExchangeLastRun(
-      buildManagedExchangeRecord(newExchange()),
-      { at: raisedAt, outcome: "failed", failureKind: "auth" },
-      Date.parse(raisedAt),
+  function withCondition(): RunnableManagedExchangeRecord {
+    return runnableManagedExchangeOrRefuse(
+      applyManagedExchangeLastRun(
+        buildManagedExchangeRecord(newExchange()),
+        { at: raisedAt, outcome: "failed", failureKind: "auth" },
+        Date.parse(raisedAt),
+      ),
     );
   }
 
@@ -1583,9 +1590,8 @@ describe("the operator's compromise response", () => {
   });
 
   test("the acknowledgement and the re-invite each take it with the condition", () => {
-    const answered = applyManagedExchangeCompromiseResponse(
-      withCondition(),
-      answeredAt,
+    const answered = runnableManagedExchangeOrRefuse(
+      applyManagedExchangeCompromiseResponse(withCondition(), answeredAt),
     );
     const cleared = applyManagedExchangeStandingConditionCleared(answered);
     expect(cleared.standingCondition).toEqual(NO_STANDING_CONDITION);
@@ -1598,9 +1604,8 @@ describe("the operator's compromise response", () => {
   });
 
   test("a run's own rotation does not take it: only the three acts do", () => {
-    const answered = applyManagedExchangeCompromiseResponse(
-      withCondition(),
-      answeredAt,
+    const answered = runnableManagedExchangeOrRefuse(
+      applyManagedExchangeCompromiseResponse(withCondition(), answeredAt),
     );
     const rotated = applyManagedExchangeRotation(answered, {
       sharedSecret: generateSharedSecret(),
@@ -1674,6 +1679,31 @@ describe("the configuration-only record", () => {
         buildManagedExchangeRecord(configurationFields()),
       ),
     ).toThrow(/configuration only/);
+  });
+
+  test("neither rotation reaches it: the narrowing runs first and it stays keyless", () => {
+    // Both rotation appliers take the narrowed record type, so the store's
+    // id-taking rotation and re-invite writes narrow the record they read inside
+    // the transaction -- this is that narrowing, on a stored configuration-only
+    // record.
+    const stored = parseManagedExchangeRecord(
+      buildManagedExchangeRecord(configurationFields()),
+    );
+    const rotation = { sharedSecret: generateSharedSecret(), expires: null };
+
+    expect(() =>
+      applyManagedExchangeRotation(
+        runnableManagedExchangeOrRefuse(stored),
+        rotation,
+      ),
+    ).toThrow(/configuration only/);
+    expect(() =>
+      applyManagedExchangeReinviteRotation(
+        runnableManagedExchangeOrRefuse(stored),
+        rotation,
+      ),
+    ).toThrow(/configuration only/);
+    expect(stored.sharedSecret).toBeUndefined();
   });
 
   test("holds nothing a run or a secret produces", () => {
