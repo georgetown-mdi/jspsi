@@ -65,7 +65,8 @@ export function builder(cmd: Argv): Argv {
       type: "string",
       describe:
         "how long to wait for the connection before giving up (e.g. 10s); " +
-        "enforced as the SSH ready timeout",
+        "enforced as the SSH ready timeout, and the whole wait -- the probe " +
+        "dials once and is not re-dialed",
     })
     .option("json", {
       type: "boolean",
@@ -99,10 +100,11 @@ const PROBE_USERNAME = "psilink-host-key-probe";
 
 /**
  * Build the minimal probe connection from an `sftp://host[:port]` URL: host,
- * port, a placeholder {@link PROBE_USERNAME}, and the connect timeout as
- * `serverConnectTimeoutMs`. It includes NO credential and no username FROM THE
- * URL -- the host-key verifier refuses before authenticating, so none is ever
- * sent, and omitting it avoids parsing an unresolved one. A non-sftp scheme, an
+ * port, a placeholder {@link PROBE_USERNAME}, the connect timeout as
+ * `serverConnectTimeoutMs`, and a single dial attempt, so that timeout bounds
+ * the whole read. It includes NO credential and no username FROM THE URL --
+ * the host-key verifier refuses before authenticating, so none is ever sent,
+ * and omitting it avoids parsing an unresolved one. A non-sftp scheme, an
  * unparseable URL, or a host-less URL is a {@link UsageError} (exit 64), never a
  * transport failure, reusing the URL-handling primitives the connection
  * builders share so the scheme/host rules cannot drift.
@@ -142,9 +144,17 @@ export function buildProbeConfig(
       ...(port !== undefined ? { port } : {}),
       username: PROBE_USERNAME,
     },
-    ...(connectTimeoutSeconds !== undefined
-      ? { options: { serverConnectTimeoutMs: connectTimeoutSeconds * 1000 } }
-      : {}),
+    options: {
+      // The command has no reconnect setting of its own, so the default three
+      // re-dials would spend four connect budgets plus their pauses against a
+      // host that accepts the connection and answers nothing -- measured at
+      // 7.0 s for a 1 s budget -- and leave the operator no way to ask for the
+      // total they stated. One attempt makes --connect-timeout the whole wait.
+      maxReconnectAttempts: 0,
+      ...(connectTimeoutSeconds !== undefined
+        ? { serverConnectTimeoutMs: connectTimeoutSeconds * 1000 }
+        : {}),
+    },
   };
 }
 

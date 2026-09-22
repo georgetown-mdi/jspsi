@@ -79,11 +79,23 @@ describe("buildProbeConfig parses the URL into a minimal connection", () => {
     expect(config.options?.serverConnectTimeoutMs).toBe(10_000);
   });
 
-  test("omits the options block when no connect timeout is given", () => {
+  test("leaves the connect timeout unset when none is given", () => {
     const config = buildProbeConfig("sftp://sftp.example.org", undefined);
     expect(config.server.host).toBe("sftp.example.org");
     expect(config.server.port).toBeUndefined();
-    expect(config.options).toBeUndefined();
+    expect(config.options?.serverConnectTimeoutMs).toBeUndefined();
+  });
+
+  test("dials once, so --connect-timeout is the probe's whole wait", () => {
+    // A re-dial would spend the operator's stated budget again, and the
+    // command exposes no reconnect setting to ask for one attempt with. What
+    // the value costs against a silent endpoint is measured in
+    // apps/cli/test/integration/droppedEndpointDialBudget.test.ts.
+    for (const timeout of [10, undefined])
+      expect(
+        buildProbeConfig("sftp://sftp.example.org", timeout).options
+          ?.maxReconnectAttempts,
+      ).toBe(0);
   });
 
   test("a non-sftp scheme is a UsageError (exit 64)", () => {
