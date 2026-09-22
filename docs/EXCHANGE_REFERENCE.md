@@ -1517,6 +1517,109 @@ Steps following `split_on` are applied element-wise across all parts. Null-produ
 
 ---
 
+## Where each setting is edited
+
+Each of psilink's three applications opens a configuration, and the aim is that you can change every setting in it in whichever application you opened it in. The table below states what each application does with each setting when it opens a configuration; a cell other than authored, and a carried cell above all, is a gap still to close.
+
+The columns:
+
+- **Command line** -- whether a `psilink` command, flag, or prompt sets the value. Anything the command line does not set, you set by editing `psilink.yaml`.
+- **Console** -- what opening a `psilink.yaml` from the working folder does with the value, and whether a console control changes it afterwards.
+- **Web application** -- what importing a `psilink.yaml` as a stored exchange does with the value, and whether that exchange's settings change it afterwards.
+
+The cells:
+
+- **authored** -- you can set the value here: a command, flag, prompt, or control writes it, or the application works it out from your input file ("inferred") or records it when you invite or accept. Terms copied unchanged from a partner's invitation do not count.
+- **carried** -- the application keeps the value you wrote and writes it back unchanged, and uses it where it applies, but has no control for it and does not tell you so. Change it by editing the file or in another application.
+- **carried with a notice** -- carried, and the application tells you which settings it holds unchanged.
+- **refused** -- the application will not open the configuration, or will not run it, while it states the setting, and names the setting.
+- **dropped** -- the application opens the configuration but uses its own value in place of the one you wrote, or leaves it out, without telling you. This is a defect, not a design.
+- **not applicable** -- the application supplies the value itself, the setting has no effect there, or the setting belongs to a channel the application does not run (see `connection.channel`).
+
+| Setting | Command line | Console | Web application |
+|---------|--------------|---------|-----------------|
+| **[Linkage terms](#linkage-terms)** | | | |
+| `linkage_terms.version` | not applicable | not applicable | carried with a notice |
+| `linkage_terms.identity` | authored | authored | carried with a notice |
+| `linkage_terms.date` | not applicable | not applicable | carried with a notice |
+| `linkage_terms.algorithm` | carried | authored | carried with a notice |
+| `linkage_terms.linkage_strategy` | authored | authored | carried with a notice |
+| `linkage_terms.output.expects_output` | carried | authored | carried with a notice |
+| `linkage_terms.output.share_with_partner` | carried | authored | carried with a notice |
+| `linkage_terms.deduplicate` | authored (zero-setup exchange only) | authored | carried with a notice |
+| `expected_partner_deduplicate` | authored (recorded on accept) | carried with a notice | carried |
+| `linkage_terms.linkage_fields` (`name`, `type`) | authored (inferred) | authored (inferred) | carried with a notice |
+| `linkage_terms.linkage_fields` (`constraints`) | carried | dropped (the type's default constraints replace yours) | carried with a notice |
+| `linkage_terms.linkage_keys` | authored (inferred) | authored | carried with a notice |
+| `linkage_terms.linkage_rule_set` | authored (inferred) | authored (inferred) | carried with a notice |
+| `linkage_terms.legal_agreement` | carried | authored | carried with a notice |
+| `linkage_terms.payload.send` (`name`) | carried | authored (inferred) | carried with a notice |
+| `linkage_terms.payload.send` (`description`) | carried | dropped | carried with a notice |
+| `linkage_terms.payload.receive` | carried | dropped | carried with a notice |
+| `expected_payload_columns` | authored (recorded on accept or save) | carried with a notice | carried |
+| `disclosed_payload_columns` | authored (recorded on invite) | carried with a notice | carried |
+| `outbound_payload_consent` | authored (the accept consent prompt) | carried with a notice | carried |
+| **[Connection](#connection)** | | | |
+| `connection.channel` | authored | authored (`sftp`, `filedrop`); `webrtc` opens but is refused at run | carried (`webrtc`); `sftp` and `filedrop` open but are refused at run |
+| `connection.path` (filedrop) | authored | not applicable | not applicable |
+| `connection.inbound_path`, `connection.outbound_path` (filedrop) | authored | not applicable | not applicable |
+| `connection.server.host` (sftp) | authored | authored | not applicable |
+| `connection.server.port` (sftp) | authored | authored | not applicable |
+| `connection.server.path` (sftp) | authored | authored | not applicable |
+| `connection.server.inbound_path` (sftp) | authored | authored | not applicable |
+| `connection.server.outbound_path` (sftp) | authored | authored | not applicable |
+| `connection.server.username` (sftp) | authored | authored | not applicable |
+| `connection.server.password` | authored | authored (entered again; a warning names it) | not applicable |
+| `connection.server.private_key` | authored | authored (entered again; a warning names it) | not applicable |
+| `connection.server.private_key_passphrase` | authored | authored (entered again; a warning names it) | not applicable |
+| `connection.server.keyboard_interactive` | authored | authored | not applicable |
+| `connection.server.host_key_fingerprint` | authored | authored (one value; a rotation list is dropped to its first entry) | not applicable |
+| `connection.server.certificate` | refused | refused | refused |
+| `connection.server.known_hosts` | refused | refused | refused |
+| `connection.server.provision` | carried (no effect yet) | refused | refused |
+| `connection.server.host`, `port`, `path` (webrtc) | authored | not applicable | carried |
+| `connection.server.secure` (webrtc) | authored | not applicable | refused |
+| `connection.server.key` (webrtc) | carried | not applicable | refused |
+| `connection.server.username` (webrtc) | not applicable | not applicable | refused |
+| `connection.role` | authored | not applicable | carried |
+| `connection.stun` | carried | not applicable | refused |
+| `connection.turn` | carried | not applicable | refused |
+| `connection.ice_transport_policy` | carried | not applicable | refused |
+| `connection.ice_provision` | refused | not applicable | refused |
+| `connection.proxy` | not applicable | refused | not applicable |
+| `connection.options.peer_timeout_ms` | authored | authored | refused |
+| `connection.options.server_connect_timeout_ms` | authored | authored | refused |
+| `connection.options.max_reconnect_attempts` | authored | authored | refused |
+| `connection.options.poll_interval_ms` | authored | authored | not applicable |
+| `connection.options.retain_files` | authored | authored | not applicable |
+| `connection.options.timestamp_in_filename` | authored | authored | not applicable |
+| `connection.options.lockless_rendezvous` | authored | authored | not applicable |
+| `connection.options.peer_id` | authored | authored | not applicable |
+| `connection.options.unexpected_files` | carried | authored | not applicable |
+| `connection.options.connection_per_poll` | authored | authored | not applicable |
+| `connection.provider_options` (sftp) | carried | refused | not applicable |
+| `connection.provider_options` (webrtc) | not applicable | not applicable | refused |
+| **[Authentication](#authentication)** | | | |
+| `authentication.shared_secret` | not applicable | refused | refused |
+| `authentication.expires` | not applicable | refused | refused |
+| `authentication.token_max_age_days` | carried | carried with a notice (not applied to the console's run) | authored |
+| **[Signing](#signing)** | | | |
+| `signing.mode` | carried | authored | refused |
+| `signing.identity_file` | carried | authored (a location you pick in the console; the path the file states is not kept) | refused |
+| `signing.partner_fingerprint` | authored (pinned on first contact) | authored | refused |
+| `signing.receipt_output` | carried | not applicable | refused |
+| **Other top-level settings** | | | |
+| `retention_disposition` | carried | authored | carried |
+| `include_own_columns` | carried | authored | carried |
+| `csv_delimiter` | authored | authored | carried |
+| **[Input metadata](#input-metadata)** | | | |
+| `metadata` (`name`, `type`, `role`, `is_payload`) | authored (inferred) | authored | carried |
+| `metadata` (`description`) | carried | carried | carried |
+| **[Data standardizing transformations](#data-standardizing-transformations)** | | | |
+| `standardization` | authored (inferred) | authored | carried |
+
+---
+
 ## Full example
 
 An end-to-end annotated specification covering every component is planned; see [ROADMAP.md](ROADMAP.md). For the linkage-terms component, the web application's Expert authoring surface in the Matching keys tab exports the terms as a JSON or YAML document (and imports one back, round-tripped through the same validation), which serves as a GUI-produced reference. The per-section snippets above are the working reference for the rest.
