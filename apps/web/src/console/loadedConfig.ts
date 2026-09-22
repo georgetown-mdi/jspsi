@@ -16,10 +16,12 @@
  * (`credentialFieldsNotAdopted` and `carriedThroughFields`, `@jobs/configLoad`),
  * since the values that decide them stay server-side.
  *
- * The linkage terms reach the invitation editor through `editorWithImportedTerms`
- * (`@psi/inviterEditor`), which needs the operator's own CSV: it rebuilds each
- * field's binding against their columns. That is a sequencing constraint, not a
- * mapping one -- the terms are held here until the input step has a file.
+ * The linkage terms, the column roles, and the cleaning pipeline reach the
+ * invitation editor together, through `editorWithLoadedTerms`, which needs the
+ * operator's own CSV: the import rebuilds each field's binding against their
+ * columns. That is a sequencing constraint, not a mapping one -- the three are
+ * held until the input step has a file. What their own file cannot supply comes
+ * back by name for the notice beside the load control.
  */
 
 import {
@@ -29,10 +31,22 @@ import {
 } from "@components/csvDelimiterChoice";
 import { OWN_COLUMNS_DEFAULT } from "@psi/ownColumnsModel";
 
+import {
+  disclosureOf,
+  setColumnDisclosure,
+  setColumnType,
+} from "@psi/metadataEditing";
+import {
+  editorWithFieldInput,
+  editorWithFieldSteps,
+  editorWithImportedTerms,
+} from "@psi/inviterEditor";
+
 import { CONNECTION_TUNING_DEFAULT } from "./connectionTuningModel";
 import { EMPTY_SFTP_FORM } from "./sftpConnectionForm";
 import { EXCHANGE_FILES_DEFAULT } from "./exchangeFilesModel";
 
+import type { AcquiredCsv, InviterEditor } from "@psi/inviterEditor";
 import type {
   DisclosedExchangeDocument,
   DisclosedFileSyncOptions,
@@ -270,5 +284,104 @@ export function authoringStateFromDocument(
     ...(document.standardization !== undefined
       ? { standardization: document.standardization }
       : {}),
+  };
+}
+
+/** The parts of a loaded document the invitation editor takes once the input
+ * file is read: the matching terms, and the column roles and cleaning pipeline
+ * the document states for this party's own columns. */
+export interface LoadedEditorTerms {
+  linkageTerms: LinkageTerms;
+  metadata?: Metadata;
+  standardization?: Standardization;
+}
+
+/**
+ * The column set the import binds against: the operator's own inferred columns
+ * with each role and type the document states for a column of that name put
+ * back, through the same editing helpers the columns step uses, so the
+ * single-identifier rule holds exactly as it does for a hand edit. A column the
+ * document names that this file does not have leaves the whole setting
+ * unapplied, since nothing in the editor can hold it.
+ */
+function metadataWithLoadedColumns(
+  inferred: Metadata,
+  loaded: Metadata | undefined,
+): { metadata: Metadata; whole: boolean } {
+  let metadata = inferred;
+  let whole = true;
+  for (const column of loaded ?? []) {
+    if (!metadata.some((own) => own.name === column.name)) {
+      whole = false;
+      continue;
+    }
+    metadata = setColumnType(metadata, column.name, column.type).metadata;
+    metadata = setColumnDisclosure(
+      metadata,
+      column.name,
+      disclosureOf(column),
+    ).metadata;
+  }
+  return { metadata, whole };
+}
+
+/**
+ * Put a loaded configuration's terms, columns, and cleaning into the editor,
+ * against the file the operator read: the import rebuilds every binding over
+ * their own columns ({@link editorWithImportedTerms}), so nothing here can run
+ * before a file is read.
+ *
+ * The document's own cleaning is adopted per field, over the binding the import
+ * reconstructed, for a field the import declared whose input the document binds
+ * to a `role: linkage` column -- the rule the import's own reconstruction binds
+ * by, so a configuration cannot clean a column into a matching key that this
+ * party's roles do not offer for matching.
+ *
+ * A setting the operator's file cannot supply whole is named rather than
+ * dropped, as the file spells it, for the notice beside the load control: a
+ * document column the file does not have, or a cleaned field whose binding
+ * could not be placed, leaves that setting named there.
+ */
+export function editorWithLoadedTerms(
+  editor: InviterEditor,
+  csv: AcquiredCsv,
+  loaded: LoadedEditorTerms,
+): { editor: InviterEditor; notApplied: Array<string> } {
+  if (editor.sealed === true) return { editor, notApplied: [] };
+  const columns = metadataWithLoadedColumns(
+    editor.seed.metadata,
+    loaded.metadata,
+  );
+  let next = editorWithImportedTerms(
+    editor,
+    csv,
+    loaded.linkageTerms,
+    columns.metadata,
+  );
+  let cleaningWhole = true;
+  for (const transformation of loaded.standardization ?? []) {
+    const declared = next.draft.standardization.some(
+      (declaration) => declaration.output === transformation.output,
+    );
+    const bindable = columns.metadata.some(
+      (column) =>
+        column.name === transformation.input && column.role === "linkage",
+    );
+    if (!declared || !bindable) {
+      cleaningWhole = false;
+      continue;
+    }
+    next = editorWithFieldSteps(
+      editorWithFieldInput(next, transformation.output, transformation.input),
+      transformation.output,
+      transformation.steps,
+    );
+  }
+  return {
+    editor: next,
+    notApplied: [
+      ...(columns.whole ? [] : ["metadata"]),
+      ...(cleaningWhole ? [] : ["standardization"]),
+    ],
   };
 }

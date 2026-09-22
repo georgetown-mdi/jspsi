@@ -122,6 +122,7 @@ import {
 import { consoleAcquiredCsv } from "@console/consoleAcquiredCsv";
 
 import { MountedConfigurationCard } from "@console/MountedConfigurationCard";
+import { editorWithLoadedTerms } from "@console/loadedConfig";
 import { fetchMountedConfiguration } from "@psi/jobClient/mountedConfigClient";
 import { mountedConfigurationRead } from "@console/mountedConfiguration";
 
@@ -412,7 +413,8 @@ export function InviterScreen() {
   // The terms a load held, applied the moment the file step has a file: the
   // import rebuilds each field's binding against the operator's own columns, so
   // it cannot run before one is read. The own-column choice goes on first,
-  // because the import reads it off the draft it rebuilds from.
+  // because the import reads it off the draft it rebuilds from. The transport
+  // the file's channel selects goes on in the reducer, which holds it.
   useEffect(() => {
     if (
       pendingLoadedTerms === undefined ||
@@ -420,13 +422,15 @@ export function InviterScreen() {
       acquired === undefined
     )
       return;
+    const applied = editorWithLoadedTerms(
+      editorWithIncludeOwnColumns(editor, pendingLoadedTerms.ownColumns),
+      acquired,
+      pendingLoadedTerms,
+    );
     dispatch({
       type: "loaded-terms-applied",
-      editor: editorWithImportedTerms(
-        editorWithIncludeOwnColumns(editor, pendingLoadedTerms.ownColumns),
-        acquired,
-        pendingLoadedTerms.linkageTerms,
-      ),
+      editor: applied.editor,
+      notApplied: applied.notApplied,
     });
   }, [acquired, editor, pendingLoadedTerms]);
 

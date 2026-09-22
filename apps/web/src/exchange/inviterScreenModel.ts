@@ -1,5 +1,6 @@
 import {
   editorWithIdentity,
+  editorWithTransport,
   sealEditor,
   unsealEditor,
 } from "@psi/inviterEditor";
@@ -13,7 +14,11 @@ import { RECEIPTS_DEFAULT } from "@psi/receiptsModel";
 import {
   MOUNTED_CONFIGURATION_UNREAD,
   mountedConfigurationRead,
+  withTermsNotApplied,
+  withUnavailableTransport,
 } from "@console/mountedConfiguration";
+
+import { availableTransports, transportOffered } from "@psi/transportChooser";
 
 import { CONNECTION_TUNING_DEFAULT } from "@console/connectionTuningModel";
 import { EXCHANGE_FILES_DEFAULT } from "@console/exchangeFilesModel";
@@ -40,12 +45,13 @@ import type { SftpConnectionInfo } from "@psi/jobClient/serverJobExchangeDriver"
 import type { ConnectionTuningDraft } from "@console/connectionTuningModel";
 import type { ExchangeFilesDraft } from "@console/exchangeFilesModel";
 
-import type { LinkageTerms } from "@psilink/core";
+import type { LinkageTerms, Metadata, Standardization } from "@psilink/core";
 import type { LoadedEnforcementRecords } from "@console/loadedConfig";
 import type { MountedConfigurationAnswer } from "@psi/jobClient/mountedConfigClient";
 import type { MountedConfigurationState } from "@console/mountedConfiguration";
 import type { OwnColumnsChoice } from "@psi/ownColumnsModel";
 import type { SftpConnectionFormValues } from "@console/sftpConnectionForm";
+import type { Transport } from "@psi/transportChooser";
 
 import type { AlertContent } from "@components/csvIntake";
 import type { SftpConnectionProjection } from "@jobs/jobManager";
@@ -202,11 +208,21 @@ export interface InviterScreenState {
   loadedEnforcementRecords: LoadedEnforcementRecords;
 }
 
-/** The terms and own-column choice a load holds until a file is read. Both move
- * together: the choice is an argument of the import that rebuilds the draft. */
+/** What a load holds until a file is read, every part of it an argument of the
+ * one import that rebuilds the draft against the operator's own columns, so
+ * they move together.
+ *
+ * `transport` is the transport the file's own channel runs over, present only
+ * where this console offers it -- an unoffered one is named beside the load
+ * control instead ({@link withUnavailableTransport}). `metadata` and
+ * `standardization` are the document's own column roles and cleaning pipeline,
+ * adopted over the inference the file's headers alone would give. */
 export interface PendingLoadedTerms {
   linkageTerms: LinkageTerms;
   ownColumns: OwnColumnsChoice;
+  transport?: Transport;
+  metadata?: Metadata;
+  standardization?: Standardization;
 }
 
 /** The console before a visitor has done anything: step 1, no file, no draft, and
@@ -372,8 +388,15 @@ export type InviterScreenAction =
    * covers in one action, so no step is left showing a value from another
    * configuration; a refusal or an absent mount fills none. */
   | { type: "mounted-configuration-read"; answer: MountedConfigurationAnswer }
-  /** The held terms reached the file the import binds them against. */
-  | { type: "loaded-terms-applied"; editor: InviterEditor };
+  /** The held terms reached the file the import binds them against, with the
+   * settings that file's own columns could not supply named for the notice
+   * beside the load control. The transport the loaded channel selects rides the
+   * held terms, so it goes on the editor the import rebuilt. */
+  | {
+      type: "loaded-terms-applied";
+      editor: InviterEditor;
+      notApplied?: ReadonlyArray<string>;
+    };
 
 /** The state a discarded or cleared read leaves: no file, no profile, no draft,
  * and no sample marker, so nothing downstream vouches for a file that is gone. */
@@ -593,9 +616,24 @@ export function inviterScreenReducer(
       const loaded = read.loaded;
       if (loaded === undefined)
         return { ...state, mountedConfiguration: read.state };
+      // The file's own channel against the console's transport matrix -- the
+      // build this offer is rendered on (`InviterScreen`). An unresolved mount
+      // reads as no mount, the same conservative reading the chooser itself
+      // gives it, so the load never selects a transport this console has not
+      // confirmed it can run.
+      const offered = transportOffered(
+        availableTransports(
+          true,
+          state.sftpInfo?.connection != null,
+          state.rendezvous?.configured === true,
+        ),
+        loaded.channel,
+      );
       return {
         ...state,
-        mountedConfiguration: read.state,
+        mountedConfiguration: offered
+          ? read.state
+          : withUnavailableTransport(read.state, loaded.channel),
         connectionTuning: loaded.connectionTuning,
         exchangeFiles: loaded.exchangeFiles,
         receipts: {
@@ -608,18 +646,34 @@ export function inviterScreenReducer(
         pendingLoadedTerms: {
           linkageTerms: loaded.linkageTerms,
           ownColumns: loaded.ownColumns,
+          ...(offered ? { transport: loaded.channel } : {}),
+          ...(loaded.metadata !== undefined
+            ? { metadata: loaded.metadata }
+            : {}),
+          ...(loaded.standardization !== undefined
+            ? { standardization: loaded.standardization }
+            : {}),
         },
         loadedEnforcementRecords: loaded.records,
       };
     }
-    case "loaded-terms-applied":
+    case "loaded-terms-applied": {
+      const transport = state.pendingLoadedTerms?.transport;
       return {
         ...state,
-        editor: action.editor,
+        editor:
+          transport === undefined
+            ? action.editor
+            : editorWithTransport(action.editor, transport),
+        mountedConfiguration: withTermsNotApplied(
+          state.mountedConfiguration,
+          action.notApplied ?? [],
+        ),
         pendingLoadedTerms: undefined,
         editorAnnouncement:
           "Loaded the configuration's matching terms. Review them before creating.",
       };
+    }
   }
 }
 

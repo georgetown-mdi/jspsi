@@ -121,6 +121,27 @@ describe("the load offer on the file step", () => {
       .toBeInTheDocument();
   });
 
+  test("a channel this console cannot run is named beside the control", async () => {
+    stubConfigRoute({
+      status: 200,
+      body: {
+        configured: true,
+        present: true,
+        document: {
+          channel: "filedrop",
+          linkageTerms: CONFIG_DOCUMENT.linkageTerms,
+        },
+        carriedThrough: [],
+        warnings: [],
+      },
+    });
+    app.render(createElement(InviterScreen));
+    await page.getByRole("button", { name: OPEN_CONFIGURATION_LABEL }).click();
+    await expect
+      .element(page.getByText(/no shared folder mounted/))
+      .toBeInTheDocument();
+  });
+
   test("a refusal shows the console's own text and offers no partial form", async () => {
     const error =
       "This configuration runs over webrtc. The console conducts sftp and " +

@@ -44,6 +44,7 @@ import type {
   LinkageKeyFitness,
   LinkageStrategy,
   LinkageTerms,
+  Metadata,
   SemanticType,
 } from "@psilink/core";
 
@@ -238,18 +239,24 @@ export function editorWithLegalAgreement(
  * per-party and local, so no terms document states them and an import leaves
  * them where the operator set them. An unsupplyable imported key arrives
  * disabled with its badge, never dropped ({@link draftFromTerms}). Imported
- * keys are author-controlled. */
+ * keys are author-controlled.
+ *
+ * `metadata` is the column set the import binds against and the draft opens
+ * on, for a caller holding roles the file's headers alone do not give -- a
+ * configuration opened from the console's mount. The seed's own inference is
+ * the default, and stays the grid's reset anchor either way. */
 export function editorWithImportedTerms(
   editor: InviterEditor,
   csv: AcquiredCsv,
   terms: LinkageTerms,
+  metadata: Metadata = editor.seed.metadata,
 ): InviterEditor {
   if (editor.sealed === true) return editor;
   return {
     ...editor,
     draft: draftFromTerms(
       terms,
-      editor.seed,
+      { ...editor.seed, metadata },
       editor.draft.lifetimeSeconds,
       seedRows(csv),
       csv.dateInputFormat,

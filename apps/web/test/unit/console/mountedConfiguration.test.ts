@@ -9,6 +9,9 @@ import {
   credentialWarningNotice,
   mountedConfigurationNotices,
   mountedConfigurationRead,
+  termsNotAppliedNotice,
+  withTermsNotApplied,
+  withUnavailableTransport,
 } from "@console/mountedConfiguration";
 
 import type { DisclosedExchangeDocument } from "@jobs/configLoad";
@@ -93,6 +96,11 @@ describe("a record this flow has no control for opens and is named", () => {
     ["expectedPayloadColumns", "expected_payload_columns", ["program_code"]],
     ["expectedPartnerDeduplicate", "expected_partner_deduplicate", true],
     ["disclosedPayloadColumns", "disclosed_payload_columns", ["program_code"]],
+    [
+      "outboundPayloadConsent",
+      "outbound_payload_consent",
+      { status: "confirmed", columns: ["program_code"] },
+    ],
   ] as const)(
     "%s is held and named as the file spells it",
     (field, spelling, value) => {
@@ -107,13 +115,14 @@ describe("a record this flow has no control for opens and is named", () => {
     },
   );
 
-  test("all three are named beside the settings the route itself held", () => {
+  test("all four are named beside the settings the route itself held", () => {
     const read = mountedConfigurationRead(
       opened(
         {
           expectedPayloadColumns: [],
           expectedPartnerDeduplicate: false,
           disclosedPayloadColumns: [],
+          outboundPayloadConsent: { status: "pending" },
         },
         ["signing.receipt_output"],
       ),
@@ -124,6 +133,7 @@ describe("a record this flow has no control for opens and is named", () => {
       "disclosed_payload_columns",
       "expected_partner_deduplicate",
       "expected_payload_columns",
+      "outbound_payload_consent",
       "signing.receipt_output",
     ]);
   });
@@ -180,6 +190,59 @@ describe("the notices name the settings and say what happens to them", () => {
     expect(notices).toHaveLength(2);
     expect(notices[0]).toContain("signing.receipt_output");
     expect(notices[1]).toContain("connection.server.password");
+  });
+
+  test("a channel this console cannot run says so and what to do", () => {
+    const read = mountedConfigurationRead(opened({ channel: "filedrop" }));
+    const notices = mountedConfigurationNotices(
+      withUnavailableTransport(read.state, "filedrop"),
+    );
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toContain("shared directory");
+    expect(notices[0]).toContain("JOB_RENDEZVOUS_DIR");
+    expect(notices[0]).toMatch(/review step/);
+  });
+
+  test("an unrunnable sftp channel points at the same choice", () => {
+    const read = mountedConfigurationRead(opened());
+    const notices = mountedConfigurationNotices(
+      withUnavailableTransport(read.state, "sftp"),
+    );
+    expect(notices[0]).toContain("over SFTP");
+    expect(notices[0]).toMatch(/review step/);
+  });
+
+  test("a setting the input file cannot supply is named, not dropped", () => {
+    const notice = termsNotAppliedNotice(["metadata", "standardization"]);
+    expect(notice).toContain("metadata, standardization");
+    expect(notice).toMatch(/psilink on the command line/);
+    expect(termsNotAppliedNotice([])).toBeUndefined();
+  });
+
+  test("what the file could not supply is stated last", () => {
+    const read = mountedConfigurationRead(
+      opened({}, ["signing.receipt_output"], ["connection.server.password"]),
+    );
+    const notices = mountedConfigurationNotices(
+      withUnavailableTransport(
+        withTermsNotApplied(read.state, ["metadata"]),
+        "sftp",
+      ),
+    );
+    expect(notices).toHaveLength(4);
+    expect(notices[0]).toContain("over SFTP");
+    expect(notices[1]).toContain("signing.receipt_output");
+    expect(notices[2]).toContain("connection.server.password");
+    expect(notices[3]).toContain("metadata");
+  });
+
+  test("a load that opened nothing takes neither added notice", () => {
+    expect(withUnavailableTransport({ status: "absent" }, "sftp")).toEqual({
+      status: "absent",
+    });
+    expect(withTermsNotApplied({ status: "absent" }, ["metadata"])).toEqual({
+      status: "absent",
+    });
   });
 
   test("a state that opened nothing renders no notice", () => {

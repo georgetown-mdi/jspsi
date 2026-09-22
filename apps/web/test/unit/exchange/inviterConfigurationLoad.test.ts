@@ -14,8 +14,12 @@ import {
 } from "@console/connectionTuningModel";
 import { RECEIPTS_DEFAULT, receiptsIntentFields } from "@psi/receiptsModel";
 
+import {
+  csvDelimiterFromDocument,
+  editorWithLoadedTerms,
+} from "@console/loadedConfig";
+import { editorFromCsv, editorWithIncludeOwnColumns } from "@psi/inviterEditor";
 import { EMPTY_SFTP_FORM } from "@console/sftpConnectionForm";
-import { csvDelimiterFromDocument } from "@console/loadedConfig";
 import { mountedConfigurationNotices } from "@console/mountedConfiguration";
 import { resolveCsvDelimiter } from "@components/csvDelimiterChoice";
 
@@ -30,6 +34,7 @@ import { inviterServerJobConfig } from "@exchange/useInviterExchange";
 
 import { testSftpServerEntry } from "../../utils/jobFixtures";
 
+import type { AcquiredCsv } from "@psi/inviterEditor";
 import type { DisclosedExchangeDocument } from "@jobs/configLoad";
 import type { InviterScreenState } from "@exchange/inviterScreenModel";
 import type { MountedConfigurationAnswer } from "@psi/jobClient/mountedConfigClient";
@@ -149,10 +154,11 @@ describe("every step the document covers is filled in", () => {
     expect(resolved.ok && resolved.delimiter).toBe("|");
   });
 
-  test("the terms and own-column choice wait for the file step", () => {
+  test("the terms, own-column choice and transport wait for the file step", () => {
     expect(state.pendingLoadedTerms).toEqual({
       linkageTerms: sftpDocument().linkageTerms,
       ownColumns: "all",
+      transport: "sftp",
     });
   });
 
@@ -257,7 +263,6 @@ describe("the held terms are released once they are applied", () => {
       editor,
     });
     expect(applied.pendingLoadedTerms).toBeUndefined();
-    expect(applied.editor).toBe(editor);
     expect(applied.editorAnnouncement).toMatch(/matching terms/);
   });
 });
@@ -328,7 +333,7 @@ describe("a run started from a loaded configuration composes what a hand-authore
   });
 });
 
-// The three records whose absence turns an enforcement off. The console has no
+// The four records whose absence turns an enforcement off. The console has no
 // control for any of them, so an opened document's values ride the authoring
 // state into the intent the run submits, and the configuration composed for that
 // run states each one as the file did.
@@ -337,6 +342,10 @@ describe("the records the console cannot edit reach the run unchanged", () => {
     expectedPayloadColumns: ["partner_program"],
     expectedPartnerDeduplicate: false,
     disclosedPayloadColumns: ["program_code"],
+    outboundPayloadConsent: {
+      status: "confirmed" as const,
+      columns: ["program_code"],
+    },
   };
 
   /** The intent a document stating all three submits when it is opened and
@@ -356,11 +365,11 @@ describe("the records the console cannot edit reach the run unchanged", () => {
     );
   }
 
-  test("the intent states all three with the file's values", () => {
+  test("the intent states all four with the file's values", () => {
     expect(intentFromUntouchedLoad()).toMatchObject(records);
   });
 
-  test("the composed configuration states all three", () => {
+  test("the composed configuration states all four", () => {
     const intent = intentFromUntouchedLoad();
     if (intent.channel !== "sftp") throw new Error("expected an sftp intent");
     const spec = composeSftpConfigSpec(intent, testSftpServerEntry());
@@ -369,6 +378,9 @@ describe("the records the console cannot edit reach the run unchanged", () => {
     expect(spec.disclosedPayloadColumns).toEqual(
       records.disclosedPayloadColumns,
     );
+    // The consent record the file confirmed, composed verbatim: the run is held
+    // to the set this party already confirmed rather than consenting afresh.
+    expect(spec.outboundPayloadConsent).toEqual(records.outboundPayloadConsent);
   });
 
   test("the notice beside the load names each one", () => {
@@ -379,7 +391,177 @@ describe("the records the console cannot edit reach the run unchanged", () => {
       "expected_payload_columns",
       "expected_partner_deduplicate",
       "disclosed_payload_columns",
+      "outbound_payload_consent",
     ])
       expect(notices[0]).toContain(field);
+  });
+});
+
+// The file step reads a file, and the held terms go into the editor against the
+// operator's own columns -- the screen's own sequence, as a value: the transport
+// the file's channel names selects the review step's tab, and the document's own
+// column roles and cleaning replace what the CSV headers alone would infer.
+describe("a loaded configuration reaches the editor once a file is read", () => {
+  const columns = [
+    "client_id",
+    "first_name",
+    "last_name",
+    "dob",
+    "program_code",
+  ];
+
+  function acquired(): AcquiredCsv {
+    return {
+      fileName: "clients.csv",
+      sizeBytes: 4096,
+      rawRows: [
+        {
+          client_id: "17",
+          first_name: "Alice",
+          last_name: "Smith",
+          dob: "1990-01-02",
+          program_code: "A7",
+        },
+      ],
+      columns,
+      rowCount: 1,
+    };
+  }
+
+  /** The screen's own application of the held terms: the import rebuilds the
+   * draft against the read file, and the reducer books what it could not
+   * apply. */
+  function withFileRead(state: InviterScreenState): InviterScreenState {
+    const held = state.pendingLoadedTerms;
+    if (held === undefined) throw new Error("expected held terms");
+    const csv = acquired();
+    const applied = editorWithLoadedTerms(
+      editorWithIncludeOwnColumns(
+        editorFromCsv("County Health", csv),
+        held.ownColumns,
+      ),
+      csv,
+      held,
+    );
+    return inviterScreenReducer(state, {
+      type: "loaded-terms-applied",
+      editor: applied.editor,
+      notApplied: applied.notApplied,
+    });
+  }
+
+  function columnRole(state: InviterScreenState, name: string) {
+    return state.editor?.draft.metadata.find((column) => column.name === name);
+  }
+
+  test("an sftp document selects the SFTP transport, not the console default", () => {
+    // Nothing is authored on this console and no rendezvous is mounted, so the
+    // chooser's own default is the unconfigured SFTP card -- and the loaded
+    // channel, not that default, is what the transport reads.
+    const applied = withFileRead(
+      loadedInto(INVITER_SCREEN_INITIAL, sftpDocument()),
+    );
+    expect(applied.editor?.transport).toBe("sftp");
+  });
+
+  test("a shared-folder document selects filedrop where the mount is there", () => {
+    const mounted = inviterScreenReducer(INVITER_SCREEN_INITIAL, {
+      type: "console-rendezvous-resolved",
+      config: { configured: true },
+    });
+    const applied = withFileRead(
+      loadedInto(mounted, {
+        channel: "filedrop",
+        linkageTerms: getDefaultLinkageTerms("County Health"),
+      }),
+    );
+    expect(applied.editor?.transport).toBe("filedrop");
+  });
+
+  test("a channel this console cannot run selects nothing and says so", () => {
+    const loaded = loadedInto(INVITER_SCREEN_INITIAL, {
+      channel: "filedrop",
+      linkageTerms: getDefaultLinkageTerms("County Health"),
+    });
+    expect(loaded.pendingLoadedTerms?.transport).toBeUndefined();
+    const notices = mountedConfigurationNotices(loaded.mountedConfiguration);
+    expect(notices.some((notice) => notice.includes("shared directory"))).toBe(
+      true,
+    );
+    expect(withFileRead(loaded).editor?.transport).toBeUndefined();
+  });
+
+  test("the document's column roles replace what the headers infer", () => {
+    // program_code infers as a disclosed payload column; the file states it as
+    // one this party keeps to itself, and the editor opens on what the file
+    // states.
+    const applied = withFileRead(
+      loadedInto(
+        INVITER_SCREEN_INITIAL,
+        sftpDocument({
+          metadata: [
+            {
+              name: "program_code",
+              type: "other",
+              role: "ignored",
+              isPayload: false,
+            },
+          ],
+        }),
+      ),
+    );
+    expect(columnRole(applied, "program_code")).toMatchObject({
+      role: "ignored",
+      isPayload: false,
+    });
+    expect(columnRole(applied, "first_name")?.role).toBe("linkage");
+    expect(mountedConfigurationNotices(applied.mountedConfiguration)).toEqual(
+      [],
+    );
+  });
+
+  test("the document's cleaning steps replace the recommended pipeline", () => {
+    const steps = [{ function: "trim_whitespace" }];
+    const applied = withFileRead(
+      loadedInto(
+        INVITER_SCREEN_INITIAL,
+        sftpDocument({
+          standardization: [
+            { output: "first_name", input: "first_name", steps },
+          ],
+        }),
+      ),
+    );
+    const cleaned = applied.editor?.draft.standardization.find(
+      (transformation) => transformation.output === "first_name",
+    );
+    expect(cleaned?.input).toBe("first_name");
+    expect(cleaned?.steps).toEqual(steps);
+  });
+
+  test("what this file cannot supply is named beside the load, not dropped", () => {
+    const applied = withFileRead(
+      loadedInto(
+        INVITER_SCREEN_INITIAL,
+        sftpDocument({
+          metadata: [
+            {
+              name: "household_id",
+              type: "other",
+              role: "ignored",
+              isPayload: false,
+            },
+          ],
+          standardization: [
+            { output: "first_name", input: "household_id", steps: [] },
+          ],
+        }),
+      ),
+    );
+    const notice = mountedConfigurationNotices(
+      applied.mountedConfiguration,
+    ).find((text) => text.includes("cannot supply"));
+    expect(notice).toContain("metadata, standardization");
+    expect(columnRole(applied, "household_id")).toBeUndefined();
   });
 });

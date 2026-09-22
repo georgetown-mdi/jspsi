@@ -14,13 +14,16 @@ import type { MountedConfigurationAnswer } from "@psi/jobClient/mountedConfigCli
  * can be a credential, which is why the server names rather than sends the two
  * lists ({@link ../jobs/configLoad}), and nothing here reverses that.
  *
- * The three records whose absence turns an enforcement off have no control on
+ * The four records whose absence turns an enforcement off have no control on
  * the invitation-authoring path this offer sits in. A document stating one is
  * opened with its value held: the record rides the authoring state into the
  * intent the run submits, so the configuration composed for that run states it
  * exactly as the file did (docs/spec/EXCHANGE_FILE.md, "The records that must
  * survive"). Having no control, each one is named in the carry-through notice.
  */
+
+/** The channel a configuration the console can open runs over. */
+export type LoadedChannel = LoadedAuthoringState["channel"];
 
 /** What the load control shows. */
 export type MountedConfigurationState =
@@ -32,8 +35,18 @@ export type MountedConfigurationState =
   | { status: "absent" }
   /** The read did not answer, and the offer stands so the operator can retry. */
   | { status: "unavailable" }
-  /** The configuration is open, and these are the notices beside it. */
-  | { status: "opened"; carriedThrough: Array<string>; warnings: Array<string> }
+  /** The configuration is open, and these are the notices beside it.
+   * `transportUnavailable` is the channel the file runs over where this console
+   * cannot run it, so the transport stays where the review step had it;
+   * `notApplied` names the settings the operator's own input file could not
+   * supply, settled once the held terms reach that file. */
+  | {
+      status: "opened";
+      carriedThrough: Array<string>;
+      warnings: Array<string>;
+      transportUnavailable?: LoadedChannel;
+      notApplied?: Array<string>;
+    }
   /** The console refused the file, in the words the read answered with. */
   | { status: "refused"; error: string };
 
@@ -80,7 +93,22 @@ const RECORDS_WITH_NO_CONTROL: ReadonlyArray<
   ["expectedPayloadColumns", "expected_payload_columns"],
   ["expectedPartnerDeduplicate", "expected_partner_deduplicate"],
   ["disclosedPayloadColumns", "disclosed_payload_columns"],
+  ["outboundPayloadConsent", "outbound_payload_consent"],
 ];
+
+/** What the operator is told about a configuration whose channel this console
+ * cannot run: the review step keeps the transport it already had, and the
+ * shared-folder case names the mount that would make the file's own channel
+ * runnable here. */
+const TRANSPORT_UNAVAILABLE_NOTICE: Record<LoadedChannel, string> = {
+  sftp:
+    "This configuration runs over SFTP, which this console cannot run. " +
+    "Choose how this exchange runs on the review step below.",
+  filedrop:
+    "This configuration runs over a shared directory, and this console has " +
+    "no shared folder mounted. Mount one and set JOB_RENDEZVOUS_DIR to run " +
+    "it here, or choose how this exchange runs on the review step below.",
+};
 
 /** A list of setting names as a sentence fragment, in the file's own spelling. */
 function nameList(fields: ReadonlyArray<string>): string {
@@ -145,17 +173,72 @@ export function credentialWarningNotice(
   );
 }
 
+/**
+ * What the operator is told about the settings a loaded document states that
+ * their own input file cannot supply, or undefined where there are none. The
+ * settings are named as the file spells them and the columns they describe are
+ * not, the rule every notice here holds to. The steps below the control hold
+ * what the file's own columns support; the command line runs the configuration
+ * as it stands.
+ */
+export function termsNotAppliedNotice(
+  fields: ReadonlyArray<string>,
+): string | undefined {
+  if (fields.length === 0) return undefined;
+  const one = fields.length === 1;
+  return (
+    "Your input file cannot supply everything this configuration states " +
+    "under " +
+    nameList(fields) +
+    ", so the steps below hold what your own columns support. Run this " +
+    "exchange with psilink on the command line to keep " +
+    (one ? "that setting" : "those settings") +
+    " as your file states " +
+    (one ? "it" : "them") +
+    "."
+  );
+}
+
 /** The whole of what an opened configuration puts beside the control, in the
- * order it renders: the carry-through notice first, since it is about the run
- * itself, then the credential the operator has to supply. */
+ * order it renders: what this console cannot run at all, then the carry-through
+ * notice, since it is about the run itself, then the credential the operator
+ * has to supply, and last what their input file could not supply. */
 export function mountedConfigurationNotices(
   state: MountedConfigurationState,
 ): Array<string> {
   if (state.status !== "opened") return [];
   return [
+    state.transportUnavailable === undefined
+      ? undefined
+      : TRANSPORT_UNAVAILABLE_NOTICE[state.transportUnavailable],
     carriedThroughNotice(state.carriedThrough),
     credentialWarningNotice(state.warnings),
+    termsNotAppliedNotice(state.notApplied ?? []),
   ].filter((notice): notice is string => notice !== undefined);
+}
+
+/** The opened state with the channel this console cannot run named on it, so
+ * the notice stands beside the control that opened the configuration. Any other
+ * state is returned unchanged: a load that does not proceed selects no
+ * transport and so withholds none. */
+export function withUnavailableTransport(
+  state: MountedConfigurationState,
+  channel: LoadedChannel,
+): MountedConfigurationState {
+  if (state.status !== "opened") return state;
+  return { ...state, transportUnavailable: channel };
+}
+
+/** The opened state with the settings the operator's input file could not
+ * supply named on it, as the file spells them, beside the same control. Nothing
+ * to name, or a state that is not an opened configuration, leaves the state as
+ * it is. */
+export function withTermsNotApplied(
+  state: MountedConfigurationState,
+  names: ReadonlyArray<string>,
+): MountedConfigurationState {
+  if (state.status !== "opened" || names.length === 0) return state;
+  return { ...state, notApplied: [...names] };
 }
 
 /**

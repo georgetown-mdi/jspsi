@@ -137,6 +137,19 @@ export function transportRunMode(
   );
 }
 
+/** Whether a transport's card can be chosen in an {@link AvailableTransports}
+ * matrix: offered by this build and not rendered disabled. False for a
+ * transport the matrix does not model, so a caller asking about one this build
+ * never offers gets the same answer as for a disabled card. */
+export function transportOffered(
+  available: AvailableTransports,
+  transport: Transport,
+): boolean {
+  return available.options.some(
+    (option) => option.transport === transport && !option.disabled,
+  );
+}
+
 const TRANSPORT_RUN_NOUN: Record<Transport, string> = {
   browser: "live",
   sftp: "SFTP",
