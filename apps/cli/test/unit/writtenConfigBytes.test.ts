@@ -68,6 +68,10 @@ const specs: Record<string, ExchangeSpec> = {
       server: { host: "broker.example.org", port: 443, path: "/api" },
       role: "acceptor",
     },
+    authentication: {
+      sharedSecret: "PLACEHOLDER_NOT_A_REAL_SECRET",
+      expires: "2030-01-01T00:00:00Z",
+    },
     linkageTerms: { ...terms, identity: "Agency C" },
   },
 };
