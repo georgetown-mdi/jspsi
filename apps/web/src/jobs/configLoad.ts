@@ -90,6 +90,13 @@ const UNREADABLE_CONFIGURATION_MESSAGE =
   "read it. Check that it is a regular file with read permission, then " +
   "open it again.";
 
+/** The message reaching the operator when a `psilink.yaml` sits in the mount
+ * but exceeds {@link MAX_CONFIGURATION_FILE_BYTES}. */
+const OVER_LARGE_CONFIGURATION_MESSAGE =
+  "The psilink.yaml in your working folder is too large to be an " +
+  "exchange configuration. Check that it is the file psilink runs " +
+  "under, then open it again.";
+
 /** The channels the console conducts. A `connection` on any other is refused by
  * channel: the console drives the containerized CLI over a mounted folder or an
  * SFTP host, and nothing here dials a peer. */
@@ -630,6 +637,14 @@ export function readMountedConfiguration(
  * something in the folder to fix rather than being pointed at authoring a
  * configuration that already exists.
  *
+ * Every check and the read itself go through the one descriptor `openSync`
+ * returns, so nothing between them can swap what `psilink.yaml` names. An
+ * open failure is absent only when the entry does not exist (`ENOENT`);
+ * any other open failure -- including a permission denied that a `stat`
+ * would have missed -- is the unreadable refusal. The read is bounded to
+ * one byte past the cap, so an over-large file is caught by what arrives
+ * rather than by a size `fstat` reported earlier.
+ *
  * @throws {ConfigurationLoadRefusedError} when the file is not a configuration
  *   the console can open.
  */
@@ -644,25 +659,42 @@ export function loadMountedConfiguration(
   };
   const filePath = resolveWorkdirFile(dataRoot, JOB_FILE_NAMES.config);
   if (filePath === null) return absent;
-  let stat: fs.Stats;
+  let fd: number;
   try {
-    stat = fs.statSync(filePath);
-  } catch {
-    return absent;
-  }
-  if (!stat.isFile())
+    fd = fs.openSync(filePath, "r");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return absent;
     throw new ConfigurationLoadRefusedError(UNREADABLE_CONFIGURATION_MESSAGE);
-  if (stat.size > MAX_CONFIGURATION_FILE_BYTES)
-    throw new ConfigurationLoadRefusedError(
-      "The psilink.yaml in your working folder is too large to be an " +
-        "exchange configuration. Check that it is the file psilink runs " +
-        "under, then open it again.",
+  }
+  try {
+    const stat = fs.fstatSync(fd);
+    if (!stat.isFile())
+      throw new ConfigurationLoadRefusedError(UNREADABLE_CONFIGURATION_MESSAGE);
+    if (stat.size > MAX_CONFIGURATION_FILE_BYTES)
+      throw new ConfigurationLoadRefusedError(OVER_LARGE_CONFIGURATION_MESSAGE);
+    const buffer = Buffer.alloc(MAX_CONFIGURATION_FILE_BYTES + 1);
+    let bytesRead = 0;
+    try {
+      while (bytesRead < buffer.length) {
+        const read = fs.readSync(
+          fd,
+          buffer,
+          bytesRead,
+          buffer.length - bytesRead,
+          null,
+        );
+        if (read === 0) break;
+        bytesRead += read;
+      }
+    } catch {
+      throw new ConfigurationLoadRefusedError(UNREADABLE_CONFIGURATION_MESSAGE);
+    }
+    if (bytesRead > MAX_CONFIGURATION_FILE_BYTES)
+      throw new ConfigurationLoadRefusedError(OVER_LARGE_CONFIGURATION_MESSAGE);
+    return readMountedConfiguration(
+      buffer.subarray(0, bytesRead).toString("utf8"),
     );
-  let source: string;
-  try {
-    source = fs.readFileSync(filePath, "utf8");
-  } catch {
-    throw new ConfigurationLoadRefusedError(UNREADABLE_CONFIGURATION_MESSAGE);
+  } finally {
+    fs.closeSync(fd);
   }
-  return readMountedConfiguration(source);
 }

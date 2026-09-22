@@ -244,6 +244,14 @@ describe("a mounted file the load cannot open", () => {
     expect(refusalFrom(dir)).toBe(refusalFrom(unreadableMountDir()));
   });
 
+  test("a directory named psilink.yaml refuses as unreadable", () => {
+    const dir = mountDir();
+    fs.mkdirSync(path.join(dir, "psilink.yaml"));
+    const message = refusalFrom(dir);
+    expect(message).toContain("could not");
+    expect(message).not.toContain("too large");
+  });
+
   test("an over-large file refuses by size, distinctly from unreadable", () => {
     const dir = mountDir();
     fs.writeFileSync(path.join(dir, "psilink.yaml"), "x".repeat(1_000_001));
@@ -251,6 +259,18 @@ describe("a mounted file the load cannot open", () => {
     expect(message).toContain("too large");
     expect(message).not.toMatch(/\/tmp/);
     expect(message).not.toBe(refusalFrom(unreadableMountDir()));
+  });
+
+  test("a file of exactly the cap plus one byte refuses as over-large", () => {
+    const dir = mountDir();
+    fs.writeFileSync(path.join(dir, "psilink.yaml"), "x".repeat(1_000_001));
+    expect(refusalFrom(dir)).toContain("too large");
+  });
+
+  test("a file of exactly the cap is read rather than refused by size", () => {
+    const dir = mountDir();
+    fs.writeFileSync(path.join(dir, "psilink.yaml"), "x".repeat(1_000_000));
+    expect(refusalFrom(dir)).not.toContain("too large");
   });
 });
 
