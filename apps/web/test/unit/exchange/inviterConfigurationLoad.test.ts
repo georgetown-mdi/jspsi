@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { getDefaultLinkageTerms } from "@psilink/core";
+import { getDefaultLinkageTerms, inferMetadata } from "@psilink/core";
 
 import {
   CONFIG_EXCHANGE_FILES,
@@ -21,12 +21,15 @@ import {
   mountedConfigurationOfferable,
 } from "@console/mountedConfiguration";
 import {
+  INITIAL_CSV_DELIMITER_CHOICE,
+  resolveCsvDelimiter,
+} from "@components/csvDelimiterChoice";
+import {
   csvDelimiterFromDocument,
   editorWithLoadedTerms,
 } from "@console/loadedConfig";
 import { editorFromCsv, editorWithIncludeOwnColumns } from "@psi/inviterEditor";
 import { EMPTY_SFTP_FORM } from "@console/sftpConnectionForm";
-import { resolveCsvDelimiter } from "@components/csvDelimiterChoice";
 
 import {
   INVITER_SCREEN_INITIAL,
@@ -47,6 +50,7 @@ import type {
 import type { AcquiredCsv } from "@psi/inviterEditor";
 import type { DisclosedExchangeDocument } from "@jobs/configLoad";
 import type { InviterScreenState } from "@exchange/inviterScreenModel";
+import type { Metadata } from "@psilink/core";
 import type { MountedConfigurationAnswer } from "@psi/jobClient/mountedConfigClient";
 import type { ProfiledJobInput } from "@psi/jobClient/workInputClient";
 
@@ -180,6 +184,7 @@ function withLoadedTermsDerived(state: InviterScreenState): InviterScreenState {
     file: csv,
     editor: applied.editor,
     notApplied: applied.notApplied,
+    notCovered: applied.notCovered,
   });
 }
 
@@ -190,6 +195,22 @@ function withFileRead(
   csv: AcquiredCsv = acquired(),
 ): InviterScreenState {
   return withLoadedTermsDerived(withFileCommitted(state, csv));
+}
+
+/** A document's own `metadata`: every column this file has, with `program_code`
+ * stated as one this party keeps to itself where inference would send it. */
+function statedColumns(): Metadata {
+  return inferMetadata(COLUMNS, []).map((column) =>
+    column.name === "program_code"
+      ? { ...column, role: "ignored" as const, isPayload: false }
+      : column,
+  );
+}
+
+/** The same document stating four of the file's five columns: `program_code`,
+ * the one column inference sends to the partner, goes unnamed. */
+function fourOfFiveColumns(): Metadata {
+  return inferMetadata(COLUMNS.slice(0, 4), []);
 }
 
 function columnRole(state: InviterScreenState, name: string) {
@@ -707,16 +728,7 @@ describe("a loaded configuration reaches the editor once a file is read", () => 
     const applied = withFileRead(
       loadedInto(
         INVITER_SCREEN_INITIAL,
-        sftpDocument({
-          metadata: [
-            {
-              name: "program_code",
-              type: "other",
-              role: "ignored",
-              isPayload: false,
-            },
-          ],
-        }),
+        sftpDocument({ metadata: statedColumns() }),
       ),
     );
     expect(columnRole(applied, "program_code")).toMatchObject({
@@ -807,5 +819,150 @@ describe("a loaded configuration reaches the editor once a file is read", () => 
     ).find((text) => text.includes("cannot supply"));
     expect(notice).toContain("metadata, standardization");
     expect(columnRole(applied, "household_id")).toBeUndefined();
+  });
+});
+
+// A document stating `metadata` states the column set whole, the way the command
+// line reads it, so a column of this file the document does not name is held
+// back rather than disclosed on inference's default.
+describe("a column the configuration does not name is kept back", () => {
+  const applied = withFileRead(
+    loadedInto(
+      INVITER_SCREEN_INITIAL,
+      sftpDocument({ metadata: fourOfFiveColumns() }),
+    ),
+  );
+
+  test("the unnamed column lands ignored rather than sent", () => {
+    expect(columnRole(applied, "program_code")).toMatchObject({
+      role: "ignored",
+      isPayload: false,
+    });
+  });
+
+  test("the columns the document does name are applied as it states them", () => {
+    expect(columnRole(applied, "first_name")?.role).toBe("linkage");
+  });
+
+  test("the notice names the setting and says the file holds more", () => {
+    const notice = mountedConfigurationNotices(
+      applied.mountedConfiguration,
+    ).find((text) => text.includes("does not state under"));
+    expect(notice).toContain("metadata");
+    expect(notice).not.toContain("program_code");
+  });
+
+  test("a document naming every column fires no notice", () => {
+    const whole = withFileRead(
+      loadedInto(
+        INVITER_SCREEN_INITIAL,
+        sftpDocument({ metadata: statedColumns() }),
+      ),
+    );
+    expect(mountedConfigurationNotices(whole.mountedConfiguration)).toEqual([]);
+  });
+
+  test("with no configuration open the same file still infers", () => {
+    const own = withFileCommitted(INVITER_SCREEN_INITIAL, acquired());
+    expect(columnRole(own, "program_code")).toMatchObject({
+      role: "payload",
+      isPayload: true,
+    });
+  });
+});
+
+// Closing the configuration drops what it filled in, which is every card it
+// seeded: each was derived from the document, so each returns to the default an
+// operator who never opened one would author from (docs/CONSOLE.md, "Close it to
+// author from scratch").
+describe("closing the configuration returns every seeded card to its default", () => {
+  const closed = inviterScreenReducer(
+    loadedInto(INVITER_SCREEN_INITIAL, sftpDocument()),
+    { type: "loaded-configuration-discarded" },
+  );
+
+  test("the option cards hold what a fresh console holds", () => {
+    expect(closed.connectionTuning).toEqual(CONNECTION_TUNING_DEFAULT);
+    expect(closed.exchangeFiles).toEqual(EXCHANGE_FILES_DEFAULT);
+  });
+
+  test("receipts hold no signing mode, no partner pin and no note", () => {
+    expect(closed.receipts).toEqual(RECEIPTS_DEFAULT);
+  });
+
+  test("the delimiter returns to the one an unopened console reads by", () => {
+    expect(closed.delimiterChoice).toEqual(INITIAL_CSV_DELIMITER_CHOICE);
+  });
+});
+
+// The delimiter the document states is one more thing the load fills in, so the
+// seal that refuses the read refuses it too: a read resolving after the
+// invitation was minted cannot leave this party reading its file by a character
+// the sealed terms were never authored over.
+describe("the delimiter moves with the read the seal guards", () => {
+  test("an open configuration's delimiter reaches the file step", () => {
+    const opened = loadedInto(INVITER_SCREEN_INITIAL, sftpDocument());
+    const resolved = resolveCsvDelimiter(opened.delimiterChoice);
+    expect(resolved.ok && resolved.delimiter).toBe("|");
+  });
+
+  test("a read that lands after the mint leaves it where the mint left it", () => {
+    const sealed: InviterScreenState = {
+      ...INVITER_SCREEN_INITIAL,
+      editor: { sealed: true } as never,
+    };
+    const late = loadedInto(sealed, sftpDocument());
+    expect(late.delimiterChoice).toBe(INVITER_SCREEN_INITIAL.delimiterChoice);
+  });
+});
+
+// A commitment about what this party discloses, held from the file it was opened
+// from, is enforced against the run's own disclosed set when the run starts. The
+// console already knows the columns diverged -- it said so -- so the refusal is
+// decided before the operator starts anything.
+describe("a disclosure commitment over columns this file cannot supply", () => {
+  const records = {
+    disclosedPayloadColumns: ["household_id"],
+    outboundPayloadConsent: {
+      status: "confirmed" as const,
+      columns: ["household_id"],
+    },
+  };
+  const missingColumn: Metadata = [
+    ...statedColumns(),
+    { name: "household_id", type: "other", role: "payload", isPayload: true },
+  ];
+
+  test("the warning names both records and what to do about them", () => {
+    const applied = withFileRead(
+      loadedInto(
+        INVITER_SCREEN_INITIAL,
+        sftpDocument({ ...records, metadata: missingColumn }),
+      ),
+    );
+    const warning = mountedConfigurationNotices(
+      applied.mountedConfiguration,
+    ).find((text) => text.includes("a run started here is refused"));
+    expect(warning).toContain("disclosed_payload_columns");
+    expect(warning).toContain("outbound_payload_consent");
+    expect(warning).toContain("close this configuration");
+    expect(warning).not.toContain("household_id");
+  });
+
+  test("the same records over columns this file supplies warn about nothing", () => {
+    const applied = withFileRead(
+      loadedInto(
+        INVITER_SCREEN_INITIAL,
+        sftpDocument({
+          disclosedPayloadColumns: ["program_code"],
+          metadata: statedColumns(),
+        }),
+      ),
+    );
+    expect(
+      mountedConfigurationNotices(applied.mountedConfiguration).some((text) =>
+        text.includes("a run started here is refused"),
+      ),
+    ).toBe(false);
   });
 });

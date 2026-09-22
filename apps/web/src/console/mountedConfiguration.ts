@@ -39,13 +39,15 @@ export type MountedConfigurationState =
    * `transportUnavailable` is the channel the file runs over where this console
    * cannot run it, so the transport stays where the review step had it;
    * `notApplied` names the settings the operator's own input file could not
-   * supply, settled once the held terms reach that file. */
+   * supply and `notCovered` the settings whose own column set does not reach
+   * every column that file has, both settled once the held terms reach it. */
   | {
       status: "opened";
       carriedThrough: Array<string>;
       warnings: Array<string>;
       transportUnavailable?: LoadedChannel;
       notApplied?: Array<string>;
+      notCovered?: Array<string>;
     }
   /** The console refused the file, in the words the read answered with. */
   | { status: "refused"; error: string };
@@ -210,6 +212,70 @@ export function termsNotAppliedNotice(
 }
 
 /**
+ * What the operator is told about the columns their input file has that a
+ * loaded document's own column set does not state: the console holds each one
+ * back, as the command line running that configuration would, and the columns
+ * step is where the operator decides otherwise. The setting is named as the
+ * file spells it and the columns are not, the rule every notice here holds to.
+ */
+export function columnsNotCoveredNotice(
+  fields: ReadonlyArray<string>,
+): string | undefined {
+  if (fields.length === 0) return undefined;
+  return (
+    "Your input file has columns this configuration does not state under " +
+    nameList(fields) +
+    ", so the steps below keep those columns back instead of sending them " +
+    "to your partner. Change how each one is used on the next step to send it."
+  );
+}
+
+/**
+ * What the operator is told when a commitment the file states about what this
+ * party discloses can no longer match what the run would disclose: the columns
+ * the document states are not the columns this input file gives, so the run is
+ * refused when it starts. Shown while that divergence stands, so it is met here
+ * rather than as a failed run.
+ */
+export function divergedCommitmentWarning(
+  fields: ReadonlyArray<string>,
+): string | undefined {
+  if (fields.length === 0) return undefined;
+  const one = fields.length === 1;
+  return (
+    "This configuration's " +
+    nameList(fields) +
+    (one ? " states" : " state") +
+    " what this party discloses, and your input file cannot supply the " +
+    "columns it names, so a run started here is refused. Change the columns " +
+    "on the next step to match, or close this configuration."
+  );
+}
+
+/** The commitments a loaded document can state about the columns this party
+ * discloses. Each is enforced against the run's own disclosed set when the run
+ * starts, so a document stating one over columns this file cannot supply is a
+ * refusal already decided. */
+const DISCLOSURE_COMMITMENTS: ReadonlyArray<string> = [
+  "disclosed_payload_columns",
+  "outbound_payload_consent",
+];
+
+/** The disclosure commitments an opened configuration states that its own
+ * column set no longer reaches, named as the file spells them. Empty where the
+ * file supplied every column the document names, which is where the run's
+ * disclosed set can still match what the commitment holds. */
+export function divergedCommitments(
+  state: MountedConfigurationState,
+): Array<string> {
+  if (state.status !== "opened") return [];
+  if (!(state.notApplied ?? []).includes("metadata")) return [];
+  return DISCLOSURE_COMMITMENTS.filter((field) =>
+    state.carriedThrough.includes(field),
+  );
+}
+
+/**
  * Whether the control offers a read. A configuration is an input to every step
  * below it, so the offer stands only while nothing is open (or a read did not
  * answer) and the draft those steps hold is still editable: once an invitation
@@ -239,6 +305,8 @@ export function mountedConfigurationNotices(
     carriedThroughNotice(state.carriedThrough),
     credentialWarningNotice(state.warnings),
     termsNotAppliedNotice(state.notApplied ?? []),
+    columnsNotCoveredNotice(state.notCovered ?? []),
+    divergedCommitmentWarning(divergedCommitments(state)),
   ].filter((notice): notice is string => notice !== undefined);
 }
 
@@ -255,18 +323,20 @@ export function withUnavailableTransport(
 }
 
 /** The opened state with the settings the operator's input file could not
- * supply named on it, as the file spells them, beside the same control. The
- * names are those of the file the terms reached last, so a state that names
- * none clears what an earlier one named; a state that is not an opened
- * configuration is left as it is. */
+ * supply, and those whose columns do not reach every column it has, named on it
+ * as the file spells them beside the same control. Both are read off the file
+ * the terms reached last, so a state that names none clears what an earlier one
+ * named; a state that is not an opened configuration is left as it is. */
 export function withTermsNotApplied(
   state: MountedConfigurationState,
   names: ReadonlyArray<string>,
+  notCovered: ReadonlyArray<string> = [],
 ): MountedConfigurationState {
   if (state.status !== "opened") return state;
   return {
     ...state,
     notApplied: names.length === 0 ? undefined : [...names],
+    notCovered: notCovered.length === 0 ? undefined : [...notCovered],
   };
 }
 

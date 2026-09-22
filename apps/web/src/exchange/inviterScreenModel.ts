@@ -22,6 +22,7 @@ import { availableTransports, transportOffered } from "@psi/transportChooser";
 
 import { CONNECTION_TUNING_DEFAULT } from "@console/connectionTuningModel";
 import { EXCHANGE_FILES_DEFAULT } from "@console/exchangeFilesModel";
+import { INITIAL_CSV_DELIMITER_CHOICE } from "@components/csvDelimiterChoice";
 
 import { EMPTY_SAVE_FIELDS } from "./saveExchangeModel";
 import { MANAGE_OFFER_IDLE } from "./manageOfferModel";
@@ -43,6 +44,7 @@ import type { RunDiagnosticsDraft } from "@psi/runDiagnosticsModel";
 import type { SftpConnectionInfo } from "@psi/jobClient/serverJobExchangeDriver";
 
 import type { ConnectionTuningDraft } from "@console/connectionTuningModel";
+import type { CsvDelimiterChoice } from "@components/csvDelimiterChoice";
 import type { ExchangeFilesDraft } from "@console/exchangeFilesModel";
 
 import type { LinkageTerms, Metadata, Standardization } from "@psilink/core";
@@ -184,6 +186,12 @@ export interface InviterScreenState {
   /** The operator's receipt-signing and retention choices for the same run, held
    * beside the three drafts above for the same reasons. */
   receipts: ReceiptsDraft;
+  /** How this party's own file is read and its own result file written. Held
+   * here rather than beside the file step's controls because a loaded
+   * configuration states it: a read that the seal refuses must leave it where
+   * the sealed terms had it, which only the guard this reducer applies can
+   * decide. */
+  delimiterChoice: CsvDelimiterChoice;
   /** Whether the live spine holds the synthetic sample rather than a real file. */
   demoActive: boolean;
   /** The offer's progress and, for a failed deposit, what it was about when a
@@ -265,6 +273,7 @@ export const INVITER_SCREEN_INITIAL: InviterScreenState = {
   connectionTuning: CONNECTION_TUNING_DEFAULT,
   runDiagnostics: RUN_DIAGNOSTICS_DEFAULT,
   receipts: RECEIPTS_DEFAULT,
+  delimiterChoice: INITIAL_CSV_DELIMITER_CHOICE,
   demoActive: false,
   manageOffer: MANAGE_OFFER_IDLE,
   mountedConfiguration: MOUNTED_CONFIGURATION_UNREAD,
@@ -385,6 +394,9 @@ export type InviterScreenAction =
   | { type: "connection-tuning-chosen"; draft: ConnectionTuningDraft }
   | { type: "run-diagnostics-chosen"; draft: RunDiagnosticsDraft }
   | { type: "receipts-chosen"; draft: ReceiptsDraft }
+  /** The field delimiter this party's file is read by was chosen. The screen
+   * re-reads the file by it; nothing else here depends on the read. */
+  | { type: "delimiter-chosen"; choice: CsvDelimiterChoice }
   /** The keys tab's expert authoring switch moved. */
   | { type: "expert-mode-chosen"; expertMode: boolean }
   /** The managed-exchange deposit began, landed, or failed. */
@@ -407,11 +419,13 @@ export type InviterScreenAction =
       file: AcquiredCsv;
       editor: InviterEditor;
       notApplied?: ReadonlyArray<string>;
+      notCovered?: ReadonlyArray<string>;
     }
   /** The operator closed the open configuration: it stops being an input, so
-   * the terms, the records, the connection form it seeded and the notices go,
-   * and the draft falls back to what the file's own headers infer. `editor` is
-   * that inference, absent where the file step holds no file to infer from. */
+   * every card and draft it seeded returns to its own authoring default along
+   * with the terms, the records, the connection form and the notices, and the
+   * draft falls back to what the file's own headers infer. `editor` is that
+   * inference, absent where the file step holds no file to infer from. */
   | { type: "loaded-configuration-discarded"; editor?: InviterEditor };
 
 /** The state a discarded or cleared read leaves: no file, no profile, no draft,
@@ -617,6 +631,8 @@ export function inviterScreenReducer(
       return { ...state, runDiagnostics: action.draft };
     case "receipts-chosen":
       return { ...state, receipts: action.draft };
+    case "delimiter-chosen":
+      return { ...state, delimiterChoice: action.choice };
     case "expert-mode-chosen":
       return { ...state, expertMode: action.expertMode };
     case "manage-offer-started":
@@ -669,6 +685,7 @@ export function inviterScreenReducer(
           partnerFingerprint: loaded.receipts.partnerFingerprint,
           retentionDisposition: loaded.receipts.retentionDisposition,
         },
+        delimiterChoice: loaded.csvDelimiter,
         loadedSftpForm: loaded.sftpForm,
         loadedConfiguration: {
           linkageTerms: loaded.linkageTerms,
@@ -701,6 +718,7 @@ export function inviterScreenReducer(
         mountedConfiguration: withTermsNotApplied(
           state.mountedConfiguration,
           action.notApplied ?? [],
+          action.notCovered ?? [],
         ),
         loadedTermsFile: action.file,
         editorAnnouncement:
@@ -715,6 +733,15 @@ export function inviterScreenReducer(
         loadedTermsFile: undefined,
         loadedSftpForm: undefined,
         loadedEnforcementRecords: {},
+        connectionTuning: CONNECTION_TUNING_DEFAULT,
+        exchangeFiles: EXCHANGE_FILES_DEFAULT,
+        receipts: {
+          ...state.receipts,
+          mode: RECEIPTS_DEFAULT.mode,
+          partnerFingerprint: RECEIPTS_DEFAULT.partnerFingerprint,
+          retentionDisposition: RECEIPTS_DEFAULT.retentionDisposition,
+        },
+        delimiterChoice: INITIAL_CSV_DELIMITER_CHOICE,
         ...(action.editor !== undefined ? { editor: action.editor } : {}),
         editorAnnouncement:
           "Closed the configuration. These terms come from your own file's columns.",

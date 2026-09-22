@@ -304,6 +304,13 @@ export interface LoadedEditorTerms {
  * document names that this file does not have leaves the whole setting
  * unapplied, since nothing in the editor can hold it.
  *
+ * A document stating `metadata` states the column set whole, as the command
+ * line reads it (`resolveExchangeInputs` takes the config's metadata in place of
+ * inference, never beside it), so a file column the document does not name is
+ * held back at `ignored` rather than keeping inference's disclosed default.
+ * `covered` reports whether the document's set reached every column the file
+ * has, for the notice beside the load control.
+ *
  * What the merge lands on is read back against what the document states, so a
  * column the single-identifier rule demoted -- a document naming two identifier
  * columns keeps the last one and the rule sends the other to `ignored` -- counts
@@ -313,9 +320,11 @@ export interface LoadedEditorTerms {
 function metadataWithLoadedColumns(
   inferred: Metadata,
   loaded: Metadata | undefined,
-): { metadata: Metadata; whole: boolean } {
+): { metadata: Metadata; whole: boolean; covered: boolean } {
+  if (loaded === undefined)
+    return { metadata: inferred, whole: true, covered: true };
   let metadata = inferred;
-  for (const column of loaded ?? []) {
+  for (const column of loaded) {
     if (!metadata.some((own) => own.name === column.name)) continue;
     metadata = setColumnType(metadata, column.name, column.type).metadata;
     metadata = setColumnDisclosure(
@@ -324,11 +333,18 @@ function metadataWithLoadedColumns(
       disclosureOf(column),
     ).metadata;
   }
-  const whole = (loaded ?? []).every((column) => {
+  const stated = new Set(loaded.map((column) => column.name));
+  const unstated = inferred
+    .filter((own) => !stated.has(own.name))
+    .map((own) => own.name);
+  for (const name of unstated) {
+    metadata = setColumnDisclosure(metadata, name, "ignored").metadata;
+  }
+  const whole = loaded.every((column) => {
     const own = metadata.find((merged) => merged.name === column.name);
     return own !== undefined && disclosureOf(own) === disclosureOf(column);
   });
-  return { metadata, whole };
+  return { metadata, whole, covered: unstated.length === 0 };
 }
 
 /**
@@ -346,14 +362,20 @@ function metadataWithLoadedColumns(
  * A setting the operator's file cannot supply whole is named rather than
  * dropped, as the file spells it, for the notice beside the load control: a
  * document column the file does not have, or a cleaned field whose binding
- * could not be placed, leaves that setting named there.
+ * could not be placed, leaves that setting named there. `notCovered` names the
+ * other direction, the file holding columns the document's own set does not
+ * state, each of which is held back rather than disclosed.
  */
 export function editorWithLoadedTerms(
   editor: InviterEditor,
   csv: AcquiredCsv,
   loaded: LoadedEditorTerms,
-): { editor: InviterEditor; notApplied: Array<string> } {
-  if (editor.sealed === true) return { editor, notApplied: [] };
+): {
+  editor: InviterEditor;
+  notApplied: Array<string>;
+  notCovered: Array<string>;
+} {
+  if (editor.sealed === true) return { editor, notApplied: [], notCovered: [] };
   const columns = metadataWithLoadedColumns(
     editor.seed.metadata,
     loaded.metadata,
@@ -389,5 +411,6 @@ export function editorWithLoadedTerms(
       ...(columns.whole ? [] : ["metadata"]),
       ...(cleaningWhole ? [] : ["standardization"]),
     ],
+    notCovered: columns.covered ? [] : ["metadata"],
   };
 }

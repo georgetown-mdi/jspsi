@@ -2,7 +2,7 @@
 
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { page } from "vitest/browser";
+import { page, userEvent } from "vitest/browser";
 
 import { createElement } from "react";
 
@@ -11,10 +11,12 @@ import "@mantine/core/styles.css";
 import { getDefaultLinkageTerms } from "@psilink/core";
 
 import {
+  CLOSE_CONFIGURATION_LABEL,
   NO_CONFIGURATION_IN_FOLDER,
   OPEN_CONFIGURATION_LABEL,
 } from "@console/mountedConfiguration";
 import { InviterScreen } from "@exchange/InviterScreen";
+import { isolatedColumnName } from "@components/ColumnName";
 
 import { createAppMount } from "./renderApp";
 
@@ -48,9 +50,61 @@ const CONFIG_DOCUMENT = {
   linkageTerms: getDefaultLinkageTerms("County Health"),
 };
 
+const CLIENTS_FILE = {
+  name: "clients.csv",
+  sizeBytes: 4096,
+  modifiedAt: 1_700_000_000_000,
+};
+
+const CLIENTS_PROFILE = {
+  ...CLIENTS_FILE,
+  rowCount: 2,
+  columns: ["client_id", "first_name", "last_name", "dob", "program_code"],
+  sanitizedColumnPositions: [],
+  dateInputFormat: "%m/%d/%Y",
+  columnSamples: [
+    { column: "client_id", values: ["1", "2"] },
+    { column: "first_name", values: ["Ann", "Bo"] },
+    { column: "last_name", values: ["Lee", "Ray"] },
+    { column: "dob", values: ["01/02/1990", "03/04/1985"] },
+    { column: "program_code", values: ["A", "B"] },
+  ],
+};
+
+/** The document's own column set over that file: every column it has, with
+ * `program_code` -- the one column inference sends to the partner -- stated as
+ * one this party keeps to itself. */
+const STATED_COLUMNS = [
+  {
+    name: "client_id",
+    type: "identifier",
+    role: "identifier",
+    isPayload: false,
+  },
+  { name: "first_name", type: "first_name", role: "linkage", isPayload: false },
+  { name: "last_name", type: "last_name", role: "linkage", isPayload: false },
+  { name: "dob", type: "date_of_birth", role: "linkage", isPayload: false },
+  { name: "program_code", type: "other", role: "ignored", isPayload: false },
+];
+
+/** The body `GET /api/jobs/config` answers for an opened configuration. */
+function openedBody(document: unknown): unknown {
+  return {
+    configured: true,
+    present: true,
+    document,
+    carriedThrough: [],
+    warnings: [],
+  };
+}
+
 /** Answer the console's job API, with `GET /api/jobs/config` under this test's
- * control and every other route answering as an unprovisioned console does. */
-function stubConfigRoute(answer: { status: number; body: unknown }): void {
+ * control. The work directory is empty and nothing else is provisioned unless
+ * the test says otherwise. */
+function stubConfigRoute(
+  answer: { status: number; body: unknown },
+  mount: { files?: Array<unknown>; sftp?: unknown } = {},
+): void {
   const realFetch = window.fetch.bind(window);
   vi.stubGlobal(
     "fetch",
@@ -66,16 +120,49 @@ function stubConfigRoute(answer: { status: number; body: unknown }): void {
         );
       if (url === "/api/jobs/config") return json(answer.body, answer.status);
       if (url === "/api/jobs/inputs")
-        return json({ configured: true, files: [] });
+        return json({ configured: true, files: mount.files ?? [] });
+      if (url.startsWith("/api/jobs/inputs/profile"))
+        return json(CLIENTS_PROFILE);
+      if (url === "/api/jobs/inputs/coverage") return json({ rates: [] });
+      if (url === "/api/jobs/sftp")
+        return json(mount.sftp ?? { configured: false });
+      if (url === "/api/jobs") return json({ id: "job-7" }, 201);
+      if (url === "/api/jobs/job-7/events")
+        return Promise.resolve(
+          new Response(new ReadableStream<Uint8Array>(), {
+            status: 200,
+            headers: { "Content-Type": "text/event-stream" },
+          }),
+        );
+      if (url === "/api/jobs/job-7")
+        return json({ status: "running", recordAvailable: false });
       return json({ configured: false });
     },
   );
+}
+
+/** Open the mounted configuration from the file step. */
+async function openConfiguration(): Promise<void> {
+  await page.getByRole("button", { name: OPEN_CONFIGURATION_LABEL }).click();
+  await expect
+    .element(page.getByText("Configuration opened").first())
+    .toBeInTheDocument();
+}
+
+/** Commit the mounted file the console lists, the two-stage pick. */
+async function commitFile(): Promise<void> {
+  await page.getByRole("button", { name: /clients\.csv/ }).click();
+  await page.getByRole("button", { name: "Use this file" }).click();
+  await expect.element(page.getByText("Selected")).toBeInTheDocument();
 }
 
 const app = createAppMount();
 
 afterEach(() => {
   app.unmount();
+  // A server-job run persists a strand-recovery record; clear it so the next
+  // test's idle screen does not re-attach to a prior run's id.
+  window.localStorage.clear();
   vi.unstubAllGlobals();
 });
 
@@ -154,5 +241,91 @@ describe("the load offer on the file step", () => {
       .toBeInTheDocument();
     await expect.element(page.getByText(error).first()).toBeInTheDocument();
     expect(document.body.textContent).not.toContain("Configuration opened");
+  });
+});
+
+// The open configuration is an input to the file step for as long as it is open,
+// and the draft is derived from it at every commit -- the screen's own effect,
+// driven here rather than transcribed by a unit test.
+describe("the open configuration over the files it is derived across", () => {
+  test("the column it keeps back is kept back again after a void", async () => {
+    stubConfigRoute(
+      {
+        status: 200,
+        body: openedBody({ ...CONFIG_DOCUMENT, metadata: STATED_COLUMNS }),
+      },
+      { files: [CLIENTS_FILE] },
+    );
+    app.render(createElement(InviterScreen));
+    await userEvent.fill(page.getByLabelText("Your name"), "Dana Okafor");
+    await openConfiguration();
+    await commitFile();
+
+    // A delimiter change re-reads the file, so the commit made under the old
+    // one is voided and the re-profiled file is committed again.
+    await userEvent.selectOptions(
+      page.getByLabelText("How your file separates fields"),
+      "Semicolon",
+    );
+    await page.getByRole("button", { name: "Use this file" }).click();
+    await expect.element(page.getByText("Selected")).toBeInTheDocument();
+
+    await page
+      .getByRole("button", { name: "Continue to matching & sharing" })
+      .click();
+    await expect
+      .element(
+        page.getByLabelText(
+          `How ${isolatedColumnName("program_code")} is used`,
+        ),
+      )
+      .toHaveValue("ignored");
+  });
+
+  test("an invitation created while it is open withholds both controls", async () => {
+    stubConfigRoute(
+      {
+        status: 200,
+        body: openedBody({ ...CONFIG_DOCUMENT, metadata: STATED_COLUMNS }),
+      },
+      {
+        files: [CLIENTS_FILE],
+        sftp: {
+          configured: true,
+          host: "sftp.partner.example",
+          port: 22,
+          path: "/exchange",
+        },
+      },
+    );
+    app.render(createElement(InviterScreen));
+    await userEvent.fill(page.getByLabelText("Your name"), "Dana Okafor");
+    await openConfiguration();
+    await commitFile();
+    await page
+      .getByRole("button", { name: "Continue to matching & sharing" })
+      .click();
+    await page
+      .getByRole("button", { name: "Continue to review & create" })
+      .click();
+    await page.getByRole("button", { name: "Create the invitation" }).click();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toMatchTextContent("Your invitation is ready");
+
+    // Back to the step the load sits on: the terms it filled are sealed, so
+    // neither opening another configuration nor closing this one is offered.
+    window.history.back();
+    window.history.back();
+    window.history.back();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toMatchTextContent("Your file");
+    expect(
+      page.getByRole("button", { name: OPEN_CONFIGURATION_LABEL }).query(),
+    ).toBeNull();
+    expect(
+      page.getByRole("button", { name: CLOSE_CONFIGURATION_LABEL }).query(),
+    ).toBeNull();
   });
 });

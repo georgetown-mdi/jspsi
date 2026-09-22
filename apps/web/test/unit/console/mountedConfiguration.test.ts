@@ -8,7 +8,10 @@ import {
   MOUNTED_CONFIGURATION_UNREAD,
   NO_CONFIGURATION_IN_FOLDER,
   carriedThroughNotice,
+  columnsNotCoveredNotice,
   credentialWarningNotice,
+  divergedCommitmentWarning,
+  divergedCommitments,
   mountedConfigurationNotices,
   mountedConfigurationOfferable,
   mountedConfigurationRead,
@@ -286,7 +289,8 @@ describe("no value of the document reaches a notice", () => {
         ["connection.server.password"],
       ),
     );
-    for (const notice of mountedConfigurationNotices(read.state)) {
+    const named = withTermsNotApplied(read.state, ["metadata"], ["metadata"]);
+    for (const notice of mountedConfigurationNotices(named)) {
       expect(notice).not.toContain(secret);
       expect(notice).not.toContain(FINGERPRINT);
     }
@@ -314,5 +318,80 @@ describe("the offer stands only while the steps it fills are editable", () => {
         false,
       ),
     ).toBe(false);
+  });
+});
+
+// A document stating `metadata` states the whole column set, so a column this
+// party's file has and that set does not name is held back. The notice says the
+// file holds more than the configuration states -- the opposite direction from
+// the one beside it -- and names the setting only.
+describe("columns the configuration does not state", () => {
+  test("the notice names the setting and what happens to the columns", () => {
+    const notice = columnsNotCoveredNotice(["metadata"]);
+    expect(notice).toContain("metadata");
+    expect(notice).toMatch(/keep those columns back/);
+    expect(columnsNotCoveredNotice([])).toBeUndefined();
+  });
+
+  test("it stands beside what the file could not supply, after it", () => {
+    const read = mountedConfigurationRead(opened());
+    const notices = mountedConfigurationNotices(
+      withTermsNotApplied(read.state, ["standardization"], ["metadata"]),
+    );
+    expect(notices).toHaveLength(2);
+    expect(notices[0]).toContain("standardization");
+    expect(notices[1]).toContain("does not state under metadata");
+  });
+});
+
+// A commitment the file states about what this party discloses is enforced when
+// the run starts, against the columns the run actually discloses. Where the
+// console has already reported that those columns diverged, that refusal is
+// decided, so the operator meets it here instead of at exit.
+describe("a disclosure commitment the columns can no longer match", () => {
+  const read = mountedConfigurationRead(
+    opened({
+      disclosedPayloadColumns: ["program_code"],
+      outboundPayloadConsent: {
+        status: "confirmed",
+        columns: ["program_code"],
+      },
+    }),
+  );
+
+  test("the warning names the records and both ways out", () => {
+    const warning = divergedCommitmentWarning([
+      "disclosed_payload_columns",
+      "outbound_payload_consent",
+    ]);
+    expect(warning).toContain("disclosed_payload_columns");
+    expect(warning).toContain("outbound_payload_consent");
+    expect(warning).toMatch(/next step/);
+    expect(warning).toMatch(/close this configuration/);
+    expect(divergedCommitmentWarning([])).toBeUndefined();
+  });
+
+  test("it is raised only where the columns diverged", () => {
+    expect(divergedCommitments(read.state)).toEqual([]);
+    expect(
+      divergedCommitments(withTermsNotApplied(read.state, ["standardization"])),
+    ).toEqual([]);
+    expect(
+      divergedCommitments(withTermsNotApplied(read.state, ["metadata"])),
+    ).toEqual(["disclosed_payload_columns", "outbound_payload_consent"]);
+  });
+
+  test("a document stating no commitment raises nothing", () => {
+    const plain = mountedConfigurationRead(opened());
+    expect(
+      divergedCommitments(withTermsNotApplied(plain.state, ["metadata"])),
+    ).toEqual([]);
+  });
+
+  test("it is the last thing said beside the control", () => {
+    const notices = mountedConfigurationNotices(
+      withTermsNotApplied(read.state, ["metadata"]),
+    );
+    expect(notices.at(-1)).toContain("a run started here is refused");
   });
 });

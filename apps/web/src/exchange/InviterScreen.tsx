@@ -1,11 +1,4 @@
-import {
-  Fragment,
-  useEffect,
-  useMemo,
-  useReducer,
-  useRef,
-  useState,
-} from "react";
+import { Fragment, useEffect, useMemo, useReducer, useRef } from "react";
 
 import { Alert, VisuallyHidden } from "@mantine/core";
 import { IconAlertCircle } from "@tabler/icons-react";
@@ -124,7 +117,6 @@ import { consoleAcquiredCsv } from "@console/consoleAcquiredCsv";
 import { MountedConfigurationCard } from "@console/MountedConfigurationCard";
 import { editorWithLoadedTerms } from "@console/loadedConfig";
 import { fetchMountedConfiguration } from "@psi/jobClient/mountedConfigClient";
-import { mountedConfigurationRead } from "@console/mountedConfiguration";
 
 import {
   INVITER_SCREEN_INITIAL,
@@ -327,6 +319,7 @@ export function InviterScreen() {
     connectionTuning,
     consoleSource,
     createAlert,
+    delimiterChoice,
     demoActive,
     editor,
     editorAnnouncement,
@@ -359,12 +352,6 @@ export function InviterScreen() {
     sourceHandle,
   } = screenState;
 
-  // How this party's own file is read and its own result file written. Local
-  // component state rather than reducer state: nothing derived from the read
-  // depends on it, and every consumer takes the resolved character.
-  const [delimiterChoice, setDelimiterChoice] = useState<CsvDelimiterChoice>(
-    INITIAL_CSV_DELIMITER_CHOICE,
-  );
   const delimiterResolution = resolveCsvDelimiter(delimiterChoice);
   const csvDelimiter = delimiterResolution.ok
     ? delimiterResolution.delimiter
@@ -376,7 +363,7 @@ export function InviterScreen() {
   // refused choice reads nothing -- the field states the refusal and the intake
   // is closed until it resolves.
   function changeDelimiter(choice: CsvDelimiterChoice) {
-    setDelimiterChoice(choice);
+    dispatch({ type: "delimiter-chosen", choice });
     const resolution = resolveCsvDelimiter(choice);
     if (!resolution.ok || sourceFile === undefined) return;
     void readFile(sourceFile, resolution.delimiter);
@@ -399,16 +386,16 @@ export function InviterScreen() {
     };
   }, [sftpInfo]);
 
-  // Open the configuration the operator mounted. The delimiter is component
-  // state rather than reducer state, so the same pure mapping the reducer
-  // applies to the cards is read here for that one field; a refused or absent
-  // answer maps to none and changes nothing.
+  // Open the configuration the operator mounted. The read answers here and the
+  // reducer decides what it may change, the delimiter included: an invitation
+  // minted while this fetch is in flight leaves every field the document states
+  // where the sealed terms had it.
   async function openMountedConfiguration(): Promise<void> {
     dispatch({ type: "mounted-configuration-reading" });
-    const answer = await fetchMountedConfiguration();
-    const loaded = mountedConfigurationRead(answer).loaded;
-    if (loaded !== undefined) setDelimiterChoice(loaded.csvDelimiter);
-    dispatch({ type: "mounted-configuration-read", answer });
+    dispatch({
+      type: "mounted-configuration-read",
+      answer: await fetchMountedConfiguration(),
+    });
   }
 
   // Close the open configuration: it stops being an input here, so the draft
@@ -449,6 +436,7 @@ export function InviterScreen() {
       file: acquired,
       editor: applied.editor,
       notApplied: applied.notApplied,
+      notCovered: applied.notCovered,
     });
   }, [acquired, editor, loadedConfiguration, loadedTermsFile]);
 
@@ -948,7 +936,10 @@ export function InviterScreen() {
   // a sample inviter name so step 1 lands complete. The mint path stays
   // demo-free -- from here the visitor drives every real step by hand.
   function loadSample() {
-    setDelimiterChoice(INITIAL_CSV_DELIMITER_CHOICE);
+    dispatch({
+      type: "delimiter-chosen",
+      choice: INITIAL_CSV_DELIMITER_CHOICE,
+    });
     void readFile(sampleInviterFile(), undefined, {
       name: SAMPLE_INVITER_NAME,
     });
