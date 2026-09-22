@@ -2,7 +2,7 @@ import { z } from "zod";
 import { maxCodeUnits } from "../utils/maxCodeUnits.js";
 import { camelizeKeys } from "../utils/camelizeKeys.js";
 import { safeParseCamelized } from "./safeParseCamelized.js";
-import { unreadKeyIssues } from "./unreadKeys.js";
+import { collidingKeyIssues, unreadKeyIssues } from "./unreadKeys.js";
 import {
   columnsNamedOnce,
   LinkageTermsSchema,
@@ -214,29 +214,39 @@ export type ExchangeSpec = z.infer<typeof ExchangeSpecSchema>;
  * than stripped, wherever in the document it sits: a consumer writes the parse
  * result back out, so a dropped key is a setting the operator wrote and the next
  * file does not hold ({@link unreadKeyIssues}; docs/spec/EXCHANGE_FILE.md, "What
- * a consumer does with a setting it cannot honor").
+ * a consumer does with a setting it cannot honor"). A setting the case
+ * conversion above would drop instead of the schema -- one key written in both
+ * spellings -- is refused on the same rule ({@link collidingKeyIssues}), which
+ * reads the document as written.
  *
- * @throws {ZodError} if validation fails, or if the document holds a key the
- *   schema does not read.
+ * @throws {ZodError} if validation fails, if the document holds a key the
+ *   schema does not read, or if it writes one key in two spellings.
  */
 export function parseExchangeSpec(raw: unknown): ExchangeSpec {
   const camelized = camelizeKeys(raw);
   const parsed = ExchangeSpecSchema.parse(camelized);
-  const unread = unreadKeyIssues(camelized, parsed);
-  if (unread.length > 0) throw new z.ZodError(unread);
+  const dropped = [
+    ...collidingKeyIssues(raw),
+    ...unreadKeyIssues(camelized, parsed),
+  ];
+  if (dropped.length > 0) throw new z.ZodError(dropped);
   return parsed;
 }
 
 /**
- * Non-throwing version of {@link parseExchangeSpec}, holding the same unread-key
- * rule. Honors the "safe" contract for the {@link camelizeKeys} bounds too --
- * see {@link safeParseCamelized}.
+ * Non-throwing version of {@link parseExchangeSpec}, holding the same rules for
+ * a setting neither the case conversion nor the schema keeps. Honors the "safe"
+ * contract for the {@link camelizeKeys} bounds too -- see
+ * {@link safeParseCamelized}.
  */
 export function safeParseExchangeSpec(raw: unknown) {
   return safeParseCamelized(
     ExchangeSpecSchema,
     raw,
     undefined,
-    unreadKeyIssues,
+    (camelized, parsed) => [
+      ...collidingKeyIssues(raw),
+      ...unreadKeyIssues(camelized, parsed),
+    ],
   );
 }

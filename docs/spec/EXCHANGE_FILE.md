@@ -219,7 +219,10 @@ Dropping a setting is not among them. A consumer MUST NOT load a document with a
 setting silently discarded, and MUST NOT write a document short of a setting the
 one it read stated. That rule is what the unread-key refusal above enforces for a
 key no schema block reads, and it is why `saveConfig` and the web application's
-export write a document holding every field their input held.
+export write a document holding every field their input held. A document writing
+one setting under two spellings of its key -- the snake_case the file writes and
+the camelCase the parse works in -- is refused on the same rule, since the case
+conversion ahead of the schema keeps one of the two.
 
 ### The records that must survive
 

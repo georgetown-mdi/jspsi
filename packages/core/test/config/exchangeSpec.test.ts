@@ -593,7 +593,7 @@ test("includeOwnColumns: a count-only exchange refuses the key at parse", () => 
 test("a key no block reads is refused, naming it as the file spells it", () => {
   const result = safeParseExchangeSpec({
     ...minimalSpec,
-    linkage_terms: { ...minimalLinkageTerms, mystery_setting: "held" },
+    linkageTerms: { ...minimalLinkageTerms, mystery_setting: "held" },
   });
   expect(result.success).toBe(false);
   const issue = result.error?.issues[0];
@@ -674,22 +674,110 @@ test("every key of a document that parses survives into the parse result", () =>
   for (const key of Object.keys(camelized)) expect(parsed).toHaveProperty(key);
 });
 
-test("a repeated payload column is collapsed without reporting its keys unread", () => {
+const sendingColumns = (send: ReadonlyArray<Record<string, unknown>>) => ({
+  ...minimalSpec,
+  linkageTerms: { ...minimalLinkageTerms, payload: { send } },
+});
+
+test("a repeated payload column that states nothing beyond the entry kept is collapsed", () => {
   // The one normalization that shortens an array: two entries naming one column
-  // collapse to the first. The survivor holds the same keys, so the walk reports
-  // nothing, and the collapse stays a normalization rather than becoming a
-  // refusal.
-  const parsed = parseExchangeSpec({
+  // collapse to the first. The repeat states nothing the survivor does not, so
+  // the document a save writes back holds every setting this one states and the
+  // collapse stays a normalization rather than becoming a refusal.
+  const parsed = parseExchangeSpec(
+    sendingColumns([
+      { name: "program", description: "the program enrolled in" },
+      { name: "program" },
+    ]),
+  );
+  expect(parsed.linkageTerms.payload?.send).toHaveLength(1);
+  expect(parsed.linkageTerms.payload?.send?.[0]?.description).toBe(
+    "the program enrolled in",
+  );
+  expect(
+    parseExchangeSpec(
+      sendingColumns([
+        { name: "program", description: "the program enrolled in" },
+        { name: "program", description: "the program enrolled in" },
+      ]),
+    ).linkageTerms.payload?.send,
+  ).toHaveLength(1);
+});
+
+test("a repeated payload column that states more is refused as a duplicate", () => {
+  // The collapse keeps the FIRST entry, so what a later one states beyond it is
+  // dropped -- a setting the operator wrote and a save would not write back. The
+  // refusal names the entry that is already there, rather than reporting the
+  // dropped entry's own keys as keys no block reads: `description` is a payload
+  // column key, and telling the operator to remove it names the wrong line.
+  for (const send of [
+    [{ name: "program" }, { name: "program", description: "held" }],
+    [
+      { name: "program", description: "first" },
+      { name: "program", description: "held" },
+    ],
+  ]) {
+    const result = safeParseExchangeSpec(sendingColumns(send));
+    expect(result.success).toBe(false);
+    const issue = result.error?.issues[0];
+    expect(issue?.path).toEqual(["linkageTerms", "payload", "send", 1]);
+    expect(issue?.message).toContain('names the column "program"');
+    expect(issue?.message).toContain("entry 0");
+    expect(issue?.message).not.toContain("Unrecognized");
+    expect(issue?.message).not.toContain("held");
+  }
+});
+
+test("both spellings of one key are refused, naming each as the file writes it", () => {
+  // The camelize pre-pass reads both as one name and keeps one of the two, which
+  // the document-against-result comparison cannot see is missing. On a
+  // fail-closed record the surviving value would narrow an enforcement the
+  // operator wrote (docs/spec/EXCHANGE_FILE.md, "The records that must
+  // survive").
+  const result = safeParseExchangeSpec({
     ...minimalSpec,
-    linkage_terms: {
+    expected_payload_columns: ["partner_program"],
+    expectedPayloadColumns: ["other"],
+  });
+  expect(result.success).toBe(false);
+  const issue = result.error?.issues[0];
+  expect(issue?.path).toEqual([]);
+  expect(issue?.message).toContain('"expected_payload_columns"');
+  expect(issue?.message).toContain('"expectedPayloadColumns"');
+  expect(issue?.message).not.toContain("partner_program");
+});
+
+test("both spellings of one key are refused inside a block too", () => {
+  const result = safeParseExchangeSpec({
+    ...minimalSpec,
+    linkageTerms: {
       ...minimalLinkageTerms,
-      payload: {
-        send: [
-          { name: "program", description: "the program enrolled in" },
-          { name: "program" },
-        ],
+      output: {
+        expects_output: true,
+        expectsOutput: false,
+        shareWithPartner: false,
       },
     },
   });
-  expect(parsed.linkageTerms.payload?.send).toHaveLength(1);
+  expect(result.success).toBe(false);
+  const issue = result.error?.issues[0];
+  expect(issue?.path).toEqual(["linkageTerms", "output"]);
+  expect(issue?.message).toContain('"expects_output"');
+  expect(issue?.message).toContain('"expectsOutput"');
+});
+
+test("provider_options on a channel whose schema has no such field is refused", () => {
+  // The opaque subtree is never entered, but the key naming it is read like any
+  // other: a filedrop connection declares no provider_options, so a document
+  // writing one states a setting the file a save writes back would not hold.
+  const result = safeParseExchangeSpec({
+    ...minimalSpec,
+    connection: {
+      channel: "filedrop",
+      path: "/mnt/share",
+      provider_options: { readyTimeout: 1000 },
+    },
+  });
+  expect(result.success).toBe(false);
+  expect(result.error?.issues[0]?.message).toContain("provider_options");
 });

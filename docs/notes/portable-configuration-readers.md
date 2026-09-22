@@ -36,12 +36,41 @@ new branch.
 What it cannot see is bounded and stated in the module. An opaque subtree is not
 entered: its keys are the author's own, kept verbatim by both the camelize pre-pass
 and the schema, and `provider_options` is the one key naming such a subtree
-(`OPAQUE_VALUE_KEYS` in `packages/core/src/utils/camelizeKeys.ts`). Where a
-normalizing schema shortens an array -- the payload dictionary collapsing two
-entries naming one column -- a key is measured against every surviving entry rather
-than a positional counterpart. A transform's `params` record is walked like any
-other node and yields no false report, since the schema reads the whole record
-through and the parse result holds every key the document wrote.
+(`OPAQUE_VALUE_KEYS` in `packages/core/src/utils/camelizeKeys.ts`). The key naming
+it is read like any other, so a channel whose schema declares no `provider_options`
+refuses one. A transform's `params` record is walked like any other node and yields
+no false report, since the schema reads the whole record through and the parse
+result holds every key the document wrote.
+
+### An array the collapse shortened
+
+One normalization shortens an array: the payload dictionary keeps the first entry
+naming a column and drops a later entry naming that column again
+(`columnsNamedOnce`). The document's entries are lined up with the result's by that
+name, so a dropped entry is measured against the entry kept in its place rather
+than against the result as a whole.
+
+- A dropped entry that states something the kept entry does not -- a
+  `description`, or one of the same keys with a different value -- is refused as
+  the duplicate it is, naming the column and both entries. Reporting the keys it
+  states as keys no block reads would name a documented payload-column key and
+  point the operator at the wrong line.
+- A dropped entry that states nothing the kept entry does not is loaded. The rule
+  is that a consumer "MUST NOT write a document short of a setting the one it read
+  stated", and every setting such an entry states the saved document states too;
+  the line is written twice, and the collapse stays the normalization the schema
+  intends rather than becoming a refusal for a repeated line.
+
+### Two spellings of one key
+
+The comparison runs between the camelized document and the parse result, so a key
+the camelize pre-pass itself drops is missing from neither side. A document writing
+one setting as both `expected_payload_columns` and `expectedPayloadColumns` states
+two keys that are read as one name, and the pre-pass keeps one of the two. A second
+walk therefore reads the document AS WRITTEN and refuses two sibling keys that
+camelize to one name, naming both as the file writes them (`collidingKeyIssues`).
+It reaches furthest on the three fail-closed records, where the spelling that
+survives decides what a receive-side enforcement holds the partner to.
 
 ## The three readers
 
@@ -49,13 +78,17 @@ through and the parse result holds every key the document wrote.
 `apps/cli/src/commands/exchange.ts`). It honors what it reads or refuses loudly:
 an algorithm, a deduplicate shape, or a signing mode this build does not implement
 is already its own refusal, and a runtime-injected `authentication` field is warned
-about by name rather than dropped. Two divergences, both now refusals: a
-`connection.authentication` block (the pre-refactor location, previously stripped)
-and CLI-only invocation flags written into `connection.options`
-(`sweep_exchange_files`, `force_retain_sweep`, previously stripped). A third was in
-the naming rather than the outcome: a schema refusal named its field by the
-camelCase path the parsed shape uses, so `expected_payload_columns` reached the
-operator as `expectedPayloadColumns`. `describeConfigSchemaError` names each
+about by name rather than dropped. Four divergences, each a refusal at load
+where the block's schema on its own strips the key: a `connection.authentication`
+block (the pre-refactor location); CLI-only invocation flags written into
+`connection.options` (`sweep_exchange_files`, `force_retain_sweep`); an option
+under `connection.options` the connection's own channel does not read
+(`poll_interval_ms` on a webrtc connection, which the filedrop and sftp schemas
+read and webrtc's does not); and `provider_options` on a channel whose schema
+declares none (filedrop). One more divergence is in the naming rather than the
+outcome: a schema refusal named its field by the camelCase path the parsed shape
+uses, so `expected_payload_columns` reached the operator as
+`expectedPayloadColumns`. `describeConfigSchemaError` names each
 segment as the file spells it, for both config-file call sites, through the one
 path rendering the per-block renderer beside it takes -- which stops a path at a
 `params` block, whose keys are the author's own.

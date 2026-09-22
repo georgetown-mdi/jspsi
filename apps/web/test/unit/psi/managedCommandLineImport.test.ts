@@ -331,6 +331,23 @@ describe("refusing what this app cannot hold", () => {
     expect(message).toContain("import it again");
   });
 
+  test("one setting written in both spellings is refused, naming both lines", () => {
+    // The case conversion ahead of the schema reads the two as one key and keeps
+    // one of them, so neither the parse nor the document-against-result
+    // comparison sees the other go. The refusal names both lines to fix.
+    const message = refusal(
+      stringifyYaml({
+        ...(snakeizeKeys(commandLineDocument()) as Record<string, unknown>),
+        expected_payload_columns: ["partner_program"],
+        expectedPayloadColumns: ["other_program"],
+      }),
+    );
+
+    expect(message).toContain("expected_payload_columns");
+    expect(message).toContain("expectedPayloadColumns");
+    expect(message).not.toContain("partner_program");
+  });
+
   test("a key outside the schema under the server block is refused, not trimmed", () => {
     const message = refusal(configTextHoldingKey("mysteryKey", "server"));
 
