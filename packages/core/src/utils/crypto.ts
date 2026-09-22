@@ -148,6 +148,25 @@ export async function hmacSha256(
 }
 
 /**
+ * Compute HMAC-SHA-1 of `data` under `key`. Used only for the TURN relay
+ * credential, whose format the relay server fixes (docs/spec/PROTOCOL.md,
+ * "Relay credential derivation"); use {@link hmacSha256} for anything else.
+ */
+export async function hmacSha1(
+  key: Uint8Array<ArrayBuffer>,
+  data: Uint8Array<ArrayBuffer>,
+): Promise<Uint8Array<ArrayBuffer>> {
+  const cryptoKey = await crypto.subtle.importKey(
+    "raw",
+    key,
+    { name: "HMAC", hash: "SHA-1" },
+    false,
+    ["sign"],
+  );
+  return new Uint8Array(await crypto.subtle.sign("HMAC", cryptoKey, data));
+}
+
+/**
  * Compute the SHA-256 digest of `data`. Uses `crypto.subtle`, so it is identical
  * on Node and in the browser; the same bytes hash to the same digest on both.
  */
