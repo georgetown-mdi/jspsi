@@ -1,9 +1,12 @@
+import { isJobChannel } from "@jobs/intentSchemas";
+
 import { authoringStateFromDocument } from "./loadedConfig";
 
 import type {
   LoadedAuthoringState,
   LoadedEnforcementRecords,
 } from "./loadedConfig";
+import type { JobChannel } from "@jobs/intentSchemas";
 import type { MountedConfigurationAnswer } from "@psi/jobClient/mountedConfigClient";
 
 /**
@@ -23,10 +26,17 @@ import type { MountedConfigurationAnswer } from "@psi/jobClient/mountedConfigCli
  * intent the run submits, so the configuration composed for that run states it
  * exactly as the file did (docs/spec/EXCHANGE_FILE.md, "The records that must
  * survive"). Having no control, each one is named in the carry-through notice.
+ *
+ * A configuration on a channel the console does not conduct opens all the same:
+ * the steps below start from it for review, and the run is withheld by the one
+ * derived field {@link runWithheldReason} reads, which names the channel.
  */
 
 /** The channel a configuration the console can open runs over. */
 export type LoadedChannel = LoadedAuthoringState["channel"];
+
+/** A channel the console opens a configuration on but does not conduct. */
+type UnconductedChannel = Exclude<LoadedChannel, JobChannel>;
 
 /** What the load control shows. */
 export type MountedConfigurationState =
@@ -45,12 +55,16 @@ export type MountedConfigurationState =
    * supply and `notCovered` the settings whose own column set does not reach
    * every column that file has, both settled once the held terms reach it;
    * `pendingOutboundConsent` is the consent record the file states as pending,
-   * which no run that shares results with the partner gets past. */
+   * which no run that shares results with the partner gets past.
+   * `notConducted` is the file's channel where the console conducts no
+   * exchange over it at all, derived once at the read: it withholds the run
+   * and replaces every notice about the run with the one naming the channel. */
   | {
       status: "opened";
       carriedThrough: Array<string>;
       warnings: Array<string>;
-      transportUnavailable?: LoadedChannel;
+      notConducted?: UnconductedChannel;
+      transportUnavailable?: JobChannel;
       notApplied?: Array<string>;
       notCovered?: Array<string>;
       pendingOutboundConsent?: boolean;
@@ -99,6 +113,50 @@ export const CONFIGURATION_OPENED =
   "Opened the configuration in your folder. Every step below starts from it, " +
   "and you can change anything before you run the exchange.";
 
+/** What the control says once a configuration the console cannot run is open. */
+export const CONFIGURATION_OPENED_FOR_REVIEW =
+  "Opened the configuration in your folder. Every step below starts from it " +
+  "for you to review.";
+
+/** The line under the open control for an opened state. */
+export function configurationOpenedMessage(
+  state: MountedConfigurationState,
+): string {
+  return state.status === "opened" && state.notConducted !== undefined
+    ? CONFIGURATION_OPENED_FOR_REVIEW
+    : CONFIGURATION_OPENED;
+}
+
+/** What the operator is told beside the load about a configuration on a channel
+ * the console does not conduct, naming the channel as the file spells it. */
+export function channelNotConductedNotice(channel: UnconductedChannel): string {
+  return (
+    `This configuration runs over ${channel}, and the console conducts sftp ` +
+    "and filedrop exchanges only. The steps below show its settings, but the " +
+    "console cannot run this exchange or save changes to it. Run it with " +
+    "psilink on the command line, or close this configuration to author an " +
+    "exchange the console runs."
+  );
+}
+
+/**
+ * Why the review step withholds its run control, or undefined where nothing
+ * open withholds it: a configuration on a channel the console does not
+ * conduct. Read off the state the load derived once, so no run starts and then
+ * fails on the channel.
+ */
+export function runWithheldReason(
+  state: MountedConfigurationState,
+): string | undefined {
+  if (state.status !== "opened" || state.notConducted === undefined)
+    return undefined;
+  return (
+    `The console cannot run this ${state.notConducted} configuration: it ` +
+    "conducts sftp and filedrop exchanges only. Run it with psilink on the " +
+    "command line, or close the configuration to author an exchange here."
+  );
+}
+
 /**
  * The records this flow holds without an editor, as the file spells them beside
  * the field the load reads them into. An invitation authored here states none of
@@ -118,7 +176,7 @@ const RECORDS_WITH_NO_CONTROL: ReadonlyArray<
  * has nothing to run it over: the review step keeps the transport it already
  * had, and each case names what would make the file's own channel runnable
  * here -- a mounted shared folder, or an authored SFTP connection. */
-const TRANSPORT_UNAVAILABLE_NOTICE: Record<LoadedChannel, string> = {
+const TRANSPORT_UNAVAILABLE_NOTICE: Record<JobChannel, string> = {
   sftp:
     "This configuration runs over SFTP, and this console has no SFTP " +
     "connection to run it with. Author one in the connection step below, or " +
@@ -364,7 +422,12 @@ export function divergedCommitments(
   state: MountedConfigurationState,
   run: RunDisclosure | undefined,
 ): Array<string> {
-  if (state.status !== "opened" || run === undefined) return [];
+  if (
+    state.status !== "opened" ||
+    state.notConducted !== undefined ||
+    run === undefined
+  )
+    return [];
   const disclosed = new Set(run.disclosedColumns);
   return DISCLOSURE_COMMITMENTS.filter((commitment) => {
     const columns = commitment.columnsOf(run);
@@ -393,12 +456,20 @@ export function mountedConfigurationOfferable(
  * has to supply, then what their input file could not supply, then a consent
  * record the file states as pending, and last a commitment the run's own
  * disclosed set no longer matches. `run` is what that last one is read from,
- * absent until a file is read. */
+ * absent until a file is read. A configuration the console does not conduct
+ * puts the notice naming its channel in place of every one about a run here,
+ * and keeps the two about what the steps below hold. */
 export function mountedConfigurationNotices(
   state: MountedConfigurationState,
   run?: RunDisclosure,
 ): Array<string> {
   if (state.status !== "opened") return [];
+  if (state.notConducted !== undefined)
+    return [
+      channelNotConductedNotice(state.notConducted),
+      termsNotAppliedNotice(state.notApplied ?? []),
+      columnsNotCoveredNotice(state.notCovered ?? []),
+    ].filter((notice): notice is string => notice !== undefined);
   return [
     state.transportUnavailable === undefined
       ? undefined
@@ -420,7 +491,7 @@ export function mountedConfigurationNotices(
  * transport and so withholds none. */
 export function withUnavailableTransport(
   state: MountedConfigurationState,
-  channel: LoadedChannel,
+  channel: JobChannel,
 ): MountedConfigurationState {
   if (state.status !== "opened") return state;
   return { ...state, transportUnavailable: channel };
@@ -472,6 +543,9 @@ export function mountedConfigurationRead(answer: MountedConfigurationAnswer): {
             ]),
           ].sort(),
           warnings: answer.warnings,
+          ...(isJobChannel(loaded.channel)
+            ? {}
+            : { notConducted: loaded.channel }),
           ...(loaded.records.outboundPayloadConsent?.status === "pending"
             ? { pendingOutboundConsent: true }
             : {}),

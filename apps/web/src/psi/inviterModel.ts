@@ -274,6 +274,10 @@ export function spineProblems(
  * itself: the blocker no edit here clears, then the transport's own setup, then
  * the cards below it, and the spine's outstanding problems last. */
 export interface InviterCreateGates {
+  /** Why an open configuration withholds the run, `undefined` where none does:
+   * one on a channel the console does not conduct. Already a complete sentence
+   * naming the channel and both remedies, used as-is. */
+  runWithheld: string | undefined;
   /** The device reports no network and the chosen transport begins a live run
    * (a save-a-file transport connects to nothing, so it is never held). */
   offlineBlocked: boolean;
@@ -329,13 +333,17 @@ function heldCreate(
  * announcement is read on its own.
  *
  * The chain follows the screen's reading order: an operator working down it
- * meets the first unresolved card first. Two gates are not cleared on this step:
- * the offline one, and the signing-identity divergence, whose two remedies are
- * the name on the file step and a re-key at the command line.
+ * meets the first unresolved card first. Three gates are not cleared on this
+ * step: the open configuration's channel, whose remedies are the command line
+ * and closing it on the file step; the offline one; and the signing-identity
+ * divergence, whose two remedies are the name on the file step and a re-key at
+ * the command line.
  */
 export function inviterCreateStatus(
   gates: InviterCreateGates,
 ): InviterCreateStatus {
+  if (gates.runWithheld !== undefined)
+    return heldCreate(gates.runWithheld, gates.runWithheld);
   if (gates.offlineBlocked)
     return heldCreate(OFFLINE_EXCHANGE_REASON, OFFLINE_EXCHANGE_REASON);
   if (gates.connectionIncomplete)

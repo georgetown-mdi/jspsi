@@ -4,18 +4,23 @@ import { getDefaultLinkageTerms } from "@psilink/core";
 
 import {
   CONFIGURATION_LOAD_SEALED,
+  CONFIGURATION_OPENED,
+  CONFIGURATION_OPENED_FOR_REVIEW,
   CONFIGURATION_READ_UNAVAILABLE,
   MOUNTED_CONFIGURATION_UNREAD,
   NO_CONFIGURATION_IN_FOLDER,
   PENDING_OUTBOUND_CONSENT_WARNING,
   carriedThroughNotice,
+  channelNotConductedNotice,
   columnsNotCoveredNotice,
+  configurationOpenedMessage,
   credentialWarningNotice,
   divergedCommitmentWarning,
   divergedCommitments,
   mountedConfigurationNotices,
   mountedConfigurationOfferable,
   mountedConfigurationRead,
+  runWithheldReason,
   termsNotAppliedNotice,
   withTermsNotApplied,
   withUnavailableTransport,
@@ -72,13 +77,12 @@ describe("each answer lands the control in one state", () => {
   });
 
   test("a refusal shows the console's own text and fills nothing", () => {
-    // The channel refusal the route raises for a webrtc document: it reaches the
-    // operator whole, and no step is filled from a document the console will not
-    // run.
+    // A refusal the route raises reaches the operator whole, and no step is
+    // filled from a document the console would not open.
     const error =
-      "This configuration runs over webrtc. The console conducts sftp and " +
-      "shared-folder exchanges only, so it cannot open this one. Run it with " +
-      "psilink on the command line instead.";
+      "The psilink.yaml in your working folder is not a valid psilink " +
+      "configuration. Fix this setting in the file, then open it again: " +
+      "connection.server.port.";
     const read = mountedConfigurationRead({ kind: "refused", error });
     expect(read.state).toEqual({ status: "refused", error });
     expect(read.loaded).toBeUndefined();
@@ -99,6 +103,102 @@ describe("each answer lands the control in one state", () => {
     });
     expect(read.loaded?.channel).toBe("sftp");
     expect(read.loaded?.sftpForm?.host).toBe("sftp.partner.example");
+  });
+});
+
+describe("a configuration on a channel the console does not conduct", () => {
+  function openedWebrtc(
+    overrides: Partial<DisclosedExchangeDocument> = {},
+    carriedThrough: Array<string> = ["authentication.token_max_age_days"],
+  ): MountedConfigurationAnswer {
+    return {
+      kind: "opened",
+      document: {
+        channel: "webrtc",
+        linkageTerms: getDefaultLinkageTerms("County Health"),
+        ...overrides,
+      },
+      carriedThrough,
+      warnings: [],
+    };
+  }
+
+  test("opens with its channel named on the state, and every step seeded", () => {
+    const read = mountedConfigurationRead(
+      openedWebrtc({ csvDelimiter: "|", retentionDisposition: "Filed." }),
+    );
+    expect(read.state).toEqual({
+      status: "opened",
+      carriedThrough: ["authentication.token_max_age_days"],
+      warnings: [],
+      notConducted: "webrtc",
+    });
+    expect(read.loaded?.channel).toBe("webrtc");
+    expect(read.loaded?.sftpForm).toBeUndefined();
+    expect(read.loaded?.csvDelimiter.option).toBe("|");
+    expect(read.loaded?.receipts.retentionDisposition).toBe("Filed.");
+  });
+
+  test("withholds the run, naming the channel and what the console runs", () => {
+    const { state } = mountedConfigurationRead(openedWebrtc());
+    const reason = runWithheldReason(state);
+    expect(reason).toContain("webrtc");
+    expect(reason).toContain("sftp and filedrop");
+    expect(reason).toMatch(/psilink on the command line/);
+    expect(reason).toMatch(/close the configuration/);
+  });
+
+  test("a channel the console conducts withholds nothing", () => {
+    expect(runWithheldReason(mountedConfigurationRead(opened()).state)).toBe(
+      undefined,
+    );
+    expect(
+      runWithheldReason(
+        mountedConfigurationRead(opened({ channel: "filedrop" })).state,
+      ),
+    ).toBeUndefined();
+    expect(runWithheldReason({ status: "unread" })).toBeUndefined();
+    expect(
+      runWithheldReason({ status: "refused", error: "no" }),
+    ).toBeUndefined();
+  });
+
+  test("the channel notice stands in place of every notice about a run", () => {
+    const { state } = mountedConfigurationRead(
+      openedWebrtc({
+        outboundPayloadConsent: { status: "pending" },
+        disclosedPayloadColumns: ["own_notes"],
+      }),
+    );
+    const notices = mountedConfigurationNotices(state, {
+      disclosedColumns: ["other_column"],
+      sharesWithPartner: true,
+      records: { disclosedPayloadColumns: ["own_notes"] },
+    });
+    expect(notices).toEqual([channelNotConductedNotice("webrtc")]);
+    expect(notices[0]).toContain("runs over webrtc");
+    expect(notices[0]).toMatch(/cannot run this exchange/);
+  });
+
+  test("what the input file cannot supply is still named after it", () => {
+    const { state } = mountedConfigurationRead(openedWebrtc());
+    const notices = mountedConfigurationNotices(
+      withTermsNotApplied(state, ["metadata"], ["metadata"]),
+    );
+    expect(notices).toHaveLength(3);
+    expect(notices[0]).toContain("webrtc");
+    expect(notices[1]).toContain("metadata");
+  });
+
+  test("the control says the configuration is open for review", () => {
+    expect(
+      configurationOpenedMessage(
+        mountedConfigurationRead(openedWebrtc()).state,
+      ),
+    ).toBe(CONFIGURATION_OPENED_FOR_REVIEW);
+    expect(
+      configurationOpenedMessage(mountedConfigurationRead(opened()).state),
+    ).toBe(CONFIGURATION_OPENED);
   });
 });
 

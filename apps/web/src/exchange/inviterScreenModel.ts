@@ -19,6 +19,7 @@ import {
 } from "@console/mountedConfiguration";
 
 import { availableTransports, transportOffered } from "@psi/transportChooser";
+import { isJobChannel } from "@jobs/intentSchemas";
 
 import { CONNECTION_TUNING_DEFAULT } from "@console/connectionTuningModel";
 import { EXCHANGE_FILES_DEFAULT } from "@console/exchangeFilesModel";
@@ -663,20 +664,29 @@ export function inviterScreenReducer(
       // build this offer is rendered on (`InviterScreen`). An unresolved mount
       // reads as no mount, the same conservative reading the chooser itself
       // gives it, so the load never selects a transport this console has not
-      // confirmed it can run.
-      const offered = transportOffered(
-        availableTransports(
-          true,
-          state.sftpInfo?.connection != null,
-          state.rendezvous?.configured === true,
-        ),
-        loaded.channel,
-      );
+      // confirmed it can run. A channel no job conducts selects none, and the
+      // read's own state already withholds its run.
+      const conducted = isJobChannel(loaded.channel)
+        ? loaded.channel
+        : undefined;
+      const offeredTransport =
+        conducted !== undefined &&
+        transportOffered(
+          availableTransports(
+            true,
+            state.sftpInfo?.connection != null,
+            state.rendezvous?.configured === true,
+          ),
+          conducted,
+        )
+          ? conducted
+          : undefined;
       return {
         ...state,
-        mountedConfiguration: offered
-          ? read.state
-          : withUnavailableTransport(read.state, loaded.channel),
+        mountedConfiguration:
+          conducted === undefined || offeredTransport !== undefined
+            ? read.state
+            : withUnavailableTransport(read.state, conducted),
         connectionTuning: loaded.connectionTuning,
         exchangeFiles: loaded.exchangeFiles,
         receipts: {
@@ -690,7 +700,9 @@ export function inviterScreenReducer(
         loadedConfiguration: {
           linkageTerms: loaded.linkageTerms,
           ownColumns: loaded.ownColumns,
-          ...(offered ? { transport: loaded.channel } : {}),
+          ...(offeredTransport !== undefined
+            ? { transport: offeredTransport }
+            : {}),
           ...(loaded.metadata !== undefined
             ? { metadata: loaded.metadata }
             : {}),

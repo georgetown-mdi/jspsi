@@ -59,7 +59,12 @@ function namesOf(value: unknown): Array<string> | null {
  * route, narrowed here against a body that is not it. */
 function documentOf(value: unknown): DisclosedExchangeDocument | null {
   if (!isRecord(value)) return null;
-  if (value.channel !== "sftp" && value.channel !== "filedrop") return null;
+  if (
+    value.channel !== "sftp" &&
+    value.channel !== "filedrop" &&
+    value.channel !== "webrtc"
+  )
+    return null;
   if (!isRecord(value.linkageTerms)) return null;
   return value as unknown as DisclosedExchangeDocument;
 }

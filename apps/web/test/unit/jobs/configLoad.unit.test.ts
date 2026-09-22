@@ -14,6 +14,7 @@ import {
   credentialFieldsNotAdopted,
   disclosedDocument,
   loadMountedConfiguration,
+  mountedExchangeDocument,
   readMountedConfiguration,
 } from "@jobs/configLoad";
 import { authoringStateFromDocument } from "@console/loadedConfig";
@@ -29,7 +30,7 @@ import type { ExchangeSpec } from "@psilink/core";
 // Every document here is written as YAML and read through the real
 // readMountedConfiguration, so the sensitive-parse chokepoint, core's own
 // exchange-file schema (the unread-key refusal included), and the console's
-// three refusals are all in the path under test.
+// own refusals are all in the path under test.
 
 /** The host-key fingerprint every sftp fixture pins. Obviously fake, of the
  * canonical OpenSSH SHA256 shape core's schema grades. */
@@ -299,20 +300,108 @@ describe("a mounted file the load cannot open", () => {
   });
 });
 
-describe("what the load refuses", () => {
-  test("a webrtc connection, by channel", () => {
-    const message = refusal({
+describe("a configuration on a channel the console does not conduct", () => {
+  /** A webrtc document of the shape the web application writes, its broker key
+   * and TURN credential among the connection settings. */
+  function webrtcDocument(
+    overrides: Record<string, unknown> = {},
+  ): Record<string, unknown> {
+    return {
       connection: {
         channel: "webrtc",
         role: "inviter",
-        server: { host: "broker.example" },
+        server: {
+          host: "broker.example",
+          port: 443,
+          key: "@/run/secrets/broker-key",
+          secure: true,
+        },
+        stun: ["stun:stun.example.org:3478"],
+        turn: [
+          {
+            url: "turn:turn.example.org:3478",
+            username: "county",
+            credential: "@/run/secrets/turn-credential",
+          },
+        ],
+        ice_transport_policy: "relay",
+        options: { peer_timeout_ms: 600_000 },
       },
       linkage_terms: snakeizeKeys(terms()),
-    });
-    expect(message).toContain("webrtc");
-    expect(message).toContain("command line");
+      csv_delimiter: "|",
+      retention_disposition: "Filed with the 2026 intake.",
+      authentication: { token_max_age_days: 30 },
+      ...overrides,
+    };
+  }
+
+  const dirs: Array<string> = [];
+
+  afterEach(() => {
+    for (const dir of dirs.splice(0))
+      fs.rmSync(dir, { recursive: true, force: true });
   });
 
+  function mountHolding(document: Record<string, unknown>): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-configload-"));
+    dirs.push(dir);
+    fs.writeFileSync(path.join(dir, "psilink.yaml"), stringifyYaml(document));
+    return dir;
+  }
+
+  test("opens, naming its channel and the settings the steps edit", () => {
+    const { document } = loadDocument(webrtcDocument());
+    expect(document?.channel).toBe("webrtc");
+    expect(document?.csvDelimiter).toBe("|");
+    expect(document?.retentionDisposition).toBe("Filed with the 2026 intake.");
+    expect(document?.linkageTerms.identity).toBe("County Health");
+  });
+
+  test("discloses nothing of its connection", () => {
+    const response = loadDocument(webrtcDocument());
+    expect(response.document?.server).toBeUndefined();
+    expect(response.document?.options).toBeUndefined();
+    const body = JSON.stringify(response);
+    expect(body).not.toContain("broker.example");
+    expect(body).not.toContain("turn.example.org");
+    expect(body).not.toMatch(/"@/);
+  });
+
+  test("holds settings outside its connection, and measures nothing in it", () => {
+    const response = loadDocument(webrtcDocument());
+    expect(response.carriedThrough).toEqual([
+      "authentication.token_max_age_days",
+    ]);
+    expect(response.warnings).toEqual([]);
+  });
+
+  test("reaches the authoring state with no connection form", () => {
+    const { document } = loadDocument(webrtcDocument());
+    if (document === undefined) throw new Error("the load opened nothing");
+    const loaded = authoringStateFromDocument(document);
+    expect(loaded.channel).toBe("webrtc");
+    expect(loaded.sftpForm).toBeUndefined();
+  });
+
+  test("still refuses a stated shared secret", () => {
+    const message = refusal(
+      webrtcDocument({ authentication: { shared_secret: "x".repeat(43) } }),
+    );
+    expect(message).toContain("shared_secret");
+  });
+
+  test("gives a run composed here nothing to hold", () => {
+    expect(mountedExchangeDocument(mountHolding(webrtcDocument()))).toBe(
+      undefined,
+    );
+    expect(
+      mountedExchangeDocument(mountHolding(savedSftpDocument()))?.connection
+        .channel,
+    ).toBe("sftp");
+  });
+});
+
+describe("what the load refuses", () => {
   test("a schema violation, naming the setting in the file's snake_case", () => {
     const document = savedSftpDocument();
     (document.connection as Record<string, unknown>) = {

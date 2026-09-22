@@ -63,8 +63,24 @@ describe("a definitive answer", () => {
     expect(answer.warnings).toEqual(["connection.server.password"]);
   });
 
+  test("a webrtc configuration reads as opened, for review", async () => {
+    const { fetchImpl } = answering(200, {
+      configured: true,
+      present: true,
+      document: {
+        channel: "webrtc",
+        linkageTerms: getDefaultLinkageTerms("County Health"),
+      },
+      carriedThrough: [],
+      warnings: [],
+    });
+    const answer = await fetchMountedConfiguration(fetchImpl);
+    if (answer.kind !== "opened") throw new Error("expected an opened answer");
+    expect(answer.document.channel).toBe("webrtc");
+  });
+
   test("a refusal keeps the console's own text", async () => {
-    const error = "This configuration runs over webrtc.";
+    const error = "This configuration runs over ftp.";
     const { fetchImpl } = answering(400, { error });
     expect(await fetchMountedConfiguration(fetchImpl)).toEqual({
       kind: "refused",
@@ -87,11 +103,11 @@ describe("an answer this cannot read", () => {
     ["no present field", 200, { configured: true }],
     ["present with no document", 200, { present: true, carriedThrough: [] }],
     [
-      "a document on a channel the console does not conduct",
+      "a document on a channel the console does not open",
       200,
       {
         present: true,
-        document: { ...DOCUMENT, channel: "webrtc" },
+        document: { ...DOCUMENT, channel: "ftp" },
         carriedThrough: [],
         warnings: [],
       },

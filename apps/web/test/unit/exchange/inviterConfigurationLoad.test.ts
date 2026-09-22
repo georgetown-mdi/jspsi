@@ -24,6 +24,7 @@ import {
   PENDING_OUTBOUND_CONSENT_WARNING,
   mountedConfigurationNotices,
   mountedConfigurationOfferable,
+  runWithheldReason,
 } from "@console/mountedConfiguration";
 import {
   INITIAL_CSV_DELIMITER_CHOICE,
@@ -39,6 +40,7 @@ import {
   editorWithOutputDirection,
 } from "@psi/inviterEditor";
 import { EMPTY_SFTP_FORM } from "@console/sftpConnectionForm";
+import { inviterCreateStatus } from "@psi/inviterModel";
 import { outputForDirection } from "@psi/authoring/advancedInvite";
 
 import {
@@ -417,15 +419,80 @@ describe("a load that does not proceed changes no step", () => {
     },
   );
 
-  test("a webrtc refusal reaches the control as a channel refusal", () => {
+  test("a refusal reaches the control in the route's own words", () => {
     const error =
-      "This configuration runs over webrtc. The console conducts sftp and " +
-      "shared-folder exchanges only, so it cannot open this one.";
+      "The psilink.yaml in your working folder is not a psilink exchange " +
+      "configuration. Check the file, then open it again.";
     const state = inviterScreenReducer(INVITER_SCREEN_INITIAL, {
       type: "mounted-configuration-read",
       answer: { kind: "refused", error },
     });
     expect(state.mountedConfiguration).toEqual({ status: "refused", error });
+  });
+});
+
+describe("a webrtc configuration opens for review with its run withheld", () => {
+  const state = inviterScreenReducer(INVITER_SCREEN_INITIAL, {
+    type: "mounted-configuration-read",
+    answer: {
+      kind: "opened",
+      document: {
+        channel: "webrtc",
+        linkageTerms: getDefaultLinkageTerms("County Health"),
+        csvDelimiter: "|",
+        retentionDisposition: "Filed with the 2026 intake.",
+      },
+      carriedThrough: [],
+      warnings: [],
+    },
+  });
+
+  test("the steps start from it", () => {
+    expect(state.delimiterChoice.option).toBe("|");
+    expect(state.receipts.retentionDisposition).toBe(
+      "Filed with the 2026 intake.",
+    );
+    expect(state.loadedConfiguration?.linkageTerms.identity).toBe(
+      "County Health",
+    );
+    expect(state.loadedSftpForm).toBeUndefined();
+  });
+
+  test("it selects no transport, and names its channel instead", () => {
+    expect(state.loadedConfiguration?.transport).toBeUndefined();
+    expect(state.mountedConfiguration).toMatchObject({
+      status: "opened",
+      notConducted: "webrtc",
+    });
+    expect(state.mountedConfiguration).not.toHaveProperty(
+      "transportUnavailable",
+    );
+  });
+
+  test("the review step's create is held, naming the channel", () => {
+    const reason = runWithheldReason(state.mountedConfiguration);
+    expect(reason).toContain("webrtc");
+    const status = inviterCreateStatus({
+      runWithheld: reason,
+      offlineBlocked: false,
+      connectionIncomplete: false,
+      splitDirectoryProblem: undefined,
+      exchangeFilesBlocked: false,
+      connectionTuningBlocked: false,
+      runDiagnosticsBlocked: false,
+      receiptsBlocked: false,
+      signingIdentityDivergence: undefined,
+      problemCount: 0,
+    });
+    expect(status.ready).toBe(false);
+    expect(status.statusLine).toBe(reason);
+  });
+
+  test("closing it releases the run", () => {
+    const closed = inviterScreenReducer(state, {
+      type: "loaded-configuration-discarded",
+    });
+    expect(runWithheldReason(closed.mountedConfiguration)).toBeUndefined();
   });
 });
 

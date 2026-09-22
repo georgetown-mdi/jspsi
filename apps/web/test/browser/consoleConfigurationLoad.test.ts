@@ -231,8 +231,8 @@ describe("the load offer on the file step", () => {
 
   test("a refusal shows the console's own text and offers no partial form", async () => {
     const error =
-      "This configuration runs over webrtc. The console conducts sftp and " +
-      "shared-folder exchanges only, so it cannot open this one.";
+      "The psilink.yaml in your working folder is not a psilink exchange " +
+      "configuration. Check the file, then open it again.";
     stubConfigRoute({ status: 400, body: { error } });
     app.render(createElement(InviterScreen));
     await page.getByRole("button", { name: OPEN_CONFIGURATION_LABEL }).click();
@@ -280,6 +280,47 @@ describe("the open configuration over the files it is derived across", () => {
         ),
       )
       .toHaveValue("ignored");
+  });
+
+  test("a webrtc configuration opens for review and holds the create", async () => {
+    stubConfigRoute(
+      {
+        status: 200,
+        body: openedBody({
+          channel: "webrtc",
+          linkageTerms: CONFIG_DOCUMENT.linkageTerms,
+          metadata: STATED_COLUMNS,
+        }),
+      },
+      {
+        files: [CLIENTS_FILE],
+        sftp: {
+          configured: true,
+          host: "sftp.partner.example",
+          port: 22,
+          path: "/exchange",
+        },
+      },
+    );
+    app.render(createElement(InviterScreen));
+    await userEvent.fill(page.getByLabelText("Your name"), "Dana Okafor");
+    await openConfiguration();
+    await expect
+      .element(page.getByText(/runs over webrtc/).first())
+      .toBeInTheDocument();
+    await commitFile();
+    await page
+      .getByRole("button", { name: "Continue to matching & sharing" })
+      .click();
+    await page
+      .getByRole("button", { name: "Continue to review & create" })
+      .click();
+    await expect
+      .element(page.getByRole("button", { name: "Create the invitation" }))
+      .toBeDisabled();
+    await expect
+      .element(page.getByText(/cannot run this webrtc configuration/).first())
+      .toBeInTheDocument();
   });
 
   test("an invitation created while it is open withholds both controls", async () => {

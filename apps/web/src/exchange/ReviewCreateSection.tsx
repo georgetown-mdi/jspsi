@@ -99,6 +99,7 @@ export function ReviewCreateSection({
   sftpConnection,
   loadedSftpForm,
   sftpSaveFilePreferred,
+  runWithheld,
   rendezvous,
   exchangeFiles,
   onExchangeFiles,
@@ -133,6 +134,9 @@ export function ReviewCreateSection({
   /** Whether the operator chose to run SFTP through their own
    * command-line tool (save-a-file) instead of authoring a connection here. */
   sftpSaveFilePreferred: boolean;
+  /** Why the configuration opened from the mounted folder withholds the run,
+   * undefined where nothing withholds it (`runWithheldReason`). */
+  runWithheld?: string;
   /** The console's rendezvous provisioning, or undefined before it resolves (or
    * off a console). The filedrop card runs here when it reports a mount and renders
    * disabled with the console's own reason when it does not; a split pair also
@@ -288,6 +292,7 @@ export function ReviewCreateSection({
   const offlineBlocked =
     !online && transportRunMode(available, transport) !== "save-file";
   const createStatus = inviterCreateStatus({
+    runWithheld,
     offlineBlocked,
     connectionIncomplete,
     splitDirectoryProblem,

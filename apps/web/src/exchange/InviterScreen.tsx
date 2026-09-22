@@ -121,6 +121,7 @@ import {
 } from "@console/MountedConfigurationCard";
 import { editorWithLoadedTerms } from "@console/loadedConfig";
 import { fetchMountedConfiguration } from "@psi/jobClient/mountedConfigClient";
+import { runWithheldReason } from "@console/mountedConfiguration";
 
 import {
   INVITER_SCREEN_INITIAL,
@@ -1494,6 +1495,7 @@ export function InviterScreen() {
                 sftpConnection={sftpConnection}
                 loadedSftpForm={loadedSftpForm}
                 sftpSaveFilePreferred={sftpSaveFilePreferred}
+                runWithheld={runWithheldReason(mountedConfiguration)}
                 rendezvous={rendezvous}
                 exchangeFiles={exchangeFiles}
                 onExchangeFiles={(draft) =>

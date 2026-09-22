@@ -849,6 +849,22 @@ export type JobZeroSetupIntent =
  */
 export type JobCreateIntent = JobExchangeIntent | JobZeroSetupIntent;
 
+/** The channel a console job conducts, which every job intent discriminates on. */
+export type JobChannel = JobCreateIntent["channel"];
+
+/** The channels a console job conducts, as the configuration file spells them. */
+const JOB_CHANNELS: ReadonlySet<string> = new Set<JobChannel>([
+  "sftp",
+  "filedrop",
+]);
+
+/** Whether the console conducts an exchange over `channel`: an allowlist, so a
+ * channel a later schema version adds is one the console does not run until it
+ * is named here. */
+export function isJobChannel(channel: string): channel is JobChannel {
+  return JOB_CHANNELS.has(channel);
+}
+
 /**
  * Upper bound on the `inputCsv` string length, anchored to the browser intake's
  * own file-size gate ({@link MAX_CSV_FILE_BYTES}, 100 MiB): a CSV that passed
