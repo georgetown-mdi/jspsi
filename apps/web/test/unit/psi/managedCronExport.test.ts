@@ -10,12 +10,15 @@ import {
   serializeExchangeDocument,
 } from "@psilink/core";
 
+import { ZodError } from "zod";
+
 import {
   CRON_EXPORT_CONFIG_FILE_NAME,
   CRON_EXPORT_INPUT_FILE_NAME,
   CRON_EXPORT_KEY_FILE_NAME,
   CRON_EXPORT_OUTPUT_FILE_NAME,
   composeManagedCronExport,
+  composeManagedCronExportConfig,
 } from "@psi/managed/managedCronExport";
 import {
   MANAGED_EXCHANGE_ARTIFACT_VERSION,
@@ -269,24 +272,91 @@ describe("a record that is not a webrtc exchange", () => {
     ["sftp", { channel: "sftp", host: "sftp.example.org", path: "/exchange" }],
   ];
 
+  function documentOn(locator: ExchangeLocator): ExchangeSpec {
+    return assembleExchangeSpec({
+      connection: connectionFromLocator(locator),
+      linkageTerms,
+    });
+  }
+
   test.each(nonWebrtcLocators)(
-    "is refused rather than exported (%s)",
-    (channel, locator) => {
-      // Unreachable through the UI -- a managed connection is composed from a
-      // credential-free webrtc locator -- but reachable by importing a
-      // hand-crafted artifact, so the export gates on the channel discriminant
-      // exactly as the re-run dispatch does.
-      const record = managedRecord({
-        exchangeFile: assembleExchangeSpec({
-          connection: connectionFromLocator(locator),
-          linkageTerms,
-        }),
-      });
-      expect(() => composeManagedCronExport(record)).toThrow(
-        new RegExp(`webrtc[\\s\\S]*${channel}`),
-      );
+    "cannot hold a secret, so no key half is ever composed for one (%s)",
+    (_channel, locator) => {
+      // A hand-crafted artifact is the one route to a secret on such a record;
+      // the record schema refuses it there, so the key file this app writes is
+      // always a webrtc exchange's.
+      expect(() =>
+        buildManagedExchangeRecord(
+          newExchange({ exchangeFile: documentOn(locator), side: undefined }),
+        ),
+      ).toThrow(ZodError);
     },
   );
+
+  test.each(nonWebrtcLocators)(
+    "exports its configuration with no role (%s)",
+    (channel, locator) => {
+      const record = buildManagedExchangeRecord({
+        label: "Riverbend quarterly",
+        exchangeFile: documentOn(locator),
+      });
+
+      const exported = parseExchangeSpec(
+        parseSensitiveYaml(
+          composeManagedCronExportConfig(record).config.text,
+          "exported psilink.yaml",
+        ),
+      );
+
+      expect(exported.connection.channel).toBe(channel);
+      expect(exported.connection).not.toHaveProperty("role");
+      expect(exported).toEqual(record.exchangeFile);
+    },
+  );
+
+  /** A configuration-only sftp record whose server states `server` lines. */
+  function sftpRecordWith(server: Record<string, unknown>) {
+    const connection = connectionFromLocator(nonWebrtcLocators[1][1]);
+    if (connection.channel !== "sftp") throw new Error("not an sftp locator");
+    return buildManagedExchangeRecord({
+      label: "Riverbend quarterly",
+      exchangeFile: assembleExchangeSpec({
+        connection: {
+          ...connection,
+          server: { ...connection.server, ...server },
+        },
+        linkageTerms,
+      }),
+    });
+  }
+
+  test("writes an sftp @path credential and host-key pin back as stored", () => {
+    const record = sftpRecordWith({
+      privateKey: "@/keys/exchange_key",
+      privateKeyPassphrase: "@/keys/exchange_key.passphrase",
+      hostKeyFingerprint: `SHA256:${"A".repeat(43)}`,
+    });
+    const { text } = composeManagedCronExportConfig(record).config;
+
+    expect(text).toContain('private_key: "@/keys/exchange_key"');
+    expect(
+      parseExchangeSpec(parseSensitiveYaml(text, "exported psilink.yaml")),
+    ).toEqual(record.exchangeFile);
+  });
+
+  test("refuses an sftp credential stored as a value, naming it and not echoing it", () => {
+    const record = sftpRecordWith({ password: "stored-password-not-echoed" });
+
+    let message = "";
+    try {
+      composeManagedCronExportConfig(record);
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+
+    expect(message).toContain("connection.server.password");
+    expect(message).not.toContain("stored-password-not-echoed");
+  });
 });
 
 /** A record as a hand-crafted artifact import produces one. The import path

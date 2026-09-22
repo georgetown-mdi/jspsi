@@ -13,17 +13,23 @@
  */
 
 import {
-  managedStandingConditionTier,
-  readManagedFailure,
-} from "@psi/managed/managedFailureTiers";
-import {
+  channelThisAppDoesNotRun,
   raisedStandingCondition,
   runnableManagedExchange,
 } from "@psi/managed/managedExchangeRecord";
+import {
+  managedStandingConditionTier,
+  readManagedFailure,
+} from "@psi/managed/managedFailureTiers";
 import { deriveManagedBackupState } from "@psi/managed/managedBackupState";
 import { managedExchangeLapsed } from "@psi/managed/managedExpiry";
 
 import { dateLabel, dateTimeLabel } from "@psi/formatting";
+
+import {
+  configurationOnlyStatus,
+  sidelessRowLabel,
+} from "./managedConfigurationModel";
 import {
   repeatedMissCoordination,
   scheduleDueLine,
@@ -31,6 +37,7 @@ import {
 } from "./scheduleSurfacingModel";
 
 import type {
+  ManagedElsewhereChannel,
   ManagedExchangeRecord,
   ManagedExchangeSchedule,
   ManagedExchangeSide,
@@ -52,6 +59,18 @@ export const SIDE_LABEL: Record<ManagedExchangeSide, string> = {
   acceptor: "You accept",
 };
 
+/** What a row names in the side position: this party's side, or the channel
+ * for a configuration on one that names no side. The saved-exchanges list and
+ * the read-failed recovery listing both derive it here. */
+export function rowSideLabel(
+  side: ManagedExchangeSide | undefined,
+  elsewhereChannel: ManagedElsewhereChannel | undefined,
+): string {
+  return side !== undefined
+    ? SIDE_LABEL[side]
+    : sidelessRowLabel(elsewhereChannel);
+}
+
 /** The derived backup state a row shows, phrased for the list. `"backed-up"`
  * holds the date phrase for the quiet green line; `"backup-needed"` is the one
  * actionable state. */
@@ -59,12 +78,6 @@ type SavedExchangeBackup =
   | { kind: "backed-up"; asOf: string }
   | { kind: "backup-needed" }
   | { kind: "not-applicable" };
-
-/** The one-line status of a configuration-only row: what this browser holds for
- * the exchange, and where it runs. It has no run history to summarize -- it has
- * never run here and cannot. */
-const CONFIGURATION_ONLY_STATUS =
-  "Configuration only - edit it here, run it with psilink";
 
 /** The schedule lines a row holds for a record with an agreed schedule: where
  * the recurrence stands at the row's `now`, and the coordination line a run of
@@ -84,7 +97,8 @@ export interface SavedExchangeRow {
   id: string;
   /** The operator's display label; may be empty (the field has no minimum). */
   label: string;
-  /** This party's side, as the list names it (see {@link SIDE_LABEL}). */
+  /** This party's side, as the list names it (see {@link SIDE_LABEL}), or the
+   * channel for a configuration on one that names no side. */
   sideLabel: string;
   /** A one-line status summary of the last run and the expiry state. */
   status: string;
@@ -95,9 +109,10 @@ export interface SavedExchangeRow {
   /** The derived backup state for the row (see {@link SavedExchangeBackup}). */
   backup: SavedExchangeBackup;
   /** Whether the record holds no shared secret: a configuration imported from
-   * the command line, which edits and exports here and runs there. Derived from
-   * the record's own shape, never from a stored flag, so the row withholds the
-   * Run affordance for the same reason the exchange's own surface does. */
+   * the command line, which edits and exports here and runs there -- every
+   * record on a channel this app does not run among them. Derived from the
+   * record's own shape, never from a stored flag, so the row withholds the Run
+   * affordance for the same reason the exchange's own surface does. */
   configurationOnly: boolean;
   /** When set, this device's copy was handed off by an export as of this date
    * phrase: the row shows no Run affordance and names the handoff. Deleting is the
@@ -264,8 +279,11 @@ export function savedExchangeRow(
     return {
       id: record.id,
       label: record.label,
-      sideLabel: SIDE_LABEL[record.side],
-      status: CONFIGURATION_ONLY_STATUS,
+      sideLabel: rowSideLabel(
+        record.side,
+        channelThisAppDoesNotRun(record.exchangeFile),
+      ),
+      status: configurationOnlyStatus(record),
       expired: false,
       backup: { kind: "not-applicable" },
       configurationOnly: true,

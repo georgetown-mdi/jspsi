@@ -1,4 +1,9 @@
-import { UNNAMED_PARTY_LABEL, getDefaultLinkageTerms } from "@psilink/core";
+import {
+  UNNAMED_PARTY_LABEL,
+  assembleExchangeSpec,
+  connectionFromLocator,
+  getDefaultLinkageTerms,
+} from "@psilink/core";
 import { describe, expect, test } from "vitest";
 
 import {
@@ -70,6 +75,47 @@ describe("connectionRows", () => {
     const rendered = rows.map((row) => row.value).join(" ");
     expect(rendered).not.toContain("username");
     expect(rendered).not.toContain("key");
+  });
+
+  test("names an SFTP server, its username, and its folder", () => {
+    const connection = connectionFromLocator({
+      channel: "sftp",
+      host: "sftp.example.org",
+      port: 2222,
+      path: "/exchange",
+    });
+    const rows = connectionRows(
+      assembleExchangeSpec({ connection, linkageTerms }),
+    );
+
+    expect(rows.map((row) => [row.label, row.value])).toEqual([
+      ["Channel", "SFTP server"],
+      ["Server", "sftp.example.org:2222"],
+      ["Username", "REPLACE_WITH_SSH_USERNAME"],
+      ["Folder", "/exchange"],
+    ]);
+  });
+
+  test("names a shared folder's split pair by who writes to each", () => {
+    const connection = connectionFromLocator({
+      channel: "filedrop",
+      inboundPath: "/srv/inbound",
+      outboundPath: "/srv/outbound",
+      options: {
+        retainFiles: true,
+        timestampInFilename: true,
+        locklessRendezvous: true,
+      },
+    });
+    const rows = connectionRows(
+      assembleExchangeSpec({ connection, linkageTerms }),
+    );
+
+    expect(rows.map((row) => [row.label, row.value])).toEqual([
+      ["Channel", "Shared folder"],
+      ["Folder your partner writes to", "/srv/inbound"],
+      ["Folder you write to", "/srv/outbound"],
+    ]);
   });
 });
 

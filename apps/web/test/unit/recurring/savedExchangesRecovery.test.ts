@@ -17,18 +17,25 @@ function readable(
   overrides: Partial<{
     id: string;
     label: string;
-    side: "inviter" | "acceptor";
+    side: "inviter" | "acceptor" | undefined;
+    elsewhereChannel: "sftp" | "filedrop";
     lastRunAt: string;
     backedUp: boolean;
   }> = {},
 ): ManagedExchangeDiagnosticEntry {
+  // An explicit `side: undefined` stands for a configuration whose channel
+  // names no side.
+  const side = "side" in overrides ? overrides.side : "inviter";
   return {
     kind: "readable",
     backedUp: overrides.backedUp ?? false,
     essentials: {
       id: overrides.id ?? "abc",
       label: overrides.label ?? "Riverbend quarterly",
-      side: overrides.side ?? "inviter",
+      ...(side !== undefined ? { side } : {}),
+      ...(overrides.elsewhereChannel !== undefined
+        ? { elsewhereChannel: overrides.elsewhereChannel }
+        : {}),
       ...(overrides.lastRunAt !== undefined
         ? { lastRunAt: overrides.lastRunAt }
         : {}),
@@ -52,6 +59,17 @@ describe("recoveryRow", () => {
     expect(row.sideLabel).toBe("You accept");
     expect(row.lastRunAt).toBeDefined();
     expect(row.unreadable).toBe(false);
+  });
+
+  test("a readable configuration with no side names its channel, as the saved list does", () => {
+    const row = recoveryRow(
+      readable({ side: undefined, elsewhereChannel: "filedrop" }),
+    );
+    expect(row.sideLabel).toBe("Shared-folder exchange");
+    expect(
+      recoveryRow(readable({ side: undefined, elsewhereChannel: "sftp" }))
+        .sideLabel,
+    ).toBe("SFTP exchange");
   });
 
   test("an empty label displays as (unnamed exchange) in the row text", () => {

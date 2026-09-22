@@ -3,7 +3,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   assembleExchangeSpec,
-  connectionFromLocator,
   generateSharedSecret,
   getDefaultLinkageTerms,
 } from "@psilink/core";
@@ -438,14 +437,22 @@ describe("the durable spent surface names the hand-off that spent it", () => {
 
 describe("a record this app could not have composed", () => {
   /** A stored exchange the command-line composition refuses. Reachable only by
-   * importing a hand-crafted artifact: the browser composes webrtc exchanges alone. */
+   * importing a hand-crafted artifact: the browser composes a credential-free
+   * connection alone. */
   const refusedExchange = () =>
     newExchange({
       exchangeFile: assembleExchangeSpec({
-        connection: connectionFromLocator({
-          channel: "filedrop",
-          path: "/srv/exchange",
-        }),
+        connection: {
+          channel: "webrtc",
+          server: { host: "signaling.example.org" },
+          turn: [
+            {
+              url: "turn:relay.example.org:3478",
+              username: "operator",
+              credential: "@/home/other/turn-credential",
+            },
+          ],
+        },
         linkageTerms,
       }),
     });
@@ -470,7 +477,7 @@ describe("a record this app could not have composed", () => {
       )
       .toBeInTheDocument();
     await expect
-      .element(page.getByText("stored connection channel is filedrop"))
+      .element(page.getByText("Remove: turn", { exact: false }))
       .toBeInTheDocument();
     await expect
       .element(
@@ -496,7 +503,7 @@ describe("a record this app could not have composed", () => {
         download: (fileName) => downloaded.push(fileName),
         spendIfCurrent: spendManagedExchangeIfCurrent,
       }),
-    ).rejects.toThrow(/stored connection channel is filedrop/);
+    ).rejects.toThrow(/Remove: turn/);
 
     expect(downloaded).toEqual([]);
     expect(await getManagedLocalState(created.id)).toBeUndefined();

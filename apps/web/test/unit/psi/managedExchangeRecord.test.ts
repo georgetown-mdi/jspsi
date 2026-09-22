@@ -1,6 +1,7 @@
 import {
   CSV_DELIMITER_DETECT,
   DEFAULT_LINKAGE_KEY_SET_NAME,
+  assembleExchangeSpec,
   connectionFromLocator,
   generateSharedSecret,
   getDefaultLinkageTerms,
@@ -22,6 +23,7 @@ import {
   applyManagedExchangeScheduleAdvance,
   applyManagedExchangeStandingConditionCleared,
   buildManagedExchangeRecord,
+  channelThisAppDoesNotRun,
   composeManagedExchangeFile,
   diagnoseManagedExchangeRecord,
   parseManagedExchangeRecord,
@@ -1192,6 +1194,26 @@ describe("diagnoseManagedExchangeRecord", () => {
     });
   });
 
+  test("names the channel in place of the side for a configuration this app does not run", () => {
+    const {
+      sharedSecret: _sharedSecret,
+      side: _side,
+      ...rest
+    } = buildManagedExchangeRecord(newExchange({ label: "Shared folder" }));
+    const essentials = diagnoseManagedExchangeRecord({
+      ...rest,
+      exchangeFile: {
+        ...rest.exchangeFile,
+        connection: { channel: "filedrop", path: "/srv/exchange" },
+      },
+    });
+    expect(essentials).toEqual({
+      id: rest.id,
+      label: "Shared folder",
+      elsewhereChannel: "filedrop",
+    });
+  });
+
   test("omits the last-run date for a never-run record", () => {
     const record = buildManagedExchangeRecord(newExchange());
     expect(diagnoseManagedExchangeRecord(record).lastRunAt).toBeUndefined();
@@ -1730,5 +1752,50 @@ describe("the configuration-only record", () => {
 
     expect(edited.tokenMaxAgeDays).toBe(30);
     expect(edited.expires).toBeUndefined();
+  });
+});
+
+describe("a record on a channel this app does not run", () => {
+  const sftpDocument = assembleExchangeSpec({
+    connection: connectionFromLocator({
+      channel: "sftp",
+      host: "sftp.example.org",
+      path: "/exchange",
+    }),
+    linkageTerms,
+  });
+
+  test("is a configuration only, with no side, and says which channel", () => {
+    const record = buildManagedExchangeRecord({
+      label: "",
+      exchangeFile: sftpDocument,
+    });
+
+    expect(runnableManagedExchange(record)).toBe(false);
+    expect(channelThisAppDoesNotRun(record.exchangeFile)).toBe("sftp");
+    expect(channelThisAppDoesNotRun(exchangeFile())).toBeUndefined();
+  });
+
+  test("cannot hold a secret, so no run, rotation, or backup reaches it", () => {
+    expect(() =>
+      buildManagedExchangeRecord({
+        label: "",
+        exchangeFile: sftpDocument,
+        sharedSecret: generateSharedSecret(),
+      }),
+    ).toThrow(/webrtc exchanges only/);
+  });
+
+  test("holds no side, and a webrtc record holds one", () => {
+    expect(() =>
+      buildManagedExchangeRecord({
+        label: "",
+        exchangeFile: sftpDocument,
+        side: "inviter",
+      }),
+    ).toThrow(/side exactly when/);
+    expect(() =>
+      buildManagedExchangeRecord({ label: "", exchangeFile: exchangeFile() }),
+    ).toThrow(/side exactly when/);
   });
 });

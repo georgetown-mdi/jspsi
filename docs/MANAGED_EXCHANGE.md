@@ -1141,17 +1141,26 @@ is no longer the one meeting it, so remove it there.
 ### Bringing a command-line configuration back
 
 A `psilink.yaml` written for the command line imports here on its own, without
-its key file. What lands is a **configuration-only** exchange: the agreed terms,
-the rendezvous address, and the local settings, with no shared secret. It is for
-the operator who would rather set an exchange up in a browser than author YAML,
-and run it where the data and the scheduler are -- read the file in, edit what is
-editable, download it again, run it there.
+its key file, whichever channel it runs over. What lands is a
+**configuration-only** exchange: the agreed terms, the connection, and the local
+settings, with no shared secret. It is for the operator who would rather set an
+exchange up in a browser than author YAML, and run it where the data and the
+scheduler are -- read the file in, edit what is editable, download it again, run
+it there.
 
-Such an exchange **does not run in this browser**, and its own page says so in
-place of the Run control. The absent key file is the whole reason: without the
-secret the partnership rotates, there is nothing here to connect with. Nothing
-about the exchange on the other machine changes by importing its configuration --
-it keeps running there, from the files it already has.
+Such an exchange **does not run in this browser**. It sits in the same list as
+the exchanges that do, with Open in place of Run, and its own page says why in
+place of the Run and schedule controls:
+
+- **A webrtc configuration** has no key file here: without the secret the
+  partnership rotates, there is nothing here to connect with.
+- **An sftp or filedrop configuration** runs over a channel this browser does
+  not conduct -- it runs live browser exchanges (webrtc) only. The page names the
+  channel and says to run the exchange with psilink on the command line; a key
+  file would not change that.
+
+Nothing about the exchange on the other machine changes by importing its
+configuration -- it keeps running there, from the files it already has.
 
 What the import accepts is what this app can hold:
 
@@ -1159,27 +1168,62 @@ What the import accepts is what this app can hold:
   longer matches the format psilink reads is refused naming the fields to fix,
   spelled as the file spells them, so the operator goes back to the line rather
   than to the app.
-- **A webrtc connection, and no other channel.** The browser runs webrtc
-  exchanges only, so a configuration on another channel is refused, named by its
-  channel.
-- **A credential-free rendezvous address.** A TURN credential, an ICE
-  provisioning block, a signing identity or receipt path, a pinned fingerprint --
-  anything this app does not compose for itself -- is refused rather than stored,
-  by field name. The next export would hand it straight back to the command line,
-  and this browser cannot tell what a path on another machine opens.
+- **A connection this app can hold.** A webrtc connection may hold what this
+  app composes for it, a rendezvous address; a TURN credential, an ICE
+  provisioning block, or a PeerJS server key is refused by field name, since
+  this browser runs a webrtc exchange and could not apply them. A filedrop
+  connection holds its folders and `options`. An sftp connection is held whole
+  -- host, port, username, folders, `options`, `host_key_fingerprint`,
+  `keyboard_interactive`, `proxy`, `provision`, and `provider_options` -- since
+  nothing here runs it and each setting goes back into the file psilink runs.
+  A signing identity or receipt path is refused on every channel.
+- **Credentials as `@path` references, never as values.** An sftp `password`,
+  `private_key`, or `private_key_passphrase`, the `bearer` or `password` of a
+  `proxy` or `provision` block's `auth`, and a `password`, `passphrase`,
+  `privateKey`, or `private_key` key in `provider_options`, in any letter case
+  and at any depth, is held when the file writes it as `@` and a path, and
+  refused, by field name, when the file writes any other value, a number or
+  `true` included: this browser does not store a secret. The refusal
+  says to put the value in a file of its own and write the setting as `@` and
+  that file's path. Any other `provider_options` setting, such as a cipher
+  list, is held as written.
 - **No shared secret.** A configuration naming one in its `authentication` block
   is refused: the key file stays where the exchange runs. psilink reads the secret
   from `.psilink.key` and refuses it in `psilink.yaml` for the same reason.
-- **A `role`.** The configuration has to say which side of the partnership this
-  party takes; the command line refuses a webrtc connection that names none, and
-  so does this.
+- **A `role` on a webrtc connection.** The configuration has to say which side of
+  the partnership this party takes; the command line refuses a webrtc connection
+  that names none, and so does this. An sftp or filedrop connection has no `role`.
 
 What is editable is what a browser-run exchange edits in place: the label, and
 the maximum age for the exchange's secret, which the exported configuration
 carries as `authentication.token_max_age_days` for the command-line run to apply.
 The agreed terms are read-only here as everywhere else -- exchanging on different
 terms is a new exchange, agreed with the partner. An import that is not edited
-exports back to the same configuration.
+exports back to the same configuration, and an edited one exports back with the
+edits and every other setting as the file stated it.
+
+The page states three more things where they apply:
+
+- **The settings it keeps without showing them.** Every setting of the file
+  other than the connection and the agreed terms the page shows -- `metadata`,
+  `retention_disposition`, a connection's `options`, an sftp connection's
+  credential references, host-key pin, and the rest -- is kept unchanged and
+  named, in the file's own snake_case, with a pointer to the file as the place to
+  edit it.
+- **The files it names by `@path`.** This browser never opens the file an
+  `@path` names. The page warns, naming each such setting and never its path,
+  that the psilink.yaml it hands back keeps the reference as the file wrote it
+  and psilink reads that file on the machine that runs the exchange; the export
+  panel repeats the names.
+- **A pending outbound payload consent.** A configuration whose
+  `outbound_payload_consent` is pending is refused by psilink at any run that
+  shares results with the partner until the columns are confirmed, which it asks
+  for at a terminal. The page says so, so a scheduled run is not the first place
+  the operator meets that refusal.
+
+An SFTP configuration that names no credential or no host key exports without
+one: the export panel says to add `private_key` or `password` (as an `@path`),
+`host_key_fingerprint`, or both under `connection.server` before running it.
 
 ## Desync detection and recovery
 

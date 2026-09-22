@@ -11,11 +11,12 @@
  * input content or a row value. The document is fixed for the partnership --
  * only `label`, `schedule`, and `tokenMaxAgeDays` update in place.
  *
- * The secret is the one field a record may hold none of. A record without it is
- * a CONFIGURATION ONLY -- settings to edit and export, running nowhere here --
- * and {@link runnableManagedExchange} is the narrowing every path that needs a
+ * A record may hold no secret. A record without one is a CONFIGURATION ONLY --
+ * settings to edit and export, running nowhere here -- and
+ * {@link runnableManagedExchange} is the narrowing every path that needs a
  * secret takes (see docs/spec/MANAGED_EXCHANGE_RECORD.md, "The
- * configuration-only record").
+ * configuration-only record"). Every record on a channel this app does not run
+ * is one, and holds no `side` either.
  */
 
 import {
@@ -32,6 +33,7 @@ import { z } from "zod";
 import { deriveEditedExpiry } from "./managedTokenAgeEdit";
 
 import type {
+  ConnectionConfig,
   ExchangeSpec,
   OutboundPayloadConsent,
   WebRTCExchangeLocator,
@@ -94,6 +96,31 @@ export const MAX_LABEL_LENGTH = 120;
  * rendezvous flow. Local-only: not the document's schema-only
  * `connection.role`. */
 export type ManagedExchangeSide = "inviter" | "acceptor";
+
+/** The one channel this app conducts an exchange over: a live browser-to-browser
+ * connection. A record on any other channel holds a configuration only. */
+export const MANAGED_RUN_CHANNEL = "webrtc";
+
+/** A channel a stored document can name that this app does not conduct an
+ * exchange over. */
+export type ManagedElsewhereChannel = Exclude<
+  ConnectionConfig["channel"],
+  typeof MANAGED_RUN_CHANNEL
+>;
+
+/**
+ * The channel a document's exchange runs over when this app cannot conduct it,
+ * or undefined for the channel it runs. The one place "does this run here" is
+ * read off a document's channel: every surface that withholds a run or a
+ * schedule for the channel's sake, and names the channel in saying so, derives
+ * it from here.
+ */
+export function channelThisAppDoesNotRun(
+  exchangeFile: ExchangeSpec,
+): ManagedElsewhereChannel | undefined {
+  const { channel } = exchangeFile.connection;
+  return channel === MANAGED_RUN_CHANNEL ? undefined : channel;
+}
 
 /**
  * Upper bound on {@link ManagedExchangeSchedule.intervalDays}: an annual cadence,
@@ -265,13 +292,17 @@ export interface ManagedExchangeRecord {
    * This party's exchange-file document, verbatim: the validated
    * {@link ExchangeSpec} both applications share. Contains no `authentication`
    * block (the secret lives in {@link sharedSecret}) and its connection block is
-   * composed from a credential-free locator, so no credential is representable
-   * (see {@link composeManagedExchangeFile}).
+   * composed from a credential-free locator (see
+   * {@link composeManagedExchangeFile}), except a configuration-only sftp
+   * record's, which holds the imported connection with each credential as an
+   * `@path` reference (./managedCommandLineDocument.ts).
    */
   exchangeFile: ExchangeSpec;
   /** This party's side of the partnership; dispatches a re-run to the matching
-   * rendezvous flow. */
-  side: ManagedExchangeSide;
+   * rendezvous flow. Present exactly when the connection is webrtc: sftp and
+   * filedrop connections name no `role`, so a configuration imported on one of
+   * them has no side to record. */
+  side?: ManagedExchangeSide;
   /**
    * A persisted pointer to the operator's input file, held where the File System
    * Access API exists. A reference, never a copy: no input content or row value
@@ -298,7 +329,9 @@ export interface ManagedExchangeRecord {
    * a record holds settings to edit and export, and its absent secret is what
    * withholds every run here: {@link runnableManagedExchange} is the one
    * narrowing to the record shape the run, rotation, re-invite, and backup paths
-   * take, so a configuration-only record cannot be handed to any of them. */
+   * take, so a configuration-only record cannot be handed to any of them.
+   * Present only on a webrtc connection, the one channel this app runs, so a
+   * record on any other channel is a configuration only. */
   sharedSecret?: string;
   /** ISO 8601 UTC instant after which {@link sharedSecret} must not be used;
    * absent means no bound is in force. Only {@link tokenMaxAgeDays} writes it. */
@@ -468,12 +501,18 @@ export const keyFileFieldsSchema: ZodType<ManagedExchangeKeyFields> = z
  * no-input-content invariant is a property of the type (a handle is a pointer),
  * not a runtime check.
  *
- * The refine holds the configuration-only shape together: a record with no
- * `sharedSecret` runs nothing here, so it may hold nothing a run or a secret
+ * The first refine holds the configuration-only shape together: a record with
+ * no `sharedSecret` runs nothing here, so it may hold nothing a run or a secret
  * produces. Every such field is bound to the secret's presence at the schema, so
  * a record whose shape withholds the run cannot also hold a lapse instant for a
  * secret it does not have, a schedule nothing here would execute, or the
  * bookkeeping of runs it never made.
+ *
+ * The other two bind the record to its connection's channel. A secret is held
+ * only on a webrtc connection, the one channel this app runs, so a record on any
+ * other channel is a configuration only and the narrowing that withholds its run
+ * is the same one. `side` is held exactly when the connection is webrtc, the one
+ * channel whose document names a `role` for it to stand for.
  */
 const ManagedExchangeRecordSchema: ZodType<ManagedExchangeRecord> = z
   .object({
@@ -481,7 +520,7 @@ const ManagedExchangeRecordSchema: ZodType<ManagedExchangeRecord> = z
     id: z.string().min(1),
     label: z.string().check(maxCodeUnits(MAX_LABEL_LENGTH)),
     exchangeFile: persistedExchangeFileSchema,
-    side: z.enum(["inviter", "acceptor"]),
+    side: z.enum(["inviter", "acceptor"]).optional(),
     inputFileHandle: z.custom<FileSystemFileHandle>().optional(),
     outputDirectoryHandle: z.custom<FileSystemDirectoryHandle>().optional(),
     sharedSecret: z.string().regex(SHARED_SECRET_REGEX).optional(),
@@ -503,6 +542,26 @@ const ManagedExchangeRecordSchema: ZodType<ManagedExchangeRecord> = z
       message:
         "a record without a sharedSecret is configuration only and must hold " +
         "no expires, schedule, lastRun, or platform handle",
+    },
+  )
+  .refine(
+    (record) =>
+      record.sharedSecret === undefined ||
+      record.exchangeFile.connection.channel === MANAGED_RUN_CHANNEL,
+    {
+      message:
+        "a record holding a sharedSecret runs in this app, which runs webrtc " +
+        "exchanges only",
+    },
+  )
+  .refine(
+    (record) =>
+      (record.side !== undefined) ===
+      (record.exchangeFile.connection.channel === MANAGED_RUN_CHANNEL),
+    {
+      message:
+        "a record holds a side exactly when its connection is webrtc, the one " +
+        "channel whose document names a role",
     },
   );
 
@@ -533,6 +592,7 @@ export function safeParseManagedExchangeRecord(raw: unknown) {
  */
 export type RunnableManagedExchangeRecord = ManagedExchangeRecord & {
   sharedSecret: string;
+  side: ManagedExchangeSide;
 };
 
 /**
@@ -540,12 +600,14 @@ export type RunnableManagedExchangeRecord = ManagedExchangeRecord & {
  * {@link RunnableManagedExchangeRecord} where it does. The one place the withheld
  * run is decided, and it decides on the record's own shape rather than on a
  * stored flag: a surface offering a run narrows first and shows the
- * configuration-only state where the narrowing fails.
+ * configuration-only state where the narrowing fails. The record schema holds a
+ * secret only on a webrtc connection, which always has a side, so the side is
+ * read here for the narrowed type rather than as a second condition.
  */
 export function runnableManagedExchange(
   record: ManagedExchangeRecord,
 ): record is RunnableManagedExchangeRecord {
-  return record.sharedSecret !== undefined;
+  return record.sharedSecret !== undefined && record.side !== undefined;
 }
 
 /**
@@ -622,9 +684,10 @@ export function partitionReadableManagedExchanges(
 /**
  * The display essentials a diagnostic read reports for one stored entry that
  * parses: only the fields a recovery listing renders -- the label, this party's
- * side, and the last run's instant when recorded. Not the whole record: the
- * diagnostic path must never return the `sharedSecret` or any document field to a
- * component, so this type structurally cannot hold secret material (see
+ * side or the channel this app does not run, and the last run's instant when
+ * recorded. Not the whole record: the diagnostic path must never return the
+ * `sharedSecret` or any document field to a component, so this type
+ * structurally cannot hold secret material (see
  * docs/MANAGED_EXCHANGE.md, "Deleting a managed exchange", and the read-failed
  * recovery listing). The `id` is the stored key a delete-by-key acts on.
  */
@@ -633,20 +696,25 @@ export interface ManagedExchangeDiagnosticEssentials {
   id: string;
   /** The operator's display label; may be empty. */
   label: string;
-  /** This party's side of the partnership. */
-  side: ManagedExchangeSide;
+  /** This party's side of the partnership; absent on a configuration on a
+   * channel that names no side. */
+  side?: ManagedExchangeSide;
+  /** The channel the stored document runs over when this app does not run it
+   * (see {@link channelThisAppDoesNotRun}), which the listing names in place
+   * of a side. */
+  elsewhereChannel?: ManagedElsewhereChannel;
   /** ISO 8601 UTC instant of the last recorded run, when one exists. */
   lastRunAt?: string;
 }
 
 /**
  * Extract only the display essentials from a stored value for the read-failed
- * recovery listing: the `id`, `label`, `side`, and last-run instant, and nothing
- * else. Structurally incapable of returning secret material: it reads named
- * scalar fields off the validated record into a
- * {@link ManagedExchangeDiagnosticEssentials}, so the `sharedSecret`, the
- * document, and the input handle never leave this function. Full record
- * validation runs first, so a value that would fail
+ * recovery listing: the `id`, `label`, `side`, the channel this app does not
+ * run, and the last-run instant, and nothing else. Structurally incapable of
+ * returning secret material: it reads named scalar fields off the validated
+ * record into a {@link ManagedExchangeDiagnosticEssentials}, so the
+ * `sharedSecret`, the document, and the input handle never leave this
+ * function. Full record validation runs first, so a value that would fail
  * {@link parseManagedExchangeRecord} throws here exactly as it would on the
  * strict read; the caller catches that to mark the entry unreadable.
  *
@@ -656,10 +724,12 @@ export function diagnoseManagedExchangeRecord(
   raw: unknown,
 ): ManagedExchangeDiagnosticEssentials {
   const record = parseManagedExchangeRecord(raw);
+  const elsewhereChannel = channelThisAppDoesNotRun(record.exchangeFile);
   return {
     id: record.id,
     label: record.label,
-    side: record.side,
+    ...(record.side !== undefined ? { side: record.side } : {}),
+    ...(elsewhereChannel !== undefined ? { elsewhereChannel } : {}),
     ...(record.lastRun !== undefined ? { lastRunAt: record.lastRun.at } : {}),
   };
 }
@@ -735,8 +805,9 @@ export interface NewManagedExchange {
   /** The composed exchange-file document (see
    * {@link composeManagedExchangeFile}). */
   exchangeFile: ExchangeSpec;
-  /** This party's side of the partnership. */
-  side: ManagedExchangeSide;
+  /** This party's side of the partnership. Present exactly when the document's
+   * connection is webrtc (see {@link ManagedExchangeRecord.side}). */
+  side?: ManagedExchangeSide;
   /** The current rotated shared secret. Absent only for a configuration-only
    * record, which holds settings to edit and export and runs nothing here (see
    * {@link ManagedExchangeRecord.sharedSecret}). */
@@ -781,7 +852,7 @@ export function buildManagedExchangeRecord(
     id: crypto.randomUUID(),
     label: fields.label,
     exchangeFile: fields.exchangeFile,
-    side: fields.side,
+    ...(fields.side !== undefined ? { side: fields.side } : {}),
     ...(fields.sharedSecret !== undefined
       ? { sharedSecret: fields.sharedSecret }
       : {}),

@@ -20,6 +20,7 @@ import {
   readManagedCommandLineConfiguration,
 } from "@psi/managed/managedCommandLineImport";
 import {
+  applyManagedExchangeLocalEdits,
   buildManagedExchangeRecord,
   composeManagedExchangeFile,
   runnableManagedExchange,
@@ -37,7 +38,9 @@ import {
 } from "@psi/managed/managedExchangeArtifact";
 
 import type {
+  ExchangeLocator,
   ExchangeSpec,
+  SFTPConnectionConfig,
   WebRTCConnectionConfig,
   WebRTCExchangeLocator,
 } from "@psilink/core";
@@ -185,19 +188,347 @@ describe("accepting a command-line configuration", () => {
   });
 });
 
-describe("refusing what this app cannot hold", () => {
-  test("a connection on another channel names the channel and the limit", () => {
+const sftpLocator: ExchangeLocator = {
+  channel: "sftp",
+  host: "sftp.example.org",
+  port: 2222,
+  path: "/exchange",
+  options: { pollIntervalMs: 5000 },
+};
+
+const filedropLocator: ExchangeLocator = {
+  channel: "filedrop",
+  inboundPath: "/srv/exchange/inbound",
+  outboundPath: "/srv/exchange/outbound",
+  options: {
+    retainFiles: true,
+    timestampInFilename: true,
+    locklessRendezvous: true,
+  },
+};
+
+/** A hand-written file's document on a channel this app does not run: the
+ * credential-free connection its locator expands to, with the SFTP username an
+ * operator fills in, and no `role`, which neither channel has. */
+function documentOn(
+  locator: ExchangeLocator,
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  const connection = connectionFromLocator(locator);
+  return {
+    ...assembleExchangeSpec({
+      connection:
+        connection.channel === "sftp"
+          ? {
+              ...connection,
+              server: { ...connection.server, username: "exchange_operator" },
+            }
+          : connection,
+      linkageTerms,
+    }),
+    ...overrides,
+  };
+}
+
+/** The same document with one line added under its `connection.server` block. */
+function sftpDocumentWithServerLine(line: Record<string, unknown>) {
+  const document = documentOn(sftpLocator);
+  const connection = document.connection as SFTPConnectionConfig;
+  return {
+    ...document,
+    connection: { ...connection, server: { ...connection.server, ...line } },
+  };
+}
+
+describe("accepting a configuration on a channel this app does not run", () => {
+  test.each([
+    ["sftp", sftpLocator],
+    ["filedrop", filedropLocator],
+  ] as const)(
+    "a %s configuration imports as a configuration only, with no side",
+    (channel, locator) => {
+      const record = readManagedCommandLineConfiguration(
+        configText(documentOn(locator)),
+      );
+
+      expect(record.exchangeFile.connection.channel).toBe(channel);
+      expect(record.side).toBeUndefined();
+      expect(record.sharedSecret).toBeUndefined();
+      expect(runnableManagedExchange(record)).toBe(false);
+    },
+  );
+
+  test("a role on a connection that has none is refused by name", () => {
+    const document = documentOn(sftpLocator);
     const message = refusal(
       configText({
-        ...composedDocument(),
-        connection: { channel: "filedrop", path: "/srv/drop" },
+        ...document,
+        connection: {
+          ...(document.connection as SFTPConnectionConfig),
+          role: "acceptor",
+        },
       }),
     );
 
-    expect(message).toContain("filedrop");
-    expect(message).toContain("webrtc exchanges only");
+    expect(message).toContain("connection.role");
   });
 
+  test("an SFTP private key named by @path is held as written", () => {
+    const privateKey = "@/home/operator/.ssh/exchange_key";
+    const record = readManagedCommandLineConfiguration(
+      configText(sftpDocumentWithServerLine({ privateKey })),
+    );
+
+    const { connection } = record.exchangeFile;
+    expect(connection.channel === "sftp" && connection.server.privateKey).toBe(
+      privateKey,
+    );
+  });
+
+  test("an SFTP password written into the file is refused, never echoed", () => {
+    const password = "password-not-in-any-message";
+    const message = refusal(
+      configText(sftpDocumentWithServerLine({ password })),
+    );
+
+    expect(message).toContain("connection.server.password");
+    expect(message).toContain("write the setting as @");
+    expect(message).not.toContain(password);
+  });
+
+  test.each([
+    ["private_key", { privateKey: "-----BEGIN OPENSSH PRIVATE KEY-----" }],
+    [
+      "private_key_passphrase",
+      { privateKey: "@/keys/exchange_key", privateKeyPassphrase: "words" },
+    ],
+  ])("an SFTP %s written into the file is refused by name", (field, line) => {
+    const message = refusal(configText(sftpDocumentWithServerLine(line)));
+
+    expect(message).toContain(`connection.server.${field}`);
+    for (const value of Object.values(line))
+      if (!value.startsWith("@")) expect(message).not.toContain(value);
+  });
+
+  test("an SFTP host-key pin and keyboard_interactive are held as written", () => {
+    const hostKeyFingerprint = [`SHA256:${"A".repeat(43)}`, "@/pins/second"];
+    const record = readManagedCommandLineConfiguration(
+      configText(
+        sftpDocumentWithServerLine({
+          password: "@/secrets/sftp-password",
+          keyboardInteractive: true,
+          hostKeyFingerprint,
+        }),
+      ),
+    );
+
+    const { connection } = record.exchangeFile;
+    if (connection.channel !== "sftp") throw new Error("not an sftp record");
+    expect(connection.server.hostKeyFingerprint).toEqual(hostKeyFingerprint);
+    expect(connection.server.keyboardInteractive).toBe(true);
+  });
+
+  test("a proxy, provisioning endpoint, and provider options are held with @path credentials", () => {
+    const document = sftpDocumentWithServerLine({
+      provision: {
+        host: "wake.example.org",
+        auth: { bearer: "@/secrets/wake.bearer" },
+      },
+    });
+    const record = readManagedCommandLineConfiguration(
+      configText({
+        ...document,
+        connection: {
+          ...document.connection,
+          proxy: {
+            host: "proxy.example.org",
+            auth: { username: "relay", password: "@/secrets/proxy.password" },
+          },
+          providerOptions: {
+            readyTimeout: 20000,
+            passphrase: "@/secrets/key.passphrase",
+          },
+        },
+      }),
+    );
+
+    const { connection } = record.exchangeFile;
+    if (connection.channel !== "sftp") throw new Error("not an sftp record");
+    expect(connection.server.provision?.auth?.bearer).toBe(
+      "@/secrets/wake.bearer",
+    );
+    expect(connection.proxy?.auth).toEqual({
+      username: "relay",
+      password: "@/secrets/proxy.password",
+    });
+    expect(connection.providerOptions).toEqual({
+      readyTimeout: 20000,
+      passphrase: "@/secrets/key.passphrase",
+    });
+  });
+
+  test("a literal credential in a proxy, provisioning auth, or provider option is refused", () => {
+    const secrets = [
+      "bearer-not-echoed",
+      "proxy-not-echoed",
+      "option-not-echoed",
+    ];
+    const document = sftpDocumentWithServerLine({
+      provision: { host: "wake.example.org", auth: { bearer: secrets[0] } },
+    });
+    const message = refusal(
+      configText({
+        ...document,
+        connection: {
+          ...document.connection,
+          proxy: {
+            host: "proxy.example.org",
+            auth: { username: "relay", password: secrets[1] },
+          },
+          providerOptions: { password: secrets[2] },
+        },
+      }),
+    );
+
+    expect(message).toContain(
+      "connection.provider_options.password, connection.proxy.auth.password, " +
+        "connection.server.provision.auth.bearer",
+    );
+    for (const secret of secrets) expect(message).not.toContain(secret);
+  });
+
+  test.each(["password", "passphrase", "privateKey", "private_key"])(
+    "a literal %s under provider options is refused by name",
+    (key) => {
+      const document = sftpDocumentWithServerLine({});
+      const message = refusal(
+        configText({
+          ...document,
+          connection: {
+            ...document.connection,
+            providerOptions: {
+              algorithms: { cipher: ["aes256-gcm@openssh.com"] },
+              [key]: "option-not-echoed",
+            },
+          },
+        }),
+      );
+
+      expect(message).toContain(`connection.provider_options.${key}`);
+      expect(message).not.toContain("connection.provider_options.algorithms");
+      expect(message).not.toContain("option-not-echoed");
+    },
+  );
+
+  test.each([
+    { case: "a numeric password", options: { password: 482915 } },
+    { case: "a boolean passphrase", options: { passphrase: true } },
+  ])("$case under provider options is refused by name", ({ options }) => {
+    const [[key, value]] = Object.entries(options);
+    const document = sftpDocumentWithServerLine({});
+    const source = configText({
+      ...document,
+      connection: { ...document.connection, providerOptions: options },
+    });
+    expect(source).toContain(`${key}: ${String(value)}\n`);
+
+    const message = refusal(source);
+
+    expect(message).toContain(`connection.provider_options.${key}`);
+    expect(message).not.toContain(String(value));
+  });
+
+  test("a credential key in another case or nested deeper is refused by its path", () => {
+    const document = sftpDocumentWithServerLine({});
+    const message = refusal(
+      configText({
+        ...document,
+        connection: {
+          ...document.connection,
+          providerOptions: {
+            Password: "upper-not-echoed",
+            algorithms: {
+              cipher: ["aes256-gcm@openssh.com"],
+              password: "nested-not-echoed",
+            },
+          },
+        },
+      }),
+    );
+
+    expect(message).toContain(
+      "connection.provider_options.Password, " +
+        "connection.provider_options.algorithms.password",
+    );
+    expect(message).not.toContain(
+      "connection.provider_options.algorithms.cipher",
+    );
+    expect(message).not.toContain("upper-not-echoed");
+    expect(message).not.toContain("nested-not-echoed");
+  });
+
+  test("an @path under a respelled or nested credential key is held", () => {
+    const providerOptions = {
+      PASSPHRASE: "@/secrets/key.passphrase",
+      algorithms: {
+        cipher: ["aes256-gcm@openssh.com"],
+        password: "@/secrets/nested.password",
+      },
+    };
+    const document = sftpDocumentWithServerLine({});
+    const record = readManagedCommandLineConfiguration(
+      configText({
+        ...document,
+        connection: { ...document.connection, providerOptions },
+      }),
+    );
+
+    const { connection } = record.exchangeFile;
+    if (connection.channel !== "sftp") throw new Error("not an sftp record");
+    expect(connection.providerOptions).toEqual(providerOptions);
+  });
+
+  test("a literal cipher option is held and comes back unchanged on export", () => {
+    const providerOptions = {
+      algorithms: { cipher: ["aes256-gcm@openssh.com", "aes128-ctr"] },
+      keepaliveInterval: 10000,
+    };
+    const document = sftpDocumentWithServerLine({
+      password: "@/secrets/sftp-password",
+    });
+    const source = configText({
+      ...document,
+      connection: { ...document.connection, providerOptions },
+    });
+
+    const record = readManagedCommandLineConfiguration(source);
+    const { connection } = record.exchangeFile;
+    if (connection.channel !== "sftp") throw new Error("not an sftp record");
+    expect(connection.providerOptions).toEqual(providerOptions);
+
+    const reexported = parseExchangeSpec(
+      parseSensitiveYaml(
+        composeManagedCronExportConfig(record).config.text,
+        "re-export",
+      ),
+    );
+    expect(reexported).toEqual(
+      parseExchangeSpec(parseSensitiveYaml(source, "import")),
+    );
+  });
+
+  test("a key outside the schema under an SFTP server block is refused, not trimmed", () => {
+    const message = refusal(
+      stringifyYaml(
+        snakeizeKeys(sftpDocumentWithServerLine({ mysteryKey: "a line" })),
+      ),
+    );
+
+    expect(message).toContain("server.mystery_key");
+  });
+});
+
+describe("refusing what this app cannot hold", () => {
   test("a credential-bearing connection names the fields, never their values", () => {
     const credential = "turn-credential-not-in-any-message";
     const message = refusal(
@@ -454,6 +785,82 @@ describe("import then export", () => {
     expect(reexported.expectedPayloadColumns).toEqual(["partner_program"]);
     expect(reexported.expectedPartnerDeduplicate).toBe(true);
   });
+});
+
+describe("import, edit, and export on every channel", () => {
+  /** Every setting a stored document can hold that has no editor here, so a
+   * round trip that dropped one would show. */
+  const heldSettings = {
+    metadata: [
+      {
+        name: "case_id",
+        type: "identifier",
+        role: "identifier",
+        isPayload: false,
+      },
+      { name: "program", type: "other", role: "payload", isPayload: true },
+    ],
+    disclosedPayloadColumns: ["program"],
+    expectedPayloadColumns: ["partner_program"],
+    expectedPartnerDeduplicate: true,
+    outboundPayloadConsent: { status: "confirmed", columns: ["program"] },
+    includeOwnColumns: "all",
+    csvDelimiter: ";",
+    retentionDisposition: "Filed with the program office for seven years.",
+  };
+
+  const webrtcDocument = {
+    ...composedDocument(),
+    ...heldSettings,
+    connection: { ...connectionFromLocator(webrtcLocator), role: "acceptor" },
+  };
+
+  const sftpDocument = documentOn(sftpLocator, heldSettings);
+  const sftpConnection = sftpDocument.connection as SFTPConnectionConfig;
+  const sftpDocumentWithCredential = {
+    ...sftpDocument,
+    connection: {
+      ...sftpConnection,
+      server: {
+        ...sftpConnection.server,
+        password: "@secret.txt",
+        hostKeyFingerprint: `SHA256:${"B".repeat(42)}A`,
+      },
+    },
+  };
+
+  test.each([
+    ["webrtc", webrtcDocument],
+    ["sftp", sftpDocument],
+    [
+      "sftp with an @path password and a host-key pin",
+      sftpDocumentWithCredential,
+    ],
+    ["filedrop", documentOn(filedropLocator, heldSettings)],
+  ] as const)(
+    "a %s configuration comes back with the edits and nothing dropped",
+    (_channel, document) => {
+      const source = configText(document);
+      const imported = readManagedCommandLineConfiguration(source);
+
+      const edited = applyManagedExchangeLocalEdits(imported, {
+        label: "Riverbend quarterly",
+        tokenMaxAgeDays: 30,
+      });
+      const exported = parseExchangeSpec(
+        parseSensitiveYaml(
+          composeManagedCronExportConfig(edited).config.text,
+          "re-export",
+        ),
+      );
+
+      expect(edited.label).toBe("Riverbend quarterly");
+      expect(exported).toEqual({
+        ...parseExchangeSpec(parseSensitiveYaml(source, "import")),
+        authentication: { tokenMaxAgeDays: 30 },
+      });
+    },
+  );
 });
 
 describe("routing a file to its leg", () => {

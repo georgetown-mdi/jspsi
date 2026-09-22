@@ -20,26 +20,35 @@
  * the two the export injects on the way out ({@link ./managedCronExport.ts}), so
  * an unedited import and re-export yield the same document:
  *
- * - `connection.role` becomes the record's `side`. The document a stored record
- *   holds has none (docs/spec/MANAGED_EXCHANGE_RECORD.md, "Role: a local `side`
- *   field, not the document"), and a file without one is refused: the CLI itself
- *   refuses to run a webrtc connection that names no role.
+ * - A webrtc `connection.role` becomes the record's `side`. The document a
+ *   stored record holds has none (docs/spec/MANAGED_EXCHANGE_RECORD.md, "Role: a
+ *   local `side` field, not the document"), and a webrtc file without one is
+ *   refused: the CLI itself refuses to run a webrtc connection that names no
+ *   role. The sftp and filedrop connections have no `role` in the shared schema,
+ *   so a configuration on either has no side.
  * - `authentication.token_max_age_days` becomes the record's `tokenMaxAgeDays`.
  *   A stored document holds no `authentication` block at all, so the block is
  *   read for that one policy and dropped.
  *
+ * A configuration on any channel imports. This app runs webrtc exchanges only,
+ * and that limit is met where a run would start rather than here: a record on
+ * another channel is a configuration only, which the record's own shape keeps
+ * from every run (docs/spec/MANAGED_EXCHANGE_RECORD.md, "The configuration-only
+ * record").
+ *
  * Three levels are guarded against an extra key: the top-level document, the
  * connection, and connection.server (the bespoke allowlist below, since the
- * shared schema's own server block is not strict). Below those levels, an
- * unknown key is dropped by the shared schema's non-strict parse rather than
- * refused. The channel must be webrtc -- the one channel this app runs -- and
- * the connection and the document may hold only what the app itself composes
- * ({@link ./managedCommandLineDocument.ts}),
- * which is what keeps a partner's TURN credential, ICE provisioning block,
- * signing identity path, or `@path` reference from being stored here and handed
- * back to the CLI by the next export. A shared secret in the file is refused on
- * the same terms: this import brings back configuration, and the key file stays
- * with the machine that runs the exchange.
+ * shared schema's own server blocks are not strict). Below those levels, an
+ * unknown key is refused by the shared schema's unread-key comparison. The
+ * document may hold only what the app itself composes, and the connection what
+ * a configuration on its channel holds ({@link ./managedCommandLineDocument.ts}):
+ * a credential-free locator on webrtc and filedrop, which keeps a TURN
+ * credential, an ICE provisioning block, or a signing identity path from being
+ * stored here, and the whole connection on sftp, whose record runs nowhere
+ * here. An sftp credential is held as an `@path` reference and refused as a
+ * literal value. A shared secret in the file is refused on the same terms: this
+ * import brings back configuration, and the key file stays with the machine
+ * that runs the exchange.
  */
 
 import { ZodError } from "zod";
@@ -53,13 +62,14 @@ import {
 } from "../exchangeDocumentRefusal";
 
 import {
+  connectionFieldsNotHeld,
   fieldsOutsideComposableDocument,
-  fieldsOutsideLocatorSubset,
-  serverFieldsOutsideLocatorSubset,
+  literalCredentialFields,
+  serverFieldsNotHeld,
 } from "./managedCommandLineDocument";
 import { buildManagedExchangeRecord } from "./managedExchangeRecord";
 
-import type { ExchangeSpec, WebRTCConnectionConfig } from "@psilink/core";
+import type { ConnectionConfig, ExchangeSpec } from "@psilink/core";
 import type {
   ManagedExchangeRecord,
   ManagedExchangeSide,
@@ -78,10 +88,9 @@ const IMPORTED_CONFIGURATION_LABEL = "";
 /**
  * Raised when a file is not a configuration this app takes: a document off the
  * exchange-file schema, or one that parses and holds what this app cannot keep --
- * a channel it does not run, a field outside what it composes, or a secret it
- * does not import. Its message is shown to the operator, so it states what the
- * file holds and what to do about it, and it names FIELD NAMES only -- a field's
- * value is the credential.
+ * a field outside what it composes, or a secret it does not import. Its message
+ * is shown to the operator, so it states what the file holds and what to do
+ * about it, and it names FIELD NAMES only -- a field's value is the credential.
  */
 export class ManagedConfigurationRefusedError extends Error {
   constructor(message: string) {
@@ -133,62 +142,70 @@ function importedDocument(raw: unknown): ExchangeSpec {
 }
 
 /**
- * Narrow the document's connection to the credential-free webrtc locator this
- * app composes, or refuse. A hard refusal on both counts: the browser runs
- * webrtc exchanges and no other, and a field outside the locator subset is a
- * credential or a path this app would store and hand back to the command line.
+ * Narrow the document's connection to what a configuration on its channel
+ * holds, or refuse. A hard refusal: a field outside it is a credential or a
+ * path this app would store and hand back to the command line, and a literal
+ * credential is a secret this app does not store.
  *
  * The `server` block is measured on the file's own object as well as on the
- * parsed connection: the shared schema's server block is not strict, so a key
- * outside it is stripped by the parse and would reach no allowlist at all.
+ * parsed connection: the shared schema's server blocks are not strict, so a key
+ * outside one is stripped by the parse and would reach no allowlist at all.
  */
-function importedWebrtcConnection(
+function importedConnection(
   document: ExchangeSpec,
   raw: unknown,
-): WebRTCConnectionConfig {
+): ConnectionConfig {
   const connection = document.connection;
-  if (connection.channel !== "webrtc")
-    throw new ManagedConfigurationRefusedError(
-      `This configuration runs over ${connection.channel}. This app runs ` +
-        "webrtc exchanges only, so it cannot hold this one. Run it with " +
-        "psilink on the command line instead.",
-    );
   const outside = [
     ...new Set([
-      ...fieldsOutsideLocatorSubset(withoutRole(connection)),
-      ...serverFieldsOutsideLocatorSubset(
+      ...connectionFieldsNotHeld(withoutRole(connection)),
+      ...serverFieldsNotHeld(
+        connection.channel,
         documentValueAt(raw, ["connection", "server"]),
       ),
     ]),
   ].sort();
   if (outside.length > 0)
     throw new ManagedConfigurationRefusedError(
-      "This configuration's connection holds settings this app does not use " +
-        "and would hand back to the command line unchanged -- a credential, " +
-        "an address, or a file it would open. Remove these lines from the " +
-        "connection and import it again: " +
+      "This configuration's connection holds settings this app does not " +
+        "keep -- a credential, or an address or file the command line would " +
+        "open. Remove these lines from the connection and import it again: " +
         outside.join(", ") +
-        ".",
+        ". The configuration this app hands back leaves them out, so add " +
+        "them back to that file before you run it.",
+    );
+  const literal = literalCredentialFields(connection);
+  if (literal.length > 0)
+    throw new ManagedConfigurationRefusedError(
+      "This configuration writes a credential into the file itself: " +
+        literal.join(", ") +
+        ". This app does not store a credential. Put each in a file of its " +
+        "own, write the setting as @ followed by that file's path, and " +
+        "import it again.",
     );
   return connection;
 }
 
-/** The connection without the `role` this import consumes, so the locator
- * allowlist measures only the fields that stay in the stored document. */
-function withoutRole(
-  connection: WebRTCConnectionConfig,
-): WebRTCConnectionConfig {
+/** The connection without the webrtc `role` this import consumes, so the
+ * locator allowlist measures only the fields that stay in the stored document.
+ * No other channel has a `role`. */
+function withoutRole(connection: ConnectionConfig): ConnectionConfig {
+  if (connection.channel !== "webrtc") return connection;
   const { role: _role, ...rest } = connection;
   return rest;
 }
 
 /**
- * The side this party takes, read from `connection.role`. A file that names none
- * is refused rather than guessed: the role decides which rendezvous id each
- * party registers under, and the CLI refuses a roleless webrtc connection on the
- * same grounds (`apps/cli/src/protocol.ts`).
+ * The side this party takes, read from a webrtc `connection.role`, and none on
+ * any other channel. A webrtc file that names none is refused rather than
+ * guessed: the role decides which rendezvous id each party registers under,
+ * and the CLI refuses a roleless webrtc connection on the same grounds
+ * (`apps/cli/src/protocol.ts`).
  */
-function importedSide(connection: WebRTCConnectionConfig): ManagedExchangeSide {
+function importedSide(
+  connection: ConnectionConfig,
+): ManagedExchangeSide | undefined {
+  if (connection.channel !== "webrtc") return undefined;
   const { role } = connection;
   if (role === undefined)
     throw new ManagedConfigurationRefusedError(
@@ -227,7 +244,7 @@ function importedTokenMaxAgeDays(document: ExchangeSpec): number | undefined {
 
 /**
  * The document a configuration-only record stores: the parsed file with the two
- * local fields taken out of it -- no `role` on the connection, no
+ * local fields taken out of it -- no webrtc `role` on the connection, no
  * `authentication` block -- re-validated so what is stored is a schema parse
  * result rather than an edited object.
  *
@@ -236,7 +253,7 @@ function importedTokenMaxAgeDays(document: ExchangeSpec): number | undefined {
  */
 function storedDocument(
   document: ExchangeSpec,
-  connection: WebRTCConnectionConfig,
+  connection: ConnectionConfig,
 ): ExchangeSpec {
   const { authentication: _authentication, ...rest } = document;
   return importedDocument({ ...rest, connection: withoutRole(connection) });
@@ -252,8 +269,8 @@ function storedDocument(
  *
  * @throws {UsageError} if the bytes are not parseable YAML.
  * @throws {ManagedConfigurationRefusedError} if the document is not a valid
- *   exchange file, or is one this app cannot hold (another channel, a field
- *   outside what it composes, a secret, or no role).
+ *   exchange file, or is one this app cannot hold (a field outside what it
+ *   composes, a secret, or a webrtc connection naming no role).
  * @throws {ZodError} if the record built from the document is not a valid
  *   record.
  */
@@ -262,24 +279,24 @@ export function readManagedCommandLineConfiguration(
 ): ManagedExchangeRecord {
   const raw = parseSensitiveYaml(source, "command-line exchange configuration");
   const document = importedDocument(raw);
-  const connection = importedWebrtcConnection(document, raw);
+  const connection = importedConnection(document, raw);
   const side = importedSide(connection);
   const tokenMaxAgeDays = importedTokenMaxAgeDays(document);
   const exchangeFile = storedDocument(document, connection);
   const outside = fieldsOutsideComposableDocument(exchangeFile);
   if (outside.length > 0)
     throw new ManagedConfigurationRefusedError(
-      "This configuration holds settings this app does not use and would " +
-        "hand back to the command line unchanged -- a file it would open, a " +
-        "file it would write, or a fingerprint it would pin. Remove these " +
-        "top-level lines and import it again: " +
+      "This configuration holds settings this app does not keep -- a file " +
+        "the command line would open or write, or a fingerprint it would " +
+        "pin. Remove these top-level lines and import it again: " +
         outside.join(", ") +
-        ".",
+        ". The configuration this app hands back leaves them out, so add " +
+        "them back to that file before you run it.",
     );
   return buildManagedExchangeRecord({
     label: IMPORTED_CONFIGURATION_LABEL,
     exchangeFile,
-    side,
+    ...(side !== undefined ? { side } : {}),
     ...(tokenMaxAgeDays !== undefined ? { tokenMaxAgeDays } : {}),
   });
 }

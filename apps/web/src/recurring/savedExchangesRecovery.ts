@@ -5,19 +5,21 @@
  * reads and the delete action live in the component, so the display derivation is
  * unit-testable in Node.
  *
- * A readable entry shows its label, side, and last-run date; an unreadable entry
- * shows a fixed "Unreadable record" label and no other detail, since nothing
- * about it could be parsed. Every row holds the stored key the one-step
- * delete-by-key acts on, so an unreadable record is discardable without a
- * successful parse, and the custody the delete confirm states -- an exported backup,
- * and the hand-off a spend gave the copy to -- which survives a record's
- * unreadability because it is the sibling entry's, not the record's. Secret material
- * never reaches this model: the diagnostic entries hold display essentials only.
+ * A readable entry shows its label, its side (or, for a configuration on a
+ * channel that names no side, the channel, named as the saved-exchanges list
+ * names it), and last-run date; an unreadable entry shows a fixed "Unreadable
+ * record" label and no other detail, since nothing about it could be parsed.
+ * Every row holds the stored key the one-step delete-by-key acts on, so an
+ * unreadable record is discardable without a successful parse, and the custody
+ * the delete confirm states -- an exported backup, and the hand-off a spend
+ * gave the copy to -- which survives a record's unreadability because it is the
+ * sibling entry's, not the record's. Secret material never reaches this model:
+ * the diagnostic entries hold display essentials only.
  */
 
 import { dateLabel } from "@psi/formatting";
 
-import { SIDE_LABEL } from "./savedExchangesModel";
+import { rowSideLabel } from "./savedExchangesModel";
 
 import type { ManagedExchangeDiagnosticEntry } from "@psi/managed/managedExchangeStore";
 import type { ManagedSpentHandoff } from "@psi/managed/managedLocalState";
@@ -32,8 +34,9 @@ export const UNREADABLE_RECORD_LABEL = "Unreadable record";
  * {@link UNREADABLE_RECORD_LABEL} when the entry could not be parsed), the raw label
  * the delete confirm names (empty when unlabeled, so the button's own empty-label
  * branch fires rather than reading a doubly-transformed "(unnamed exchange)"), the
- * side and last-run date when parseable, whether the entry was unreadable, and
- * whether an exported backup remains under the operator's custody. */
+ * side (or channel) and last-run date when parseable, whether the entry was
+ * unreadable, and whether an exported backup remains under the operator's
+ * custody. */
 export interface RecoveryRow {
   /** The stored key the one-step delete-by-key dispatches on. */
   id: string;
@@ -43,7 +46,9 @@ export interface RecoveryRow {
    * confirm reads "Delete this exchange?" exactly as the normal list's does, not the
    * transformed row text. Always empty on an unreadable row. */
   deleteLabel: string;
-  /** This party's side, as the listing names it; absent on an unreadable row. */
+  /** This party's side, or the channel for a configuration on one that names
+   * no side, as the saved-exchanges list names it (see {@link rowSideLabel});
+   * absent on an unreadable row. */
   sideLabel?: string;
   /** The last run's calendar-day phrase, when the entry parsed and had a run. */
   lastRunAt?: string;
@@ -87,7 +92,7 @@ export function recoveryRow(
     id: essentials.id,
     label: essentials.label === "" ? "(unnamed exchange)" : essentials.label,
     deleteLabel: essentials.label,
-    sideLabel: SIDE_LABEL[essentials.side],
+    sideLabel: rowSideLabel(essentials.side, essentials.elsewhereChannel),
     ...(essentials.lastRunAt !== undefined
       ? { lastRunAt: dateLabel(new Date(essentials.lastRunAt)) }
       : {}),

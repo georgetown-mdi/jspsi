@@ -494,4 +494,25 @@ describe("a configuration-only row", () => {
       false,
     );
   });
+
+  test("a configuration on a channel this app does not run names it and withholds Run", () => {
+    const { sharedSecret: _sharedSecret, side: _side, ...rest } = record();
+    const row = savedExchangeRow(
+      {
+        ...rest,
+        exchangeFile: {
+          ...rest.exchangeFile,
+          connection: { channel: "filedrop", path: "/srv/exchange" },
+        },
+      },
+      undefined,
+      NOW,
+    );
+
+    expect(row.configurationOnly).toBe(true);
+    expect(row.sideLabel).toBe("Shared-folder exchange");
+    expect(row.status).toBe(
+      "Configuration only - this app cannot run it, run it with psilink",
+    );
+  });
 });

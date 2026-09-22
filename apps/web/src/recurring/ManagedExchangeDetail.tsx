@@ -365,10 +365,12 @@ function ConfigurationView({
   return (
     <div className={styles.callout}>
       <h2 className={styles.eyebrow}>Configuration</h2>
-      <div className={styles.dlRow}>
-        <span className={styles.dlLabel}>Your side</span>
-        <span>{SIDE_LABELS[record.side]}</span>
-      </div>
+      {record.side !== undefined && (
+        <div className={styles.dlRow}>
+          <span className={styles.dlLabel}>Your side</span>
+          <span>{SIDE_LABELS[record.side]}</span>
+        </div>
+      )}
       {connectionRows(record.exchangeFile).map((row) => (
         <ConfigRowItem key={row.label} row={row} />
       ))}
