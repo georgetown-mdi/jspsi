@@ -115,7 +115,10 @@ import {
 } from "@console/sftpConnectionChoice";
 import { consoleAcquiredCsv } from "@console/consoleAcquiredCsv";
 
-import { MountedConfigurationCard } from "@console/MountedConfigurationCard";
+import {
+  DivergedCommitmentNotice,
+  MountedConfigurationCard,
+} from "@console/MountedConfigurationCard";
 import { editorWithLoadedTerms } from "@console/loadedConfig";
 import { fetchMountedConfiguration } from "@psi/jobClient/mountedConfigClient";
 
@@ -1255,6 +1258,19 @@ export function InviterScreen() {
   const fileReady = name.trim().length > 0 && linkable;
   const sealed = editor?.sealed === true;
 
+  // What an open configuration's commitments are read against: the set this
+  // draft would send and the direction it would send it in. Absent until a file
+  // is read, where no draft settles either.
+  const runDisclosure =
+    editor === undefined
+      ? undefined
+      : {
+          disclosedColumns: disclosedColumnNames(editor.draft.metadata),
+          sharesWithPartner: outputForDirection(editor.draft.outputDirection)
+            .shareWithPartner,
+          records: loadedEnforcementRecords,
+        };
+
   // Inside a Customize tab no spine step is current; the step the operator
   // came from stays navigable like any completed step. The share and save
   // sections have their own rails, so neither is a Customize tab.
@@ -1390,16 +1406,7 @@ export function InviterScreen() {
           <MountedConfigurationCard
             state={mountedConfiguration}
             sealed={sealed}
-            disclosure={
-              editor === undefined
-                ? undefined
-                : {
-                    disclosedColumns: disclosedColumnNames(
-                      editor.draft.metadata,
-                    ),
-                    records: loadedEnforcementRecords,
-                  }
-            }
+            disclosure={runDisclosure}
             onOpen={() => void openMountedConfiguration()}
             onClose={closeMountedConfiguration}
           />
@@ -1428,6 +1435,12 @@ export function InviterScreen() {
             }}
             onLoadSample={loadSample}
             onDownloadSamples={downloadSampleCsvs}
+          />
+        )}
+        {isConsoleBuild() && section === "columns" && (
+          <DivergedCommitmentNotice
+            state={mountedConfiguration}
+            disclosure={runDisclosure}
           />
         )}
         {section === "columns" &&

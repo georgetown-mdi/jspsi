@@ -29,6 +29,8 @@ import {
   CSV_DELIMITER_OTHER,
   INITIAL_CSV_DELIMITER_CHOICE,
 } from "@components/csvDelimiterChoice";
+import { isDisclosedToPartner } from "@psilink/core";
+
 import { OWN_COLUMNS_DEFAULT } from "@psi/ownColumnsModel";
 
 import {
@@ -48,17 +50,19 @@ import { EXCHANGE_FILES_DEFAULT } from "./exchangeFilesModel";
 
 import type { AcquiredCsv, InviterEditor } from "@psi/inviterEditor";
 import type {
-  DisclosedExchangeDocument,
-  DisclosedFileSyncOptions,
-  DisclosedSftpServer,
-} from "@jobs/configLoad";
-import type {
+  ColumnMetadata,
   LinkageTerms,
   Metadata,
   OutboundPayloadConsent,
   Standardization,
 } from "@psilink/core";
+import type {
+  DisclosedExchangeDocument,
+  DisclosedFileSyncOptions,
+  DisclosedSftpServer,
+} from "@jobs/configLoad";
 import type { CsvDelimiterChoice } from "@components/csvDelimiterChoice";
+import type { DisclosureChoice } from "@psi/metadataEditing";
 import type { OwnColumnsChoice } from "@psi/ownColumnsModel";
 import type { ReceiptsSigningMode } from "@psi/receiptsModel";
 
@@ -316,6 +320,23 @@ function withColumnDescription(
 }
 
 /**
+ * The disclosure choice a loaded column takes, read from what core transmits it
+ * as ({@link isDisclosedToPartner}) rather than from its `role` alone, so the
+ * merged draft sends exactly the columns the document sends.
+ *
+ * The columns step holds `role` and `isPayload` as one collapsed choice, so a
+ * pair core admits off that diagonal has no choice of its own: a `role: payload`
+ * column with `is_payload: false` sends nothing and takes `ignored`, while a
+ * `role: linkage` or `role: identifier` column with `is_payload: true` does
+ * send, so it takes `payload` and loses its matching or identifier half. Each
+ * such pair is reported by the merge rather than passed over as applied.
+ */
+function loadedDisclosureOf(column: ColumnMetadata): DisclosureChoice {
+  if (isDisclosedToPartner(column)) return "payload";
+  return column.role === "payload" ? "ignored" : disclosureOf(column);
+}
+
+/**
  * The column set the import binds against: the operator's own inferred columns
  * with each role, type, and description the document states for a column of
  * that name put back, through the same editing helpers the columns step uses,
@@ -330,10 +351,12 @@ function withColumnDescription(
  * `covered` reports whether the document's set reached every column the file
  * has, for the notice beside the load control.
  *
- * What the merge lands on is read back against what the document states, so a
- * column the single-identifier rule demoted -- a document naming two identifier
- * columns keeps the last one and the rule sends the other to `ignored` -- counts
- * as a setting this file could not take whole, rather than a silent divergence
+ * What the merge lands on is read back against the `role` and `is_payload` the
+ * document states for each column, so a pair the columns step cannot hold --
+ * the off-diagonal ones {@link loadedDisclosureOf} collapses, and a column the
+ * single-identifier rule demoted, a document naming two identifier columns
+ * keeping the last one and sending the other to `ignored` -- counts as a
+ * setting this file could not take whole, rather than a silent divergence
  * between the run and the file it was opened from.
  */
 function metadataWithLoadedColumns(
@@ -349,7 +372,7 @@ function metadataWithLoadedColumns(
     metadata = setColumnDisclosure(
       metadata,
       column.name,
-      disclosureOf(column),
+      loadedDisclosureOf(column),
     ).metadata;
     metadata = withColumnDescription(metadata, column.name, column.description);
   }
@@ -362,7 +385,11 @@ function metadataWithLoadedColumns(
   }
   const whole = loaded.every((column) => {
     const own = metadata.find((merged) => merged.name === column.name);
-    return own !== undefined && disclosureOf(own) === disclosureOf(column);
+    return (
+      own !== undefined &&
+      own.role === column.role &&
+      own.isPayload === column.isPayload
+    );
   });
   return { metadata, whole, covered: unstated.length === 0 };
 }

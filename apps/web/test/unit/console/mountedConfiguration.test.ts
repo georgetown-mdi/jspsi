@@ -7,6 +7,7 @@ import {
   CONFIGURATION_READ_UNAVAILABLE,
   MOUNTED_CONFIGURATION_UNREAD,
   NO_CONFIGURATION_IN_FOLDER,
+  PENDING_OUTBOUND_CONSENT_WARNING,
   carriedThroughNotice,
   columnsNotCoveredNotice,
   credentialWarningNotice,
@@ -344,6 +345,40 @@ describe("columns the configuration does not state", () => {
   });
 });
 
+// A consent record the file states as pending confirms no set, so core refuses
+// every run that shares results with the partner until it is confirmed. The
+// operator meets that beside the load rather than as a failed run.
+describe("a consent record the configuration leaves pending", () => {
+  test("the control warns, naming the setting and where to confirm it", () => {
+    const read = mountedConfigurationRead(
+      opened({ outboundPayloadConsent: { status: "pending" } }),
+    );
+    expect(mountedConfigurationNotices(read.state)).toContain(
+      PENDING_OUTBOUND_CONSENT_WARNING,
+    );
+    expect(PENDING_OUTBOUND_CONSENT_WARNING).toContain(
+      "outbound_payload_consent",
+    );
+    expect(PENDING_OUTBOUND_CONSENT_WARNING).toMatch(/pending/);
+    expect(PENDING_OUTBOUND_CONSENT_WARNING).toMatch(/command line/);
+  });
+
+  test("a confirmed record, and no record at all, warn about nothing", () => {
+    const confirmed = mountedConfigurationRead(
+      opened({
+        outboundPayloadConsent: { status: "confirmed", columns: ["dob"] },
+      }),
+    );
+    const none = mountedConfigurationRead(opened());
+    for (const read of [confirmed, none])
+      expect(
+        mountedConfigurationNotices(read.state).includes(
+          PENDING_OUTBOUND_CONSENT_WARNING,
+        ),
+      ).toBe(false);
+  });
+});
+
 // A commitment the file states about what this party discloses is enforced when
 // the run starts, against the set the run would disclose: core compares the two
 // sets and refuses on any difference. The warning reports exactly that refusal,
@@ -382,6 +417,7 @@ describe("a disclosure commitment the run's own columns no longer match", () => 
     expect(
       divergedCommitments(read.state, {
         disclosedColumns: ["program_code"],
+        sharesWithPartner: true,
         records,
       }),
     ).toEqual([]);
@@ -391,6 +427,7 @@ describe("a disclosure commitment the run's own columns no longer match", () => 
     expect(
       divergedCommitments(read.state, {
         disclosedColumns: ["program_code", "program_code"],
+        sharesWithPartner: true,
         records: { disclosedPayloadColumns: ["program_code"] },
       }),
     ).toEqual([]);
@@ -398,11 +435,16 @@ describe("a disclosure commitment the run's own columns no longer match", () => 
 
   test("a column dropped from the set, and one added to it, each raise it", () => {
     expect(
-      divergedCommitments(read.state, { disclosedColumns: [], records }),
+      divergedCommitments(read.state, {
+        disclosedColumns: [],
+        sharesWithPartner: true,
+        records,
+      }),
     ).toEqual(["disclosed_payload_columns", "outbound_payload_consent"]);
     expect(
       divergedCommitments(read.state, {
         disclosedColumns: ["program_code", "dob"],
+        sharesWithPartner: true,
         records,
       }),
     ).toEqual(["disclosed_payload_columns", "outbound_payload_consent"]);
@@ -412,6 +454,7 @@ describe("a disclosure commitment the run's own columns no longer match", () => 
     expect(
       divergedCommitments(read.state, {
         disclosedColumns: ["dob"],
+        sharesWithPartner: true,
         records: { outboundPayloadConsent: { status: "pending" } },
       }),
     ).toEqual([]);
@@ -422,6 +465,7 @@ describe("a disclosure commitment the run's own columns no longer match", () => 
     expect(
       divergedCommitments(plain.state, {
         disclosedColumns: ["dob"],
+        sharesWithPartner: true,
         records: {},
       }),
     ).toEqual([]);
@@ -436,10 +480,30 @@ describe("a disclosure commitment the run's own columns no longer match", () => 
     ).toBe(false);
   });
 
+  test("a partner taking no results is past core's consent gate", () => {
+    // core's `assessOutboundPayloadConsent` answers not-required where
+    // `output.shareWithPartner` is false: the run sends nothing, so the consent
+    // record has nothing to hold. The commitment beside it has no such gate.
+    expect(
+      divergedCommitments(read.state, {
+        disclosedColumns: ["dob"],
+        sharesWithPartner: false,
+        records,
+      }),
+    ).toEqual(["disclosed_payload_columns"]);
+    expect(
+      divergedCommitments(read.state, {
+        disclosedColumns: ["dob"],
+        sharesWithPartner: true,
+        records,
+      }),
+    ).toEqual(["disclosed_payload_columns", "outbound_payload_consent"]);
+  });
+
   test("it is the last thing said beside the control", () => {
     const notices = mountedConfigurationNotices(
       withTermsNotApplied(read.state, ["metadata"]),
-      { disclosedColumns: [], records },
+      { disclosedColumns: [], sharesWithPartner: true, records },
     );
     expect(notices.at(-1)).toContain("a run started here is refused");
   });

@@ -329,3 +329,48 @@ describe("the open configuration over the files it is derived across", () => {
     ).toBeNull();
   });
 });
+
+// The warning about a commitment the run's own columns no longer match names
+// the columns step as the way out, so it stands on that step too -- and nothing
+// else the load says does: those are about the load itself.
+describe("the divergence warning on the step that resolves it", () => {
+  /** The document's commitment on a column its own metadata keeps back, so the
+   * run discloses nothing and core refuses it. */
+  const COMMITTED = {
+    ...CONFIG_DOCUMENT,
+    metadata: STATED_COLUMNS,
+    disclosedPayloadColumns: ["program_code"],
+  };
+
+  async function goToColumns(document: unknown): Promise<void> {
+    stubConfigRoute(
+      { status: 200, body: openedBody(document) },
+      { files: [CLIENTS_FILE] },
+    );
+    app.render(createElement(InviterScreen));
+    await userEvent.fill(page.getByLabelText("Your name"), "Dana Okafor");
+    await openConfiguration();
+    await commitFile();
+    await page
+      .getByRole("button", { name: "Continue to matching & sharing" })
+      .click();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toMatchTextContent("Matching & sharing");
+  }
+
+  test("a diverged commitment is reported where the columns are edited", async () => {
+    await goToColumns(COMMITTED);
+    await expect
+      .element(page.getByText(/a run started here is refused/))
+      .toBeInTheDocument();
+    // What the load says about itself stays on the file step: the carry-through
+    // notice names this same record there and does not follow it here.
+    expect(page.getByText(/has no control for/).query()).toBeNull();
+  });
+
+  test("a configuration whose commitment holds says nothing here", async () => {
+    await goToColumns({ ...CONFIG_DOCUMENT, metadata: STATED_COLUMNS });
+    expect(page.getByText(/a run started here is refused/).query()).toBeNull();
+  });
+});

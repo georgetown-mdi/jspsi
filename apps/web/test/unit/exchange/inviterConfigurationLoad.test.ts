@@ -21,6 +21,7 @@ import { RECEIPTS_DEFAULT, receiptsIntentFields } from "@psi/receiptsModel";
 import {
   CONFIGURATION_LOAD_SEALED,
   MOUNTED_CONFIGURATION_UNREAD,
+  PENDING_OUTBOUND_CONSENT_WARNING,
   mountedConfigurationNotices,
   mountedConfigurationOfferable,
 } from "@console/mountedConfiguration";
@@ -32,8 +33,13 @@ import {
   csvDelimiterFromDocument,
   editorWithLoadedTerms,
 } from "@console/loadedConfig";
-import { editorFromCsv, editorWithIncludeOwnColumns } from "@psi/inviterEditor";
+import {
+  editorFromCsv,
+  editorWithIncludeOwnColumns,
+  editorWithOutputDirection,
+} from "@psi/inviterEditor";
 import { EMPTY_SFTP_FORM } from "@console/sftpConnectionForm";
+import { outputForDirection } from "@psi/authoring/advancedInvite";
 
 import {
   INVITER_SCREEN_INITIAL,
@@ -47,6 +53,7 @@ import { jobCreateIntentSchema } from "@jobs/intentSchemas";
 
 import { testSftpServerEntry } from "../../utils/jobFixtures";
 
+import type { ColumnMetadata, Metadata } from "@psilink/core";
 import type {
   JobInputSource,
   ServerJobExchangeTransport,
@@ -54,8 +61,8 @@ import type {
 import type { AcquiredCsv } from "@psi/inviterEditor";
 import type { DisclosedExchangeDocument } from "@jobs/configLoad";
 import type { InviterScreenState } from "@exchange/inviterScreenModel";
-import type { Metadata } from "@psilink/core";
 import type { MountedConfigurationAnswer } from "@psi/jobClient/mountedConfigClient";
+import type { OutputDirection } from "@psi/authoring/advancedInvite";
 import type { ProfiledJobInput } from "@psi/jobClient/workInputClient";
 
 // Opening a mounted configuration into the inviter console: which authoring step
@@ -201,10 +208,21 @@ function withFileRead(
   return withLoadedTermsDerived(withFileCommitted(state, csv));
 }
 
+/** The inference over this file's headers as a configuration states it: the
+ * record identifier held back, the pair `role: identifier` takes in the columns
+ * step. Inference itself states that column as sent beside the identifier role
+ * ({@link inferMetadata}), the one pair the step cannot hold, which the
+ * off-diagonal cases below drive on its own. */
+function documentColumns(columns: Array<string> = COLUMNS): Metadata {
+  return inferMetadata(columns, []).map((column) =>
+    column.role === "identifier" ? { ...column, isPayload: false } : column,
+  );
+}
+
 /** A document's own `metadata`: every column this file has, with `program_code`
  * stated as one this party keeps to itself where inference would send it. */
 function statedColumns(): Metadata {
-  return inferMetadata(COLUMNS, []).map((column) =>
+  return documentColumns().map((column) =>
     column.name === "program_code"
       ? { ...column, role: "ignored" as const, isPayload: false }
       : column,
@@ -214,7 +232,7 @@ function statedColumns(): Metadata {
 /** The same document stating four of the file's five columns: `program_code`,
  * the one column inference sends to the partner, goes unnamed. */
 function fourOfFiveColumns(): Metadata {
-  return inferMetadata(COLUMNS.slice(0, 4), []);
+  return documentColumns(COLUMNS.slice(0, 4));
 }
 
 function columnRole(state: InviterScreenState, name: string) {
@@ -231,9 +249,25 @@ function noticesOf(state: InviterScreenState): Array<string> {
       ? undefined
       : {
           disclosedColumns: disclosedColumnNames(state.editor.draft.metadata),
+          sharesWithPartner: outputForDirection(
+            state.editor.draft.outputDirection,
+          ).shareWithPartner,
           records: state.loadedEnforcementRecords,
         },
   );
+}
+
+/** The screen with the matched results going where this direction sends them,
+ * the choice the review step makes. */
+function withOutputDirection(
+  state: InviterScreenState,
+  direction: OutputDirection,
+): InviterScreenState {
+  if (state.editor === undefined) throw new Error("expected a seated editor");
+  return inviterScreenReducer(state, {
+    type: "editor-applied",
+    editor: editorWithOutputDirection(state.editor, direction),
+  });
 }
 
 /** Whether the load control warns that a run started here is refused for a
@@ -884,6 +918,71 @@ describe("a loaded configuration reaches the editor once a file is read", () => 
   });
 });
 
+// core reads a column's transmission from `is_payload` beside its role
+// (`isDisclosedToPartner`), not from the role alone, so a configuration can
+// state a pair the columns step's single choice cannot hold. What the merge
+// keeps is what the document sends; the pair it could not hold whole is named
+// beside the load rather than passed over.
+describe("a column whose is_payload does not follow its role", () => {
+  function mergedOver(column: ColumnMetadata) {
+    const metadata: Metadata = statedColumns().map((own) =>
+      own.name === column.name ? column : own,
+    );
+    const applied = withFileRead(
+      loadedInto(INVITER_SCREEN_INITIAL, sftpDocument({ metadata })),
+    );
+    return {
+      documentSends: disclosedColumnNames(metadata),
+      draftSends: disclosedColumnNames(applied.editor?.draft.metadata ?? []),
+      role: (name: string) => columnRole(applied, name)?.role,
+      notApplied: noticesOf(applied).find((text) =>
+        text.includes("cannot supply"),
+      ),
+    };
+  }
+
+  test("a payload column stated as not sent is not sent from here", () => {
+    const merged = mergedOver({
+      name: "program_code",
+      type: "other",
+      role: "payload",
+      isPayload: false,
+    });
+    expect(merged.documentSends).toEqual([]);
+    expect(merged.draftSends).toEqual(merged.documentSends);
+    expect(merged.notApplied).toContain("metadata");
+  });
+
+  test("a record identifier stated as sent is sent, not held as one", () => {
+    // Inference states this pair for an `_id` column, so a configuration
+    // written from it sends that column on the command line. The step holds
+    // either the identifier role or the sending one, and it takes sending, so
+    // the run discloses what the file discloses.
+    const merged = mergedOver({
+      name: "client_id",
+      type: "identifier",
+      role: "identifier",
+      isPayload: true,
+    });
+    expect(merged.documentSends).toEqual(["client_id"]);
+    expect(merged.draftSends).toEqual(merged.documentSends);
+    expect(merged.role("client_id")).toBe("payload");
+    expect(merged.notApplied).toContain("metadata");
+  });
+
+  test("a matching column stated as sent is sent from here", () => {
+    const merged = mergedOver({
+      name: "dob",
+      type: "date_of_birth",
+      role: "linkage",
+      isPayload: true,
+    });
+    expect(merged.documentSends).toEqual(["dob"]);
+    expect(merged.draftSends).toEqual(merged.documentSends);
+    expect(merged.notApplied).toContain("metadata");
+  });
+});
+
 // A document stating `metadata` states the column set whole, the way the command
 // line reads it, so a column of this file the document does not name is held
 // back rather than disclosed on inference's default.
@@ -1023,7 +1122,7 @@ describe("a disclosure commitment the run's own columns no longer match", () => 
             status: "confirmed",
             columns: ["program_code"],
           },
-          metadata: inferMetadata(COLUMNS, []),
+          metadata: documentColumns(),
         }),
       ),
     );
@@ -1040,7 +1139,7 @@ describe("a disclosure commitment the run's own columns no longer match", () => 
         sftpDocument({
           disclosedPayloadColumns: ["program_code"],
           metadata: [
-            ...inferMetadata(COLUMNS, []),
+            ...documentColumns(),
             {
               name: "household_id",
               type: "other",
@@ -1088,5 +1187,80 @@ describe("a disclosure commitment the run's own columns no longer match", () => 
       noticesOf(applied).find((text) => text.includes("cannot supply")),
     ).toContain("metadata");
     expect(refusalWarned(applied)).toBe(false);
+  });
+});
+
+// core's consent gate reads the run's output direction: a partner not entitled
+// to the matched results receives nothing, so the consent record holds nothing
+// and the run is allowed. The commitment beside it is held in either direction.
+describe("a run the partner takes no results from", () => {
+  const loaded = loadedInto(
+    INVITER_SCREEN_INITIAL,
+    sftpDocument({
+      outboundPayloadConsent: {
+        status: "confirmed",
+        columns: ["household_id"],
+      },
+      metadata: statedColumns(),
+    }),
+  );
+
+  test("warns of the consent record where the partner receives", () => {
+    const applied = withOutputDirection(withFileRead(loaded), "both");
+    const warning = noticesOf(applied).find((text) =>
+      text.includes("a run started here is refused"),
+    );
+    expect(warning).toContain("outbound_payload_consent");
+  });
+
+  test("warns of nothing where only the inviter receives", () => {
+    const applied = withOutputDirection(withFileRead(loaded), "inviter");
+    expect(refusalWarned(applied)).toBe(false);
+  });
+
+  test("still holds the commitment core enforces in either direction", () => {
+    const committed = loadedInto(
+      INVITER_SCREEN_INITIAL,
+      sftpDocument({
+        disclosedPayloadColumns: ["household_id"],
+        metadata: statedColumns(),
+      }),
+    );
+    const applied = withOutputDirection(withFileRead(committed), "inviter");
+    const warning = noticesOf(applied).find((text) =>
+      text.includes("a run started here is refused"),
+    );
+    expect(warning).toContain("disclosed_payload_columns");
+    expect(warning).not.toContain("outbound_payload_consent");
+  });
+});
+
+// A consent record the file leaves pending confirms no column set, so core
+// refuses every run that shares results with the partner until the command line
+// confirms one. The load says so rather than leaving it to a failed run.
+describe("a consent record the configuration leaves pending", () => {
+  test("the load warns, and a confirmed record does not", () => {
+    const pending = withFileRead(
+      loadedInto(
+        INVITER_SCREEN_INITIAL,
+        sftpDocument({
+          outboundPayloadConsent: { status: "pending" },
+          metadata: statedColumns(),
+        }),
+      ),
+    );
+    expect(noticesOf(pending)).toContain(PENDING_OUTBOUND_CONSENT_WARNING);
+    const confirmed = withFileRead(
+      loadedInto(
+        INVITER_SCREEN_INITIAL,
+        sftpDocument({
+          outboundPayloadConsent: { status: "confirmed", columns: [] },
+          metadata: statedColumns(),
+        }),
+      ),
+    );
+    expect(noticesOf(confirmed)).not.toContain(
+      PENDING_OUTBOUND_CONSENT_WARNING,
+    );
   });
 });

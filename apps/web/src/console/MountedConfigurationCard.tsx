@@ -13,6 +13,8 @@ import {
   NO_CONFIGURATION_IN_FOLDER,
   OPEN_CONFIGURATION_INVITATION,
   OPEN_CONFIGURATION_LABEL,
+  divergedCommitmentWarning,
+  divergedCommitments,
   mountedConfigurationNotices,
   mountedConfigurationOfferable,
 } from "./mountedConfiguration";
@@ -58,6 +60,49 @@ function announcementFor(state: MountedConfigurationState): string {
     default:
       return "";
   }
+}
+
+/** The notices an open configuration puts beside a step, in one alert.
+ * Renders nothing where there are none. */
+function NoticesAlert({ notices }: { notices: ReadonlyArray<string> }) {
+  if (notices.length === 0) return null;
+  return (
+    <Alert
+      color="yellow"
+      role="presentation"
+      icon={<IconAlertTriangle aria-hidden />}
+      title={NOTICES_TITLE}
+    >
+      <Stack gap={4}>
+        {notices.map((notice, index) => (
+          <Text key={index} size="sm">
+            {notice}
+          </Text>
+        ))}
+      </Stack>
+    </Alert>
+  );
+}
+
+/**
+ * The diverged-commitment warning on its own, for the columns step the warning
+ * tells the operator to change: the remedy and the report of whether it worked
+ * stand together, rather than the report staying on the file step. Nothing else
+ * the load says renders here -- each of those is about the load itself.
+ */
+export function DivergedCommitmentNotice({
+  state,
+  disclosure,
+}: {
+  state: MountedConfigurationState;
+  /** What the draft this step edits would send to the partner, beside the
+   * commitments the open configuration holds. Absent until a file is read. */
+  disclosure?: RunDisclosure;
+}) {
+  const warning = divergedCommitmentWarning(
+    divergedCommitments(state, disclosure),
+  );
+  return <NoticesAlert notices={warning === undefined ? [] : [warning]} />;
 }
 
 /** The console's load offer and the notices beside it. */
@@ -131,22 +176,7 @@ export function MountedConfigurationCard({
           )}
         </>
       )}
-      {notices.length > 0 && (
-        <Alert
-          color="yellow"
-          role="presentation"
-          icon={<IconAlertTriangle aria-hidden />}
-          title={NOTICES_TITLE}
-        >
-          <Stack gap={4}>
-            {notices.map((notice, index) => (
-              <Text key={index} size="sm">
-                {notice}
-              </Text>
-            ))}
-          </Stack>
-        </Alert>
-      )}
+      <NoticesAlert notices={notices} />
       {state.status === "refused" && (
         <Alert
           color="red"
