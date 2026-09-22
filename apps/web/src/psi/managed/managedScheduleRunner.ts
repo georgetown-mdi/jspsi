@@ -71,6 +71,7 @@ import {
 } from "./managedSchedule";
 import {
   parseStoredInstant,
+  runnableManagedExchange,
   standingCompromiseResponse,
 } from "./managedExchangeRecord";
 import { ManagedExchangeExpiredError } from "./managedExpiry";
@@ -85,6 +86,7 @@ import type {
   ManagedExchangeScheduleAdvance,
   ManagedStandingCondition,
   ManagedStandingConditionKind,
+  RunnableManagedExchangeRecord,
 } from "./managedExchangeRecord";
 import type {
   ManagedScheduleWindow,
@@ -127,7 +129,7 @@ export const MAX_WINDOW_ATTEMPTS = 64;
  * calls. */
 export interface ManagedScheduleAttempt {
   /** The record to run, as the store held it when the window was claimed. */
-  record: ManagedExchangeRecord;
+  record: RunnableManagedExchangeRecord;
   /** This run's input, always the persisted handle read UNATTENDED: a scheduled
    * run has no operator to answer a permission prompt, so a non-granted
    * permission must fail benignly rather than block on one (see
@@ -187,6 +189,7 @@ export interface ManagedScheduleTickSeams {
 type ManagedScheduleSkipReason =
   | "unreadable"
   | "no-schedule"
+  | "configuration-only"
   | "spent"
   | "in-flight"
   | "not-due"
@@ -373,6 +376,13 @@ async function occupyDueWindow(
     return { ...entry };
   }
 
+  // A record holding no shared secret runs from the command line and nowhere
+  // else. The record schema keeps a schedule and a handle off one, so this
+  // reports a store hand-edited past that rule rather than a state the app
+  // writes.
+  if (!runnableManagedExchange(claimed))
+    return { ...entry, skipped: "configuration-only" };
+
   const handle = claimed.inputFileHandle;
   // Without a persisted handle there is no unattended read of the input at all
   // (the re-selection path needs an operator), so the window is left
@@ -453,7 +463,7 @@ interface WindowOccupancy {
  * evidence at all.
  */
 async function occupyWindow(
-  record: ManagedExchangeRecord,
+  record: RunnableManagedExchangeRecord,
   handle: FileSystemFileHandle,
   window: ManagedScheduleWindow,
   seams: ManagedScheduleTickSeams,

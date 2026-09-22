@@ -11,9 +11,10 @@ import {
 import { Link, useNavigate } from "@tanstack/react-router";
 
 import {
+  MAX_IMPORT_FILE_BYTES,
   ManagedImportCustodyUnreadableError,
   ManagedImportHandedOffError,
-  importManagedExchange,
+  importManagedExchangeFile,
 } from "@psi/managed/managedExchangeImport";
 import {
   deleteManagedExchange,
@@ -22,7 +23,6 @@ import {
   openManagedExchangeDatabase,
   requestPersistentStorage,
 } from "@psi/managed/managedExchangeStore";
-import { MAX_ARTIFACT_IMPORT_BYTES } from "@psi/managed/managedExchangeArtifact";
 import { listManagedLocalState } from "@psi/managed/managedLocalState";
 
 import { Lobby } from "@exchange/Lobby";
@@ -218,7 +218,7 @@ function SavedExchangesList({
             </div>
             <div className={styles.savedRowActions}>
               <Button
-                variant={row.spentAsOf === undefined ? "default" : "subtle"}
+                variant={runnableRow(row) ? "default" : "subtle"}
                 onClick={() =>
                   void navigate({
                     to: "/saved/$id",
@@ -226,13 +226,14 @@ function SavedExchangesList({
                   })
                 }
               >
-                {row.spentAsOf === undefined ? "Run" : "Open"}
+                {runnableRow(row) ? "Run" : "Open"}
               </Button>
               <DeleteExchangeButton
                 id={row.id}
                 label={row.label}
                 backedUp={row.backup.kind === "backed-up"}
                 handoff={row.spentHandoff}
+                configurationOnly={row.configurationOnly}
                 onDeleted={reload}
               />
             </div>
@@ -281,6 +282,13 @@ function StorageUnavailable() {
   );
 }
 
+/** Whether the row's exchange runs in this browser, which is what decides
+ * between the Run and Open actions: a handed-off copy runs elsewhere and a
+ * configuration-only record runs on the command line, so both open instead. */
+function runnableRow(row: SavedExchangeRow): boolean {
+  return row.spentAsOf === undefined && !row.configurationOnly;
+}
+
 /** The per-row schedule lines, for a row whose record holds an agreed
  * schedule: where the recurrence stands, quietly, and -- once the record's
  * consecutive-miss count reaches the escalation threshold -- the coordination
@@ -311,9 +319,12 @@ function ScheduleLines({ row }: { row: SavedExchangeRow }) {
 
 /** The per-row backup line: a quiet "backed up as of <date>" when a current export
  * exists, or the actionable "Back up this exchange" when none does. A spent row
- * names its handoff instead, with the recovery that hand-off actually has: a
- * migration's artifact imports back, while the command-line files do not. */
+ * names its handoff instead, with the recovery that hand-off actually has: the
+ * migration's artifact brings the secret back, while the command-line files
+ * bring back the configuration alone. A configuration-only row shows no backup
+ * line at all: it holds no secret for a backup to be of. */
 function BackupLine({ row }: { row: SavedExchangeRow }) {
+  if (row.backup.kind === "not-applicable") return null;
   if (row.spentAsOf !== undefined)
     return (
       <span className={`${styles.small} ${styles.sub}`}>
@@ -350,6 +361,7 @@ export function DeleteExchangeButton({
   label,
   backedUp,
   handoff,
+  configurationOnly = false,
   onDeleted,
 }: {
   id: string;
@@ -361,6 +373,11 @@ export function DeleteExchangeButton({
    * custody note then names what that hand-off left running elsewhere. Absent for a
    * live copy and for a migration spend, which records no hand-off. */
   handoff?: ManagedSpentHandoff;
+  /** Whether this exchange is configuration only -- imported from a command-line
+   * configuration, holding no secret and no history of runs here. What the delete
+   * takes is then the settings alone, and what it leaves is the exchange itself,
+   * running from the machine that holds its key file. */
+  configurationOnly?: boolean;
   onDeleted: () => void;
 }) {
   const [confirming, setConfirming] = useState(false);
@@ -407,17 +424,34 @@ export function DeleteExchangeButton({
         centered
         transitionProps={{ duration: 0 }}
       >
-        <p>
-          Delete {named}? This removes everything this browser holds for it --
-          the terms, the stored secret, its run history, its accounting of
-          disclosures, and any results a scheduled run left here for you to
-          download -- in one step. It cannot be undone here. Download those
-          results and export the accounting first if you need to keep them.
-        </p>
-        <p className={`${styles.small} ${styles.sub}`}>
-          This only removes your copy: your partner is not notified, and their
-          own copy stands until they remove it or you re-invite.
-        </p>
+        {configurationOnly ? (
+          <>
+            <p>
+              Delete {named}? This removes the settings this browser holds for
+              it. It cannot be undone here.
+            </p>
+            <p className={`${styles.small} ${styles.sub}`}>
+              The exchange itself runs from the psilink.yaml and .psilink.key on
+              the machine you run it from. Deleting it here changes nothing
+              there, and your partner is not notified.
+            </p>
+          </>
+        ) : (
+          <>
+            <p>
+              Delete {named}? This removes everything this browser holds for it
+              -- the terms, the stored secret, its run history, its accounting
+              of disclosures, and any results a scheduled run left here for you
+              to download -- in one step. It cannot be undone here. Download
+              those results and export the accounting first if you need to keep
+              them.
+            </p>
+            <p className={`${styles.small} ${styles.sub}`}>
+              This only removes your copy: your partner is not notified, and
+              their own copy stands until they remove it or you re-invite.
+            </p>
+          </>
+        )}
         {backedUp && (
           <p className={`${styles.small} ${styles.sub}`}>
             A backup file you exported stays in your custody -- delete it
@@ -483,7 +517,7 @@ function SavedExchangesEmpty() {
         </Anchor>{" "}
         and choose &quot;Save as a recurring exchange&quot; to save it here.
       </p>
-      <RestoreFromBackup />
+      <ImportExchangeFile />
     </>
   );
 }
@@ -507,7 +541,7 @@ function SavedExchangesFailed({ reload }: { reload: () => void }) {
         Remove the record below to recover the rest, or import a backup file.
       </p>
       <RecoveryListing reload={reload} />
-      <RestoreFromBackup />
+      <ImportExchangeFile />
     </>
   );
 }
@@ -598,13 +632,17 @@ function importFailureAlert(error: unknown): ImportFailureAlert {
   };
 }
 
-/** The standing restore-from-backup import affordance, shared by the empty state and the
- * read-failed surface so both render one markup. A successful import puts the operator
- * on the imported exchange's run surface, so it is a way forward even when the list read
- * itself cannot be mended.
+/** The standing import affordance, shared by the empty state and the read-failed
+ * surface so both render one markup. It takes either file the operator may hold:
+ * the backup this app exports, and the `psilink.yaml` the command line runs,
+ * which lands as a configuration-only exchange. The file decides which, not the
+ * control ({@link importManagedExchangeFile}). A successful import puts the
+ * operator on the imported exchange's own surface, so it is a way forward even
+ * when the list read itself cannot be mended.
  *
  * A file the import will not take is refused with the reason its failure has
- * ({@link importFailureReason}): a document the artifact schema rejects can be a
+ * ({@link importFailureReason}): a configuration this app cannot hold says what
+ * it holds and what to remove, a document the artifact schema rejects can be a
  * newer build's export, which the operator cannot see from the file, while bytes
  * that do not parse at all leave only the file itself to check.
  *
@@ -621,7 +659,7 @@ function importFailureAlert(error: unknown): ImportFailureAlert {
  * the exchange ({@link managedImportGrantNotice}): the grants are what they have to
  * choose again, and the notice is only read where it is shown. An import with nothing
  * to say goes straight through. */
-function RestoreFromBackup() {
+function ImportExchangeFile() {
   const navigate = useNavigate();
   const [importFailure, setImportFailure] = useState<ImportFailureAlert>();
   const [grantNotice, setGrantNotice] = useState<{
@@ -633,10 +671,10 @@ function RestoreFromBackup() {
     if (file === null) return;
     setImportFailure(undefined);
     setGrantNotice(undefined);
-    // Cap the file size before reading it: the artifact is a small JSON document, so
-    // an over-cap file is refused with the unreadable-file copy rather than read into
-    // memory ahead of the bounded parse.
-    if (file.size > MAX_ARTIFACT_IMPORT_BYTES) {
+    // Cap the file size before reading it: both files are small operator-held
+    // documents, so an over-cap file is refused with the unreadable-file copy
+    // rather than read into memory ahead of the bounded parse.
+    if (file.size > MAX_IMPORT_FILE_BYTES) {
       setImportFailure({
         color: "red",
         title: IMPORT_FAILURE_TITLE,
@@ -650,7 +688,8 @@ function RestoreFromBackup() {
         // Best-effort persistence on the imported record's origin, the same request
         // a create makes; a denied grant does not fail the import.
         void requestPersistentStorage();
-        const { record, missingGrants } = await importManagedExchange(source);
+        const { record, missingGrants } =
+          await importManagedExchangeFile(source);
         const notice = managedImportGrantNotice(missingGrants);
         if (notice !== undefined) {
           setGrantNotice({ id: record.id, notice });
@@ -665,10 +704,13 @@ function RestoreFromBackup() {
 
   return (
     <div className={styles.callout}>
-      <p className={styles.calloutLead}>Restore from a backup.</p>
+      <p className={styles.calloutLead}>Import an exchange.</p>
       <p className={styles.small}>
         If this browser was cleared or you are moving to a new device, import
-        the backup file you exported to bring the exchange back here.
+        the backup file you exported to bring the exchange back here. You can
+        also import a command-line psilink.yaml to edit its settings here: its
+        key file stays where it is, so that exchange keeps running from the
+        command line and not in this browser.
       </p>
       {grantNotice !== undefined && (
         <Alert color="yellow" title={grantNotice.notice.title} mb="sm">
@@ -696,10 +738,13 @@ function RestoreFromBackup() {
           {importFailure.reason}
         </Alert>
       )}
-      <FileButton accept="application/json,.json" onChange={onFile}>
+      <FileButton
+        accept="application/json,.json,application/yaml,.yaml,.yml"
+        onChange={onFile}
+      >
         {(props) => (
           <Button mt="sm" variant="default" {...props}>
-            Import a backup file
+            Import a file
           </Button>
         )}
       </FileButton>

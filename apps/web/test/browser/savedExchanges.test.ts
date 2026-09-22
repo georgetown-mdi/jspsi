@@ -15,8 +15,11 @@ import {
   createManagedExchange,
   spendManagedExchangeIfCurrent,
 } from "@psi/managed/managedExchangeStore";
+import {
+  composeManagedExchangeFile,
+  runnableManagedExchangeOrRefuse,
+} from "@psi/managed/managedExchangeRecord";
 import { Lobby } from "@exchange/Lobby";
-import { composeManagedExchangeFile } from "@psi/managed/managedExchangeRecord";
 import { markManagedExchangeBackedUp } from "@psi/managed/managedLocalState";
 import styles from "@styles/app.module.css";
 
@@ -25,7 +28,17 @@ import { createAppMount } from "./renderApp";
 import type {
   ManagedExchangeSchedule,
   NewManagedExchange,
+  RunnableManagedExchangeRecord,
 } from "@psi/managed/managedExchangeRecord";
+
+/** A stored record narrowed to the runnable shape these fixtures all have: every
+ * record here is created with a shared secret, and the export, hand-off, and run
+ * paths take the record type that holds one. */
+async function createRunnableExchange(
+  fields: Parameters<typeof createManagedExchange>[0],
+): Promise<RunnableManagedExchangeRecord> {
+  return runnableManagedExchangeOrRefuse(await createManagedExchange(fields));
+}
 
 // The component's delete goes through this module. It is mocked so the delete-failure
 // test can make a single delete reject while every other case uses the real
@@ -111,7 +124,7 @@ afterEach(async () => {
 
 describe("home route: conditional on a stored exchange existing", () => {
   test("populated -> the list surface renders at the home route", async () => {
-    await createManagedExchange(newExchange({ label: "Riverbend quarterly" }));
+    await createRunnableExchange(newExchange({ label: "Riverbend quarterly" }));
 
     app.render(createElement(SavedExchangesHome));
 
@@ -143,7 +156,7 @@ describe("home route: conditional on a stored exchange existing", () => {
 
     // Neither the empty-list affordances nor any run rows leak into the home route.
     expect(
-      page.getByRole("button", { name: "Import a backup file" }).query(),
+      page.getByRole("button", { name: "Import a file" }).query(),
     ).toBeNull();
     expect(
       page.getByText("You have none saved yet.", { exact: false }).query(),
@@ -170,7 +183,7 @@ describe("lobby: the recurring-exchange pointer is gated on a saved exchange", (
   });
 
   test("a saved exchange -> the run-again framing appears", async () => {
-    await createManagedExchange(newExchange());
+    await createRunnableExchange(newExchange());
 
     app.render(createElement(Lobby));
 
@@ -184,7 +197,7 @@ describe("lobby: the recurring-exchange pointer is gated on a saved exchange", (
 
 describe("saved list route: the always-list surface", () => {
   test("populated: a stored exchange appears as a runnable row", async () => {
-    await createManagedExchange(newExchange({ label: "Riverbend quarterly" }));
+    await createRunnableExchange(newExchange({ label: "Riverbend quarterly" }));
 
     app.render(createElement(SavedExchanges));
 
@@ -211,7 +224,7 @@ describe("saved list route: the always-list surface", () => {
       .element(page.getByRole("link", { name: "Accept it" }))
       .toBeInTheDocument();
     await expect
-      .element(page.getByRole("button", { name: "Import a backup file" }))
+      .element(page.getByRole("button", { name: "Import a file" }))
       .toBeInTheDocument();
 
     // No stale run rows leak into the empty state.
@@ -232,11 +245,11 @@ describe("saved list route: the always-list surface", () => {
   });
 
   test("a backed-up row reads the quiet green state; a fresh one reads backup-needed", async () => {
-    const backedUp = await createManagedExchange(
+    const backedUp = await createRunnableExchange(
       newExchange({ label: "Backed up partnership" }),
     );
     await markManagedExchangeBackedUp(backedUp.id, "2026-07-10T09:00:00.000Z");
-    await createManagedExchange(newExchange({ label: "Fresh partnership" }));
+    await createRunnableExchange(newExchange({ label: "Fresh partnership" }));
 
     app.render(createElement(SavedExchanges));
 
@@ -249,7 +262,7 @@ describe("saved list route: the always-list surface", () => {
   });
 
   test("a populated list offers the quick path as a one-off alternative", async () => {
-    await createManagedExchange(newExchange());
+    await createRunnableExchange(newExchange());
 
     app.render(createElement(SavedExchanges));
 
@@ -261,7 +274,7 @@ describe("saved list route: the always-list surface", () => {
   });
 
   test("a populated list offers a primary create entry into the invite/configure flow", async () => {
-    await createManagedExchange(newExchange());
+    await createRunnableExchange(newExchange());
 
     app.render(createElement(SavedExchanges));
 
@@ -273,10 +286,10 @@ describe("saved list route: the always-list surface", () => {
   });
 
   test("the side facet is readable at a glance: an inviter and an acceptor row", async () => {
-    await createManagedExchange(
+    await createRunnableExchange(
       newExchange({ label: "Invited partnership", side: "inviter" }),
     );
-    await createManagedExchange(
+    await createRunnableExchange(
       newExchange({ label: "Accepted partnership", side: "acceptor" }),
     );
 
@@ -293,7 +306,7 @@ describe("saved list route: the always-list surface", () => {
 
 describe("saved list route: an agreed schedule shows its due-ness", () => {
   test("a window open right now is named as open on the row", async () => {
-    await createManagedExchange(
+    await createRunnableExchange(
       newExchange({
         label: "Scheduled partnership",
         schedule: schedule(-60 * 60 * 1000),
@@ -308,7 +321,7 @@ describe("saved list route: an agreed schedule shows its due-ness", () => {
   });
 
   test("a window still ahead is named as the next one", async () => {
-    await createManagedExchange(
+    await createRunnableExchange(
       newExchange({
         label: "Scheduled partnership",
         schedule: schedule(2 * 60 * 60 * 1000),
@@ -323,7 +336,9 @@ describe("saved list route: an agreed schedule shows its due-ness", () => {
   });
 
   test("a record with no schedule shows no window line at all", async () => {
-    await createManagedExchange(newExchange({ label: "Attended partnership" }));
+    await createRunnableExchange(
+      newExchange({ label: "Attended partnership" }),
+    );
 
     app.render(createElement(SavedExchanges));
 
@@ -341,7 +356,7 @@ describe("saved list route: an agreed schedule shows its due-ness", () => {
   });
 
   test("a single miss stays quiet: the row names the window and nothing else", async () => {
-    await createManagedExchange(
+    await createRunnableExchange(
       newExchange({
         label: "Drifting partnership",
         schedule: schedule(-60 * 60 * 1000, { consecutiveMisses: 1 }),
@@ -359,7 +374,7 @@ describe("saved list route: an agreed schedule shows its due-ness", () => {
   });
 
   test("the second consecutive miss raises the coordination line, naming both checks", async () => {
-    await createManagedExchange(
+    await createRunnableExchange(
       newExchange({
         label: "Drifting partnership",
         schedule: schedule(-60 * 60 * 1000, { consecutiveMisses: 2 }),
@@ -381,7 +396,7 @@ describe("saved list route: an agreed schedule shows its due-ness", () => {
   });
 
   test("the coordination line is styled as caution, never as a failure", async () => {
-    await createManagedExchange(
+    await createRunnableExchange(
       newExchange({
         label: "Drifting partnership",
         schedule: schedule(-60 * 60 * 1000, { consecutiveMisses: 2 }),
@@ -408,7 +423,7 @@ describe("saved list route: an agreed schedule shows its due-ness", () => {
 
 describe("saved list route: delete is a fully supported, always-available action", () => {
   test("delete confirms, then removes the exchange from the list", async () => {
-    await createManagedExchange(newExchange({ label: "Riverbend quarterly" }));
+    await createRunnableExchange(newExchange({ label: "Riverbend quarterly" }));
 
     app.render(createElement(SavedExchanges));
 
@@ -443,7 +458,7 @@ describe("saved list route: delete is a fully supported, always-available action
   });
 
   test("a backed-up exchange's confirm holds the exported-backup custody note", async () => {
-    const created = await createManagedExchange(
+    const created = await createRunnableExchange(
       newExchange({ label: "Backed up partnership" }),
     );
     await markManagedExchangeBackedUp(created.id, "2026-07-10T09:00:00.000Z");
@@ -472,7 +487,7 @@ describe("saved list route: delete is a fully supported, always-available action
   });
 
   test("a never-backed-up exchange's confirm holds no custody note", async () => {
-    await createManagedExchange(newExchange({ label: "Fresh partnership" }));
+    await createRunnableExchange(newExchange({ label: "Fresh partnership" }));
 
     app.render(createElement(SavedExchanges));
 
@@ -494,7 +509,7 @@ describe("saved list route: delete is a fully supported, always-available action
     // The hand-off marks no backup, so the backed-up note cannot hold the custody
     // reminder for it: deleting this row leaves the CLI's two files and the schedule
     // the operator set around them running the exchange.
-    const created = await createManagedExchange(
+    const created = await createRunnableExchange(
       newExchange({ label: "Handed off to cron" }),
     );
     await spendManagedExchangeIfCurrent(
@@ -531,7 +546,7 @@ describe("saved list route: delete is a fully supported, always-available action
   });
 
   test("a migration spend's confirm keeps the backup note, not the hand-off one", async () => {
-    const created = await createManagedExchange(
+    const created = await createRunnableExchange(
       newExchange({ label: "Migrated partnership" }),
     );
     await markManagedExchangeBackedUp(created.id, "2026-07-12T08:00:00.000Z");
@@ -558,7 +573,7 @@ describe("saved list route: delete is a fully supported, always-available action
   });
 
   test("a spent (handed-off) row offers Open and Delete", async () => {
-    const created = await createManagedExchange(
+    const created = await createRunnableExchange(
       newExchange({ label: "Handed off partnership" }),
     );
     await spendManagedExchangeIfCurrent(
@@ -584,7 +599,7 @@ describe("saved list route: delete is a fully supported, always-available action
   });
 
   test("a command-line hand-off names its own recovery, not the import", async () => {
-    const created = await createManagedExchange(
+    const created = await createRunnableExchange(
       newExchange({ label: "Handed off partnership" }),
     );
     await spendManagedExchangeIfCurrent(
@@ -609,7 +624,7 @@ describe("saved list route: delete is a fully supported, always-available action
   });
 
   test("a rejected delete shows an error and leaves the row standing", async () => {
-    await createManagedExchange(newExchange({ label: "Riverbend quarterly" }));
+    await createRunnableExchange(newExchange({ label: "Riverbend quarterly" }));
     // The delete rejects (a transaction abort, quota, or blocked open): the confirm
     // must not close silently over a row that is still there.
     deleteOverride = () => Promise.reject(new Error("delete failed"));
@@ -642,7 +657,7 @@ describe("saved list route: delete is a fully supported, always-available action
   });
 
   test("reopening the confirm after a failed delete starts clean, and a retry succeeds", async () => {
-    await createManagedExchange(newExchange({ label: "Riverbend quarterly" }));
+    await createRunnableExchange(newExchange({ label: "Riverbend quarterly" }));
     deleteOverride = () => Promise.reject(new Error("delete failed"));
 
     app.render(createElement(SavedExchanges));

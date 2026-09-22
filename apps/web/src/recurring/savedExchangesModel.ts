@@ -16,9 +16,12 @@ import {
   managedStandingConditionTier,
   readManagedFailure,
 } from "@psi/managed/managedFailureTiers";
+import {
+  raisedStandingCondition,
+  runnableManagedExchange,
+} from "@psi/managed/managedExchangeRecord";
 import { deriveManagedBackupState } from "@psi/managed/managedBackupState";
 import { managedExchangeLapsed } from "@psi/managed/managedExpiry";
-import { raisedStandingCondition } from "@psi/managed/managedExchangeRecord";
 
 import { dateLabel, dateTimeLabel } from "@psi/formatting";
 import {
@@ -53,7 +56,15 @@ export const SIDE_LABEL: Record<ManagedExchangeSide, string> = {
  * holds the date phrase for the quiet green line; `"backup-needed"` is the one
  * actionable state. */
 type SavedExchangeBackup =
-  { kind: "backed-up"; asOf: string } | { kind: "backup-needed" };
+  | { kind: "backed-up"; asOf: string }
+  | { kind: "backup-needed" }
+  | { kind: "not-applicable" };
+
+/** The one-line status of a configuration-only row: what this browser holds for
+ * the exchange, and where it runs. It has no run history to summarize -- it has
+ * never run here and cannot. */
+const CONFIGURATION_ONLY_STATUS =
+  "Configuration only - edit it here, run it with psilink";
 
 /** The schedule lines a row holds for a record with an agreed schedule: where
  * the recurrence stands at the row's `now`, and the coordination line a run of
@@ -83,6 +94,11 @@ export interface SavedExchangeRow {
   expired: boolean;
   /** The derived backup state for the row (see {@link SavedExchangeBackup}). */
   backup: SavedExchangeBackup;
+  /** Whether the record holds no shared secret: a configuration imported from
+   * the command line, which edits and exports here and runs there. Derived from
+   * the record's own shape, never from a stored flag, so the row withholds the
+   * Run affordance for the same reason the exchange's own surface does. */
+  configurationOnly: boolean;
   /** When set, this device's copy was handed off by an export as of this date
    * phrase: the row shows no Run affordance and names the handoff. Deleting is the
    * only path forward, beside the recovery {@link spentHandoff} names. */
@@ -228,7 +244,9 @@ function scheduleLines(
 
 /**
  * Derive the display row for a stored record as of `now`, given its local sibling
- * state (the backup marker and any spent state). The last-run status holds a
+ * state (the backup marker and any spent state). A record holding no shared
+ * secret is a configuration only: it has no run, no lapse, and no backup state,
+ * so the row says what it is and the list offers no Run. The last-run status holds a
  * lapsed-`expires` note when the secret has lapsed; the backup state is derived from
  * the marker's presence; a spent record names its handoff date and which hand-off it
  * was, and the list suppresses its run action. `now` is injected so the expiry note
@@ -242,6 +260,16 @@ export function savedExchangeRow(
   local: ManagedLocalState | undefined,
   now: number,
 ): SavedExchangeRow {
+  if (!runnableManagedExchange(record))
+    return {
+      id: record.id,
+      label: record.label,
+      sideLabel: SIDE_LABEL[record.side],
+      status: CONFIGURATION_ONLY_STATUS,
+      expired: false,
+      backup: { kind: "not-applicable" },
+      configurationOnly: true,
+    };
   return {
     id: record.id,
     label: record.label,
@@ -249,6 +277,7 @@ export function savedExchangeRow(
     status: lastRunStatus(record, local, now),
     expired: managedExchangeLapsed(record, now),
     backup: backupFor(local),
+    configurationOnly: false,
     ...(local?.spent !== undefined
       ? {
           spentAsOf: dateLabel(new Date(local.spent.spentAt)),

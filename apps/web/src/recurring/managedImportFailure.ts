@@ -5,7 +5,15 @@
  * and the exchange is still here, so it says so itself
  * ({@link ./managedHandoffGate.ts}).
  *
- * Three things stop a file, and they call for different actions. Bytes that are not
+ * A command-line configuration this app will not take is the one refusal that
+ * states its own reason: the file is in front of the operator, who wrote it by
+ * hand, and what stops it is a line in it -- a field off the exchange-file
+ * schema, a channel this app does not run, a credential it will not store, a
+ * missing role -- so the refusal names the lines and what to do about them
+ * ({@link ManagedConfigurationRefusedError}).
+ *
+ * Three things stop a file that says nothing of its own, and they call for
+ * different actions. Bytes that are not
  * a parseable document at all -- along with a file over the import cap, which is
  * refused before it is read -- leave only the file itself to check. A document
  * that parses and then fails the artifact's strict
@@ -22,7 +30,10 @@
 
 import { ZodError } from "zod";
 
+import { sanitizeErrorForDisplay } from "@psilink/core";
+
 import { ManagedArtifactOutdatedError } from "@psi/managed/managedExchangeArtifact";
+import { ManagedConfigurationRefusedError } from "@psi/managed/managedCommandLineImport";
 
 /** The heading every import refusal here is shown under. */
 export const IMPORT_FAILURE_TITLE = "That file could not be imported";
@@ -55,8 +66,10 @@ export const OUTDATED_IMPORT_REASON =
   "Delete the old exchange if this browser still holds it.";
 
 /**
- * Which refusal an import error is shown as. A file holding the previous artifact
- * format raises {@link ManagedArtifactOutdatedError}, which is checked first: it
+ * Which refusal an import error is shown as. A command-line configuration this
+ * app cannot hold carries its own reason and is checked first; it is escaped for
+ * display here, at the one altitude, since it names fields read out of the file.
+ * A file holding the previous artifact format raises {@link ManagedArtifactOutdatedError}, which is checked first: it
  * would otherwise read as the newer-build case below, whose remedies an older file
  * does not have. A schema rejection anywhere else in the
  * parse-and-reconstruct -- the artifact's own strict schema, the embedded exchange
@@ -65,6 +78,8 @@ export const OUTDATED_IMPORT_REASON =
  * would not take the record alike, leaves the operator with the file to check.
  */
 export function importFailureReason(error: unknown): string {
+  if (error instanceof ManagedConfigurationRefusedError)
+    return sanitizeErrorForDisplay(error);
   if (error instanceof ManagedArtifactOutdatedError)
     return OUTDATED_IMPORT_REASON;
   return error instanceof ZodError

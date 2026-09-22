@@ -20,6 +20,7 @@ import {
 } from "@psi/managed/managedExchangeStore";
 import {
   composeManagedExchangeFile,
+  runnableManagedExchangeOrRefuse,
   standingCompromiseResponse,
 } from "@psi/managed/managedExchangeRecord";
 import {
@@ -121,11 +122,28 @@ describe("persistManagedExchangeReinvite drops the consumed failure", () => {
     const failure = managedRunFailureFromRecord(stored!, local, Date.now());
     expect(failure).toBeUndefined();
   });
+
+  test("a configuration-only record refuses the rotation and stays keyless", async () => {
+    // The entry point takes an `id`, which carries no shape, so the record read
+    // inside the transaction is what the re-invite rotation is narrowed on.
+    const record = await createManagedExchange(
+      newExchange({ sharedSecret: undefined }),
+    );
+    await expect(
+      persistManagedExchangeReinvite(record.id, {
+        sharedSecret: generateSharedSecret(),
+        expires: null,
+      }),
+    ).rejects.toThrow(/configuration only/);
+    expect((await getManagedExchange(record.id))?.sharedSecret).toBeUndefined();
+  });
 });
 
 describe("reinviteManagedExchange rotates the stored secret and returns it", () => {
   test("a post-re-invite run reads the rotated secret, not the stale one", async () => {
-    const record = await createManagedExchange(newExchange());
+    const record = runnableManagedExchangeOrRefuse(
+      await createManagedExchange(newExchange()),
+    );
     const stale = record.sharedSecret;
 
     const result = await reinviteManagedExchange(record);

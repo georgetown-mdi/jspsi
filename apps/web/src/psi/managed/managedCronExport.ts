@@ -46,28 +46,22 @@
  * and any `expires` ride the key file alone.
  */
 
-import {
-  ExchangeSpecSchema,
-  connectionFromLocator,
-  getDefaultLinkageTerms,
-  snakeizeKey,
-} from "@psilink/core";
+import { ExchangeSpecSchema } from "@psilink/core";
 
+import {
+  fieldsOutsideComposableDocument,
+  fieldsOutsideLocatorSubset,
+} from "./managedCommandLineDocument";
 import {
   keyFileFieldsFromRecord,
   serializeExchangeDocument,
 } from "./managedExchangeArtifact";
-import { composeManagedExchangeFile } from "./managedExchangeRecord";
 
+import type { ExchangeSpec, WebRTCConnectionConfig } from "@psilink/core";
 import type {
-  ExchangeSpec,
-  WebRTCConnectionConfig,
-  WebRTCExchangeLocator,
-} from "@psilink/core";
-import type {
-  ManagedExchangeFileComposition,
   ManagedExchangeKeyFields,
   ManagedExchangeRecord,
+  RunnableManagedExchangeRecord,
 } from "./managedExchangeRecord";
 
 /** The config file name `psilink exchange` reads at its default config path
@@ -111,86 +105,31 @@ interface ManagedCronExportFile {
 }
 
 /**
- * Everything the operator needs to run a managed exchange from the command line:
- * the two files and the invocation. Nothing here is machine-specific -- a managed
- * connection is a credential-free webrtc locator with no path, no credential, and
- * no rendezvous directory -- so the command is turnkey in the folder the two files
- * are saved to, rather than a template with placeholders to fill.
+ * The configuration half of the command-line hand-off: the `psilink.yaml` the
+ * CLI loads, and the invocation that runs it. Nothing here is machine-specific
+ * -- a managed connection is a credential-free webrtc locator with no path, no
+ * credential, and no rendezvous directory -- so the command is turnkey in the
+ * folder the file is saved to, rather than a template with placeholders to
+ * fill. It holds no secret, which is what lets a configuration-only record
+ * compose it.
  */
-export interface ManagedCronExport {
+export interface ManagedCommandLineConfig {
   /** The `psilink.yaml` half: the exchange-file document, with `role` injected
    * and any max-age policy held, and no secret. */
   config: ManagedCronExportFile;
-  /** The `.psilink.key` half: the shared secret and any `expires`. A plaintext
-   * credential -- this is the file the handover's custody rules are about. */
-  key: ManagedCronExportFile;
-  /** The command to run in the folder holding the two files above. */
+  /** The command to run in the folder holding that file, and the key file where
+   * the exchange has one. */
   command: string;
 }
 
 /**
- * The locator both composition probes below are driven with: a webrtc locator
- * holding every optional field, so what each probe measures is the widest shape
- * the app can compose rather than the narrowest.
+ * Everything the operator needs to run a managed exchange from the command
+ * line: the two files and the invocation.
  */
-const WIDEST_PROBE_LOCATOR: WebRTCExchangeLocator = {
-  channel: "webrtc",
-  host: "locator.invalid",
-  port: 443,
-  path: "/",
-};
-
-/**
- * The field names a credential-free webrtc locator expands to, at the
- * connection and its nested `server`. Read off {@link connectionFromLocator}'s
- * own webrtc arm rather than restated, so the allowlist cannot drift from the
- * composition rule (docs/spec/MANAGED_EXCHANGE_RECORD.md, "The connection
- * block: credential-free by composition").
- */
-function credentialFreeLocatorFields(): {
-  connection: ReadonlySet<string>;
-  server: ReadonlySet<string>;
-} {
-  const composed = connectionFromLocator(WIDEST_PROBE_LOCATOR);
-  if (composed.channel !== "webrtc")
-    throw new Error(
-      "the credential-free locator expansion did not compose a webrtc " +
-        "connection from a webrtc locator",
-    );
-  return {
-    connection: new Set(Object.keys(composed)),
-    server: new Set(Object.keys(composed.server)),
-  };
-}
-
-const CREDENTIAL_FREE_LOCATOR_FIELDS = credentialFreeLocatorFields();
-
-/**
- * The stored connection's fields that a credential-free locator does not expand
- * to, named in the operator's own snake_case spelling so a refusal points at the
- * lines to remove. Names only -- a field's VALUE is the credential (a TURN
- * secret, a bearer token, an `@path` naming another machine's file) and never
- * enters the message.
- */
-function fieldsOutsideLocatorSubset(
-  connection: WebRTCConnectionConfig,
-): Array<string> {
-  const outside = Object.keys(connection).filter(
-    (field) => !CREDENTIAL_FREE_LOCATOR_FIELDS.connection.has(field),
-  );
-  // Typed as required, but this gate runs on a record shape that reached the
-  // composer without the read path's validation, so the nested object is read
-  // defensively: a missing `server` is the exchange schema's refusal to make,
-  // not a TypeError here.
-  const server: unknown = connection.server;
-  const serverFields =
-    typeof server === "object" && server !== null ? Object.keys(server) : [];
-  return [
-    ...outside.map((field) => snakeizeKey(field)),
-    ...serverFields
-      .filter((field) => !CREDENTIAL_FREE_LOCATOR_FIELDS.server.has(field))
-      .map((field) => `server.${snakeizeKey(field)}`),
-  ].sort();
+export interface ManagedCronExport extends ManagedCommandLineConfig {
+  /** The `.psilink.key` half: the shared secret and any `expires`. A plaintext
+   * credential -- this is the file the handover's custody rules are about. */
+  key: ManagedCronExportFile;
 }
 
 /**
@@ -241,60 +180,6 @@ function assertNoStoredAuthentication(exchangeFile: ExchangeSpec): void {
         "max-age policy alone, so a stored one is refused rather than " +
         "republished",
     );
-}
-
-/**
- * The top-level document fields the app can put in a stored document, measured
- * by composing one. Typed `Required<ManagedExchangeFileComposition>`, so a
- * field added to the record composer's input fails this module's compile
- * until the probe holds it. Read off {@link composeManagedExchangeFile}'s
- * OUTPUT, not its input: the probe measures which KEYS survive composition,
- * never what they hold.
- */
-function composableDocumentFields(): ReadonlySet<string> {
-  const widestComposition: Required<ManagedExchangeFileComposition> = {
-    connection: WIDEST_PROBE_LOCATOR,
-    linkageTerms: getDefaultLinkageTerms("composition probe"),
-    metadata: [],
-    standardization: [],
-    disclosedPayloadColumns: [],
-    expectedPayloadColumns: [],
-    expectedPartnerDeduplicate: false,
-    outboundPayloadConsent: { status: "pending" },
-    includeOwnColumns: "all",
-    csvDelimiter: "|",
-  };
-  return new Set(Object.keys(composeManagedExchangeFile(widestComposition)));
-}
-
-/**
- * The top-level fields the exported document may hold: what the app can compose
- * (above), plus the `authentication` block this module injects from the local
- * max-age policy, plus the `retentionDisposition` the record spec sanctions on a
- * stored document as operator-authored free text
- * (docs/spec/MANAGED_EXCHANGE_RECORD.md, the `exchangeFile` row). Nothing else the
- * shared exchange-file schema can represent belongs in an exported psilink.yaml.
- */
-const EXPORTED_DOCUMENT_FIELDS: ReadonlySet<string> = new Set([
-  ...composableDocumentFields(),
-  "authentication",
-  "retentionDisposition",
-]);
-
-/**
- * The composed document's top-level fields outside {@link EXPORTED_DOCUMENT_FIELDS},
- * named in the operator's own snake_case spelling so a refusal points at the lines
- * to remove. Names only -- a field's VALUE is what the CLI would act on (a path it
- * opens as this party's signing identity, a path it writes a receipt to, a
- * fingerprint it pins a partner certificate against) and never enters the message.
- */
-function fieldsOutsideComposableDocument(
-  document: ExchangeSpec,
-): Array<string> {
-  return Object.keys(document)
-    .filter((field) => !EXPORTED_DOCUMENT_FIELDS.has(field))
-    .map((field) => snakeizeKey(field))
-    .sort();
 }
 
 /**
@@ -361,9 +246,10 @@ function serializeKeyFile(fields: ManagedExchangeKeyFields): string {
 }
 
 /**
- * Compose a managed record into the CLI's two files and the command that runs
- * them. Pure: the record is read, never written, and no marker, spend, or
- * download is involved.
+ * Compose a managed record's configuration half: the `psilink.yaml` file and
+ * the command that runs it. Pure, and available to every stored record --
+ * including a configuration-only one, whose key file stayed with the machine
+ * that runs it and which has no key half to compose.
  *
  * The emitted command is `psilink exchange`'s real invocation --
  * `[options] INPUT_FILE [OUTPUT_FILE]`, with the config and key read at their
@@ -374,22 +260,44 @@ function serializeKeyFile(fields: ManagedExchangeKeyFields): string {
  *   or a top-level field the app does not compose.
  * @throws {ZodError} if the composed document fails exchange-file validation.
  */
-export function composeManagedCronExport(
+export function composeManagedCronExportConfig(
   record: ManagedExchangeRecord,
-): ManagedCronExport {
+): ManagedCommandLineConfig {
   return {
     config: {
       fileName: CRON_EXPORT_CONFIG_FILE_NAME,
       text: serializeExchangeDocument(composeCronExportDocument(record)),
       mimeType: CRON_EXPORT_CONFIG_MIME,
     },
+    command:
+      `psilink exchange ${CRON_EXPORT_INPUT_FILE_NAME} ` +
+      CRON_EXPORT_OUTPUT_FILE_NAME,
+  };
+}
+
+/**
+ * Compose a managed record into the CLI's two files and the command that runs
+ * them: the configuration half above, plus the key file. Pure: the record is
+ * read, never written, and no marker, spend, or download is involved. The
+ * record type is the runnable one, so the key half cannot be asked of a record
+ * that holds no secret.
+ *
+ * @throws {Error} if the record's stored connection is not a credential-free
+ *   webrtc locator, or its stored document holds an `authentication` block
+ *   or a top-level field the app does not compose.
+ * @throws {ZodError} if the composed document fails exchange-file validation.
+ */
+export function composeManagedCronExport(
+  record: RunnableManagedExchangeRecord,
+): ManagedCronExport {
+  const { config, command } = composeManagedCronExportConfig(record);
+  return {
+    config,
     key: {
       fileName: CRON_EXPORT_KEY_FILE_NAME,
       text: serializeKeyFile(keyFileFieldsFromRecord(record)),
       mimeType: CRON_EXPORT_KEY_MIME,
     },
-    command:
-      `psilink exchange ${CRON_EXPORT_INPUT_FILE_NAME} ` +
-      CRON_EXPORT_OUTPUT_FILE_NAME,
+    command,
   };
 }

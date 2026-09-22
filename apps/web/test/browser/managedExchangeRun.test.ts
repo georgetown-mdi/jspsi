@@ -27,13 +27,28 @@ import {
   RotationPersistError,
   succeededRun,
 } from "@psi/managed/managedRunRotate";
+import {
+  composeManagedExchangeFile,
+  runnableManagedExchangeOrRefuse,
+} from "@psi/managed/managedExchangeRecord";
 import { ManagedInputError } from "@psi/managed/managedInputGuard";
-import { composeManagedExchangeFile } from "@psi/managed/managedExchangeRecord";
 import { deriveManagedFailureTier } from "@psi/managed/managedFailureTiers";
 import { getManagedLocalState } from "@psi/managed/managedLocalState";
 
-import type { NewManagedExchange } from "@psi/managed/managedExchangeRecord";
+import type {
+  NewManagedExchange,
+  RunnableManagedExchangeRecord,
+} from "@psi/managed/managedExchangeRecord";
 import type { WebRTCExchangeLocator } from "@psilink/core";
+
+/** A stored record narrowed to the runnable shape these fixtures all have: every
+ * record here is created with a shared secret, and the export, hand-off, and run
+ * paths take the record type that holds one. */
+async function createRunnableExchange(
+  fields: Parameters<typeof createManagedExchange>[0],
+): Promise<RunnableManagedExchangeRecord> {
+  return runnableManagedExchangeOrRefuse(await createManagedExchange(fields));
+}
 
 // The platform half of the run+rotate critical section, exercised against real
 // Chromium (real Web Locks and real IndexedDB): the single-writer lock's exclusion
@@ -289,7 +304,7 @@ describe("single-writer lock", () => {
 
 describe("runManagedExchange: persist-before-success end to end", () => {
   test("persists the rotated secret durably before the data exchange begins", async () => {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
     const rotatedSecret = generateSharedSecret();
     const order: Array<string> = [];
     // The stored record as seen at the moment the data exchange begins -- the
@@ -326,7 +341,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
   });
 
   test("the rotation write uses a strict-durability transaction", async () => {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
     const rotatedSecret = generateSharedSecret();
 
     // Observe the durability of the readwrite transactions the run opens: the
@@ -362,7 +377,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
   });
 
   test("the rotation write is field-scoped: it advances the secret, not the label", async () => {
-    const created = await createManagedExchange(
+    const created = await createRunnableExchange(
       newExchange({ label: "original label" }),
     );
     const rotatedSecret = generateSharedSecret();
@@ -381,7 +396,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
   });
 
   test("restamps expires from tokenMaxAgeDays on a successful run", async () => {
-    const created = await createManagedExchange(
+    const created = await createRunnableExchange(
       newExchange({ tokenMaxAgeDays: 90 }),
     );
     const rotatedSecret = generateSharedSecret();
@@ -401,7 +416,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
   });
 
   test("no policy clears any standing expires bound on rotation", async () => {
-    const created = await createManagedExchange(
+    const created = await createRunnableExchange(
       newExchange({ expires: "2026-09-01T00:00:00.000Z" }),
     );
     const rotatedSecret = generateSharedSecret();
@@ -417,7 +432,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
   });
 
   test("a persist failure records a storage failure and never begins the data exchange", async () => {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
     const rotatedSecret = generateSharedSecret();
     let dataExchangeRan = false;
 
@@ -478,7 +493,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
   });
 
   test("a total storage fault still exposes the RotationPersistError, not the bookkeeping failure", async () => {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
     const rotatedSecret = generateSharedSecret();
     let dataExchangeRan = false;
 
@@ -537,7 +552,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
   });
 
   test("a total storage fault still exposes the ManagedInputError, not the bookkeeping failure", async () => {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
     let handshakeRan = false;
 
     // Fail EVERY readwrite the run opens: the input tier's best-effort `input`
@@ -601,7 +616,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
   });
 
   test("two contended runs serialize: the second sees the first's rotated secret", async () => {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
     const firstRotated = generateSharedSecret();
     const secondRotated = generateSharedSecret();
     const firstInExchange = deferred<void>();
@@ -654,7 +669,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
   });
 
   test("a data-exchange failure propagates unchanged, with the rotation kept and no success recorded", async () => {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
     const rotatedSecret = generateSharedSecret();
     const failure = new Error("data channel dropped mid-exchange");
 
@@ -689,7 +704,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
     // by the surfaces, so a run started in another context after a hand-off still
     // rotated past the copy the operator had just handed over. The record and the
     // sibling spent state here are the real ones the hand-off writes.
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
     expect(
       await spendManagedExchangeIfCurrent(
         created.id,
@@ -747,7 +762,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
     // the storage kind, which would wrongly report a rotation this run never
     // reached -- and not the retryable transport kind, which would keep offering a
     // scheduled window a retry on a permanent local problem.
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
     await putRawLocalState(created.id, {
       spent: { spentAt: "not an instant" },
     });
@@ -799,7 +814,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
     // A record that ran cleanly and was handed off afterwards -- the shape a
     // mount-time reading gets wrong, and the one a scheduled window meets between
     // two attempts.
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
     const rotatedSecret = generateSharedSecret();
     await runManagedExchange({
       record: created,
@@ -838,7 +853,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
   });
 
   test("a slow run's stale success tail cannot mask a newer outcome", async () => {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
     const earlierRunAt = Date.parse("2026-07-14T12:00:00.000Z");
     const laterRunAt = Date.parse("2026-07-14T13:00:00.000Z");
     const runInExchange = deferred<void>();
@@ -917,7 +932,7 @@ describe("the lock spans the payload exchange", () => {
   }
 
   test("a second attended Run is refused while the payload exchange is in flight", async () => {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
     const parked = await runParkedInItsExchange(created.id);
 
     try {
@@ -945,7 +960,7 @@ describe("the lock spans the payload exchange", () => {
   });
 
   test("a hand-off spend is refused while the payload exchange is in flight", async () => {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
     const parked = await runParkedInItsExchange(created.id);
 
     try {
@@ -968,7 +983,7 @@ describe("the lock spans the payload exchange", () => {
   });
 
   test("the lock is free once the success stamp resolves", async () => {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
     const rotatedSecret = generateSharedSecret();
     let lockHeldAtExchange: boolean | undefined;
 
@@ -993,7 +1008,7 @@ describe("the lock spans the payload exchange", () => {
   });
 
   test("the lock is free after the payload exchange fails", async () => {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
     const failure = new Error("data channel dropped mid-exchange");
 
     await expect(
@@ -1015,7 +1030,7 @@ describe("the lock spans the payload exchange", () => {
   });
 
   test("a tab closed mid-exchange releases the lock it held", async () => {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
     const secondTab = await lockHeldByASecondContext(
       managedExchangeLockName(created.id),
     );
@@ -1052,7 +1067,7 @@ describe("a failing run never overwrites a success stamped after it began", () =
   });
 
   test("a failure stamped over a success written mid-run leaves the success", async () => {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
     const runStartedAtMs = Date.now();
     const successAt = runStartedAtMs + 1_000;
 
@@ -1087,7 +1102,7 @@ describe("a failing run never overwrites a success stamped after it began", () =
   });
 
   test("a failure whose run began after the success stamp records normally", async () => {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
     const successAt = Date.now();
     await recordManagedExchangeLastRun(
       created.id,
@@ -1118,7 +1133,7 @@ describe("a failing run never overwrites a success stamped after it began", () =
   });
 
   test("a success writes over a stored failure whatever the run start", async () => {
-    const created = await createManagedExchange(newExchange());
+    const created = await createRunnableExchange(newExchange());
     const runStartedAtMs = Date.now();
     const completedAt = runStartedAtMs + 2_000;
     await recordManagedExchangeLastRun(

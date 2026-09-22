@@ -55,9 +55,12 @@ import {
 import { deepLinkFor, webrtcEndpointFromLocation } from "../invitation";
 import { rotationWriteBack } from "./managedRunRotate";
 
+import type {
+  ManagedExchangeRecord,
+  RunnableManagedExchangeRecord,
+} from "./managedExchangeRecord";
 import type { InvitationLocation } from "../invitation";
 import type { InvitationToken } from "@psilink/core";
-import type { ManagedExchangeRecord } from "./managedExchangeRecord";
 import type { RotationWriteBack } from "./managedRunRotate";
 
 /**
@@ -168,7 +171,7 @@ interface ManagedReinviteSeams {
  *   validation at encode.
  */
 export async function composeManagedReinvite(
-  record: ManagedExchangeRecord,
+  record: RunnableManagedExchangeRecord,
   location: InvitationLocation,
   seams: ManagedReinviteSeams,
 ): Promise<ManagedReinvite> {

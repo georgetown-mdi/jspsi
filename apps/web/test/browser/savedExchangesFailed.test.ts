@@ -18,13 +18,27 @@ import {
 } from "@psi/managed/managedExchangeStore";
 import { SavedExchanges, SavedExchangesHome } from "@recurring/SavedExchanges";
 import {
+  composeManagedExchangeFile,
+  runnableManagedExchangeOrRefuse,
+} from "@psi/managed/managedExchangeRecord";
+import {
   encodeManagedExchangeArtifact,
   serializeManagedExchangeArtifact,
 } from "@psi/managed/managedExchangeArtifact";
 import { RETAKE_ACTION_LABEL } from "@recurring/managedRetakeModel";
-import { composeManagedExchangeFile } from "@psi/managed/managedExchangeRecord";
 
 import { createAppMount } from "./renderApp";
+
+import type { RunnableManagedExchangeRecord } from "@psi/managed/managedExchangeRecord";
+
+/** A stored record narrowed to the runnable shape these fixtures all have: every
+ * record here is created with a shared secret, and the export, hand-off, and run
+ * paths take the record type that holds one. */
+async function createRunnableExchange(
+  fields: Parameters<typeof createManagedExchange>[0],
+): Promise<RunnableManagedExchangeRecord> {
+  return runnableManagedExchangeOrRefuse(await createManagedExchange(fields));
+}
 
 // A read failure after a successful open (a corrupted or app-upgrade-invalidated
 // record) must render the read-failed surface on both the home route (`/`) and
@@ -93,10 +107,10 @@ describe("store opens but the read fails", () => {
     app.render(createElement(SavedExchanges));
 
     await expect
-      .element(page.getByText("Restore from a backup", { exact: false }))
+      .element(page.getByText("Import an exchange", { exact: false }))
       .toBeInTheDocument();
     await expect
-      .element(page.getByRole("button", { name: "Import a backup file" }))
+      .element(page.getByRole("button", { name: "Import a file" }))
       .toBeInTheDocument();
   });
 });
@@ -117,7 +131,7 @@ describe("importing a backup of an exchange handed off from here", () => {
   /** A stored exchange, its pre-hand-off backup bytes, and the command-line spend
    * that makes those bytes an artifact of a copy this browser gave away. */
   async function handedOffBackup(): Promise<string> {
-    const record = await createManagedExchange({
+    const record = await createRunnableExchange({
       label: "Riverbend quarterly",
       exchangeFile: composeManagedExchangeFile({
         connection: { channel: "webrtc", host: "signaling.example.org" },
@@ -142,7 +156,7 @@ describe("importing a backup of an exchange handed off from here", () => {
     const bytes = await handedOffBackup();
     app.render(createElement(SavedExchanges));
     await expect
-      .element(page.getByRole("button", { name: "Import a backup file" }))
+      .element(page.getByRole("button", { name: "Import a file" }))
       .toBeInTheDocument();
 
     await userEvent.upload(
@@ -193,7 +207,7 @@ describe("importing a backup whose stored copy cannot be read here", () => {
    * refuses -- a hand-off route a newer build recorded. Bypasses the validating
    * write, as no supported path stores one. */
   async function unreadableCustodyBackup(): Promise<string> {
-    const record = await createManagedExchange({
+    const record = await createRunnableExchange({
       label: "Riverbend quarterly",
       exchangeFile: composeManagedExchangeFile({
         connection: { channel: "webrtc", host: "signaling.example.org" },
@@ -235,7 +249,7 @@ describe("importing a backup whose stored copy cannot be read here", () => {
     const bytes = await unreadableCustodyBackup();
     app.render(createElement(SavedExchanges));
     await expect
-      .element(page.getByRole("button", { name: "Import a backup file" }))
+      .element(page.getByRole("button", { name: "Import a file" }))
       .toBeInTheDocument();
 
     await userEvent.upload(

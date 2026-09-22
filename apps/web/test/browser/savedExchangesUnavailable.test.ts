@@ -85,7 +85,7 @@ describe("store unavailable", () => {
 
     // No error shown, and no empty-list affordances leaked through.
     expect(
-      page.getByRole("button", { name: "Import a backup file" }).query(),
+      page.getByRole("button", { name: "Import a file" }).query(),
     ).toBeNull();
   });
 });

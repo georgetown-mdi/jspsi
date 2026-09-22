@@ -39,8 +39,8 @@ import { disclosureRecord } from "../../utils/disclosureFixtures.js";
 import { noteUnfiledDisclosureRun } from "../../../src/psi/unfiledDisclosureStore.js";
 import { openPeerMessageConnection } from "../../../src/psi/transport/peerMessageConnection.js";
 
-import type { ManagedExchangeRecord } from "../../../src/psi/managed/managedExchangeRecord.js";
 import type { ManagedInputSource } from "../../../src/psi/managed/managedInputHandle.js";
+import type { RunnableManagedExchangeRecord } from "../../../src/psi/managed/managedExchangeRecord.js";
 
 import type { DataConnection } from "peerjs";
 import type Peer from "peerjs";
@@ -205,10 +205,12 @@ const RECORD = {
   side: "acceptor",
   sharedSecret: "stored-secret",
   exchangeFile: {},
-} as unknown as ManagedExchangeRecord;
+} as unknown as RunnableManagedExchangeRecord;
 
 /** The same record stored for the other rendezvous side. */
-const recordForSide = (side: RendezvousRole): ManagedExchangeRecord => ({
+const recordForSide = (
+  side: RendezvousRole,
+): RunnableManagedExchangeRecord => ({
   ...RECORD,
   side,
 });
@@ -295,7 +297,7 @@ function acquireResources(side: RendezvousRole = "acceptor") {
 function runDriver(
   signal: AbortSignal,
   onWarning?: (message: string) => void,
-  record: ManagedExchangeRecord = RECORD,
+  record: RunnableManagedExchangeRecord = RECORD,
   peerWaitTimeoutMs?: number,
 ) {
   return runManagedExchangeInBrowser({

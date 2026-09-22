@@ -1,6 +1,20 @@
 /**
- * The managed-exchange import: a take-over that installs the artifact as the one
- * owner on this device (see docs/MANAGED_EXCHANGE.md, "Eviction recovery is the
+ * The managed-exchange import: one control over two files (see
+ * {@link importManagedExchangeFile}), routed by what the file holds rather than
+ * by which control the operator used.
+ *
+ * - The app's own BACKUP artifact is a take-over that installs it as the one
+ *   owner on this device (the rest of this header).
+ * - A command-line `psilink.yaml` installs a CONFIGURATION-ONLY record: settings
+ *   to edit and export again, with no secret and no run here (see
+ *   {@link ./managedCommandLineImport.ts}). It reconciles against nothing -- it
+ *   brings no secret to match a stored record on -- and stamps no marker: the
+ *   import marker is evidence of a restored secret, and the backup marker
+ *   attests a file this browser restores a secret from. A file holding neither
+ *   is that record's own backup, on the machine that runs it.
+ *
+ * What follows is the backup leg: a take-over that installs the artifact as the
+ * one owner on this device (see docs/MANAGED_EXCHANGE.md, "Eviction recovery is the
  * import flow" and "Export/import is migration, not sync"). Restoring after eviction
  * and migrating to a new device are the same operation: an import re-establishes the
  * one owner wherever it runs.
@@ -25,7 +39,8 @@
  *
  * A match spent under a HAND-OFF of its own is refused instead
  * ({@link ManagedImportHandedOffError}). The exchange runs from what that hand-off
- * saved -- the command-line export's two files, which this import does not accept --
+ * saved -- the command-line export's two files, whose `psilink.yaml` this import
+ * reads back as a configuration only and whose key file it does not read at all --
  * so the artifact, taken before the hand-off, has no copy to bring back: reviving
  * would run a copy the hand-off gave away, and installing fresh would split one secret
  * across a spent husk and a live row beside it. The refusal names the record the store
@@ -54,11 +69,20 @@
  * path (see {@link ./managedFailureTiers.ts}).
  */
 
+import { parseSensitiveYaml } from "@psilink/core";
+
+import {
+  MAX_ARTIFACT_IMPORT_BYTES,
+  importManagedExchangeArtifact,
+} from "./managedExchangeArtifact";
+import {
+  MAX_CONFIGURATION_IMPORT_BYTES,
+  readManagedCommandLineConfiguration,
+} from "./managedCommandLineImport";
 import {
   createManagedExchange,
   reviveSpentManagedExchange,
 } from "./managedExchangeStore";
-import { importManagedExchangeArtifact } from "./managedExchangeArtifact";
 import { markManagedExchangeImported } from "./managedLocalState";
 
 import type { ManagedExchangeRecord } from "./managedExchangeRecord";
@@ -231,4 +255,72 @@ export async function importManagedExchange(
     record: installed,
     missingGrants: grantsMissingHere(heldGrants, installed),
   };
+}
+
+/** Upper bound, in bytes, on a file this import will read: the picker in
+ * `SavedExchanges.tsx` refuses a file above this cap before reading it. The two
+ * per-leg constants below name each leg's intended bound; both equal this value
+ * today. */
+export const MAX_IMPORT_FILE_BYTES = Math.max(
+  MAX_ARTIFACT_IMPORT_BYTES,
+  MAX_CONFIGURATION_IMPORT_BYTES,
+);
+
+/**
+ * Which of the two files an import was given, decided on what the bytes hold.
+ * The backup artifact is a JSON document tagged with an `artifactVersion`; a
+ * command-line configuration is the YAML the CLI loads, which has no such
+ * field. The probe reads the bytes through the sensitive-YAML chokepoint (YAML
+ * being a superset of the artifact's JSON), and each leg then parses the file
+ * again through its own trust boundary, so no leg validates what another
+ * decoded.
+ *
+ * Bytes that parse as neither are the backup leg's: its refusal is the one that
+ * tells an operator to check the file they chose, and a file this app never
+ * wrote has no version story to tell them.
+ */
+export function managedImportFileKind(
+  source: string,
+): "backup" | "command-line-configuration" {
+  let probed: unknown;
+  try {
+    probed = parseSensitiveYaml(source, "managed exchange import");
+  } catch {
+    return "backup";
+  }
+  const tagged =
+    typeof probed === "object" &&
+    probed !== null &&
+    "artifactVersion" in probed;
+  return tagged ? "backup" : "command-line-configuration";
+}
+
+/**
+ * Import a file the operator chose, whichever of the two it is: the app's own
+ * backup artifact ({@link importManagedExchange}), or a command-line
+ * `psilink.yaml` installed as a configuration-only record
+ * ({@link readManagedCommandLineConfiguration}). Nothing is written on a
+ * refusal by either leg.
+ *
+ * A configuration import always installs a fresh record. It holds no secret to
+ * reconcile against a stored one, and it installs nothing runnable, so it
+ * neither revives a spent record nor stands beside one as a second live copy.
+ *
+ * @throws {UsageError} if the bytes parse as neither file.
+ * @throws {ManagedConfigurationRefusedError} if a configuration fails the
+ *   exchange-file schema, or is one this app cannot hold.
+ * @throws {ManagedImportHandedOffError} or
+ *   {@link ManagedImportCustodyUnreadableError} on the backup leg's refusals.
+ * @throws {ZodError} if the backup file fails its schema, or the install does.
+ */
+export async function importManagedExchangeFile(
+  source: string,
+  deps: ManagedImportDeps = defaultDeps,
+): Promise<ManagedImportResult> {
+  if (managedImportFileKind(source) === "backup")
+    return importManagedExchange(source, deps);
+  const record = await deps.install(
+    readManagedCommandLineConfiguration(source),
+  );
+  return { record, missingGrants: [] };
 }

@@ -5,19 +5,35 @@ import {
   ManagedImportCustodyUnreadableError,
   ManagedImportHandedOffError,
   importManagedExchange,
+  importManagedExchangeFile,
 } from "@psi/managed/managedExchangeImport";
 import {
   buildManagedExchangeRecord,
   composeManagedExchangeFile,
+  runnableManagedExchangeOrRefuse,
 } from "@psi/managed/managedExchangeRecord";
 import {
   encodeManagedExchangeArtifact,
   serializeManagedExchangeArtifact,
 } from "@psi/managed/managedExchangeArtifact";
+import { composeManagedCronExport } from "@psi/managed/managedCronExport";
 
-import type { ManagedExchangeRecord } from "@psi/managed/managedExchangeRecord";
+import type {
+  ManagedExchangeRecord,
+  NewManagedExchange,
+  RunnableManagedExchangeRecord,
+} from "@psi/managed/managedExchangeRecord";
 import type { ManagedImportDeps } from "@psi/managed/managedExchangeImport";
 import type { ManagedReviveOutcome } from "@psi/managed/managedExchangeStore";
+
+/** A record built from `fields` and narrowed to the runnable shape: every fixture
+ * here is built with a shared secret, and the export paths take the record type
+ * that holds one. */
+function runnableRecord(
+  fields: NewManagedExchange,
+): RunnableManagedExchangeRecord {
+  return runnableManagedExchangeOrRefuse(buildManagedExchangeRecord(fields));
+}
 
 // The import take-over, tested in Node with injected dependencies: a valid
 // artifact installs one owner and marks it imported-and-backed-up; a
@@ -31,7 +47,7 @@ import type { ManagedReviveOutcome } from "@psi/managed/managedExchangeStore";
 const linkageTerms = getDefaultLinkageTerms("County Health Dept");
 
 function goodBytes(): string {
-  const record = buildManagedExchangeRecord({
+  const record = runnableRecord({
     label: "Riverbend quarterly",
     exchangeFile: composeManagedExchangeFile({
       connection: { channel: "webrtc", host: "signaling.example.org" },
@@ -50,8 +66,8 @@ function goodBytes(): string {
 function recordHolding(grants: {
   inputFile?: boolean;
   outputFolder?: boolean;
-}): ManagedExchangeRecord {
-  return buildManagedExchangeRecord({
+}): RunnableManagedExchangeRecord {
+  return runnableRecord({
     label: "Riverbend quarterly",
     exchangeFile: composeManagedExchangeFile({
       connection: { channel: "webrtc", host: "signaling.example.org" },
@@ -85,7 +101,7 @@ function grantedBytes(): string {
  * artifact holds the schedule, and the handle is a device-local platform
  * object no artifact can hold. */
 function scheduledBytes(): string {
-  const record = buildManagedExchangeRecord({
+  const record = runnableRecord({
     label: "Riverbend quarterly",
     exchangeFile: composeManagedExchangeFile({
       connection: { channel: "webrtc", host: "signaling.example.org" },
@@ -143,7 +159,7 @@ describe("importManagedExchange", () => {
   });
 
   test("revives a migration-spent secret-match in place instead of installing a duplicate", async () => {
-    const existing = buildManagedExchangeRecord({
+    const existing = runnableRecord({
       label: "Riverbend quarterly",
       exchangeFile: composeManagedExchangeFile({
         connection: { channel: "webrtc", host: "signaling.example.org" },
@@ -295,6 +311,68 @@ describe("importManagedExchange", () => {
     artifact.key.sharedSecret = "not-a-secret";
     await expect(
       importManagedExchange(JSON.stringify(artifact), deps),
+    ).rejects.toThrow();
+    expect(deps.installed).toHaveLength(0);
+  });
+});
+
+describe("importManagedExchangeFile routes by what the file is", () => {
+  /** The `psilink.yaml` the app's own command-line export writes, which is the
+   * file an operator brings back. */
+  function configurationBytes(): string {
+    return composeManagedCronExport(
+      runnableRecord({
+        label: "Riverbend quarterly",
+        exchangeFile: composeManagedExchangeFile({
+          connection: { channel: "webrtc", host: "signaling.example.org" },
+          linkageTerms,
+        }),
+        side: "acceptor",
+        sharedSecret: generateSharedSecret(),
+      }),
+    ).config.text;
+  }
+
+  test("a backup artifact takes the take-over leg", async () => {
+    const deps = recordingDeps();
+
+    await importManagedExchangeFile(goodBytes(), deps);
+
+    expect(deps.reviveSpent).toHaveBeenCalledOnce();
+    expect(deps.installed).toHaveLength(1);
+  });
+
+  test("a command-line configuration installs a record holding no secret", async () => {
+    const deps = recordingDeps();
+
+    const { record, missingGrants } = await importManagedExchangeFile(
+      configurationBytes(),
+      deps,
+    );
+
+    expect(record.sharedSecret).toBeUndefined();
+    expect(record.side).toBe("acceptor");
+    expect(missingGrants).toEqual([]);
+    expect(deps.installed).toHaveLength(1);
+  });
+
+  test("a configuration reconciles against nothing and marks nothing", async () => {
+    // It brings no secret to match a stored record on, and no file it could be
+    // restored from: neither the revive nor the import marker has anything to
+    // act on.
+    const deps = recordingDeps();
+
+    await importManagedExchangeFile(configurationBytes(), deps);
+
+    expect(deps.reviveSpent).not.toHaveBeenCalled();
+    expect(deps.markImported).not.toHaveBeenCalled();
+  });
+
+  test("a configuration this app cannot hold installs nothing", async () => {
+    const deps = recordingDeps();
+
+    await expect(
+      importManagedExchangeFile("channel: nonsense\n", deps),
     ).rejects.toThrow();
     expect(deps.installed).toHaveLength(0);
   });

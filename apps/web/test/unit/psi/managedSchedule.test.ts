@@ -18,6 +18,7 @@ import {
   buildManagedExchangeRecord,
   composeManagedExchangeFile,
   parseManagedExchangeRecord,
+  runnableManagedExchangeOrRefuse,
   scheduleSchema,
 } from "@psi/managed/managedExchangeRecord";
 import {
@@ -30,7 +31,18 @@ import { withTimeZone } from "../../utils/hostTimeZone";
 import type {
   ManagedExchangeRecord,
   ManagedExchangeSchedule,
+  NewManagedExchange,
+  RunnableManagedExchangeRecord,
 } from "@psi/managed/managedExchangeRecord";
+
+/** A record built from `fields` and narrowed to the runnable shape: every fixture
+ * here is built with a shared secret, and the export paths take the record type
+ * that holds one. */
+function runnableRecord(
+  fields: NewManagedExchange,
+): RunnableManagedExchangeRecord {
+  return runnableManagedExchangeOrRefuse(buildManagedExchangeRecord(fields));
+}
 
 // The schedule arithmetic in Node, with every clock injected. The recurrence is
 // UTC-millisecond arithmetic against the record's stored-UTC anchor, so the suite
@@ -876,8 +888,8 @@ describe("catch-up on the import path", () => {
 
   function recordWith(
     schedule: ManagedExchangeSchedule,
-  ): ManagedExchangeRecord {
-    return buildManagedExchangeRecord({
+  ): RunnableManagedExchangeRecord {
+    return runnableRecord({
       label: "Riverbend quarterly",
       exchangeFile: composeManagedExchangeFile({
         connection: { channel: "webrtc", host: "signaling.example.org" },
@@ -929,8 +941,8 @@ describe("folding the windows a compromise response held", () => {
     schedule: ManagedExchangeSchedule;
     lastRun?: ManagedExchangeRecord["lastRun"];
     respondedAt?: string;
-  }): ManagedExchangeRecord {
-    const built = buildManagedExchangeRecord({
+  }): RunnableManagedExchangeRecord {
+    const built = runnableRecord({
       label: "Riverbend quarterly",
       exchangeFile: composeManagedExchangeFile({
         connection: { channel: "webrtc", host: "signaling.example.org" },
@@ -941,12 +953,17 @@ describe("folding the windows a compromise response held", () => {
       schedule: options.schedule,
       ...(options.lastRun !== undefined ? { lastRun: options.lastRun } : {}),
     });
-    return applyManagedExchangeCompromiseResponse(
-      parseManagedExchangeRecord({
-        ...built,
-        standingCondition: { since: "2026-01-06T08:00:00.000Z", kind: "auth" },
-      }),
-      options.respondedAt ?? "2026-01-06T09:00:00.000Z",
+    return runnableManagedExchangeOrRefuse(
+      applyManagedExchangeCompromiseResponse(
+        parseManagedExchangeRecord({
+          ...built,
+          standingCondition: {
+            since: "2026-01-06T08:00:00.000Z",
+            kind: "auth",
+          },
+        }),
+        options.respondedAt ?? "2026-01-06T09:00:00.000Z",
+      ),
     );
   }
 
@@ -991,7 +1008,7 @@ describe("folding the windows a compromise response held", () => {
   });
 
   test("folds nothing where no answer stands", () => {
-    const record = buildManagedExchangeRecord({
+    const record = runnableRecord({
       label: "Riverbend quarterly",
       exchangeFile: composeManagedExchangeFile({
         connection: { channel: "webrtc", host: "signaling.example.org" },

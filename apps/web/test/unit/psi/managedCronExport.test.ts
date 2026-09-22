@@ -22,6 +22,7 @@ import {
   composeManagedExchangeFile,
   keyFileFieldsSchema,
   parseManagedExchangeRecord,
+  runnableManagedExchangeOrRefuse,
 } from "@psi/managed/managedExchangeRecord";
 import {
   importManagedExchangeArtifact,
@@ -35,10 +36,19 @@ import type {
   WebRTCExchangeLocator,
 } from "@psilink/core";
 import type {
-  ManagedExchangeRecord,
   ManagedExchangeSide,
   NewManagedExchange,
+  RunnableManagedExchangeRecord,
 } from "@psi/managed/managedExchangeRecord";
+
+/** A record built from `fields` and narrowed to the runnable shape: every fixture
+ * here is built with a shared secret, and the export paths take the record type
+ * that holds one. */
+function runnableRecord(
+  fields: NewManagedExchange,
+): RunnableManagedExchangeRecord {
+  return runnableManagedExchangeOrRefuse(buildManagedExchangeRecord(fields));
+}
 
 // The command-line export composer, tested in Node without a store, a download,
 // or a spend: the two files it emits are the ones `psilink exchange` opens, the
@@ -72,13 +82,13 @@ function newExchange(
 
 function managedRecord(
   overrides: Partial<NewManagedExchange> = {},
-): ManagedExchangeRecord {
-  return buildManagedExchangeRecord(newExchange(overrides));
+): RunnableManagedExchangeRecord {
+  return runnableRecord(newExchange(overrides));
 }
 
 /** The exported configuration read back the way the CLI reads it: the sensitive
  * YAML chokepoint, then core's exchange-file parser. */
-function parseExportedConfig(record: ManagedExchangeRecord) {
+function parseExportedConfig(record: RunnableManagedExchangeRecord) {
   return parseExchangeSpec(
     parseSensitiveYaml(
       composeManagedCronExport(record).config.text,
@@ -288,20 +298,22 @@ describe("a record that is not a webrtc exchange", () => {
  * reachability half of the refusal the test then asserts. */
 function importedRecordWithDocument(
   exchangeFile: ExchangeSpec,
-): ManagedExchangeRecord {
-  return importManagedExchangeArtifact(
-    JSON.stringify({
-      artifactVersion: MANAGED_EXCHANGE_ARTIFACT_VERSION,
-      exchangeDocument: serializeExchangeDocument(exchangeFile),
-      key: { sharedSecret: generateSharedSecret() },
-      local: { label: "Imported quarterly", side: "inviter" },
-    }),
-  ).record;
+): RunnableManagedExchangeRecord {
+  return runnableManagedExchangeOrRefuse(
+    importManagedExchangeArtifact(
+      JSON.stringify({
+        artifactVersion: MANAGED_EXCHANGE_ARTIFACT_VERSION,
+        exchangeDocument: serializeExchangeDocument(exchangeFile),
+        key: { sharedSecret: generateSharedSecret() },
+        local: { label: "Imported quarterly", side: "inviter" },
+      }),
+    ).record,
+  );
 }
 
 function importedRecordWithConnection(
   connection: WebRTCConnectionConfig,
-): ManagedExchangeRecord {
+): RunnableManagedExchangeRecord {
   return importedRecordWithDocument(
     assembleExchangeSpec({ connection, linkageTerms }),
   );
@@ -309,7 +321,7 @@ function importedRecordWithConnection(
 
 /** The message the export refuses a record with, failing the test if it composed
  * one instead. */
-function exportRefusal(record: ManagedExchangeRecord): string {
+function exportRefusal(record: RunnableManagedExchangeRecord): string {
   try {
     composeManagedCronExport(record);
   } catch (error) {
@@ -478,7 +490,7 @@ describe("an authentication block on the stored document", () => {
   function recordCarrying(
     authentication: ExchangeSpec["authentication"],
     overrides: Partial<NewManagedExchange> = {},
-  ): ManagedExchangeRecord {
+  ): RunnableManagedExchangeRecord {
     const record = managedRecord(overrides);
     return {
       ...record,
@@ -530,7 +542,7 @@ describe("a signing block on the stored document", () => {
     receiptOutput: "/home/other/receipts/planted-receipt.json",
   } as const;
 
-  function importedRecordWithSigning(): ManagedExchangeRecord {
+  function importedRecordWithSigning(): RunnableManagedExchangeRecord {
     return importedRecordWithDocument(
       assembleExchangeSpec({
         connection: connectionFromLocator(webrtcLocator),

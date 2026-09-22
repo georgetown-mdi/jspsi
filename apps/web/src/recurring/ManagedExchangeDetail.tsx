@@ -28,9 +28,7 @@ import {
   LABEL_GUIDANCE,
   MAX_LABEL_LENGTH,
   MAX_TOKEN_MAX_AGE_DAYS,
-  labelWithinCap,
   maxAgeCadenceNote,
-  maxAgeDaysError,
 } from "@exchange/manageOfferModel";
 import styles from "@styles/app.module.css";
 
@@ -95,6 +93,7 @@ import {
   UNCHANGED_INPUT_TITLE,
 } from "./scheduleSurfacingModel";
 import { useInputFileModifiedAt } from "./useInputFileModifiedAt";
+import { useLocalFieldsDraft } from "./useLocalFieldsDraft";
 
 import type {
   ManagedExchangeLocalEdits,
@@ -306,7 +305,7 @@ export function ManagedExchangeDetail({
  * app's own fixed copy, not a value the partner or operator chose (those reach
  * the row through `row.value` / `row.values` / `row.muted` instead).
  */
-function ConfigRowItem({ row }: { row: ConfigRow }) {
+export function ConfigRowItem({ row }: { row: ConfigRow }) {
   return (
     <div className={styles.dlRow}>
       <span className={styles.dlLabel}>{row.label}</span>
@@ -465,16 +464,24 @@ function LocalFieldsEditor({
   onGrantOutputFolder: () => Promise<void>;
   onStopUsingOutputFolder: () => Promise<void>;
 }) {
-  const [label, setLabel] = useState(record.label);
-  const [maxAgeEnabled, setMaxAgeEnabled] = useState(
-    record.tokenMaxAgeDays !== undefined,
-  );
-  // Held as the NumberInput reports it (a string when cleared or mid-edit), so an
-  // invalid state is representable and blocks the save rather than being coerced to
-  // a sentinel that silently drops the opted-in bound.
-  const [maxAgeDays, setMaxAgeDays] = useState<number | string>(
-    record.tokenMaxAgeDays ?? 90,
-  );
+  const {
+    label,
+    editLabel,
+    maxAgeEnabled,
+    editMaxAgeEnabled,
+    maxAgeDays,
+    editMaxAgeDays,
+    markEdited,
+    maxAgeError,
+    tokenMaxAgeDays,
+    tokenMaxAgeDaysEdit,
+    labelValid,
+    canSave: localFieldsSavable,
+    saving,
+    saved,
+    failed,
+    submit,
+  } = useLocalFieldsDraft(record);
   const [scheduleEnabled, setScheduleEnabled] = useState(
     record.schedule !== undefined,
   );
@@ -486,15 +493,6 @@ function LocalFieldsEditor({
       ? scheduleEntryFieldsFrom(record.schedule)
       : defaultScheduleEntryFields(Date.now()),
   );
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [failed, setFailed] = useState(false);
-
-  const maxAgeError = maxAgeEnabled ? maxAgeDaysError(maxAgeDays) : undefined;
-  const tokenMaxAgeDays =
-    maxAgeEnabled && maxAgeError === undefined && typeof maxAgeDays === "number"
-      ? maxAgeDays
-      : undefined;
   const cadenceNote = maxAgeCadenceNote(tokenMaxAgeDays);
   const scheduleErrors = scheduleEnabled
     ? scheduleEntryErrors(schedule, record.schedule)
@@ -504,21 +502,16 @@ function LocalFieldsEditor({
   const cadenceProblem = scheduleEnabled
     ? cadenceAgainstTokenBound(schedule.intervalDays, tokenMaxAgeDays)
     : undefined;
-  const labelValid = labelWithinCap(label);
   const grant = outputFolderGrant(
     record.outputDirectoryHandle,
     storedOutputDirectoryUsable(record.outputDirectoryHandle),
     outputDirectoryGrantSupported(),
   );
-  const canSave =
-    labelValid &&
-    scheduleValid &&
-    !saving &&
-    (!maxAgeEnabled || maxAgeError === undefined);
+  const canSave = localFieldsSavable && scheduleValid;
 
   function editSchedule(fields: Partial<ScheduleEntryFields>) {
     setSchedule((current) => ({ ...current, ...fields }));
-    setSaved(false);
+    markEdited();
   }
 
   /**
@@ -549,23 +542,15 @@ function LocalFieldsEditor({
 
   function save() {
     if (!canSave) return;
-    setSaving(true);
-    setSaved(false);
-    setFailed(false);
-    // The max-age opt-in is a three-way edit: enabled with a valid value sets it,
-    // disabled clears it (null), so an off checkbox drops what is stored rather
-    // than leaving it untouched. The schedule takes the same shape for a toggle
-    // the operator moved, and no edit at all otherwise.
+    // The schedule is a three-way edit: a resolved cadence to write, null to drop
+    // a stored one for a toggle the operator moved, and no edit at all otherwise.
     const scheduleChange = scheduleEdit();
     const edits: ManagedExchangeLocalEdits = {
       label,
-      tokenMaxAgeDays: maxAgeEnabled ? (tokenMaxAgeDays ?? null) : null,
+      tokenMaxAgeDays: tokenMaxAgeDaysEdit,
       ...(scheduleChange !== undefined ? { schedule: scheduleChange } : {}),
     };
-    void onSave(edits)
-      .then(() => setSaved(true))
-      .catch(() => setFailed(true))
-      .finally(() => setSaving(false));
+    submit(() => onSave(edits));
   }
 
   return (
@@ -585,10 +570,7 @@ function LocalFieldsEditor({
             ? undefined
             : `Keep the label to ${MAX_LABEL_LENGTH} characters or fewer.`
         }
-        onChange={(event) => {
-          setLabel(event.currentTarget.value);
-          setSaved(false);
-        }}
+        onChange={(event) => editLabel(event.currentTarget.value)}
         mt="sm"
       />
       <Checkbox
@@ -597,7 +579,7 @@ function LocalFieldsEditor({
         checked={scheduleEnabled}
         onChange={(event) => {
           setScheduleEnabled(event.currentTarget.checked);
-          setSaved(false);
+          markEdited();
         }}
         mt="sm"
       />
@@ -641,10 +623,7 @@ function LocalFieldsEditor({
         label="Set a maximum age for the stored secret"
         description="Off by default. When set, the stored secret lapses if the exchange is not run or renewed within the age you choose."
         checked={maxAgeEnabled}
-        onChange={(event) => {
-          setMaxAgeEnabled(event.currentTarget.checked);
-          setSaved(false);
-        }}
+        onChange={(event) => editMaxAgeEnabled(event.currentTarget.checked)}
         mt="sm"
       />
       {maxAgeEnabled && (
@@ -656,10 +635,7 @@ function LocalFieldsEditor({
           step={1}
           allowDecimal={false}
           error={maxAgeError}
-          onChange={(value) => {
-            setMaxAgeDays(value);
-            setSaved(false);
-          }}
+          onChange={editMaxAgeDays}
           mt="xs"
         />
       )}

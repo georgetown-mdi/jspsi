@@ -10,6 +10,12 @@
  * block), the one at-rest secret, and a small set of local-only fields; never
  * input content or a row value. The document is fixed for the partnership --
  * only `label`, `schedule`, and `tokenMaxAgeDays` update in place.
+ *
+ * The secret is the one field a record may hold none of. A record without it is
+ * a CONFIGURATION ONLY -- settings to edit and export, running nowhere here --
+ * and {@link runnableManagedExchange} is the narrowing every path that needs a
+ * secret takes (see docs/spec/MANAGED_EXCHANGE_RECORD.md, "The
+ * configuration-only record").
  */
 
 import {
@@ -285,8 +291,15 @@ export interface ManagedExchangeRecord {
    */
   outputDirectoryHandle?: FileSystemDirectoryHandle;
   /** The current rotated shared secret (base64url, 43 chars / 32 bytes), matching
-   * {@link SHARED_SECRET_REGEX}. The one at-rest secret in the record. */
-  sharedSecret: string;
+   * {@link SHARED_SECRET_REGEX}. The one at-rest secret in the record.
+   *
+   * Absent in a CONFIGURATION-ONLY record -- one imported from a command-line
+   * `psilink.yaml` whose `.psilink.key` stayed on the machine that runs it. Such
+   * a record holds settings to edit and export, and its absent secret is what
+   * withholds every run here: {@link runnableManagedExchange} is the one
+   * narrowing to the record shape the run, rotation, re-invite, and backup paths
+   * take, so a configuration-only record cannot be handed to any of them. */
+  sharedSecret?: string;
   /** ISO 8601 UTC instant after which {@link sharedSecret} must not be used;
    * absent means no bound is in force. Only {@link tokenMaxAgeDays} writes it. */
   expires?: string;
@@ -454,22 +467,44 @@ export const keyFileFieldsSchema: ZodType<ManagedExchangeKeyFields> = z
  * to assert -- the schema treats each as an optional unknown, and the
  * no-input-content invariant is a property of the type (a handle is a pointer),
  * not a runtime check.
+ *
+ * The refine holds the configuration-only shape together: a record with no
+ * `sharedSecret` runs nothing here, so it may hold nothing a run or a secret
+ * produces. Every such field is bound to the secret's presence at the schema, so
+ * a record whose shape withholds the run cannot also hold a lapse instant for a
+ * secret it does not have, a schedule nothing here would execute, or the
+ * bookkeeping of runs it never made.
  */
-const ManagedExchangeRecordSchema: ZodType<ManagedExchangeRecord> = z.object({
-  schemaVersion: z.literal(MANAGED_EXCHANGE_SCHEMA_VERSION),
-  id: z.string().min(1),
-  label: z.string().check(maxCodeUnits(MAX_LABEL_LENGTH)),
-  exchangeFile: persistedExchangeFileSchema,
-  side: z.enum(["inviter", "acceptor"]),
-  inputFileHandle: z.custom<FileSystemFileHandle>().optional(),
-  outputDirectoryHandle: z.custom<FileSystemDirectoryHandle>().optional(),
-  sharedSecret: z.string().regex(SHARED_SECRET_REGEX),
-  expires: z.iso.datetime().optional(),
-  tokenMaxAgeDays: tokenMaxAgeDaysSchema.optional(),
-  schedule: scheduleSchema.optional(),
-  lastRun: lastRunSchema.optional(),
-  standingCondition: standingConditionFieldSchema,
-});
+const ManagedExchangeRecordSchema: ZodType<ManagedExchangeRecord> = z
+  .object({
+    schemaVersion: z.literal(MANAGED_EXCHANGE_SCHEMA_VERSION),
+    id: z.string().min(1),
+    label: z.string().check(maxCodeUnits(MAX_LABEL_LENGTH)),
+    exchangeFile: persistedExchangeFileSchema,
+    side: z.enum(["inviter", "acceptor"]),
+    inputFileHandle: z.custom<FileSystemFileHandle>().optional(),
+    outputDirectoryHandle: z.custom<FileSystemDirectoryHandle>().optional(),
+    sharedSecret: z.string().regex(SHARED_SECRET_REGEX).optional(),
+    expires: z.iso.datetime().optional(),
+    tokenMaxAgeDays: tokenMaxAgeDaysSchema.optional(),
+    schedule: scheduleSchema.optional(),
+    lastRun: lastRunSchema.optional(),
+    standingCondition: standingConditionFieldSchema,
+  })
+  .refine(
+    (record) =>
+      record.sharedSecret !== undefined ||
+      (record.expires === undefined &&
+        record.schedule === undefined &&
+        record.lastRun === undefined &&
+        record.inputFileHandle === undefined &&
+        record.outputDirectoryHandle === undefined),
+    {
+      message:
+        "a record without a sharedSecret is configuration only and must hold " +
+        "no expires, schedule, lastRun, or platform handle",
+    },
+  );
 
 /**
  * Parse and validate a value read from the store as a {@link ManagedExchangeRecord}.
@@ -488,6 +523,56 @@ export function parseManagedExchangeRecord(
 /** Non-throwing {@link parseManagedExchangeRecord}. */
 export function safeParseManagedExchangeRecord(raw: unknown) {
   return ManagedExchangeRecordSchema.safeParse(raw);
+}
+
+/**
+ * A record holding the secret its exchange runs on: the shape every run,
+ * rotation, re-invite, hand-off, and backup path takes. The narrowing is the
+ * type, so a configuration-only record (no {@link
+ * ManagedExchangeRecord.sharedSecret}) cannot be passed to one of them at all.
+ */
+export type RunnableManagedExchangeRecord = ManagedExchangeRecord & {
+  sharedSecret: string;
+};
+
+/**
+ * Whether a stored record holds the secret its exchange runs on, narrowing it to
+ * {@link RunnableManagedExchangeRecord} where it does. The one place the withheld
+ * run is decided, and it decides on the record's own shape rather than on a
+ * stored flag: a surface offering a run narrows first and shows the
+ * configuration-only state where the narrowing fails.
+ */
+export function runnableManagedExchange(
+  record: ManagedExchangeRecord,
+): record is RunnableManagedExchangeRecord {
+  return record.sharedSecret !== undefined;
+}
+
+/**
+ * The same narrowing as a refusal, for a path a configuration-only record has no
+ * answer for at all -- a backup of a secret that is not stored, a hand-off of a
+ * copy this browser never held. The surfaces withhold those controls on the
+ * record's shape; this is the boundary that refuses one reached anyway, rather
+ * than composing a file with an empty secret in it.
+ *
+ * It is also the runtime half of the narrowing where the type is erased: a
+ * store entry point takes the record's `id`, which carries no shape, so the
+ * rotation and re-invite writes narrow the record they read inside the
+ * transaction and abort it here rather than writing a secret onto a record that
+ * holds none (see {@link ./managedExchangeStore.ts}).
+ *
+ * @throws {Error} if the record holds no shared secret.
+ */
+export function runnableManagedExchangeOrRefuse(
+  record: ManagedExchangeRecord,
+): RunnableManagedExchangeRecord {
+  if (!runnableManagedExchange(record))
+    throw new Error(
+      "this exchange holds a configuration only: its shared secret stayed " +
+        "with the command line, so there is nothing here to rotate, " +
+        "re-invite from, back up, hand off, or run",
+    );
+  return record;
 }
 
 /**
@@ -652,8 +737,10 @@ export interface NewManagedExchange {
   exchangeFile: ExchangeSpec;
   /** This party's side of the partnership. */
   side: ManagedExchangeSide;
-  /** The current rotated shared secret. */
-  sharedSecret: string;
+  /** The current rotated shared secret. Absent only for a configuration-only
+   * record, which holds settings to edit and export and runs nothing here (see
+   * {@link ManagedExchangeRecord.sharedSecret}). */
+  sharedSecret?: string;
   /** An input-file handle pointer, when the platform provides one. */
   inputFileHandle?: FileSystemFileHandle;
   /** An output-folder grant, when the operator has already taken one. */
@@ -695,7 +782,9 @@ export function buildManagedExchangeRecord(
     label: fields.label,
     exchangeFile: fields.exchangeFile,
     side: fields.side,
-    sharedSecret: fields.sharedSecret,
+    ...(fields.sharedSecret !== undefined
+      ? { sharedSecret: fields.sharedSecret }
+      : {}),
     ...(fields.inputFileHandle !== undefined
       ? { inputFileHandle: fields.inputFileHandle }
       : {}),
@@ -739,16 +828,16 @@ export interface ManagedExchangeRotation {
  * @throws {ZodError} if the rotated record is invalid (a malformed secret).
  */
 export function applyManagedExchangeRotation(
-  record: ManagedExchangeRecord,
+  record: RunnableManagedExchangeRecord,
   rotation: ManagedExchangeRotation,
-): ManagedExchangeRecord {
+): RunnableManagedExchangeRecord {
   const next: ManagedExchangeRecord = {
     ...record,
     sharedSecret: rotation.sharedSecret,
   };
   if (rotation.expires === null) delete next.expires;
   else next.expires = rotation.expires;
-  return parseManagedExchangeRecord(next);
+  return runnableManagedExchangeOrRefuse(parseManagedExchangeRecord(next));
 }
 
 /**
@@ -766,9 +855,9 @@ export function applyManagedExchangeRotation(
  * @throws {ZodError} if the rotated record is invalid (a malformed secret).
  */
 export function applyManagedExchangeReinviteRotation(
-  record: ManagedExchangeRecord,
+  record: RunnableManagedExchangeRecord,
   rotation: ManagedExchangeRotation,
-): ManagedExchangeRecord {
+): RunnableManagedExchangeRecord {
   const next: ManagedExchangeRecord = {
     ...record,
     sharedSecret: rotation.sharedSecret,
@@ -777,7 +866,7 @@ export function applyManagedExchangeReinviteRotation(
   else next.expires = rotation.expires;
   delete next.lastRun;
   next.standingCondition = NO_STANDING_CONDITION;
-  return parseManagedExchangeRecord(next);
+  return runnableManagedExchangeOrRefuse(parseManagedExchangeRecord(next));
 }
 
 /**
@@ -1135,9 +1224,13 @@ export function applyManagedExchangeLocalEdits(
   if (edits.tokenMaxAgeDays !== undefined) {
     if (edits.tokenMaxAgeDays === null) delete next.tokenMaxAgeDays;
     else next.tokenMaxAgeDays = edits.tokenMaxAgeDays;
-    const expires = deriveEditedExpiry(record, edits.tokenMaxAgeDays, now);
-    if (expires === null) delete next.expires;
-    else next.expires = expires;
+    // `expires` bounds the stored secret, so a record holding none takes the
+    // policy alone: the bound is stamped by the run that gives it a secret.
+    if (record.sharedSecret !== undefined) {
+      const expires = deriveEditedExpiry(record, edits.tokenMaxAgeDays, now);
+      if (expires === null) delete next.expires;
+      else next.expires = expires;
+    }
   }
   return parseManagedExchangeRecord(next);
 }
