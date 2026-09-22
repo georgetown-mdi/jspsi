@@ -151,7 +151,7 @@ The workflow holds no AWS key. It assumes `psilink-origin-drift-check`, a role w
 
 1. Confirm the account has GitHub's OIDC provider, which the deploy role already uses: `aws iam list-open-id-connect-providers` states an ARN ending `token.actions.githubusercontent.com`. Create it if it is absent -- `aws iam create-open-id-connect-provider --url https://token.actions.githubusercontent.com --client-id-list sts.amazonaws.com`.
 
-2. Write the trust policy. The condition admits this repository's default branch and nothing else, so no other branch, no pull request, and no other repository can assume the role:
+2. Write the trust policy. The condition admits this repository's default branch and nothing else, so a dispatch from any other branch, and any other repository, cannot assume the role:
 
    ```json
    {

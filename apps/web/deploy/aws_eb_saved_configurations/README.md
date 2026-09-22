@@ -89,7 +89,7 @@ What it reads comes from the committed files beside it rather than from a typed-
 | Permitted actions | `sts:GetCallerIdentity`; `s3:GetObject` on `arn:aws:s3:::elasticbeanstalk-<region>-<account-id>/cert/public.crt`, the one object the check reads; `ec2:DescribeSecurityGroups`. No write action, and no other read |
 | Role ARN          | The `AWS_ORIGIN_DRIFT_ROLE_ARN` repository secret. It is a secret rather than a variable because an ARN states the account id, which this repository keeps out of its files                          |
 
-The trust condition names the default branch's ref, so the role is assumable from `main` alone: a dispatch from any other branch, and anything a pull request runs, stops at the role-assumption step.
+The trust condition names the default branch's ref, so the role is assumable from `main` alone: a dispatch from any other branch stops at the role-assumption step.
 
 `ec2:DescribeSecurityGroups` is granted on `*` rather than on the one group. Whether IAM accepts a security-group ARN as the resource of a Describe call is the account holder's to find out against IAM itself, which nothing in this repository can call; the runbook says to narrow it where IAM takes it.
 
