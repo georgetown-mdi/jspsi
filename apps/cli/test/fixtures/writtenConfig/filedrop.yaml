@@ -1,0 +1,34 @@
+# How to reach your exchange partner. channel is one of sftp, filedrop (a
+# shared mounted directory), or webrtc; the block each one takes is at
+# https://github.com/georgetown-mdi/jspsi/blob/main/docs/EXCHANGE_REFERENCE.md#connection-blocks-by-channel
+connection:
+  channel: filedrop
+  inbound_path: /mnt/from-partner
+  outbound_path: /mnt/to-partner
+  options:
+    retain_files: true
+    lockless_rendezvous: true
+    timestamp_in_filename: true
+    poll_interval_ms: 250
+    # Connection tuning, all optional; the defaults are shown below. Uncomment
+    # and edit to change one.
+    # server_connect_timeout_ms: 30000
+    # peer_timeout_ms: 3600000
+    # max_reconnect_attempts: 3
+linkage_terms:
+  version: 1.0.0
+  identity: Agency B
+  date: 2025-01-01
+  algorithm: psi
+  linkage_strategy: cascade
+  output:
+    expects_output: true
+    share_with_partner: false
+  deduplicate: false
+  linkage_fields:
+    - name: ssn
+      type: ssn
+  linkage_keys:
+    - name: SSN
+      elements:
+        - field: ssn

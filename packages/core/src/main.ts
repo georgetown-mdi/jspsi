@@ -390,6 +390,13 @@ export {
 } from "./config/endpointProducer";
 export type { EndpointSourceConnectionConfig } from "./config/endpointProducer";
 export {
+  CONNECTION_BLOCK_DOC_URL,
+  CONNECTION_BLOCK_NOTICE,
+  POLL_INTERVAL_LINES,
+} from "./config/connectionGuidance";
+export { commentBlock, commentKey } from "./config/yamlComments";
+export { serializeExchangeDocument } from "./config/exchangeDocument";
+export {
   assembleExchangeSpec,
   connectionFromLocator,
   mintExchangeFile,

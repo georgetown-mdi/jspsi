@@ -35,7 +35,9 @@ hold. The web mint layer (`mintExchangeFile` in
 `packages/core/src/config/exchangeFile.ts`) expands the credential-free locator
 into a connection block and serializes the parse result -- not the
 pre-validation input -- through the same `snakeizeKeys` + YAML `stringify`
-discipline the CLI's `saveConfig` (`apps/cli/src/config.ts`) uses.
+discipline `serializeExchangeDocument`
+(`packages/core/src/config/exchangeDocument.ts`) applies, the function the
+CLI's `saveConfig` (`apps/cli/src/config.ts`) calls to write its output.
 
 Assembly and validation are one function below the mint, `assembleExchangeSpec`
 in the same module: it builds the exchange from the camelCase parts, attaching
@@ -84,10 +86,12 @@ obligation, not a property of the artifact.
   runtime, and the operator-policy `token_max_age_days`, which an operator sets
   in `psilink.yaml` and no mint path has a value for. So a minted file that omits
   the block has no secret and no place to put one, and leaves the max-age
-  policy to whoever runs it. This mirrors `saveConfig`, which strips
-  `shared_secret` and `expires` from any `authentication` block a caller leaves
-  populated -- and leaves `token_max_age_days` standing; the mint layer reaches
-  the same end by never building the block.
+  policy to whoever runs it. This mirrors `serializeExchangeDocument`
+  (`packages/core/src/config/exchangeDocument.ts`), which strips
+  `shared_secret` and `expires` from any `authentication` block a caller
+  leaves populated -- and leaves `token_max_age_days` standing, the same as
+  when `saveConfig` (`apps/cli/src/config.ts`) calls it to write its output;
+  the mint layer reaches the same end by never building the block.
 - **No credential field is representable.** The mint layer's input connection is
   a credential-free locator type (`ExchangeFileConnection`: `SftpExchangeLocator`
   or `FiledropExchangeLocator`). By construction these types have no `username`,
@@ -528,8 +532,11 @@ The shared secret rides only the invitation code. It never enters the exchange
 file, and each party provisions its own `.psilink.key` from the code:
 
 - **The file has no secret.** As above, a minted file has no
-  `authentication` block, and `saveConfig` strips `shared_secret`/`expires`
-  regardless. The 256-bit setup secret an invitation holds
+  `authentication` block, and `serializeExchangeDocument`
+  (`packages/core/src/config/exchangeDocument.ts`) strips
+  `shared_secret`/`expires` regardless, whether the caller is `saveConfig`
+  (`apps/cli/src/config.ts`) or another writer. The 256-bit setup secret an
+  invitation holds
   (`SHARED_SECRET_REGEX`: 43 base64url characters encoding 32 bytes,
   `packages/core/src/config/connection.ts`) is confidential and travels only on
   the encoded invitation code, over a trusted out-of-band channel.

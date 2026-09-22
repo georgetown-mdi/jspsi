@@ -1,19 +1,17 @@
 import YAML from "yaml";
 
 import {
+  commentBlock,
+  commentKey,
+  CONNECTION_BLOCK_DOC_URL,
   DEFAULT_MAX_RECONNECT_ATTEMPTS,
   DEFAULT_PEER_TIMEOUT_MS,
   DEFAULT_POLLING_FREQUENCY_MS,
   DEFAULT_SERVER_CONNECT_TIMEOUT_MS,
+  POLL_INTERVAL_LINES,
   snakeizeKeys,
 } from "@psilink/core";
 import type { LinkageTerms, Metadata, Standardization } from "@psilink/core";
-
-import {
-  CONNECTION_BLOCK_DOC_URL,
-  POLL_INTERVAL_LINES,
-} from "./connectionGuidance";
-import { commentBlock, commentKey } from "./yamlComments";
 
 // Placeholder server fields the operator must replace before the first exchange.
 // Kept identical in spirit to the offline-invite placeholder connection

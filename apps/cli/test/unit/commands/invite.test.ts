@@ -7,6 +7,8 @@ import type { Arguments } from "yargs";
 import logLibrary from "loglevel";
 import YAML from "yaml";
 import {
+  CONNECTION_BLOCK_DOC_URL,
+  CONNECTION_BLOCK_NOTICE,
   decodeInvitation,
   DEFAULT_LINKAGE_RULE_SET,
   DEFAULT_PEER_TIMEOUT_MS,
@@ -67,10 +69,6 @@ import {
   validateInvite,
 } from "../../../src/commands/invite";
 import { loadConfigLinkageSource, saveConfig } from "../../../src/config";
-import {
-  CONNECTION_BLOCK_DOC_URL,
-  CONNECTION_BLOCK_NOTICE,
-} from "../../../src/connectionGuidance";
 import { DEFAULT_WEBRTC_INACTIVITY_TIMEOUT_MS } from "../../../src/connection/webrtc/webrtcMessageConnection";
 import {
   DEFAULT_CHANNEL_OPEN_TIMEOUT_MS,
