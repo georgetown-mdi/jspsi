@@ -39,6 +39,7 @@ import type { SftpConnectionProjection } from "@jobs/jobManager";
  */
 export function SftpConnectionCard({
   connection,
+  loadedForm,
   saveFilePreferred,
   retainFiles,
   offerSaveFile = true,
@@ -49,6 +50,11 @@ export function SftpConnectionCard({
   onRunHere,
 }: {
   connection: SftpConnectionProjection | null;
+  /** The connection form a configuration opened from the mounted folder seeds,
+   * used only while no connection is authored: an authored one is the effective
+   * connection, and its own projection seeds the edit. The credential is not in
+   * it -- no credential value leaves the console's server. */
+  loadedForm?: SftpConnectionFormValues;
   /** The operator chose to run SFTP through their own command-line tool
    * (save-a-file) instead of authoring a connection here. */
   saveFilePreferred: boolean;
@@ -163,7 +169,7 @@ export function SftpConnectionCard({
 
   return (
     <SftpAuthoringForm
-      initial={initialFormFor(connection)}
+      initial={initialFormFor(connection, loadedForm)}
       isEdit={connection !== null}
       retainFiles={retainFiles}
       probeCeremony={probeCeremony}
@@ -182,8 +188,9 @@ export function SftpConnectionCard({
  * not recoverable from the credential-free projection, so an edit re-enters them. */
 function initialFormFor(
   connection: SftpConnectionProjection | null,
+  loadedForm: SftpConnectionFormValues | undefined,
 ): SftpConnectionFormValues {
-  if (connection === null) return EMPTY_SFTP_FORM;
+  if (connection === null) return loadedForm ?? EMPTY_SFTP_FORM;
   return {
     ...EMPTY_SFTP_FORM,
     host: connection.host,

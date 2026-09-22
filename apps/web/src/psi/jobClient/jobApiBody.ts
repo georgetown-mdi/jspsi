@@ -59,11 +59,15 @@ export const MAX_JOB_HANDOFF_RESPONSE_BYTES = 32 * 1024 ** 2;
  * The cap on the variable-length bodies: the mounted-input listing
  * (`GET /api/jobs/inputs`), the secrets-mount entries
  * (`GET /api/jobs/mounts/secrets/entries`), one file's profile
- * (`GET /api/jobs/inputs/profile`), and the coverage rates
- * (`POST /api/jobs/inputs/coverage`). What decides the length of each is the
- * operator's own mount contents or CSV header, which no code bound fixes, so
- * 8 MiB is headroom -- far above any directory or header a console prototype
- * runs against, and far below what buffering an unbounded stream would cost.
+ * (`GET /api/jobs/inputs/profile`), the coverage rates
+ * (`POST /api/jobs/inputs/coverage`), and the mounted configuration
+ * (`GET /api/jobs/config`). What decides the length of each is the operator's
+ * own mount contents, CSV header, or configuration file, which no code bound
+ * fixes -- the configuration's own file cap (1 MB, `MAX_CONFIGURATION_FILE_BYTES`
+ * in `@jobs/configLoad`) bounds the source of that one but not its JSON
+ * projection -- so 8 MiB is headroom, far above any directory, header, or
+ * configuration a console prototype runs against, and far below what buffering
+ * an unbounded stream would cost.
  */
 export const MAX_JOB_LISTING_RESPONSE_BYTES = 8 * 1024 ** 2;
 

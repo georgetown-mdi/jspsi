@@ -1199,10 +1199,14 @@ describe("console inviter picker accessibility", () => {
     stubJobApi();
     app.render(createElement(InviterScreen));
     await vi.waitFor(() => {
-      const status = document.querySelector(
-        '[role="status"][aria-live="polite"]',
+      // The file step mounts more than one polite region -- the load offer's is
+      // above the file card -- so the listing's announcement is looked for
+      // across them rather than in whichever renders first.
+      const announced = Array.from(
+        document.querySelectorAll('[role="status"][aria-live="polite"]'),
+        (region) => region.textContent,
       );
-      expect(status?.textContent).toContain("Loaded 1 file");
+      expect(announced.join(" ")).toContain("Loaded 1 file");
     });
   });
 

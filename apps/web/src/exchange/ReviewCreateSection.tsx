@@ -66,6 +66,7 @@ import type { JobRendezvousConfig } from "@psi/jobClient/workInputClient";
 import type { OutputDirection } from "@psi/authoring/advancedInvite";
 import type { ReceiptsDraft } from "@psi/receiptsModel";
 import type { RunDiagnosticsDraft } from "@psi/runDiagnosticsModel";
+import type { SftpConnectionFormValues } from "@console/sftpConnectionForm";
 import type { SftpConnectionProjection } from "@jobs/jobManager";
 
 const DIRECTION_CHOICES: ReadonlyArray<{
@@ -96,6 +97,7 @@ export function ReviewCreateSection({
   problems,
   minting,
   sftpConnection,
+  loadedSftpForm,
   sftpSaveFilePreferred,
   rendezvous,
   exchangeFiles,
@@ -125,6 +127,9 @@ export function ReviewCreateSection({
    * updated when the operator authors or clears one); undefined before the fetch
    * resolves (or off a console), null when none is effective. */
   sftpConnection: SftpConnectionProjection | null | undefined;
+  /** The connection form a configuration opened from the mounted folder seeds,
+   * forwarded to the SFTP card for the case where no connection is authored yet. */
+  loadedSftpForm?: SftpConnectionFormValues;
   /** Whether the operator chose to run SFTP through their own
    * command-line tool (save-a-file) instead of authoring a connection here. */
   sftpSaveFilePreferred: boolean;
@@ -368,6 +373,7 @@ export function ReviewCreateSection({
           {transport === "sftp" && consoleBuild && (
             <SftpConnectionCard
               connection={sftpConnection ?? null}
+              loadedForm={loadedSftpForm}
               saveFilePreferred={sftpSaveFilePreferred}
               retainFiles={exchangeFiles.retainFiles}
               probeCeremony="exchange"

@@ -10,6 +10,11 @@ import {
 } from "@psi/runDiagnosticsModel";
 import { RECEIPTS_DEFAULT } from "@psi/receiptsModel";
 
+import {
+  MOUNTED_CONFIGURATION_UNREAD,
+  mountedConfigurationRead,
+} from "@console/mountedConfiguration";
+
 import { CONNECTION_TUNING_DEFAULT } from "@console/connectionTuningModel";
 import { EXCHANGE_FILES_DEFAULT } from "@console/exchangeFilesModel";
 
@@ -34,6 +39,12 @@ import type { SftpConnectionInfo } from "@psi/jobClient/serverJobExchangeDriver"
 
 import type { ConnectionTuningDraft } from "@console/connectionTuningModel";
 import type { ExchangeFilesDraft } from "@console/exchangeFilesModel";
+
+import type { LinkageTerms } from "@psilink/core";
+import type { MountedConfigurationAnswer } from "@psi/jobClient/mountedConfigClient";
+import type { MountedConfigurationState } from "@console/mountedConfiguration";
+import type { OwnColumnsChoice } from "@psi/ownColumnsModel";
+import type { SftpConnectionFormValues } from "@console/sftpConnectionForm";
 
 import type { AlertContent } from "@components/csvIntake";
 import type { SftpConnectionProjection } from "@jobs/jobManager";
@@ -171,6 +182,25 @@ export interface InviterScreenState {
   /** The offer's progress and, for a failed deposit, what it was about when a
    * column name explains it. */
   manageOffer: ManageOfferState;
+  /** The load of the configuration mounted beside the working directory: what
+   * the offer shows, and the two notices it renders beside itself. */
+  mountedConfiguration: MountedConfigurationState;
+  /** The connection form a loaded configuration seeds, for the review step's
+   * SFTP card. Undefined where no configuration is open or the open one names no
+   * host, in which case the card starts from the empty form. */
+  loadedSftpForm: SftpConnectionFormValues | undefined;
+  /** The terms a loaded configuration supplied, held until the file step has a
+   * file: the import rebuilds each field's binding against the operator's own
+   * columns, so it cannot run before one is read (`editorWithImportedTerms`,
+   * `@psi/inviterEditor`). Cleared the moment they are applied. */
+  pendingLoadedTerms: PendingLoadedTerms | undefined;
+}
+
+/** The terms and own-column choice a load holds until a file is read. Both move
+ * together: the choice is an argument of the import that rebuilds the draft. */
+export interface PendingLoadedTerms {
+  linkageTerms: LinkageTerms;
+  ownColumns: OwnColumnsChoice;
 }
 
 /** The console before a visitor has done anything: step 1, no file, no draft, and
@@ -207,6 +237,9 @@ export const INVITER_SCREEN_INITIAL: InviterScreenState = {
   receipts: RECEIPTS_DEFAULT,
   demoActive: false,
   manageOffer: MANAGE_OFFER_IDLE,
+  mountedConfiguration: MOUNTED_CONFIGURATION_UNREAD,
+  loadedSftpForm: undefined,
+  pendingLoadedTerms: undefined,
 };
 
 /** Everything that moves the inviter console. */
@@ -325,7 +358,15 @@ export type InviterScreenAction =
   /** The managed-exchange deposit began, landed, or failed. */
   | { type: "manage-offer-started" }
   | { type: "manage-offer-deposited" }
-  | { type: "manage-offer-failed"; refusal?: AlertContent };
+  | { type: "manage-offer-failed"; refusal?: AlertContent }
+  /** A read of the mounted configuration is in flight. */
+  | { type: "mounted-configuration-reading" }
+  /** The read answered. A configuration that opens fills every card the document
+   * covers in one action, so no step is left showing a value from another
+   * configuration; a refusal or an absent mount fills none. */
+  | { type: "mounted-configuration-read"; answer: MountedConfigurationAnswer }
+  /** The held terms reached the file the import binds them against. */
+  | { type: "loaded-terms-applied"; editor: InviterEditor };
 
 /** The state a discarded or cleared read leaves: no file, no profile, no draft,
  * and no sample marker, so nothing downstream vouches for a file that is gone. */
@@ -537,6 +578,39 @@ export function inviterScreenReducer(
           status: "error",
           ...(action.refusal !== undefined ? { refusal: action.refusal } : {}),
         },
+      };
+    case "mounted-configuration-reading":
+      return { ...state, mountedConfiguration: { status: "reading" } };
+    case "mounted-configuration-read": {
+      const read = mountedConfigurationRead(action.answer);
+      const loaded = read.loaded;
+      if (loaded === undefined)
+        return { ...state, mountedConfiguration: read.state };
+      return {
+        ...state,
+        mountedConfiguration: read.state,
+        connectionTuning: loaded.connectionTuning,
+        exchangeFiles: loaded.exchangeFiles,
+        receipts: {
+          ...state.receipts,
+          mode: loaded.receipts.mode,
+          partnerFingerprint: loaded.receipts.partnerFingerprint,
+          retentionDisposition: loaded.receipts.retentionDisposition,
+        },
+        loadedSftpForm: loaded.sftpForm,
+        pendingLoadedTerms: {
+          linkageTerms: loaded.linkageTerms,
+          ownColumns: loaded.ownColumns,
+        },
+      };
+    }
+    case "loaded-terms-applied":
+      return {
+        ...state,
+        editor: action.editor,
+        pendingLoadedTerms: undefined,
+        editorAnnouncement:
+          "Loaded the configuration's matching terms. Review them before creating.",
       };
   }
 }

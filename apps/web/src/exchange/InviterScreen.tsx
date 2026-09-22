@@ -121,6 +121,10 @@ import {
 } from "@console/sftpConnectionChoice";
 import { consoleAcquiredCsv } from "@console/consoleAcquiredCsv";
 
+import { MountedConfigurationCard } from "@console/MountedConfigurationCard";
+import { fetchMountedConfiguration } from "@psi/jobClient/mountedConfigClient";
+import { mountedConfigurationRead } from "@console/mountedConfiguration";
+
 import {
   INVITER_SCREEN_INITIAL,
   INVITER_SPINE_ORDER,
@@ -330,9 +334,12 @@ export function InviterScreen() {
     intakeAlert,
     invitation,
     lastSpineStep,
+    loadedSftpForm,
     manageOffer,
     minting,
+    mountedConfiguration,
     name,
+    pendingLoadedTerms,
     reading,
     receipts,
     rendezvous,
@@ -388,6 +395,39 @@ export function InviterScreen() {
       cancelled = true;
     };
   }, [sftpInfo]);
+
+  // Open the configuration the operator mounted. The delimiter is component
+  // state rather than reducer state, so the same pure mapping the reducer
+  // applies to the cards is read here for that one field; a refused or absent
+  // answer maps to none and changes nothing.
+  async function openMountedConfiguration(): Promise<void> {
+    dispatch({ type: "mounted-configuration-reading" });
+    const answer = await fetchMountedConfiguration();
+    const loaded = mountedConfigurationRead(answer).loaded;
+    if (loaded !== undefined) setDelimiterChoice(loaded.csvDelimiter);
+    dispatch({ type: "mounted-configuration-read", answer });
+  }
+
+  // The terms a load held, applied the moment the file step has a file: the
+  // import rebuilds each field's binding against the operator's own columns, so
+  // it cannot run before one is read. The own-column choice goes on first,
+  // because the import reads it off the draft it rebuilds from.
+  useEffect(() => {
+    if (
+      pendingLoadedTerms === undefined ||
+      editor === undefined ||
+      acquired === undefined
+    )
+      return;
+    dispatch({
+      type: "loaded-terms-applied",
+      editor: editorWithImportedTerms(
+        editorWithIncludeOwnColumns(editor, pendingLoadedTerms.ownColumns),
+        acquired,
+        pendingLoadedTerms.linkageTerms,
+      ),
+    });
+  }, [acquired, editor, pendingLoadedTerms]);
 
   // Fetch the console's rendezvous mount once on a console build; the mount is
   // boot-static on the server, so one fetch per console serves the session. The
@@ -1330,6 +1370,12 @@ export function InviterScreen() {
         {isConsoleBuild() && section === "file" && acquired === undefined && (
           <RecoveredExchangePanel />
         )}
+        {isConsoleBuild() && section === "file" && (
+          <MountedConfigurationCard
+            state={mountedConfiguration}
+            onOpen={() => void openMountedConfiguration()}
+          />
+        )}
         {section === "file" && (
           <YourFileSection
             name={name}
@@ -1404,6 +1450,7 @@ export function InviterScreen() {
                 problems={openProblems}
                 minting={minting}
                 sftpConnection={sftpConnection}
+                loadedSftpForm={loadedSftpForm}
                 sftpSaveFilePreferred={sftpSaveFilePreferred}
                 rendezvous={rendezvous}
                 exchangeFiles={exchangeFiles}
