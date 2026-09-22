@@ -269,6 +269,11 @@ function composedHandoffSpec(
  * control for and never composes, which the load names for the operator
  * ({@link ./configLoad}).
  *
+ * The two agree because the load refuses a document whose held setting sits
+ * inside a block a composition writes: a key-by-key merge is what such a
+ * setting would need, and the name the load reports as kept is therefore a
+ * setting this merge keeps.
+ *
  * The merged document is re-validated before it is written, so a pair of
  * settings that only conflicts once combined is refused here rather than at the
  * operator's first scheduled run. The parse is also what fixes the key order:

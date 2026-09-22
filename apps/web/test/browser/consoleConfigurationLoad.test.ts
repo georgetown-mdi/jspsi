@@ -191,7 +191,7 @@ describe("the load offer on the file step", () => {
         configured: true,
         present: true,
         document: CONFIG_DOCUMENT,
-        carriedThrough: ["signing.receipt_output"],
+        carriedThrough: ["authentication.token_max_age_days"],
         warnings: ["connection.server.password"],
       },
     });
@@ -201,7 +201,7 @@ describe("the load offer on the file step", () => {
       .element(page.getByText("Configuration opened").first())
       .toBeInTheDocument();
     await expect
-      .element(page.getByText(/signing\.receipt_output/))
+      .element(page.getByText(/authentication\.token_max_age_days/))
       .toBeInTheDocument();
     await expect
       .element(page.getByText(/connection\.server\.password/))

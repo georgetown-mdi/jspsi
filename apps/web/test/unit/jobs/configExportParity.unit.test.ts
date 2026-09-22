@@ -9,14 +9,17 @@ import {
   parseSensitiveJson,
   parseSensitiveYaml,
   serializeExchangeDocument,
+  snakeizeKeys,
 } from "@psilink/core";
 
 import {
   HANDOFF_CREDENTIAL_PATH_PLACEHOLDER,
   HANDOFF_SHARED_DIRECTORY_PLACEHOLDER,
+  HANDOFF_SIGNING_IDENTITY_PLACEHOLDER,
   buildJobHandoff,
 } from "@jobs/handoff";
 import {
+  carriedThroughFields,
   disclosedDocument,
   mountedConfigurationDocument,
 } from "@jobs/configLoad";
@@ -32,7 +35,11 @@ import {
   validLinkageTerms,
 } from "../../utils/jobFixtures";
 
-import type { JobExchangeIntent, JobExchangeSide } from "@jobs/intentSchemas";
+import type {
+  JobExchangeIntent,
+  JobExchangeSide,
+  JobFiledropExchangeIntent,
+} from "@jobs/intentSchemas";
 import type { ExchangeSpec } from "@psilink/core";
 import type { JobSftpServerEntry } from "@jobs/sftpServer";
 
@@ -466,18 +473,25 @@ describe.each([
 describe("the settings a loaded configuration keeps in the export", () => {
   /** A mounted document stating a setting the console composes no key for, and
    * a rendezvous folder of the machine it was written on. */
-  function mountedDocument(authentication: Record<string, unknown>) {
+  function mountedDocument(
+    authentication: Record<string, unknown>,
+    rest: Record<string, unknown> = {},
+  ) {
     return parseExchangeSpec({
       connection: { channel: "filedrop", path: MOUNTED_RENDEZVOUS_PATH },
       linkageTerms: validLinkageTerms(),
       authentication,
+      ...rest,
     });
   }
 
   /** The export of a file-drop run composed over that document. */
-  function exportOver(document: ExchangeSpec | undefined): string {
+  function exportOver(
+    document: ExchangeSpec | undefined,
+    intentOverrides: Partial<JobFiledropExchangeIntent> = {},
+  ): string {
     const handoff = buildJobHandoff(
-      validIntent({ linkageTerms: validLinkageTerms() }),
+      validIntent({ linkageTerms: validLinkageTerms(), ...intentOverrides }),
       undefined,
       {
         credentialPasted: false,
@@ -489,6 +503,63 @@ describe("the settings a loaded configuration keeps in the export", () => {
       throw new Error("an exchange hand-off composed no template");
     return handoff.template.yaml;
   }
+
+  /** One setting of an exported template, read by the name the load states it
+   * under: the file's own snake_case path. */
+  function exportedValue(exported: string, field: string): unknown {
+    const document = snakeizeKeys(
+      parseExchangeSpec(parseSensitiveYaml(exported, "export parity")),
+    ) as Record<string, unknown>;
+    return field
+      .split(".")
+      .reduce<unknown>(
+        (value, key) =>
+          typeof value === "object" && value !== null
+            ? (value as Record<string, unknown>)[key]
+            : undefined,
+        document,
+      );
+  }
+
+  test("every setting named as kept is in the export unchanged", () => {
+    const document = mountedDocument({ tokenMaxAgeDays: 30 });
+    const exported = exportOver(document);
+    const named = carriedThroughFields(document);
+    expect(named).toEqual(["authentication.token_max_age_days"]);
+    for (const field of named)
+      expect(exportedValue(exported, field)).toEqual(30);
+  });
+
+  test("the rendezvous folder the export writes over is named nowhere", () => {
+    const document = mountedDocument({ tokenMaxAgeDays: 30 });
+    expect(exportedValue(exportOver(document), "connection.path")).toBe(
+      HANDOFF_SHARED_DIRECTORY_PLACEHOLDER,
+    );
+    expect(carriedThroughFields(document)).not.toContain("connection.path");
+  });
+
+  test("a signing path the export writes over is named nowhere", () => {
+    const signing = {
+      mode: "certificate" as const,
+      partnerFingerprint: PARTNER_FINGERPRINT,
+      identityFile: "/home/operator/.psilink/identity.json",
+      receiptOutput: "/home/operator/receipt.json",
+    };
+    const document = mountedDocument({ tokenMaxAgeDays: 30 }, { signing });
+    const exported = exportOver(document, {
+      signing: {
+        mode: "certificate",
+        partnerFingerprint: PARTNER_FINGERPRINT,
+      },
+    });
+    expect(exportedValue(exported, "signing.identity_file")).toBe(
+      HANDOFF_SIGNING_IDENTITY_PLACEHOLDER,
+    );
+    expect(exportedValue(exported, "signing.receipt_output")).toBeUndefined();
+    expect(carriedThroughFields(document)).toEqual([
+      "authentication.token_max_age_days",
+    ]);
+  });
 
   test("a setting the console composes no key for is written back", () => {
     expect(exportOver(mountedDocument({ tokenMaxAgeDays: 30 }))).toContain(
@@ -526,6 +597,9 @@ describe("the settings a loaded configuration keeps in the export", () => {
 /** The rendezvous folder the mounted document names, which belongs to the
  * machine that wrote it and reaches no template. */
 const MOUNTED_RENDEZVOUS_PATH = "/srv/partner-drop";
+
+/** A signing partner fingerprint of the canonical base64url shape. */
+const PARTNER_FINGERPRINT = "C".repeat(42) + "A";
 
 /** The comment block a psilink-written configuration opens with, above its
  * connection block. */

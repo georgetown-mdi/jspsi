@@ -373,10 +373,14 @@ describe("what the load reads and does not adopt", () => {
   });
 
   test("a private key and its passphrase, both named", () => {
-    expect(loadDocument(privateKeySftpDocument()).warnings).toEqual([
+    const response = loadDocument(privateKeySftpDocument());
+    expect(response.warnings).toEqual([
       "connection.server.private_key",
       "connection.server.private_key_passphrase",
     ]);
+    // Named once, as a credential the hand-off writes a placeholder for --
+    // never as a setting the export writes back unchanged.
+    expect(response.carriedThrough).toEqual([]);
   });
 
   test("no credential the load warns about is also reported as held", () => {
@@ -407,12 +411,15 @@ describe("what the load reads and does not adopt", () => {
     expect(credentialFieldsNotAdopted(spec)).toEqual([]);
   });
 
-  test("the rendezvous directory a filedrop file names is held, not adopted", () => {
+  test("the rendezvous directory a filedrop file names is not held", () => {
+    // A run here writes its own rendezvous folder and the hand-off writes a
+    // placeholder for it, so the document's value is replaced rather than
+    // kept, and the held list does not claim it.
     const spec = {
       connection: { channel: "filedrop", path: "/mnt/partner-drop" },
       linkageTerms: terms(),
     } as unknown as ExchangeSpec;
-    expect(carriedThroughFields(spec)).toEqual(["connection.path"]);
+    expect(carriedThroughFields(spec)).toEqual([]);
   });
 });
 
@@ -426,13 +433,18 @@ describe("the settings the console holds without an editor", () => {
     );
   });
 
-  test("the receipt output is carried through, the console pinning its own", () => {
+  test("the signing paths the console pins itself are not held", () => {
     const response = loadDocument(
       savedSftpDocument({
-        signing: { mode: "certificate", receipt_output: "/out/receipt.json" },
+        signing: {
+          mode: "certificate",
+          partner_fingerprint: PARTNER_FINGERPRINT,
+          identity_file: "/home/operator/.psilink/identity.json",
+          receipt_output: "/out/receipt.json",
+        },
       }),
     );
-    expect(response.carriedThrough).toContain("signing.receipt_output");
+    expect(response.carriedThrough).toEqual([]);
   });
 
   test("a setting the console composes is not reported as held", () => {
@@ -462,17 +474,67 @@ describe("the settings the console holds without an editor", () => {
     expect(response.carriedThrough).toEqual([]);
   });
 
-  test("names only: no value of a carried-through setting is reported", () => {
+  test("names only: no value of a held setting is reported", () => {
     const response = loadDocument(
-      savedSftpDocument({
-        signing: {
-          mode: "certificate",
-          identity_file: "/home/operator/.psilink/identity.json",
-        },
-      }),
+      savedSftpDocument({ authentication: { token_max_age_days: 30 } }),
     );
-    expect(response.carriedThrough).toContain("signing.identity_file");
-    expect(JSON.stringify(response.carriedThrough)).not.toContain("/home");
+    expect(response.carriedThrough).toEqual([
+      "authentication.token_max_age_days",
+    ]);
+    expect(JSON.stringify(response.carriedThrough)).not.toContain("30");
+  });
+});
+
+describe("a setting inside a block the composition writes", () => {
+  // The export writes a composed block over the opened document's whole
+  // (apps/web/src/jobs/handoff.ts), so a setting inside one cannot be kept.
+  // The portable-configuration rule lets a consumer hold a setting or refuse
+  // naming it, and this is the refusal: reporting it as kept and then writing
+  // over it is what the rule does not allow.
+  const CONNECTION_SETTINGS: ReadonlyArray<[string, Record<string, unknown>]> =
+    [
+      [
+        "connection.server.provision",
+        { provision: { host: "wake.partner.example", port: 8080 } },
+      ],
+      ["connection.provider_options", { provider_options: {} }],
+      ["connection.proxy", { proxy: { host: "proxy.partner.example" } }],
+    ];
+
+  test.each(CONNECTION_SETTINGS)("%s refuses by name", (field, stated) => {
+    const document = savedSftpDocument();
+    const connection = document.connection as Record<string, unknown>;
+    const inServer = field.startsWith("connection.server.");
+    document.connection = inServer
+      ? {
+          ...connection,
+          server: { ...(connection.server as object), ...stated },
+        }
+      : { ...connection, ...stated };
+    const message = refusal(document);
+    expect(message).toContain(field);
+    expect(message).toContain("psilink on the command line");
+  });
+
+  test("the refusal names the setting only, never its value", () => {
+    const document = savedSftpDocument();
+    const connection = document.connection as Record<string, unknown>;
+    document.connection = {
+      ...connection,
+      proxy: { host: "proxy.partner.example", port: 8080 },
+    };
+    expect(refusal(document)).not.toContain("proxy.partner.example");
+  });
+
+  test("a block the composition never writes is kept, not refused", () => {
+    // The counter-case the refusal above is measured against: `authentication`
+    // is no composition's block here, so its setting rides the export.
+    const response = loadDocument(
+      savedSftpDocument({ authentication: { token_max_age_days: 30 } }),
+    );
+    expect(response.carriedThrough).toEqual([
+      "authentication.token_max_age_days",
+    ]);
   });
 });
 

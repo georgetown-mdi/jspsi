@@ -50,14 +50,16 @@ describe("a definitive answer", () => {
       configured: true,
       present: true,
       document: DOCUMENT,
-      carriedThrough: ["signing.receipt_output"],
+      carriedThrough: ["authentication.token_max_age_days"],
       warnings: ["connection.server.password"],
     });
     const answer = await fetchMountedConfiguration(fetchImpl);
     expect(answer.kind).toBe("opened");
     if (answer.kind !== "opened") throw new Error("expected an opened answer");
     expect(answer.document.channel).toBe("sftp");
-    expect(answer.carriedThrough).toEqual(["signing.receipt_output"]);
+    expect(answer.carriedThrough).toEqual([
+      "authentication.token_max_age_days",
+    ]);
     expect(answer.warnings).toEqual(["connection.server.password"]);
   });
 
@@ -110,7 +112,7 @@ describe("an answer this cannot read", () => {
       {
         present: true,
         document: DOCUMENT,
-        carriedThrough: [{ field: "signing.receipt_output" }],
+        carriedThrough: [{ field: "authentication.token_max_age_days" }],
         warnings: [],
       },
     ],
