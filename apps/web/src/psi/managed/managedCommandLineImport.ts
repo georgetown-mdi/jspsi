@@ -28,9 +28,13 @@
  *   A stored document holds no `authentication` block at all, so the block is
  *   read for that one policy and dropped.
  *
- * Everything else is refused rather than trimmed. The channel must be webrtc --
- * the one channel this app runs -- and the connection and the document may hold
- * only what the app itself composes ({@link ./managedCommandLineDocument.ts}),
+ * Three levels are guarded against an extra key: the top-level document, the
+ * connection, and connection.server (the bespoke allowlist below, since the
+ * shared schema's own server block is not strict). Below those levels, an
+ * unknown key is dropped by the shared schema's non-strict parse rather than
+ * refused. The channel must be webrtc -- the one channel this app runs -- and
+ * the connection and the document may hold only what the app itself composes
+ * ({@link ./managedCommandLineDocument.ts}),
  * which is what keeps a partner's TURN credential, ICE provisioning block,
  * signing identity path, or `@path` reference from being stored here and handed
  * back to the CLI by the next export. A shared secret in the file is refused on

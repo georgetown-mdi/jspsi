@@ -257,9 +257,10 @@ export async function importManagedExchange(
   };
 }
 
-/** Upper bound, in bytes, on a file this import will read, applied before either
- * leg's bounded parse. One control reads either file, so it caps at the larger
- * of the two legs' own caps and each leg keeps its own bound behind it. */
+/** Upper bound, in bytes, on a file this import will read: the picker in
+ * `SavedExchanges.tsx` refuses a file above this cap before reading it. The two
+ * per-leg constants below name each leg's intended bound; both equal this value
+ * today. */
 export const MAX_IMPORT_FILE_BYTES = Math.max(
   MAX_ARTIFACT_IMPORT_BYTES,
   MAX_CONFIGURATION_IMPORT_BYTES,
