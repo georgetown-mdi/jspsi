@@ -21,7 +21,7 @@ import {
 
 import { VerifyReceiptScreen } from "@exchange/VerifyReceiptScreen";
 
-import { createAppMount } from "./renderApp";
+import { createAppMount, flushPendingUpdates } from "./renderApp";
 
 import type {
   AssociationTable,
@@ -224,7 +224,13 @@ async function mountVerifyScreen() {
     .toMatchTextContent("Verify a receipt");
 }
 
-afterEach(app.unmount);
+afterEach(async () => {
+  // Every parse and every verify run on this screen resolves asynchronously,
+  // and a disclosure the test opened commits its panel later still, so an
+  // unmount taken straight after a test can interleave with a render.
+  await flushPendingUpdates();
+  app.unmount();
+});
 
 // A joint run: the record's own verdict, whose standing note points the reader
 // at the signed panel, and that signed panel beside it. Returns what a test

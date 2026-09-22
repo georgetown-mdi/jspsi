@@ -583,8 +583,17 @@ describe("inviter screen", () => {
       )
       .toBeInTheDocument();
 
+    // The narrow layout arrives on a media-query listener and the re-render it
+    // schedules, neither of which the viewport call awaits: the share bar is
+    // that layout's own control, so its arrival is the signal that the width
+    // being measured is the narrow layout's.
     await page.viewport(400, 800);
-    expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(400);
+    await expect
+      .element(page.getByRole("button", { name: "What you will share" }))
+      .toBeInTheDocument();
+    await expect
+      .poll(() => document.documentElement.scrollWidth)
+      .toBeLessThanOrEqual(400);
   });
 
   test("reports a two-identifier file in the rail's Problems block", async () => {
