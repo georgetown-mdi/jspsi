@@ -240,10 +240,12 @@ the same failure, one exchange later.
 
 ### How a setting is named
 
-Every refusal and every notice names the setting as the FILE spells it:
-snake_case, under the path of the block holding it (`connection.server.port`,
-`linkage_terms.deduplicate`), rather than the camelCase of the parsed shape. The
-key a refusal names is the key the document holds, so one written in camelCase or
+Every refusal and every notice names the setting as the FILE spells it: the block
+PATH holding it is given in snake_case (`connection.server.port`,
+`linkage_terms.deduplicate`) regardless of how the file spelled that block, while
+the KEY at the end of the path is given as the document itself spells it, rather
+than the camelCase of the parsed shape. The key a refusal names is the key the
+document holds, so one written in camelCase or
 outside either convention is named its own spelling: a reader that converted the
 parsed name back to snake_case would name a line the file does not hold. A name
 is all that is named -- a setting's VALUE can be a credential and stays out of

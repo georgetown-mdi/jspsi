@@ -88,10 +88,12 @@ read and webrtc's does not); and `provider_options` on a channel whose schema
 declares none (filedrop). One more divergence is in the naming rather than the
 outcome: a schema refusal named its field by the camelCase path the parsed shape
 uses, so `expected_payload_columns` reached the operator as
-`expectedPayloadColumns`. `describeConfigSchemaError` names each
-segment as the file spells it, for both config-file call sites, through the one
-path rendering the per-block renderer beside it takes -- which stops a path at a
-`params` block, whose keys are the author's own.
+`expectedPayloadColumns`. `describeConfigSchemaError` renders each path
+segment in snake_case mechanically, so a block authored in camelCase (a
+`linkageTerms:` block, say) is still reported as `linkage_terms`; only the
+refused KEY is named as the file spells it, for both config-file call sites,
+through the one path rendering the per-block renderer beside it takes -- which
+stops a path at a `params` block, whose keys are the author's own.
 
 The renderer names the path; the KEY an `unrecognized_keys` refusal reports is
 named in core, where the raw document is in hand. `unrecognizedKeysAsWritten`
@@ -113,8 +115,12 @@ an invitation from, over terms narrowed by whatever the strip took, with nothing
 said to either party. All three blocks are read through the entry point that
 applies the same comparison
 (`safeParseLinkageTermsTheReaderWrote` and the `TheReaderWrote` siblings for the
-other two), so one file is accepted by both commands or refused by both, and
-refused naming the same key.
+other two), so for those three blocks one file is accepted by both commands or
+refused by both, and refused naming the same key. A misspelled top-level key
+outside those three (`expected_payload_columns`, say) is not covered by this
+comparison: `psilink invite`'s read still accepts it, and only `psilink
+exchange`'s full load refuses it, so the file still fails closed at exchange
+time rather than earlier.
 
 **The console's job layer** (`apps/web/src/jobs/`). No load path exists to audit.
 The layer composes an exchange file from the console's own intent and validates
