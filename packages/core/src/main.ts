@@ -735,6 +735,15 @@ export {
   RENDEZVOUS_ROLES,
 } from "./rendezvous";
 export type { RendezvousRole, SignalingLocationField } from "./rendezvous";
+export {
+  deriveRelayKey,
+  mintRelayCredential,
+  RELAY_CREDENTIAL_MAX_TTL_SECONDS,
+} from "./relayCredential";
+export type {
+  MintRelayCredentialOptions,
+  RelayCredential,
+} from "./relayCredential";
 // The shared chokepoint for parsing config/credential documents that may hold
 // secrets, so a parse error never leaks source bytes. Consumed by the CLI (file
 // reads, via its thin re-export) and the web app (an imported linkage-terms
