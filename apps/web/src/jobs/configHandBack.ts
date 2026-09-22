@@ -91,13 +91,26 @@ function replaceMountedConfiguration(dataRoot: string, text: string): void {
     throw new Error("the configuration name resolved outside the data root");
   try {
     const target = fs.realpathSync(filePath);
-    const mode = fs.statSync(target).mode & 0o777;
-    writeReplacing(previousPath, fs.readFileSync(target), mode);
+    const { mode, bytes } = readModeAndBytes(target);
+    writeReplacing(previousPath, bytes, mode);
     writeReplacing(target, text, mode);
   } catch {
     throw new ConfigurationHandBackRefusedError(
       UNWRITABLE_CONFIGURATION_MESSAGE,
     );
+  }
+}
+
+/** Read a file's permission bits and contents from one open descriptor. */
+function readModeAndBytes(file: string): { mode: number; bytes: Buffer } {
+  const fd = fs.openSync(file, "r");
+  try {
+    return {
+      mode: fs.fstatSync(fd).mode & 0o777,
+      bytes: fs.readFileSync(fd),
+    };
+  } finally {
+    fs.closeSync(fd);
   }
 }
 
