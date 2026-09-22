@@ -419,21 +419,45 @@ export const PENDING_OUTBOUND_CONSENT_WARNING =
  * are not the columns a commitment the file states holds: core enforces the
  * commitment against the run's own disclosed set when the run starts, so the
  * refusal is already decided and is met here rather than as a failed run.
+ * `conductedHere` false is a configuration the console only saves back, whose
+ * refusal is met by the command-line run of the saved file instead.
  */
 export function divergedCommitmentWarning(
   fields: ReadonlyArray<string>,
+  conductedHere = true,
 ): string | undefined {
   if (fields.length === 0) return undefined;
   const one = fields.length === 1;
+  const refusal = conductedHere
+    ? ", so a run started here is refused. Change the columns on the next " +
+      "step to match " +
+      (one ? "it" : "them") +
+      ", or close this configuration."
+    : ", so psilink on the command line refuses to run the file you save " +
+      "here. Change the columns on the next step to match " +
+      (one ? "it" : "them") +
+      ", or invite your partner again so a new invitation states these columns.";
   return (
     "The columns this exchange would send to your partner are not the " +
     "columns this configuration's " +
     nameList(fields) +
     (one ? " states" : " state") +
-    ", so a run started here is refused. Change the columns on the next step " +
-    "to match " +
-    (one ? "it" : "them") +
-    ", or close this configuration."
+    refusal
+  );
+}
+
+/** The diverged-commitment warning for the configuration open in `state`, in
+ * the variant for whether the console conducts it. The divergence is a
+ * property of the document the steps hold, so it is derived on every channel:
+ * a save hands the file's commitments back unchanged beside the edited
+ * columns. */
+export function divergedCommitmentNotice(
+  state: MountedConfigurationState,
+  run: RunDisclosure | undefined,
+): string | undefined {
+  return divergedCommitmentWarning(
+    divergedCommitments(state, run),
+    state.status !== "opened" || state.notConducted === undefined,
   );
 }
 
@@ -502,12 +526,7 @@ export function divergedCommitments(
   state: MountedConfigurationState,
   run: RunDisclosure | undefined,
 ): Array<string> {
-  if (
-    state.status !== "opened" ||
-    state.notConducted !== undefined ||
-    run === undefined
-  )
-    return [];
+  if (state.status !== "opened" || run === undefined) return [];
   const disclosed = new Set(run.disclosedColumns);
   return DISCLOSURE_COMMITMENTS.filter((commitment) => {
     const columns = commitment.columnsOf(run);
@@ -538,7 +557,8 @@ export function mountedConfigurationOfferable(
  * disclosed set no longer matches. `run` is what that last one is read from,
  * absent until a file is read. A configuration the console does not conduct
  * puts the notice naming its channel in place of every one about a run here,
- * and keeps the two about what the steps below hold. */
+ * and keeps the two about what the steps below hold and the diverged
+ * commitment, which the command-line run of the saved file meets. */
 export function mountedConfigurationNotices(
   state: MountedConfigurationState,
   run?: RunDisclosure,
@@ -549,6 +569,7 @@ export function mountedConfigurationNotices(
       channelNotConductedNotice(state.notConducted),
       termsNotAppliedNotice(state.notApplied ?? []),
       columnsNotCoveredNotice(state.notCovered ?? []),
+      divergedCommitmentNotice(state, run),
     ].filter((notice): notice is string => notice !== undefined);
   return [
     state.transportUnavailable === undefined
@@ -561,7 +582,7 @@ export function mountedConfigurationNotices(
     state.pendingOutboundConsent === true
       ? PENDING_OUTBOUND_CONSENT_WARNING
       : undefined,
-    divergedCommitmentWarning(divergedCommitments(state, run)),
+    divergedCommitmentNotice(state, run),
   ].filter((notice): notice is string => notice !== undefined);
 }
 

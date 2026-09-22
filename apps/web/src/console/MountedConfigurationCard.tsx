@@ -13,8 +13,7 @@ import {
   OPEN_CONFIGURATION_INVITATION,
   OPEN_CONFIGURATION_LABEL,
   configurationOpenedMessage,
-  divergedCommitmentWarning,
-  divergedCommitments,
+  divergedCommitmentNotice,
   mountedConfigurationNotices,
   mountedConfigurationOfferable,
 } from "./mountedConfiguration";
@@ -99,9 +98,7 @@ export function DivergedCommitmentNotice({
    * commitments the open configuration holds. Absent until a file is read. */
   disclosure?: RunDisclosure;
 }) {
-  const warning = divergedCommitmentWarning(
-    divergedCommitments(state, disclosure),
-  );
+  const warning = divergedCommitmentNotice(state, disclosure);
   return <NoticesAlert notices={warning === undefined ? [] : [warning]} />;
 }
 

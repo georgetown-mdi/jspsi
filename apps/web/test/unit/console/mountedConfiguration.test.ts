@@ -20,6 +20,7 @@ import {
   configurationSaveState,
   connectionSettingsHeldNotice,
   credentialWarningNotice,
+  divergedCommitmentNotice,
   divergedCommitmentWarning,
   divergedCommitments,
   mountedConfigurationNotices,
@@ -186,7 +187,7 @@ describe("a configuration on a channel the console does not conduct", () => {
       }),
     );
     const notices = mountedConfigurationNotices(state, {
-      disclosedColumns: ["other_column"],
+      disclosedColumns: ["own_notes"],
       sharesWithPartner: true,
       records: { disclosedPayloadColumns: ["own_notes"] },
     });
@@ -194,6 +195,47 @@ describe("a configuration on a channel the console does not conduct", () => {
     expect(notices[0]).toContain("runs over webrtc");
     expect(notices[0]).toMatch(/save them to psilink\.yaml/);
     expect(notices[0]).toMatch(/connection is kept exactly as your file/);
+  });
+
+  test("a draft that changes the disclosed columns is reported", () => {
+    const records = {
+      disclosedPayloadColumns: ["own_notes"],
+      outboundPayloadConsent: {
+        status: "confirmed" as const,
+        columns: ["own_notes"],
+      },
+    };
+    const { state } = mountedConfigurationRead(openedWebrtc(records));
+    const edited = {
+      disclosedColumns: ["own_notes", "dob"],
+      sharesWithPartner: true,
+      records,
+    };
+    expect(divergedCommitments(state, edited)).toEqual([
+      "disclosed_payload_columns",
+      "outbound_payload_consent",
+    ]);
+    const notice = divergedCommitmentNotice(state, edited);
+    expect(notice).toContain("disclosed_payload_columns");
+    expect(notice).toMatch(/psilink on the command line refuses to run/);
+    expect(notice).toMatch(/invite your partner again/);
+    expect(notice).not.toMatch(/a run started here/);
+    expect(mountedConfigurationNotices(state, edited)).toEqual([
+      channelNotConductedNotice("webrtc"),
+      notice,
+    ]);
+  });
+
+  test("an unchanged draft reports no diverged commitment", () => {
+    const records = { disclosedPayloadColumns: ["own_notes"] };
+    const { state } = mountedConfigurationRead(openedWebrtc(records));
+    const unchanged = {
+      disclosedColumns: ["own_notes"],
+      sharesWithPartner: true,
+      records,
+    };
+    expect(divergedCommitments(state, unchanged)).toEqual([]);
+    expect(divergedCommitmentNotice(state, unchanged)).toBeUndefined();
   });
 
   test("a save leaves the state its answer names", () => {

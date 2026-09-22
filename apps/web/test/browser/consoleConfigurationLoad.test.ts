@@ -449,6 +449,16 @@ describe("the divergence warning on the step that resolves it", () => {
     expect(page.getByText(/has no control for/).query()).toBeNull();
   });
 
+  test("a webrtc configuration's diverged commitment names the command line", async () => {
+    await goToColumns({ ...COMMITTED, channel: "webrtc" });
+    await expect
+      .element(
+        page.getByText(/psilink on the command line refuses to run the file/),
+      )
+      .toBeInTheDocument();
+    expect(page.getByText(/a run started here is refused/).query()).toBeNull();
+  });
+
   test("a configuration whose commitment holds says nothing here", async () => {
     await goToColumns({ ...CONFIG_DOCUMENT, metadata: STATED_COLUMNS });
     expect(page.getByText(/a run started here is refused/).query()).toBeNull();
