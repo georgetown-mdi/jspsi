@@ -109,6 +109,31 @@ export function fieldsOutsideLocatorSubset(
 }
 
 /**
+ * The keys a FILE's own `connection.server` block holds outside the locator
+ * subset, named verbatim under the block and sorted. The shared exchange-file
+ * schema's server block is not strict, so a key outside it is stripped by the
+ * parse and never reaches {@link fieldsOutsideLocatorSubset}: reading the
+ * document the operator wrote is what refuses such a line rather than trimming
+ * it away. The allowlist is compared in both spellings, since these keys have
+ * not been through the camelize pre-pass the parsed connection's have.
+ */
+export function serverFieldsOutsideLocatorSubset(
+  server: unknown,
+): Array<string> {
+  if (typeof server !== "object" || server === null) return [];
+  const allowed = new Set([
+    ...CREDENTIAL_FREE_LOCATOR_FIELDS.server,
+    ...[...CREDENTIAL_FREE_LOCATOR_FIELDS.server].map((field) =>
+      snakeizeKey(field),
+    ),
+  ]);
+  return Object.keys(server)
+    .filter((field) => !allowed.has(field))
+    .map((field) => `server.${field}`)
+    .sort();
+}
+
+/**
  * The top-level document fields the app can put in a stored document, measured
  * by composing one. Typed `Required<ManagedExchangeFileComposition>`, so a
  * field added to the record composer's input fails this module's compile

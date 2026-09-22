@@ -7,6 +7,7 @@ import {
   getDefaultLinkageTerms,
   parseExchangeSpec,
   parseSensitiveYaml,
+  snakeizeKey,
   snakeizeKeys,
 } from "@psilink/core";
 
@@ -104,6 +105,35 @@ function commandLineDocument(overrides: Record<string, unknown> = {}) {
     connection: { ...composed.connection, role: "acceptor" },
     ...overrides,
   };
+}
+
+/** A hand-written file holding one key spelled exactly as the operator wrote it,
+ * at the document, the connection, or the connection's server block. The other
+ * fixtures pass through the snake_case rewrite {@link configText} applies, which
+ * would respell the key before the import ever read it. */
+function configTextHoldingKey(
+  key: string,
+  block: "document" | "connection" | "server",
+): string {
+  const document = snakeizeKeys(commandLineDocument()) as Record<
+    string,
+    unknown
+  >;
+  const connection = document.connection as Record<string, unknown>;
+  const line = { [key]: "hand-edited line" };
+  if (block === "document") return stringifyYaml({ ...document, ...line });
+  if (block === "connection")
+    return stringifyYaml({
+      ...document,
+      connection: { ...connection, ...line },
+    });
+  return stringifyYaml({
+    ...document,
+    connection: {
+      ...connection,
+      server: { ...(connection.server as Record<string, unknown>), ...line },
+    },
+  });
 }
 
 /** The refusal a file meets, failing the test if it was accepted instead. */
@@ -263,6 +293,37 @@ describe("refusing what this app cannot hold", () => {
     );
 
     expect(message).toContain("connection.secret_sauce");
+  });
+
+  test.each(["mysteryKey", "Mystery-Key", "MYSTERY_KEY"])(
+    "a top-level key outside the schema is named exactly as written: %s",
+    (key) => {
+      const message = refusal(configTextHoldingKey(key, "document"));
+
+      expect(message).toContain(key);
+      expect(message).not.toContain(snakeizeKey(key));
+    },
+  );
+
+  test.each(["mysteryKey", "Mystery-Key", "MYSTERY_KEY"])(
+    "a key outside the schema under the connection is named as written: %s",
+    (key) => {
+      const message = refusal(configTextHoldingKey(key, "connection"));
+
+      expect(message).toContain(`connection.${key}`);
+      expect(message).not.toContain(snakeizeKey(key));
+    },
+  );
+
+  test("a key outside the schema under the server block is refused, not trimmed", () => {
+    const message = refusal(configTextHoldingKey("mysteryKey", "server"));
+
+    expect(message).toContain("server.mysteryKey");
+    expect(() =>
+      readManagedCommandLineConfiguration(
+        configTextHoldingKey("mysteryKey", "server"),
+      ),
+    ).toThrow(ManagedConfigurationRefusedError);
   });
 
   test("a refused field is named as the file spells it, not as Zod saw it", () => {
