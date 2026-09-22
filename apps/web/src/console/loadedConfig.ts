@@ -37,7 +37,12 @@ import type {
   DisclosedExchangeDocument,
   DisclosedSftpServer,
 } from "@jobs/configLoad";
-import type { LinkageTerms, Metadata, Standardization } from "@psilink/core";
+import type {
+  LinkageTerms,
+  Metadata,
+  OutboundPayloadConsent,
+  Standardization,
+} from "@psilink/core";
 import type { CsvDelimiterChoice } from "@components/csvDelimiterChoice";
 import type { OwnColumnsChoice } from "@psi/ownColumnsModel";
 import type { ReceiptsSigningMode } from "@psi/receiptsModel";
@@ -71,11 +76,15 @@ export interface LoadedReceiptsChoices {
 
 /** The enforcement records a loaded configuration puts back on the job intent,
  * so a run composed here states what the file it came from stated
- * (docs/spec/EXCHANGE_FILE.md, "The records that must survive"). */
+ * (docs/spec/EXCHANGE_FILE.md, "The records that must survive", and "The
+ * acceptor's outbound consent" for the consent record). None has an editor on
+ * the console: each is held as the file states it and composed back unchanged,
+ * since an absent one turns its own enforcement off. */
 export interface LoadedEnforcementRecords {
   expectedPayloadColumns?: Array<string>;
   expectedPartnerDeduplicate?: boolean;
   disclosedPayloadColumns?: Array<string>;
+  outboundPayloadConsent?: OutboundPayloadConsent;
 }
 
 /** Everything a loaded configuration puts into the console's authoring state. */
@@ -266,6 +275,9 @@ export function authoringStateFromDocument(
         : {}),
       ...(document.disclosedPayloadColumns !== undefined
         ? { disclosedPayloadColumns: document.disclosedPayloadColumns }
+        : {}),
+      ...(document.outboundPayloadConsent !== undefined
+        ? { outboundPayloadConsent: document.outboundPayloadConsent }
         : {}),
     },
     linkageTerms: document.linkageTerms,

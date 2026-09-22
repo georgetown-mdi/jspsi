@@ -703,6 +703,59 @@ describe("composeConfigDocument records the acceptance's outbound consent", () =
   });
 });
 
+describe("a stated consent record is composed rather than derived", () => {
+  // The record a configuration loaded from the console's mount holds. Absence
+  // is a valid state that turns the run-boundary consent gate off, so a
+  // composition that re-derived it would release this party from the set its
+  // own file confirmed.
+  const STATED: OutboundPayloadConsent = {
+    status: "confirmed",
+    columns: ["own_notes"],
+  };
+
+  test("an acceptance states the record its file holds, not a fresh one", () => {
+    expect(
+      composedConsent({
+        side: "acceptor",
+        metadata: editedMetadata,
+        outboundPayloadConsent: STATED,
+      }),
+    ).toEqual(STATED);
+  });
+
+  test("an inviter states it too, though it derives none of its own", () => {
+    expect(
+      composedConsent({
+        side: "inviter",
+        metadata: editedMetadata,
+        outboundPayloadConsent: STATED,
+      }),
+    ).toEqual(STATED);
+  });
+
+  test("the sftp arm states the identical block", () => {
+    const sftpDoc = parseYaml(
+      composeSftpConfigDocument(
+        validSftpIntent({ side: "inviter", outboundPayloadConsent: STATED }),
+        testSftpServerEntry(),
+      ),
+    ) as Record<string, unknown>;
+    expect(sftpDoc.outbound_payload_consent).toEqual({
+      status: "confirmed",
+      columns: ["own_notes"],
+    });
+  });
+
+  test("a create request may state one, so a loaded record can be run", () => {
+    expect(
+      jobCreateIntentSchema.safeParse({
+        ...validSftpIntent({ outboundPayloadConsent: STATED }),
+        mode: "exchange",
+      }).success,
+    ).toBe(true);
+  });
+});
+
 describe("a composed acceptance config satisfies the later run's consent gate", () => {
   /** The verdict a later `psilink exchange` reaches on a composed config: the
    * record the config holds, assessed against the set that run would actually

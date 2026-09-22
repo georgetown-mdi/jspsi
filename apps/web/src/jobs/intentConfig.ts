@@ -28,11 +28,18 @@ import type {
 
 /**
  * This party's consent to its OWN outbound payload set, for the composed
- * config's `outbound_payload_consent`. An acceptance is the only side that
- * records one, deriving core's {@link deriveOutboundPayloadConsent} from the
- * same `linkageTerms.output` and `metadata` the same call composes into the
- * config, so the recorded consent and the config it rides in cannot
- * disagree.
+ * config's `outbound_payload_consent`.
+ *
+ * A record the intent states is composed verbatim, on either side: it is the
+ * one a configuration loaded from the mount holds, and a record this party
+ * already confirmed is not re-derived from what the console was re-authored
+ * with. A run whose resolved set no longer matches is then refused at core's
+ * own consent gate rather than consented to afresh.
+ *
+ * Otherwise an acceptance is the only side that records one, deriving core's
+ * {@link deriveOutboundPayloadConsent} from the same `linkageTerms.output` and
+ * `metadata` the same call composes into the config, so the derived consent and
+ * the config it rides in cannot disagree.
  *
  * The three states are core's: absent where nothing is transmitted,
  * `pending` where no metadata was resolvable, `confirmed` with the resolved
@@ -43,6 +50,8 @@ import type {
 function outboundPayloadConsentFor(
   intent: JobExchangeIntent,
 ): OutboundPayloadConsent | undefined {
+  if (intent.outboundPayloadConsent !== undefined)
+    return intent.outboundPayloadConsent;
   if (intent.side !== "acceptor") return undefined;
   return deriveOutboundPayloadConsent(
     intent.linkageTerms.output,
@@ -92,10 +101,10 @@ function outboundPayloadConsentFor(
  * contradiction before any key or payload moves. `false` is forwarded
  * verbatim, a real declaration; only an omitted field binds nothing.
  *
- * The send-side counterpart is `outbound_payload_consent`, derived here for
- * an acceptance alone (see {@link outboundPayloadConsentFor}), so the
- * config this composer hands the operator is one a later unattended run's
- * consent gate is held to.
+ * The send-side counterpart is `outbound_payload_consent`: the record the
+ * intent states, else one derived here for an acceptance alone (see
+ * {@link outboundPayloadConsentFor}), so the config this composer hands the
+ * operator is one a later unattended run's consent gate is held to.
  *
  * `signingPaths` supplies the two paths a `signing` block names, which the
  * intent cannot hold; it is read only under `certificate` mode, so a caller

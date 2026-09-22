@@ -15,6 +15,10 @@ import {
   loadMountedConfiguration,
   readMountedConfiguration,
 } from "@jobs/configLoad";
+import { authoringStateFromDocument } from "@console/loadedConfig";
+import { composeSftpConfigSpec } from "@jobs/intentConfig";
+
+import { testSftpServerEntry, validSftpIntent } from "../../utils/jobFixtures";
 
 import type { ExchangeSpec } from "@psilink/core";
 
@@ -66,6 +70,34 @@ function savedSftpDocument(
     }) as Record<string, unknown>),
     ...overrides,
   };
+}
+
+/** The same document with a private key and its passphrase in place of the
+ * password: core's server schema admits one primary credential at a time. The
+ * remote directory is the split pair, which core admits only under retained
+ * files and the two settings retention implies. */
+function privateKeySftpDocument(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  const document = savedSftpDocument(overrides);
+  document.connection = snakeizeKeys({
+    channel: "sftp",
+    server: {
+      host: "sftp.partner.example",
+      inboundPath: "/exchange/in",
+      outboundPath: "/exchange/out",
+      username: "county",
+      privateKey: "@/run/secrets/key",
+      privateKeyPassphrase: "@/run/secrets/key-passphrase",
+      hostKeyFingerprint: FINGERPRINT,
+    },
+    options: {
+      retainFiles: true,
+      timestampInFilename: true,
+      locklessRendezvous: true,
+    },
+  });
+  return document;
 }
 
 function loadDocument(document: Record<string, unknown>) {
@@ -260,6 +292,16 @@ describe("what the load refuses", () => {
     ).toContain("expires");
   });
 
+  test("a document nested past the case conversion's bound, as a refusal", () => {
+    // The bound is raised by the case conversion rather than the schema, and
+    // it is reported at the document root, which names no setting to fix.
+    let nested: Record<string, unknown> = { host: "sftp.partner.example" };
+    for (let depth = 0; depth < 300; depth += 1) nested = { server: nested };
+    const message = refusal({ connection: nested });
+    expect(message).toContain("not a psilink exchange configuration");
+    expect(message).not.toContain("sftp.partner.example");
+  });
+
   test("bytes that are not YAML, without the parser's own words", () => {
     let message = "";
     try {
@@ -286,20 +328,30 @@ describe("what the load reads and does not adopt", () => {
   });
 
   test("a private key and its passphrase, both named", () => {
-    const document = savedSftpDocument();
-    document.connection = snakeizeKeys({
-      channel: "sftp",
-      server: {
-        host: "sftp.partner.example",
-        privateKey: "@/run/secrets/key",
-        privateKeyPassphrase: "@/run/secrets/key-passphrase",
-        hostKeyFingerprint: FINGERPRINT,
-      },
-    });
-    expect(loadDocument(document).warnings).toEqual([
+    expect(loadDocument(privateKeySftpDocument()).warnings).toEqual([
       "connection.server.private_key",
       "connection.server.private_key_passphrase",
     ]);
+  });
+
+  test("no credential the load warns about is also reported as held", () => {
+    // The two claims are mutually exclusive: a field the console cannot
+    // pre-fill is one the operator authors again and the composition writes,
+    // so telling the operator in one answer that the file's value is kept
+    // would invite them to believe a credential reference survives a
+    // re-author that overwrites it.
+    for (const document of [savedSftpDocument(), privateKeySftpDocument()]) {
+      const response = loadDocument(document);
+      expect(response.warnings.length).toBeGreaterThan(0);
+      for (const field of response.warnings)
+        expect(response.carriedThrough).not.toContain(field);
+    }
+  });
+
+  test("a split remote directory is composed, not held without an editor", () => {
+    // Both directory forms are the connection form's own fields, so neither is
+    // a setting this surface keeps unchanged.
+    expect(loadDocument(privateKeySftpDocument()).carriedThrough).toEqual([]);
   });
 
   test("a filedrop connection draws no credential warning of its own", () => {
@@ -362,23 +414,72 @@ describe("the records that must survive a load", () => {
     "expected_payload_columns",
     "expected_partner_deduplicate",
     "disclosed_payload_columns",
+    "outbound_payload_consent",
   ];
 
-  test("none of the three is reported as held without an editor", () => {
+  test("none of them is reported as held without an editor", () => {
     // Held-without-an-editor is what a setting the composition cannot emit
-    // gets, and these three have no such fallback: a record this console
-    // cannot put back into the document it composes turns off a check the
-    // operator wrote.
-    const response = loadDocument(savedSftpDocument());
+    // gets, and these records have no such fallback: one this console cannot
+    // put back into the document it composes turns off a check the operator
+    // wrote.
+    const response = loadDocument(
+      savedSftpDocument({
+        outbound_payload_consent: {
+          status: "confirmed",
+          columns: ["own_notes"],
+        },
+      }),
+    );
     for (const field of MUST_SURVIVE)
       expect(response.carriedThrough).not.toContain(field);
   });
 
   test("each reaches the disclosed document with the value the file states", () => {
-    const { document } = loadDocument(savedSftpDocument());
+    const { document } = loadDocument(
+      savedSftpDocument({
+        outbound_payload_consent: {
+          status: "confirmed",
+          columns: ["own_notes"],
+        },
+      }),
+    );
     expect(document?.expectedPayloadColumns).toEqual(["partner_notes"]);
     expect(document?.expectedPartnerDeduplicate).toBe(false);
     expect(document?.disclosedPayloadColumns).toEqual(["own_notes"]);
+    expect(document?.outboundPayloadConsent).toEqual({
+      status: "confirmed",
+      columns: ["own_notes"],
+    });
+  });
+
+  test("a pending consent record survives as pending", () => {
+    // The state that refuses an unattended run until the set is confirmed:
+    // losing it would let the next run proceed against no record at all.
+    const { document } = loadDocument(
+      savedSftpDocument({ outbound_payload_consent: { status: "pending" } }),
+    );
+    expect(document?.outboundPayloadConsent).toEqual({ status: "pending" });
+  });
+
+  test("each survives the whole cycle: load, authoring state, composition", () => {
+    // The cycle a console run makes of a mounted configuration. Each record's
+    // absence is a valid state that turns its own enforcement off, so the
+    // composed configuration has to state what the file stated.
+    const consent = { status: "confirmed" as const, columns: ["own_notes"] };
+    const { document } = loadDocument(
+      savedSftpDocument({ outbound_payload_consent: consent }),
+    );
+    if (document === undefined)
+      throw new Error("the load disclosed no document");
+    const { records } = authoringStateFromDocument(document);
+    const composed = composeSftpConfigSpec(
+      validSftpIntent({ ...records, side: "acceptor" }),
+      testSftpServerEntry(),
+    );
+    expect(composed.expectedPayloadColumns).toEqual(["partner_notes"]);
+    expect(composed.expectedPartnerDeduplicate).toBe(false);
+    expect(composed.disclosedPayloadColumns).toEqual(["own_notes"]);
+    expect(composed.outboundPayloadConsent).toEqual(consent);
   });
 
   test("an empty list survives as an empty list, not as an absence", () => {
@@ -406,6 +507,7 @@ describe("the records that must survive a load", () => {
       expectedPayloadColumns: ["a"],
       expectedPartnerDeduplicate: true,
       disclosedPayloadColumns: ["b"],
+      outboundPayloadConsent: { status: "pending" },
     } as unknown as ExchangeSpec;
     expect(carriedThroughFields(spec)).toEqual([]);
   });

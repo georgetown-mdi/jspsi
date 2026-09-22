@@ -139,6 +139,21 @@ describe("GET /api/jobs/config", () => {
     });
   });
 
+  test("a document nested past the parse bounds is a 400, not a throw", async () => {
+    // The bound is raised by the case conversion ahead of the schema, so the
+    // handler answers it as the refusal it is rather than letting the
+    // framework turn it into a 500.
+    const dataRoot = enable();
+    let nested: Record<string, unknown> = { host: "sftp.partner.example" };
+    for (let depth = 0; depth < 300; depth += 1) nested = { server: nested };
+    writeConfiguration(dataRoot, { connection: nested });
+    const response = await load();
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error: string };
+    expect(body.error).toContain("not a psilink exchange configuration");
+    expect(body.error).not.toContain("sftp.partner.example");
+  });
+
   test("an over-large mounted file is a 400 naming no container path", async () => {
     const dataRoot = enable();
     fs.writeFileSync(

@@ -36,12 +36,11 @@
 
 import fs from "node:fs";
 
-import { ZodError } from "zod";
-
 import {
   getDefaultLinkageTerms,
   parseExchangeSpec,
   parseSensitiveYaml,
+  safeParseExchangeSpec,
   snakeizeKey,
 } from "@psilink/core";
 
@@ -60,6 +59,7 @@ import type {
   JobFiledropExchangeIntent,
   JobSftpExchangeIntent,
 } from "./intentSchemas";
+import type { JobSftpServerEntry } from "./sftpServer";
 
 /**
  * Upper bound, in bytes, on the configuration file this load will read, applied
@@ -167,6 +167,7 @@ function probeIntentFields(): JobExchangeIntentBase {
     expectedPayloadColumns: [],
     expectedPartnerDeduplicate: false,
     disclosedPayloadColumns: [],
+    outboundPayloadConsent: { status: "pending" },
     includeOwnColumns: "all",
     csvDelimiter: "|",
     retentionDisposition: "composition probe",
@@ -193,8 +194,13 @@ const PROBE_SIGNING_PATHS = {
   receiptOutput: "/probe/receipt",
 };
 
-/** The widest sftp composition this console emits, as a validated spec. */
-function sftpProbeSpec(): ExchangeSpec {
+/**
+ * An sftp composition over one shape of authored connection, as a validated
+ * spec. `server` supplies the shapes that vary: the credential, which core's
+ * server schema admits one primary of at a time, and the remote directory,
+ * which is either the single `path` or the inbound/outbound pair.
+ */
+function sftpProbeSpec(server: Partial<JobSftpServerEntry>): ExchangeSpec {
   const intent: JobSftpExchangeIntent = {
     ...probeIntentFields(),
     channel: "sftp",
@@ -205,14 +211,38 @@ function sftpProbeSpec(): ExchangeSpec {
     {
       host: "probe.invalid",
       port: 22,
-      path: "/probe",
       username: "probe",
-      password: "@/probe",
-      keyboardInteractive: true,
       hostKeyFingerprint: PROBE_HOST_KEY_FINGERPRINT,
+      ...server,
     },
     PROBE_SIGNING_PATHS,
   );
+}
+
+/**
+ * Every sftp composition this console emits, over the connection shapes the
+ * authored entry can hold: a password or a private key with its passphrase,
+ * and a single remote directory or the inbound/outbound pair.
+ * `keyboard_interactive` rides the password shape, the only one core's schema
+ * admits it beside. A credential the operator authors again is composed rather
+ * than held, so measuring one shape alone would report the other's fields as
+ * settings this surface keeps unchanged while
+ * {@link credentialFieldsNotAdopted} warns it cannot pre-fill them.
+ */
+function sftpProbeSpecs(): Array<ExchangeSpec> {
+  return [
+    sftpProbeSpec({
+      path: "/probe",
+      password: "@/probe/password",
+      keyboardInteractive: true,
+    }),
+    sftpProbeSpec({
+      inboundPath: "/probe/inbound",
+      outboundPath: "/probe/outbound",
+      privateKey: "@/probe/key",
+      privateKeyPassphrase: "@/probe/key-passphrase",
+    }),
+  ];
 }
 
 /**
@@ -316,7 +346,7 @@ const CONSOLE_FILLED_FIELDS: ReadonlySet<string> = new Set([
  */
 const COMPOSED_FIELD_PATHS: ReadonlySet<string> = new Set(
   [
-    ...documentKeyPaths(sftpProbeSpec()),
+    ...sftpProbeSpecs().flatMap((spec) => documentKeyPaths(spec)),
     ...documentKeyPaths(filedropProbeSpec(false)),
     ...documentKeyPaths(filedropProbeSpec(true)),
   ].filter((field) => !CONSOLE_FILLED_FIELDS.has(field)),
@@ -335,16 +365,19 @@ export function carriedThroughFields(document: ExchangeSpec): Array<string> {
 }
 
 /**
- * The three records whose ABSENCE is a valid state turning an enforcement off,
- * so a load that could not put one back into the composed document would
- * silently release this party from it (docs/spec/EXCHANGE_FILE.md, "The records
- * that must survive"). Named here as the file spells them; whether the
- * composition still emits each is measured, never assumed.
+ * The records whose ABSENCE is a valid state turning an enforcement off, so a
+ * load that could not put one back into the composed document would silently
+ * release this party from it: the three of docs/spec/EXCHANGE_FILE.md, "The
+ * records that must survive", and the consent record this party confirmed its
+ * own outbound set with, whose absent state is read the same lazy way ("The
+ * acceptor's outbound consent"). Named here as the file spells them; whether
+ * the composition still emits each is measured, never assumed.
  */
 const RECORDS_THAT_MUST_SURVIVE: ReadonlyArray<string> = [
   "expected_payload_columns",
   "expected_partner_deduplicate",
   "disclosed_payload_columns",
+  "outbound_payload_consent",
 ];
 
 /**
@@ -389,25 +422,25 @@ function parsedYaml(source: string): unknown {
 
 /** The document the shared exchange-file schema reads out of the mounted file,
  * refused in the console's own words: the operator edits this file by hand, so
- * a setting it rejects is a line they can fix. */
+ * a setting it rejects is a line they can fix. The non-throwing parse is what
+ * puts a file too deeply nested for the case conversion into the same refusal
+ * as a schema violation rather than past this handler: its bound is reported at
+ * the document root, which names no line to fix. */
 function parsedDocument(raw: unknown): ExchangeSpec {
-  try {
-    return parseExchangeSpec(raw);
-  } catch (error) {
-    if (!(error instanceof ZodError)) throw error;
-    const fields = refusedDocumentFields(error, raw);
-    throw new ConfigurationLoadRefusedError(
-      fields.length === 0
-        ? "The psilink.yaml in your working folder is not a psilink exchange " +
-            "configuration. Check the file, then open it again."
-        : "The psilink.yaml in your working folder is not a valid psilink " +
-            "configuration. " +
-            (fields.length === 1 ? "Fix this setting" : "Fix these settings") +
-            " in the file, then open it again: " +
-            namedFieldList(fields) +
-            ".",
-    );
-  }
+  const parsed = safeParseExchangeSpec(raw);
+  if (parsed.success) return parsed.data;
+  const fields = refusedDocumentFields(parsed.error, raw);
+  throw new ConfigurationLoadRefusedError(
+    fields.length === 0
+      ? "The psilink.yaml in your working folder is not a psilink exchange " +
+          "configuration. Check the file, then open it again."
+      : "The psilink.yaml in your working folder is not a valid psilink " +
+          "configuration. " +
+          (fields.length === 1 ? "Fix this setting" : "Fix these settings") +
+          " in the file, then open it again: " +
+          namedFieldList(fields) +
+          ".",
+  );
 }
 
 /** Refuse a channel the console does not conduct, naming it as the file spells

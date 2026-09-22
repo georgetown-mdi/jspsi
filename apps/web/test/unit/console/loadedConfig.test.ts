@@ -221,18 +221,29 @@ describe("the authoring state a loaded document seeds", () => {
     expect(state.receipts.mode).toBe("session-derived");
   });
 
-  test("the three enforcement records reach the intent fields verbatim", () => {
+  test("the enforcement records reach the intent fields verbatim", () => {
     const state = authoringStateFromDocument(
       disclosed({
         expectedPayloadColumns: ["partner_notes"],
         expectedPartnerDeduplicate: false,
         disclosedPayloadColumns: [],
+        outboundPayloadConsent: { status: "confirmed", columns: ["own_notes"] },
       }),
     );
     expect(state.records).toEqual({
       expectedPayloadColumns: ["partner_notes"],
       expectedPartnerDeduplicate: false,
       disclosedPayloadColumns: [],
+      outboundPayloadConsent: { status: "confirmed", columns: ["own_notes"] },
+    });
+  });
+
+  test("a pending consent record is held as pending, not as none", () => {
+    const state = authoringStateFromDocument(
+      disclosed({ outboundPayloadConsent: { status: "pending" } }),
+    );
+    expect(state.records.outboundPayloadConsent).toEqual({
+      status: "pending",
     });
   });
 
