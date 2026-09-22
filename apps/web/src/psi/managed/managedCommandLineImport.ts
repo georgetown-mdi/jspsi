@@ -88,9 +88,9 @@ const IMPORTED_CONFIGURATION_LABEL = "";
 /**
  * Raised when a file is not a configuration this app takes: a document off the
  * exchange-file schema, or one that parses and holds what this app cannot keep --
- * a field outside what it composes, or a secret it does not import. Its message is shown to the operator, so it states what the
- * file holds and what to do about it, and it names FIELD NAMES only -- a field's
- * value is the credential.
+ * a field outside what it composes, or a secret it does not import. Its message
+ * is shown to the operator, so it states what the file holds and what to do
+ * about it, and it names FIELD NAMES only -- a field's value is the credential.
  */
 export class ManagedConfigurationRefusedError extends Error {
   constructor(message: string) {

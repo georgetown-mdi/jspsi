@@ -1179,12 +1179,13 @@ What the import accepts is what this app can hold:
   A signing identity or receipt path is refused on every channel.
 - **Credentials as `@path` references, never as values.** An sftp `password`,
   `private_key`, or `private_key_passphrase`, the `bearer` or `password` of a
-  `proxy` or `provision` block's `auth`, and any string in `provider_options`
-  (which psilink hands to the SFTP library as written, so this app cannot tell
-  a credential there from any other option) is held when the file writes it as
-  `@` and a path, and refused, by field name, when the file writes the value
-  itself: this browser does not store a secret. The refusal says to put the
-  value in a file of its own and write the setting as `@` and that file's path.
+  `proxy` or `provision` block's `auth`, and a `password`, `passphrase`,
+  `privateKey`, or `private_key` in `provider_options` is held when the file
+  writes it as `@` and a path, and refused, by field name, when the file
+  writes the value itself: this browser does not store a secret. The refusal
+  says to put the value in a file of its own and write the setting as `@` and
+  that file's path. Any other `provider_options` setting, such as a cipher
+  list, is held as written.
 - **No shared secret.** A configuration naming one in its `authentication` block
   is refused: the key file stays where the exchange runs. psilink reads the secret
   from `.psilink.key` and refuses it in `psilink.yaml` for the same reason.

@@ -179,6 +179,36 @@ describe("read-failed recovery listing", () => {
     expect(page.getByText("Unreadable record").query()).toBeNull();
   });
 
+  test("a configuration-only shared-folder record names its channel in the listing", async () => {
+    const good = await createRunnableExchange(
+      newExchange({ label: "Riverbend quarterly" }),
+    );
+    const { sharedSecret: _sharedSecret, side: _side, ...rest } = good;
+    await rawPut({
+      ...rest,
+      id: "folder-record",
+      label: "Shared folder quarterly",
+      exchangeFile: {
+        ...rest.exchangeFile,
+        connection: { channel: "filedrop", path: "/srv/exchange" },
+      },
+    });
+    await rawPut({
+      ...good,
+      id: "zzz-bad-record",
+      schemaVersion: "psilink-managed-exchange/v4",
+    });
+
+    app.render(createElement(SavedExchanges));
+
+    await expect
+      .element(page.getByText("Shared folder quarterly"))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("Shared-folder exchange"))
+      .toBeInTheDocument();
+  });
+
   test("the recovery listing never renders the stored secret", async () => {
     const good = await createRunnableExchange(
       newExchange({ label: "Riverbend quarterly" }),

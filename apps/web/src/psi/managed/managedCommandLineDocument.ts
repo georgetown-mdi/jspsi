@@ -260,6 +260,17 @@ function httpAuthValues(
   ];
 }
 
+/** The `provider_options` keys that name a credential: the credential keys
+ * the SFTP option passthrough documents as rejected (docs/EXCHANGE_REFERENCE.md,
+ * `connection.provider_options`), in each spelling it lists. The map's keys are
+ * passed as written, so each is matched exactly. */
+const PROVIDER_OPTION_CREDENTIAL_KEYS: ReadonlySet<string> = new Set([
+  "password",
+  "passphrase",
+  "privateKey",
+  "private_key",
+]);
+
 /** Every string a `provider_options` value holds, at any depth. */
 function stringLeaves(value: unknown): Array<string> {
   if (typeof value === "string") return [value];
@@ -272,10 +283,10 @@ function stringLeaves(value: unknown): Array<string> {
 /**
  * The values an sftp connection states where the CLI resolves an `@path`
  * (`resolveExchangeSpecRefs`, `apps/cli/src/util/atSignRefs.ts`). Every one is
- * a credential but the host-key pin. A `provider_options` string is counted as
- * one too: the map is passed to the SFTP library as written, a password or key
- * among its options is indistinguishable here from any other string, and its
- * keys are named verbatim because the case conversion leaves them alone.
+ * a credential but the host-key pin. A `provider_options` string is a
+ * credential only under a key in {@link PROVIDER_OPTION_CREDENTIAL_KEYS}; any
+ * other option, a cipher name among them, is transport tuning. Its keys are
+ * named verbatim because the case conversion leaves them alone.
  */
 function sftpFileReadableValues(
   connection: SFTPConnectionConfig,
@@ -316,7 +327,7 @@ function sftpFileReadableValues(
         stringLeaves(value).map((leaf) => ({
           field: `connection.provider_options.${key}`,
           value: leaf,
-          credential: true,
+          credential: PROVIDER_OPTION_CREDENTIAL_KEYS.has(key),
         })),
     ),
   ];

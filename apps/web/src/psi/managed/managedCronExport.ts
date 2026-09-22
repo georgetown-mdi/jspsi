@@ -230,9 +230,9 @@ function assertComposableDocumentFields(document: ExchangeSpec): void {
  * run.
  *
  * @throws {Error} if the stored connection holds a field or a literal
- *   credential the app does not hold, a webrtc record holds no side, the stored document holds an
- *   `authentication` block, or it holds a top-level field the app does not
- *   compose.
+ *   credential the app does not hold, a webrtc record holds no side, the
+ *   stored document holds an `authentication` block, or it holds a top-level
+ *   field the app does not compose.
  * @throws {ZodError} if the composed document fails exchange-file validation.
  */
 function composeCronExportDocument(
@@ -272,8 +272,8 @@ function serializeKeyFile(fields: ManagedExchangeKeyFields): string {
  * defaults (`apps/cli/src/commands/exchange.ts`).
  *
  * @throws {Error} if the record's stored connection holds a field or a
- *   literal credential the app does not hold, or its stored document holds an `authentication` block or a
- *   top-level field the app does not compose.
+ *   literal credential the app does not hold, or its stored document holds an
+ *   `authentication` block or a top-level field the app does not compose.
  * @throws {ZodError} if the composed document fails exchange-file validation.
  */
 export function composeManagedCronExportConfig(
@@ -299,8 +299,8 @@ export function composeManagedCronExportConfig(
  * that holds no secret.
  *
  * @throws {Error} if the record's stored connection holds a field or a
- *   literal credential the app does not hold, or its stored document holds an `authentication` block or a
- *   top-level field the app does not compose.
+ *   literal credential the app does not hold, or its stored document holds an
+ *   `authentication` block or a top-level field the app does not compose.
  * @throws {ZodError} if the composed document fails exchange-file validation.
  */
 export function composeManagedCronExport(

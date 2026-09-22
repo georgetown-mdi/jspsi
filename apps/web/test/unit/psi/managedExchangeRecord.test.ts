@@ -1194,6 +1194,26 @@ describe("diagnoseManagedExchangeRecord", () => {
     });
   });
 
+  test("names the channel in place of the side for a configuration this app does not run", () => {
+    const {
+      sharedSecret: _sharedSecret,
+      side: _side,
+      ...rest
+    } = buildManagedExchangeRecord(newExchange({ label: "Shared folder" }));
+    const essentials = diagnoseManagedExchangeRecord({
+      ...rest,
+      exchangeFile: {
+        ...rest.exchangeFile,
+        connection: { channel: "filedrop", path: "/srv/exchange" },
+      },
+    });
+    expect(essentials).toEqual({
+      id: rest.id,
+      label: "Shared folder",
+      elsewhereChannel: "filedrop",
+    });
+  });
+
   test("omits the last-run date for a never-run record", () => {
     const record = buildManagedExchangeRecord(newExchange());
     expect(diagnoseManagedExchangeRecord(record).lastRunAt).toBeUndefined();

@@ -385,16 +385,68 @@ describe("accepting a configuration on a channel this app does not run", () => {
             host: "proxy.example.org",
             auth: { username: "relay", password: secrets[1] },
           },
-          providerOptions: { algorithms: { cipher: [secrets[2]] } },
+          providerOptions: { password: secrets[2] },
         },
       }),
     );
 
     expect(message).toContain(
-      "connection.provider_options.algorithms, connection.proxy.auth.password, " +
+      "connection.provider_options.password, connection.proxy.auth.password, " +
         "connection.server.provision.auth.bearer",
     );
     for (const secret of secrets) expect(message).not.toContain(secret);
+  });
+
+  test.each(["password", "passphrase", "privateKey", "private_key"])(
+    "a literal %s under provider options is refused by name",
+    (key) => {
+      const document = sftpDocumentWithServerLine({});
+      const message = refusal(
+        configText({
+          ...document,
+          connection: {
+            ...document.connection,
+            providerOptions: {
+              algorithms: { cipher: ["aes256-gcm@openssh.com"] },
+              [key]: "option-not-echoed",
+            },
+          },
+        }),
+      );
+
+      expect(message).toContain(`connection.provider_options.${key}`);
+      expect(message).not.toContain("connection.provider_options.algorithms");
+      expect(message).not.toContain("option-not-echoed");
+    },
+  );
+
+  test("a literal cipher option is held and comes back unchanged on export", () => {
+    const providerOptions = {
+      algorithms: { cipher: ["aes256-gcm@openssh.com", "aes128-ctr"] },
+      keepaliveInterval: 10000,
+    };
+    const document = sftpDocumentWithServerLine({
+      password: "@/secrets/sftp-password",
+    });
+    const source = configText({
+      ...document,
+      connection: { ...document.connection, providerOptions },
+    });
+
+    const record = readManagedCommandLineConfiguration(source);
+    const { connection } = record.exchangeFile;
+    if (connection.channel !== "sftp") throw new Error("not an sftp record");
+    expect(connection.providerOptions).toEqual(providerOptions);
+
+    const reexported = parseExchangeSpec(
+      parseSensitiveYaml(
+        composeManagedCronExportConfig(record).config.text,
+        "re-export",
+      ),
+    );
+    expect(reexported).toEqual(
+      parseExchangeSpec(parseSensitiveYaml(source, "import")),
+    );
   });
 
   test("a key outside the schema under an SFTP server block is refused, not trimmed", () => {

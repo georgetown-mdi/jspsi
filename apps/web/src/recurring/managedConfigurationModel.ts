@@ -98,11 +98,14 @@ export function configurationOnlyStatus(record: ManagedExchangeRecord): string {
     : CHANNEL_ELSEWHERE_STATUS;
 }
 
-/** What the list names a sideless configuration by: its channel, where the
- * record holds no side for the list to name. */
-export function sidelessRowLabel(record: ManagedExchangeRecord): string {
-  const channel = channelThisAppDoesNotRun(record.exchangeFile);
-  return channel === undefined ? "" : ELSEWHERE_CHANNEL_ROW_LABELS[channel];
+/** What the list names a sideless configuration by: the channel this app does
+ * not run, where the record holds no side for the list to name. */
+export function sidelessRowLabel(
+  elsewhereChannel: ManagedElsewhereChannel | undefined,
+): string {
+  return elsewhereChannel === undefined
+    ? ""
+    : ELSEWHERE_CHANNEL_ROW_LABELS[elsewhereChannel];
 }
 
 /**

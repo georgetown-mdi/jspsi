@@ -684,9 +684,10 @@ export function partitionReadableManagedExchanges(
 /**
  * The display essentials a diagnostic read reports for one stored entry that
  * parses: only the fields a recovery listing renders -- the label, this party's
- * side, and the last run's instant when recorded. Not the whole record: the
- * diagnostic path must never return the `sharedSecret` or any document field to a
- * component, so this type structurally cannot hold secret material (see
+ * side or the channel this app does not run, and the last run's instant when
+ * recorded. Not the whole record: the diagnostic path must never return the
+ * `sharedSecret` or any document field to a component, so this type
+ * structurally cannot hold secret material (see
  * docs/MANAGED_EXCHANGE.md, "Deleting a managed exchange", and the read-failed
  * recovery listing). The `id` is the stored key a delete-by-key acts on.
  */
@@ -698,18 +699,22 @@ export interface ManagedExchangeDiagnosticEssentials {
   /** This party's side of the partnership; absent on a configuration on a
    * channel that names no side. */
   side?: ManagedExchangeSide;
+  /** The channel the stored document runs over when this app does not run it
+   * (see {@link channelThisAppDoesNotRun}), which the listing names in place
+   * of a side. */
+  elsewhereChannel?: ManagedElsewhereChannel;
   /** ISO 8601 UTC instant of the last recorded run, when one exists. */
   lastRunAt?: string;
 }
 
 /**
  * Extract only the display essentials from a stored value for the read-failed
- * recovery listing: the `id`, `label`, `side`, and last-run instant, and nothing
- * else. Structurally incapable of returning secret material: it reads named
- * scalar fields off the validated record into a
- * {@link ManagedExchangeDiagnosticEssentials}, so the `sharedSecret`, the
- * document, and the input handle never leave this function. Full record
- * validation runs first, so a value that would fail
+ * recovery listing: the `id`, `label`, `side`, the channel this app does not
+ * run, and the last-run instant, and nothing else. Structurally incapable of
+ * returning secret material: it reads named scalar fields off the validated
+ * record into a {@link ManagedExchangeDiagnosticEssentials}, so the
+ * `sharedSecret`, the document, and the input handle never leave this
+ * function. Full record validation runs first, so a value that would fail
  * {@link parseManagedExchangeRecord} throws here exactly as it would on the
  * strict read; the caller catches that to mark the entry unreadable.
  *
@@ -719,10 +724,12 @@ export function diagnoseManagedExchangeRecord(
   raw: unknown,
 ): ManagedExchangeDiagnosticEssentials {
   const record = parseManagedExchangeRecord(raw);
+  const elsewhereChannel = channelThisAppDoesNotRun(record.exchangeFile);
   return {
     id: record.id,
     label: record.label,
     ...(record.side !== undefined ? { side: record.side } : {}),
+    ...(elsewhereChannel !== undefined ? { elsewhereChannel } : {}),
     ...(record.lastRun !== undefined ? { lastRunAt: record.lastRun.at } : {}),
   };
 }

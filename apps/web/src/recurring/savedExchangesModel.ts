@@ -13,13 +13,14 @@
  */
 
 import {
-  managedStandingConditionTier,
-  readManagedFailure,
-} from "@psi/managed/managedFailureTiers";
-import {
+  channelThisAppDoesNotRun,
   raisedStandingCondition,
   runnableManagedExchange,
 } from "@psi/managed/managedExchangeRecord";
+import {
+  managedStandingConditionTier,
+  readManagedFailure,
+} from "@psi/managed/managedFailureTiers";
 import { deriveManagedBackupState } from "@psi/managed/managedBackupState";
 import { managedExchangeLapsed } from "@psi/managed/managedExpiry";
 
@@ -36,6 +37,7 @@ import {
 } from "./scheduleSurfacingModel";
 
 import type {
+  ManagedElsewhereChannel,
   ManagedExchangeRecord,
   ManagedExchangeSchedule,
   ManagedExchangeSide,
@@ -56,6 +58,18 @@ export const SIDE_LABEL: Record<ManagedExchangeSide, string> = {
   inviter: "You invite",
   acceptor: "You accept",
 };
+
+/** What a row names in the side position: this party's side, or the channel
+ * for a configuration on one that names no side. The saved-exchanges list and
+ * the read-failed recovery listing both derive it here. */
+export function rowSideLabel(
+  side: ManagedExchangeSide | undefined,
+  elsewhereChannel: ManagedElsewhereChannel | undefined,
+): string {
+  return side !== undefined
+    ? SIDE_LABEL[side]
+    : sidelessRowLabel(elsewhereChannel);
+}
 
 /** The derived backup state a row shows, phrased for the list. `"backed-up"`
  * holds the date phrase for the quiet green line; `"backup-needed"` is the one
@@ -265,10 +279,10 @@ export function savedExchangeRow(
     return {
       id: record.id,
       label: record.label,
-      sideLabel:
-        record.side !== undefined
-          ? SIDE_LABEL[record.side]
-          : sidelessRowLabel(record),
+      sideLabel: rowSideLabel(
+        record.side,
+        channelThisAppDoesNotRun(record.exchangeFile),
+      ),
       status: configurationOnlyStatus(record),
       expired: false,
       backup: { kind: "not-applicable" },

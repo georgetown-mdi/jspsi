@@ -149,14 +149,16 @@ operator wrote.
 
 ## The two gaps left open
 
-**No notice for a setting held without an editor.** The rule's middle outcome has
-two halves: hold the setting unchanged, and tell the operator this surface will not
-let them change it. The holding half is built and tested in both directions. The
-web application's configuration-only page tells it, naming each setting it keeps
-without showing or editing it, and warning separately about each setting that
-names a file by `@path` (`apps/web/src/recurring/managedConfigurationModel.ts`);
-it names them from the stored record, whose keys the parse has camelized, so a key
-the file wrote in camelCase is named in snake_case there rather than as written.
+**The held-setting notice may not spell a key as the file did.** The rule's
+middle outcome has two halves: hold the setting unchanged, and tell the operator
+this surface will not let them change it. Both are built. The holding half is
+tested in both directions, and the web application's configuration-only page
+tells the operator, naming each setting it keeps without showing or editing it
+and warning separately about each setting that names a file by `@path`
+(`apps/web/src/recurring/managedConfigurationModel.ts`). What stays open is the
+spelling: the page names the settings from the stored record, whose keys the
+parse has camelized, so a key the file wrote in camelCase is named in
+snake_case there rather than as written.
 
 **The CLI's refusal cites one issue.** A config failing schema validation reports
 the first issue and a count of the rest, so a document with several dropped keys
