@@ -12,8 +12,10 @@ import type { ExchangeSpec } from "./exchangeSpec.js";
  * The shared secret and its expiration live only in the key file: they are
  * stripped from the top-level `authentication` block here even if the caller
  * left them populated, so the secret cannot be duplicated onto disk. The strip
- * is part of the serialization rather than of any one writer, so a second
- * application rendering this document does not have to repeat it.
+ * is part of this serializer rather than of any one caller, so every writer
+ * that renders the document through it inherits it; a writer that serializes
+ * a spec by another route does not, and must not carry an `authentication`
+ * secret into what it writes.
  *
  * The `connection` block is annotated with the operator guidance
  * {@link annotateConnectionGuidance} attaches -- the channel alternatives, where
