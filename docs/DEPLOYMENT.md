@@ -132,16 +132,88 @@ That measured behavior bounds what the second copy of the hook is good for. `dow
 
 Two values the exports do not carry decide whether the origin keeps answering the edge: the certificate it serves, an expired one answering `Full (strict)` with a 526 on both public names, and its port-443 rule list, a range Cloudflare adds and the rules do not admit showing as an intermittent edge error. `check-origin-drift.mjs` in the saved-configuration directory compares the deployed certificate against a margin and the rules against Cloudflare's published lists; that directory's [README](../apps/web/deploy/aws_eb_saved_configurations/README.md#checking-the-origin-certificate-and-the-cloudflare-ranges) holds its arguments, its exit codes, the read permissions it needs and the recorded values it compares against.
 
-Run it monthly, and after any change to the origin certificate, the shared security group, or the Cloudflare configuration:
+Cloudflare changes its published ranges without notice, so the reconciliation runs daily rather than on a person's cadence: [`origin_drift.yaml`](../.github/workflows/origin_drift.yaml) runs the check at 06:23 UTC and on manual dispatch, assuming a read-only role through GitHub's OIDC token. Its exit code is the result, so a difference or a value it could not read reds the run; a red scheduled run reaches the maintainer the way every other one here does, and nothing else reports drift.
+
+Run it by hand after any change to the origin certificate, the shared security group, or the Cloudflare configuration, and whenever the daily run is red for a reason other than drift -- a throttled AWS call, an unreachable `cloudflare.com`, a role that will not assume -- since a red run for one of those states nothing about the two values. Where that condition outlasts the day it appeared, the by-hand run is the reconciliation until it is fixed, monthly at the least:
 
 ```sh
 node apps/web/deploy/aws_eb_saved_configurations/check-origin-drift.mjs
 ```
 
-The run needs read credentials for the AWS account, which no CI job and no development container holds, so it is the maintainer's to run outside the container. What to do with each result:
+A run by hand needs read credentials for the AWS account, which no development container holds, so it is the maintainer's to run outside the container. What to do with each result, from the daily run or by hand:
 
 - **A comparison found a difference.** Correct the account first where it is the account that is wrong: issue a replacement Origin CA certificate and install it by the route above when the expiry is inside the margin, and authorize a published range the rules do not admit and revoke a range Cloudflare no longer publishes -- authorize before revoking, since a revoke first drops live requests from the range being replaced. Then re-run the check and commit the record it prints, which is what the account and Cloudflare now hold. Where the account is already right, the record alone is stale, and committing that block is the whole fix.
 - **A comparison could not run.** The run had no credentials for the account, no route to `cloudflare.com`, or an answer it could not read, so a value it compares was never read. It exits 2 rather than 0 and compares nothing in place of what it could not read, so fix the run and repeat it rather than reading a 2 as agreement.
+
+#### Creating the role the scheduled run assumes
+
+The workflow holds no AWS key. It assumes `psilink-origin-drift-check`, a role with the three read calls the check makes and nothing else, which the account holder creates once. The role's recorded values are in the saved-configuration [README](../apps/web/deploy/aws_eb_saved_configurations/README.md#the-scheduled-run-and-the-role-it-assumes); these are the steps that create it. Substitute the account id and the region, and run them with credentials that can write IAM:
+
+1. Confirm the account has GitHub's OIDC provider, which the deploy role already uses: `aws iam list-open-id-connect-providers` states an ARN ending `token.actions.githubusercontent.com`. Create it if it is absent -- `aws iam create-open-id-connect-provider --url https://token.actions.githubusercontent.com --client-id-list sts.amazonaws.com`.
+
+2. Write the trust policy. The condition admits this repository's default branch and nothing else, so no other branch, no pull request, and no other repository can assume the role:
+
+   ```json
+   {
+     "Version": "2012-10-17",
+     "Statement": [
+       {
+         "Effect": "Allow",
+         "Principal": {
+           "Federated": "arn:aws:iam::<account-id>:oidc-provider/token.actions.githubusercontent.com"
+         },
+         "Action": "sts:AssumeRoleWithWebIdentity",
+         "Condition": {
+           "StringEquals": {
+             "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+             "token.actions.githubusercontent.com:sub": "repo:georgetown-mdi/jspsi:ref:refs/heads/main"
+           }
+         }
+       }
+     ]
+   }
+   ```
+
+3. Write the permission policy. Each statement is one call the check makes: the account id it reads to name the deployment bucket, the one certificate object in it, and the security group both environments attach. `ec2:DescribeSecurityGroups` names `*` because a Describe call's resource is the whole account; narrow it to the group's ARN where IAM accepts one.
+
+   ```json
+   {
+     "Version": "2012-10-17",
+     "Statement": [
+       {
+         "Sid": "ReadTheAccountId",
+         "Effect": "Allow",
+         "Action": "sts:GetCallerIdentity",
+         "Resource": "*"
+       },
+       {
+         "Sid": "ReadTheOriginCertificate",
+         "Effect": "Allow",
+         "Action": "s3:GetObject",
+         "Resource": "arn:aws:s3:::elasticbeanstalk-<region>-<account-id>/cert/public.crt"
+       },
+       {
+         "Sid": "ReadThePort443Rules",
+         "Effect": "Allow",
+         "Action": "ec2:DescribeSecurityGroups",
+         "Resource": "*"
+       }
+     ]
+   }
+   ```
+
+4. Create the role and attach the policy:
+
+   ```sh
+   aws iam create-role --role-name psilink-origin-drift-check \
+     --assume-role-policy-document file://trust-policy.json
+   aws iam put-role-policy --role-name psilink-origin-drift-check \
+     --policy-name origin-drift-reads --policy-document file://permission-policy.json
+   ```
+
+5. Set the role's ARN as the `AWS_ORIGIN_DRIFT_ROLE_ARN` repository secret, and confirm `AWS_REGION_NAME`, which the deploy workflow already reads, is set as a repository variable.
+
+6. Dispatch the workflow from the default branch once and read the run. A role that will not assume, a permission the policy misses, or a region that does not match the one the committed configuration files state all end as a red run naming what it could not read.
 
 ### Recorded settings and their source
 

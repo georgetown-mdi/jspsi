@@ -1,0 +1,77 @@
+name: Origin Drift Check
+
+# Runs apps/web/deploy/aws_eb_saved_configurations/check-origin-drift.mjs against
+# the hosted deployment's AWS account once a day. Cloudflare's published ranges
+# change without notice, and a range the port-443 rules do not admit is dropped
+# at the origin until they do, so a by-hand run on a monthly cadence leaves a
+# window of up to a month in which that is the deployment's live state. A daily
+# run closes it to a day.
+#
+# A failed run is the whole report: the check exits 1 on a difference and 2 on a
+# comparison it could not run, either of which reds the run and reaches the
+# maintainer by whatever notification a failed scheduled run already sends. This
+# workflow adds no notification integration of its own, and the by-hand run in
+# docs/DEPLOYMENT.md stays the fallback for a run that is red for a reason other
+# than drift.
+#
+# The account is read through a role assumed with GitHub's OIDC token, holding
+# the three read calls the check makes and nothing else -- no long-lived AWS key.
+# The role's name and trust condition are recorded in
+# apps/web/deploy/aws_eb_saved_configurations/README.md, and the runbook that
+# creates it is in docs/DEPLOYMENT.md.
+
+on:
+  schedule:
+    # 06:23 UTC daily, off the hour per GitHub's guidance on top-of-hour
+    # congestion and clear of the nightly runs (03:43 through 04:57) and the
+    # Monday scans (05:30 through 05:47). A schedule trigger fires only from the
+    # workflow as it exists on the default branch, so no run happens until this
+    # file lands there; the trust condition below is on that branch's ref for the
+    # same reason.
+    - cron: "23 6 * * *"
+  # On-demand run, for a re-check after correcting the account without waiting
+  # for tomorrow. Dispatched from a branch other than the default one it reaches
+  # the role-assumption step and stops there: the trust condition admits the
+  # default branch alone.
+  workflow_dispatch:
+
+# One run at a time; an in-flight run finishes rather than being cancelled by a
+# manual dispatch racing the schedule.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  check:
+    name: Origin drift
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: ${{vars.AWS_REGION_NAME}}
+          role-to-assume: ${{secrets.AWS_ORIGIN_DRIFT_ROLE_ARN}}
+          role-session-name: ${{github.run_id}}
+          # This repository is public, so the run log is. The check prints no
+          # account id of its own, but an AWS CLI error it passes through can
+          # name the account or the deployment bucket, whose name holds the
+          # account id.
+          mask-aws-account-id: true
+      - name: Compare the origin against the account
+        # No arguments: the region, the security group and the certificate object
+        # come from the committed files beside the script, and the expiry margin
+        # is its default. Its exit code is the result -- 1 a difference, 2 a
+        # comparison that could not run -- so nothing here has to read the output
+        # for the run to go red on either.
+        run: node apps/web/deploy/aws_eb_saved_configurations/check-origin-drift.mjs
