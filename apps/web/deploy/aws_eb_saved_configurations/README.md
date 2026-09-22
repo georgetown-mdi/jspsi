@@ -11,7 +11,7 @@ It sits beside `aws_eb/` rather than inside it because that tree is the deployed
 | `production.json` | The production environment, serving the production public name |
 | `staging.json`    | The staging environment, serving the staging public name       |
 
-The two names match the deployment environments `eb_deploy.yaml` maps a branch onto (`main` -> Production, `staging` -> Staging), so a reader who has only the repository can tell which file belongs where. Each is an `aws elasticbeanstalk describe-configuration-settings` response with the identifiers below replaced. Producing one needs credentials for the AWS account that holds the environments, which no CI job and no development container has, so the maintainer runs the export outside the container.
+The two names match the deployment environments `eb_deploy.yaml` maps a branch onto (`main` -> Production, `staging` -> Staging), so a reader who has only the repository can tell which file belongs where. Each is an `aws elasticbeanstalk describe-configuration-settings` response with the identifiers below replaced. Producing one needs credentials for the AWS account that holds the environments, which no development container has and no CI job holds the Elastic Beanstalk permission for, so the maintainer runs the export outside the container.
 
 ## Refreshing a file
 
@@ -74,9 +74,24 @@ node check-origin-drift.mjs --margin-days 60
 
 Every value it compares is read live. A read that fails -- the certificate from the account, the security group, or either published list -- ends that comparison there: the line names what could not be read and why, the run exits 2, and nothing is compared against `recorded-origin.json` in its place, so a 0 is only ever a run that read both sides. A run that finds any live value differing from the record prints the record as it would now read, ready to paste into `recorded-origin.json`; a run that agrees prints nothing to paste. The script writes no file of its own.
 
-It reads the account through the `aws` CLI, as the refresh commands above do, so it runs from a machine holding read credentials for the account: `sts:GetCallerIdentity`, `s3:GetObject` on the deployment bucket's `cert/` prefix, and `ec2:DescribeSecurityGroups`. No CI job and no development container holds those, so the run is the maintainer's; the cadence and what to do about each result are in [docs/DEPLOYMENT.md](../../../../docs/DEPLOYMENT.md#checking-for-certificate-and-range-drift). The script prints no account id and no bucket name of its own, but an AWS CLI error it passes through can name either. Every call it makes is bounded -- 30 seconds for a published list, 2 minutes for an `aws` call, which is given no standard input -- so an unreachable host or a CLI waiting on a prompt ends as a value the run could not read rather than as a run that never returns.
+It reads the account through the `aws` CLI, as the refresh commands above do, so it runs from a machine holding read credentials for the account: `sts:GetCallerIdentity`, `s3:GetObject` on the deployment bucket's `cert/` prefix, and `ec2:DescribeSecurityGroups`. No development container holds those, so a run from the container is a run that exits 2. The daily workflow below holds them, and the maintainer runs the check by hand where that run is red for a reason other than drift; the cadence and what to do about each result are in [docs/DEPLOYMENT.md](../../../../docs/DEPLOYMENT.md#checking-for-certificate-and-range-drift). The script prints no account id and no bucket name of its own, but an AWS CLI error it passes through can name either. Every call it makes is bounded -- 30 seconds for a published list, 2 minutes for an `aws` call, which is given no standard input -- so an unreachable host or a CLI waiting on a prompt ends as a value the run could not read rather than as a run that never returns.
 
 What it reads comes from the committed files beside it rather than from a typed-in identifier: the one security group both environments attach is the shared group that carries the port-443 rule, and the region is the one their ARNs state. The certificate is the object `.platform/hooks/prebuild/download_certificates.sh` installs on the instance, read from the same bucket and key. Ranges compare as addresses rather than as text, so two spellings of one range agree; a range on either side that is no CIDR is named as a value the check cannot compare.
+
+### The scheduled run and the role it assumes
+
+[`origin_drift.yaml`](../../../../.github/workflows/origin_drift.yaml) runs the check daily and on manual dispatch, and a difference or an unread value reds the run. It holds no AWS key: it assumes a read-only role with GitHub's OIDC token, as [`eb_deploy_reusable_action.yaml`](../../../../.github/workflows/eb_deploy_reusable_action.yaml) assumes the deploy role. The values that role is created from, recorded here as the other hosted-environment values are, with the runbook that creates it in [docs/DEPLOYMENT.md](../../../../docs/DEPLOYMENT.md#creating-the-role-the-scheduled-run-assumes):
+
+| Value             | Recorded                                                                                                                                                                                            |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Role name         | `psilink-origin-drift-check`                                                                                                                                                                        |
+| Trust condition   | `token.actions.githubusercontent.com:sub` equals `repo:georgetown-mdi/jspsi:ref:refs/heads/main` and `:aud` equals `sts.amazonaws.com`, on the account's GitHub OIDC provider                        |
+| Permitted actions | `sts:GetCallerIdentity`; `s3:GetObject` on `arn:aws:s3:::elasticbeanstalk-<region>-<account-id>/cert/public.crt`, the one object the check reads; `ec2:DescribeSecurityGroups`. No write action, and no other read |
+| Role ARN          | The `AWS_ORIGIN_DRIFT_ROLE_ARN` repository secret. It is a secret rather than a variable because an ARN states the account id, which this repository keeps out of its files                          |
+
+The trust condition names the default branch's ref, so the role is assumable from `main` alone: a dispatch from any other branch stops at the role-assumption step.
+
+`ec2:DescribeSecurityGroups` is granted on `*` rather than on the one group. Whether IAM accepts a security-group ARN as the resource of a Describe call is the account holder's to find out against IAM itself, which nothing in this repository can call; the runbook says to narrow it where IAM takes it.
 
 ## The recorded values
 
