@@ -231,6 +231,9 @@ This is a different question from the version-skew cases above, and the two are
 settled separately: there the field is one the BUILD does not know, here it is one
 the build knows and the CONTEXT cannot run.
 
+What each application does with each setting it reads is tabulated in
+[EXCHANGE_REFERENCE.md](../EXCHANGE_REFERENCE.md#where-each-setting-is-edited).
+
 ### The three outcomes
 
 A consumer reading an exchange file MUST take exactly one of these for every
