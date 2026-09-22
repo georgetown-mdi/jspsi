@@ -86,11 +86,15 @@ describe("each answer lands the control in one state", () => {
 
   test("an opened configuration reports both lists and the authoring state", () => {
     const read = mountedConfigurationRead(
-      opened({}, ["signing.receipt_output"], ["connection.server.password"]),
+      opened(
+        {},
+        ["authentication.token_max_age_days"],
+        ["connection.server.password"],
+      ),
     );
     expect(read.state).toEqual({
       status: "opened",
-      carriedThrough: ["signing.receipt_output"],
+      carriedThrough: ["authentication.token_max_age_days"],
       warnings: ["connection.server.password"],
     });
     expect(read.loaded?.channel).toBe("sftp");
@@ -131,37 +135,55 @@ describe("a record this flow has no control for opens and is named", () => {
           disclosedPayloadColumns: [],
           outboundPayloadConsent: { status: "pending" },
         },
-        ["signing.receipt_output"],
+        ["authentication.token_max_age_days"],
       ),
     );
     if (read.state.status !== "opened")
       throw new Error("expected an open configuration");
     expect(read.state.carriedThrough).toEqual([
+      "authentication.token_max_age_days",
       "disclosed_payload_columns",
       "expected_partner_deduplicate",
       "expected_payload_columns",
       "outbound_payload_consent",
-      "signing.receipt_output",
     ]);
   });
 });
 
 describe("the notices name the settings and say what happens to them", () => {
   test("one held setting is named, with where it is edited", () => {
-    const notice = carriedThroughNotice(["signing.receipt_output"]);
-    expect(notice).toContain("signing.receipt_output");
+    const notice = carriedThroughNotice(["authentication.token_max_age_days"]);
+    expect(notice).toContain("authentication.token_max_age_days");
     expect(notice).toContain("keeps it unchanged");
     expect(notice).toMatch(/psilink on the command line/);
   });
 
+  test("a held setting the run does not apply says so", () => {
+    const notice = carriedThroughNotice(["authentication.token_max_age_days"]);
+    expect(notice).toContain("The run started here does not apply it");
+    expect(notice).toContain("hands back states it as your file does");
+  });
+
+  test("a record the run states is not named as unapplied", () => {
+    const notice = carriedThroughNotice([
+      "expected_payload_columns",
+      "outbound_payload_consent",
+    ]);
+    expect(notice).toContain("keeps each unchanged");
+    expect(notice).not.toContain("does not apply");
+  });
+
   test("several held settings are all named", () => {
     const notice = carriedThroughNotice([
-      "connection.path",
-      "signing.identity_file",
+      "authentication.token_max_age_days",
+      "expected_payload_columns",
     ]);
-    expect(notice).toContain("connection.path");
-    expect(notice).toContain("signing.identity_file");
+    expect(notice).toContain("authentication.token_max_age_days");
+    expect(notice).toContain("expected_payload_columns");
     expect(notice).toContain("keeps each unchanged");
+    expect(notice).toContain(
+      "does not apply authentication.token_max_age_days",
+    );
   });
 
   test("no held setting draws no notice", () => {
@@ -191,11 +213,15 @@ describe("the notices name the settings and say what happens to them", () => {
 
   test("the held settings are stated before the credential to supply", () => {
     const read = mountedConfigurationRead(
-      opened({}, ["signing.receipt_output"], ["connection.server.password"]),
+      opened(
+        {},
+        ["authentication.token_max_age_days"],
+        ["connection.server.password"],
+      ),
     );
     const notices = mountedConfigurationNotices(read.state);
     expect(notices).toHaveLength(2);
-    expect(notices[0]).toContain("signing.receipt_output");
+    expect(notices[0]).toContain("authentication.token_max_age_days");
     expect(notices[1]).toContain("connection.server.password");
   });
 
@@ -210,12 +236,13 @@ describe("the notices name the settings and say what happens to them", () => {
     expect(notices[0]).toMatch(/review step/);
   });
 
-  test("an unrunnable sftp channel points at the same choice", () => {
+  test("an sftp channel with no connection names the step that authors one", () => {
     const read = mountedConfigurationRead(opened());
     const notices = mountedConfigurationNotices(
       withUnavailableTransport(read.state, "sftp"),
     );
     expect(notices[0]).toContain("over SFTP");
+    expect(notices[0]).toMatch(/connection step/);
     expect(notices[0]).toMatch(/review step/);
   });
 
@@ -286,7 +313,7 @@ describe("no value of the document reaches a notice", () => {
           retentionDisposition: `note-${secret}`,
           signing: { mode: "certificate", partnerFingerprint: FINGERPRINT },
         },
-        ["signing.receipt_output", "authentication.token_max_age_days"],
+        ["authentication.token_max_age_days"],
         ["connection.server.password"],
       ),
     );

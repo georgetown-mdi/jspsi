@@ -313,11 +313,22 @@ export function assembleExchangeSpec(
  *   split pair, ...).
  */
 export function mintExchangeFile(input: ExchangeFileInput): string {
-  const validated = assembleExchangeSpec({
+  return stringifyYaml(snakeizeKeys(mintExchangeSpec(input)));
+}
+
+/**
+ * The validated spec {@link mintExchangeFile} serializes, for a caller that
+ * needs the document as a spec rather than as text -- one that merges it with
+ * another spec, or renders it through a different writer.
+ *
+ * @throws {ZodError} if the assembled spec fails {@link ExchangeSpecSchema}
+ *   validation.
+ */
+export function mintExchangeSpec(input: ExchangeFileInput): ExchangeSpec {
+  return assembleExchangeSpec({
     ...input,
     connection: connectionFromLocator(input.connection),
   });
-  return stringifyYaml(snakeizeKeys(validated));
 }
 
 /**

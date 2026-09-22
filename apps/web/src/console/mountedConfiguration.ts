@@ -115,13 +115,14 @@ const RECORDS_WITH_NO_CONTROL: ReadonlyArray<
 ];
 
 /** What the operator is told about a configuration whose channel this console
- * cannot run: the review step keeps the transport it already had, and the
- * shared-folder case names the mount that would make the file's own channel
- * runnable here. */
+ * has nothing to run it over: the review step keeps the transport it already
+ * had, and each case names what would make the file's own channel runnable
+ * here -- a mounted shared folder, or an authored SFTP connection. */
 const TRANSPORT_UNAVAILABLE_NOTICE: Record<LoadedChannel, string> = {
   sftp:
-    "This configuration runs over SFTP, which this console cannot run. " +
-    "Choose how this exchange runs on the review step below.",
+    "This configuration runs over SFTP, and this console has no SFTP " +
+    "connection to run it with. Author one in the connection step below, or " +
+    "choose how this exchange runs on the review step.",
   filedrop:
     "This configuration runs over a shared directory, and this console has " +
     "no shared folder mounted. Mount one and set JOB_RENDEZVOUS_DIR to run " +
@@ -146,16 +147,35 @@ export function recordsWithNoControl(
   ).map(([, field]) => field);
 }
 
+/** The records above as the file spells them, which a run here states from the
+ * authoring state: every other held setting sits outside the blocks a run here
+ * composes, so the export keeps it and the run does not apply it. */
+const RECORD_FIELDS_THE_RUN_STATES: ReadonlySet<string> = new Set(
+  RECORDS_WITH_NO_CONTROL.map(([, field]) => field),
+);
+
 /**
  * What the operator is told about the settings the console holds without an
  * editor, or undefined when the document states none. The console writes each
- * back unchanged, and the command line is where they are edited.
+ * back unchanged, and the command line is where they are edited. A held setting
+ * the run itself does not apply is named again with that said, so the notice
+ * promises nothing about the run keeping it in force.
  */
 export function carriedThroughNotice(
   fields: ReadonlyArray<string>,
 ): string | undefined {
   if (fields.length === 0) return undefined;
   const one = fields.length === 1;
+  const notApplied = fields.filter(
+    (field) => !RECORD_FIELDS_THE_RUN_STATES.has(field),
+  );
+  const notAppliedOne = notApplied.length === 1;
+  const notAppliedNames =
+    notApplied.length === fields.length
+      ? notAppliedOne
+        ? "it"
+        : "them"
+      : nameList(notApplied);
   return (
     "This configuration states " +
     (one ? "a setting" : "settings") +
@@ -163,7 +183,15 @@ export function carriedThroughNotice(
     (one ? "it" : "each") +
     " unchanged: " +
     nameList(fields) +
-    ". Edit " +
+    "." +
+    (notApplied.length === 0
+      ? ""
+      : " The run started here does not apply " +
+        notAppliedNames +
+        "; the configuration the console hands back states " +
+        (notAppliedOne ? "it" : "them") +
+        " as your file does.") +
+    " Edit " +
     (one ? "it" : "them") +
     " with psilink on the command line."
   );

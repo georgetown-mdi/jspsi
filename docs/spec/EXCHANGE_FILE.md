@@ -111,6 +111,37 @@ obligation, not a property of the artifact.
   constant is used by the CLI's `connectionFromEndpoint`, so the "fill this in"
   marker is identical wherever a config was minted.
 
+## Writing a configuration back
+
+A tool that reads a `psilink.yaml` and writes one -- the console opening the
+configuration in its mounted folder, editing it, and handing back the file a
+scheduled command-line run loads (`apps/web/src/jobs/handoff.ts`) -- writes it
+through `serializeExchangeDocument`, the same function `saveConfig` calls. What
+that promises, and what it does not, is bounded:
+
+- **Byte-stable: a parse result's key order and the guidance comments.** The
+  writer is handed a spec that came out of `ExchangeSpecSchema`, so its key
+  order is the schema's declaration order and its connection block carries the
+  comments `annotateConnectionGuidance` attaches. Two callers handing it the
+  same parse result write the same bytes, and a document it wrote re-writes to
+  itself.
+- **Not round-trippable: the file's own presentation.** An operator's own
+  comments, their key order, their quoting and flow style, and a `tab` or `\t`
+  `csv_delimiter` spelling `normalizeCsvDelimiter`
+  (`packages/core/src/config/exchangeSpec.ts`) folds to the character are
+  properties of the file rather than of the document, and a read-and-write
+  cycle states the document. The promise is a file byte-compatible with what
+  psilink writes for those settings, not with an arbitrary hand-authored file.
+- **A CLI-written file is not itself in that order.** `psilink invite` and
+  `psilink accept` hand `saveConfig` a spec they assembled rather than one the
+  schema parsed, so reading one of their files and writing it back states every
+  setting at the same value with keys reordered inside a block. Measured against
+  the built CLI in `apps/web/test/interop/consoleExportParity.test.ts`.
+- **A default a writing surface states is written.** The console's
+  connection-tuning card states a value for every setting it offers, so a run
+  composed from a file that left one unset writes it explicitly, at the value it
+  already had.
+
 ## Versioning and compatibility policy
 
 The hosted web application is continuously deployed; a CLI in the field is

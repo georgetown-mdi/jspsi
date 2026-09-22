@@ -399,6 +399,14 @@ It lives in `apps/web/test/interop/` because only that workspace may import
 already drives it. The suite skips itself when `apps/cli/dist/` is absent rather
 than failing on a tree that has not built it.
 
+Not every file in the project is an exchange. `consoleExportParity.test.ts`
+spawns the built `psilink` only to WRITE what it compares against -- a
+configuration `psilink invite` or `psilink accept` wrote, opened in the console,
+run and handed back -- and it sits here for the reason the exchanges do: the
+comparison is against the real program's own bytes, and a unit test neither
+builds the CLI nor spawns it. What the console's hand-off composes without the
+CLI stays in the unit project.
+
 Two pieces of the web party are the harness's rather than the app's, and each is
 there because the app has no counterpart it could use:
 

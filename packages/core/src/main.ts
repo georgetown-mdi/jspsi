@@ -401,6 +401,7 @@ export {
   assembleExchangeSpec,
   connectionFromLocator,
   mintExchangeFile,
+  mintExchangeSpec,
 } from "./config/exchangeFile";
 export type {
   ExchangeFileConnection,

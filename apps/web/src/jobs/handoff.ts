@@ -1,8 +1,16 @@
+import {
+  parseExchangeSpec,
+  serializeExchangeDocument,
+  snakeizeKey,
+} from "@psilink/core";
+
+import { COMPOSED_BLOCKS } from "./configLoad";
+
 import { zeroSetupOptionsArgv, zeroSetupSftpArgv } from "./intentArgv";
 
 import {
-  composeConfigDocument,
-  composeSftpConfigDocument,
+  composeFiledropConfigSpec,
+  composeSftpConfigSpec,
 } from "./intentConfig";
 
 import type {
@@ -11,6 +19,7 @@ import type {
   JobSigningPaths,
   JobZeroSetupIntent,
 } from "./intentSchemas";
+import type { ExchangeSpec } from "@psilink/core";
 import type { JobSftpServerEntry } from "./sftpServer";
 
 /**
@@ -23,6 +32,13 @@ import type { JobSftpServerEntry } from "./sftpServer";
  * (SFTP host/port/username, the host-key fingerprint pin, the linkage terms
  * exactly as they ran) are filled in, while machine-specific paths are shown
  * as labelled placeholders the operator sets for their own machine.
+ *
+ * The exchange mode's template is written through core's
+ * {@link serializeExchangeDocument}, the writer psilink's own `saveConfig`
+ * uses, and over a document the schema has validated -- so an authored
+ * exchange and one opened from the mount are written by one writer, in the
+ * file psilink would write for those settings (docs/spec/EXCHANGE_FILE.md,
+ * "Writing a configuration back").
  *
  * Two invariants, enforced by the compose helpers below and driven in
  * jobHandoff.unit.test.ts and jobHandoffParity.unit.test.ts:
@@ -202,35 +218,114 @@ function buildExchangeHandoffTemplate(
   intent: JobExchangeIntent,
   serverEntry: JobSftpServerEntry | undefined,
   filedropSplit: boolean,
+  mountedDocument: ExchangeSpec | undefined,
 ): JobHandoffTemplate {
+  return {
+    kind: "config",
+    yaml: handoffConfigDocument(
+      composedHandoffSpec(intent, serverEntry, filedropSplit),
+      mountedDocument,
+    ),
+  };
+}
+
+/** The composition the template states, over the placeholder paths above. */
+function composedHandoffSpec(
+  intent: JobExchangeIntent,
+  serverEntry: JobSftpServerEntry | undefined,
+  filedropSplit: boolean,
+): ExchangeSpec {
   if (intent.channel === "sftp") {
     if (serverEntry === undefined)
       throw new Error("sftp handoff reached compose without a resolved server");
-    return {
-      kind: "config",
-      yaml: composeSftpConfigDocument(
-        intent,
-        placeholderServerEntry(serverEntry),
-        HANDOFF_SIGNING_PATHS,
-      ),
-    };
+    return composeSftpConfigSpec(
+      intent,
+      placeholderServerEntry(serverEntry),
+      HANDOFF_SIGNING_PATHS,
+    );
   }
-  return {
-    kind: "config",
-    yaml: filedropSplit
-      ? composeConfigDocument(
-          intent,
-          HANDOFF_INBOUND_DIRECTORY_PLACEHOLDER,
-          HANDOFF_OUTBOUND_DIRECTORY_PLACEHOLDER,
-          HANDOFF_SIGNING_PATHS,
-        )
-      : composeConfigDocument(
-          intent,
-          HANDOFF_SHARED_DIRECTORY_PLACEHOLDER,
-          undefined,
-          HANDOFF_SIGNING_PATHS,
-        ),
-  };
+  return filedropSplit
+    ? composeFiledropConfigSpec(
+        intent,
+        HANDOFF_INBOUND_DIRECTORY_PLACEHOLDER,
+        HANDOFF_OUTBOUND_DIRECTORY_PLACEHOLDER,
+        HANDOFF_SIGNING_PATHS,
+      )
+    : composeFiledropConfigSpec(
+        intent,
+        HANDOFF_SHARED_DIRECTORY_PLACEHOLDER,
+        undefined,
+        HANDOFF_SIGNING_PATHS,
+      );
+}
+
+/**
+ * The template's `psilink.yaml` text: core's
+ * {@link serializeExchangeDocument}, the writer the CLI's own `saveConfig`
+ * uses, over the composition -- so the file an operator takes to the command
+ * line is the file psilink itself would write for the same settings, guidance
+ * comments included.
+ *
+ * A run composed from a configuration the operator opened off the mount merges
+ * the mounted document's top-level keys OUTSIDE {@link COMPOSED_BLOCKS} (the
+ * settings the console has no editor for, held unchanged) with the composed
+ * document (every block the composition emits, whole -- the connection, the
+ * linkage terms, the signing paths, each already placeholdered above). A block
+ * in {@link COMPOSED_BLOCKS} the composition did not write for this run -- an
+ * operator who mounted a `signing` block and turned signing off in the console
+ * -- is therefore absent from the export rather than surviving from the
+ * mount: the composition's absence is itself the operator's edit. So no
+ * container path and no credential from the opened file reaches the template,
+ * and no held setting outlives a run that replaced it. What survives is the
+ * settings the console has no control for and never composes, which the load
+ * names for the operator ({@link ./configLoad}).
+ *
+ * The two agree because the load refuses a document whose held setting sits
+ * inside a block a composition writes: a key-by-key merge is what such a
+ * setting would need, and the name the load reports as kept is therefore a
+ * setting this merge keeps.
+ *
+ * The merged document is re-validated before it is written, so a pair of
+ * settings that only conflicts once combined is refused here rather than at the
+ * operator's first scheduled run. The parse is also what fixes the key order:
+ * the schema's, which is the order psilink writes a configuration it loaded.
+ *
+ * The shared secret cannot reach the file: the load refuses a document stating
+ * one, and core's serializer strips `authentication.shared_secret` and
+ * `expires` from whatever it is handed.
+ *
+ * @throws {ZodError} if the merged document fails exchange-file validation.
+ */
+function handoffConfigDocument(
+  composed: ExchangeSpec,
+  mountedDocument: ExchangeSpec | undefined,
+): string {
+  const merged =
+    mountedDocument === undefined
+      ? composed
+      : { ...heldTopLevelKeys(mountedDocument), ...composed };
+  return serializeExchangeDocument(parseExchangeSpec(merged));
+}
+
+/**
+ * The mounted document's top-level keys OUTSIDE {@link COMPOSED_BLOCKS}: the
+ * held settings the export carries unchanged. A key inside that set is left
+ * out here even when the composition did not end up writing it for this run
+ * (e.g. `signing` with signing off), since the composition's absence of the
+ * block is the operator's edit, not something to carry from the mount.
+ *
+ * {@link COMPOSED_BLOCKS} names blocks the FILE spells (snake_case, e.g.
+ * `linkage_terms`); the mounted document's own keys are the parsed spec's
+ * camelCase, so each is snakeized before the membership check.
+ */
+function heldTopLevelKeys(
+  mountedDocument: ExchangeSpec,
+): Partial<ExchangeSpec> {
+  return Object.fromEntries(
+    Object.entries(mountedDocument).filter(
+      ([key]) => !COMPOSED_BLOCKS.has(snakeizeKey(key)),
+    ),
+  );
 }
 
 /**
@@ -314,6 +409,14 @@ interface JobHandoffRunFacts {
    * shared directory and the two-directory form.
    */
   filedropSplit: boolean;
+  /**
+   * The configuration the console's mounted working folder holds, parsed.
+   * Present where the console could open it, and the settings of it a run
+   * composed here does not emit are written into the exchange mode's template
+   * unchanged (see {@link handoffConfigDocument}). A zero-setup run composes no
+   * configuration at all and reads it nowhere.
+   */
+  mountedDocument?: ExchangeSpec;
 }
 
 /**
@@ -325,7 +428,7 @@ interface JobHandoffRunFacts {
 export function buildJobHandoff(
   intent: JobCreateIntent,
   serverEntry: JobSftpServerEntry | undefined,
-  { credentialPasted, filedropSplit }: JobHandoffRunFacts,
+  { credentialPasted, filedropSplit, mountedDocument }: JobHandoffRunFacts,
 ): JobHandoff {
   const zeroSetup = intent.mode === "zeroSetup";
   const split = intent.channel === "filedrop" && filedropSplit;
@@ -338,6 +441,11 @@ export function buildJobHandoff(
       intent.mode !== "zeroSetup" && intent.signing?.mode === "certificate",
     template: zeroSetup
       ? buildZeroSetupHandoffTemplate(intent, serverEntry, split)
-      : buildExchangeHandoffTemplate(intent, serverEntry, split),
+      : buildExchangeHandoffTemplate(
+          intent,
+          serverEntry,
+          split,
+          mountedDocument,
+        ),
   };
 }

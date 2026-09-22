@@ -3,7 +3,7 @@ import { stringify as stringifyYaml } from "yaml";
 import {
   ExchangeSpecSchema,
   deriveOutboundPayloadConsent,
-  mintExchangeFile,
+  mintExchangeSpec,
   snakeizeKeys,
 } from "@psilink/core";
 
@@ -69,12 +69,12 @@ function outboundPayloadConsentFor(
  * On a split-provisioned console (`JOB_RENDEZVOUS_OUTBOUND_DIR` set) the
  * caller passes both mounts and the connection holds the CLI's
  * `inbound_path`/`outbound_path` pair instead of the single `path`, never
- * both together, which `mintExchangeFile`'s own schema refuses. The pair's
+ * both together, which `mintExchangeSpec`'s own schema refuses. The pair's
  * own rules are core's.
  *
  * The connection is built as a credential-free filedrop locator, so by
  * core's {@link ExchangeFileInput} typing no credential is representable;
- * `mintExchangeFile` never assembles an `authentication` block (the shared
+ * `mintExchangeSpec` never assembles an `authentication` block (the shared
  * secret rides the key file). The client's `linkageTerms`, `metadata`, and
  * `standardization` reach the file only after core's schema validation; the
  * one path field (`path`) is set by the server, not the client.
@@ -129,6 +129,30 @@ export function composeConfigDocument(
   outboundRendezvousPath?: string,
   signingPaths?: JobSigningPaths,
 ): string {
+  return stringifyYaml(
+    snakeizeKeys(
+      composeFiledropConfigSpec(
+        intent,
+        rendezvousPath,
+        outboundRendezvousPath,
+        signingPaths,
+      ),
+    ),
+  );
+}
+
+/**
+ * The validated spec {@link composeConfigDocument} serializes. Exported as the
+ * spec beside {@link composeSftpConfigSpec} so a caller that merges this
+ * composition with another document, or renders it through a different writer,
+ * reads the same composition rather than re-parsing its text.
+ */
+export function composeFiledropConfigSpec(
+  intent: JobFiledropExchangeIntent,
+  rendezvousPath: string,
+  outboundRendezvousPath?: string,
+  signingPaths?: JobSigningPaths,
+): ExchangeSpec {
   const options = intentOptionsToFileSyncOptions(intent.options);
   const {
     metadata,
@@ -169,7 +193,7 @@ export function composeConfigDocument(
     ...(includeOwnColumns !== undefined ? { includeOwnColumns } : {}),
     ...(csvDelimiter !== undefined ? { csvDelimiter } : {}),
   };
-  return mintExchangeFile(fileInput);
+  return mintExchangeSpec(fileInput);
 }
 
 /**

@@ -574,6 +574,9 @@ export type JobExchangeSide = "inviter" | "acceptor";
  *   read and its own result written.
  * - `side` is a closed two-value enum selecting which composition rules apply
  *   to this party; it contributes no value to the composed config.
+ * - `mountedConfigurationOpened` is a bare schema boolean selecting whether
+ *   the recurring-run hand-off merges the mounted document into its template;
+ *   it names no setting and contributes no value of its own.
  * - `diagnosticRun` and `sweepExchangeFiles` are the per-run controls
  *   ({@link jobRunControlFields}): booleans that each select a fixed CLI
  *   flag and hold no value of their own.
@@ -697,6 +700,14 @@ export interface JobExchangeIntentBase {
    * cannot build an acceptance that omits it.
    */
   side?: JobExchangeSide;
+  /**
+   * Whether this run was composed from the configuration the operator opened
+   * off the mount. The recurring-run hand-off merges the mounted document's
+   * held top-level keys into its template only under this flag, so a run
+   * authored here from scratch exports nothing from a `psilink.yaml` the
+   * operator never opened (see `buildJobHandoff` in `./handoff`).
+   */
+  mountedConfigurationOpened?: boolean;
   options?: JobExchangeOptions;
   eventStream?: boolean;
   diagnosticRun?: boolean;
@@ -1076,6 +1087,7 @@ const jobExchangeIntentCommonFields = {
   includeOwnColumns: OwnColumnSelectionSchema.optional(),
   csvDelimiter: jobCsvDelimiterSchema.optional(),
   side: z.enum(["inviter", "acceptor"]).optional(),
+  mountedConfigurationOpened: z.boolean().optional(),
   eventStream: z.boolean().optional(),
   signing: jobSigningChoiceSchema.optional(),
   retentionDisposition: z

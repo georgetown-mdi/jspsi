@@ -7,6 +7,7 @@ import {
   getDefaultLinkageTerms,
   parseExchangeSpec,
   parseSensitiveYaml,
+  serializeExchangeDocument,
 } from "@psilink/core";
 
 import {
@@ -24,10 +25,7 @@ import {
   parseManagedExchangeRecord,
   runnableManagedExchangeOrRefuse,
 } from "@psi/managed/managedExchangeRecord";
-import {
-  importManagedExchangeArtifact,
-  serializeExchangeDocument,
-} from "@psi/managed/managedExchangeArtifact";
+import { importManagedExchangeArtifact } from "@psi/managed/managedExchangeArtifact";
 
 import type {
   ExchangeLocator,

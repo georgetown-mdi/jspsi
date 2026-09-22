@@ -341,12 +341,12 @@ describe("every step the document covers is filled in", () => {
     const withLists = loadedInto(
       INVITER_SCREEN_INITIAL,
       sftpDocument(),
-      ["signing.receipt_output"],
+      ["authentication.token_max_age_days"],
       ["connection.server.private_key"],
     );
     expect(withLists.mountedConfiguration).toEqual({
       status: "opened",
-      carriedThrough: ["signing.receipt_output"],
+      carriedThrough: ["authentication.token_max_age_days"],
       warnings: ["connection.server.private_key"],
     });
   });

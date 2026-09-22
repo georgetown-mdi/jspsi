@@ -61,6 +61,7 @@ import {
   signingIdentityTargetExists,
 } from "./signingIdentity";
 import { buildJobHandoff } from "./handoff";
+import { mountedExchangeDocument } from "./configLoad";
 import { probeSftpHostKey } from "./sftpProbe";
 import { removeSftpCredentialFile } from "./sftpScratch";
 import { validateAuthoredSftpServer } from "./sftpServer";
@@ -972,9 +973,17 @@ export class JobManager {
         ? this.signingPathsFor(workdir, identityPath).receiptOutput
         : null;
 
+    // The hand-off's merge base is the document the operator opened, so a run
+    // authored here from scratch takes no held setting from a configuration
+    // sitting in the mount that nobody read.
+    const mountedDocument =
+      intent.mode !== "zeroSetup" && intent.mountedConfigurationOpened === true
+        ? mountedExchangeDocument(this.dataRoot)
+        : undefined;
     const handoff = buildJobHandoff(intent, serverEntry, {
       credentialPasted: this.authoredMaterializedCredentialPath !== undefined,
       filedropSplit: this.jobRendezvousOutboundDir !== undefined,
+      ...(mountedDocument !== undefined ? { mountedDocument } : {}),
     });
 
     const record: JobRecord = {

@@ -1,8 +1,8 @@
 import { describe, expect, test } from "vitest";
 
-import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { parse as parseYaml } from "yaml";
 
-import { parseExchangeSpec, snakeizeKeys } from "@psilink/core";
+import { parseExchangeSpec, serializeExchangeDocument } from "@psilink/core";
 
 import {
   HANDOFF_CREDENTIAL_PATH_PLACEHOLDER,
@@ -231,6 +231,12 @@ const EXCHANGE_INTENT_ROUTES: Record<
     because:
       "it selects whether an acceptance DERIVES a consent record when the " +
       "intent states none; the record itself graduates under its own field",
+  },
+  mountedConfigurationOpened: {
+    carries: "nothing",
+    because:
+      "it selects whether the template is written over the mounted document; " +
+      "what that document holds graduates as the held keys themselves",
   },
   options: { carries: "tuningOptions" },
   eventStream: {
@@ -475,13 +481,14 @@ describe("the composed config stays one format with one validator", () => {
   });
 
   test("the template contains no key outside core's schema", () => {
-    // Re-serializing core's own parse of the document reproduces it byte for
-    // byte: nothing in the template is outside the schema (it would be dropped),
-    // and nothing the schema fills in is missing from the template.
+    // Re-serializing core's own parse of the document through the writer the
+    // CLI's saveConfig uses reproduces it byte for byte: nothing in the
+    // template is outside the schema (it would be dropped), nothing the schema
+    // fills in is missing from it, and the guidance comments are the CLI's.
     const yaml = maximalExchangeYaml();
-    expect(
-      stringifyYaml(snakeizeKeys(parseExchangeSpec(parseYaml(yaml)))),
-    ).toBe(yaml);
+    expect(serializeExchangeDocument(parseExchangeSpec(parseYaml(yaml)))).toBe(
+      yaml,
+    );
   });
 
   test("the authored values survive the round trip unchanged", () => {

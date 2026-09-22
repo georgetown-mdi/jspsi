@@ -9,7 +9,7 @@
  * `@path` whose value is a credential, and not the container path the console
  * keeps on this side of the API throughout (docs/spec/SERVER_JOB_API.md).
  *
- * Three refusals, each naming the setting as the FILE spells it
+ * The refusals, each naming the setting as the FILE spells it
  * ({@link ../psi/exchangeDocumentRefusal}):
  *
  * - a document the shared exchange-file schema rejects, an unread key included
@@ -20,7 +20,11 @@
  *   application (docs/CONSOLE.md);
  * - an `authentication` block holding a shared secret or an expiry, which the
  *   console reads from the key file beside the configuration rather than from
- *   the document.
+ *   the document;
+ * - one of the records whose absence turns an enforcement off that a run
+ *   composed here could not state back ({@link assertRecordsSurvive});
+ * - a setting inside a block the composition writes, which the export could not
+ *   write back unchanged ({@link assertHeldSettingsSurvive}).
  *
  * A `@path` credential reference is a WARNING and not a refusal: the operator
  * owns this mount and the reference is their own choice, so the load proceeds
@@ -28,10 +32,11 @@
  * ({@link credentialFieldsNotAdopted}).
  *
  * Nothing the console cannot edit is dropped. {@link carriedThroughFields}
- * measures which of the document's settings a run composed here does not adopt,
+ * measures which of the document's settings a run composed here does not write,
  * by composing probes and diffing key paths against them rather than restating a
  * list, and the response names them so the operator knows which settings this
- * surface holds without an editor.
+ * surface holds without an editor -- the settings the export writes back from
+ * the document it opened, the last refusal above holding the list to those.
  */
 
 import fs from "node:fs";
@@ -362,49 +367,88 @@ function documentKeyPaths(value: unknown, parent = ""): Array<string> {
 }
 
 /**
- * The settings a composition fills from the console's OWN resources rather than
- * from the document it opened: the rendezvous folder it was provisioned with,
- * and the two paths it serves a signing identity and a receipt from. A run here
- * writes its own value for each, so the document's value is not adopted and is
- * held unchanged instead.
- *
- * Subtracting these is the one judgement in the measure below, and it fails
- * safe in the direction that matters: a key that leaves the composers leaves
- * this set's effect with it and is reported as held, while a NEW console-filled
- * key added to a composer and not named here would be reported as adopted.
+ * The settings this console's compositions write at all, over every channel and
+ * rendezvous form it composes. Measured once off the composers themselves, so a
+ * field they stop emitting shows up as held rather than in a restated list that
+ * would go on claiming it. A setting here is written at the composition's own
+ * value, which for the rendezvous folder and the two signing paths is the
+ * console's own resource rather than anything the document stated.
  */
-const CONSOLE_FILLED_FIELDS: ReadonlySet<string> = new Set([
-  "connection.path",
-  "connection.inbound_path",
-  "connection.outbound_path",
-  "signing.identity_file",
-  "signing.receipt_output",
+const COMPOSED_FIELD_PATHS: ReadonlySet<string> = new Set([
+  ...sftpProbeSpecs().flatMap((spec) => documentKeyPaths(spec)),
+  ...documentKeyPaths(filedropProbeSpec(false)),
+  ...documentKeyPaths(filedropProbeSpec(true)),
 ]);
 
 /**
- * The settings this console's compositions adopt from a document at all, over
- * every channel and rendezvous form it composes. Measured once off the composers
- * themselves, so a field they stop emitting shows up as held rather than in a
- * restated list that would go on claiming it.
+ * The top-level blocks a composition here writes, from the same measure.
+ * Exported for the hand-off's own merge ({@link ./handoff}): the export holds
+ * a mounted top-level key only outside this set, since a key inside it is the
+ * composition's alone, present or absent as the run composed it -- a setting
+ * INSIDE one of these cannot be held, the composition's block replaces it,
+ * key for key.
  */
-const COMPOSED_FIELD_PATHS: ReadonlySet<string> = new Set(
-  [
-    ...sftpProbeSpecs().flatMap((spec) => documentKeyPaths(spec)),
-    ...documentKeyPaths(filedropProbeSpec(false)),
-    ...documentKeyPaths(filedropProbeSpec(true)),
-  ].filter((field) => !CONSOLE_FILLED_FIELDS.has(field)),
+export const COMPOSED_BLOCKS: ReadonlySet<string> = new Set(
+  [...COMPOSED_FIELD_PATHS].map((field) => field.split(".")[0]),
 );
 
 /**
- * The document's settings the console's composition never emits, named as the
- * file spells them and sorted. Measured against {@link widestComposedSpec}: a
- * key path the widest composition does not hold is one no form here edits and
- * no run here writes, so the document holds it unchanged.
+ * The document's settings no composition here writes, credential fields
+ * excepted: the hand-off replaces each of those with a placeholder, and the
+ * response names them in its warnings ({@link credentialFieldsNotAdopted})
+ * rather than as settings it keeps.
+ */
+function unadoptedFields(document: ExchangeSpec): Array<string> {
+  const credentials = new Set(credentialFieldsNotAdopted(document));
+  return documentKeyPaths(document)
+    .filter(
+      (field) => !COMPOSED_FIELD_PATHS.has(field) && !credentials.has(field),
+    )
+    .sort();
+}
+
+/** Whether a setting sits inside a block the composition writes whole. */
+function insideComposedBlock(field: string): boolean {
+  return field.includes(".") && COMPOSED_BLOCKS.has(field.split(".")[0]);
+}
+
+/**
+ * The document's settings the console's composition never writes and the export
+ * keeps unchanged, named as the file spells them and sorted: the settings no
+ * form here edits and no run here replaces, which the export writes back from
+ * the document it opened.
+ *
+ * A setting inside a composed block is not among them -- the load refuses such
+ * a document ({@link assertHeldSettingsSurvive}), so the name this list states
+ * and the setting the export keeps are the same setting.
  */
 export function carriedThroughFields(document: ExchangeSpec): Array<string> {
-  return documentKeyPaths(document)
-    .filter((field) => !COMPOSED_FIELD_PATHS.has(field))
-    .sort();
+  return unadoptedFields(document).filter(
+    (field) => !insideComposedBlock(field),
+  );
+}
+
+/**
+ * Refuse a load whose held setting the export could not write back: it sits
+ * inside a block the composition writes, which the export writes over that
+ * block whole. Naming it here is the alternative the portable-configuration
+ * rule allows to holding it (docs/spec/EXCHANGE_FILE.md, "What a consumer does
+ * with a setting it cannot honor"); reporting it as kept and then dropping it
+ * is not.
+ */
+function assertHeldSettingsSurvive(document: ExchangeSpec): void {
+  const lost = unadoptedFields(document).filter(insideComposedBlock);
+  if (lost.length === 0) return;
+  throw new ConfigurationLoadRefusedError(
+    "This configuration states " +
+      (lost.length === 1 ? "a setting" : "settings") +
+      " the console has no control for and cannot write back, because a run " +
+      "here writes the block holding " +
+      (lost.length === 1 ? "it" : "them") +
+      ": " +
+      lost.join(", ") +
+      ". Run this configuration with psilink on the command line instead.",
+  );
 }
 
 /**
@@ -688,14 +732,27 @@ export function disclosedDocument(
  * @throws {ConfigurationLoadRefusedError} when the file is not a configuration
  *   the console can open.
  */
-export function readMountedConfiguration(
-  source: string,
-): LoadedConfigurationResponse {
-  const raw = parsedYaml(source);
-  const document = parsedDocument(raw);
+export function mountedConfigurationDocument(source: string): ExchangeSpec {
+  const document = parsedDocument(parsedYaml(source));
   consoleChannel(document);
   assertNoStatedSecret(document);
   assertRecordsSurvive(document);
+  assertHeldSettingsSurvive(document);
+  return document;
+}
+
+/**
+ * The same read as a response body: the settings the authoring forms edit, the
+ * ones the console holds without an editor, and the credential fields it cannot
+ * pre-fill.
+ *
+ * @throws {ConfigurationLoadRefusedError} when the file is not a configuration
+ *   the console can open.
+ */
+export function readMountedConfiguration(
+  source: string,
+): LoadedConfigurationResponse {
+  const document = mountedConfigurationDocument(source);
   return {
     configured: true,
     present: true,
@@ -714,6 +771,27 @@ export function readMountedConfiguration(
  * something in the folder to fix rather than being pointed at authoring a
  * configuration that already exists.
  *
+ * @throws {ConfigurationLoadRefusedError} when the file is not a configuration
+ *   the console can open.
+ */
+export function loadMountedConfiguration(
+  dataRoot: string,
+): LoadedConfigurationResponse {
+  const source = mountedConfigurationSource(dataRoot);
+  if (source === null)
+    return {
+      configured: true,
+      present: false,
+      carriedThrough: [],
+      warnings: [],
+    };
+  return readMountedConfiguration(source);
+}
+
+/**
+ * The mounted configuration's bytes, or null where the mount holds no such file
+ * at all.
+ *
  * Every check and the read itself go through the one descriptor `openSync`
  * returns, so nothing between them can swap what `psilink.yaml` names. An
  * open failure is absent only when the entry does not exist (`ENOENT`);
@@ -722,20 +800,12 @@ export function readMountedConfiguration(
  * one byte past the cap, so an over-large file is caught by what arrives
  * rather than by a size `fstat` reported earlier.
  *
- * @throws {ConfigurationLoadRefusedError} when the file is not a configuration
- *   the console can open.
+ * @throws {ConfigurationLoadRefusedError} when a file IS there and the console
+ *   cannot read it -- unreadable, not a regular file, or over the size cap.
  */
-export function loadMountedConfiguration(
-  dataRoot: string,
-): LoadedConfigurationResponse {
-  const absent = {
-    configured: true,
-    present: false,
-    carriedThrough: [],
-    warnings: [],
-  };
+function mountedConfigurationSource(dataRoot: string): string | null {
   const filePath = resolveWorkdirFile(dataRoot, JOB_FILE_NAMES.config);
-  if (filePath === null) return absent;
+  if (filePath === null) return null;
   let fd: number;
   try {
     // O_NONBLOCK, not the plain "r" flag: opening a FIFO for read-only blocks
@@ -746,7 +816,7 @@ export function loadMountedConfiguration(
     // are unchanged.
     fd = fs.openSync(filePath, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return absent;
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw new ConfigurationLoadRefusedError(UNREADABLE_CONFIGURATION_MESSAGE);
   }
   try {
@@ -774,10 +844,31 @@ export function loadMountedConfiguration(
     }
     if (bytesRead > MAX_CONFIGURATION_FILE_BYTES)
       throw new ConfigurationLoadRefusedError(OVER_LARGE_CONFIGURATION_MESSAGE);
-    return readMountedConfiguration(
-      buffer.subarray(0, bytesRead).toString("utf8"),
-    );
+    return buffer.subarray(0, bytesRead).toString("utf8");
   } finally {
     fs.closeSync(fd);
+  }
+}
+
+/**
+ * The mounted configuration as a parsed document, for the export a run composes
+ * ({@link ./handoff}): the settings it states that a composition here does not
+ * emit are written back unchanged from this one, so the file the operator takes
+ * to the command line states everything the file they opened stated.
+ *
+ * Undefined on every fault, a mount holding no configuration included, rather
+ * than a refusal: a file this console could not have opened is not one the run
+ * was composed from, and the export then states exactly what the console
+ * composed.
+ */
+export function mountedExchangeDocument(
+  dataRoot: string,
+): ExchangeSpec | undefined {
+  try {
+    const source = mountedConfigurationSource(dataRoot);
+    return source === null ? undefined : mountedConfigurationDocument(source);
+  } catch (error) {
+    if (error instanceof ConfigurationLoadRefusedError) return undefined;
+    throw error;
   }
 }

@@ -4,10 +4,13 @@ import { pathToFileURL } from "node:url";
 
 import { afterEach, describe, expect, test, vi } from "vitest";
 
+import { stringify as stringifyYaml } from "yaml";
+
 import {
   DISPLAY_TRUNCATION_MARKER,
   PARTNER_LABELLED_VALUE_BUDGET,
   renderedDisplayCost,
+  snakeizeKeys,
 } from "@psilink/core";
 
 import { ERROR_MESSAGE_CHAIN_FIELD } from "@psi/relayErrorChain";
@@ -2405,5 +2408,58 @@ describe("a filedrop run that would publish the signing identity", () => {
         }),
       ).resolves.toMatchObject({ kind: "ok", created: false });
     });
+  });
+});
+
+// The hand-off's merge base is the configuration the operator opened, reported
+// on the intent. A `psilink.yaml` in the mount that nobody opened is not read at
+// all, so an exchange authored in the console exports only what it composed.
+describe("the mounted configuration as the hand-off's merge base", () => {
+  /** A manager whose mounted working folder holds a command-line configuration
+   * stating a setting the console composes no key for. */
+  function managerOverMountedConfiguration(): JobManager {
+    const rendezvousDir = rendezvousRoot();
+    const root = tempDataRoot("mounted-config");
+    roots.push(root);
+    fs.mkdirSync(root, { recursive: true });
+    fs.writeFileSync(
+      path.join(root, "psilink.yaml"),
+      stringifyYaml(
+        snakeizeKeys({
+          connection: { channel: "filedrop", path: "/srv/exchange" },
+          linkageTerms: validLinkageTerms(),
+          authentication: { tokenMaxAgeDays: 30 },
+        }),
+      ),
+    );
+    const manager = new JobManager({
+      dataRoot: root,
+      binaryPath: STUB_CLI_PATH,
+      jobRendezvousDir: rendezvousDir,
+      childEnv: { STUB_FD3_EVENTS: JSON.stringify([RESULT_EVENT]) },
+    });
+    managers.push(manager);
+    return manager;
+  }
+
+  async function handoffTemplate(
+    intent: JobFiledropExchangeIntent,
+  ): Promise<string> {
+    const manager = managerOverMountedConfiguration();
+    const id = await manager.createJob(intent);
+    const handoff = manager.getJobHandoff(id)!;
+    return handoff.template.kind === "config" ? handoff.template.yaml : "";
+  }
+
+  test("an exchange authored here keeps nothing from the mounted file", async () => {
+    expect(await handoffTemplate(validIntent())).not.toContain(
+      "token_max_age_days",
+    );
+  });
+
+  test("an exchange composed from the opened file keeps its held settings", async () => {
+    expect(
+      await handoffTemplate(validIntent({ mountedConfigurationOpened: true })),
+    ).toContain("token_max_age_days: 30");
   });
 });
