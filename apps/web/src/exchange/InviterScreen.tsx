@@ -127,7 +127,9 @@ import {
   MountedConfigurationCard,
 } from "@console/MountedConfigurationCard";
 import {
+  configurationSaveShown,
   configurationSaveState,
+  connectionSettingsHeldNotice,
   runWithheldReason,
 } from "@console/mountedConfiguration";
 import {
@@ -427,23 +429,32 @@ export function InviterScreen() {
     setConfigurationSave({ status: "idle" });
   }, [mountedConfiguration.status]);
 
+  // The hand-back the steps hold now, where the opened configuration is one
+  // the console saves back rather than runs: what a save sends, and what a
+  // written save is compared against to say whether it still holds.
+  const saveBackOffered = runWithheldReason(mountedConfiguration) !== undefined;
+  const currentHandBack = useMemo(() => {
+    if (!saveBackOffered || editor === undefined) return undefined;
+    const validation = reviewValidation(editor);
+    if (!validation.canGenerate || validation.terms === undefined)
+      return undefined;
+    return configurationHandBack({
+      editor,
+      terms: validation.terms,
+      csvDelimiter,
+      receipts,
+    });
+  }, [saveBackOffered, editor, csvDelimiter, receipts]);
+
   // Write the settings these steps edit into the opened configuration's file,
   // for a channel the console does not conduct: the console keeps the file's
   // connection itself, so the save sends only what the steps hold.
   async function saveConfiguration(): Promise<void> {
-    if (editor === undefined) return;
-    const validation = reviewValidation(editor);
-    if (!validation.canGenerate || validation.terms === undefined) return;
+    if (currentHandBack === undefined) return;
+    const sent = currentHandBack;
     setConfigurationSave({ status: "saving" });
-    const answer = await saveOpenedConfiguration(
-      configurationHandBack({
-        editor,
-        terms: validation.terms,
-        csvDelimiter,
-        receipts,
-      }),
-    );
-    setConfigurationSave(configurationSaveState(answer));
+    const answer = await saveOpenedConfiguration(sent);
+    setConfigurationSave(configurationSaveState(answer, sent));
   }
 
   // Close the open configuration: it stops being an input here, so the draft
@@ -1539,7 +1550,13 @@ export function InviterScreen() {
                 loadedSftpForm={loadedSftpForm}
                 sftpSaveFilePreferred={sftpSaveFilePreferred}
                 runWithheld={runWithheldReason(mountedConfiguration)}
-                configurationSave={configurationSave}
+                connectionSettingsHeld={connectionSettingsHeldNotice(
+                  mountedConfiguration,
+                )}
+                configurationSave={configurationSaveShown(
+                  configurationSave,
+                  currentHandBack,
+                )}
                 onSaveConfiguration={() => void saveConfiguration()}
                 rendezvous={rendezvous}
                 exchangeFiles={exchangeFiles}

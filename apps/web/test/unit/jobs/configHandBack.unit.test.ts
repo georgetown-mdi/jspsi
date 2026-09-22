@@ -19,8 +19,11 @@ import {
   ConfigurationLoadRefusedError,
   mountedConfigurationDocument,
 } from "@jobs/configLoad";
+import {
+  PREVIOUS_CONFIGURATION_FILE_NAME,
+  jobConfigurationHandBackSchema,
+} from "@jobs/intentSchemas";
 import { HANDOFF_SIGNING_IDENTITY_PLACEHOLDER } from "@jobs/handoff";
-import { jobConfigurationHandBackSchema } from "@jobs/intentSchemas";
 
 import type { ExchangeSpec } from "@psilink/core";
 import type { JobConfigurationHandBack } from "@jobs/intentSchemas";
@@ -102,6 +105,13 @@ function mountHolding(document: Record<string, unknown>): string {
 
 function mountedText(dir: string): string {
   return fs.readFileSync(path.join(dir, "psilink.yaml"), "utf8");
+}
+
+function previousText(dir: string): string {
+  return fs.readFileSync(
+    path.join(dir, PREVIOUS_CONFIGURATION_FILE_NAME),
+    "utf8",
+  );
 }
 
 /** The hand-back of a document's own values: what the steps hold when the
@@ -216,10 +226,48 @@ describe("a webrtc configuration handed back with edits", () => {
   test("keeps the file's own permission bits and leaves no other file", () => {
     const dir = mountHolding(webrtcDocument());
     handBackMountedConfiguration(dir, editedHandBack(readBack(dir)));
-    expect(fs.statSync(path.join(dir, "psilink.yaml")).mode & 0o777).toBe(
-      0o640,
+    for (const name of ["psilink.yaml", PREVIOUS_CONFIGURATION_FILE_NAME])
+      expect(fs.statSync(path.join(dir, name)).mode & 0o777).toBe(0o640);
+    expect(fs.readdirSync(dir).sort()).toEqual([
+      "psilink.yaml",
+      PREVIOUS_CONFIGURATION_FILE_NAME,
+    ]);
+  });
+
+  test("keeps the file as it was before the save beside it", () => {
+    const dir = mountHolding(webrtcDocument());
+    fs.appendFileSync(
+      path.join(dir, "psilink.yaml"),
+      "# the operator's own comment\n",
     );
-    expect(fs.readdirSync(dir)).toEqual(["psilink.yaml"]);
+    const before = mountedText(dir);
+    const opened = readBack(dir);
+    handBackMountedConfiguration(dir, editedHandBack(opened));
+    expect(previousText(dir)).toBe(before);
+    expect(mountedText(dir)).not.toContain("the operator's own comment");
+    expect(readBack(dir).linkageTerms.identity).toBe("County Health West");
+  });
+
+  test("a second save keeps the file the first one wrote", () => {
+    const dir = mountHolding(webrtcDocument());
+    handBackMountedConfiguration(dir, editedHandBack(readBack(dir)));
+    const firstSaved = mountedText(dir);
+    handBackMountedConfiguration(dir, unchangedHandBack(readBack(dir)));
+    expect(previousText(dir)).toBe(firstSaved);
+  });
+
+  test("a copy that cannot be written leaves the file unreplaced", () => {
+    const dir = mountHolding(webrtcDocument());
+    fs.mkdirSync(path.join(dir, PREVIOUS_CONFIGURATION_FILE_NAME));
+    const before = mountedText(dir);
+    expect(() =>
+      handBackMountedConfiguration(dir, editedHandBack(readBack(dir))),
+    ).toThrow(ConfigurationHandBackRefusedError);
+    expect(mountedText(dir)).toBe(before);
+    expect(fs.readdirSync(dir).sort()).toEqual([
+      "psilink.yaml",
+      PREVIOUS_CONFIGURATION_FILE_NAME,
+    ]);
   });
 });
 

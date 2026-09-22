@@ -102,6 +102,7 @@ export function ReviewCreateSection({
   loadedSftpForm,
   sftpSaveFilePreferred,
   runWithheld,
+  connectionSettingsHeld,
   rendezvous,
   exchangeFiles,
   onExchangeFiles,
@@ -141,6 +142,11 @@ export function ReviewCreateSection({
   /** Why the configuration opened from the mounted folder withholds the run,
    * undefined where nothing withholds it (`runWithheldReason`). */
   runWithheld?: string;
+  /** Why the file-handling and connection-tuning cards take no edits, standing
+   * in for them: the opened configuration's connection block is saved as the
+   * file states it (`connectionSettingsHeldNotice`). Undefined where the
+   * cards edit the run's connection. */
+  connectionSettingsHeld?: string;
   /** The console's rendezvous provisioning, or undefined before it resolves (or
    * off a console). The filedrop card runs here when it reports a mount and renders
    * disabled with the console's own reason when it does not; a split pair also
@@ -259,13 +265,15 @@ export function ReviewCreateSection({
     transport !== "browser" &&
     available.options.find((option) => option.transport === transport)
       ?.runMode === "server-job";
+  const connectionSettingsEditable =
+    exchangeFilesOffered && connectionSettingsHeld === undefined;
   // A combination core refuses is a form problem here, before the invitation is
   // sealed, rather than a job that fails at composition or at rendezvous.
   const exchangeFilesBlocked =
-    exchangeFilesOffered &&
+    connectionSettingsEditable &&
     exchangeFilesProblems(exchangeFiles, CONFIG_EXCHANGE_FILES).length > 0;
   const connectionTuningBlocked =
-    exchangeFilesOffered &&
+    connectionSettingsEditable &&
     connectionTuningProblems(connectionTuning).length > 0;
   const runDiagnosticsBlocked =
     exchangeFilesOffered && runDiagnosticsProblems(runDiagnostics).length > 0;
@@ -423,16 +431,24 @@ export function ReviewCreateSection({
       </fieldset>
       {exchangeFilesOffered && (
         <>
-          <ExchangeFilesCard
-            draft={exchangeFiles}
-            capabilities={CONFIG_EXCHANGE_FILES}
-            onChange={onExchangeFiles}
-          />
-          <ConnectionTuningCard
-            draft={connectionTuning}
-            capabilities={tuningCapabilities}
-            onChange={onConnectionTuning}
-          />
+          {connectionSettingsEditable ? (
+            <>
+              <ExchangeFilesCard
+                draft={exchangeFiles}
+                capabilities={CONFIG_EXCHANGE_FILES}
+                onChange={onExchangeFiles}
+              />
+              <ConnectionTuningCard
+                draft={connectionTuning}
+                capabilities={tuningCapabilities}
+                onChange={onConnectionTuning}
+              />
+            </>
+          ) : (
+            <p className={`${styles.small} ${styles.sub}`}>
+              {connectionSettingsHeld}
+            </p>
+          )}
           <RunDiagnosticsCard
             draft={runDiagnostics}
             onChange={onRunDiagnostics}

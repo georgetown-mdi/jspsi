@@ -1412,6 +1412,13 @@ export const jobConfigurationHandBackSchema: z.ZodType<JobConfigurationHandBack>
     .refine(certificateModeNamesThisParty, UNNAMED_CERTIFICATE_PARTY_ISSUE);
 
 /**
+ * The copy of the mounted `psilink.yaml` a save of an opened configuration keeps
+ * beside it, holding the file as it was before that save (`PUT
+ * /api/jobs/config`). Each save replaces the one before.
+ */
+export const PREVIOUS_CONFIGURATION_FILE_NAME = "psilink.yaml.previous";
+
+/**
  * The fixed, server-chosen file names inside a job workdir. The client never
  * supplies a filename: content it submits is written to these names, and the CLI
  * is pointed at them. Keeping them constant is what makes "a client string never

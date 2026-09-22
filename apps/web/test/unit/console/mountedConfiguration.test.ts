@@ -7,6 +7,7 @@ import {
   CONFIGURATION_OPENED,
   CONFIGURATION_OPENED_FOR_REVIEW,
   CONFIGURATION_READ_UNAVAILABLE,
+  CONFIGURATION_SAVED,
   CONFIGURATION_SAVE_UNAVAILABLE,
   MOUNTED_CONFIGURATION_UNREAD,
   NO_CONFIGURATION_IN_FOLDER,
@@ -15,7 +16,9 @@ import {
   channelNotConductedNotice,
   columnsNotCoveredNotice,
   configurationOpenedMessage,
+  configurationSaveShown,
   configurationSaveState,
+  connectionSettingsHeldNotice,
   credentialWarningNotice,
   divergedCommitmentWarning,
   divergedCommitments,
@@ -28,7 +31,10 @@ import {
   withUnavailableTransport,
 } from "@console/mountedConfiguration";
 
+import { PREVIOUS_CONFIGURATION_FILE_NAME } from "@jobs/intentSchemas";
+
 import type { DisclosedExchangeDocument } from "@jobs/configLoad";
+import type { JobConfigurationHandBack } from "@jobs/intentSchemas";
 import type { MountedConfigurationAnswer } from "@psi/jobClient/mountedConfigClient";
 
 // The load offer as a value: which of the three states each answer lands in, and
@@ -36,6 +42,13 @@ import type { MountedConfigurationAnswer } from "@psi/jobClient/mountedConfigCli
 // -- a setting's value can be a credential, which is why the console's own route
 // names rather than sends both lists -- so the sweep below drives a document whose
 // every value is distinctive and refuses to find one in any notice.
+
+/** A hand-back a save sends, for the save states below. */
+const HAND_BACK: JobConfigurationHandBack = {
+  linkageTerms: getDefaultLinkageTerms("County Health"),
+  csvDelimiter: "|",
+  signing: { mode: "none" },
+};
 
 const FINGERPRINT = "SHA256:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBA";
 
@@ -184,16 +197,64 @@ describe("a configuration on a channel the console does not conduct", () => {
   });
 
   test("a save leaves the state its answer names", () => {
-    expect(configurationSaveState({ kind: "written" })).toEqual({
+    expect(configurationSaveState({ kind: "written" }, HAND_BACK)).toEqual({
       status: "saved",
+      handBack: JSON.stringify(HAND_BACK),
     });
     expect(
-      configurationSaveState({ kind: "refused", error: "Change them." }),
+      configurationSaveState(
+        { kind: "refused", error: "Change them." },
+        HAND_BACK,
+      ),
     ).toEqual({ status: "failed", message: "Change them." });
-    expect(configurationSaveState({ kind: "unavailable" })).toEqual({
+    expect(configurationSaveState({ kind: "unavailable" }, HAND_BACK)).toEqual({
       status: "failed",
       message: CONFIGURATION_SAVE_UNAVAILABLE,
     });
+  });
+
+  test("a written save is shown while the steps hold what it sent", () => {
+    const saved = configurationSaveState({ kind: "written" }, HAND_BACK);
+    expect(configurationSaveShown(saved, { ...HAND_BACK })).toEqual(saved);
+  });
+
+  test("a written save is not shown once the steps hold anything else", () => {
+    const saved = configurationSaveState({ kind: "written" }, HAND_BACK);
+    expect(
+      configurationSaveShown(saved, { ...HAND_BACK, csvDelimiter: ";" }),
+    ).toEqual({ status: "idle" });
+    expect(configurationSaveShown(saved, undefined)).toEqual({
+      status: "idle",
+    });
+    const failed = configurationSaveState({ kind: "unavailable" }, HAND_BACK);
+    expect(
+      configurationSaveShown(failed, { ...HAND_BACK, csvDelimiter: ";" }),
+    ).toEqual(failed);
+  });
+
+  test("the saved message names the copy of the file kept beside it", () => {
+    expect(CONFIGURATION_SAVED).toContain(PREVIOUS_CONFIGURATION_FILE_NAME);
+  });
+
+  test("its connection settings are held from the file, with a sentence", () => {
+    const notice = connectionSettingsHeldNotice(
+      mountedConfigurationRead(openedWebrtc()).state,
+    );
+    expect(notice).toContain("webrtc connection");
+    expect(notice).toMatch(/exactly as your file states it/);
+    expect(notice).toMatch(/on the command line/);
+  });
+
+  test("a channel the console conducts holds no connection setting", () => {
+    expect(
+      connectionSettingsHeldNotice(mountedConfigurationRead(opened()).state),
+    ).toBeUndefined();
+    expect(
+      connectionSettingsHeldNotice(
+        mountedConfigurationRead(opened({ channel: "filedrop" })).state,
+      ),
+    ).toBeUndefined();
+    expect(connectionSettingsHeldNotice({ status: "unread" })).toBeUndefined();
   });
 
   test("what the input file cannot supply is still named after it", () => {

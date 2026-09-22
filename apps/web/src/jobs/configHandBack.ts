@@ -4,7 +4,10 @@ import path from "node:path";
 
 import { ZodError } from "zod";
 
-import { JOB_FILE_NAMES } from "./intentSchemas";
+import {
+  JOB_FILE_NAMES,
+  PREVIOUS_CONFIGURATION_FILE_NAME,
+} from "./intentSchemas";
 
 import { formatFirstIssue } from "./schemaIssueMessage";
 import { handBackConfigDocument } from "./handoff";
@@ -70,39 +73,60 @@ export function handBackMountedConfiguration(
 }
 
 /**
- * Replace the mounted `psilink.yaml` with `text`: written to a new file beside
- * the one it replaces, flushed, and renamed over it, so an interrupted write
- * leaves the operator's file as it was. A `psilink.yaml` that is a link is
- * replaced at the file it names, and the replacement keeps the file's own
- * permission bits.
+ * Replace the mounted `psilink.yaml` with `text`, first copying the file as it
+ * stands to {@link PREVIOUS_CONFIGURATION_FILE_NAME} in the same folder: the
+ * writer keeps none of the operator's comments, key order, or quoting, so the
+ * copy is what they have to recover them from. A copy that cannot be written
+ * leaves the file unreplaced. A `psilink.yaml` that is a link is replaced at the
+ * file it names, and the copy and the replacement keep that file's permission
+ * bits.
  */
 function replaceMountedConfiguration(dataRoot: string, text: string): void {
   const filePath = resolveWorkdirFile(dataRoot, JOB_FILE_NAMES.config);
-  if (filePath === null)
+  const previousPath = resolveWorkdirFile(
+    dataRoot,
+    PREVIOUS_CONFIGURATION_FILE_NAME,
+  );
+  if (filePath === null || previousPath === null)
     throw new Error("the configuration name resolved outside the data root");
-  let temporary: string | undefined;
   try {
     const target = fs.realpathSync(filePath);
     const mode = fs.statSync(target).mode & 0o777;
-    temporary = path.join(
-      path.dirname(target),
-      `.${path.basename(target)}.${crypto.randomUUID()}.tmp`,
+    writeReplacing(previousPath, fs.readFileSync(target), mode);
+    writeReplacing(target, text, mode);
+  } catch {
+    throw new ConfigurationHandBackRefusedError(
+      UNWRITABLE_CONFIGURATION_MESSAGE,
     );
+  }
+}
+
+/**
+ * Write `content` to a new file beside `destination`, flush it, and rename it
+ * over `destination`, so an interrupted write leaves what was there as it was.
+ */
+function writeReplacing(
+  destination: string,
+  content: string | Buffer,
+  mode: number,
+): void {
+  const temporary = path.join(
+    path.dirname(destination),
+    `.${path.basename(destination)}.${crypto.randomUUID()}.tmp`,
+  );
+  let renamed = false;
+  try {
     const fd = fs.openSync(temporary, "wx", mode);
     try {
-      fs.writeFileSync(fd, text);
+      fs.writeFileSync(fd, content);
       fs.fchmodSync(fd, mode);
       fs.fsyncSync(fd);
     } finally {
       fs.closeSync(fd);
     }
-    fs.renameSync(temporary, target);
-    temporary = undefined;
-  } catch {
-    throw new ConfigurationHandBackRefusedError(
-      UNWRITABLE_CONFIGURATION_MESSAGE,
-    );
+    fs.renameSync(temporary, destination);
+    renamed = true;
   } finally {
-    if (temporary !== undefined) fs.rmSync(temporary, { force: true });
+    if (!renamed) fs.rmSync(temporary, { force: true });
   }
 }

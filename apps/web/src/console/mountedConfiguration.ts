@@ -1,4 +1,7 @@
-import { isJobChannel } from "@jobs/intentSchemas";
+import {
+  PREVIOUS_CONFIGURATION_FILE_NAME,
+  isJobChannel,
+} from "@jobs/intentSchemas";
 
 import { authoringStateFromDocument } from "./loadedConfig";
 
@@ -6,11 +9,11 @@ import type {
   ConfigurationHandBackAnswer,
   MountedConfigurationAnswer,
 } from "@psi/jobClient/mountedConfigClient";
+import type { JobChannel, JobConfigurationHandBack } from "@jobs/intentSchemas";
 import type {
   LoadedAuthoringState,
   LoadedEnforcementRecords,
 } from "./loadedConfig";
-import type { JobChannel } from "@jobs/intentSchemas";
 
 /**
  * The console's offer to open the command-line configuration sitting in its
@@ -161,35 +164,77 @@ export function runWithheldReason(
   );
 }
 
-/** Where saving the opened configuration back to the folder stands. */
+/**
+ * The sentence standing in for the cards that edit an opened configuration's
+ * connection block -- connection tuning and file handling -- where the console
+ * keeps that block exactly as the file states it, so an edit there would reach
+ * nothing. Undefined where the cards edit the run's connection.
+ */
+export function connectionSettingsHeldNotice(
+  state: MountedConfigurationState,
+): string | undefined {
+  if (state.status !== "opened" || state.notConducted === undefined)
+    return undefined;
+  return (
+    `This configuration's ${state.notConducted} connection, its tuning and ` +
+    "file handling included, is saved exactly as your file states it. Edit " +
+    "it in psilink.yaml on the command line."
+  );
+}
+
+/** Where saving the opened configuration back to the folder stands. A save
+ * that was written holds the hand-back it sent, as JSON, so whether the steps
+ * still hold what was saved is derived by comparison
+ * ({@link configurationSaveShown}). */
 export type ConfigurationSaveState =
   | { status: "idle" }
   | { status: "saving" }
-  | { status: "saved" }
+  | { status: "saved"; handBack: string }
   | { status: "failed"; message: string };
 
 /** What the review step says once the settings are written to the folder. */
 export const CONFIGURATION_SAVED =
   "Saved your changes to psilink.yaml in your working folder, with its " +
-  "connection as your file stated it. Run it with psilink on the command line.";
+  "connection as your file stated it. The file as it was before this save " +
+  `is kept beside it as ${PREVIOUS_CONFIGURATION_FILE_NAME}. Run it with ` +
+  "psilink on the command line.";
 
 /** What the review step says when the save did not answer. */
 export const CONFIGURATION_SAVE_UNAVAILABLE =
   "The console did not answer, so your changes were not saved to " +
   "psilink.yaml. Save again.";
 
-/** The save state one answer from the console leaves. */
+/** The save state one answer from the console leaves for `sent`, the hand-back
+ * the save sent. */
 export function configurationSaveState(
   answer: ConfigurationHandBackAnswer,
+  sent: JobConfigurationHandBack,
 ): ConfigurationSaveState {
   switch (answer.kind) {
     case "written":
-      return { status: "saved" };
+      return { status: "saved", handBack: JSON.stringify(sent) };
     case "refused":
       return { status: "failed", message: answer.error };
     case "unavailable":
       return { status: "failed", message: CONFIGURATION_SAVE_UNAVAILABLE };
   }
+}
+
+/**
+ * The save state the review step shows: a written save is shown as saved only
+ * while `current`, the hand-back the steps hold now, is the one it sent, and
+ * as idle once the steps hold anything else.
+ */
+export function configurationSaveShown(
+  save: ConfigurationSaveState,
+  current: JobConfigurationHandBack | undefined,
+): ConfigurationSaveState {
+  if (
+    save.status === "saved" &&
+    (current === undefined || JSON.stringify(current) !== save.handBack)
+  )
+    return { status: "idle" };
+  return save;
 }
 
 /**

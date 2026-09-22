@@ -19,6 +19,7 @@ import {
 import { InviterScreen } from "@exchange/InviterScreen";
 import { isolatedColumnName } from "@components/ColumnName";
 
+import { disclosureToggle, openDisclosure } from "./collapsePanels";
 import { createAppMount } from "./renderApp";
 
 // The load offer as the operator meets it on the file step: the three states the
@@ -330,6 +331,14 @@ describe("the open configuration over the files it is derived across", () => {
     await expect
       .element(page.getByText(/cannot run this webrtc configuration/).first())
       .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText(/webrtc connection, its tuning and file handling/),
+      )
+      .toBeInTheDocument();
+    await expect
+      .element(disclosureToggle(/Connection tuning/))
+      .not.toBeInTheDocument();
     await page
       .getByRole("button", { name: "Save changes to psilink.yaml" })
       .click();
@@ -342,6 +351,15 @@ describe("the open configuration over the files it is derived across", () => {
       signing: { mode: "none" },
     });
     expect(savedBodies[0]).not.toHaveProperty("connection");
+
+    await openDisclosure(/Receipts and record keeping/);
+    await userEvent.fill(
+      page.getByLabelText("Retention note for your own record"),
+      "Destroyed after 90 days.",
+    );
+    await expect
+      .element(page.getByText(CONFIGURATION_SAVED).first())
+      .not.toBeInTheDocument();
   });
 
   test("an invitation created while it is open withholds both controls", async () => {
