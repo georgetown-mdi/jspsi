@@ -7,6 +7,7 @@ import {
   CONFIGURATION_OPENED,
   CONFIGURATION_OPENED_FOR_REVIEW,
   CONFIGURATION_READ_UNAVAILABLE,
+  CONFIGURATION_SAVE_UNAVAILABLE,
   MOUNTED_CONFIGURATION_UNREAD,
   NO_CONFIGURATION_IN_FOLDER,
   PENDING_OUTBOUND_CONSENT_WARNING,
@@ -14,6 +15,7 @@ import {
   channelNotConductedNotice,
   columnsNotCoveredNotice,
   configurationOpenedMessage,
+  configurationSaveState,
   credentialWarningNotice,
   divergedCommitmentWarning,
   divergedCommitments,
@@ -145,7 +147,7 @@ describe("a configuration on a channel the console does not conduct", () => {
     expect(reason).toContain("webrtc");
     expect(reason).toContain("sftp and filedrop");
     expect(reason).toMatch(/psilink on the command line/);
-    expect(reason).toMatch(/close the configuration/);
+    expect(reason).toMatch(/Save your changes to psilink\.yaml/);
   });
 
   test("a channel the console conducts withholds nothing", () => {
@@ -177,7 +179,21 @@ describe("a configuration on a channel the console does not conduct", () => {
     });
     expect(notices).toEqual([channelNotConductedNotice("webrtc")]);
     expect(notices[0]).toContain("runs over webrtc");
-    expect(notices[0]).toMatch(/cannot run this exchange/);
+    expect(notices[0]).toMatch(/save them to psilink\.yaml/);
+    expect(notices[0]).toMatch(/connection is kept exactly as your file/);
+  });
+
+  test("a save leaves the state its answer names", () => {
+    expect(configurationSaveState({ kind: "written" })).toEqual({
+      status: "saved",
+    });
+    expect(
+      configurationSaveState({ kind: "refused", error: "Change them." }),
+    ).toEqual({ status: "failed", message: "Change them." });
+    expect(configurationSaveState({ kind: "unavailable" })).toEqual({
+      status: "failed",
+      message: CONFIGURATION_SAVE_UNAVAILABLE,
+    });
   });
 
   test("what the input file cannot supply is still named after it", () => {

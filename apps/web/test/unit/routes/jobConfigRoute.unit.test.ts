@@ -167,3 +167,162 @@ describe("GET /api/jobs/config", () => {
     expect(body.error).not.toContain(dataRoot);
   });
 });
+
+async function handBack(body: unknown): Promise<Response> {
+  return (await handlersOf(ConfigRoute).PUT({
+    request: new Request("http://localhost/api/jobs/config", {
+      method: "PUT",
+      headers: { host: "localhost", "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+    params: {},
+  })) as Response;
+}
+
+/** Obviously fake credential values, one per place a webrtc connection holds
+ * one, so a search of a response body can find any that leaked. */
+const WEBRTC_CREDENTIALS = {
+  brokerKey: "fake-broker-key-for-tests",
+  turnCredential: "fake-turn-credential-for-tests",
+  iceBearer: "fake-ice-bearer-for-tests",
+  provisionPassword: "fake-provision-password-for-tests",
+  providerOptionPath: "@/run/secrets/fake-provider-option",
+};
+
+/** Two webrtc documents between them stating every credential a webrtc
+ * connection holds: TURN credentials and ICE provisioning cannot share one. */
+function webrtcDocuments(): Array<unknown> {
+  const shared = {
+    linkage_terms: snakeizeKeys(getDefaultLinkageTerms("County Health")),
+    csv_delimiter: "|",
+  };
+  const server = {
+    host: "broker.example",
+    key: WEBRTC_CREDENTIALS.brokerKey,
+    provision: {
+      host: "provision.example",
+      auth: {
+        username: "county",
+        password: WEBRTC_CREDENTIALS.provisionPassword,
+      },
+    },
+  };
+  return [
+    {
+      connection: {
+        channel: "webrtc",
+        role: "inviter",
+        server,
+        turn: [
+          {
+            url: "turn:turn.example.org:3478",
+            username: "county",
+            credential: WEBRTC_CREDENTIALS.turnCredential,
+          },
+        ],
+        provider_options: {
+          config_file: WEBRTC_CREDENTIALS.providerOptionPath,
+        },
+      },
+      ...shared,
+    },
+    {
+      connection: {
+        channel: "webrtc",
+        role: "inviter",
+        server,
+        ice_provision: {
+          host: "ice.example",
+          auth: { bearer: WEBRTC_CREDENTIALS.iceBearer },
+        },
+      },
+      ...shared,
+    },
+  ];
+}
+
+function expectNoWebrtcCredential(text: string): void {
+  for (const credential of Object.values(WEBRTC_CREDENTIALS))
+    expect(text).not.toContain(credential);
+}
+
+describe("the webrtc connection's credentials never reach the browser", () => {
+  test("the load answers none of them", async () => {
+    for (const document of webrtcDocuments()) {
+      const dataRoot = enable();
+      writeConfiguration(dataRoot, document);
+      const response = await load();
+      expect(response.status).toBe(200);
+      expectNoWebrtcCredential(await response.text());
+    }
+  });
+
+  test("the hand-back answers none of them and writes every one back", async () => {
+    for (const document of webrtcDocuments()) {
+      const dataRoot = enable();
+      writeConfiguration(dataRoot, document);
+      const response = await handBack({
+        linkageTerms: getDefaultLinkageTerms("County Health West"),
+        csvDelimiter: ";",
+        signing: { mode: "none" },
+      });
+      expect(response.status).toBe(200);
+      const text = await response.text();
+      expect(JSON.parse(text)).toEqual({ written: true });
+      expectNoWebrtcCredential(text);
+      const written = fs.readFileSync(
+        path.join(dataRoot, "psilink.yaml"),
+        "utf8",
+      );
+      expect(written).toContain("County Health West");
+      for (const credential of Object.values(WEBRTC_CREDENTIALS))
+        if (JSON.stringify(document).includes(credential))
+          expect(written).toContain(credential);
+    }
+  });
+});
+
+describe("PUT /api/jobs/config", () => {
+  const settings = {
+    linkageTerms: getDefaultLinkageTerms("County Health"),
+    signing: { mode: "none" },
+  };
+
+  test("is 404 when the API is disabled", async () => {
+    vi.stubEnv("JOB_DATA_ROOT", "");
+    expect((await handBack(settings)).status).toBe(404);
+  });
+
+  test("admits no connection from the browser", async () => {
+    const dataRoot = enable();
+    writeConfiguration(dataRoot, webrtcDocuments()[0]);
+    const before = fs.readFileSync(path.join(dataRoot, "psilink.yaml"));
+    const response = await handBack({
+      ...settings,
+      connection: { channel: "webrtc", server: { host: "elsewhere" } },
+    });
+    expect(response.status).toBe(400);
+    expect(fs.readFileSync(path.join(dataRoot, "psilink.yaml"))).toEqual(
+      before,
+    );
+  });
+
+  test("refuses a configuration the console runs itself", async () => {
+    const dataRoot = enable();
+    writeConfiguration(dataRoot, savedSftpDocument());
+    const response = await handBack(settings);
+    expect(response.status).toBe(400);
+    expect(((await response.json()) as { error: string }).error).toContain(
+      "runs over sftp",
+    );
+  });
+
+  test("refuses a mount holding no configuration", async () => {
+    enable();
+    const response = await handBack(settings);
+    expect(response.status).toBe(400);
+    expect(((await response.json()) as { error: string }).error).toContain(
+      "no longer holds a psilink.yaml",
+    );
+  });
+});

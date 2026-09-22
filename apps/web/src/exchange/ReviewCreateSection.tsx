@@ -45,6 +45,7 @@ import {
   SFTP_CONNECTION_TUNING,
   connectionTuningProblems,
 } from "@console/connectionTuningModel";
+import { CONFIGURATION_SAVED } from "@console/mountedConfiguration";
 import { ConnectionTuningCard } from "@console/ConnectionTuningCard";
 import { ExchangeFilesCard } from "@console/ExchangeFilesCard";
 import { ReceiptsCard } from "@console/ReceiptsCard";
@@ -60,6 +61,7 @@ import type { AcquiredCsv, InviterEditor } from "@psi/inviterEditor";
 import type { SpineProblem, SpineTarget } from "@psi/inviterModel";
 import type { Transport } from "@psi/transportChooser";
 
+import type { ConfigurationSaveState } from "@console/mountedConfiguration";
 import type { ConnectionTuningDraft } from "@console/connectionTuningModel";
 import type { ExchangeFilesDraft } from "@console/exchangeFilesModel";
 import type { JobRendezvousConfig } from "@psi/jobClient/workInputClient";
@@ -119,6 +121,8 @@ export function ReviewCreateSection({
   onReset,
   onCreate,
   onNavigate,
+  configurationSave,
+  onSaveConfiguration,
 }: {
   editor: InviterEditor;
   csv: AcquiredCsv;
@@ -173,6 +177,13 @@ export function ReviewCreateSection({
   onReset: () => void;
   onCreate: () => void;
   onNavigate: (target: SpineTarget) => void;
+  /** Where saving the opened configuration back to the folder stands, beside
+   * {@link onSaveConfiguration}. */
+  configurationSave?: ConfigurationSaveState;
+  /** Save the settings these steps edit into the opened configuration's file.
+   * Offered only where that configuration withholds the run
+   * ({@link runWithheld}), since a run hands back its own configuration. */
+  onSaveConfiguration?: () => void;
 }) {
   const consoleBuild = isConsoleBuild();
   const online = useOnlineStatus();
@@ -309,6 +320,9 @@ export function ReviewCreateSection({
   // Voiced when the create gate flips either way; deferred so a blocked state
   // present when the section mounts still announces.
   const readiness = useDeferredAnnouncement(createStatus.announcement);
+  const saveOffered =
+    runWithheld !== undefined && onSaveConfiguration !== undefined;
+  const configurationSaving = configurationSave?.status === "saving";
   return (
     <>
       <p className={styles.eyebrow}>Step 3 of 3</p>
@@ -503,6 +517,31 @@ export function ReviewCreateSection({
           {readiness}
         </p>
       </VisuallyHidden>
+      {saveOffered && (
+        <div className={styles.workFoot}>
+          <Button
+            disabled={problems.length > 0}
+            loading={configurationSaving}
+            onClick={onSaveConfiguration}
+          >
+            Save changes to psilink.yaml
+          </Button>
+          <p
+            role="status"
+            className={
+              configurationSave?.status === "failed"
+                ? `${styles.statusLine} ${styles.statusLineDanger}`
+                : `${styles.statusLine} ${styles.statusLineOk}`
+            }
+          >
+            {configurationSave?.status === "saved"
+              ? CONFIGURATION_SAVED
+              : configurationSave?.status === "failed"
+                ? configurationSave.message
+                : ""}
+          </p>
+        </div>
+      )}
       <div className={styles.workFoot}>
         <Button disabled={!canCreate} loading={minting} onClick={onCreate}>
           Create the invitation

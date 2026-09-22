@@ -3,11 +3,14 @@ import { isJobChannel } from "@jobs/intentSchemas";
 import { authoringStateFromDocument } from "./loadedConfig";
 
 import type {
+  ConfigurationHandBackAnswer,
+  MountedConfigurationAnswer,
+} from "@psi/jobClient/mountedConfigClient";
+import type {
   LoadedAuthoringState,
   LoadedEnforcementRecords,
 } from "./loadedConfig";
 import type { JobChannel } from "@jobs/intentSchemas";
-import type { MountedConfigurationAnswer } from "@psi/jobClient/mountedConfigClient";
 
 /**
  * The console's offer to open the command-line configuration sitting in its
@@ -28,8 +31,9 @@ import type { MountedConfigurationAnswer } from "@psi/jobClient/mountedConfigCli
  * survive"). Having no control, each one is named in the carry-through notice.
  *
  * A configuration on a channel the console does not conduct opens all the same:
- * the steps below start from it for review, and the run is withheld by the one
- * derived field {@link runWithheldReason} reads, which names the channel.
+ * the steps below start from it and save back into its file, and the run is
+ * withheld by the one derived field {@link runWithheldReason} reads, which
+ * names the channel.
  */
 
 /** The channel a configuration the console can open runs over. */
@@ -115,8 +119,8 @@ export const CONFIGURATION_OPENED =
 
 /** What the control says once a configuration the console cannot run is open. */
 export const CONFIGURATION_OPENED_FOR_REVIEW =
-  "Opened the configuration in your folder. Every step below starts from it " +
-  "for you to review.";
+  "Opened the configuration in your folder. Every step below starts from it, " +
+  "and you can change anything before you save it back.";
 
 /** The line under the open control for an opened state. */
 export function configurationOpenedMessage(
@@ -132,10 +136,10 @@ export function configurationOpenedMessage(
 export function channelNotConductedNotice(channel: UnconductedChannel): string {
   return (
     `This configuration runs over ${channel}, and the console conducts sftp ` +
-    "and filedrop exchanges only. The steps below show its settings, but the " +
-    "console cannot run this exchange or save changes to it. Run it with " +
-    "psilink on the command line, or close this configuration to author an " +
-    "exchange the console runs."
+    "and filedrop exchanges only. Change its settings in the steps below, " +
+    `then save them to psilink.yaml on the review step: its ${channel} ` +
+    "connection is kept exactly as your file states it. Run the saved file " +
+    `with psilink on the command line, which conducts ${channel} exchanges.`
   );
 }
 
@@ -152,9 +156,40 @@ export function runWithheldReason(
     return undefined;
   return (
     `The console cannot run this ${state.notConducted} configuration: it ` +
-    "conducts sftp and filedrop exchanges only. Run it with psilink on the " +
-    "command line, or close the configuration to author an exchange here."
+    "conducts sftp and filedrop exchanges only. Save your changes to " +
+    "psilink.yaml, then run it with psilink on the command line."
   );
+}
+
+/** Where saving the opened configuration back to the folder stands. */
+export type ConfigurationSaveState =
+  | { status: "idle" }
+  | { status: "saving" }
+  | { status: "saved" }
+  | { status: "failed"; message: string };
+
+/** What the review step says once the settings are written to the folder. */
+export const CONFIGURATION_SAVED =
+  "Saved your changes to psilink.yaml in your working folder, with its " +
+  "connection as your file stated it. Run it with psilink on the command line.";
+
+/** What the review step says when the save did not answer. */
+export const CONFIGURATION_SAVE_UNAVAILABLE =
+  "The console did not answer, so your changes were not saved to " +
+  "psilink.yaml. Save again.";
+
+/** The save state one answer from the console leaves. */
+export function configurationSaveState(
+  answer: ConfigurationHandBackAnswer,
+): ConfigurationSaveState {
+  switch (answer.kind) {
+    case "written":
+      return { status: "saved" };
+    case "refused":
+      return { status: "failed", message: answer.error };
+    case "unavailable":
+      return { status: "failed", message: CONFIGURATION_SAVE_UNAVAILABLE };
+  }
 }
 
 /**

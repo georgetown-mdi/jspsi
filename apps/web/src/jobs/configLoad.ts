@@ -25,9 +25,10 @@
  *   write back unchanged ({@link assertHeldSettingsSurvive}).
  *
  * A configuration on a channel the console opens but does not conduct -- webrtc
- * -- is not refused here: the browser reads its settings for review and
- * withholds the run (docs/CONSOLE.md). Its `connection` is neither disclosed
- * nor measured, since no run here composes or replaces it.
+ * -- is not refused here: the browser edits its settings and withholds the
+ * run, and the edits are saved back into the file ({@link ./configHandBack}).
+ * Its `connection` is neither disclosed nor measured, since no run here
+ * composes or replaces it.
  *
  * A `@path` credential reference is a WARNING and not a refusal: the operator
  * owns this mount and the reference is their own choice, so the load proceeds
@@ -116,7 +117,7 @@ type OpenedChannel = "sftp" | "filedrop" | "webrtc";
 /** The channels the console opens a configuration on: an allowlist, so a channel
  * a later schema version adds is refused until it is named here. Only the job
  * channels ({@link isJobChannel}) are conducted; a configuration on another is
- * opened for review with its run withheld. */
+ * opened for editing with its run withheld. */
 const OPENED_CHANNELS: ReadonlySet<string> = new Set<OpenedChannel>([
   "sftp",
   "filedrop",
@@ -890,4 +891,31 @@ export function mountedExchangeDocument(
     if (error instanceof ConfigurationLoadRefusedError) return undefined;
     throw error;
   }
+}
+
+/**
+ * The mounted configuration a hand-back is written over: the document the
+ * operator opened on a channel the console does not conduct, read again at the
+ * moment of the write so the connection it keeps is the one the file holds now.
+ *
+ * @throws {ConfigurationLoadRefusedError} when the mount holds no configuration,
+ *   one the console cannot open, or one on a channel the console runs itself --
+ *   a file changed on disk since it was opened.
+ */
+export function mountedUnconductedDocument(dataRoot: string): ExchangeSpec {
+  const source = mountedConfigurationSource(dataRoot);
+  if (source === null)
+    throw new ConfigurationLoadRefusedError(
+      "Your working folder no longer holds a psilink.yaml to save these " +
+        "changes to. Put the configuration back, then open it again.",
+    );
+  const document = mountedConfigurationDocument(source);
+  const { channel } = document.connection;
+  if (isJobChannel(channel))
+    throw new ConfigurationLoadRefusedError(
+      `The psilink.yaml in your working folder has changed since you opened ` +
+        `it, and runs over ${channel} now. Close the configuration and open ` +
+        "it again.",
+    );
+  return document;
 }

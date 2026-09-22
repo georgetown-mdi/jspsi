@@ -2,7 +2,10 @@ import { describe, expect, test } from "vitest";
 
 import { getDefaultLinkageTerms } from "@psilink/core";
 
-import { fetchMountedConfiguration } from "@psi/jobClient/mountedConfigClient";
+import {
+  fetchMountedConfiguration,
+  saveOpenedConfiguration,
+} from "@psi/jobClient/mountedConfigClient";
 
 // The browser's read of the mounted configuration. It fails toward
 // `unavailable`: a body this cannot narrow reaches the load control as a read
@@ -153,6 +156,64 @@ describe("an answer this cannot read", () => {
     const fetchImpl = (() =>
       Promise.reject(new Error("offline"))) as unknown as typeof fetch;
     expect(await fetchMountedConfiguration(fetchImpl)).toEqual({
+      kind: "unavailable",
+    });
+  });
+});
+
+describe("saving the opened configuration back", () => {
+  const HAND_BACK = {
+    linkageTerms: getDefaultLinkageTerms("County Health"),
+    signing: { mode: "none" as const },
+  };
+
+  test("a written answer reads as written, over PUT to the load's route", async () => {
+    const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const fetchImpl = ((url: string, init?: RequestInit) => {
+      requests.push({ url, init });
+      return Promise.resolve(
+        new Response(JSON.stringify({ written: true }), { status: 200 }),
+      );
+    }) as unknown as typeof fetch;
+    expect(await saveOpenedConfiguration(HAND_BACK, fetchImpl)).toEqual({
+      kind: "written",
+    });
+    expect(requests).toHaveLength(1);
+    expect(requests[0].url).toBe("/api/jobs/config");
+    expect(requests[0].init?.method).toBe("PUT");
+    expect(JSON.parse(String(requests[0].init?.body))).toEqual(HAND_BACK);
+  });
+
+  test("a refusal reads in the console's own words", async () => {
+    const { fetchImpl } = answering(400, { error: "Change them." });
+    expect(await saveOpenedConfiguration(HAND_BACK, fetchImpl)).toEqual({
+      kind: "refused",
+      error: "Change them.",
+    });
+  });
+
+  test("a refusal with no text still says the save stopped", async () => {
+    const { fetchImpl } = answering(400, undefined);
+    const answer = await saveOpenedConfiguration(HAND_BACK, fetchImpl);
+    expect(answer.kind).toBe("refused");
+    if (answer.kind !== "refused") throw new Error("expected a refusal");
+    expect(answer.error).toContain("did not save");
+  });
+
+  test("anything else reads as unavailable", async () => {
+    for (const { status, body } of [
+      { status: 200, body: { written: "yes" } },
+      { status: 200, body: undefined },
+      { status: 500, body: { error: "no" } },
+    ]) {
+      const { fetchImpl } = answering(status, body);
+      expect(await saveOpenedConfiguration(HAND_BACK, fetchImpl)).toEqual({
+        kind: "unavailable",
+      });
+    }
+    const failing = (() =>
+      Promise.reject(new Error("offline"))) as unknown as typeof fetch;
+    expect(await saveOpenedConfiguration(HAND_BACK, failing)).toEqual({
       kind: "unavailable",
     });
   });

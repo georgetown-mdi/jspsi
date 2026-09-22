@@ -12,6 +12,7 @@ import { getDefaultLinkageTerms } from "@psilink/core";
 
 import {
   CLOSE_CONFIGURATION_LABEL,
+  CONFIGURATION_SAVED,
   NO_CONFIGURATION_IN_FOLDER,
   OPEN_CONFIGURATION_LABEL,
 } from "@console/mountedConfiguration";
@@ -98,6 +99,9 @@ function openedBody(document: unknown): unknown {
   };
 }
 
+/** Each body a `PUT /api/jobs/config` sent, in order. */
+const savedBodies: Array<unknown> = [];
+
 /** Answer the console's job API, with `GET /api/jobs/config` under this test's
  * control. The work directory is empty and nothing else is provisioned unless
  * the test says otherwise. */
@@ -118,6 +122,10 @@ function stubConfigRoute(
             headers: { "Content-Type": "application/json" },
           }),
         );
+      if (url === "/api/jobs/config" && init?.method === "PUT") {
+        savedBodies.push(JSON.parse(String(init.body)) as unknown);
+        return json({ written: true });
+      }
       if (url === "/api/jobs/config") return json(answer.body, answer.status);
       if (url === "/api/jobs/inputs")
         return json({ configured: true, files: mount.files ?? [] });
@@ -164,6 +172,7 @@ afterEach(() => {
   // test's idle screen does not re-attach to a prior run's id.
   window.localStorage.clear();
   vi.unstubAllGlobals();
+  savedBodies.splice(0);
 });
 
 describe("the load offer on the file step", () => {
@@ -321,6 +330,18 @@ describe("the open configuration over the files it is derived across", () => {
     await expect
       .element(page.getByText(/cannot run this webrtc configuration/).first())
       .toBeInTheDocument();
+    await page
+      .getByRole("button", { name: "Save changes to psilink.yaml" })
+      .click();
+    await expect
+      .element(page.getByText(CONFIGURATION_SAVED).first())
+      .toBeInTheDocument();
+    expect(savedBodies).toHaveLength(1);
+    expect(savedBodies[0]).toMatchObject({
+      linkageTerms: { identity: "County Health" },
+      signing: { mode: "none" },
+    });
+    expect(savedBodies[0]).not.toHaveProperty("connection");
   });
 
   test("an invitation created while it is open withholds both controls", async () => {

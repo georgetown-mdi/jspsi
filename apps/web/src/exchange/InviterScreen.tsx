@@ -1,4 +1,11 @@
-import { Fragment, useEffect, useMemo, useReducer, useRef } from "react";
+import {
+  Fragment,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from "react";
 
 import { Alert, VisuallyHidden } from "@mantine/core";
 import { IconAlertCircle } from "@tabler/icons-react";
@@ -119,9 +126,16 @@ import {
   DivergedCommitmentNotice,
   MountedConfigurationCard,
 } from "@console/MountedConfigurationCard";
+import {
+  configurationSaveState,
+  runWithheldReason,
+} from "@console/mountedConfiguration";
+import {
+  fetchMountedConfiguration,
+  saveOpenedConfiguration,
+} from "@psi/jobClient/mountedConfigClient";
+import { configurationHandBack } from "@console/configurationHandBack";
 import { editorWithLoadedTerms } from "@console/loadedConfig";
-import { fetchMountedConfiguration } from "@psi/jobClient/mountedConfigClient";
-import { runWithheldReason } from "@console/mountedConfiguration";
 
 import {
   INVITER_SCREEN_INITIAL,
@@ -182,6 +196,7 @@ import type { JobInputSource } from "@psi/jobClient/serverJobExchangeDriver";
 import type { ProfiledJobInput } from "@psi/jobClient/workInputClient";
 
 import type { ColumnSamples } from "@psi/columnSamples";
+import type { ConfigurationSaveState } from "@console/mountedConfiguration";
 import type { DisclosureChoice } from "@psi/metadataEditing";
 import type { InviterSpineStep } from "./inviterScreenModel";
 import type { ManageOfferChoices } from "./manageOfferModel";
@@ -401,6 +416,34 @@ export function InviterScreen() {
       type: "mounted-configuration-read",
       answer: await fetchMountedConfiguration(),
     });
+  }
+
+  // Where saving the opened configuration back to the folder stands. Cleared
+  // when a configuration is opened or closed, since a save names the file
+  // that was open.
+  const [configurationSave, setConfigurationSave] =
+    useState<ConfigurationSaveState>({ status: "idle" });
+  useEffect(() => {
+    setConfigurationSave({ status: "idle" });
+  }, [mountedConfiguration.status]);
+
+  // Write the settings these steps edit into the opened configuration's file,
+  // for a channel the console does not conduct: the console keeps the file's
+  // connection itself, so the save sends only what the steps hold.
+  async function saveConfiguration(): Promise<void> {
+    if (editor === undefined) return;
+    const validation = reviewValidation(editor);
+    if (!validation.canGenerate || validation.terms === undefined) return;
+    setConfigurationSave({ status: "saving" });
+    const answer = await saveOpenedConfiguration(
+      configurationHandBack({
+        editor,
+        terms: validation.terms,
+        csvDelimiter,
+        receipts,
+      }),
+    );
+    setConfigurationSave(configurationSaveState(answer));
   }
 
   // Close the open configuration: it stops being an input here, so the draft
@@ -1496,6 +1539,8 @@ export function InviterScreen() {
                 loadedSftpForm={loadedSftpForm}
                 sftpSaveFilePreferred={sftpSaveFilePreferred}
                 runWithheld={runWithheldReason(mountedConfiguration)}
+                configurationSave={configurationSave}
+                onSaveConfiguration={() => void saveConfiguration()}
                 rendezvous={rendezvous}
                 exchangeFiles={exchangeFiles}
                 onExchangeFiles={(draft) =>

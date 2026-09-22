@@ -1,11 +1,25 @@
 import { createFileRoute } from "@tanstack/react-router";
 
 import {
+  ConfigurationHandBackRefusedError,
+  handBackMountedConfiguration,
+} from "@jobs/configHandBack";
+import {
   ConfigurationLoadRefusedError,
   loadMountedConfiguration,
 } from "@jobs/configLoad";
-import { jobJsonResponse, readJobApiConfig } from "@jobs/gate";
-import { gateJobRoute } from "@jobs/routeSupport";
+import {
+  MAX_CONFIG_HAND_BACK_BODY_BYTES,
+  gateJobRoute,
+  readJobRequestBody,
+} from "@jobs/routeSupport";
+import {
+  jobEmptyResponse,
+  jobJsonResponse,
+  readJobApiConfig,
+} from "@jobs/gate";
+import { formatFirstIssue } from "@jobs/schemaIssueMessage";
+import { jobConfigurationHandBackSchema } from "@jobs/intentSchemas";
 
 /**
  * `GET /api/jobs/config` -- the command-line configuration the operator mounted
@@ -28,6 +42,13 @@ import { gateJobRoute } from "@jobs/routeSupport";
  * as the FILE spells them. The static `config` segment cannot be captured as a
  * job id: ids are validated as canonical v4 UUIDs before any use, which `config`
  * is not.
+ *
+ * `PUT /api/jobs/config` hands the operator's edits back into that file, for a
+ * configuration on a channel the console does not conduct: the body is a
+ * {@link jobConfigurationHandBackSchema} hand-back, the file's `connection` and
+ * every setting no step edits are kept from the file itself, and the answer is
+ * `{ written: true }` -- nothing of the document crosses back. A hand-back the
+ * file or the settings refuse is a `400 { error }`.
  */
 export const Route = createFileRoute("/api/jobs/config")({
   server: {
@@ -44,6 +65,38 @@ export const Route = createFileRoute("/api/jobs/config")({
             return jobJsonResponse({ error: error.message }, 400);
           throw error;
         }
+      },
+      PUT: async ({ request }) => {
+        const gate = gateJobRoute(request);
+        if (gate.kind === "response") return gate.response;
+
+        const body = await readJobRequestBody(
+          request,
+          MAX_CONFIG_HAND_BACK_BODY_BYTES,
+        );
+        if (body.kind === "too-large") return jobEmptyResponse(413);
+        if (body.kind === "invalid") return jobEmptyResponse(400);
+
+        const parsed = jobConfigurationHandBackSchema.safeParse(body.value);
+        if (!parsed.success)
+          return jobJsonResponse(
+            { error: formatFirstIssue(parsed.error.issues) },
+            400,
+          );
+        try {
+          handBackMountedConfiguration(
+            readJobApiConfig().dataRoot,
+            parsed.data,
+          );
+        } catch (error) {
+          if (
+            error instanceof ConfigurationLoadRefusedError ||
+            error instanceof ConfigurationHandBackRefusedError
+          )
+            return jobJsonResponse({ error: error.message }, 400);
+          throw error;
+        }
+        return jobJsonResponse({ written: true });
       },
     },
   },
