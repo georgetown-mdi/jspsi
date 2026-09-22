@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 
@@ -19,11 +20,13 @@ import type { ConnectionConfig, PresentedHostKey } from "@psilink/core";
 
 import {
   establishHostKeyTrust,
+  HOST_KEY_PROBE_DIALS_ONCE,
   type HostKeyPersistence,
   type HostKeyTrustDeps,
 } from "../../src/hostKeyTrust";
 import { applyConnectionOverrides } from "../../src/config";
 import { connectionOverridesFrom } from "../../src/optionDefinitions";
+import { exitCodeForError } from "../../src/util/exit";
 import { snapshotDiagnosticSinkAndLevel } from "../loggingTestSupport";
 
 snapshotDiagnosticSinkAndLevel();
@@ -97,12 +100,102 @@ test("is a no-op for a non-sftp channel (no host key to establish)", async () =>
   expect(deps.probeCalls).toBe(0);
 });
 
-test("a probe failure propagates unchanged and pins nothing", async () => {
+// The connect budget the stalled-host case gives its dial: far above a
+// loopback dial and far below the case timeout, so the wait measured is this
+// bound. A re-dial adds a one-second pause and a further budget, which the
+// tolerance stays under.
+const STALLED_HOST_BUDGET_MS = 500;
+const STALLED_HOST_TOLERANCE_MS = 1_000;
+
+test("against a silent host the probe dials once, so the connect timeout bounds the wait", async () => {
+  // A listener that accepts the TCP connection and never answers: a dropped
+  // endpoint past the SYN. The real probe dials it through the real SSH
+  // stack, and the listener's own count of accepted connections is what
+  // shows whether it was re-dialed.
+  const accepted: net.Socket[] = [];
+  const server = net.createServer((socket) => {
+    socket.on("error", () => {});
+    accepted.push(socket);
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as net.AddressInfo;
+  try {
+    const conn: ConnectionConfig = {
+      channel: "sftp",
+      server: { host: "127.0.0.1", port, username: "psilink-test" },
+      options: {
+        serverConnectTimeoutMs: STALLED_HOST_BUDGET_MS,
+        maxReconnectAttempts: 3,
+      },
+    };
+    process.stdin.isTTY = true;
+    const started = Date.now();
+    const error: unknown = await establishHostKeyTrust(conn, {
+      verbosity: -1,
+      loggerName: "exchange",
+      persistence: { mode: "ephemeral" },
+    }).then(
+      () => new Error("establishHostKeyTrust resolved instead of refusing"),
+      (err: unknown) => err,
+    );
+    const elapsedMs = Date.now() - started;
+
+    expect({
+      dials: accepted.length,
+      withinBudget:
+        elapsedMs < STALLED_HOST_BUDGET_MS + STALLED_HOST_TOLERANCE_MS,
+    }).toEqual({ dials: 1, withinBudget: true });
+    expect(sanitizeErrorForDisplay(error)).toContain(HOST_KEY_PROBE_DIALS_ONCE);
+    if (conn.channel === "sftp")
+      expect(conn.server.hostKeyFingerprint).toBeUndefined();
+  } finally {
+    for (const socket of accepted) socket.destroy();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+}, 20_000);
+
+test("the probe is handed a single dial and the configured connect timeout", async () => {
+  // The connection the exchange dials afterwards keeps its own reconnect
+  // setting; only the probe's dial is bounded to one attempt.
+  const conn: ConnectionConfig = {
+    channel: "sftp",
+    server: { host: "sftp.example.org" },
+    options: { serverConnectTimeoutMs: 7_000, maxReconnectAttempts: 5 },
+  };
+  const probed: ConnectionConfig[] = [];
+  process.stdin.isTTY = true;
+  await establishHostKeyTrust(
+    conn,
+    {
+      verbosity: -1,
+      loggerName: "exchange",
+      persistence: { mode: "ephemeral" },
+    },
+    {
+      probe: (connection) => {
+        probed.push(connection);
+        return Promise.resolve({ fingerprint: FP, keyType: "ssh-ed25519" });
+      },
+      confirm: () => Promise.resolve(true),
+    },
+  );
+  expect(probed).toHaveLength(1);
+  expect(probed[0]?.channel === "sftp" && probed[0].options).toMatchObject({
+    serverConnectTimeoutMs: 7_000,
+    maxReconnectAttempts: 0,
+  });
+  expect(conn.channel === "sftp" && conn.options).toMatchObject({
+    maxReconnectAttempts: 5,
+  });
+  expect(conn.channel === "sftp" && conn.server.hostKeyFingerprint).toBe(FP);
+});
+
+test("a probe failure is refused naming the single dial and keeps its cause", async () => {
   // A dial that never reaches a host key -- a refused connection, an
-  // unresolvable name -- rejects out of the probe. There is no recovery here:
-  // the rejection reaches the caller as the error the probe raised, so the
-  // exchange path classifies a connect failure exactly as it would with no trust
-  // step, and neither the prompt nor a pin follows it.
+  // unresolvable name, a silent host -- rejects out of the probe. The refusal
+  // keeps that rejection as its cause, so the operator still reads what went
+  // wrong and the run exits with the status the failure itself maps to;
+  // neither the prompt nor a pin follows it.
   const conn = sftpConn();
   const failure = new Error("connect ECONNREFUSED 203.0.113.9:22");
   let confirmCalls = 0;
@@ -114,20 +207,56 @@ test("a probe failure propagates unchanged and pins nothing", async () => {
     },
   };
   process.stdin.isTTY = true; // interactive, so the probe is reached
-  await expect(
-    establishHostKeyTrust(
-      conn,
-      {
-        verbosity: 0,
-        loggerName: "exchange",
-        persistence: { mode: "ephemeral" },
-      },
-      deps,
-    ),
-  ).rejects.toBe(failure);
+  const error: unknown = await establishHostKeyTrust(
+    conn,
+    {
+      verbosity: 0,
+      loggerName: "exchange",
+      persistence: { mode: "ephemeral" },
+    },
+    deps,
+  ).then(
+    () => new Error("establishHostKeyTrust resolved instead of refusing"),
+    (err: unknown) => err,
+  );
+  expect((error as Error).cause).toBe(failure);
+  expect(exitCodeForError(error)).toBe(69);
+  const rendered = sanitizeErrorForDisplay(error);
+  expect(rendered).toContain(HOST_KEY_PROBE_DIALS_ONCE);
+  expect(rendered).toContain("--connection-timeout");
+  expect(rendered).toContain("connection.options.server_connect_timeout_ms");
+  expect(rendered).toContain("connect ECONNREFUSED 203.0.113.9:22");
   expect(confirmCalls).toBe(0);
   if (conn.channel === "sftp")
     expect(conn.server.hostKeyFingerprint).toBeUndefined();
+});
+
+test("a probe failure keeps the exit status its cause maps to", async () => {
+  // A cause that is a usage fault, or declares its own status, exits as it
+  // would have without the refusal around it.
+  const failures: Array<[unknown, number]> = [
+    [new UsageError("bad endpoint"), 64],
+    [Object.assign(new Error("declared"), { exitCode: 70 }), 70],
+  ];
+  process.stdin.isTTY = true;
+  for (const [failure, exitCode] of failures) {
+    const error: unknown = await establishHostKeyTrust(
+      sftpConn(),
+      {
+        verbosity: -1,
+        loggerName: "exchange",
+        persistence: { mode: "ephemeral" },
+      },
+      {
+        probe: () => Promise.reject(failure),
+        confirm: () => Promise.resolve(true),
+      },
+    ).then(
+      () => new Error("establishHostKeyTrust resolved instead of refusing"),
+      (err: unknown) => err,
+    );
+    expect(exitCodeForError(error)).toBe(exitCode);
+  }
 });
 
 test("is a no-op when a list of host_key_fingerprints is already pinned", async () => {
