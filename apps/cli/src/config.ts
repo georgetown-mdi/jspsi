@@ -1,7 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import YAML from "yaml";
 import type {
   BuiltInLinkageRuleSet,
   CompatibilityMessageFragment,
@@ -54,14 +53,13 @@ import {
   safeParseMetadata,
   safeParseStandardization,
   sanitizeForDisplay,
+  serializeExchangeDocument,
   snakeizeKey,
-  snakeizeKeys,
   trimPartialControlCharacterMarker,
   UsageError,
   withRetainModeImplications,
 } from "@psilink/core";
 
-import { annotateConnectionGuidance } from "./connectionGuidance";
 import { writeFileOwnerOnly } from "./fileUtils";
 import { parseSensitiveYaml, editSensitiveYamlDocument } from "./sensitiveFile";
 import type { SensitiveFileLabel } from "./sensitiveFile";
@@ -1379,39 +1377,17 @@ export function reconcileConflictError(params: {
 // --- Config writer -----------------------------------------------------------
 
 /**
- * Serialize an {@link ExchangeSpec} and write it to `configPath` as
- * snake_case YAML, owner-read-only -- a config may hold an SFTP credential.
- * Gets the same `0600`/ACL protection as the key file via
+ * Write an {@link ExchangeSpec} to `configPath` as the snake_case YAML document
+ * {@link serializeExchangeDocument} renders -- guidance comments and the
+ * shared-secret strip included -- owner-read-only, since a config may hold an
+ * SFTP credential. Gets the same `0600`/ACL protection as the key file via
  * {@link writeFileOwnerOnly}.
- *
- * The shared secret and its expiration live only in the key file: they are
- * stripped from the top-level `authentication` block here even if the
- * caller left them populated, so the secret cannot be duplicated onto disk.
- * The caller's spec is not mutated.
- *
- * The `connection` block is annotated with the operator guidance
- * {@link annotateConnectionGuidance} attaches -- the channel alternatives, where
- * each channel's block is documented, and the connection tuning as a commented
- * example -- since a config written by `invite`, `accept`, or a saved zero-setup
- * exchange is one the operator edits by hand from here on.
  *
  * Does not guard against overwriting an existing file; callers provision
  * through `provisionConfigAndKey`, which runs the conflict gate first.
  */
 export function saveConfig(configPath: string, spec: ExchangeSpec): void {
-  const sanitized = structuredClone(spec);
-  const auth = sanitized.authentication;
-  if (auth) {
-    delete auth.sharedSecret;
-    delete auth.expires;
-    // Drop the container if those were its only keys, so the config holds no
-    // noisy empty `authentication: {}` block. Operator-policy fields (e.g.
-    // token_max_age_days) keep it non-empty when present.
-    if (Object.keys(auth).length === 0) delete sanitized.authentication;
-  }
-  const doc = new YAML.Document(snakeizeKeys(sanitized));
-  annotateConnectionGuidance(doc);
-  writeFileOwnerOnly(configPath, doc.toString());
+  writeFileOwnerOnly(configPath, serializeExchangeDocument(spec));
 }
 
 /**

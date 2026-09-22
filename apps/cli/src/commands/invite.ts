@@ -11,6 +11,7 @@ import {
   assertPayloadSendDisclosed,
   assertStandardizationMatchesTerms,
   assertTransformsCompile,
+  CONNECTION_BLOCK_NOTICE,
   DEFAULT_PEER_TIMEOUT_MS,
   disclosedColumnNames,
   inferMetadata,
@@ -37,7 +38,6 @@ import {
   persistOutboundPayloadConsent,
   warnOnLinkageRuleSetCitationDrift,
 } from "../config";
-import { CONNECTION_BLOCK_NOTICE } from "../connectionGuidance";
 import { detectFileConflicts } from "../fileUtils";
 import { resolveIdentity, resolveInvitationIdentity } from "../partyIdentity";
 import { resolveRecordOutput } from "../recordFile";

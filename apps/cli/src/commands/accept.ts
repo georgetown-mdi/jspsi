@@ -4,6 +4,7 @@ import type { Argv, Arguments } from "yargs";
 
 import {
   assertCountOnlyTransmitsNoColumn,
+  CONNECTION_BLOCK_NOTICE,
   deriveAcceptedLinkageTerms,
   deriveOutboundPayloadConsent,
   disclosedColumnNames,
@@ -40,7 +41,6 @@ import {
   warnOnLinkageRuleSetCitationDrift,
   type ReconcileDiff,
 } from "../config";
-import { CONNECTION_BLOCK_NOTICE } from "../connectionGuidance";
 import { detectFileConflicts } from "../fileUtils";
 import {
   ACCEPT_IDENTITY_QUESTION,

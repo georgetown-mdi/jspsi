@@ -1,40 +1,24 @@
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { expect, test } from "vitest";
 import YAML from "yaml";
 
 import {
   DEFAULT_MAX_RECONNECT_ATTEMPTS,
-  DEFAULT_PEER_TIMEOUT_MS,
-  DEFAULT_POLLING_FREQUENCY_MS,
   DEFAULT_SERVER_CONNECT_TIMEOUT_MS,
-  getDefaultLinkageTerms,
-  parseExchangeSpec,
-} from "@psilink/core";
-import type { ExchangeSpec } from "@psilink/core";
-
-import { saveConfig } from "../../src/config";
+} from "../../src/config/connection";
 import {
   CONNECTION_BLOCK_DOC_URL,
   CONNECTION_BLOCK_NOTICE,
-} from "../../src/connectionGuidance";
-
-let dir: string;
-
-beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-guidance-"));
-});
-
-afterEach(() => {
-  fs.rmSync(dir, { recursive: true, force: true });
-});
-
-function write(spec: ExchangeSpec): string {
-  const configPath = path.join(dir, "psilink.yaml");
-  saveConfig(configPath, spec);
-  return fs.readFileSync(configPath, "utf8");
-}
+} from "../../src/config/connectionGuidance";
+import { serializeExchangeDocument as write } from "../../src/config/exchangeDocument";
+import { parseExchangeSpec } from "../../src/config/exchangeSpec";
+import type { ExchangeSpec } from "../../src/config/exchangeSpec";
+import {
+  DEFAULT_PEER_TIMEOUT_MS,
+  DEFAULT_POLLING_FREQUENCY_MS,
+} from "../../src/connection/fileSyncConnection";
+import { getDefaultLinkageTerms } from "../../src/defaults/builtInLinkageTerms";
 
 /** The placeholder connection block an offline `psilink invite` writes. */
 function placeholderSpec(): ExchangeSpec {

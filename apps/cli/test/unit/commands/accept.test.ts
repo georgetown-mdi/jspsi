@@ -9,6 +9,8 @@ import logLibrary from "loglevel";
 import YAML from "yaml";
 import {
   ACCEPTOR_DEDUPLICATE_CONTROL_FACTS,
+  CONNECTION_BLOCK_DOC_URL,
+  CONNECTION_BLOCK_NOTICE,
   CONSENT_FACTS,
   DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
   DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
@@ -114,10 +116,6 @@ import {
 } from "../../../src/partyIdentity";
 import { saveConfig } from "../../../src/config";
 import { webRtcDialFrom } from "../../../src/protocol";
-import {
-  CONNECTION_BLOCK_DOC_URL,
-  CONNECTION_BLOCK_NOTICE,
-} from "../../../src/connectionGuidance";
 import { exitCodeForError } from "../../../src/util/exit";
 import { promptConfirm, promptFreeText } from "../../../src/util/prompt";
 import { captureStdio } from "../../loggingTestSupport";

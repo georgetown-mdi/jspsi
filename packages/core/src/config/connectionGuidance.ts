@@ -1,13 +1,14 @@
 import YAML from "yaml";
 
 import {
-  DEFAULT_MAX_RECONNECT_ATTEMPTS,
   DEFAULT_PEER_TIMEOUT_MS,
   DEFAULT_POLLING_FREQUENCY_MS,
+} from "../connection/fileSyncConnection.js";
+import {
+  DEFAULT_MAX_RECONNECT_ATTEMPTS,
   DEFAULT_SERVER_CONNECT_TIMEOUT_MS,
-} from "@psilink/core";
-
-import { commentBlock, commentKey } from "./yamlComments";
+} from "./connection.js";
+import { commentBlock, commentKey } from "./yamlComments.js";
 
 /**
  * The documentation section holding one runnable `connection` block per channel.
