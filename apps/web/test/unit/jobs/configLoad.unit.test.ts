@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -248,6 +249,30 @@ describe("a mounted file the load cannot open", () => {
     const dir = mountDir();
     fs.mkdirSync(path.join(dir, "psilink.yaml"));
     const message = refusalFrom(dir);
+    expect(message).toContain("could not");
+    expect(message).not.toContain("too large");
+  });
+
+  test("a FIFO named psilink.yaml refuses as unreadable, without blocking", () => {
+    // A plain open() of a FIFO for reading blocks until a writer opens it; with
+    // no writer ever attached here, a blocking open would wedge this
+    // synchronous server. The load must open non-blocking so the refusal
+    // returns promptly instead.
+    let mkfifoAvailable = true;
+    const dir = mountDir();
+    const filePath = path.join(dir, "psilink.yaml");
+    try {
+      execFileSync("mkfifo", [filePath]);
+    } catch {
+      mkfifoAvailable = false;
+    }
+    if (!mkfifoAvailable) {
+      console.warn("skipping FIFO test: mkfifo is not available");
+      return;
+    }
+    const started = Date.now();
+    const message = refusalFrom(dir);
+    expect(Date.now() - started).toBeLessThan(2000);
     expect(message).toContain("could not");
     expect(message).not.toContain("too large");
   });
@@ -555,5 +580,46 @@ describe("the disclosed projection", () => {
       "credentialMethod",
     ]);
     expect(Object.hasOwn(disclosed, "authentication")).toBe(false);
+  });
+
+  test("the options block states exactly the file-sync tuning fields", () => {
+    const spec = {
+      connection: {
+        channel: "sftp",
+        server: {
+          host: "h",
+          hostKeyFingerprint: FINGERPRINT,
+          password: "@/secret",
+        },
+        options: {
+          peerTimeoutMs: 1,
+          serverConnectTimeoutMs: 2,
+          maxReconnectAttempts: 3,
+          pollIntervalMs: 4,
+          timestampInFilename: true,
+          locklessRendezvous: true,
+          peerId: "site",
+          retainFiles: true,
+          unexpectedFiles: "warn",
+          connectionPerPoll: true,
+        },
+      },
+      linkageTerms: terms(),
+    } as unknown as ExchangeSpec;
+    const disclosed = disclosedDocument(spec);
+    expect(Object.keys(disclosed.options ?? {}).sort()).toEqual(
+      [
+        "peerTimeoutMs",
+        "serverConnectTimeoutMs",
+        "maxReconnectAttempts",
+        "pollIntervalMs",
+        "timestampInFilename",
+        "locklessRendezvous",
+        "peerId",
+        "retainFiles",
+        "unexpectedFiles",
+        "connectionPerPoll",
+      ].sort(),
+    );
   });
 });

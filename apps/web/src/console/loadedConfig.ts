@@ -35,6 +35,7 @@ import { EXCHANGE_FILES_DEFAULT } from "./exchangeFilesModel";
 
 import type {
   DisclosedExchangeDocument,
+  DisclosedFileSyncOptions,
   DisclosedSftpServer,
 } from "@jobs/configLoad";
 import type {
@@ -52,11 +53,7 @@ import type {
   DurationField,
   DurationUnit,
 } from "./connectionTuningModel";
-import type {
-  ExchangeFilesDraft,
-  FileSyncToggle,
-  UnexpectedFilesChoice,
-} from "./exchangeFilesModel";
+import type { ExchangeFilesDraft, FileSyncToggle } from "./exchangeFilesModel";
 import type { SftpConnectionFormValues } from "./sftpConnectionForm";
 
 /**
@@ -143,15 +140,9 @@ function fileSyncToggle(stated: boolean | undefined): FileSyncToggle {
  * configuration stating nothing opens the card exactly as a fresh one does.
  */
 export function connectionTuningFromOptions(
-  options: Record<string, unknown> | undefined,
+  options: DisclosedFileSyncOptions | undefined,
 ): ConnectionTuningDraft {
-  const stated = (options ?? {}) as {
-    pollIntervalMs?: number;
-    peerTimeoutMs?: number;
-    serverConnectTimeoutMs?: number;
-    maxReconnectAttempts?: number;
-    connectionPerPoll?: boolean;
-  };
+  const stated = options ?? {};
   return {
     pollInterval: durationField(
       stated.pollIntervalMs,
@@ -181,15 +172,9 @@ export function connectionTuningFromOptions(
  * one written with retain alone reopens the same way.
  */
 export function exchangeFilesFromOptions(
-  options: Record<string, unknown> | undefined,
+  options: DisclosedFileSyncOptions | undefined,
 ): ExchangeFilesDraft {
-  const stated = (options ?? {}) as {
-    retainFiles?: boolean;
-    timestampInFilename?: boolean;
-    locklessRendezvous?: boolean;
-    peerId?: string;
-    unexpectedFiles?: UnexpectedFilesChoice;
-  };
+  const stated = options ?? {};
   return {
     retainFiles: stated.retainFiles ?? EXCHANGE_FILES_DEFAULT.retainFiles,
     timestampInFilename: fileSyncToggle(stated.timestampInFilename),

@@ -53,7 +53,11 @@ import { composeConfigDocument, composeSftpConfigSpec } from "./intentConfig";
 import { JOB_FILE_NAMES } from "./intentSchemas";
 import { resolveWorkdirFile } from "./workdir";
 
-import type { ExchangeSpec, SigningConfig } from "@psilink/core";
+import type {
+  ExchangeSpec,
+  FileSyncOptions,
+  SigningConfig,
+} from "@psilink/core";
 import type {
   JobExchangeIntentBase,
   JobFiledropExchangeIntent,
@@ -130,6 +134,24 @@ export interface DisclosedSigning {
 }
 
 /**
+ * The file-sync tuning fields the authoring forms edit, projected from core's
+ * {@link FileSyncOptions} by name so a field a later schema version adds
+ * reaches no browser until this states it.
+ */
+export interface DisclosedFileSyncOptions {
+  peerTimeoutMs?: number;
+  serverConnectTimeoutMs?: number;
+  maxReconnectAttempts?: number;
+  pollIntervalMs?: number;
+  timestampInFilename?: boolean;
+  locklessRendezvous?: boolean;
+  peerId?: string;
+  retainFiles?: boolean;
+  unexpectedFiles?: "error" | "warn" | "ignore";
+  connectionPerPoll?: boolean;
+}
+
+/**
  * The document as the browser receives it: the authoring forms' own fields and
  * nothing else. Not an {@link ExchangeSpec} -- it is a projection, so a field
  * added to the shared schema reaches no browser until this states it.
@@ -137,7 +159,7 @@ export interface DisclosedSigning {
 export interface DisclosedExchangeDocument {
   channel: "sftp" | "filedrop";
   server?: DisclosedSftpServer;
-  options?: Record<string, unknown>;
+  options?: DisclosedFileSyncOptions;
   linkageTerms: ExchangeSpec["linkageTerms"];
   metadata?: ExchangeSpec["metadata"];
   standardization?: ExchangeSpec["standardization"];
@@ -549,6 +571,44 @@ function disclosedServer(document: ExchangeSpec): DisclosedSftpServer {
 }
 
 /**
+ * The `options` block as the browser receives it, named field by field so a
+ * field a later {@link FileSyncOptions} version adds reaches no browser until
+ * this function states it.
+ */
+function disclosedOptions(options: FileSyncOptions): DisclosedFileSyncOptions {
+  return {
+    ...(options.peerTimeoutMs !== undefined
+      ? { peerTimeoutMs: options.peerTimeoutMs }
+      : {}),
+    ...(options.serverConnectTimeoutMs !== undefined
+      ? { serverConnectTimeoutMs: options.serverConnectTimeoutMs }
+      : {}),
+    ...(options.maxReconnectAttempts !== undefined
+      ? { maxReconnectAttempts: options.maxReconnectAttempts }
+      : {}),
+    ...(options.pollIntervalMs !== undefined
+      ? { pollIntervalMs: options.pollIntervalMs }
+      : {}),
+    ...(options.timestampInFilename !== undefined
+      ? { timestampInFilename: options.timestampInFilename }
+      : {}),
+    ...(options.locklessRendezvous !== undefined
+      ? { locklessRendezvous: options.locklessRendezvous }
+      : {}),
+    ...(options.peerId !== undefined ? { peerId: options.peerId } : {}),
+    ...(options.retainFiles !== undefined
+      ? { retainFiles: options.retainFiles }
+      : {}),
+    ...(options.unexpectedFiles !== undefined
+      ? { unexpectedFiles: options.unexpectedFiles }
+      : {}),
+    ...(options.connectionPerPoll !== undefined
+      ? { connectionPerPoll: options.connectionPerPoll }
+      : {}),
+  };
+}
+
+/**
  * The parsed document as the browser receives it. An explicit mapping rather
  * than a strip of the parsed object: every disclosed field is written here by
  * name, so a credential, a container path, or a field a later schema version
@@ -558,13 +618,16 @@ export function disclosedDocument(
   document: ExchangeSpec,
 ): DisclosedExchangeDocument {
   const { connection } = document;
-  const options = connection.options;
+  const options: FileSyncOptions | undefined =
+    connection.channel === "sftp" || connection.channel === "filedrop"
+      ? connection.options
+      : undefined;
   return {
     channel: consoleChannel(document),
     ...(connection.channel === "sftp"
       ? { server: disclosedServer(document) }
       : {}),
-    ...(options !== undefined ? { options: { ...options } } : {}),
+    ...(options !== undefined ? { options: disclosedOptions(options) } : {}),
     linkageTerms: document.linkageTerms,
     ...(document.metadata !== undefined ? { metadata: document.metadata } : {}),
     ...(document.standardization !== undefined
@@ -661,7 +724,13 @@ export function loadMountedConfiguration(
   if (filePath === null) return absent;
   let fd: number;
   try {
-    fd = fs.openSync(filePath, "r");
+    // O_NONBLOCK, not the plain "r" flag: opening a FIFO for read-only blocks
+    // until a writer opens it, which would wedge this synchronous server on a
+    // FIFO named psilink.yaml (or a symlink to one). O_NONBLOCK makes that
+    // open return immediately instead; the fstat below then refuses it as not
+    // a regular file. A regular file ignores the flag, so its open and read
+    // are unchanged.
+    fd = fs.openSync(filePath, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return absent;
     throw new ConfigurationLoadRefusedError(UNREADABLE_CONFIGURATION_MESSAGE);
