@@ -158,6 +158,21 @@ describe("the notices name the settings and say what happens to them", () => {
     expect(notice).toMatch(/psilink on the command line/);
   });
 
+  test("a held setting the run does not apply says so", () => {
+    const notice = carriedThroughNotice(["authentication.token_max_age_days"]);
+    expect(notice).toContain("The run started here does not apply it");
+    expect(notice).toContain("hands back states it as your file does");
+  });
+
+  test("a record the run states is not named as unapplied", () => {
+    const notice = carriedThroughNotice([
+      "expected_payload_columns",
+      "outbound_payload_consent",
+    ]);
+    expect(notice).toContain("keeps each unchanged");
+    expect(notice).not.toContain("does not apply");
+  });
+
   test("several held settings are all named", () => {
     const notice = carriedThroughNotice([
       "authentication.token_max_age_days",
@@ -166,6 +181,9 @@ describe("the notices name the settings and say what happens to them", () => {
     expect(notice).toContain("authentication.token_max_age_days");
     expect(notice).toContain("expected_payload_columns");
     expect(notice).toContain("keeps each unchanged");
+    expect(notice).toContain(
+      "does not apply authentication.token_max_age_days",
+    );
   });
 
   test("no held setting draws no notice", () => {
@@ -218,12 +236,13 @@ describe("the notices name the settings and say what happens to them", () => {
     expect(notices[0]).toMatch(/review step/);
   });
 
-  test("an unrunnable sftp channel points at the same choice", () => {
+  test("an sftp channel with no connection names the step that authors one", () => {
     const read = mountedConfigurationRead(opened());
     const notices = mountedConfigurationNotices(
       withUnavailableTransport(read.state, "sftp"),
     );
     expect(notices[0]).toContain("over SFTP");
+    expect(notices[0]).toMatch(/connection step/);
     expect(notices[0]).toMatch(/review step/);
   });
 

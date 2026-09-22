@@ -136,7 +136,7 @@ that promises, and what it does not, is bounded:
   `psilink accept` hand `saveConfig` a spec they assembled rather than one the
   schema parsed, so reading one of their files and writing it back states every
   setting at the same value with keys reordered inside a block. Measured against
-  the built CLI in `apps/web/test/unit/jobs/configExportParity.unit.test.ts`.
+  the built CLI in `apps/web/test/interop/consoleExportParity.test.ts`.
 - **A default a writing surface states is written.** The console's
   connection-tuning card states a value for every setting it offers, so a run
   composed from a file that left one unset writes it explicitly, at the value it
