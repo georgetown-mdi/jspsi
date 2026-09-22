@@ -26,10 +26,9 @@ on:
   # unit suite is driven by fixtures that workspace holds, so a change confined
   # to them would otherwise weaken this gate without re-running it.
   #
-  # The negated entries below exclude markdown under the directory globs above:
-  # none of the suites this gate runs reads a markdown file as a fixture or
-  # input (verified by grepping the workspaces this workflow builds and tests
-  # for a `.md` read), so a change confined to one starts nothing here. A
+  # The negated entries below exclude markdown under the directory globs above.
+  # The claim that no suite this gate runs reads one as a fixture or input is
+  # held by scripts/check-deploy-trigger-graph.test.mjs, not by this comment. A
   # negated pattern applies only to paths a positive pattern earlier in this
   # list already matched, per GitHub's paths evaluation order, so each sits
   # after the glob it narrows.

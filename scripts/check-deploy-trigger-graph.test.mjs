@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -15,6 +16,7 @@ import {
   readTriggerPaths,
   sourceMapPaths,
   toRepoPath,
+  trackedFiles,
   unreachedRoots,
 } from "./check-deploy-trigger-graph.mjs";
 import { parseWorkflow, workflowDocument } from "./lib/workflows.mjs";
@@ -116,6 +118,74 @@ describe("compiling a path filter", () => {
       );
     },
   );
+});
+
+describe("holding the markdown negation against what the gate reads", () => {
+  // eb_build_and_test.yaml's pull_request filter negates markdown under each
+  // positive prefix on the claim that no suite this gate runs reads one as a
+  // fixture or input. This is that claim as a check: no tracked non-markdown
+  // file under a tree the gate builds or tests may name a negated markdown
+  // path, so a PR adding such a read and editing only the markdown file could
+  // no longer skip the gate silently.
+  const gateFilterPaths = workflowDocument(
+    repoRoot,
+    ".github/workflows/eb_build_and_test.yaml",
+  ).on.pull_request.paths;
+
+  const negatedMarkdownPrefixes = gateFilterPaths
+    .map((pattern) => /^!(.+)\/\*\*\/\*\.md$/.exec(pattern)?.[1])
+    .filter((prefix) => prefix !== undefined);
+
+  // The cross-runtime suite (matrix.build-cli in eb_build_and_test.yaml) builds
+  // apps/cli even though the filter carries no apps/cli entry of its own.
+  const builtPrefixes = [
+    ...gateFilterPaths
+      .filter((pattern) => !pattern.startsWith("!") && pattern.endsWith("/**"))
+      .map((pattern) => pattern.slice(0, -"/**".length)),
+    "apps/cli",
+  ];
+
+  it("declares at least one negated markdown prefix", () => {
+    expect(negatedMarkdownPrefixes.length).toBeGreaterThan(0);
+  });
+
+  it("is read by no tracked non-markdown source under a tree the gate builds or tests", () => {
+    const tracked = trackedFiles(repoRoot);
+    const markdownPaths = negatedMarkdownPrefixes.flatMap((prefix) =>
+      [...tracked].filter(
+        (file) => file.startsWith(`${prefix}/`) && file.endsWith(".md"),
+      ),
+    );
+    expect(markdownPaths.length).toBeGreaterThan(0);
+
+    // git grep over the tracked tree, not a per-file read: a directory-scoped
+    // pathspec plus a fixed-string search across every negated markdown path in
+    // one process is what keeps this under a second.
+    const pathspecs = [
+      ...builtPrefixes.map((prefix) => `${prefix}/**`),
+      ":!*.md",
+    ];
+    let offenders = [];
+    try {
+      const output = execFileSync(
+        "git",
+        [
+          "grep",
+          "-n",
+          "-F",
+          ...markdownPaths.flatMap((path) => ["-e", path]),
+          "--",
+          ...pathspecs,
+        ],
+        { cwd: repoRoot, encoding: "utf8" },
+      );
+      offenders = output.split("\n").filter(Boolean);
+    } catch (error) {
+      // git grep exits 1 for "no match", which is the passing case here.
+      if (error.status !== 1) throw error;
+    }
+    expect(offenders).toEqual([]);
+  });
 });
 
 describe("normalizing what a build reports", () => {
