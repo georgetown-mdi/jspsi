@@ -43,6 +43,17 @@ updates:
           - "peerjs"
           - "peerjs-js-binarypack"
           - "werift"
+      # The @vitest/* plugins peer-pin the exact vitest version, so an
+      # ungrouped major bump arrives as several separate pull requests that
+      # each fail their own install and must be landed by hand. Grouped here,
+      # with no update-types restriction, so a major moves the whole set in
+      # one pull request.
+      vitest:
+        patterns:
+          - "vitest"
+          - "@vitest/browser"
+          - "@vitest/browser-playwright"
+          - "@vitest/coverage-v8"
       # Batch routine dependency bumps to reduce noise. A package whose upgrade
       # carries a checklist in docs/spec/DEPENDENCY_PINS.md is excluded below,
       # or its bump rides this batch and is skimmed as routine instead;
@@ -61,6 +72,10 @@ updates:
           - "peerjs"
           - "peerjs-js-binarypack"
           - "werift"
+          - "vitest"
+          - "@vitest/browser"
+          - "@vitest/browser-playwright"
+          - "@vitest/coverage-v8"
           # Inlined into a built @psilink/core artifact rather than resolved
           # at runtime -- canonicalize in every build, re2js and yaml in the
           # standalone UMD browser build. Excluded so each bump is an
