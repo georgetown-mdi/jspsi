@@ -426,6 +426,7 @@ export type {
   Metadata,
   OwnColumnSelection,
 } from "./config/metadata";
+export { OutboundPayloadConsentSchema } from "./config/outboundPayloadConsent";
 export type { OutboundPayloadConsent } from "./config/outboundPayloadConsent";
 export { FINGERPRINT_REGEX, partnerPinIsPresent } from "./config/signing";
 export type { SigningConfig } from "./config/signing";
