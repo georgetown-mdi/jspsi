@@ -25,6 +25,14 @@ on:
   # packages/testkit/** is here for the same reason the test trees are: the web
   # unit suite is driven by fixtures that workspace holds, so a change confined
   # to them would otherwise weaken this gate without re-running it.
+  #
+  # The negated entries below exclude markdown under the directory globs above:
+  # none of the suites this gate runs reads a markdown file as a fixture or
+  # input (verified by grepping the workspaces this workflow builds and tests
+  # for a `.md` read), so a change confined to one starts nothing here. A
+  # negated pattern applies only to paths a positive pattern earlier in this
+  # list already matched, per GitHub's paths evaluation order, so each sits
+  # after the glob it narrows.
   pull_request:
     branches: [main, staging]
     paths:
@@ -42,6 +50,12 @@ on:
       # workflow -- narrowing the filter is exactly the change the check exists
       # to catch, and it touches nothing else here.
       - ".github/workflows/eb_deploy.yaml"
+      - "!lib/**/*.md"
+      - "!apps/web/**/*.md"
+      - "!packages/core/**/*.md"
+      - "!packages/peerjs-broker/**/*.md"
+      - "!packages/testkit/**/*.md"
+      - "!.github/actions/setup/**/*.md"
 
   workflow_call:
     outputs:

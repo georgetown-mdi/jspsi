@@ -91,6 +91,23 @@ describe("compiling a path filter", () => {
     expect(filter.matches("apps/web/srcs/main.tsx")).toBe(false);
   });
 
+  it("excludes an extension under a prefix a negated /**/*.ext pattern names", () => {
+    const filter = compileFilter(["apps/web/**", "!apps/web/**/*.md"]);
+    expect(filter.matches("apps/web/README.md")).toBe(false);
+    expect(filter.matches("apps/web/deploy/aws_eb/README.md")).toBe(false);
+    expect(filter.matches("apps/web/src/main.tsx")).toBe(true);
+    // Unmatched by the earlier positive pattern in the first place.
+    expect(filter.matches("packages/core/README.md")).toBe(false);
+  });
+
+  it("compiles every pattern eb_build_and_test.yaml's pull_request filter declares", () => {
+    const filter = compileFilter(
+      workflowDocument(repoRoot, ".github/workflows/eb_build_and_test.yaml").on
+        .pull_request.paths,
+    );
+    expect(filter.patterns.length).toBeGreaterThan(0);
+  });
+
   it.each(["apps/web/*.ts", "!apps/web/test/**", "apps/*/src/**", "**"])(
     "throws on the unsupported pattern %s",
     (pattern) => {
