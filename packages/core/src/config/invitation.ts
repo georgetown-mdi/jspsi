@@ -87,17 +87,12 @@ export interface FileDropEndpoint {
 }
 
 /**
- * A credential-free connection locator an invitation MAY hold so the acceptor
- * can reach the rendezvous point without separate out-of-band setup.
- * Discriminated by `channel`, mirroring `ConnectionConfig` in `connection.ts`.
- *
- * INVARIANT: an endpoint contains only a public locator (signaling URL, SFTP
- * host/port, file-drop path, or a split inbound/outbound directory pair) and
- * MUST NEVER contain credentials -- no password, private key, key file, or
- * PeerJS API key. The per-channel shapes have no field for any of these, and
- * {@link ConnectionEndpointSchema} rejects any field outside the locator
- * allowlist, so a credential cannot ride along. A public locator is not a
- * secret, so including it does not weaken the invitation.
+ * A connection locator an invitation MAY hold so the acceptor can reach the
+ * rendezvous point without separate out-of-band setup; discriminated by
+ * `channel`, as `ConnectionConfig` in `connection.ts` is. Locator only:
+ * {@link ConnectionEndpointSchema} rejects every field outside the per-channel
+ * allowlist, a credential or `turn` entry included -- the current release's
+ * shape, not a confidentiality rule (docs/SECURITY_DESIGN.md).
  */
 export type ConnectionEndpoint =
   WebRTCEndpoint | SFTPEndpoint | FileDropEndpoint;
@@ -256,7 +251,7 @@ const SFTPEndpointSchema = z.strictObject(
 // config is re-validated by connection.ts (which enforces absolute), so a bad
 // absolute path is caught where it matters.
 //
-// The endpoint's security invariant is 'no credentials', not 'absolute path'.
+// The endpoint's shape rule is 'locator only', not 'absolute path'.
 // Distinctness of the split halves, unlike absoluteness, survives the swap, so
 // it IS enforced here by the directory-mode refines. `path` is optional; those
 // refines require exactly one form (single path or the split pair).
@@ -404,17 +399,11 @@ const ConnectionEndpointSchema: z.ZodType<ConnectionEndpoint> = z
 // --- Token -------------------------------------------------------------------
 
 /**
- * The invitation token passed from inviter to acceptor out-of-band. Holds
- * linkage terms and a short-lived shared-secret credential, and MAY hold a
- * credential-free connection endpoint (see {@link ConnectionEndpoint}) so the
- * acceptor can reach the rendezvous point without separate out-of-band setup.
- *
- * The endpoint is a public locator only: the token MUST NEVER hold connection
- * credentials (password, private key, key file, PeerJS API key). Each party
- * still configures the credential portion of its own `connection` block
- * independently. Because the token holds the established shared secret -- and,
- * for the web flow, the rendezvous derived from it -- the encoded invitation is
- * confidential and must travel only over a trusted out-of-band channel.
+ * The invitation token passed from inviter to acceptor out-of-band: linkage
+ * terms, the short-lived shared secret, and an optional locator-only
+ * {@link ConnectionEndpoint}. Confidential, since the secret authenticates its
+ * holder and derives the WebRTC rendezvous ids and relay key; each party
+ * configures its own connection credentials in the current release.
  */
 export interface InvitationToken {
   /**
@@ -441,8 +430,7 @@ export interface InvitationToken {
   /** ISO 8601 datetime after which this token is rejected at accept time. */
   expires?: string;
   /**
-   * Optional credential-free connection locator (see
-   * {@link ConnectionEndpoint}). Never holds credentials.
+   * Optional locator-only connection endpoint (see {@link ConnectionEndpoint}).
    */
   connectionEndpoint?: ConnectionEndpoint;
   /**

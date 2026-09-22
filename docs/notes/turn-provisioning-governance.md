@@ -33,6 +33,26 @@ Owner direction, taken as given and not re-examined here:
   own.** Both entries merge into one ICE server list, and the inviter's relay
   serves both parties by design.
 
+**Superseded 2026-09-22, by an owner ruling on the relay work.** Two inputs
+this record relied on are superseded; its measurements and governance findings
+stand.
+
+- **The credential-free invitation is not a rule.** This record cites
+  [SECURITY_DESIGN.md](../SECURITY_DESIGN.md#invitation-contents-and-confidentiality)
+  for an invitation that can never hold a credential; the owner had not approved
+  that rule. The invitation is confidential, and a connection credential may be
+  included where its lifetime fits the invitation's acceptance window. The
+  objection under [Runbook relay](#runbook-relay) that a one-hour credential
+  would expire before a slow acceptance stands as a lifetime mismatch, not as a
+  prohibition.
+- **The inviter's relay does not serve both parties in the first cut.** Each
+  party relays through its own relay, with a credential derived from the
+  exchange's shared secret
+  ([PROTOCOL.md](../spec/PROTOCOL.md#relay-credential-derivation)), so no relay
+  entry or relay credential passes between the parties and the invitation holds
+  only its signaling locator. Delivering an inviter's relay to a partner who has
+  none, sealed at rendezvous, is a later option and not part of that cut.
+
 Taken from the relay measurement rather than measured again: TURN over TLS on
 443 relays a UDP-blocked CLI party, through TLS interception once the
 interception CA is trusted on the CLI host; the recommended shape is a shared,
@@ -299,7 +319,8 @@ a partner, or to an unattended browser party, on every run without an operator
 minting it. What it leaves open is how the
 partner authenticates to the endpoint. The invitation is credential-free by
 design
-([SECURITY_DESIGN.md](../SECURITY_DESIGN.md#invitation-contents-and-confidentiality)),
+([SECURITY_DESIGN.md](../SECURITY_DESIGN.md#invitation-contents-and-confidentiality);
+superseded as a rule, see [What this record assumes](#what-this-record-assumes)),
 and a per-partner API credential issued out of band is long-lived.
 **Advisory:** an endpoint credential derived from the exchange's own rotating
 shared secret, which the inviter already holds, is one candidate; the
@@ -346,7 +367,8 @@ at the cost of outbound UDP to the relay's high ports.
 When the partner's network does block UDP, the credential has to arrive per
 exchange, and none of the three routes fits:
 
-- **The invitation** is minted once, is credential-free by design, and may wait
+- **The invitation** is minted once, is credential-free by design (superseded
+  as a rule, see [What this record assumes](#what-this-record-assumes)), and may wait
   up to a year for acceptance
   ([SECURITY_DESIGN.md](../SECURITY_DESIGN.md#recurring-exchange-authentication)).
   A one-hour credential in it would expire before a slow acceptance and would
@@ -404,10 +426,14 @@ browser's relay entry can come only from the deployment.
   operator in the loop, and it is where a runbook relay ends up once its
   partners block UDP.
 - **Runbook relay:** be the inviter. The inviter's relay serves both parties,
-  so the party that has one should send the invitation. Pair the reference relay
+  so the party that has one should send the invitation. (Superseded for the
+  first cut, where each party uses its own relay; see
+  [What this record assumes](#what-this-record-assumes).) Pair the reference relay
   with a stable name registered well ahead, and with an allow-and-do-not-inspect
   request to each partner's network team at onboarding.
-- **No relay of its own:** be the acceptor, and use the inviter's relay. Where
+- **No relay of its own:** be the acceptor, and use the inviter's relay (not
+  available in the first cut; see
+  [What this record assumes](#what-this-record-assumes)). Where
   the partner has none, choose a managed relay that signs a BAA or document a
   conduit determination, and set its credential lifetime.
 - **Every profile:** name the relay in the data sharing agreement, as the SFTP

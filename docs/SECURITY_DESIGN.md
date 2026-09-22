@@ -1,7 +1,7 @@
 ---
 title: "psilink Security Design"
 review_owner: "psilink maintainers"
-last_reviewed: "2026-09-17"
+last_reviewed: "2026-09-22"
 ---
 
 # psilink security
@@ -159,13 +159,24 @@ The shared secret is a 32-byte value holding 256 bits of entropy, whether minted
 
 #### Invitation contents and confidentiality
 
-An invitation has the linkage terms and the short-lived setup secret, and it may include a connection endpoint: a public locator (a PeerJS signaling URL, an SFTP host and port, or a file-drop directory) telling the acceptor where to rendezvous. A locator names a meeting point, not a way to authenticate at it, so it is not a secret. The schema enforces that the endpoint contains no password, private key, key file, PeerJS API key, or server-identity material such as an SSH host-key fingerprint; an invitation with any such field is rejected when decoded. Connection credentials are therefore never transmitted in an invitation; each party configures its own.
+An invitation holds the linkage terms, the short-lived setup secret, and optionally a connection endpoint: a locator (a PeerJS signaling URL, an SFTP host and port, or a file-drop directory) telling the acceptor where to rendezvous. The invitation is confidential, so it may hold what both parties need to meet. A locator names a meeting point, not a way to authenticate at it.
+
+A connection credential may be included where its lifetime fits the invitation's acceptance window: the credential must stay valid for as long as the invitation can be accepted, which may be up to a year. A one-hour relay credential does not fit an invitation that may wait days for acceptance.
+
+What the current release accepts is narrower than that rule:
+
+- **The endpoint is a locator only.** The schema rejects any other field -- a password, private key, key file, PeerJS API key, TURN relay entry, or server-identity material such as an SSH host-key fingerprint -- and an invitation with any such field is rejected when decoded. Each party configures its own connection credentials.
+- **Each party relays through its own relay.** A party whose WebRTC connection needs a TURN relay uses one its own side controls, so no relay entry or relay credential passes between the parties; a partner sees only the relay's address, as that party's relayed ICE candidate. Delivering an inviter's relay to a partner who has none is not supported.
 
 On the web, the inviter derives the linkage terms from its own data file rather than authoring them by hand (see [COMMUNICATION.md](COMMUNICATION.md#web-invitation)). The terms reflect the inviter's column _shape_ (which default field types the file has) but never a row _value_; the file is read in the browser and never uploaded. This is presence-only disclosure to the recipient, who must hold matching columns to link at all. Where the inviter discloses payload columns, the terms also embed those columns' _names_ as a data dictionary the recipient consents to; the names are those of columns whose values that recipient already receives on a match, so naming them discloses nothing beyond what the match gives, and still no row value is included.
 
 The decoder also bounds the size and complexity of every attacker-influenceable invitation field: per-field size caps (the 4-byte checksum detects transcription errors only and is no barrier to a crafted payload), a linear-time regex dialect for partner-supplied transform patterns so a catastrophic-backtracking (ReDoS) pattern cannot hang the acceptor, and caps on transform parameters that would otherwise drive unbounded work from a single crafted constant. A parameter cap bounds what the partner may write, not what a row derives from it -- a substitution template re-inserts the local cell at every match position, and transform steps compose -- so a ceiling on the derived value stands beside those caps and is what bounds per-row work. It refuses the exchange rather than shortening the value, because both parties must derive identical keys. Each is defense-in-depth set far above any legitimate invitation and each fails closed: the field, pattern, and parameter bounds before any row is processed, the derived-value ceiling at the first row that crosses it. The per-field caps, the regex dialect, the parameter ceilings, and the derived-value ceiling are in [CHANNEL_SECURITY.md](spec/CHANNEL_SECURITY.md#application-layer-parsed-input-bounds) and [PROTOCOL.md](spec/PROTOCOL.md#transform-regular-expression-dialect).
 
-The invitation must nonetheless be treated as confidential, because it holds the setup secret an attacker needs to authenticate as you. In the web rendezvous flow both parties derive the coordination-server rendezvous id from that secret, so an attacker who obtains the invitation learns both the authentication secret and the rendezvous id, and could reach the meeting point first to attempt a man-in-the-middle before the intended partner arrives. In that flow the inviter's browser also holds the secret in page memory for the tab's lifetime, the same in-origin exposure as the encoded invitation the page already displays for copying (a same-origin script able to read one could read the other); the secret is never sent to a backend. This is the standard out-of-band trust model: forward invitations only over a trusted channel such as secure email, and treat a leaked invitation as a compromise by generating a fresh one (see [Recovery](CLI.md#recovery)) rather than reusing it.
+The invitation is confidential because it holds the setup secret an attacker needs to authenticate as you. In the web rendezvous flow both parties derive the coordination-server rendezvous id from that secret, so an attacker who obtains the invitation learns both the authentication secret and the rendezvous id, and could reach the meeting point first to attempt a man-in-the-middle before the intended partner arrives. In that flow the inviter's browser also holds the secret in page memory for the tab's lifetime, the same in-origin exposure as the encoded invitation the page already displays for copying (a same-origin script able to read one could read the other); the secret is never sent to a backend.
+
+Holding the secret also grants relay access: a party's relay credential is derived from it, so while that exchange's relay key is registered with a relay, anyone holding the secret can use that relay ([PROTOCOL.md](spec/PROTOCOL.md#relay-credential-derivation)).
+
+This is the standard out-of-band trust model: forward invitations only over a trusted channel such as secure email, and treat a leaked invitation as a compromise by generating a fresh one (see [Recovery](CLI.md#recovery)) rather than reusing it.
 
 #### Recurring web exchanges: single-use vs managed
 
