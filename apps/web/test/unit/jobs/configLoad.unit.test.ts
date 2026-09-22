@@ -440,6 +440,28 @@ describe("the settings the console holds without an editor", () => {
     expect(response.carriedThrough).toEqual([]);
   });
 
+  test("the column roles and the cleaning pipeline are not reported as held", () => {
+    // The columns step edits both and the run writes what it holds, so a
+    // document stating either is opened into that step rather than kept
+    // unchanged.
+    const response = loadDocument(
+      savedSftpDocument({
+        metadata: [
+          {
+            name: "own_notes",
+            type: "other",
+            role: "ignored",
+            is_payload: false,
+          },
+        ],
+        standardization: [
+          { output: "first_name", input: "own_notes", steps: [] },
+        ],
+      }),
+    );
+    expect(response.carriedThrough).toEqual([]);
+  });
+
   test("names only: no value of a carried-through setting is reported", () => {
     const response = loadDocument(
       savedSftpDocument({

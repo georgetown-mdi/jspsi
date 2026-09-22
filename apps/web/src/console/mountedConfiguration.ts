@@ -76,6 +76,16 @@ export const CONFIGURATION_READ_UNAVAILABLE =
   "The console could not read the folder you mounted. Nothing below has " +
   "changed; try opening the configuration again.";
 
+/** What the control says once an invitation is minted from terms the console
+ * already holds: the load fills the steps below it, and those are sealed, so
+ * the offer is withheld rather than shown as a read that would change nothing. */
+export const CONFIGURATION_LOAD_SEALED =
+  "This exchange's invitation is already created. Start a new exchange to " +
+  "open a configuration.";
+
+/** The label of the control that closes an open configuration. */
+export const CLOSE_CONFIGURATION_LABEL = "Close this configuration";
+
 /** What the control says once a configuration is open. */
 export const CONFIGURATION_OPENED =
   "Opened the configuration in your folder. Every step below starts from it, " +
@@ -199,6 +209,21 @@ export function termsNotAppliedNotice(
   );
 }
 
+/**
+ * Whether the control offers a read. A configuration is an input to every step
+ * below it, so the offer stands only while nothing is open (or a read did not
+ * answer) and the draft those steps hold is still editable: once an invitation
+ * is minted the terms are sealed, and a load that filled the cards around them
+ * would report a configuration the run's terms do not state.
+ */
+export function mountedConfigurationOfferable(
+  state: MountedConfigurationState,
+  sealed: boolean,
+): boolean {
+  if (sealed) return false;
+  return state.status === "unread" || state.status === "unavailable";
+}
+
 /** The whole of what an opened configuration puts beside the control, in the
  * order it renders: what this console cannot run at all, then the carry-through
  * notice, since it is about the run itself, then the credential the operator
@@ -230,15 +255,19 @@ export function withUnavailableTransport(
 }
 
 /** The opened state with the settings the operator's input file could not
- * supply named on it, as the file spells them, beside the same control. Nothing
- * to name, or a state that is not an opened configuration, leaves the state as
- * it is. */
+ * supply named on it, as the file spells them, beside the same control. The
+ * names are those of the file the terms reached last, so a state that names
+ * none clears what an earlier one named; a state that is not an opened
+ * configuration is left as it is. */
 export function withTermsNotApplied(
   state: MountedConfigurationState,
   names: ReadonlyArray<string>,
 ): MountedConfigurationState {
-  if (state.status !== "opened" || names.length === 0) return state;
-  return { ...state, notApplied: [...names] };
+  if (state.status !== "opened") return state;
+  return {
+    ...state,
+    notApplied: names.length === 0 ? undefined : [...names],
+  };
 }
 
 /**

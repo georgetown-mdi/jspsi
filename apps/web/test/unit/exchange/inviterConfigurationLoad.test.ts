@@ -15,12 +15,17 @@ import {
 import { RECEIPTS_DEFAULT, receiptsIntentFields } from "@psi/receiptsModel";
 
 import {
+  CONFIGURATION_LOAD_SEALED,
+  MOUNTED_CONFIGURATION_UNREAD,
+  mountedConfigurationNotices,
+  mountedConfigurationOfferable,
+} from "@console/mountedConfiguration";
+import {
   csvDelimiterFromDocument,
   editorWithLoadedTerms,
 } from "@console/loadedConfig";
 import { editorFromCsv, editorWithIncludeOwnColumns } from "@psi/inviterEditor";
 import { EMPTY_SFTP_FORM } from "@console/sftpConnectionForm";
-import { mountedConfigurationNotices } from "@console/mountedConfiguration";
 import { resolveCsvDelimiter } from "@components/csvDelimiterChoice";
 
 import {
@@ -31,14 +36,19 @@ import {
 import { composeSftpConfigSpec } from "@jobs/intentConfig";
 import { intentFor } from "@psi/jobClient/serverJobExchangeDriver";
 import { inviterServerJobConfig } from "@exchange/useInviterExchange";
+import { jobCreateIntentSchema } from "@jobs/intentSchemas";
 
 import { testSftpServerEntry } from "../../utils/jobFixtures";
 
+import type {
+  JobInputSource,
+  ServerJobExchangeTransport,
+} from "@psi/jobClient/serverJobExchangeDriver";
 import type { AcquiredCsv } from "@psi/inviterEditor";
 import type { DisclosedExchangeDocument } from "@jobs/configLoad";
 import type { InviterScreenState } from "@exchange/inviterScreenModel";
 import type { MountedConfigurationAnswer } from "@psi/jobClient/mountedConfigClient";
-import type { ServerJobExchangeTransport } from "@psi/jobClient/serverJobExchangeDriver";
+import type { ProfiledJobInput } from "@psi/jobClient/workInputClient";
 
 // Opening a mounted configuration into the inviter console: which authoring step
 // each block of the document fills, that a setting the file omits keeps the
@@ -103,6 +113,89 @@ function loadedInto(
   });
 }
 
+const COLUMNS = ["client_id", "first_name", "last_name", "dob", "program_code"];
+
+function acquired(): AcquiredCsv {
+  return {
+    fileName: "clients.csv",
+    sizeBytes: 4096,
+    rawRows: [
+      {
+        client_id: "17",
+        first_name: "Alice",
+        last_name: "Smith",
+        dob: "1990-01-02",
+        program_code: "A7",
+      },
+    ],
+    columns: COLUMNS,
+    rowCount: 1,
+  };
+}
+
+function profileOf(csv: AcquiredCsv): ProfiledJobInput {
+  return {
+    name: csv.fileName,
+    sizeBytes: csv.sizeBytes,
+    modifiedAt: 1_700_000_000_000,
+    rowCount: csv.rowCount,
+    columns: csv.columns,
+    sanitizedColumnPositions: [],
+    columnSamples: new Map(),
+  };
+}
+
+/** The console's commit of a mounted input file: the draft is seeded from the
+ * file's own headers, as it is for a console with no configuration open. */
+function withFileCommitted(
+  state: InviterScreenState,
+  csv: AcquiredCsv,
+): InviterScreenState {
+  return inviterScreenReducer(state, {
+    type: "console-file-seeded",
+    source: profileOf(csv),
+    acquired: csv,
+    editor: editorFromCsv("County Health", csv),
+  });
+}
+
+/** The screen's derivation of the draft from the open configuration and the
+ * committed file: the import rebuilds each binding against that file's own
+ * columns, and the reducer books what it could not apply. Runs at every commit
+ * the configuration is open for, and is a no-op over a file it already
+ * reached. */
+function withLoadedTermsDerived(state: InviterScreenState): InviterScreenState {
+  const open = state.loadedConfiguration;
+  const csv = state.acquired;
+  if (open === undefined || csv === undefined || state.editor === undefined)
+    throw new Error("expected an open configuration over a committed file");
+  if (state.loadedTermsFile === csv) return state;
+  const applied = editorWithLoadedTerms(
+    editorWithIncludeOwnColumns(state.editor, open.ownColumns),
+    csv,
+    open,
+  );
+  return inviterScreenReducer(state, {
+    type: "loaded-terms-applied",
+    file: csv,
+    editor: applied.editor,
+    notApplied: applied.notApplied,
+  });
+}
+
+/** A file committed with the open configuration's terms derived over it, the
+ * pair the screen runs for every file while a configuration is open. */
+function withFileRead(
+  state: InviterScreenState,
+  csv: AcquiredCsv = acquired(),
+): InviterScreenState {
+  return withLoadedTermsDerived(withFileCommitted(state, csv));
+}
+
+function columnRole(state: InviterScreenState, name: string) {
+  return state.editor?.draft.metadata.find((column) => column.name === name);
+}
+
 describe("every step the document covers is filled in", () => {
   const state = loadedInto(INVITER_SCREEN_INITIAL, sftpDocument());
 
@@ -154,8 +247,8 @@ describe("every step the document covers is filled in", () => {
     expect(resolved.ok && resolved.delimiter).toBe("|");
   });
 
-  test("the terms, own-column choice and transport wait for the file step", () => {
-    expect(state.pendingLoadedTerms).toEqual({
+  test("the terms, own-column choice and transport are held while it is open", () => {
+    expect(state.loadedConfiguration).toEqual({
       linkageTerms: sftpDocument().linkageTerms,
       ownColumns: "all",
       transport: "sftp",
@@ -216,7 +309,7 @@ describe("a setting the file omits keeps the authoring default", () => {
   });
 
   test("the own-column choice held for the file step is the model's own", () => {
-    expect(state.pendingLoadedTerms?.ownColumns).toBe("none");
+    expect(state.loadedConfiguration?.ownColumns).toBe("none");
   });
 });
 
@@ -238,7 +331,7 @@ describe("a load that does not proceed changes no step", () => {
       expect(state.exchangeFiles).toBe(INVITER_SCREEN_INITIAL.exchangeFiles);
       expect(state.receipts).toBe(INVITER_SCREEN_INITIAL.receipts);
       expect(state.loadedSftpForm).toBeUndefined();
-      expect(state.pendingLoadedTerms).toBeUndefined();
+      expect(state.loadedConfiguration).toBeUndefined();
     },
   );
 
@@ -254,16 +347,155 @@ describe("a load that does not proceed changes no step", () => {
   });
 });
 
-describe("the held terms are released once they are applied", () => {
-  test("applying them clears the hold and announces the import", () => {
-    const loaded = loadedInto(INVITER_SCREEN_INITIAL, sftpDocument());
-    const editor = { sealed: false } as never;
-    const applied = inviterScreenReducer(loaded, {
-      type: "loaded-terms-applied",
-      editor,
-    });
-    expect(applied.pendingLoadedTerms).toBeUndefined();
+// The open configuration is an input to the screen until the operator closes
+// it, and the draft is derived from it and whichever file the file step holds.
+// A file replaced, or voided by the delimiter change a load itself triggers,
+// therefore takes the document's terms again rather than the headers' own
+// inference -- the reading that decides what leaves the machine.
+describe("the open configuration holds across the files it is derived over", () => {
+  const ignoredProgramCode: DisclosedExchangeDocument["metadata"] = [
+    { name: "program_code", type: "other", role: "ignored", isPayload: false },
+  ];
+
+  test("applying the terms announces the import and books the file", () => {
+    const applied = withFileRead(
+      loadedInto(INVITER_SCREEN_INITIAL, sftpDocument()),
+    );
+    expect(applied.loadedConfiguration).toBeDefined();
+    expect(applied.loadedTermsFile).toBe(applied.acquired);
     expect(applied.editorAnnouncement).toMatch(/matching terms/);
+  });
+
+  test("a voided file and the next one keep the document's own roles", () => {
+    // program_code infers as a disclosed payload column, and the file states it
+    // as one this party keeps to itself.
+    const opened = loadedInto(
+      INVITER_SCREEN_INITIAL,
+      sftpDocument({ metadata: ignoredProgramCode }),
+    );
+    const voided = inviterScreenReducer(withFileRead(opened), {
+      type: "console-file-voided",
+    });
+    const again = withFileRead(voided);
+    expect(columnRole(again, "program_code")).toMatchObject({
+      role: "ignored",
+      isPayload: false,
+    });
+    expect(again.mountedConfiguration.status).toBe("opened");
+  });
+
+  test("a re-profile of the same file keeps the terms in force over it", () => {
+    // The authored draft stands through a re-profile, so the terms it already
+    // holds stand with it and nothing is derived a second time.
+    const applied = withFileRead(
+      loadedInto(
+        INVITER_SCREEN_INITIAL,
+        sftpDocument({ metadata: ignoredProgramCode }),
+      ),
+    );
+    const editor = applied.editor;
+    if (editor === undefined) throw new Error("expected a draft");
+    const csv = acquired();
+    const reprofiled = inviterScreenReducer(applied, {
+      type: "console-file-reprofiled",
+      source: profileOf(csv),
+      acquired: csv,
+      editor,
+      announcement: "Re-profiled with the file's current contents",
+    });
+    expect(reprofiled.loadedTermsFile).toBe(csv);
+    expect(columnRole(reprofiled, "program_code")).toMatchObject({
+      role: "ignored",
+    });
+  });
+
+  test("a draft rebuilt over a file the step no longer holds is not seated", () => {
+    const opened = loadedInto(INVITER_SCREEN_INITIAL, sftpDocument());
+    const committed = withFileCommitted(opened, acquired());
+    const voided = inviterScreenReducer(committed, {
+      type: "console-file-voided",
+    });
+    const late = inviterScreenReducer(voided, {
+      type: "loaded-terms-applied",
+      file: committed.acquired as AcquiredCsv,
+      editor: { sealed: false } as never,
+    });
+    expect(late).toBe(voided);
+    expect(late.editor).toBeUndefined();
+  });
+
+  test("closing it leaves the file's own inference and no records", () => {
+    const records = { disclosedPayloadColumns: ["program_code"] };
+    const applied = withFileRead(
+      loadedInto(
+        INVITER_SCREEN_INITIAL,
+        sftpDocument({ ...records, metadata: ignoredProgramCode }),
+      ),
+    );
+    const csv = applied.acquired as AcquiredCsv;
+    const closed = inviterScreenReducer(applied, {
+      type: "loaded-configuration-discarded",
+      editor: editorFromCsv("County Health", csv),
+    });
+    expect(columnRole(closed, "program_code")).toMatchObject({
+      role: "payload",
+      isPayload: true,
+    });
+    expect(closed.loadedConfiguration).toBeUndefined();
+    expect(closed.loadedSftpForm).toBeUndefined();
+    expect(closed.loadedEnforcementRecords).toEqual({});
+    expect(mountedConfigurationNotices(closed.mountedConfiguration)).toEqual(
+      [],
+    );
+    expect(
+      intentFor(
+        inviterServerJobConfig({
+          minted: {
+            linkageTerms: getDefaultLinkageTerms("County Health"),
+            sharedSecret: "a".repeat(43),
+          },
+          inputSource: { kind: "workFile", name: "cohort.csv" },
+          transport: { channel: "sftp" },
+          loadedEnforcementRecords: closed.loadedEnforcementRecords,
+        }),
+      ).disclosedPayloadColumns,
+    ).toBeUndefined();
+  });
+});
+
+// An invitation minted from other terms seals the draft the load would fill, so
+// the load has nothing it can do: the control is withheld and the read changes
+// nothing.
+describe("a sealed draft takes no configuration", () => {
+  const sealed: InviterScreenState = {
+    ...INVITER_SCREEN_INITIAL,
+    editor: { sealed: true } as never,
+  };
+
+  test("the read leaves every step where the mint left it", () => {
+    const state = inviterScreenReducer(sealed, {
+      type: "mounted-configuration-read",
+      answer: {
+        kind: "opened",
+        document: sftpDocument(),
+        carriedThrough: [],
+        warnings: [],
+      },
+    });
+    expect(state).toBe(sealed);
+    expect(state.loadedConfiguration).toBeUndefined();
+    expect(state.loadedEnforcementRecords).toEqual({});
+    expect(state.loadedSftpForm).toBeUndefined();
+  });
+
+  test("the control is withheld, naming where a configuration can be opened", () => {
+    expect(
+      mountedConfigurationOfferable(MOUNTED_CONFIGURATION_UNREAD, true),
+    ).toBe(false);
+    expect(
+      mountedConfigurationOfferable(MOUNTED_CONFIGURATION_UNREAD, false),
+    ).toBe(true);
+    expect(CONFIGURATION_LOAD_SEALED).toContain("new exchange");
   });
 });
 
@@ -276,7 +508,10 @@ describe("the held terms are released once they are applied", () => {
 describe("a run started from a loaded configuration composes what a hand-authored one does", () => {
   const transport: ServerJobExchangeTransport = { channel: "sftp" };
 
-  function driverConfigFor(state: InviterScreenState) {
+  function driverConfigFor(
+    state: InviterScreenState,
+    inputSource: JobInputSource = { kind: "workFile", name: "cohort.csv" },
+  ) {
     const choice = csvDelimiterFromDocument(sftpDocument().csvDelimiter);
     const resolved = resolveCsvDelimiter(choice);
     const options = withConnectionTuning(
@@ -290,7 +525,7 @@ describe("a run started from a loaded configuration composes what a hand-authore
         sharedSecret: "a".repeat(43),
         includeOwnColumns: "all",
       },
-      inputSource: { kind: "workFile", name: "cohort.csv" },
+      inputSource,
       transport,
       ...(resolved.ok ? { csvDelimiter: resolved.delimiter } : {}),
       ...(options !== undefined ? { options } : {}),
@@ -298,8 +533,9 @@ describe("a run started from a loaded configuration composes what a hand-authore
     });
   }
 
-  test("the same values, loaded or typed, compose the same config", () => {
-    const loaded = loadedInto(INVITER_SCREEN_INITIAL, sftpDocument());
+  /** The same settings typed into the cards by hand, so the two starting points
+   * differ in nothing but how the values got there. */
+  function authoredState(): InviterScreenState {
     let authored = inviterScreenReducer(INVITER_SCREEN_INITIAL, {
       type: "connection-tuning-chosen",
       draft: {
@@ -320,7 +556,7 @@ describe("a run started from a loaded configuration composes what a hand-authore
         unexpectedFiles: "warn",
       },
     });
-    authored = inviterScreenReducer(authored, {
+    return inviterScreenReducer(authored, {
       type: "receipts-chosen",
       draft: {
         ...RECEIPTS_DEFAULT,
@@ -329,7 +565,32 @@ describe("a run started from a loaded configuration composes what a hand-authore
         retentionDisposition: "Filed with the 2026 cohort, kept seven years.",
       },
     });
-    expect(driverConfigFor(loaded)).toEqual(driverConfigFor(authored));
+  }
+
+  test("the same values, loaded or typed, compose the same config", () => {
+    const loaded = loadedInto(INVITER_SCREEN_INITIAL, sftpDocument());
+    expect(driverConfigFor(loaded)).toEqual(driverConfigFor(authoredState()));
+  });
+
+  // The create route parses the posted intent before anything runs, so a run
+  // started over an input file the operator has since voided is refused there.
+  // Driving that refusal from both starting points measures what the equality
+  // above implies: the same run, and so the same refusal.
+  test("a voided input file refuses the run the same way from either", () => {
+    function refusalFor(state: InviterScreenState): Array<string> {
+      const parsed = jobCreateIntentSchema.safeParse(
+        intentFor(driverConfigFor(state, { kind: "workFile", name: "" })),
+      );
+      if (parsed.success) throw new Error("the create was expected to refuse");
+      return parsed.error.issues.map((issue) => issue.message).sort();
+    }
+    const loaded = refusalFor(
+      loadedInto(INVITER_SCREEN_INITIAL, sftpDocument()),
+    );
+    expect(loaded).toContain(
+      "inputFile.name must be a single admissible path segment",
+    );
+    expect(loaded).toEqual(refusalFor(authoredState()));
   });
 });
 
@@ -402,58 +663,6 @@ describe("the records the console cannot edit reach the run unchanged", () => {
 // the file's channel names selects the review step's tab, and the document's own
 // column roles and cleaning replace what the CSV headers alone would infer.
 describe("a loaded configuration reaches the editor once a file is read", () => {
-  const columns = [
-    "client_id",
-    "first_name",
-    "last_name",
-    "dob",
-    "program_code",
-  ];
-
-  function acquired(): AcquiredCsv {
-    return {
-      fileName: "clients.csv",
-      sizeBytes: 4096,
-      rawRows: [
-        {
-          client_id: "17",
-          first_name: "Alice",
-          last_name: "Smith",
-          dob: "1990-01-02",
-          program_code: "A7",
-        },
-      ],
-      columns,
-      rowCount: 1,
-    };
-  }
-
-  /** The screen's own application of the held terms: the import rebuilds the
-   * draft against the read file, and the reducer books what it could not
-   * apply. */
-  function withFileRead(state: InviterScreenState): InviterScreenState {
-    const held = state.pendingLoadedTerms;
-    if (held === undefined) throw new Error("expected held terms");
-    const csv = acquired();
-    const applied = editorWithLoadedTerms(
-      editorWithIncludeOwnColumns(
-        editorFromCsv("County Health", csv),
-        held.ownColumns,
-      ),
-      csv,
-      held,
-    );
-    return inviterScreenReducer(state, {
-      type: "loaded-terms-applied",
-      editor: applied.editor,
-      notApplied: applied.notApplied,
-    });
-  }
-
-  function columnRole(state: InviterScreenState, name: string) {
-    return state.editor?.draft.metadata.find((column) => column.name === name);
-  }
-
   test("an sftp document selects the SFTP transport, not the console default", () => {
     // Nothing is authored on this console and no rendezvous is mounted, so the
     // chooser's own default is the unconfigured SFTP card -- and the loaded
@@ -483,7 +692,7 @@ describe("a loaded configuration reaches the editor once a file is read", () => 
       channel: "filedrop",
       linkageTerms: getDefaultLinkageTerms("County Health"),
     });
-    expect(loaded.pendingLoadedTerms?.transport).toBeUndefined();
+    expect(loaded.loadedConfiguration?.transport).toBeUndefined();
     const notices = mountedConfigurationNotices(loaded.mountedConfiguration);
     expect(notices.some((notice) => notice.includes("shared directory"))).toBe(
       true,
@@ -537,6 +746,41 @@ describe("a loaded configuration reaches the editor once a file is read", () => 
     );
     expect(cleaned?.input).toBe("first_name");
     expect(cleaned?.steps).toEqual(steps);
+  });
+
+  test("a second record identifier the columns rule demotes is named", () => {
+    // The columns step admits one record identifier, so applying the second
+    // sends the first to ignored: the run then diverges from the file it was
+    // opened from, which is what the notice reports.
+    const applied = withFileRead(
+      loadedInto(
+        INVITER_SCREEN_INITIAL,
+        sftpDocument({
+          metadata: [
+            {
+              name: "client_id",
+              type: "identifier",
+              role: "identifier",
+              isPayload: false,
+            },
+            {
+              name: "program_code",
+              type: "identifier",
+              role: "identifier",
+              isPayload: false,
+            },
+          ],
+        }),
+      ),
+    );
+    expect(columnRole(applied, "client_id")).toMatchObject({ role: "ignored" });
+    expect(columnRole(applied, "program_code")).toMatchObject({
+      role: "identifier",
+    });
+    const notice = mountedConfigurationNotices(
+      applied.mountedConfiguration,
+    ).find((text) => text.includes("cannot supply"));
+    expect(notice).toContain("metadata");
   });
 
   test("what this file cannot supply is named beside the load, not dropped", () => {

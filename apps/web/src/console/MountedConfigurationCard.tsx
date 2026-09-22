@@ -6,12 +6,15 @@ import { sanitizeForDisplay } from "@psilink/core";
 import { useDeferredAnnouncement } from "@components/useDeferredAnnouncement";
 
 import {
+  CLOSE_CONFIGURATION_LABEL,
+  CONFIGURATION_LOAD_SEALED,
   CONFIGURATION_OPENED,
   CONFIGURATION_READ_UNAVAILABLE,
   NO_CONFIGURATION_IN_FOLDER,
   OPEN_CONFIGURATION_INVITATION,
   OPEN_CONFIGURATION_LABEL,
   mountedConfigurationNotices,
+  mountedConfigurationOfferable,
 } from "./mountedConfiguration";
 
 import type { MountedConfigurationState } from "./mountedConfiguration";
@@ -57,16 +60,26 @@ function announcementFor(state: MountedConfigurationState): string {
 /** The console's load offer and the notices beside it. */
 export function MountedConfigurationCard({
   state,
+  sealed,
   onOpen,
+  onClose,
 }: {
   state: MountedConfigurationState;
+  /** Whether an invitation is already minted from the terms the steps below
+   * hold, which withholds the offer. */
+  sealed: boolean;
   /** Read the mounted configuration. Offered while nothing is open, so a read
    * that did not answer can be tried again without a page reload. */
   onOpen: () => void;
+  /** Close the open configuration, dropping everything the load put into the
+   * steps below and returning the offer. */
+  onClose: () => void;
 }) {
   const announcement = useDeferredAnnouncement(announcementFor(state));
   const notices = mountedConfigurationNotices(state);
-  const offerable = state.status === "unread" || state.status === "unavailable";
+  const offerable = mountedConfigurationOfferable(state, sealed);
+  const withheld =
+    sealed && (state.status === "unread" || state.status === "unavailable");
   return (
     <Stack gap="xs">
       <VisuallyHidden
@@ -89,6 +102,7 @@ export function MountedConfigurationCard({
           </Button>
         </>
       )}
+      {withheld && <Text size="sm">{CONFIGURATION_LOAD_SEALED}</Text>}
       {state.status === "reading" && (
         <Button size="xs" variant="default" loading disabled>
           {OPEN_CONFIGURATION_LABEL}
@@ -98,9 +112,16 @@ export function MountedConfigurationCard({
         <Text size="sm">{NO_CONFIGURATION_IN_FOLDER}</Text>
       )}
       {state.status === "opened" && (
-        <Alert color="blue" role="presentation" title={OPENED_TITLE}>
-          <Text size="sm">{CONFIGURATION_OPENED}</Text>
-        </Alert>
+        <>
+          <Alert color="blue" role="presentation" title={OPENED_TITLE}>
+            <Text size="sm">{CONFIGURATION_OPENED}</Text>
+          </Alert>
+          {!sealed && (
+            <Button size="xs" variant="default" onClick={onClose}>
+              {CLOSE_CONFIGURATION_LABEL}
+            </Button>
+          )}
+        </>
       )}
       {notices.length > 0 && (
         <Alert

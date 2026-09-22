@@ -335,13 +335,14 @@ export function InviterScreen() {
     intakeAlert,
     invitation,
     lastSpineStep,
+    loadedConfiguration,
     loadedEnforcementRecords,
     loadedSftpForm,
+    loadedTermsFile,
     manageOffer,
     minting,
     mountedConfiguration,
     name,
-    pendingLoadedTerms,
     reading,
     receipts,
     rendezvous,
@@ -410,29 +411,46 @@ export function InviterScreen() {
     dispatch({ type: "mounted-configuration-read", answer });
   }
 
-  // The terms a load held, applied the moment the file step has a file: the
+  // Close the open configuration: it stops being an input here, so the draft
+  // falls back to what the file's own headers infer and the reducer drops
+  // everything else the load filled.
+  function closeMountedConfiguration() {
+    dispatch({
+      type: "loaded-configuration-discarded",
+      ...(acquired !== undefined
+        ? { editor: editorFromCsv(name, acquired) }
+        : {}),
+    });
+  }
+
+  // The open configuration's terms over the file the file step holds: the
   // import rebuilds each field's binding against the operator's own columns, so
-  // it cannot run before one is read. The own-column choice goes on first,
-  // because the import reads it off the draft it rebuilds from. The transport
-  // the file's channel selects goes on in the reducer, which holds it.
+  // it runs once the file is read and again for the next file read while the
+  // configuration is open -- a draft seeded from a file's headers alone would
+  // disclose a column the configuration states is kept back. The own-column
+  // choice goes on first, because the import reads it off the draft it rebuilds
+  // from. The transport the file's channel selects goes on in the reducer,
+  // which holds it.
   useEffect(() => {
     if (
-      pendingLoadedTerms === undefined ||
+      loadedConfiguration === undefined ||
       editor === undefined ||
-      acquired === undefined
+      acquired === undefined ||
+      loadedTermsFile === acquired
     )
       return;
     const applied = editorWithLoadedTerms(
-      editorWithIncludeOwnColumns(editor, pendingLoadedTerms.ownColumns),
+      editorWithIncludeOwnColumns(editor, loadedConfiguration.ownColumns),
       acquired,
-      pendingLoadedTerms,
+      loadedConfiguration,
     );
     dispatch({
       type: "loaded-terms-applied",
+      file: acquired,
       editor: applied.editor,
       notApplied: applied.notApplied,
     });
-  }, [acquired, editor, pendingLoadedTerms]);
+  }, [acquired, editor, loadedConfiguration, loadedTermsFile]);
 
   // Fetch the console's rendezvous mount once on a console build; the mount is
   // boot-static on the server, so one fetch per console serves the session. The
@@ -1379,7 +1397,9 @@ export function InviterScreen() {
         {isConsoleBuild() && section === "file" && (
           <MountedConfigurationCard
             state={mountedConfiguration}
+            sealed={sealed}
             onOpen={() => void openMountedConfiguration()}
+            onClose={closeMountedConfiguration}
           />
         )}
         {section === "file" && (

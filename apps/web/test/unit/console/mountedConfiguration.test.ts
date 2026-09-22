@@ -3,11 +3,14 @@ import { describe, expect, test } from "vitest";
 import { getDefaultLinkageTerms } from "@psilink/core";
 
 import {
+  CONFIGURATION_LOAD_SEALED,
   CONFIGURATION_READ_UNAVAILABLE,
+  MOUNTED_CONFIGURATION_UNREAD,
   NO_CONFIGURATION_IN_FOLDER,
   carriedThroughNotice,
   credentialWarningNotice,
   mountedConfigurationNotices,
+  mountedConfigurationOfferable,
   mountedConfigurationRead,
   termsNotAppliedNotice,
   withTermsNotApplied,
@@ -245,6 +248,16 @@ describe("the notices name the settings and say what happens to them", () => {
     });
   });
 
+  test("a file that supplies everything clears what an earlier one could not", () => {
+    // The notice is about the file the terms reached last, so the next file
+    // supplying the whole document leaves nothing named.
+    const read = mountedConfigurationRead(opened());
+    const named = withTermsNotApplied(read.state, ["metadata"]);
+    const cleared = withTermsNotApplied(named, []);
+    expect(mountedConfigurationNotices(named)).toHaveLength(1);
+    expect(mountedConfigurationNotices(cleared)).toEqual([]);
+  });
+
   test("a state that opened nothing renders no notice", () => {
     expect(mountedConfigurationNotices({ status: "absent" })).toEqual([]);
     expect(mountedConfigurationNotices({ status: "unread" })).toEqual([]);
@@ -277,5 +290,29 @@ describe("no value of the document reaches a notice", () => {
       expect(notice).not.toContain(secret);
       expect(notice).not.toContain(FINGERPRINT);
     }
+  });
+});
+
+describe("the offer stands only while the steps it fills are editable", () => {
+  test("an unread offer is made, and withheld once an invitation is minted", () => {
+    expect(
+      mountedConfigurationOfferable(MOUNTED_CONFIGURATION_UNREAD, false),
+    ).toBe(true);
+    expect(
+      mountedConfigurationOfferable(MOUNTED_CONFIGURATION_UNREAD, true),
+    ).toBe(false);
+    expect(CONFIGURATION_LOAD_SEALED).toContain("Start a new exchange");
+  });
+
+  test("a read that did not answer can be retried, an open one cannot be reopened", () => {
+    expect(
+      mountedConfigurationOfferable({ status: "unavailable" }, false),
+    ).toBe(true);
+    expect(
+      mountedConfigurationOfferable(
+        mountedConfigurationRead(opened()).state,
+        false,
+      ),
+    ).toBe(false);
   });
 });

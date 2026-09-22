@@ -196,11 +196,16 @@ export interface InviterScreenState {
    * SFTP card. Undefined where no configuration is open or the open one names no
    * host, in which case the card starts from the empty form. */
   loadedSftpForm: SftpConnectionFormValues | undefined;
-  /** The terms a loaded configuration supplied, held until the file step has a
-   * file: the import rebuilds each field's binding against the operator's own
-   * columns, so it cannot run before one is read (`editorWithImportedTerms`,
-   * `@psi/inviterEditor`). Cleared the moment they are applied. */
-  pendingLoadedTerms: PendingLoadedTerms | undefined;
+  /** The terms the open configuration states, held for as long as it is open:
+   * the import rebuilds each field's binding against the operator's own
+   * columns, so it runs against whichever file the file step holds
+   * (`editorWithImportedTerms`, `@psi/inviterEditor`) and runs again for the
+   * next one. Undefined where no configuration is open. */
+  loadedConfiguration: LoadedConfigurationTerms | undefined;
+  /** The input file the open configuration's terms are in force over, held by
+   * identity: a file the terms have not reached is one the screen applies them
+   * to. Undefined before they reach a file, and while none is open. */
+  loadedTermsFile: AcquiredCsv | undefined;
   /** The enforcement records a loaded configuration states and this flow has no
    * control for, held so the run's composed configuration states each as the
    * file did (docs/spec/EXCHANGE_FILE.md, "The records that must survive").
@@ -208,16 +213,19 @@ export interface InviterScreenState {
   loadedEnforcementRecords: LoadedEnforcementRecords;
 }
 
-/** What a load holds until a file is read, every part of it an argument of the
- * one import that rebuilds the draft against the operator's own columns, so
- * they move together.
+/** What the open configuration states about the terms, every part of it an
+ * argument of the one import that rebuilds the draft against the operator's own
+ * columns, so they move together. It is an input to the screen for as long as
+ * the configuration is open: the draft the file step seeds is derived from it
+ * and the file together, for whichever file the operator commits, and only
+ * discarding the configuration drops it.
  *
  * `transport` is the transport the file's own channel runs over, present only
  * where this console offers it -- an unoffered one is named beside the load
  * control instead ({@link withUnavailableTransport}). `metadata` and
  * `standardization` are the document's own column roles and cleaning pipeline,
  * adopted over the inference the file's headers alone would give. */
-export interface PendingLoadedTerms {
+export interface LoadedConfigurationTerms {
   linkageTerms: LinkageTerms;
   ownColumns: OwnColumnsChoice;
   transport?: Transport;
@@ -261,7 +269,8 @@ export const INVITER_SCREEN_INITIAL: InviterScreenState = {
   manageOffer: MANAGE_OFFER_IDLE,
   mountedConfiguration: MOUNTED_CONFIGURATION_UNREAD,
   loadedSftpForm: undefined,
-  pendingLoadedTerms: undefined,
+  loadedConfiguration: undefined,
+  loadedTermsFile: undefined,
   loadedEnforcementRecords: {},
 };
 
@@ -388,15 +397,22 @@ export type InviterScreenAction =
    * covers in one action, so no step is left showing a value from another
    * configuration; a refusal or an absent mount fills none. */
   | { type: "mounted-configuration-read"; answer: MountedConfigurationAnswer }
-  /** The held terms reached the file the import binds them against, with the
-   * settings that file's own columns could not supply named for the notice
-   * beside the load control. The transport the loaded channel selects rides the
-   * held terms, so it goes on the editor the import rebuilt. */
+  /** The open configuration's terms reached the file the import binds them
+   * against, with the settings that file's own columns could not supply named
+   * for the notice beside the load control. The transport the loaded channel
+   * selects rides those terms, so it goes on the editor the import rebuilt, and
+   * the file they are now in force over is booked beside them. */
   | {
       type: "loaded-terms-applied";
+      file: AcquiredCsv;
       editor: InviterEditor;
       notApplied?: ReadonlyArray<string>;
-    };
+    }
+  /** The operator closed the open configuration: it stops being an input, so
+   * the terms, the records, the connection form it seeded and the notices go,
+   * and the draft falls back to what the file's own headers infer. `editor` is
+   * that inference, absent where the file step holds no file to infer from. */
+  | { type: "loaded-configuration-discarded"; editor?: InviterEditor };
 
 /** The state a discarded or cleared read leaves: no file, no profile, no draft,
  * and no sample marker, so nothing downstream vouches for a file that is gone. */
@@ -490,6 +506,12 @@ export function inviterScreenReducer(
         consoleSource: action.source,
         acquired: action.acquired,
         editor: action.editor,
+        // The draft stands, so an open configuration's terms stand with it over
+        // the re-profiled file and the screen re-derives nothing.
+        loadedTermsFile:
+          state.loadedTermsFile === state.acquired
+            ? action.acquired
+            : state.loadedTermsFile,
         savedExchange: undefined,
         editorAnnouncement: action.announcement,
       };
@@ -610,8 +632,13 @@ export function inviterScreenReducer(
         },
       };
     case "mounted-configuration-reading":
+      if (state.editor?.sealed === true) return state;
       return { ...state, mountedConfiguration: { status: "reading" } };
     case "mounted-configuration-read": {
+      // A sealed draft is an invitation already minted from other terms: the
+      // load would fill the cards and the records while leaving those terms
+      // untouched, so there is nothing here a read may do.
+      if (state.editor?.sealed === true) return state;
       const read = mountedConfigurationRead(action.answer);
       const loaded = read.loaded;
       if (loaded === undefined)
@@ -643,7 +670,7 @@ export function inviterScreenReducer(
           retentionDisposition: loaded.receipts.retentionDisposition,
         },
         loadedSftpForm: loaded.sftpForm,
-        pendingLoadedTerms: {
+        loadedConfiguration: {
           linkageTerms: loaded.linkageTerms,
           ownColumns: loaded.ownColumns,
           ...(offered ? { transport: loaded.channel } : {}),
@@ -654,11 +681,17 @@ export function inviterScreenReducer(
             ? { standardization: loaded.standardization }
             : {}),
         },
+        loadedTermsFile: undefined,
         loadedEnforcementRecords: loaded.records,
       };
     }
     case "loaded-terms-applied": {
-      const transport = state.pendingLoadedTerms?.transport;
+      // The draft was rebuilt against the file the screen held when the import
+      // ran. A commit or a void landing first leaves that file off the step, and
+      // a draft built over a file the console no longer holds is not one to
+      // seat -- the next file carries the terms instead.
+      if (action.file !== state.acquired) return state;
+      const transport = state.loadedConfiguration?.transport;
       return {
         ...state,
         editor:
@@ -669,11 +702,23 @@ export function inviterScreenReducer(
           state.mountedConfiguration,
           action.notApplied ?? [],
         ),
-        pendingLoadedTerms: undefined,
+        loadedTermsFile: action.file,
         editorAnnouncement:
           "Loaded the configuration's matching terms. Review them before creating.",
       };
     }
+    case "loaded-configuration-discarded":
+      return {
+        ...state,
+        mountedConfiguration: MOUNTED_CONFIGURATION_UNREAD,
+        loadedConfiguration: undefined,
+        loadedTermsFile: undefined,
+        loadedSftpForm: undefined,
+        loadedEnforcementRecords: {},
+        ...(action.editor !== undefined ? { editor: action.editor } : {}),
+        editorAnnouncement:
+          "Closed the configuration. These terms come from your own file's columns.",
+      };
   }
 }
 

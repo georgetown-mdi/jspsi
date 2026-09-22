@@ -303,18 +303,20 @@ export interface LoadedEditorTerms {
  * single-identifier rule holds exactly as it does for a hand edit. A column the
  * document names that this file does not have leaves the whole setting
  * unapplied, since nothing in the editor can hold it.
+ *
+ * What the merge lands on is read back against what the document states, so a
+ * column the single-identifier rule demoted -- a document naming two identifier
+ * columns keeps the last one and the rule sends the other to `ignored` -- counts
+ * as a setting this file could not take whole, rather than a silent divergence
+ * between the run and the file it was opened from.
  */
 function metadataWithLoadedColumns(
   inferred: Metadata,
   loaded: Metadata | undefined,
 ): { metadata: Metadata; whole: boolean } {
   let metadata = inferred;
-  let whole = true;
   for (const column of loaded ?? []) {
-    if (!metadata.some((own) => own.name === column.name)) {
-      whole = false;
-      continue;
-    }
+    if (!metadata.some((own) => own.name === column.name)) continue;
     metadata = setColumnType(metadata, column.name, column.type).metadata;
     metadata = setColumnDisclosure(
       metadata,
@@ -322,6 +324,10 @@ function metadataWithLoadedColumns(
       disclosureOf(column),
     ).metadata;
   }
+  const whole = (loaded ?? []).every((column) => {
+    const own = metadata.find((merged) => merged.name === column.name);
+    return own !== undefined && disclosureOf(own) === disclosureOf(column);
+  });
   return { metadata, whole };
 }
 
