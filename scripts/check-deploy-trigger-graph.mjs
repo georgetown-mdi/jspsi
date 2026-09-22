@@ -33,13 +33,15 @@
 //
 // WHAT THIS CHECK DOES NOT COVER:
 //
-//   - Filter syntax past two shapes. GitHub's path filters are a glob language;
-//     modelling it here would be predicting a tool's parser rather than driving
-//     it. compileFilter reads only `prefix/**` and literal paths -- what the
-//     deploy filter is written in -- and THROWS on anything else, so a pattern
-//     it cannot model fails the check rather than being silently over- or
-//     under-matched. Adding a `*` or `!` pattern to the deploy filter means
-//     teaching this check the shape, or the check stops the change.
+//   - Filter syntax past three shapes. GitHub's path filters are a glob
+//     language; modelling it here would be predicting a tool's parser rather
+//     than driving it. compileFilter reads a literal path, `prefix/**`, and the
+//     negated `!prefix/**/*.ext` markdown-exclusion shape eb_build_and_test.yaml
+//     also carries on its pull_request filter -- and THROWS on anything else, so
+//     a pattern it cannot model fails the check rather than being silently over-
+//     or under-matched. Adding another glob or negated pattern to either
+//     workflow's filter means teaching this check the shape, or the check stops
+//     the change.
 //   - The reverse direction. A filter entry that matches nothing in the graph is
 //     not a finding: the filter legitimately covers files no module graph reads
 //     (package.json, tsconfig.json, the deploy/aws_eb payload, public assets).
@@ -131,6 +133,8 @@ export const BUILD_PRODUCTS = [
 
 const WILDCARD_SUFFIX = "/**";
 const GLOB_CHARACTERS = /[*?[\]{}!+@()|]/;
+/** `!prefix/**\/*.ext`: negated markdown-exclusion shape, prefix and extension bare. */
+const NEGATED_EXTENSION_SUFFIX = /^!(.+)\/\*\*\/\*\.([a-zA-Z0-9]+)$/;
 
 /**
  * The `paths` list of the parsed deploy workflow's push trigger, in file order.
@@ -149,30 +153,51 @@ export function readTriggerPaths(workflow) {
 }
 
 /**
- * Compile a deploy path filter into `{ patterns, matches }`.
+ * Compile a path filter (a deploy filter, or a pull_request filter carrying the
+ * same shapes) into `{ patterns, matches }`.
  *
- * Two shapes are read, which is what the deploy filter is written in: a literal
- * path matches itself, and `prefix/**` matches any path under `prefix/`. Every
- * other pattern THROWS, naming itself -- see the header on why this check does
- * not implement the rest of the glob language.
+ * Three shapes are read: a literal path matches itself, `prefix/**` matches any
+ * path under `prefix/`, and `!prefix/**\/*.ext` negates every path under
+ * `prefix/` ending in `.ext`. Every other pattern THROWS, naming itself -- see
+ * the header on why this check does not implement the rest of the glob
+ * language. `matches` applies GitHub's own evaluation order: for a given file,
+ * the last pattern that matches it decides whether that file is included, so a
+ * negated pattern only narrows a positive one earlier in the list.
  */
 export function compileFilter(patterns) {
   const matchers = patterns.map((pattern) => {
-    if (pattern.endsWith(WILDCARD_SUFFIX)) {
+    const negatedExtension = NEGATED_EXTENSION_SUFFIX.exec(pattern);
+    if (negatedExtension) {
+      const [, prefix, extension] = negatedExtension;
+      if (prefix.length > 0 && !GLOB_CHARACTERS.test(prefix)) {
+        const suffix = `.${extension}`;
+        return {
+          negate: true,
+          test: (file) =>
+            file.startsWith(`${prefix}/`) && file.endsWith(suffix),
+        };
+      }
+    } else if (pattern.endsWith(WILDCARD_SUFFIX)) {
       const prefix = pattern.slice(0, -WILDCARD_SUFFIX.length);
       if (prefix.length > 0 && !GLOB_CHARACTERS.test(prefix)) {
-        return (file) => file.startsWith(`${prefix}/`);
+        return { negate: false, test: (file) => file.startsWith(`${prefix}/`) };
       }
     } else if (!GLOB_CHARACTERS.test(pattern)) {
-      return (file) => file === pattern;
+      return { negate: false, test: (file) => file === pattern };
     }
     throw new Error(
-      `${DEPLOY_WORKFLOW} carries the path filter "${pattern}", a glob shape scripts/check-deploy-trigger-graph.mjs does not read. It reads a literal path and a trailing "/**" and refuses to guess at the rest, because matching GitHub's filter any other way means predicting its parser rather than reading it. Teach compileFilter the shape, or write the entry as one it reads.`,
+      `A workflow carries the path filter "${pattern}", a glob shape scripts/check-deploy-trigger-graph.mjs does not read. It reads a literal path, a trailing "/**", and the negated "!prefix/**/*.ext" shape, and refuses to guess at the rest, because matching GitHub's filter any other way means predicting its parser rather than reading it. Teach compileFilter the shape, or write the entry as one it reads.`,
     );
   });
   return {
     patterns: [...patterns],
-    matches: (file) => matchers.some((matcher) => matcher(file)),
+    matches: (file) => {
+      let included = false;
+      for (const matcher of matchers) {
+        if (matcher.test(file)) included = !matcher.negate;
+      }
+      return included;
+    },
   };
 }
 
