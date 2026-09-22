@@ -8,7 +8,9 @@ This document is the complete field-level reference for psilink exchange specifi
 
 > Adding to this doc? Keep it conceptual and operational. Constant values, byte/wire layouts, algorithm steps, and the rationale behind them belong in the spec tier -- see [docs/spec/](spec/README.md), "Where does my content go?".
 
-Exchange specifications are JSON or YAML documents that fully describe a psilink exchange between two parties. They are consumed by both the web application and the CLI application. The web application provides an interactive editor for creating them; the CLI application accepts them as configuration files. A file the web app mints for download is an ordinary `psilink.yaml` validated against this same shared schema -- there is no web-specific format, no secret in the file, and the compatibility contract between a continuously-deployed web app and a pinned CLI is specified in [EXCHANGE_FILE.md](spec/EXCHANGE_FILE.md).
+Exchange specifications are JSON or YAML documents that fully describe a psilink exchange between two parties. All three psilink applications read the same one: the web application provides an interactive editor for creating them, the console authors and runs one on the machine it is mounted on, and the CLI accepts them as configuration files. A file the web app mints for download is an ordinary `psilink.yaml` validated against this same shared schema -- there is no web-specific format and no secret in the file.
+
+A configuration is therefore portable, and the applications do not all run the same exchanges or offer the same editors. What one of them does with a setting it cannot run -- hold it unchanged and tell you so, or refuse the file naming the setting, never drop it -- is specified in [EXCHANGE_FILE.md](spec/EXCHANGE_FILE.md), "What a consumer does with a setting it cannot honor", beside the compatibility contract between a continuously-deployed web app and a pinned CLI.
 
 An exchange specification has four top-level components:
 

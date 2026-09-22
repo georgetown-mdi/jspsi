@@ -1002,13 +1002,13 @@ test.each([
   expect(result.success).toBe(false);
   if (result.success) return;
   const messages = result.error.issues.map((i) => i.message);
-  // Named as the document writes it: the parse runs on the camelized shape, so
-  // the spelling an operator can search their own file for is the snake_case
-  // one either camelCase or snake_case input folds to.
+  // Named as the document writes it: the parse runs on the camelized shape, and
+  // names the key back in the spelling the operator can search their own file
+  // for, whichever of the two they wrote.
   expect(
     messages.some((m) => m.includes("a webrtc connection has no key")),
   ).toBe(true);
-  expect(messages.some((m) => m.includes("ice_transport_pol"))).toBe(true);
+  expect(messages.some((m) => m.includes(key))).toBe(true);
   expect(messages.some((m) => m.includes("correct the spelling"))).toBe(true);
 });
 

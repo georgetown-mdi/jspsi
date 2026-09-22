@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import YAML from "yaml";
+import { ZodError } from "zod";
 import {
   bareTermsValue,
   COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
@@ -32,6 +33,7 @@ import {
   assertPartnerFingerprintRecordable,
   assertRetainSweepGuard,
   configWithNamedRuleSetRules,
+  describeConfigSchemaError,
   diffLinkageTerms,
   linkageTermsWithNamedRuleSetRules,
   formatReconcileDiffs,
@@ -3988,6 +3990,38 @@ test("loadConfigLinkageSource rejects a config with an invalid metadata block", 
   expect(() => loadConfigLinkageSource(configPath)).toThrow("invalid metadata");
 });
 
+test("loadConfigLinkageSource refuses an unread key the run path refuses", () => {
+  // invite reads the file through here and mints an invitation from what it
+  // returns, while exchange reads the same file through parseExchangeSpec. A
+  // key this read stripped would put the operator's own narrowed terms on an
+  // invitation, over a file the next exchange refuses.
+  const configPath = path.join(dir, "psilink.yaml");
+  const document = {
+    connection: { channel: "filedrop", path: "/mnt/share" },
+    linkage_terms: {
+      ...(snakeizeKeys(getDefaultLinkageTerms("Agency A")) as object),
+      zz_probe_key: "held",
+    },
+  };
+  fs.writeFileSync(configPath, YAML.stringify(document));
+  let runPath = "";
+  try {
+    parseExchangeSpec(document);
+  } catch (err) {
+    runPath = describeConfigSchemaError(err);
+  }
+  expect(runPath).toContain('Unrecognized key: "zz_probe_key"');
+  expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
+  let inviteRead = "";
+  try {
+    loadConfigLinkageSource(configPath);
+  } catch (err) {
+    inviteRead = (err as Error).message;
+  }
+  expect(inviteRead).toContain("has invalid linkage_terms");
+  expect(inviteRead).toContain('Unrecognized key: "zz_probe_key"');
+});
+
 test("loadConfigLinkageSource rejects a config with no linkage_terms", () => {
   const configPath = path.join(dir, "psilink.yaml");
   fs.writeFileSync(
@@ -4608,12 +4642,115 @@ test("loadConfigLinkageSource rejects a non-mapping top-level value", () => {
   );
 });
 
+// --- A configuration is portable ---------------------------------------------
+
+test("a setting this build does not edit survives a load, an edit, and a save", () => {
+  // The rule every reader of the shared schema holds: what a consumer writes
+  // back out holds every setting the file it read stated, whether or not that
+  // consumer has anything to do with the setting (docs/spec/EXCHANGE_FILE.md,
+  // "What a consumer does with a setting it cannot honor"). The CLI has no
+  // editor for any of these -- they are the operator's own lines -- so a save
+  // after an edit elsewhere is what would lose them.
+  const configPath = path.join(dir, "psilink.yaml");
+  const written = {
+    connection: { channel: "filedrop", path: "/mnt/share" },
+    linkage_terms: getDefaultLinkageTerms("Agency A"),
+    metadata: [
+      { name: "program", type: "other", role: "payload", is_payload: true },
+    ],
+    standardization: [{ output: "last_name", input: "LAST_NAME", steps: [] }],
+    retention_disposition: "Filed with the program office for seven years.",
+    expected_payload_columns: ["partner_program"],
+    disclosed_payload_columns: ["program"],
+    expected_partner_deduplicate: true,
+    csv_delimiter: "|",
+  };
+  fs.writeFileSync(configPath, YAML.stringify(written));
+
+  const loaded = parseExchangeSpec(
+    YAML.parse(fs.readFileSync(configPath, "utf8")),
+  );
+  saveConfig(configPath, {
+    ...loaded,
+    linkageTerms: { ...loaded.linkageTerms, identity: "Agency A, renamed" },
+  });
+  const saved = parseExchangeSpec(
+    YAML.parse(fs.readFileSync(configPath, "utf8")),
+  );
+
+  expect(saved.linkageTerms.identity).toBe("Agency A, renamed");
+  expect(saved.retentionDisposition).toBe(written.retention_disposition);
+  expect(saved.standardization).toEqual(loaded.standardization);
+  expect(saved.metadata).toEqual(loaded.metadata);
+  expect(saved.csvDelimiter).toBe("|");
+  expect(saved.expectedPayloadColumns).toEqual(["partner_program"]);
+  expect(saved.disclosedPayloadColumns).toEqual(["program"]);
+  expect(saved.expectedPartnerDeduplicate).toBe(true);
+});
+
+// A schema refusal names its field the way the document the operator reads
+// spells it (docs/spec/EXCHANGE_FILE.md, "How a setting is named"), which the
+// whole-document renderer and the per-block one both take from one path
+// rendering.
+test("a transform-params refusal names the block, and its reason names the param as the file spells it", () => {
+  const terms = cloneTerms(getDefaultLinkageTerms("Agency A"));
+  // A refusal the SCHEMA raises against its own param vocabulary: the empty
+  // output_format refine locates itself at ["params", "outputFormat"], the
+  // camelCase the parse works in.
+  terms.linkageKeys[0].elements[0].transform = [
+    { function: "parse_date", params: { outputFormat: "" } },
+  ];
+  const doc = {
+    connection: { channel: "filedrop", path: "/mnt/share" },
+    linkage_terms: snakeizeKeys(terms),
+  };
+
+  let caught: unknown;
+  try {
+    parseExchangeSpec(doc);
+  } catch (err) {
+    caught = err;
+  }
+  const rendered = describeConfigSchemaError(caught);
+
+  expect(rendered).toContain(
+    "linkage_terms.linkage_keys.0.elements.0.transform.0.params: ",
+  );
+  expect(rendered).toContain("output_format");
+  expect(rendered).not.toContain("outputFormat");
+  expect(rendered).not.toContain("linkageKeys");
+});
+
+test("an unread-key refusal names the block and the key in the file's spelling", () => {
+  const terms = cloneTerms(getDefaultLinkageTerms("Agency A"));
+  // A setting no schema block reads, written into a key entry in the file's
+  // own spelling once the terms are snakeized.
+  (terms.linkageKeys[0] as unknown as Record<string, unknown>).keyWeighting =
+    "equal";
+  const doc = {
+    connection: { channel: "filedrop", path: "/mnt/share" },
+    linkage_terms: snakeizeKeys(terms),
+  };
+
+  let caught: unknown;
+  try {
+    parseExchangeSpec(doc);
+  } catch (err) {
+    caught = err;
+  }
+  const rendered = describeConfigSchemaError(caught);
+
+  expect(rendered).toContain("linkage_terms.linkage_keys.0: ");
+  expect(rendered).toContain("key_weighting");
+  expect(rendered).not.toContain("linkageKeys");
+});
+
 // --- CLI-only entry-sweep flags ----------------------------------------------
 
 test("connection.options.sweep_exchange_files is not a persistable config field (CLI-only)", () => {
   // The entry sweep is invocation-scoped: FileSyncOptionsSchema has no such
-  // field, so the snake_case key is stripped at parse rather than flowing into
-  // the connection options (where open() would otherwise read it).
+  // field, so a config naming it is refused at parse -- naming both lines -- and
+  // the value never reaches the connection options open() reads.
   const configPath = path.join(dir, "psilink.yaml");
   const spec: ExchangeSpec = {
     connection: { channel: "filedrop", path: "/mnt/share" },
@@ -4628,11 +4765,9 @@ test("connection.options.sweep_exchange_files is not a persistable config field 
     sweep_exchange_files: true,
     force_retain_sweep: true,
   };
-  const parsed = parseExchangeSpec(raw);
-  const options = parsed.connection.options as
-    Record<string, unknown> | undefined;
-  expect(options?.["sweepExchangeFiles"]).toBeUndefined();
-  expect(options?.["forceRetainSweep"]).toBeUndefined();
+  expect(() => parseExchangeSpec(raw)).toThrow(ZodError);
+  expect(() => parseExchangeSpec(raw)).toThrow("sweep_exchange_files");
+  expect(() => parseExchangeSpec(raw)).toThrow("force_retain_sweep");
 });
 
 test("assertRetainSweepGuard: --force-retain-sweep alone is a UsageError; other combinations pass", () => {

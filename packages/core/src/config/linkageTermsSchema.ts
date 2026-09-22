@@ -6,6 +6,7 @@ import { AlgorithmSchema } from "../types.js";
 import type { Algorithm } from "../types.js";
 import { camelizeKeys, MAX_NESTING_DEPTH } from "../utils/camelizeKeys.js";
 import { safeParseCamelized } from "./safeParseCamelized.js";
+import { droppedSettingIssues } from "./unreadKeys.js";
 import { boundedArray } from "../utils/boundedArray.js";
 import { patternConformsToDialect } from "../utils/linearRegex.js";
 import {
@@ -1792,18 +1793,22 @@ export function safeParseLinkageTerms(raw: unknown) {
 
 /**
  * {@link safeParseLinkageTerms} for a document the reading party WROTE -- the
- * `linkage_terms` block of an operator's own configuration file. Identical in
- * what it admits; the difference is that a param declared as the wrong text
- * type is refused with the remedy that fits a document the reader can edit
- * (quote the value, or omit the key), as the standardization block's refusal
- * already is. A partner's terms are read through
- * {@link safeParseLinkageTerms}, whose refusal states the type alone.
+ * `linkage_terms` block of an operator's own configuration file. A param
+ * declared as the wrong text type is refused with the remedy that fits a
+ * document the reader can edit (quote the value, or omit the key), as the
+ * standardization block's refusal already is, and a key this schema would drop
+ * rather than read is refused instead ({@link droppedSettingIssues}), as the
+ * whole-file read refuses it: the file is the reader's own, and a command that
+ * writes it back out would write it short of that setting. A partner's terms
+ * are read through {@link safeParseLinkageTerms}, whose refusal states the type
+ * alone and whose document this reader does not write.
  */
 export function safeParseLinkageTermsTheReaderWrote(raw: unknown) {
   return safeParseCamelized(
     LinkageTermsSchemaForItsAuthor,
     raw,
     PARAMS_WIDTH_BOUND,
+    (camelized, parsed) => droppedSettingIssues(raw, camelized, parsed),
   );
 }
 

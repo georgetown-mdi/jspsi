@@ -7284,7 +7284,7 @@ describe("accept-reuse warns when the re-acceptance drops the commitment", () =>
         disclosed: undefined,
         loggerName: "accept-lockin-drop-refused",
       }),
-    ).rejects.toThrow(/expectedPayloadColumns\.0: a linkage terms name/);
+    ).rejects.toThrow(/expected_payload_columns\.0: a linkage terms name/);
   });
 });
 

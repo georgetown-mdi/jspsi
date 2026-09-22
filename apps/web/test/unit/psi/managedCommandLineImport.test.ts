@@ -315,6 +315,39 @@ describe("refusing what this app cannot hold", () => {
     },
   );
 
+  test("a key outside the schema under a nested block is refused, not trimmed", () => {
+    // The blocks below the top level strip an unrecognized key on parse, so an
+    // import that stored the parse result would hand the command line back a
+    // file a line short of the one it read.
+    const document = commandLineDocument();
+    const message = refusal(
+      configText({
+        ...document,
+        linkageTerms: { ...document.linkageTerms, mysterySetting: "a line" },
+      }),
+    );
+
+    expect(message).toContain("linkage_terms.mystery_setting");
+    expect(message).toContain("import it again");
+  });
+
+  test("one setting written in both spellings is refused, naming both lines", () => {
+    // The case conversion ahead of the schema reads the two as one key and keeps
+    // one of them, so neither the parse nor the document-against-result
+    // comparison sees the other go. The refusal names both lines to fix.
+    const message = refusal(
+      stringifyYaml({
+        ...(snakeizeKeys(commandLineDocument()) as Record<string, unknown>),
+        expected_payload_columns: ["partner_program"],
+        expectedPayloadColumns: ["other_program"],
+      }),
+    );
+
+    expect(message).toContain("expected_payload_columns");
+    expect(message).toContain("expectedPayloadColumns");
+    expect(message).not.toContain("partner_program");
+  });
+
   test("a key outside the schema under the server block is refused, not trimmed", () => {
     const message = refusal(configTextHoldingKey("mysteryKey", "server"));
 
@@ -361,6 +394,29 @@ describe("import then export", () => {
     expect(
       parseExchangeSpec(parseSensitiveYaml(reexported, "re-export")),
     ).toEqual(parseExchangeSpec(parseSensitiveYaml(exported, "export")));
+  });
+
+  test("a setting this app holds without an editor survives the round trip", () => {
+    // The rule's middle outcome: a setting the app can keep but not edit is
+    // written back out as it was read (docs/spec/EXCHANGE_FILE.md, "What a
+    // consumer does with a setting it cannot honor"). `retention_disposition` is
+    // one -- operator-authored free text a stored document may hold, which no
+    // screen here edits.
+    const note = "Filed with the program office for seven years.";
+    const imported = configText({
+      ...commandLineDocument(),
+      retentionDisposition: note,
+    });
+    const record = readManagedCommandLineConfiguration(imported);
+
+    expect(record.exchangeFile.retentionDisposition).toBe(note);
+    const reexported = parseExchangeSpec(
+      parseSensitiveYaml(
+        composeManagedCronExportConfig(record).config.text,
+        "re-export",
+      ),
+    );
+    expect(reexported.retentionDisposition).toBe(note);
   });
 
   test("the fail-closed per-party fields survive the round trip", () => {

@@ -3,6 +3,7 @@ import { maxCodeUnits } from "../utils/maxCodeUnits.js";
 
 import { MAX_NAME_LENGTH } from "./linkageTermsSchema.js";
 import { safeParseCamelized } from "./safeParseCamelized.js";
+import { droppedSettingIssues } from "./unreadKeys.js";
 import { transformParamDisplayRefusals } from "./transformParamDisplay.js";
 import {
   transformParamAbsenceRefusals,
@@ -149,4 +150,21 @@ export const StandardizationSchema: z.ZodType<Standardization> = z
  */
 export function safeParseStandardization(raw: unknown) {
   return safeParseCamelized(StandardizationSchema, raw);
+}
+
+/**
+ * {@link safeParseStandardization} for the `standardization` block of a
+ * document the reading party WROTE -- an operator's own configuration file.
+ * Identical in what it admits, with one addition: a key this schema would drop
+ * rather than read is refused ({@link droppedSettingIssues}), as the
+ * whole-file read of the same block refuses it, so a command that writes the
+ * file back out cannot write it short of a setting the operator stated.
+ */
+export function safeParseStandardizationTheReaderWrote(raw: unknown) {
+  return safeParseCamelized(
+    StandardizationSchema,
+    raw,
+    undefined,
+    (camelized, parsed) => droppedSettingIssues(raw, camelized, parsed),
+  );
 }

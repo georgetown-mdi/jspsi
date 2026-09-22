@@ -5,14 +5,21 @@ import {
   parseExchangeSpec,
   safeParseExchangeSpec,
 } from "../../src/config/exchangeSpec";
-import { METADATA_NAME_SHAPE_MESSAGE } from "../../src/config/metadata";
+import {
+  METADATA_NAME_SHAPE_MESSAGE,
+  safeParseMetadataTheReaderWrote,
+} from "../../src/config/metadata";
+import { safeParseStandardizationTheReaderWrote } from "../../src/config/standardizationSchema";
 import {
   MAX_PAYLOAD_ENTRIES,
   MAX_TEXT_LENGTH,
   MAX_TRANSFORM_PARAM_LENGTH,
   NAME_SHAPE_MESSAGE,
+  safeParseLinkageTermsTheReaderWrote,
 } from "../../src/config/linkageTermsSchema";
 import { reconcileReceivedPayload } from "../../src/payloadExchange";
+import { unreadKeyIssues } from "../../src/config/unreadKeys";
+import { camelizeKeys } from "../../src/utils/camelizeKeys";
 
 // Minimal valid components used as a base.
 const minimalLinkageTerms = {
@@ -578,4 +585,294 @@ test("includeOwnColumns: a count-only exchange refuses the key at parse", () => 
   expect(issue?.message).toContain("include_own_columns");
   expect(issue?.message).toContain("count-only");
   expect(issue?.path).toEqual(["includeOwnColumns"]);
+});
+
+// --- Keys the parse does not read --------------------------------------------
+
+// Every consumer of this schema writes its parse result back out, so a key the
+// parse drops is a setting the operator wrote and the next file does not hold.
+// The top level is strict and refuses one itself; these pin the blocks below it,
+// which strip (docs/spec/EXCHANGE_FILE.md, "What a consumer does with a setting
+// it cannot honor").
+
+test("a key no block reads is refused, naming it as the file spells it", () => {
+  const result = safeParseExchangeSpec({
+    ...minimalSpec,
+    linkageTerms: { ...minimalLinkageTerms, mystery_setting: "held" },
+  });
+  expect(result.success).toBe(false);
+  const issue = result.error?.issues[0];
+  expect(issue?.code).toBe("unrecognized_keys");
+  expect(issue?.path).toEqual(["linkageTerms"]);
+  expect(issue?.message).toContain("mystery_setting");
+  expect(issue?.message).not.toContain("mysterySetting");
+});
+
+test("an unread key is named in the spelling the file writes, not snake_case", () => {
+  // Both spellings reach the schema, so an operator's own key arrives here as
+  // the case conversion left it. Converting that name back to snake_case names
+  // a line the file does not hold -- "zz_probe_key" for a camelCase key, and
+  // for a key outside either convention a name no writer would recognize.
+  for (const key of ["zzProbeKey", "Mystery-Key"]) {
+    const result = safeParseExchangeSpec({
+      ...minimalSpec,
+      linkageTerms: { ...minimalLinkageTerms, [key]: "held" },
+    });
+    expect(result.success, key).toBe(false);
+    expect(result.error?.issues[0]?.message, key).toBe(
+      `Unrecognized key: "${key}"`,
+    );
+  }
+});
+
+test("one unread key that begins another is named without swallowing it", () => {
+  // Two keys named in one refusal, where the camelized form of the first is the
+  // start of the second's: naming them in the order written would rewrite the
+  // shorter one inside the longer.
+  const result = safeParseExchangeSpec({
+    ...minimalSpec,
+    linkageTerms: {
+      ...minimalLinkageTerms,
+      zz_probe: "held",
+      zz_probe_key: "held",
+    },
+  });
+  expect(result.success).toBe(false);
+  expect(result.error?.issues[0]?.message).toBe(
+    'Unrecognized keys: "zz_probe", "zz_probe_key"',
+  );
+});
+
+test("a strict block names its unrecognized key as the file spells it too", () => {
+  // The top level and `authentication` raise their own refusal, worded by Zod
+  // over the camelized shape. Naming the same key two ways depending on which
+  // block holds it leaves the operator searching for a line that is there.
+  const cases: ReadonlyArray<[Record<string, unknown>, Array<string>]> = [
+    [{ ...minimalSpec, zz_probe_key: "held" }, []],
+    [
+      { ...minimalSpec, authentication: { zz_probe_key: "held" } },
+      ["authentication"],
+    ],
+  ];
+  for (const [spec, path] of cases) {
+    const result = safeParseExchangeSpec(spec);
+    expect(result.success).toBe(false);
+    expect(result.error?.issues[0]?.path).toEqual(path);
+    expect(result.error?.issues[0]?.message).toBe(
+      'Unrecognized key: "zz_probe_key"',
+    );
+    expect(() => parseExchangeSpec(spec)).toThrow("zz_probe_key");
+  }
+});
+
+test("a block read on its own refuses a key no part of it reads", () => {
+  // The CLI reads `linkage_terms`, `standardization`, and `metadata` block by
+  // block as well as through the whole file, and mints an invitation from what
+  // that read returns. A block entry point that stripped what the whole-file
+  // read refuses would mint from a document narrowed in silence.
+  const blocks: ReadonlyArray<
+    [(raw: unknown) => { success: boolean }, unknown]
+  > = [
+    [
+      safeParseLinkageTermsTheReaderWrote,
+      { ...minimalLinkageTerms, zz_probe_key: "held" },
+    ],
+    [
+      safeParseStandardizationTheReaderWrote,
+      [{ output: "last_name", input: "LAST_NAME", steps: [], zz_probe_key: 1 }],
+    ],
+    [
+      safeParseMetadataTheReaderWrote,
+      [
+        {
+          name: "program",
+          type: "other",
+          role: "payload",
+          is_payload: true,
+          zz_probe_key: 1,
+        },
+      ],
+    ],
+  ];
+  for (const [safeParse, block] of blocks)
+    expect(safeParse(block).success).toBe(false);
+});
+
+test("no load yields a document with a setting dropped, at any depth", () => {
+  // The one chokepoint every reader of an exchange file loads through: the CLI's
+  // config load, the web application's command-line import, and whatever the
+  // console grows. A document holding a setting no schema block reads has no
+  // load result at all, so none of them can run on one.
+  const nested: ReadonlyArray<[string, Record<string, unknown>]> = [
+    ["connection", { ...minimalConnection, mystery_setting: 1 }],
+    [
+      "connection.server",
+      { ...minimalConnection, server: { host: "api.peerjs.com", extra: 1 } },
+    ],
+    [
+      "linkage_terms.output",
+      {
+        ...minimalLinkageTerms,
+        output: { expectsOutput: true, shareWithPartner: false, extra: 1 },
+      },
+    ],
+  ];
+  for (const [where, block] of nested) {
+    const spec = where.startsWith("connection")
+      ? { ...minimalSpec, connection: block }
+      : { ...minimalSpec, linkageTerms: block };
+    const result = safeParseExchangeSpec(spec);
+    expect(result.success, where).toBe(false);
+    expect(result.data, where).toBeUndefined();
+    expect(() => parseExchangeSpec(spec), where).toThrow(ZodError);
+  }
+});
+
+test("a key no block reads is refused inside an array element", () => {
+  const result = safeParseExchangeSpec({
+    ...minimalSpec,
+    metadata: [
+      {
+        name: "program",
+        type: "other",
+        role: "payload",
+        is_payload: true,
+        mystery_setting: "held",
+      },
+    ],
+  });
+  expect(result.success).toBe(false);
+  expect(result.error?.issues[0]?.path).toEqual(["metadata", 0]);
+  expect(result.error?.issues[0]?.message).toContain("mystery_setting");
+});
+
+test("every key of a document that parses survives into the parse result", () => {
+  // The rule the refusals above serve: what the parse returns is what the next
+  // writer writes, so a document this schema accepts has lost nothing. Walked
+  // over a spec holding every block rather than asserted field by field.
+  const whole = {
+    ...minimalSpec,
+    metadata: [
+      { name: "program", type: "other", role: "payload", is_payload: true },
+    ],
+    standardization: [{ output: "last_name", input: "LAST_NAME", steps: [] }],
+    retention_disposition: "Filed with the program office for seven years.",
+    expected_payload_columns: ["partner_program"],
+    disclosed_payload_columns: ["program"],
+    expected_partner_deduplicate: true,
+    include_own_columns: "all",
+    csv_delimiter: "|",
+  };
+  const parsed = parseExchangeSpec(whole) as Record<string, unknown>;
+  const camelized = camelizeKeys(whole) as Record<string, unknown>;
+  expect(unreadKeyIssues(camelized, parsed)).toEqual([]);
+  for (const key of Object.keys(camelized)) expect(parsed).toHaveProperty(key);
+});
+
+const sendingColumns = (send: ReadonlyArray<Record<string, unknown>>) => ({
+  ...minimalSpec,
+  linkageTerms: { ...minimalLinkageTerms, payload: { send } },
+});
+
+test("a repeated payload column that states nothing beyond the entry kept is collapsed", () => {
+  // The one normalization that shortens an array: two entries naming one column
+  // collapse to the first. The repeat states nothing the survivor does not, so
+  // the document a save writes back holds every setting this one states and the
+  // collapse stays a normalization rather than becoming a refusal.
+  const parsed = parseExchangeSpec(
+    sendingColumns([
+      { name: "program", description: "the program enrolled in" },
+      { name: "program" },
+    ]),
+  );
+  expect(parsed.linkageTerms.payload?.send).toHaveLength(1);
+  expect(parsed.linkageTerms.payload?.send?.[0]?.description).toBe(
+    "the program enrolled in",
+  );
+  expect(
+    parseExchangeSpec(
+      sendingColumns([
+        { name: "program", description: "the program enrolled in" },
+        { name: "program", description: "the program enrolled in" },
+      ]),
+    ).linkageTerms.payload?.send,
+  ).toHaveLength(1);
+});
+
+test("a repeated payload column that states more is refused as a duplicate", () => {
+  // The collapse keeps the FIRST entry, so what a later one states beyond it is
+  // dropped -- a setting the operator wrote and a save would not write back. The
+  // refusal names the entry that is already there, rather than reporting the
+  // dropped entry's own keys as keys no block reads: `description` is a payload
+  // column key, and telling the operator to remove it names the wrong line.
+  for (const send of [
+    [{ name: "program" }, { name: "program", description: "held" }],
+    [
+      { name: "program", description: "first" },
+      { name: "program", description: "held" },
+    ],
+  ]) {
+    const result = safeParseExchangeSpec(sendingColumns(send));
+    expect(result.success).toBe(false);
+    const issue = result.error?.issues[0];
+    expect(issue?.path).toEqual(["linkageTerms", "payload", "send", 1]);
+    expect(issue?.message).toContain('names the column "program"');
+    expect(issue?.message).toContain("entry 0");
+    expect(issue?.message).not.toContain("Unrecognized");
+    expect(issue?.message).not.toContain("held");
+  }
+});
+
+test("both spellings of one key are refused, naming each as the file writes it", () => {
+  // The camelize pre-pass reads both as one name and keeps one of the two, which
+  // the document-against-result comparison cannot see is missing. On a
+  // fail-closed record the surviving value would narrow an enforcement the
+  // operator wrote (docs/spec/EXCHANGE_FILE.md, "The records that must
+  // survive").
+  const result = safeParseExchangeSpec({
+    ...minimalSpec,
+    expected_payload_columns: ["partner_program"],
+    expectedPayloadColumns: ["other"],
+  });
+  expect(result.success).toBe(false);
+  const issue = result.error?.issues[0];
+  expect(issue?.path).toEqual([]);
+  expect(issue?.message).toContain('"expected_payload_columns"');
+  expect(issue?.message).toContain('"expectedPayloadColumns"');
+  expect(issue?.message).not.toContain("partner_program");
+});
+
+test("both spellings of one key are refused inside a block too", () => {
+  const result = safeParseExchangeSpec({
+    ...minimalSpec,
+    linkageTerms: {
+      ...minimalLinkageTerms,
+      output: {
+        expects_output: true,
+        expectsOutput: false,
+        shareWithPartner: false,
+      },
+    },
+  });
+  expect(result.success).toBe(false);
+  const issue = result.error?.issues[0];
+  expect(issue?.path).toEqual(["linkageTerms", "output"]);
+  expect(issue?.message).toContain('"expects_output"');
+  expect(issue?.message).toContain('"expectsOutput"');
+});
+
+test("provider_options on a channel whose schema has no such field is refused", () => {
+  // The opaque subtree is never entered, but the key naming it is read like any
+  // other: a filedrop connection declares no provider_options, so a document
+  // writing one states a setting the file a save writes back would not hold.
+  const result = safeParseExchangeSpec({
+    ...minimalSpec,
+    connection: {
+      channel: "filedrop",
+      path: "/mnt/share",
+      provider_options: { readyTimeout: 1000 },
+    },
+  });
+  expect(result.success).toBe(false);
+  expect(result.error?.issues[0]?.message).toContain("provider_options");
 });

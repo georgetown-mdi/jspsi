@@ -12,7 +12,6 @@ import {
   parseExchangeSpec,
   keepOperatorSuppliedText,
   messageWithOperatorText,
-  rawDecodeErrorDescription,
   operatorSuppliedText,
   redactAndRenderOperatorSuppliedText,
   redactAndSanitizeForDisplay,
@@ -32,6 +31,7 @@ import {
   applyConnectionOverrides,
   configWithNamedRuleSetRules,
   csvDelimiterForRun,
+  describeConfigSchemaError,
   diffLinkageTerms,
   linkageTermsStandingOf,
   persistExpectedPartnerDeduplicate,
@@ -860,7 +860,7 @@ function readExistingAcceptConfig(
   } catch (err) {
     const message = messageWithOperatorText`${EXISTING_CONFIG_PREAMBLE}${operatorSuppliedText(
       configPath,
-    )} but could not be parsed to compare against ${against}: ${rawDecodeErrorDescription(
+    )} but could not be parsed to compare against ${against}: ${describeConfigSchemaError(
       err,
     )}.${RECONCILE_RETRY_REMEDY} ${retryWith}.`;
     throw keepOperatorSuppliedText(new UsageError(message.text), message);

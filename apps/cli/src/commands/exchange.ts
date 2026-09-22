@@ -7,7 +7,6 @@ import {
   operatorSuppliedText,
   redactAndRenderOperatorSuppliedText,
   parseExchangeSpec,
-  rawDecodeErrorDescription,
   getLogger,
   OperatorConfigError,
   prepareForExchange,
@@ -29,6 +28,7 @@ import {
   configWithNamedRuleSetRules,
   csvDelimiterForRun,
   DEFAULT_CONFIG_PATH,
+  describeConfigSchemaError,
   linkageTermsStandingOf,
   warnOnLinkageRuleSetCitationDrift,
 } from "../config";
@@ -427,7 +427,7 @@ export function loadConfig(options: ExchangeOptions): {
     // configuration (exit 64), not a transport failure.
     const message = messageWithOperatorText`config file ${operatorSuppliedText(
       options.configFile,
-    )} is not a valid exchange spec: ${rawDecodeErrorDescription(err)}`;
+    )} is not a valid exchange spec: ${describeConfigSchemaError(err)}`;
     throw keepOperatorSuppliedText(new UsageError(message.text), message);
   }
 

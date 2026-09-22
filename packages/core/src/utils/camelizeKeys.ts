@@ -100,8 +100,20 @@ export const OPAQUE_VALUE_KEYS: ReadonlySet<string> = new Set([
   "providerOptions",
 ]);
 
-function snakeToCamel(s: string): string {
-  return s.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+/**
+ * Rewrite ONE snake_case key to the camelCase name TypeScript reads: the scalar
+ * half of {@link camelizeKeys}, and the canonical form both directions of
+ * {@link transformKeysDeep} decide opacity on.
+ *
+ * Exported (not a stable public API) for a caller that must know which name two
+ * keys of one object would be read as -- the exchange file's colliding-key
+ * refusal (`config/unreadKeys.ts`), since two spellings reaching one name leave
+ * one of them out of the camelized document.
+ *
+ * @internal
+ */
+export function camelizeKey(key: string): string {
+  return key.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
 }
 
 /**
@@ -139,7 +151,7 @@ export function snakeizeKey(key: string): string {
  * keys.
  *
  * Opacity is decided on the canonical camelCase form of the INPUT key
- * (`snakeToCamel(k)`), independent of the output transform, so a snake_case
+ * (`camelizeKey(k)`), independent of the output transform, so a snake_case
  * read key and a camelCase write key canonicalize alike. Because the skip
  * predicate is this one fixed expression rather than a per-direction check,
  * the read and write directions provably skip the identical set of
@@ -214,7 +226,7 @@ function transformKeysDeep(
         // DESCENDANT of an earlier key in this same object, which the pre-pass
         // count above (this object's own width only) does not see.
         if (++budget.nodes > MAX_NODE_COUNT) throw new NodeCountExceededError();
-        const camel = snakeToCamel(k);
+        const camel = camelizeKey(k);
         if (OPAQUE_VALUE_KEYS.has(camel)) return [transformKey(k), v];
         const widthBound = widthBoundedKeys?.get(camel);
         if (
@@ -272,7 +284,7 @@ export function camelizeKeys(
 ): unknown {
   return transformKeysDeep(
     value,
-    snakeToCamel,
+    camelizeKey,
     0,
     { nodes: 0 },
     widthBoundedKeys,

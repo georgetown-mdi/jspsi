@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { expect, test } from "vitest";
 import YAML from "yaml";
+import { ZodError } from "zod";
 
 import {
   DEFAULT_MAX_RECONNECT_ATTEMPTS,
@@ -105,18 +106,21 @@ test("a webrtc block shows only peer_timeout_ms, the one option it reads", () =>
   expect(raw).not.toContain("server_connect_timeout_ms");
   expect(raw).not.toContain("max_reconnect_attempts");
   expect(raw).toContain(`#   peer_timeout_ms: ${DEFAULT_PEER_TIMEOUT_MS}`);
-  // Offering the field would mislead: the schema drops it without an error,
-  // so an operator who uncommented it would see no effect.
-  const withPoll = parseExchangeSpec({
-    ...(YAML.parse(raw) as Record<string, unknown>),
-    connection: {
-      channel: "webrtc",
-      server: { host: "api.peerjs.com", port: 443 },
-      role: "acceptor",
-      options: { poll_interval_ms: 250 },
-    },
-  });
-  expect(withPoll.connection.options).not.toHaveProperty("pollIntervalMs");
+  // Offering the field would mislead: a webrtc connection does not read it, so
+  // the load refuses the file naming the line rather than running as though the
+  // operator had never written it.
+  const withPoll = () =>
+    parseExchangeSpec({
+      ...(YAML.parse(raw) as Record<string, unknown>),
+      connection: {
+        channel: "webrtc",
+        server: { host: "api.peerjs.com", port: 443 },
+        role: "acceptor",
+        options: { poll_interval_ms: 250 },
+      },
+    });
+  expect(withPoll).toThrow(ZodError);
+  expect(withPoll).toThrow("poll_interval_ms");
 });
 
 test("a seeded options block keeps its own fields and is not shown them twice", () => {
