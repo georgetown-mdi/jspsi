@@ -87,7 +87,9 @@ export function recoveryRow(
     id: essentials.id,
     label: essentials.label === "" ? "(unnamed exchange)" : essentials.label,
     deleteLabel: essentials.label,
-    sideLabel: SIDE_LABEL[essentials.side],
+    ...(essentials.side !== undefined
+      ? { sideLabel: SIDE_LABEL[essentials.side] }
+      : {}),
     ...(essentials.lastRunAt !== undefined
       ? { lastRunAt: dateLabel(new Date(essentials.lastRunAt)) }
       : {}),

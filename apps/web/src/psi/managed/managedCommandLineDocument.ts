@@ -5,21 +5,22 @@
  * ({@link ./managedCommandLineImport.ts}).
  *
  * The rule is an allowlist measured off the app's own composition rather than a
- * list restated here: the connection may hold only what a credential-free webrtc
- * locator expands to ({@link connectionFromLocator}), and the document only the
- * top-level fields the record composer produces
+ * list restated here: the connection may hold only what a credential-free
+ * locator on its own channel expands to ({@link connectionFromLocator}), and the
+ * document only the top-level fields the record composer produces
  * ({@link composeManagedExchangeFile}), plus the `authentication` block the
  * export injects from the local max-age policy and the `retentionDisposition`
  * the record spec sanctions as operator-authored free text
  * (docs/spec/MANAGED_EXCHANGE_RECORD.md). The shared exchange-file schema is
  * wider than both: it can represent a TURN `credential`, a `provider_options`
  * map, an `ice_provision` auth block, a PeerJS `server.key`/`server.username`,
- * a shared secret, and a `signing` block (`identity_file`, `receipt_output`,
- * `partner_fingerprint`), and the CLI resolves an `@path` in the file it loads
- * (`apps/cli/src/util/atSignRefs.ts`). Exporting one would republish the
- * operator's own credential file for a scheduled run to open; importing one
- * would store a partner-supplied path for this app to hand back to the CLI on
- * the next export.
+ * an SFTP `password`, `private_key`, `private_key_passphrase`, host-key pin,
+ * `proxy` or `provision` block, a shared secret, and a `signing` block
+ * (`identity_file`, `receipt_output`, `partner_fingerprint`), and the CLI
+ * resolves an `@path` in the file it loads (`apps/cli/src/util/atSignRefs.ts`).
+ * Exporting one would republish the operator's own credential file for a
+ * scheduled run to open; importing one would store a partner-supplied path for
+ * this app to hand back to the CLI on the next export.
  *
  * Each leg words its own refusal -- what an operator does about a stored field
  * they cannot see differs from what they do about a line in the file in front of
@@ -36,18 +37,23 @@ import {
 import { composeManagedExchangeFile } from "./managedExchangeRecord";
 
 import type {
+  ConnectionConfig,
+  ExchangeLocator,
   ExchangeSpec,
-  WebRTCConnectionConfig,
   WebRTCExchangeLocator,
 } from "@psilink/core";
 import type { ManagedExchangeFileComposition } from "./managedExchangeRecord";
 
+/** A channel a credential-free locator exists for: every channel the shared
+ * exchange-file schema names. */
+type LocatorChannel = ExchangeLocator["channel"];
+
 /**
- * The locator both composition probes below are driven with: a webrtc locator
- * holding every optional field, so what each probe measures is the widest shape
- * the app can compose rather than the narrowest.
+ * The webrtc locator the document-field probe below is driven with, holding
+ * every optional field, so what the probe measures is the widest shape the app
+ * can compose rather than the narrowest.
  */
-const WIDEST_PROBE_LOCATOR: WebRTCExchangeLocator = {
+const WIDEST_WEBRTC_PROBE_LOCATOR: WebRTCExchangeLocator = {
   channel: "webrtc",
   host: "locator.invalid",
   port: 443,
@@ -55,77 +61,120 @@ const WIDEST_PROBE_LOCATOR: WebRTCExchangeLocator = {
 };
 
 /**
- * The field names a credential-free webrtc locator expands to, at the
- * connection and its nested `server`. Read off {@link connectionFromLocator}'s
- * own webrtc arm rather than restated, so the allowlist cannot drift from the
- * composition rule (docs/spec/MANAGED_EXCHANGE_RECORD.md, "The connection
- * block: credential-free by composition").
+ * One credential-free locator per channel, each holding every optional field,
+ * so each connection allowlist below is the widest a locator on that channel
+ * expands to. Keyed by channel, so a channel added to the locator union fails
+ * this module's compile until it has a probe. Only the KEYS an expansion
+ * produces are read, never these values.
  */
-function credentialFreeLocatorFields(): {
+const WIDEST_PROBE_LOCATORS: {
+  [Channel in LocatorChannel]: Extract<ExchangeLocator, { channel: Channel }>;
+} = {
+  webrtc: WIDEST_WEBRTC_PROBE_LOCATOR,
+  sftp: {
+    channel: "sftp",
+    host: "locator.invalid",
+    port: 22,
+    path: "/",
+    inboundPath: "/inbound",
+    outboundPath: "/outbound",
+    options: {},
+  },
+  filedrop: {
+    channel: "filedrop",
+    path: "/",
+    inboundPath: "/inbound",
+    outboundPath: "/outbound",
+    options: {},
+  },
+};
+
+/** The field names a credential-free locator expands to on one channel: at the
+ * connection, and at its nested `server` where the channel has one. */
+interface LocatorFields {
   connection: ReadonlySet<string>;
   server: ReadonlySet<string>;
-} {
-  const composed = connectionFromLocator(WIDEST_PROBE_LOCATOR);
-  if (composed.channel !== "webrtc")
+}
+
+/**
+ * The field names one channel's credential-free locator expands to. Read off
+ * {@link connectionFromLocator}'s own arm for that channel rather than
+ * restated, so the allowlist cannot drift from the composition rule
+ * (docs/spec/MANAGED_EXCHANGE_RECORD.md, "The connection block: credential-free
+ * by composition").
+ */
+function credentialFreeLocatorFields(channel: LocatorChannel): LocatorFields {
+  const composed = connectionFromLocator(WIDEST_PROBE_LOCATORS[channel]);
+  if (composed.channel !== channel)
     throw new Error(
-      "the credential-free locator expansion did not compose a webrtc " +
-        "connection from a webrtc locator",
+      `the credential-free locator expansion did not compose a ${channel} ` +
+        `connection from a ${channel} locator`,
     );
+  const server: unknown = "server" in composed ? composed.server : undefined;
   return {
     connection: new Set(Object.keys(composed)),
-    server: new Set(Object.keys(composed.server)),
+    server: new Set(
+      typeof server === "object" && server !== null ? Object.keys(server) : [],
+    ),
   };
 }
 
-const CREDENTIAL_FREE_LOCATOR_FIELDS = credentialFreeLocatorFields();
+const CREDENTIAL_FREE_LOCATOR_FIELDS: Record<LocatorChannel, LocatorFields> = {
+  webrtc: credentialFreeLocatorFields("webrtc"),
+  sftp: credentialFreeLocatorFields("sftp"),
+  filedrop: credentialFreeLocatorFields("filedrop"),
+};
 
 /**
- * A webrtc connection's fields that a credential-free locator does not expand
- * to, named in the operator's own snake_case spelling so a refusal points at the
- * lines to remove, and sorted so two runs name them in one order. `role` is
- * outside the subset: the export injects it and the import reads it into the
- * record's local `side`, so a caller that has consumed it passes a connection
- * without it.
+ * A connection's fields that a credential-free locator on its own channel does
+ * not expand to, named in the operator's own snake_case spelling so a refusal
+ * points at the lines to remove, and sorted so two runs name them in one order.
+ * A webrtc `role` is outside the subset: the export injects it and the import
+ * reads it into the record's local `side`, so a caller that has consumed it
+ * passes a connection without it.
  */
 export function fieldsOutsideLocatorSubset(
-  connection: WebRTCConnectionConfig,
+  connection: ConnectionConfig,
 ): Array<string> {
+  const allowed = CREDENTIAL_FREE_LOCATOR_FIELDS[connection.channel];
   const outside = Object.keys(connection).filter(
-    (field) => !CREDENTIAL_FREE_LOCATOR_FIELDS.connection.has(field),
+    (field) => !allowed.connection.has(field),
   );
-  // Typed as required, but this gate runs on shapes that reached it without the
-  // record read path's validation, so the nested object is read defensively: a
-  // missing `server` is the exchange schema's refusal to make, not a TypeError
-  // here.
-  const server: unknown = connection.server;
+  // Typed as required where the channel has one, but this gate runs on shapes
+  // that reached it without the record read path's validation, so the nested
+  // object is read defensively: a missing `server` is the exchange schema's
+  // refusal to make, not a TypeError here.
+  const server: unknown =
+    "server" in connection ? connection.server : undefined;
   const serverFields =
     typeof server === "object" && server !== null ? Object.keys(server) : [];
   return [
     ...outside.map((field) => snakeizeKey(field)),
     ...serverFields
-      .filter((field) => !CREDENTIAL_FREE_LOCATOR_FIELDS.server.has(field))
+      .filter((field) => !allowed.server.has(field))
       .map((field) => `server.${snakeizeKey(field)}`),
   ].sort();
 }
 
 /**
  * The keys a FILE's own `connection.server` block holds outside the locator
- * subset, named verbatim under the block and sorted. The shared exchange-file
- * schema's server block is not strict, so a key outside it is stripped by the
- * parse and never reaches {@link fieldsOutsideLocatorSubset}: reading the
- * document the operator wrote is what refuses such a line rather than trimming
- * it away. The allowlist is compared in both spellings, since these keys have
- * not been through the camelize pre-pass the parsed connection's have.
+ * subset of the connection's channel, named verbatim under the block and
+ * sorted. The shared exchange-file schema's server blocks are not strict, so a
+ * key outside one is stripped by the parse and never reaches
+ * {@link fieldsOutsideLocatorSubset}: reading the document the operator wrote
+ * is what refuses such a line rather than trimming it away. The allowlist is
+ * compared in both spellings, since these keys have not been through the
+ * camelize pre-pass the parsed connection's have.
  */
 export function serverFieldsOutsideLocatorSubset(
+  channel: LocatorChannel,
   server: unknown,
 ): Array<string> {
   if (typeof server !== "object" || server === null) return [];
+  const locatorServerFields = CREDENTIAL_FREE_LOCATOR_FIELDS[channel].server;
   const allowed = new Set([
-    ...CREDENTIAL_FREE_LOCATOR_FIELDS.server,
-    ...[...CREDENTIAL_FREE_LOCATOR_FIELDS.server].map((field) =>
-      snakeizeKey(field),
-    ),
+    ...locatorServerFields,
+    ...[...locatorServerFields].map((field) => snakeizeKey(field)),
   ]);
   return Object.keys(server)
     .filter((field) => !allowed.has(field))
@@ -139,11 +188,12 @@ export function serverFieldsOutsideLocatorSubset(
  * field added to the record composer's input fails this module's compile
  * until the probe holds it. Read off {@link composeManagedExchangeFile}'s
  * OUTPUT, not its input: the probe measures which KEYS survive composition,
- * never what they hold.
+ * never what they hold. The connection is one key whatever its channel, so one
+ * webrtc probe measures the document for every channel.
  */
 function composableDocumentFields(): ReadonlySet<string> {
   const widestComposition: Required<ManagedExchangeFileComposition> = {
-    connection: WIDEST_PROBE_LOCATOR,
+    connection: WIDEST_WEBRTC_PROBE_LOCATOR,
     linkageTerms: getDefaultLinkageTerms("composition probe"),
     metadata: [],
     standardization: [],

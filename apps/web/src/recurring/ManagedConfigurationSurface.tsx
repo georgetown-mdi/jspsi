@@ -26,6 +26,12 @@ import {
   connectionRows,
   linkageTermsRows,
 } from "./managedDetailModel";
+import {
+  configurationOnlyLead,
+  heldSettingsNotice,
+  pendingOutboundConsentNotice,
+  sftpCredentialNote,
+} from "./managedConfigurationModel";
 import { ConfigRowItem } from "./ManagedExchangeDetail";
 import { DeleteExchangeButton } from "./SavedExchanges";
 import { useLocalFieldsDraft } from "./useLocalFieldsDraft";
@@ -39,26 +45,21 @@ import type {
 const UNNAMED_CONFIGURATION_TITLE = "Imported configuration";
 
 /**
- * What this browser holds for a configuration-only exchange, and what it does
- * not. Stated once, at the top: the operator arrives here expecting the Run
- * control every other saved exchange offers, and the absent key file is why
- * there is none.
- */
-const CONFIGURATION_ONLY_LEAD =
-  "This exchange was imported from a command-line configuration, without the " +
-  ".psilink.key file it runs under. Its settings are editable here and export " +
-  "back to a psilink.yaml you run with psilink; it does not run in this " +
-  "browser.";
-
-/**
  * The per-exchange surface of a CONFIGURATION-ONLY record: the settings the
  * operator edits in a browser and the `psilink.yaml` they run on the command
  * line (docs/MANAGED_EXCHANGE.md, "Bringing a command-line configuration
- * back"). It is the whole of what such a record has -- no run, no backup, no
- * hand-off, no re-invite -- because the record holds no shared secret, and
- * nothing here can reach a path that needs one: {@link ManagedRunSurface} routes
- * a record to this surface exactly where the record's own shape withholds the
- * run (see `runnableManagedExchange`).
+ * back"). It is the whole of what such a record has -- no run, no schedule, no
+ * backup, no hand-off, no re-invite -- because the record holds no shared
+ * secret, and nothing here can reach a path that needs one:
+ * {@link ManagedRunSurface} routes a record to this surface exactly where the
+ * record's own shape withholds the run (see `runnableManagedExchange`), which
+ * it does for every record on a channel this app does not run.
+ *
+ * What it tells the operator is derived from the record, so the import lands on
+ * it and every later visit shows it alike: why nothing here runs the exchange,
+ * naming the channel where that is the reason, then the settings kept unchanged
+ * without an editor, then a pending outbound payload consent
+ * ({@link ./managedConfigurationModel.ts}).
  *
  * The agreed terms are read-only, as they are for a browser-run exchange: they
  * are the partnership's, not this browser's, and exchanging on different ones is
@@ -77,14 +78,29 @@ export function ManagedConfigurationSurface({
   /** The exchange was deleted from this browser; the host navigates away. */
   onDeleted: () => void;
 }) {
+  const heldNotice = heldSettingsNotice(record);
+  const consentNotice = pendingOutboundConsentNotice(record);
   return (
     <AppPage>
       <main className={styles.work}>
         <h1>
           {record.label === "" ? UNNAMED_CONFIGURATION_TITLE : record.label}
         </h1>
-        <p className={styles.sub}>{CONFIGURATION_ONLY_LEAD}</p>
+        <p className={styles.sub}>{configurationOnlyLead(record)}</p>
+        {consentNotice !== undefined && (
+          <Alert
+            color="yellow"
+            title="Confirm what this exchange sends"
+            mt="sm"
+            mb="sm"
+          >
+            {consentNotice}
+          </Alert>
+        )}
         <ConfigurationRows record={record} />
+        {heldNotice !== undefined && (
+          <p className={`${styles.small} ${styles.sub}`}>{heldNotice}</p>
+        )}
         <ConfigurationExportPanel record={record} />
         <ConfigurationSettingsEditor
           record={record}
@@ -114,10 +130,12 @@ function ConfigurationRows({ record }: { record: ManagedExchangeRecord }) {
   return (
     <div className={styles.callout}>
       <h2 className={styles.eyebrow}>Configuration</h2>
-      <div className={styles.dlRow}>
-        <span className={styles.dlLabel}>Your side</span>
-        <span>{SIDE_LABELS[record.side]}</span>
-      </div>
+      {record.side !== undefined && (
+        <div className={styles.dlRow}>
+          <span className={styles.dlLabel}>Your side</span>
+          <span>{SIDE_LABELS[record.side]}</span>
+        </div>
+      )}
       {connectionRows(record.exchangeFile).map((row) => (
         <ConfigRowItem key={row.label} row={row} />
       ))}
@@ -168,15 +186,19 @@ function ConfigurationExportPanel({
     );
   const { composed, cronLine, taskSchedulerLine } = state;
   const configFile = composed.config;
+  const credentialNote = sftpCredentialNote(record);
   return (
     <div className={styles.callout}>
       <h2 className={styles.eyebrow}>Run it from the command line</h2>
       <p className={styles.small}>
         Download the configuration into the folder holding this exchange&apos;s{" "}
         <span className={styles.mono}>.psilink.key</span> and your input file,
-        then run the command there. The file holds the agreed terms and the
-        rendezvous address, and no secret.
+        then run the command there. The file holds the agreed terms and where
+        the exchange connects, and no secret.
       </p>
+      {credentialNote !== undefined && (
+        <p className={styles.small}>{credentialNote}</p>
+      )}
       <Button
         mt="sm"
         onClick={() =>
@@ -215,11 +237,13 @@ function ConfigurationExportPanel({
           scheduling account&apos;s PATH.
         </p>
       </DisclosureSection>
-      <p className={`${styles.small} ${styles.sub}`}>
-        This exchange names no STUN server, so every run uses the built-in
-        default ({CLI_BUILT_IN_STUN_URI}) to discover the public address of the
-        machine it runs on.
-      </p>
+      {record.exchangeFile.connection.channel === "webrtc" && (
+        <p className={`${styles.small} ${styles.sub}`}>
+          This exchange names no STUN server, so every run uses the built-in
+          default ({CLI_BUILT_IN_STUN_URI}) to discover the public address of
+          the machine it runs on.
+        </p>
+      )}
     </div>
   );
 }

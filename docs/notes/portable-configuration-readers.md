@@ -129,9 +129,12 @@ when a load leg is built, and the fail-closed records name what that leg cannot
 quietly shed.
 
 **The web application's managed import** (`apps/web/src/psi/managed/`). Already the
-rule's model: it refuses a channel it does not run, a connection field outside the
-credential-free locator subset, a top-level field outside what it composes, and a
-secret, each naming the fields and never their values. It holds `role` and
+rule's model: it refuses a connection field outside the credential-free locator
+subset of the connection's channel, a top-level field outside what it composes,
+and a secret, each naming the fields and never their values. A channel it does
+not run is not among them: such a configuration imports as a configuration only,
+and the limit is met where a run would start
+([MANAGED_EXCHANGE_RECORD.md](../spec/MANAGED_EXCHANGE_RECORD.md#the-configuration-only-record)). It holds `role` and
 `token_max_age_days` as local record fields and re-injects both on export, so an
 unedited import and re-export are the same document. Its own audit finding was the
 nested strip, fixed in core above; its bespoke `connection.server` allowlist stays,
@@ -142,10 +145,11 @@ operator wrote.
 
 **No notice for a setting held without an editor.** The rule's middle outcome has
 two halves: hold the setting unchanged, and tell the operator this surface will not
-let them change it. The holding half is built and tested in both directions; the
-telling half needs a surface to tell it on, and the import has none. A field the
-web application stores and cannot edit (`retention_disposition` is the one a stored
-document can hold today) therefore survives a round trip in silence.
+let them change it. The holding half is built and tested in both directions. The
+web application's configuration-only page tells it, naming each setting it keeps
+without showing or editing it (`apps/web/src/recurring/managedConfigurationModel.ts`);
+it names them from the stored record, whose keys the parse has camelized, so a key
+the file wrote in camelCase is named in snake_case there rather than as written.
 
 **The CLI's refusal cites one issue.** A config failing schema validation reports
 the first issue and a count of the rest, so a document with several dropped keys

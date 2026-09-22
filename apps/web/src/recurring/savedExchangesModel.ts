@@ -24,6 +24,11 @@ import { deriveManagedBackupState } from "@psi/managed/managedBackupState";
 import { managedExchangeLapsed } from "@psi/managed/managedExpiry";
 
 import { dateLabel, dateTimeLabel } from "@psi/formatting";
+
+import {
+  configurationOnlyStatus,
+  sidelessRowLabel,
+} from "./managedConfigurationModel";
 import {
   repeatedMissCoordination,
   scheduleDueLine,
@@ -60,12 +65,6 @@ type SavedExchangeBackup =
   | { kind: "backup-needed" }
   | { kind: "not-applicable" };
 
-/** The one-line status of a configuration-only row: what this browser holds for
- * the exchange, and where it runs. It has no run history to summarize -- it has
- * never run here and cannot. */
-const CONFIGURATION_ONLY_STATUS =
-  "Configuration only - edit it here, run it with psilink";
-
 /** The schedule lines a row holds for a record with an agreed schedule: where
  * the recurrence stands at the row's `now`, and the coordination line a run of
  * missed windows earns (see {@link ./scheduleSurfacingModel.ts}). */
@@ -84,7 +83,8 @@ export interface SavedExchangeRow {
   id: string;
   /** The operator's display label; may be empty (the field has no minimum). */
   label: string;
-  /** This party's side, as the list names it (see {@link SIDE_LABEL}). */
+  /** This party's side, as the list names it (see {@link SIDE_LABEL}), or the
+   * channel for a configuration on one that names no side. */
   sideLabel: string;
   /** A one-line status summary of the last run and the expiry state. */
   status: string;
@@ -95,9 +95,10 @@ export interface SavedExchangeRow {
   /** The derived backup state for the row (see {@link SavedExchangeBackup}). */
   backup: SavedExchangeBackup;
   /** Whether the record holds no shared secret: a configuration imported from
-   * the command line, which edits and exports here and runs there. Derived from
-   * the record's own shape, never from a stored flag, so the row withholds the
-   * Run affordance for the same reason the exchange's own surface does. */
+   * the command line, which edits and exports here and runs there -- every
+   * record on a channel this app does not run among them. Derived from the
+   * record's own shape, never from a stored flag, so the row withholds the Run
+   * affordance for the same reason the exchange's own surface does. */
   configurationOnly: boolean;
   /** When set, this device's copy was handed off by an export as of this date
    * phrase: the row shows no Run affordance and names the handoff. Deleting is the
@@ -264,8 +265,11 @@ export function savedExchangeRow(
     return {
       id: record.id,
       label: record.label,
-      sideLabel: SIDE_LABEL[record.side],
-      status: CONFIGURATION_ONLY_STATUS,
+      sideLabel:
+        record.side !== undefined
+          ? SIDE_LABEL[record.side]
+          : sidelessRowLabel(record),
+      status: configurationOnlyStatus(record),
       expired: false,
       backup: { kind: "not-applicable" },
       configurationOnly: true,

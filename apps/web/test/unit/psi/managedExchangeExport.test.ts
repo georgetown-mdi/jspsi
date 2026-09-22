@@ -331,21 +331,28 @@ describe("dispatchManagedCronExport", () => {
    * store when the composition throws inside its read-and-mark step. */
   const refusedRecords: Array<[string, () => ManagedExchangeRecord, RegExp]> = [
     [
-      "a connection on another channel",
+      "a connection field outside the locator subset",
       () =>
         buildManagedExchangeRecord({
           label: "Riverbend quarterly",
           exchangeFile: assembleExchangeSpec({
-            connection: connectionFromLocator({
-              channel: "filedrop",
-              path: "/srv/exchange",
-            }),
+            connection: {
+              channel: "webrtc",
+              server: { host: "signaling.example.org" },
+              turn: [
+                {
+                  url: "turn:relay.example.org:3478",
+                  username: "operator",
+                  credential: "@/home/other/turn-credential",
+                },
+              ],
+            },
             linkageTerms,
           }),
           side: "inviter",
           sharedSecret: generateSharedSecret(),
         }),
-      /stored connection channel is filedrop/,
+      /Remove: turn/,
     ],
     [
       "an authentication block on the stored document",

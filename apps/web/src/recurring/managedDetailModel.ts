@@ -109,18 +109,60 @@ export function linkageTermsRows(exchangeFile: ExchangeSpec): Array<ConfigRow> {
   ];
 }
 
+/** What the configuration view calls each channel an exchange runs over. */
+const CHANNEL_ROW_VALUES: Record<
+  ExchangeSpec["connection"]["channel"],
+  Displayable
+> = {
+  webrtc: displayText`Live (browser)`,
+  sftp: displayText`SFTP server`,
+  filedrop: displayText`Shared folder`,
+};
+
+/** The folder rows of a file-sync connection: the one shared folder, or the
+ * split pair each party reads from and writes to. Each path crosses the
+ * display boundary on its own. */
+function folderRows(folders: {
+  path?: string;
+  inboundPath?: string;
+  outboundPath?: string;
+}): Array<ConfigRow> {
+  return [
+    ...(folders.path !== undefined
+      ? [{ label: "Folder", value: sanitizeForDisplay(folders.path) }]
+      : []),
+    ...(folders.inboundPath !== undefined
+      ? [
+          {
+            label: "Folder your partner writes to",
+            value: sanitizeForDisplay(folders.inboundPath),
+          },
+        ]
+      : []),
+    ...(folders.outboundPath !== undefined
+      ? [
+          {
+            label: "Folder you write to",
+            value: sanitizeForDisplay(folders.outboundPath),
+          },
+        ]
+      : []),
+  ];
+}
+
 /**
- * The read-only connection rows for the configuration view: the channel and the
- * partner endpoint. A managed record's document is a credential-free webrtc
- * locator (host/port/path only; see docs/spec/MANAGED_EXCHANGE_RECORD.md, "The
- * connection block"), so the endpoint shown is the signaling locator, never a
- * credential -- no `server.key`, no `server.username` is representable in the
- * stored document.
+ * The read-only connection rows for the configuration view: the channel and
+ * where the exchange meets the partner. A managed record's connection is a
+ * credential-free locator on its channel (see
+ * docs/spec/MANAGED_EXCHANGE_RECORD.md, "The connection block"), so what is
+ * shown is an address and its folders, never a credential -- no `server.key`,
+ * no password or private key is representable in the stored document. An SFTP
+ * `username` is the one identity field the locator holds, and it is shown.
  */
 export function connectionRows(exchangeFile: ExchangeSpec): Array<ConfigRow> {
   const { connection } = exchangeFile;
   const rows: Array<ConfigRow> = [
-    { label: "Channel", value: displayText`Live (browser)` },
+    { label: "Channel", value: CHANNEL_ROW_VALUES[connection.channel] },
   ];
   if (connection.channel === "webrtc") {
     const { server } = connection;
@@ -136,6 +178,24 @@ export function connectionRows(exchangeFile: ExchangeSpec): Array<ConfigRow> {
           ? displayText`${host}:${server.port}${path}`
           : displayText`${host}${path}`,
     });
+  } else if (connection.channel === "sftp") {
+    const { server } = connection;
+    const host = sanitizeForDisplay(server.host);
+    rows.push({
+      label: "Server",
+      value:
+        server.port !== undefined
+          ? displayText`${host}:${server.port}`
+          : displayText`${host}`,
+    });
+    if (server.username !== undefined)
+      rows.push({
+        label: "Username",
+        value: sanitizeForDisplay(server.username),
+      });
+    rows.push(...folderRows(server));
+  } else {
+    rows.push(...folderRows(connection));
   }
   return rows;
 }

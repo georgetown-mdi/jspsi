@@ -18,7 +18,10 @@ import {
   composeManagedExchangeFile,
   runnableManagedExchangeOrRefuse,
 } from "@psi/managed/managedExchangeRecord";
-import { managedCronExportPanelState } from "@recurring/managedCronExportModel";
+import {
+  managedConfigurationExportState,
+  managedCronExportPanelState,
+} from "@recurring/managedCronExportModel";
 
 import type { ExchangeLocator, WebRTCExchangeLocator } from "@psilink/core";
 import type {
@@ -126,6 +129,33 @@ describe("what the panel gets to render", () => {
   });
 });
 
+describe("a configuration on a channel this app does not run", () => {
+  const nonWebrtcLocators: Array<[string, ExchangeLocator]> = [
+    ["filedrop", { channel: "filedrop", path: "/srv/exchange" }],
+    ["sftp", { channel: "sftp", host: "sftp.example.org", path: "/exchange" }],
+  ];
+
+  test.each(nonWebrtcLocators)(
+    "exports a configuration on a channel this app does not run (%s)",
+    (channel, locator) => {
+      // Exporting it is how the operator runs it, so the configuration panel
+      // composes it like any other.
+      const state = managedConfigurationExportState(
+        buildManagedExchangeRecord({
+          label: "Riverbend quarterly",
+          exchangeFile: assembleExchangeSpec({
+            connection: connectionFromLocator(locator),
+            linkageTerms,
+          }),
+        }),
+      );
+      expect(state.kind).toBe("exportable");
+      if (state.kind !== "exportable") return;
+      expect(state.composed.config.text).toContain(`channel: ${channel}`);
+    },
+  );
+});
+
 describe("a record the composer refuses", () => {
   /** A receipt-signing block, every field of which is live on the operator's
    * scheduled CLI run: `identityFile` is opened as this party's private signing
@@ -137,31 +167,6 @@ describe("a record the composer refuses", () => {
     partnerFingerprint: "0123456789012345678901234567890123456789abA",
     receiptOutput: "/home/other/receipts/planted-receipt.json",
   } as const;
-
-  const nonWebrtcLocators: Array<[string, ExchangeLocator]> = [
-    ["filedrop", { channel: "filedrop", path: "/srv/exchange" }],
-    ["sftp", { channel: "sftp", host: "sftp.example.org", path: "/exchange" }],
-  ];
-
-  test.each(nonWebrtcLocators)(
-    "is presented as the composer's own refusal (%s)",
-    (channel, locator) => {
-      // Unreachable through the UI, reachable by importing a hand-crafted
-      // artifact: the panel presents the composer's decision rather than making
-      // its own, so the two cannot disagree about what is exportable.
-      const state = managedCronExportPanelState(
-        managedRecord({
-          exchangeFile: assembleExchangeSpec({
-            connection: connectionFromLocator(locator),
-            linkageTerms,
-          }),
-        }),
-      );
-      expect(state.kind).toBe("refused");
-      if (state.kind !== "refused") return;
-      expect(state.reason).toMatch(new RegExp(`webrtc[\\s\\S]*${channel}`));
-    },
-  );
 
   test("an authentication block on the stored document is refused, secret and all", () => {
     // The panel gate sees the same secret-bearing block the composer refuses, and

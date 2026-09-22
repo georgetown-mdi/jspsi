@@ -1,7 +1,11 @@
 /// <reference types="@vitest/browser-playwright/context" />
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { getDefaultLinkageTerms } from "@psilink/core";
+import {
+  assembleExchangeSpec,
+  connectionFromLocator,
+  getDefaultLinkageTerms,
+} from "@psilink/core";
 
 import { page } from "vitest/browser";
 
@@ -130,6 +134,50 @@ describe("the surface of an imported configuration", () => {
       .toBeInTheDocument();
     expect((await getManagedExchange(created.id))?.label).toBe(
       "Riverbend yearly",
+    );
+  });
+});
+
+describe("the surface of a configuration on a channel this app does not run", () => {
+  test("names the channel, withholds the run, and states each notice", async () => {
+    const created = await createManagedExchange({
+      label: "Riverbend quarterly",
+      exchangeFile: {
+        ...assembleExchangeSpec({
+          connection: connectionFromLocator({
+            channel: "sftp",
+            host: "sftp.example.org",
+            path: "/exchange",
+          }),
+          linkageTerms,
+        }),
+        outboundPayloadConsent: { status: "pending" },
+        retentionDisposition: "Filed with the program office.",
+      },
+    });
+
+    app.render(createElement(ManagedRunSurface, { id: created.id }));
+
+    await expect
+      .element(page.getByText("SFTP (channel: sftp)", { exact: false }))
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText("outbound_payload_consent is pending", { exact: false }),
+      )
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("retention_disposition", { exact: false }))
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByRole("button", {
+          name: `Download ${CRON_EXPORT_CONFIG_FILE_NAME}`,
+        }),
+      )
+      .toBeInTheDocument();
+    expect(page.getByRole("button", { name: "Run exchange" }).query()).toBe(
+      null,
     );
   });
 });

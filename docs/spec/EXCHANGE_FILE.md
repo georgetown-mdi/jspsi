@@ -244,7 +244,8 @@ setting the file states.
   will not let them change and where to change it instead.
 - **Refuse the load.** A consumer that can neither apply nor hold a setting
   refuses the whole document, naming the setting and the limit that stops it --
-  as the web application refuses a `connection` on a channel it does not run.
+  as the web application refuses a connection credential it would have to store,
+  such as an SFTP `private_key`.
 
 Dropping a setting is not among them. A consumer MUST NOT load a document with a
 setting silently discarded, and MUST NOT write a document short of a setting the
