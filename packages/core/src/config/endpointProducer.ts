@@ -2,6 +2,7 @@ import { UsageError } from "../errors.js";
 import {
   MAX_ENDPOINT_HOST_LENGTH,
   MAX_ENDPOINT_PATH_LENGTH,
+  relayLocatorFromOwnRelay,
 } from "./invitation.js";
 import type { ConnectionEndpoint } from "./invitation.js";
 import type { ConnectionConfig } from "./connection.js";
@@ -53,11 +54,14 @@ export const PLACEHOLDER_SSH_USERNAME = "REPLACE_WITH_SSH_USERNAME";
  * swapping here too would double-swap and undo it. A shared connection
  * emits a single `path`.
  *
- * On `webrtc` the locator is only the peer-coordination server's own
- * host/port/path -- where the acceptor's signaling socket goes. Everything
- * else (`key`, `username`, `stun`/`turn`, `provision`, `secure`) is left
- * behind: those are either not a public locator or have no endpoint-schema
- * field, so a plaintext-broker locator is unreachable here by construction.
+ * On `webrtc` the locator is the peer-coordination server's own
+ * host/port/path -- where the acceptor's signaling socket goes -- and the
+ * connection's own relay as urls: each `turn` entry's `url` and the `stun`
+ * list, composed by {@link relayLocatorFromOwnRelay}. Everything else (`key`,
+ * `username`, a `turn` entry's username and credential, `provision`,
+ * `secure`) is left behind: those are either not a public locator or have no
+ * endpoint-schema field, so a plaintext-broker locator is unreachable here by
+ * construction.
  *
  * `port` is carried only when it is a reachable 1-65535 value: port 0 (an
  * OS-assigned ephemeral port) is dropped rather than emitted as an
@@ -130,6 +134,10 @@ export function endpointFromConnection(
     const { server } = connection;
     requireFits("connection host", server.host, MAX_ENDPOINT_HOST_LENGTH);
     requireFits("connection path", server.path, MAX_ENDPOINT_PATH_LENGTH);
+    const relay = relayLocatorFromOwnRelay({
+      turn: connection.turn?.map((entry) => entry.url),
+      stun: connection.stun,
+    });
     return {
       channel: "webrtc",
       host: server.host,
@@ -140,6 +148,7 @@ export function endpointFromConnection(
         server.path !== undefined && server.path !== ""
           ? server.path
           : undefined,
+      ...(relay !== undefined ? { relay } : {}),
     };
   }
 

@@ -7,7 +7,9 @@ import {
   UsageError,
   deriveRendezvousPeerId,
   getLogger,
+  mintRunRelayCredential,
   redactAndSanitizeForDisplay,
+  selectRunRelay,
 } from "@psilink/core";
 
 import { REPORT_LIBRARY_INCOMPATIBILITY } from "../libraryIncompatibility";
@@ -25,7 +27,11 @@ import type {
   BrokerMessage,
 } from "./brokerClient";
 import type { IceTransportPolicy } from "./iceDiagnostics";
-import type { RendezvousRole, WebRTCConnectionConfig } from "@psilink/core";
+import type {
+  RelayCredential,
+  RendezvousRole,
+  WebRTCConnectionConfig,
+} from "@psilink/core";
 import type {
   RTCDataChannel,
   RTCIceCandidate,
@@ -376,17 +382,28 @@ export function brokerLocationFromConnection(
 }
 
 /**
- * Resolve a webrtc connection's configured `stun`/`turn` entries into the ICE
- * server list the peer connection is built with.
+ * Resolve a webrtc connection's relay servers into the ICE server list the
+ * peer connection is built with: the invitation's relay where it names one,
+ * else the connection's own `stun`/`turn` entries, per kind
+ * (`selectRunRelay`).
  *
  * An `iceProvision` block is refused rather than ignored: it names servers the
  * operator meant to use, and silently falling back to the built-in default
  * would be a downgrade they never chose.
  *
+ * @param invitationRelayCredential The credential minted for this run
+ *   (`mintRunRelayCredential`), presented to every TURN url the invitation's
+ *   relay names. Required when the selection uses those urls.
  * @throws {UsageError} if the connection configures `iceProvision`.
+ * @throws {Error} if the invitation's TURN urls are selected and no credential
+ *   was supplied, which is a fault in the caller.
  */
 export function iceServersFromConnection(
-  connection: Pick<WebRTCConnectionConfig, "stun" | "turn" | "iceProvision">,
+  connection: Pick<
+    WebRTCConnectionConfig,
+    "stun" | "turn" | "iceProvision" | "invitationRelay"
+  >,
+  invitationRelayCredential?: RelayCredential,
 ): Array<RTCIceServer> {
   if (connection.iceProvision !== undefined) {
     throw new UsageError(
@@ -394,21 +411,54 @@ export function iceServersFromConnection(
         "not support: list the servers directly under `stun` and `turn` instead",
     );
   }
+  const { stun, turn } = selectRunRelay(connection);
   const servers: Array<RTCIceServer> = [];
-  if (connection.stun !== undefined && connection.stun.length > 0) {
-    servers.push({ urls: [...connection.stun] });
+  if (stun !== undefined && stun.urls.length > 0) {
+    servers.push({ urls: stun.urls });
   }
-  for (const turn of connection.turn ?? []) {
-    // `credential_type: hmac-sha1` describes how a deployment MINTS a
-    // time-limited credential, not how a client presents it: the minted value
-    // is still sent as the password, so both types take the same shape here.
-    servers.push({
-      urls: turn.url,
-      username: turn.username,
-      credential: turn.credential,
-    });
+  if (turn?.source === "invitation") {
+    if (invitationRelayCredential === undefined)
+      throw new Error(
+        "iceServersFromConnection: the invitation's relay is selected but no " +
+          "relay credential was minted for this run",
+      );
+    for (const url of turn.urls)
+      servers.push({
+        urls: url,
+        username: invitationRelayCredential.username,
+        credential: invitationRelayCredential.credential,
+      });
+  } else {
+    for (const server of turn?.servers ?? []) {
+      // `credential_type: hmac-sha1` describes how a deployment MINTS a
+      // time-limited credential, not how a client presents it: the minted value
+      // is still sent as the password, so both types take the same shape here.
+      servers.push({
+        urls: server.url,
+        username: server.username,
+        credential: server.credential,
+      });
+    }
   }
   return servers;
+}
+
+/**
+ * Mint this run's credential for the TURN urls the connection's invitation
+ * relay names, or `undefined` when the run does not use them (no invitation
+ * relay, one naming only STUN urls, or no shared secret to mint from -- the
+ * last refused by the dial itself). Async, unlike the rest of the dial's
+ * resolution, because the key derivation is.
+ */
+export async function invitationRelayCredentialForRun(
+  connection: Pick<WebRTCConnectionConfig, "stun" | "turn" | "invitationRelay">,
+  sharedSecret: string | undefined,
+  now: Date,
+): Promise<RelayCredential | undefined> {
+  if (sharedSecret === undefined) return undefined;
+  if (selectRunRelay(connection).turn?.source !== "invitation")
+    return undefined;
+  return mintRunRelayCredential(sharedSecret, now);
 }
 
 /** The `RTCConfiguration` fields the peer connection is constructed with. */

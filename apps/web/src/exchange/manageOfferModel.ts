@@ -80,7 +80,9 @@ export const MANAGE_OFFER_IDLE: ManageOfferState = { status: "idle" };
  * Both are already the invitation's `WebRTCEndpointSchema` shape (see
  * docs/spec/MANAGED_EXCHANGE_RECORD.md, "The connection block"); this only drops
  * an absent optional the composer's strict parse would otherwise reject as
- * `undefined`.
+ * `undefined`. The endpoint's relay is kept, and the composed connection holds
+ * it as `invitation_relay`, so a scheduled re-run can use the relay the
+ * invitation named.
  */
 export function webrtcLocatorFromEndpoint(
   endpoint: WebRTCEndpoint,
@@ -90,6 +92,7 @@ export function webrtcLocatorFromEndpoint(
     host: endpoint.host,
     ...(endpoint.port !== undefined ? { port: endpoint.port } : {}),
     ...(endpoint.path !== undefined ? { path: endpoint.path } : {}),
+    ...(endpoint.relay !== undefined ? { relay: endpoint.relay } : {}),
   };
 }
 

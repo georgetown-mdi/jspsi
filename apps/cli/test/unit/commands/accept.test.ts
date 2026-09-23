@@ -4311,6 +4311,38 @@ describe("displayInvitation: the declared terms it discloses (columns, citations
     }
   });
 
+  test("displayInvitation: a webrtc endpoint's relay is named before consent, escaped, and nothing is said without one", () => {
+    const log = getLogger("accept-display-relay-test");
+    log.setLevel("silent");
+    const relayEndpoint: ConnectionEndpoint = {
+      channel: "webrtc",
+      host: "peer.example.org",
+      relay: {
+        turn: ["turns:relay.example.org:443?transport=tcp"],
+        stun: ["stun:relay.example.org:3478?x=\u001b[31m"],
+      },
+    };
+    const lines = renderDisplayInvitation(
+      log,
+      sampleToken(FUTURE(), relayEndpoint),
+    ).split("\n");
+    const heading = lines.indexOf("  relay your partner named (enforced):");
+    expect(heading).toBeGreaterThanOrEqual(0);
+    expect(lines.slice(heading + 1, heading + 4)).toEqual([
+      "    TURN turns:relay.example.org:443?transport=tcp",
+      "    STUN stun:relay.example.org:3478?x=\\x1b[31m",
+      `    ${CONSENT_FACTS.invitationRelay.note}`,
+    ]);
+    expect(heading).toBeLessThan(lines.indexOf(REPEAT_HEADING));
+
+    const without = renderDisplayInvitation(
+      log,
+      sampleToken(FUTURE(), { channel: "webrtc", host: "peer.example.org" }),
+    );
+    expect(without).not.toContain("relay your partner named");
+    expect(without).not.toContain(CONSENT_FACTS.invitationRelay.note);
+  });
+
   test("displayInvitation: a split-directory endpoint states the retention with no declaration", () => {
     // The seeded sub-case: this accept builds its connection from the endpoint and
     // is put in retain mode by its shape (a split pair cannot be configured
@@ -4451,6 +4483,16 @@ describe("displayInvitation: the declared terms it discloses (columns, citations
       ...sampleToken(FUTURE()),
       linkageTerms: { ...CONSENT_PROBE_TERMS, deduplicate: true },
     });
+    // The named relay is the eleventh: like the retain declaration it is held
+    // on the token rather than in the terms, on the endpoint this time.
+    const namingRelay = renderDisplayInvitation(
+      log,
+      sampleToken(FUTURE(), {
+        channel: "webrtc",
+        host: "peer.example.org",
+        relay: { turn: ["turns:relay.example.org:443"] },
+      }),
+    );
     const rendered = [
       acceptorWithheld,
       inviterWithheld,
@@ -4462,6 +4504,7 @@ describe("displayInvitation: the declared terms it discloses (columns, citations
       deduplicatingTableWithheld,
       inviterLearnsNoMembership,
       deduplicatingSharedResult,
+      namingRelay,
     ].join("\n");
 
     // The whole table, rather than a list restated here: a caveat this renderer
@@ -5427,6 +5470,53 @@ describe("handler: '--consent-to-terms' gates the confirmation prompt", () => {
         throw new Error("expected webrtc");
       expect(parsed.connection.role).toBe("acceptor");
       expect(raw).toContain("role: acceptor");
+    } finally {
+      exit.mockRestore();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("handler: an accepted webrtc invitation's relay is written as invitation_relay, leaving turn and stun unset", async () => {
+    // The configuration is where the partner's signaling endpoint is kept for
+    // every later `psilink exchange`, so the relay is kept there too -- beside
+    // this party's own relay settings, not in them.
+    const { dir, configFile, keyFile } = offlineAcceptFixture();
+    const exit = vi
+      .spyOn(process, "exit")
+      .mockImplementation((() => undefined) as never);
+    const relay = {
+      turn: ["turns:relay.example.org:443?transport=tcp"],
+      stun: ["stun:relay.example.org:3478"],
+    };
+    try {
+      const encoded = await encodeInvitation(
+        sampleToken(new Date(Date.now() + 3_600_000).toISOString(), {
+          channel: "webrtc",
+          host: "peer.example.org",
+          path: "/psi",
+          relay,
+        }),
+      );
+      await acceptHandler({
+        _: [],
+        $0: "psilink",
+        identity: "Agency B",
+        args: [encoded],
+        "consent-to-terms": true,
+        "config-file": configFile,
+        "key-file": keyFile,
+        "log-level": "silent",
+        record: false,
+      } as unknown as Arguments);
+      expect(exit).not.toHaveBeenCalled();
+      const raw = fs.readFileSync(configFile, "utf8");
+      expect(raw).toContain("invitation_relay:");
+      const parsed = parseExchangeSpec(YAML.parse(raw));
+      if (parsed.connection.channel !== "webrtc")
+        throw new Error("expected webrtc");
+      expect(parsed.connection.invitationRelay).toEqual(relay);
+      expect(parsed.connection.turn).toBeUndefined();
+      expect(parsed.connection.stun).toBeUndefined();
     } finally {
       exit.mockRestore();
       fs.rmSync(dir, { recursive: true, force: true });

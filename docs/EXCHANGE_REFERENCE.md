@@ -581,7 +581,7 @@ connection:
   role: inviter
 ```
 
-The peer addresses are derived from the shared secret, so there is nothing to fill in beyond the coordination server; [`connection.role`](#connectionrole) is `inviter` on the party that issued the invitation and `acceptor` on the party that accepted it. `psilink accept` seeds this block whole from the invitation, so it usually needs no edit at all.
+The peer addresses are derived from the shared secret, so there is nothing to fill in beyond the coordination server; [`connection.role`](#connectionrole) is `inviter` on the party that issued the invitation and `acceptor` on the party that accepted it. `psilink accept` seeds this block whole from the invitation -- the relay the invitation names included, as [`invitation_relay`](#connectioninvitation_relay) -- so it usually needs no edit at all.
 
 A webrtc connection takes only the keys listed below. One it does not define -- `ice_transport_polcy` for [`ice_transport_policy`](#connectionice_transport_policy), or a key that belongs under `server` written beside it -- is a usage error (exit 64) naming the key, rather than a setting dropped in silence.
 
@@ -794,6 +794,35 @@ connection:
       credential: "@/run/secrets/turn.key"
 ```
 
+### `connection.invitation_relay`
+
+*Type:* object  
+*Required:* no  
+*Applies to:* `webrtc`
+
+The relay the invitation you accepted named: your partner's TURN and STUN urls, written here by `psilink accept` and kept by the web app with a saved exchange. It holds urls only -- `turn` and `stun`, each a list in the grammar of [`connection.turn`](#connectionturn)'s `url` and [`connection.stun`](#connectionstun) -- and a `username`, `credential`, or any other key is refused.
+
+A run prefers it to your own settings, one kind at a time: its `turn` urls replace your [`turn`](#connectionturn) entries, and its `stun` urls replace your [`stun`](#connectionstun) list, each only where it names some. Where it names none of a kind, or is absent, your own setting of that kind is used, so your `turn` and `stun` stay the fallback. Each run signs in to the invitation's TURN urls with a credential it derives from the exchange's current shared secret, valid for an hour; nothing is stored. Its TURN urls also satisfy [`ice_transport_policy: relay`](#connectionice_transport_policy).
+
+The relay's operator learns your network address on every run that contacts it, whether or not any traffic is relayed, which is why an acceptance names the relay before you consent. To stop using it, delete the block. The format and the credential derivation: [PROTOCOL.md](spec/PROTOCOL.md#the-invitations-relay-locator).
+
+An inviter names its relay from its own settings -- each `turn` entry's `url` and its `stun` list, never a username or credential. A `psilink invite` over a `ws://` or `wss://` URL builds its connection from the URL alone, which holds no `turn` or `stun`, so its invitation names no relay.
+
+> **Honored by the CLI only**, like `stun` and `turn`. The web app keeps the relay with a saved exchange and does not relay through it.
+
+```yaml
+connection:
+  channel: webrtc
+  server:
+    host: peers.example.org
+  role: acceptor
+  invitation_relay:
+    turn:
+      - "turns:relay.example.org:443?transport=tcp"
+    stun:
+      - "stun:relay.example.org:3478"
+```
+
 ### `connection.ice_transport_policy`
 
 *Type:* enum (`all` | `relay`)  
@@ -803,13 +832,13 @@ connection:
 
 Which candidate types ICE may use. `all` permits host, server-reflexive and relay candidates. `relay` gathers relay candidates only, so this party offers the partner no host or server-reflexive address and every path the exchange can take runs through a configured TURN server.
 
-`relay` requires a source of relay candidates: a connection that sets it with no `turn` entry is a usage error (exit 64) before anything is dialed, since it could gather nothing to pair.
+`relay` requires a source of relay candidates: a connection that sets it with no `turn` entry, and no TURN url in [`invitation_relay`](#connectioninvitation_relay), is a usage error (exit 64) before anything is dialed, since it could gather nothing to pair.
 
 Every WebRTC run states the policy it applied as it opens the rendezvous -- the configured value, or the default where the connection sets none -- so a run's own log says which candidate types it gathered under.
 
 It holds for a `turn` entry the ICE layer keeps. An entry whose `url` sets a `transport` the layer cannot use is dropped there, which would leave a relay-only run gathering host candidates, so the accepted `transport` values ([`connection.turn`](#connectionturn)) are the ones it keeps and any other is refused at parse.
 
-> **Honored by the CLI only**, like `stun` and `turn` (see [`connection.stun`](#connectionstun)). It is each party's own setting rather than a term of the exchange: it constrains only the candidates this party gathers, an invitation cannot carry it, and the partner is unaffected. What it is for, and what a run configured with it reports, are in [CLI.md](CLI.md#turn).
+> **Honored by the CLI only**, like `stun` and `turn` (see [`connection.stun`](#connectionstun)). It is each party's own setting rather than a term of the exchange: it constrains only the candidates this party gathers, an invitation cannot include it, and the partner is unaffected. What it is for, and what a run configured with it reports, are in [CLI.md](CLI.md#turn).
 
 ```yaml
 connection:

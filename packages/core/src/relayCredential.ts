@@ -6,6 +6,7 @@ import {
   toHex,
 } from "./utils/crypto.js";
 import { SHARED_SECRET_REGEX } from "./config/connection.js";
+import type { WebRTCConnectionConfig } from "./config/connection.js";
 
 /**
  * HKDF info label for the per-exchange relay key. A single fixed label in the
@@ -117,4 +118,73 @@ export async function mintRelayCredential({
     credential: btoa(String.fromCharCode(...mac)),
     expiresAt: new Date(expirySeconds * 1000),
   };
+}
+
+/**
+ * The label {@link mintRunRelayCredential} puts in a relay credential's
+ * username. The relay operator reads it in its logs, so it names the software
+ * and nothing about the exchange or the party.
+ */
+export const RUN_RELAY_CREDENTIAL_LABEL = "psilink";
+
+/**
+ * The relay servers a webrtc run gathers candidates from, chosen per kind: the
+ * invitation's TURN urls when its relay names any, else the connection's own
+ * `turn` entries, and the invitation's STUN urls when its relay names any, else
+ * the connection's own `stun` list. An invitation's TURN url has no credential;
+ * the run mints one ({@link mintRunRelayCredential}).
+ */
+export interface RunRelaySelection {
+  /** The STUN urls and their source; absent when neither side names a list. */
+  stun?: { source: "invitation" | "own"; urls: string[] };
+  /** The TURN servers and their source; absent when neither side names any. */
+  turn?:
+    | { source: "invitation"; urls: string[] }
+    | {
+        source: "own";
+        servers: NonNullable<WebRTCConnectionConfig["turn"]>;
+      };
+}
+
+/**
+ * Choose the relay servers a webrtc run uses (see {@link RunRelaySelection}).
+ * A connection with no `invitationRelay` selects exactly its own `stun` and
+ * `turn`, so a run from an invitation that named no relay is unchanged.
+ */
+export function selectRunRelay(
+  connection: Pick<WebRTCConnectionConfig, "stun" | "turn" | "invitationRelay">,
+): RunRelaySelection {
+  const invitation = connection.invitationRelay;
+  const selection: RunRelaySelection = {};
+  if (invitation?.stun !== undefined && invitation.stun.length > 0)
+    selection.stun = { source: "invitation", urls: [...invitation.stun] };
+  else if (connection.stun !== undefined)
+    selection.stun = { source: "own", urls: [...connection.stun] };
+  if (invitation?.turn !== undefined && invitation.turn.length > 0)
+    selection.turn = { source: "invitation", urls: [...invitation.turn] };
+  else if (connection.turn !== undefined)
+    selection.turn = { source: "own", servers: [...connection.turn] };
+  return selection;
+}
+
+/**
+ * Mint the credential a run presents to the TURN urls an invitation named:
+ * signed under the relay key derived from the run's current shared secret, for
+ * {@link RELAY_CREDENTIAL_MAX_TTL_SECONDS}, labelled
+ * {@link RUN_RELAY_CREDENTIAL_LABEL}. Nothing is stored; the next run mints
+ * again from the secret it then holds.
+ *
+ * @throws {Error} if `sharedSecret` is not a base64url-encoded 32-byte value
+ *   or `now` is not a valid date.
+ */
+export async function mintRunRelayCredential(
+  sharedSecret: string,
+  now: Date,
+): Promise<RelayCredential> {
+  return mintRelayCredential({
+    key: await deriveRelayKey(sharedSecret),
+    label: RUN_RELAY_CREDENTIAL_LABEL,
+    ttlSeconds: RELAY_CREDENTIAL_MAX_TTL_SECONDS,
+    now,
+  });
 }

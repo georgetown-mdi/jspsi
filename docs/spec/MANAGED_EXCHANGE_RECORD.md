@@ -167,9 +167,13 @@ build that predates it also requires.
 
 For the browser path the document's connection block is the `webrtc` channel
 restricted to its credential-free locator subset: `server` locator fields only
-(`host`/`port`/`path` -- no `server.username`, no PeerJS `key`), and no
+(`host`/`port`/`path` -- no `server.username`, no PeerJS `key`), the
+`invitation_relay` the invitation named (TURN and STUN urls only, see
+[PROTOCOL.md](PROTOCOL.md#the-invitations-relay-locator)), and no
 `turn`, `ice_provision`, or `provider_options` entries (a TURN entry holds
-relay credentials, and the provider map is opaque and `@`-file-pathed). This
+relay credentials, and the provider map is opaque and `@`-file-pathed). An
+acceptor's record keeps `invitation_relay` so a re-run can relay through it;
+the browser's peer connection does not read it. This
 party's side lives in the local `side` field, not the document (see [Role: a
 local `side` field](#role-a-local-side-field-not-the-document)). The full shared schema **can** represent those
 credential-bearing fields, so the guarantee comes from composition, exactly as
@@ -179,7 +183,7 @@ downloadable-file mint path's credential-free input union covers only the
 file-sync channels (a webrtc exchange is coordinated live, not from a
 downloadable file), so core holds the composer's webrtc arm as three distinct
 pieces. They are a credential-free `WebRTCExchangeLocator` type
-(`host`/`port`/`path` only); a `webrtc` arm in `connectionFromLocator`, the
+(`host`/`port`/`path` and a url-only `relay`); a `webrtc` arm in `connectionFromLocator`, the
 locator-to-connection expansion in `packages/core/src/config/exchangeFile.ts`;
 and the composition guarantee extending to the nested `server` object's two
 credential fields (`server.username` and the PeerJS `server.key`), which the

@@ -201,8 +201,9 @@ sharply:
   application that adds a webrtc connection field is therefore rejected by an
   older CLI rather than narrowed, the trade the top level already makes. A
   minted file never includes the `authentication` block, and a
-  locator-composed webrtc connection holds `server` alone, so both matter only
-  for an operator-edited config.
+  locator-composed webrtc connection holds `server` and, where the invitation
+  named a relay, `invitation_relay` -- which a CLI predating that field
+  rejects.
 
 The critical property across all four cases: an incompatibility is reported as a
 loud load-time validation error, never a silent reinterpretation of a value into

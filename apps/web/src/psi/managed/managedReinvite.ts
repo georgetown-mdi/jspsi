@@ -52,7 +52,11 @@ import {
   MAX_INVITATION_LIFETIME_SECONDS,
 } from "@psilink/core";
 
-import { deepLinkFor, webrtcEndpointFromLocation } from "../invitation";
+import {
+  NO_OWN_RELAY,
+  deepLinkFor,
+  invitationWebrtcEndpoint,
+} from "../invitation";
 import { rotationWriteBack } from "./managedRunRotate";
 
 import type {
@@ -134,7 +138,7 @@ function buildReinviteToken(
     linkageTerms: record.exchangeFile.linkageTerms,
     sharedSecret: freshSecret,
     expires: tokenExpires,
-    connectionEndpoint: webrtcEndpointFromLocation(location),
+    connectionEndpoint: invitationWebrtcEndpoint(location, NO_OWN_RELAY),
     ...(record.exchangeFile.disclosedPayloadColumns !== undefined
       ? { disclosedPayloadColumns: record.exchangeFile.disclosedPayloadColumns }
       : {}),

@@ -10,6 +10,7 @@ import {
   assertPayloadSendDisclosed,
   decodeInvitation,
   disclosedColumnNames,
+  encodeInvitation,
   getDefaultLinkageTerms,
   inferMetadata,
   summarizeInvitation,
@@ -20,8 +21,10 @@ import { MAX_RAW_INVITATION_LENGTH } from "@psilink/core/testing";
 import {
   ACCEPT_ROUTE_PATH,
   InvitationFileError,
+  NO_OWN_RELAY,
   deepLinkFor,
   generateInvitation,
+  invitationWebrtcEndpoint,
   tokenFromInput,
   webrtcEndpointFromLocation,
 } from "../../../src/psi/invitation.js";
@@ -1475,6 +1478,37 @@ describe("webrtcEndpointFromLocation", () => {
     expect(
       webrtcEndpointFromLocation({ hostname: "example.org", port: "8080abc" }),
     ).toStrictEqual({ channel: "webrtc", host: "example.org", path: "/api/" });
+  });
+});
+
+describe("invitationWebrtcEndpoint", () => {
+  test("with no own relay, is this app's signaling locator alone", () => {
+    expect(invitationWebrtcEndpoint(location, NO_OWN_RELAY)).toStrictEqual(
+      webrtcEndpointFromLocation(location),
+    );
+  });
+
+  test("names the inviter's own relay urls, and they round-trip through the token", async () => {
+    const endpoint = invitationWebrtcEndpoint(location, {
+      turn: ["turns:relay.example.org:443?transport=tcp"],
+      stun: ["stun:relay.example.org:3478"],
+    });
+    expect(endpoint).toStrictEqual({
+      ...webrtcEndpointFromLocation(location),
+      relay: {
+        turn: ["turns:relay.example.org:443?transport=tcp"],
+        stun: ["stun:relay.example.org:3478"],
+      },
+    });
+    const decoded = await decodeInvitation(
+      await encodeInvitation({
+        version: "1",
+        linkageTerms: getDefaultLinkageTerms("County Health Dept"),
+        sharedSecret: "A".repeat(43),
+        connectionEndpoint: endpoint,
+      }),
+    );
+    expect(decoded.connectionEndpoint).toStrictEqual(endpoint);
   });
 });
 

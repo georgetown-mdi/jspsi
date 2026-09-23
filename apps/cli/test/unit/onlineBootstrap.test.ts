@@ -1310,6 +1310,22 @@ test("connectionFromEndpoint: a webrtc endpoint seeds the signaling locator", ()
   if (connection.channel !== "webrtc") return;
   expect(connection.server.host).toBe("peer.example.org");
   expect(connection.server.path).toBe("/psi");
+  expect(connection).not.toHaveProperty("invitationRelay");
+});
+
+test("connectionFromEndpoint: a webrtc endpoint's relay is kept as invitationRelay, not as this party's turn or stun", () => {
+  const relay = {
+    turn: ["turns:relay.example.org:443?transport=tcp"],
+    stun: ["stun:relay.example.org:3478"],
+  };
+  const { connection } = connectionFromEndpoint({
+    channel: "webrtc",
+    host: "peer.example.org",
+    relay,
+  });
+  expect(connection).toMatchObject({ invitationRelay: relay });
+  expect(connection).not.toHaveProperty("turn");
+  expect(connection).not.toHaveProperty("stun");
 });
 
 test("connectionFromEndpoint: a split sftp endpoint mirror-swaps the inbound/outbound pair", () => {
@@ -1857,8 +1873,9 @@ test("endpointFromConnection: nothing but the webrtc locator survives the emit",
   // The producer side of the no-credentials invariant on this channel: a
   // hand-authored connection holding the broker API key, a TURN relay's
   // credential, an ICE provisioning secret, and the plaintext scheme emits the
-  // locator alone. `secure` is dropped with them -- the endpoint schema has no
-  // field for it -- which is why an acceptor seeded from one resolves TLS.
+  // locator alone -- the relay's url, never its username or credential.
+  // `secure` is dropped with them -- the endpoint schema has no field for it --
+  // which is why an acceptor seeded from one resolves TLS.
   const endpoint = endpointFromConnection({
     channel: "webrtc",
     server: {
@@ -1887,14 +1904,18 @@ test("endpointFromConnection: nothing but the webrtc locator survives the emit",
     "host",
     "path",
     "port",
+    "relay",
   ]);
+  expect(endpoint).toMatchObject({
+    relay: { turn: ["turns:relay.example.org:443"] },
+  });
   const serialized = JSON.stringify(endpoint);
   for (const leak of [
     "alice",
     "broker-api-key",
     "topsecret",
     "relaysecret",
-    "relay.example.org",
+    "psilink",
     "secure",
     "role",
   ])

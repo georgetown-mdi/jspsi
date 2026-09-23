@@ -340,9 +340,9 @@ export function mintExchangeSpec(input: ExchangeFileInput): ExchangeSpec {
  *
  * For WebRTC the expansion copies only the
  * {@link WebRTCEndpointSchema}-validated `host`/`port`/`path` into
- * `server`, so no PeerJS `server.key`, `server.username`, `turn`,
- * `ice_provision`, or `provider_options` entry is representable in the
- * result. The locator is validated through {@link WebRTCEndpointSchema}
+ * `server`, and a url-only `relay` into `invitation_relay`, so no PeerJS
+ * `server.key`, `server.username`, `turn`, `ice_provision`, or
+ * `provider_options` entry is representable in the result. The locator is validated through {@link WebRTCEndpointSchema}
  * first, so a type-bypassed caller's unexpected key is rejected there, at the
  * locator, rather than reaching the connection this builds.
  */
@@ -358,6 +358,9 @@ export function connectionFromLocator(
         ...(endpoint.port !== undefined ? { port: endpoint.port } : {}),
         ...(endpoint.path !== undefined ? { path: endpoint.path } : {}),
       },
+      ...(endpoint.relay !== undefined
+        ? { invitationRelay: endpoint.relay }
+        : {}),
     };
   }
   if (locator.channel === "sftp") {

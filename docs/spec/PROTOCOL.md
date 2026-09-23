@@ -1009,7 +1009,7 @@ This is a cross-implementation contract: both implementations compute the same i
 
 ## Relay credential derivation
 
-A party whose WebRTC connection needs a TURN relay uses a relay its own side controls, and authenticates to it with a credential derived from the invitation's 32-byte shared secret, so no relay password is sent in the invitation or out of band. The relay is coturn, in its `use-auth-secret` mode: it holds a table of shared secrets and accepts a time-limited credential signed under any of them. The reference relay under `infra/relay` configures a single static secret; the per-exchange table, and the register and revoke steps that go with it, are the relay change that follows this derivation.
+A party whose WebRTC connection needs a TURN relay uses the relay the invitation names, or one its own side controls where the invitation names none (see [The invitation's relay locator](#the-invitations-relay-locator) below), and authenticates to it with a credential derived from the invitation's 32-byte shared secret, so no relay password is sent in the invitation or out of band. The relay is coturn, in its `use-auth-secret` mode: it holds a table of shared secrets and accepts a time-limited credential signed under any of them. The reference relay under `infra/relay` configures a single static secret; the per-exchange table, and the register and revoke steps that go with it, are the relay change that follows this derivation.
 
 **The relay key.** One key per exchange, which the relay's operator registers as an entry in the relay's secrets table. The key is derived from the exchange's current shared secret, so it changes at each [rotation](#shared-secret-rotation), and a relay must hold the key derived from the current secret:
 
@@ -1031,6 +1031,20 @@ The credential is standard base64 with padding. `label` is chosen by the party m
 HMAC-SHA-1 appears here only because coturn's credential format fixes it; it is not a psilink security primitive. The credential authorizes use of the relay and nothing else: the exchange's confidentiality and authentication rest on DTLS and the key exchange above, not on it.
 
 **What the relay key grants.** While the relay key is registered with a relay, holding the exchange's shared secret is equivalent to holding access to that relay: the key is computable from the secret, and the relay, not psilink, decides which expiries it honors. The 3600-second ceiling above bounds only the credentials psilink mints; anyone holding the key can mint one with a later expiry. Removing the key from the relay's secrets table is the revocation.
+
+### The invitation's relay locator
+
+A webrtc connection endpoint MAY hold `relay`, the inviting party's relay locator: an object with an optional `turn` list and an optional `stun` list of urls, and no other key.
+
+- **Grammar.** Each `turn` url and each `stun` url holds the grammar of the connection block's own [`turn`](../EXCHANGE_REFERENCE.md#connectionturn) `url` and [`stun`](../EXCHANGE_REFERENCE.md#connectionstun) entries, one schema for both (`TurnUrlSchema` and `StunUrlSchema` in `packages/core/src/config/connection.ts`).
+- **Bounds.** A list present holds 1 to `MAX_RELAY_LOCATOR_URLS` (**8**) urls, each at most `MAX_RELAY_LOCATOR_URL_LENGTH` (**1024**) UTF-16 code units, and the locator names at least one url.
+- **No credential.** A `username`, `credential`, or any other key on the locator, and a `turn` entry written as an object rather than a url, is refused when the invitation is decoded and when it is minted -- refused, not stripped.
+- **Composition.** The inviter composes the locator from its own relay's urls alone (`relayLocatorFromOwnRelay`): the CLI from its connection's `turn` urls and `stun` list, the web app from the browser's own relay setting. An inviter with no relay of its own names none.
+- **Compatibility.** The field was added to the strict webrtc endpoint without a token `version` bump, while no decoder was deployed; a decoder predating it refuses an invitation that holds it.
+
+**Which relay a run uses.** The accepting party keeps the locator on its connection as `invitation_relay` ([EXCHANGE_REFERENCE.md](../EXCHANGE_REFERENCE.md#connectioninvitation_relay)), beside its own `turn` and `stun` rather than in them. A run chooses per kind (`selectRunRelay` in `packages/core/src/relayCredential.ts`): the invitation's TURN urls when it names any, else its own `turn` entries; the invitation's STUN urls when it names any, else its own `stun` list. A connection with no `invitation_relay` runs exactly its own lists.
+
+**The run credential.** A run that uses the invitation's TURN urls presents one credential to each of them, minted when the run starts (`mintRunRelayCredential`): the relay key derived from the shared secret the run holds, `ttl` = 3600, and `label` = `psilink`. The secret rotates on every successful handshake, so each run's credential derives from a different key, and nothing derived is stored.
 
 # Post-linkage steps
 

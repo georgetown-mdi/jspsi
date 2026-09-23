@@ -3,6 +3,8 @@ import { camelizeKeys } from "../utils/camelizeKeys.js";
 import { safeParseCamelized } from "./safeParseCamelized.js";
 import { randomBytes, toBase64Url } from "../utils/crypto.js";
 import { pathsResolveToSameDir } from "../utils/pathCompare.js";
+import { maxCodeUnits } from "../utils/maxCodeUnits.js";
+import { boundedArray } from "../utils/boundedArray.js";
 
 // --- HTTP service authentication ---------------------------------------------
 
@@ -444,7 +446,9 @@ function turnUrlTransportIsSupported(url: string): boolean {
 
 /**
  * The url grammar of a `turn` entry: a `turn:` or `turns:` url naming a host,
- * with a `transport` the ICE layer keeps. Parses to the trimmed url.
+ * with a `transport` the ICE layer keeps. Parses to the trimmed url. Shared by
+ * the connection block's `turn` entries and the relay locator an invitation
+ * may name, so both accept the same urls.
  */
 export const TurnUrlSchema = z
   .string()
@@ -463,7 +467,7 @@ export const TurnUrlSchema = z
 
 /**
  * The grammar of a `stun` entry: a `stun:` or `stuns:` url naming a host.
- * Parses to the trimmed url.
+ * Parses to the trimmed url. Shared like {@link TurnUrlSchema}.
  */
 export const StunUrlSchema = z
   .string()
@@ -825,6 +829,79 @@ const FileSyncOptionsSchema: z.ZodType<FileSyncOptions> = z
     path: ["retainFiles"],
   });
 
+// --- Relay locator -----------------------------------------------------------
+
+/**
+ * Where a relay is reached, and nothing that authenticates to it: TURN and
+ * STUN urls under the grammar of the connection block's own `turn` and `stun`
+ * entries. An invitation's webrtc endpoint may name one, and the accepting
+ * side keeps it on its connection as
+ * {@link WebRTCConnectionConfig.invitationRelay}. Each party mints the TURN
+ * credential from the exchange's shared secret (docs/spec/PROTOCOL.md, "Relay
+ * credential derivation"), so the locator has no username or credential field.
+ */
+export interface RelayLocator {
+  /** TURN urls; non-empty when present. */
+  turn?: string[];
+  /** STUN urls; non-empty when present. */
+  stun?: string[];
+}
+
+/** Upper bound on the urls in each list of a {@link RelayLocator}. */
+export const MAX_RELAY_LOCATOR_URLS = 8;
+
+/**
+ * Upper bound on one relay locator url, in UTF-16 code units: a 256-character
+ * host plus the scheme, port and `transport` parameter fits well inside it.
+ */
+export const MAX_RELAY_LOCATOR_URL_LENGTH = 1024;
+
+const relayUrlList = (url: z.ZodType<string>, name: "turn" | "stun") =>
+  boundedArray(
+    url.check(maxCodeUnits(MAX_RELAY_LOCATOR_URL_LENGTH)),
+    MAX_RELAY_LOCATOR_URLS,
+    `a relay locator's ${name} list must not exceed ` +
+      `${MAX_RELAY_LOCATOR_URLS} urls`,
+    1,
+  );
+
+/**
+ * Build the strict {@link RelayLocator} schema. Every key outside
+ * `turn`/`stun`, a `username` or `credential` included, is refused rather than
+ * stripped, with `unknownKeysMessage` naming the keys; a locator naming no url
+ * is refused too. The invitation endpoint and the connection block each supply
+ * their own message: one names keys a partner wrote, the other keys the
+ * operator wrote.
+ */
+export function relayLocatorSchema(
+  unknownKeysMessage: (keys: ReadonlyArray<string>) => string,
+): z.ZodType<RelayLocator> {
+  return z
+    .strictObject(
+      {
+        turn: relayUrlList(TurnUrlSchema, "turn").optional(),
+        stun: relayUrlList(StunUrlSchema, "stun").optional(),
+      },
+      {
+        error: (issue) =>
+          issue.code === "unrecognized_keys"
+            ? unknownKeysMessage(issue.keys)
+            : undefined,
+      },
+    )
+    .refine((relay) => relay.turn !== undefined || relay.stun !== undefined, {
+      message:
+        "a relay locator must name at least one turn or stun url; omit it " +
+        "when there is no relay to name",
+    });
+}
+
+const ConnectionRelayLocatorSchema = relayLocatorSchema(
+  (keys) =>
+    `invitation_relay has no ${keys.length === 1 ? "key" : "keys"} ` +
+    `${keys.join(", ")}; it holds only turn and stun url lists`,
+);
+
 // --- Connection config -------------------------------------------------------
 
 /**
@@ -850,6 +927,13 @@ export interface WebRTCConnectionConfig {
   stun?: string[];
   /** TURN servers for relaying when no direct path can be found. */
   turn?: TurnServer[];
+  /**
+   * The relay named by the invitation this connection was accepted from. Its
+   * TURN urls replace {@link turn} and its STUN urls replace {@link stun},
+   * each only when the locator names that kind, with the TURN credential
+   * minted from the shared secret on each run.
+   */
+  invitationRelay?: RelayLocator;
   /**
    * Which candidate types ICE may use. `all` permits host, server-reflexive
    * and relay candidates; `relay` gathers relay candidates only, so every
@@ -969,6 +1053,7 @@ const WebRTCConnectionConfigSchema = z.strictObject(
     role: z.enum(["inviter", "acceptor"]).optional(),
     stun: z.array(StunUrlSchema).optional(),
     turn: z.array(TurnServerSchema).optional(),
+    invitationRelay: ConnectionRelayLocatorSchema.optional(),
     iceTransportPolicy: z.enum(["all", "relay"]).optional(),
     iceProvision: IceProvisionSchema.optional(),
     options: SharedOptionsSchema.optional(),
@@ -1066,14 +1151,16 @@ export const ConnectionConfigSchema: z.ZodType<ConnectionConfig> = z
   // here answers at config time what would otherwise be a rendezvous that runs
   // its whole budget and then reports that no relay candidate was gathered.
   // An `iceProvision` endpoint also answers with relay servers, so it satisfies
-  // the policy here; the message names only `turn`, the one source an
-  // application dials today (the CLI refuses `iceProvision` outright).
+  // the policy here, as does an invitation relay naming a TURN url; the message
+  // names only `turn`, the one source the operator authors (the CLI refuses
+  // `iceProvision` outright).
   .refine(
     (conn) =>
       !(
         conn.channel === "webrtc" &&
         conn.iceTransportPolicy === "relay" &&
         (conn.turn === undefined || conn.turn.length === 0) &&
+        conn.invitationRelay?.turn === undefined &&
         conn.iceProvision === undefined
       ),
     {

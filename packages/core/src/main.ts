@@ -284,6 +284,7 @@ export type {
   FileDropConnectionConfig,
   FileSyncOptions,
   HttpAuth,
+  RelayLocator,
   SFTPConnectionConfig,
   WebRTCConnectionConfig,
 } from "./config/connection";
@@ -377,6 +378,7 @@ export {
   endpointRequiresRetainedFiles,
   hasExpiryInstantPassed,
   isInvitationExpired,
+  relayLocatorFromOwnRelay,
   stripInvitationWhitespace,
 } from "./config/invitation";
 export type {
@@ -740,11 +742,15 @@ export type { RendezvousRole, SignalingLocationField } from "./rendezvous";
 export {
   deriveRelayKey,
   mintRelayCredential,
+  mintRunRelayCredential,
   RELAY_CREDENTIAL_MAX_TTL_SECONDS,
+  RUN_RELAY_CREDENTIAL_LABEL,
+  selectRunRelay,
 } from "./relayCredential";
 export type {
   MintRelayCredentialOptions,
   RelayCredential,
+  RunRelaySelection,
 } from "./relayCredential";
 // The shared chokepoint for parsing config/credential documents that may hold
 // secrets, so a parse error never leaks source bytes. Consumed by the CLI (file

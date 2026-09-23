@@ -16,7 +16,8 @@ import {
   clipToRenderedCost,
   DEFAULT_MAX_DISPLAY_LENGTH,
 } from "../utils/sanitizeForDisplay.js";
-import { SHARED_SECRET_REGEX } from "./connection.js";
+import { SHARED_SECRET_REGEX, relayLocatorSchema } from "./connection.js";
+import type { RelayLocator } from "./connection.js";
 import { pathsResolveToSameDir } from "../utils/pathCompare.js";
 import { parseBoundedJson } from "../utils/boundedJson.js";
 import { fromBase64Url } from "../utils/crypto.js";
@@ -26,7 +27,8 @@ import { boundedArray } from "../utils/boundedArray.js";
 
 /**
  * A WebRTC signaling locator: where the acceptor reaches the PeerJS
- * peer-coordination server. Has no PeerJS API key or other secret.
+ * peer-coordination server, and optionally the inviting party's relay. Has no
+ * PeerJS API key, relay credential, or other secret.
  */
 export interface WebRTCEndpoint {
   channel: "webrtc";
@@ -36,6 +38,12 @@ export interface WebRTCEndpoint {
   port?: number;
   /** URL path for WebRTC signaling; non-empty when present. */
   path?: string;
+  /**
+   * The inviting party's relay, TURN and STUN urls only, which the accepting
+   * party uses in place of its own (see
+   * `WebRTCConnectionConfig.invitationRelay`).
+   */
+  relay?: RelayLocator;
 }
 
 /** An SFTP locator: the host (and optional port and remote path) to reach. */
@@ -91,8 +99,9 @@ export interface FileDropEndpoint {
  * rendezvous point without separate out-of-band setup; discriminated by
  * `channel`, as `ConnectionConfig` in `connection.ts` is. Locator only:
  * {@link ConnectionEndpointSchema} rejects every field outside the per-channel
- * allowlist, a credential or `turn` entry included -- the current release's
- * shape, not a confidentiality rule (docs/SECURITY_DESIGN.md).
+ * allowlist, a credential included, and a webrtc endpoint's relay names urls
+ * only -- the current release's shape, not a confidentiality rule
+ * (docs/SECURITY_DESIGN.md).
  */
 export type ConnectionEndpoint =
   WebRTCEndpoint | SFTPEndpoint | FileDropEndpoint;
@@ -118,7 +127,8 @@ const fittedEndpointKeyName = (name: string): string =>
 // mischaracterized as an attempted credential), naming a few examples rather
 // than emitting Zod's generic "Unrecognized key". The named fields are
 // illustrative, not exhaustive: the binding rule is the allowlist itself
-// (channel/host/port/path, plus inbound_path/outbound_path for sftp/filedrop).
+// (channel/host/port/path, plus inbound_path/outbound_path for sftp/filedrop
+// and relay for webrtc).
 const endpointKeyError: z.core.$ZodErrorMap = (issue) => {
   if (issue.code === "unrecognized_keys") {
     // The rejected key names are partner-controlled (the inviter crafts the
@@ -128,7 +138,8 @@ const endpointKeyError: z.core.$ZodErrorMap = (issue) => {
     // description itself (CONTRIBUTING.md, Operator-facing escaping).
     return (
       "a connection endpoint may carry only a credential-free locator (channel " +
-      "plus host/port/path, or an inbound_path/outbound_path pair for a split " +
+      "plus host/port/path and, on webrtc, a relay of turn and stun urls, or " +
+      "an inbound_path/outbound_path pair for a split " +
       "file-sync directory); every other field is rejected so that no " +
       "credential or server-identity material (such as a password, private " +
       "key, or host-key fingerprint) can ride along. Remove unexpected " +
@@ -142,6 +153,39 @@ const endpointKeyError: z.core.$ZodErrorMap = (issue) => {
   // unrecognized-key case is customized here.
   return undefined;
 };
+
+// The inviting party's relay: TURN and STUN urls under the connection block's
+// own url grammar. A username, credential, or any other key is refused rather
+// than stripped, so no relay credential can reach the acceptor; the key names
+// are partner-controlled and fitted as endpointKeyError's are.
+const InvitationRelayLocatorSchema = relayLocatorSchema(
+  (keys) =>
+    "a connection endpoint's relay may carry only turn and stun url lists; " +
+    "a relay credential is derived by each party from the shared secret and " +
+    "is never part of an invitation. Remove unexpected field(s): " +
+    keys.map(fittedEndpointKeyName).join(", "),
+);
+
+/**
+ * The relay locator an inviting party names in its invitation, composed from
+ * its own relay's TURN and STUN urls, or `undefined` when it has none. The one
+ * place an inviter's relay setting becomes an invitation field: the CLI calls
+ * it with its connection's `turn` urls and `stun` list, the web app with the
+ * browser's own relay setting. Takes urls alone, so no credential can reach
+ * the result.
+ */
+export function relayLocatorFromOwnRelay(
+  ownRelay:
+    { turn?: ReadonlyArray<string>; stun?: ReadonlyArray<string> } | undefined,
+): RelayLocator | undefined {
+  const turn = ownRelay?.turn ?? [];
+  const stun = ownRelay?.stun ?? [];
+  if (turn.length === 0 && stun.length === 0) return undefined;
+  return {
+    ...(turn.length > 0 ? { turn: [...turn] } : {}),
+    ...(stun.length > 0 ? { stun: [...stun] } : {}),
+  };
+}
 
 /**
  * Generous upper bound on a connection endpoint `host`: 256 characters. The
@@ -175,9 +219,10 @@ export const MAX_ENDPOINT_PATH_LENGTH = 4096;
 // type safety is enforced at the ConnectionEndpointSchema level instead.
 /**
  * The credential-free WebRTC signaling-locator schema:
- * `channel`/`host`/`port`/`path` only, `z.strictObject` so any field outside
- * that allowlist -- a PeerJS `key`, a `server.username`, a `turn` entry -- is
- * rejected rather than stripped. Exported (unlike its sftp/filedrop siblings)
+ * `channel`/`host`/`port`/`path` and a url-only `relay`, `z.strictObject` so
+ * any field outside that allowlist -- a PeerJS `key`, a `server.username`, a
+ * `turn` entry, a relay `credential` -- is rejected rather than stripped.
+ * Exported (unlike its sftp/filedrop siblings)
  * as the locator source of truth the exchange-file mint layer composes a webrtc
  * connection block from, so the invitation endpoint and the composed connection
  * agree on the shape by construction. See {@link WebRTCEndpoint} and
@@ -199,6 +244,7 @@ export const WebRTCEndpointSchema = z.strictObject(
       .min(1)
       .check(maxCodeUnits(MAX_ENDPOINT_PATH_LENGTH))
       .optional(),
+    relay: InvitationRelayLocatorSchema.optional(),
   },
   { error: endpointKeyError },
 );
@@ -415,9 +461,10 @@ export interface InvitationToken {
    * The per-channel endpoint sub-schemas are `z.strictObject`, so an older
    * decoder REJECTS (does not ignore) an added field there: an endpoint-shape
    * addition is in principle incompatible. The split-directory
-   * `inbound_path`/`outbound_path` pair was added to the sftp and filedrop
-   * endpoints without bumping the version, since psilink was pre-release with
-   * no decoder deployed. A strict-endpoint addition made AFTER a release ships
+   * `inbound_path`/`outbound_path` pair on the sftp and filedrop endpoints,
+   * and the `relay` locator on the webrtc endpoint, were added without
+   * bumping the version, since psilink was pre-release with no decoder
+   * deployed. A strict-endpoint addition made AFTER a release ships
    * MUST bump the version (or otherwise stage compat).
    */
   version: "1";

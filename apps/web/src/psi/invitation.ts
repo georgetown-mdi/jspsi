@@ -14,6 +14,7 @@ import {
   getDefaultLinkageTerms,
   inferMetadata,
   overlongDisclosedColumnPositions,
+  relayLocatorFromOwnRelay,
   stripInvitationWhitespace,
 } from "@psilink/core";
 
@@ -294,6 +295,35 @@ export function webrtcEndpointFromLocation(loc: {
   return endpoint;
 }
 
+/**
+ * The browser's own relay, as the urls an invitation may name: TURN and STUN
+ * urls, never a credential. The browser holds no relay setting, so every
+ * inviter passes {@link NO_OWN_RELAY}.
+ */
+export type OwnRelayUrls = {
+  turn?: ReadonlyArray<string>;
+  stun?: ReadonlyArray<string>;
+};
+
+/** The own relay an inviter passes while the browser has no relay setting. */
+export const NO_OWN_RELAY: OwnRelayUrls | undefined = undefined;
+
+/**
+ * The webrtc endpoint a web invitation holds: this app's signaling locator
+ * ({@link webrtcEndpointFromLocation}) plus the inviter's own relay, composed
+ * by core's `relayLocatorFromOwnRelay` and omitted when there is none. The one
+ * place a web inviter's relay reaches an invitation; both mint paths -- a new
+ * invitation and a managed re-invite -- call it.
+ */
+export function invitationWebrtcEndpoint(
+  loc: { hostname: string; port: string },
+  ownRelay: OwnRelayUrls | undefined,
+): WebRTCEndpoint {
+  const endpoint = webrtcEndpointFromLocation(loc);
+  const relay = relayLocatorFromOwnRelay(ownRelay);
+  return relay !== undefined ? { ...endpoint, relay } : endpoint;
+}
+
 /** Build the deep-link URL with `encoded` in the fragment (see
  * {@link GeneratedInvitation.deepLink} for why the fragment, not a query). */
 export function deepLinkFor(origin: string, encoded: string): string {
@@ -347,7 +377,8 @@ function resolveConnectionEndpoint(
   request: ConnectionEndpointRequest,
   location: InvitationLocation,
 ): ConnectionEndpoint {
-  if (request.channel === "webrtc") return webrtcEndpointFromLocation(location);
+  if (request.channel === "webrtc")
+    return invitationWebrtcEndpoint(location, NO_OWN_RELAY);
   return request;
 }
 
