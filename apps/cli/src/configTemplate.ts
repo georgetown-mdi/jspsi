@@ -253,7 +253,9 @@ export const OPTIONAL_SECTIONS = `# --- Optional sections (uncomment and edit to
 # 'psilink accept' writes this block for you. key is the coordination server's
 # API key (default peerjs). stun replaces the built-in STUN server list. turn
 # names relay servers for networks where a direct connection fails (write the
-# credential as an @path); ice_transport_policy: relay uses those relays only.
+# credential as an @path, or leave out username and credential to have each
+# run mint one from the shared secret); ice_transport_policy: relay uses those
+# relays only.
 # connection:
 #   channel: webrtc
 #   server:
