@@ -393,6 +393,10 @@ Ratified by the owner:
   artifact the app exports for a recurring exchange can be brought back into
   it, its own backup envelope and the command-line pair alike, or the app
   names at the point it offers the export what restores the exchange instead.
+- **Project infrastructure under code** (board 10) -- Done is: every resource
+  in the AWS account, in every region, and every record and setting in the
+  Cloudflare zone has one recorded owner -- an OpenTofu root, a document, or
+  deletion -- and every root's plan against the live account is empty.
 
 Drafted, pending the owner's ratification:
 
