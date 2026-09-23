@@ -1042,9 +1042,9 @@ backup does not stand in for them either. Importing an artifact exported before 
 hand-off is **refused** while the handed-off exchange is still listed here and the
 artifact has the secret it was spent holding: importing it would either run a
 copy this browser gave away or leave that copy live beside the spent one, and one
-owner holds a recurring exchange's secret. Where an import is offered at all --
-the list's empty and could-not-read states are the only surfaces holding one --
-the refusal names the exchange and what it has instead: it runs on the machine
+owner holds a recurring exchange's secret. Where a backup import is offered at
+all -- the list's empty and could-not-read states are the only surfaces holding
+one -- the refusal names the exchange and what it has instead: it runs on the machine
 holding those two files from then on, and the way back to this browser is the
 take-back on that exchange's own page, below.
 
@@ -1150,6 +1150,13 @@ settings, with no shared secret. It is for the operator who would rather set an
 exchange up in a browser than author YAML, and run it where the data and the
 scheduler are -- read the file in, edit what is editable, download it again, run
 it there.
+
+The import is offered wherever the list is. Beside exchanges already listed, a
+control of its own takes a `psilink.yaml` and nothing else: a backup file chosen
+there is refused, since a backup is imported only while the list is empty or
+cannot be read ([Eviction recovery is the import
+flow](#eviction-recovery-is-the-import-flow)). Beside an empty or unreadable
+list, the one import control takes either file.
 
 Such an exchange **does not run in this browser**. It sits in the same list as
 the exchanges that do, with Open in place of Run, and its own page says why in

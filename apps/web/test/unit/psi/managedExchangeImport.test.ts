@@ -1,9 +1,21 @@
 import { describe, expect, test, vi } from "vitest";
-import { generateSharedSecret, getDefaultLinkageTerms } from "@psilink/core";
 
 import {
+  UsageError,
+  assembleExchangeSpec,
+  connectionFromLocator,
+  generateSharedSecret,
+  getDefaultLinkageTerms,
+  snakeizeKeys,
+} from "@psilink/core";
+
+import { stringify as stringifyYaml } from "yaml";
+
+import {
+  ManagedImportBackupNotConfigurationError,
   ManagedImportCustodyUnreadableError,
   ManagedImportHandedOffError,
+  importManagedConfigurationFile,
   importManagedExchange,
   importManagedExchangeFile,
 } from "@psi/managed/managedExchangeImport";
@@ -374,6 +386,100 @@ describe("importManagedExchangeFile routes by what the file is", () => {
     await expect(
       importManagedExchangeFile("channel: nonsense\n", deps),
     ).rejects.toThrow();
+    expect(deps.installed).toHaveLength(0);
+  });
+});
+
+describe("importManagedConfigurationFile takes a configuration and no backup", () => {
+  function configurationBytes(): string {
+    return composeManagedCronExport(
+      runnableRecord({
+        label: "Riverbend quarterly",
+        exchangeFile: composeManagedExchangeFile({
+          connection: { channel: "webrtc", host: "signaling.example.org" },
+          linkageTerms,
+        }),
+        side: "acceptor",
+        sharedSecret: generateSharedSecret(),
+      }),
+    ).config.text;
+  }
+
+  /** A hand-written filedrop configuration, in the snake_case the CLI reads. */
+  function filedropConfigurationBytes(): string {
+    return stringifyYaml(
+      snakeizeKeys(
+        assembleExchangeSpec({
+          connection: connectionFromLocator({
+            channel: "filedrop",
+            inboundPath: "/srv/exchange/inbound",
+            outboundPath: "/srv/exchange/outbound",
+            options: {
+              retainFiles: true,
+              timestampInFilename: true,
+              locklessRendezvous: true,
+            },
+          }),
+          linkageTerms,
+        }),
+      ),
+    );
+  }
+
+  test("a webrtc configuration installs the record the shared import installs", async () => {
+    const shared = recordingDeps();
+    const alone = recordingDeps();
+    const bytes = configurationBytes();
+
+    await importManagedExchangeFile(bytes, shared);
+    const { record, missingGrants } = await importManagedConfigurationFile(
+      bytes,
+      alone,
+    );
+
+    expect(record.sharedSecret).toBeUndefined();
+    expect(missingGrants).toEqual([]);
+    const { id: _aloneId, ...aloneFields } = alone.installed[0];
+    const { id: _sharedId, ...sharedFields } = shared.installed[0];
+    expect(aloneFields).toEqual(sharedFields);
+    expect(alone.reviveSpent).not.toHaveBeenCalled();
+    expect(alone.markImported).not.toHaveBeenCalled();
+  });
+
+  test("a configuration on a channel this app does not run installs one too", async () => {
+    const deps = recordingDeps();
+
+    const { record } = await importManagedConfigurationFile(
+      filedropConfigurationBytes(),
+      deps,
+    );
+
+    expect(record.exchangeFile.connection.channel).toBe("filedrop");
+    expect(record.sharedSecret).toBeUndefined();
+    expect(deps.installed).toHaveLength(1);
+  });
+
+  test("a backup is refused and nothing is reconciled or installed", async () => {
+    const deps = recordingDeps({
+      kind: "handed-off",
+      handoff: "command-line",
+      label: "Riverbend quarterly",
+    });
+
+    await expect(
+      importManagedConfigurationFile(goodBytes(), deps),
+    ).rejects.toBeInstanceOf(ManagedImportBackupNotConfigurationError);
+    expect(deps.reviveSpent).not.toHaveBeenCalled();
+    expect(deps.installed).toHaveLength(0);
+    expect(deps.markImported).not.toHaveBeenCalled();
+  });
+
+  test("bytes that parse as neither file are a configuration refusal, not a backup one", async () => {
+    const deps = recordingDeps();
+
+    await expect(
+      importManagedConfigurationFile("\tnot: [yaml", deps),
+    ).rejects.toBeInstanceOf(UsageError);
     expect(deps.installed).toHaveLength(0);
   });
 });

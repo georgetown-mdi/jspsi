@@ -163,6 +163,27 @@ fail-closed outcome the version bump exists to produce -- while every record suc
 a build wrote stays readable here. The same holds for an absent `side`, which a
 build that predates it also requires.
 
+**Its import is offered beside any listing.** Two controls import a file, and
+they are bound to different listings:
+
+- **The shared import** takes either the backup artifact or a command-line
+  `psilink.yaml` and routes by what the file holds. It renders only beside an
+  empty or unreadable listing, because its backup leg installs a runnable
+  record: one holding a secret, reconciled against the spent records and
+  refused where a hand-off holds that secret (see [the handed-off
+  refusal](#the-backup-marker-the-spent-state-and-the-import-marker-local-siblings-never-in-the-artifact)).
+- **The configuration import** beside a populated listing takes a
+  `psilink.yaml` alone, on any channel: a `webrtc` file lands as a record with
+  no key, and an `sftp` or `filedrop` file as a record on a channel this app
+  does not run. A file tagged as the backup artifact is refused before it is
+  reconciled or installed, and nothing is written.
+
+What either control installs from a `psilink.yaml` is the same
+configuration-only record. It holds no secret, reconciles against no stored
+record, and runs nowhere here, so it installs nothing runnable, and the rule
+binding the shared import to an empty or unreadable listing has nothing to
+guard for it.
+
 #### The connection block: credential-free by composition
 
 For the browser path the document's connection block is the `webrtc` channel
@@ -1357,10 +1378,12 @@ record, in a separate origin-local store keyed by the record `id`, and are
   hand-off saved, and bringing it back to this browser is the re-take on that
   record's own surface, which the refusal names by the words on its control. The
   guard binds at the store's import path, and the surface an operator meets it at
-  is not the surface offering the re-take: the import affordance renders only
+  is not the surface offering the re-take: the backup import renders only
   beside an empty or unreadable listing, and a handed-off record keeps the listing
-  non-empty, so a store whose records all read offers no import for the refusal to
-  be met at.
+  non-empty, so a store whose records all read offers no backup import for the
+  refusal to be met at. The configuration import that listing offers refuses a
+  backup file before any reconciliation ([The configuration-only
+  record](#the-configuration-only-record)).
 
   **The reconciliation parses each stored record on its own.** An entry this
   build cannot parse is **skipped** rather than failing the import: an invalid
