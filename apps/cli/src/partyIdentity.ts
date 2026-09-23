@@ -284,6 +284,35 @@ export function resolveKeptConfigurationIdentity(
 }
 
 /**
+ * The refusal {@link resolveTermsUpdateIdentity} raises. The path composes
+ * RAW, for the reason {@link configuredIdentityRequired} documents.
+ */
+export function termsUpdateIdentityRequired(configPath: string): string {
+  return (
+    `no identity for this party: ${configPath} has no ` +
+    "linkage_terms.identity, and a terms update names each party by the " +
+    `identity its configuration holds. ${PARTNER_READS_IT}, so set it there ` +
+    "and run the command again."
+  );
+}
+
+/**
+ * This party's identity label for `psilink update` and `psilink apply`: the
+ * configuration's own `linkage_terms.identity`, refused where blank or still
+ * the placeholder, as {@link resolveInvitationIdentity} refuses it.
+ */
+export function resolveTermsUpdateIdentity(
+  configuredIdentity: string | undefined,
+  configPath: string,
+): string {
+  return resolveConfiguredIdentity(
+    configuredIdentity,
+    configPath,
+    termsUpdateIdentityRequired,
+  );
+}
+
+/**
  * The body both configured-label resolvers share. `required` is the whole
  * difference between them: why THIS command reads the label out of a file rather
  * than off the command line, which is what its refusal has to say.

@@ -27,7 +27,6 @@ import type {
   InvitationKeySummary,
   InvitationRuleSetSummary,
   InvitationSummary,
-  InvitationToken,
   LinkageRuleSetCitationVerdict,
   getLogger,
 } from "@psilink/core";
@@ -284,6 +283,30 @@ const REPEATED_FACTS_HEADING_BEFORE_PROMPT =
  * wording rather than two.
  */
 const REPEATED_FACTS_HEADING_UNATTENDED = "Repeated from above:";
+
+/**
+ * What {@link displayInvitation} is shown for: an invitation being accepted,
+ * or a terms update being applied to an established partnership. Only the
+ * headings differ; the update's sender takes the inviting party's place in
+ * every fact, as its terms take the invitation's.
+ */
+export type ConsentSurfaceKind = "invitation" | "update";
+
+const SURFACE_HEADINGS: Record<
+  ConsentSurfaceKind,
+  { details: string; beforePrompt: string }
+> = {
+  invitation: {
+    details: "Invitation details:",
+    beforePrompt: REPEATED_FACTS_HEADING_BEFORE_PROMPT,
+  },
+  update: {
+    details:
+      "Terms update details (the party that sent the update is shown as " +
+      "the inviting party):",
+    beforePrompt: "Before you apply this update, repeated from above:",
+  },
+};
 
 /**
  * Emits one indented line per entry, so a name containing the list separator
@@ -648,18 +671,25 @@ export function logDecisionFacts(
  * ({@link logAcceptanceRunsExchange}).
  */
 export function displayInvitation(params: {
-  token: InvitationToken;
+  token: Parameters<typeof summarizeInvitation>[0];
   ownOutboundSend: ReadonlyArray<string> | undefined;
   emit: ConsentSurfaceSink;
   promptFollows: boolean;
   runsExchangeThrough?: DialedBrokerHostAndPort;
+  surface?: ConsentSurfaceKind;
 }): void {
-  const { token, ownOutboundSend, emit, promptFollows, runsExchangeThrough } =
-    params;
+  const {
+    token,
+    ownOutboundSend,
+    emit,
+    promptFollows,
+    runsExchangeThrough,
+    surface = "invitation",
+  } = params;
   const summary = summarizeInvitation(token);
   if (runsExchangeThrough !== undefined)
     logAcceptanceRunsExchange(emit, runsExchangeThrough, promptFollows);
-  emit("Invitation details:");
+  emit(SURFACE_HEADINGS[surface].details);
   logDecisionFacts(emit, summary, ownOutboundSend);
   // The retain fact's shared caveat, once, directly under the block's own
   // last line, which is the fact it explains: the half of that fact the
@@ -936,7 +966,7 @@ export function displayInvitation(params: {
   // would be wrong.
   emit(
     promptFollows
-      ? REPEATED_FACTS_HEADING_BEFORE_PROMPT
+      ? SURFACE_HEADINGS[surface].beforePrompt
       : REPEATED_FACTS_HEADING_UNATTENDED,
   );
   logDecisionFacts(emit, summary, ownOutboundSend);

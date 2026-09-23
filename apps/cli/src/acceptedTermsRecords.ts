@@ -17,6 +17,7 @@
 import {
   deriveAcceptedLinkageTerms,
   deriveOutboundPayloadConsent,
+  disclosedColumnNames,
   redactAndRenderOperatorSuppliedText,
   redactAndSanitizeForDisplay,
   operatorSuppliedText,
@@ -34,6 +35,7 @@ import type {
 import {
   diffLinkageTerms,
   linkageTermsStandingOf,
+  type TermsUpdateWrite,
   persistDisclosedPayloadColumns,
   persistExpectedPartnerDeduplicate,
   persistExpectedPayloadColumns,
@@ -68,16 +70,28 @@ export interface AcceptedInvitationTerms {
 }
 
 /**
- * Derive {@link AcceptedInvitationTerms} from a validated invitation and the
- * identity this party runs under. Throws where core refuses the invitation's
- * terms for an acceptor (see `deriveAcceptedLinkageTerms`).
+ * Derive {@link AcceptedInvitationTerms} from a validated invitation, or a
+ * verified terms update, and the identity this party runs under. Throws where
+ * core refuses the terms for an acceptor (see `deriveAcceptedLinkageTerms`).
+ *
+ * `ownDeduplicate` is this party's own side of the cardinality, `false` where
+ * omitted: an acceptance offers no control over it, while an applied terms
+ * update keeps the value the configuration already holds.
  */
 export function deriveAcceptedInvitationTerms(
-  token: InvitationToken,
+  token: Pick<
+    InvitationToken,
+    "linkageTerms" | "disclosedPayloadColumns" | "connectionEndpoint"
+  >,
   identity: string,
+  ownDeduplicate = false,
 ): AcceptedInvitationTerms {
   return {
-    linkageTerms: deriveAcceptedLinkageTerms(token.linkageTerms, identity),
+    linkageTerms: deriveAcceptedLinkageTerms(
+      token.linkageTerms,
+      identity,
+      ownDeduplicate,
+    ),
     expectedPayloadColumns: token.disclosedPayloadColumns,
     expectedPartnerDeduplicate: token.linkageTerms.deduplicate,
     invitationRelay:
@@ -315,4 +329,44 @@ export function writeAcceptanceRecordReportingLoss(
     reportPersistenceLoss(notice, report.eventStream);
     return false;
   }
+}
+
+/**
+ * What applying a verified terms update writes into the configuration it
+ * changes (see `persistTermsUpdate`), from the terms that update adopts and
+ * the configuration as it stands.
+ *
+ * The acceptance records are the ones an acceptance of the same terms would
+ * write: the partner's disclosed columns and declared `deduplicate`, and
+ * this party's consent to its own outbound set, which falls to `pending`
+ * where the new terms share with the partner and the configuration's
+ * metadata cannot state the set. A recorded `disclosed_payload_columns` is
+ * restated from the configuration's metadata, or removed where it declares
+ * none, on the rule an invitation minted from the configuration follows; an
+ * absent one stays absent.
+ */
+export function termsUpdateWrite(
+  accepted: AcceptedInvitationTerms,
+  existing: Pick<ExchangeSpec, "metadata" | "disclosedPayloadColumns">,
+): TermsUpdateWrite {
+  const { kept } = deriveOutboundConsentRecords({
+    acceptedOutput: accepted.linkageTerms.output,
+    ownMetadata: existing.metadata,
+    keptConfigurationShares: accepted.linkageTerms.output.shareWithPartner,
+  });
+  return {
+    linkageTerms: accepted.linkageTerms,
+    expectedPayloadColumns: accepted.expectedPayloadColumns,
+    expectedPartnerDeduplicate: accepted.expectedPartnerDeduplicate,
+    outboundPayloadConsent: kept,
+    disclosedPayloadColumns:
+      existing.disclosedPayloadColumns === undefined
+        ? "unchanged"
+        : {
+            columns:
+              existing.metadata === undefined
+                ? undefined
+                : disclosedColumnNames(existing.metadata),
+          },
+  };
 }

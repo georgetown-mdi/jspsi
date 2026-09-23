@@ -55,8 +55,10 @@ import {
   safeParseMetadataTheReaderWrote,
   safeParseStandardizationTheReaderWrote,
   sanitizeForDisplay,
+  parseExchangeSpec,
   serializeExchangeDocument,
   snakeizeKey,
+  snakeizeKeys,
   trimPartialControlCharacterMarker,
   UsageError,
   withRetainModeImplications,
@@ -1832,6 +1834,90 @@ export function persistExpectedPartnerDeduplicate(
 }
 
 /**
+ * The fields {@link persistTermsUpdate} writes. `disclosedPayloadColumns` is
+ * `"unchanged"` where the configuration's send-side commitment is left as it
+ * stands; otherwise an undefined `columns` removes it.
+ */
+export interface TermsUpdateWrite {
+  linkageTerms: LinkageTerms;
+  expectedPayloadColumns: string[] | undefined;
+  expectedPartnerDeduplicate: boolean;
+  outboundPayloadConsent: OutboundPayloadConsent | undefined;
+  disclosedPayloadColumns: "unchanged" | { columns: string[] | undefined };
+}
+
+/**
+ * Replace `linkage_terms` in an existing `psilink.yaml` and refresh the
+ * records that follow from it -- `expected_payload_columns`,
+ * `expected_partner_deduplicate`, `outbound_payload_consent`, and
+ * `disclosed_payload_columns` -- in one write, so no record is left stating a
+ * commitment the new terms do not back. Every other key, the connection block
+ * included, is left as the operator wrote it, comments and key order kept.
+ *
+ * The edited document is read back through the same schema `psilink
+ * exchange` loads it with before it is written; a document that would not
+ * load is refused and the file is left unchanged.
+ *
+ * Rewritten with the same owner-only permissions, and the same atomic rename,
+ * {@link saveConfig} uses.
+ *
+ * @throws {UsageError} if the edited document would not load.
+ */
+export function persistTermsUpdate(
+  configPath: string,
+  write: TermsUpdateWrite,
+): void {
+  const serialized = editSensitiveYamlDocument(
+    fs.readFileSync(configPath, "utf8"),
+    configFileLabel(configPath),
+    (doc) => {
+      doc.setIn(
+        ["linkage_terms"],
+        doc.createNode(snakeizeKeys(write.linkageTerms)),
+      );
+      if (write.expectedPayloadColumns === undefined)
+        doc.deleteIn(["expected_payload_columns"]);
+      else
+        doc.setIn(
+          ["expected_payload_columns"],
+          doc.createNode(write.expectedPayloadColumns),
+        );
+      doc.setIn(
+        ["expected_partner_deduplicate"],
+        write.expectedPartnerDeduplicate,
+      );
+      if (write.outboundPayloadConsent === undefined)
+        doc.deleteIn(["outbound_payload_consent"]);
+      else
+        doc.setIn(
+          ["outbound_payload_consent"],
+          doc.createNode(write.outboundPayloadConsent),
+        );
+      if (write.disclosedPayloadColumns !== "unchanged") {
+        const { columns } = write.disclosedPayloadColumns;
+        if (columns === undefined) doc.deleteIn(["disclosed_payload_columns"]);
+        else doc.setIn(["disclosed_payload_columns"], doc.createNode(columns));
+      }
+    },
+  );
+  try {
+    parseExchangeSpec(
+      configWithNamedRuleSetRules(
+        parseSensitiveYaml(serialized, configFileLabel(configPath)),
+        configPath,
+      ),
+    );
+  } catch (err) {
+    throw configFileRefusal(
+      configPath,
+      "was left unchanged: with the update applied it would not load " +
+        `(${describeConfigSchemaError(err)}).`,
+    );
+  }
+  writeFileOwnerOnly(configPath, serialized);
+}
+
+/**
  * What {@link persistInvitationRelay} did to a kept configuration's
  * `connection.invitation_relay`.
  */
@@ -2713,8 +2799,9 @@ export type CitationDriftAlternative =
 /**
  * Whether an acceptance stands behind a loaded config's linkage terms, read
  * from `expected_partner_deduplicate`. `psilink accept` writes this field on
- * every config it writes or reuses, and nothing else writes one, so its
- * presence is exactly the mark of a config an acceptance stands behind (see
+ * every config it writes or reuses, `psilink apply` on every config it applies
+ * a terms update to, and nothing else writes one, so its presence is exactly
+ * the mark of a config an acceptance stands behind (see
  * {@link persistExpectedPartnerDeduplicate}). Both values read the same
  * way: the record says an acceptance happened, not what was agreed.
  */

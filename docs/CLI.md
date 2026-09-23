@@ -350,6 +350,8 @@ If `--config-file` is not used and a configuration file already exists at the de
 
 A reused configuration keeps its connection block and linkage terms, its `linkage_terms.identity` among them: that label, not a `--identity` typed on the accepting command, is what the acceptance and every exchange the file governs send (see [Configuration](#configuration)). The record of what you consented to *receive* is refreshed to the invitation you have just accepted, so it never lags behind the disclosure you were shown. When that invitation declares no disclosed columns, the record is removed rather than left at a set this acceptance never showed you, and a warning names the columns it held: dropping it means the next `psilink exchange` accepts whatever columns the partner transmits instead of holding the received payload to a consented set. To keep the check, ask the inviting party for an invitation that declares the columns it sends.
 
+An acceptance never changes a reused configuration's linkage terms; a partnership changes them with [`psilink update` and `psilink apply`](#changing-the-terms-of-an-established-partnership) instead.
+
 The one part of the connection block an acceptance refreshes is [`connection.invitation_relay`](EXCHANGE_REFERENCE.md#connectioninvitation_relay), which holds the relay an invitation names rather than a setting of yours: it is set to the relay the invitation you have just accepted names, or removed when that invitation names none, and the line reporting the reused configuration says which. Your own `turn` and `stun`, and every other connection key, are unchanged.
 
 A pre-existing key file is treated differently from a configuration file: it is never reconciled or reused, because silently reusing a stale authentication token must never happen. If `--key-file` is not used and a key file already exists at the default path, acceptance fails outright and the user is told to delete it or supply a different key file path. In this way, accepting an invitation does not cause files to be unwittingly overwritten.
@@ -461,6 +463,57 @@ If `--config-file` is not used and a configuration file already exists at the de
 - **Absence of a field from the URL** (with no matching override) is never a conflict; the acceptor's own stored value stands.
 
 A pre-existing key file is handled as in [Offline acceptance](#existing-files), with the refusal landing before any connection is opened.
+
+## Changing the terms of an established partnership
+
+```sh
+psilink update [--config-file FILE] [--key-file FILE]
+psilink apply [--config-file FILE] [--key-file FILE] UPDATE
+```
+
+Once a partnership is set up with `psilink invite` and `psilink accept`, either party can change its linkage terms or the columns it discloses without re-inviting: no new shared secret, and no change to either party's connection block. One party edits its own configuration and runs `psilink update`; the other runs `psilink apply` on what it prints.
+
+### Making an update
+
+1. **Edit your configuration.** Change `linkage_terms`, or the `metadata` that decides which of your columns are disclosed, in the `psilink.yaml` you exchange with this partner.
+2. **Run `psilink update`.** It reads that configuration and the key file beside it, and prints a terms update to stdout. The update holds your linkage terms and the names of the columns you disclose, authenticated under the shared secret in your key file. It holds no secret, no credential, and no connection details.
+3. **Send the update to your partner.** Any channel that delivers it unchanged will do: an altered update is refused when it is applied.
+
+Before the update is printed, the command:
+
+- runs the checks an [offline invitation](#offline-invitation) made from the same configuration runs, so it refuses terms your own next exchange would refuse
+- records the columns you disclose in `disclosed_payload_columns`, as an offline invitation does, and removes an `outbound_payload_consent` left from an earlier acceptance
+
+It refuses (exit 64) when there is no configuration or key file at the paths, when the configuration has no `linkage_terms.identity`, or when the shared secret in the key file has expired. An expired secret cannot authenticate an update; re-establish the partnership as in [Out-of-sync tokens](#out-of-sync-tokens) instead.
+
+Until your partner applies the update, an exchange between you is refused wherever your terms and theirs differ.
+
+### Applying an update
+
+`UPDATE` is the update string, or an `@path` to a file holding it. `psilink apply` checks it against the shared secret in your key file before it shows anything:
+
+- **The partnership check** refuses an update made under a different shared secret: one made for another partnership, or one made before an exchange between you replaced the secret. Ask your partner to run `psilink update` again.
+- **The MAC check** refuses an update whose content was changed after it was made.
+- An update made from your own configuration is refused: applying it would swap your side of the terms for your partner's.
+
+Each refusal names the check that refused the update, changes nothing, and exits 64.
+
+An update that passes is a consent event, shown the way an [offline acceptance](#offline-acceptance) shows an invitation:
+
+1. **What changes.** A first block names the linkage-terms fields the update changes, then, on its own line, whether the columns you will receive from your partner change, listing them before and after.
+2. **The terms.** The same outline an acceptance shows follows, leading with the columns you will send. Your partner is shown as the inviting party.
+3. **The question.** You are asked to confirm. Declining leaves the configuration exactly as it was.
+
+There is no `--consent-to-terms`: an update is always applied by an operator at the prompt.
+
+Confirming rewrites the configuration in one write. It replaces `linkage_terms` with the update's terms under your own identity, with the output direction mirrored as an acceptance mirrors it. Your own `deduplicate` is kept. The records a later `psilink exchange` holds each side to are refreshed in the same write, so none of them is left stating the old terms:
+
+- `expected_payload_columns`: the columns the update says your partner discloses
+- `expected_partner_deduplicate`: the `deduplicate` it states for your partner's side
+- `outbound_payload_consent`: your consent to the columns you send, shown above, or a pending record where your configuration has no `metadata` block to state them
+- `disclosed_payload_columns`: where one is recorded, restated from your `metadata`, or removed where your configuration has none
+
+The connection block, every other key, and the key file are left as they are. Your next `psilink exchange` runs on the new terms.
 
 ## Recurring exchange
 

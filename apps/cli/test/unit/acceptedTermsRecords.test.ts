@@ -23,11 +23,12 @@ import {
   diffKeptLinkageTerms,
   receivedCommitmentRemovalWarning,
   refreshAcceptanceRecords,
+  termsUpdateWrite,
   writeAcceptanceRecordReportingLoss,
   writeTermsRecord,
   type AcceptanceRecordWrite,
 } from "../../src/acceptedTermsRecords";
-import { saveConfig } from "../../src/config";
+import { persistTermsUpdate, saveConfig } from "../../src/config";
 import {
   PERSISTENCE_LOSS_EXIT_CODE,
   type EventStreamEmitter,
@@ -383,3 +384,93 @@ test.each(LOST_WRITE_CASES)(
     expect(log.lines[0]).toContain("ENOENT");
   },
 );
+
+// --- termsUpdateWrite and persistTermsUpdate ---------------------------------
+
+test("deriveAcceptedInvitationTerms keeps this party's own deduplicate where given", () => {
+  const accepted = deriveAcceptedInvitationTerms(
+    sampleToken(),
+    "Acceptor Org",
+    true,
+  );
+  expect(accepted.linkageTerms.deduplicate).toBe(true);
+  expect(accepted.expectedPartnerDeduplicate).toBe(false);
+});
+
+test("termsUpdateWrite restates a recorded send-side commitment from the metadata", () => {
+  const metadata = inferMetadata([...LINKAGE_COLUMNS, "program"], []);
+  const accepted = deriveAcceptedInvitationTerms(
+    sampleToken({ disclosedPayloadColumns: ["notes"] }),
+    "Acceptor Org",
+  );
+  const write = termsUpdateWrite(accepted, {
+    metadata,
+    disclosedPayloadColumns: ["stale"],
+  });
+  expect(write.disclosedPayloadColumns).toEqual({ columns: ["program"] });
+  expect(write.expectedPayloadColumns).toEqual(["notes"]);
+  expect(write.outboundPayloadConsent).toEqual(
+    deriveOutboundConsentRecords({
+      acceptedOutput: accepted.linkageTerms.output,
+      ownMetadata: metadata,
+      keptConfigurationShares: true,
+    }).kept,
+  );
+});
+
+test("termsUpdateWrite leaves an absent commitment absent and removes one no metadata backs", () => {
+  const accepted = deriveAcceptedInvitationTerms(sampleToken(), "Acceptor Org");
+  expect(termsUpdateWrite(accepted, {}).disclosedPayloadColumns).toBe(
+    "unchanged",
+  );
+  expect(
+    termsUpdateWrite(accepted, { disclosedPayloadColumns: ["stale"] })
+      .disclosedPayloadColumns,
+  ).toEqual({ columns: undefined });
+});
+
+test("termsUpdateWrite records a pending outbound consent where the metadata cannot state it", () => {
+  const accepted = deriveAcceptedInvitationTerms(sampleToken(), "Acceptor Org");
+  expect(accepted.linkageTerms.output.shareWithPartner).toBe(true);
+  expect(termsUpdateWrite(accepted, {}).outboundPayloadConsent).toEqual({
+    status: "pending",
+  });
+});
+
+test("persistTermsUpdate writes the terms and every record, keeping the rest of the file", () => {
+  writeKeptConfig();
+  const before = readKeptConfig();
+  const terms: LinkageTerms = {
+    ...sampleTerms("Acceptor Org"),
+    algorithm: "psi",
+  };
+  persistTermsUpdate(configPath, {
+    linkageTerms: terms,
+    expectedPayloadColumns: ["notes"],
+    expectedPartnerDeduplicate: true,
+    outboundPayloadConsent: { status: "pending" },
+    disclosedPayloadColumns: { columns: ["program"] },
+  });
+  const after = readKeptConfig();
+  expect(after["connection"]).toEqual(before["connection"]);
+  expect(after["expected_payload_columns"]).toEqual(["notes"]);
+  expect(after["expected_partner_deduplicate"]).toBe(true);
+  expect(after["outbound_payload_consent"]).toEqual({ status: "pending" });
+  expect(after["disclosed_payload_columns"]).toEqual(["program"]);
+  expect(parseExchangeSpec(after).linkageTerms).toEqual(terms);
+});
+
+test("persistTermsUpdate refuses a document that would not load and leaves the file unchanged", () => {
+  writeKeptConfig();
+  const before = fs.readFileSync(configPath, "utf8");
+  expect(() =>
+    persistTermsUpdate(configPath, {
+      linkageTerms: { ...sampleTerms("Acceptor Org"), linkageKeys: [] },
+      expectedPayloadColumns: undefined,
+      expectedPartnerDeduplicate: false,
+      outboundPayloadConsent: undefined,
+      disclosedPayloadColumns: "unchanged",
+    }),
+  ).toThrow("was left unchanged");
+  expect(fs.readFileSync(configPath, "utf8")).toBe(before);
+});
