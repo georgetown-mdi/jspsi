@@ -594,7 +594,7 @@ const ManagedExchangeRecordSchema: ZodType<ManagedExchangeRecord> = z
     {
       message:
         "a record holding a sharedSecret runs in this app, so its document " +
-        "states no part this app cannot run (signing)",
+        `states no part this app cannot run (${DOCUMENT_PARTS_THIS_APP_DOES_NOT_RUN.join(", ")})`,
     },
   )
   .refine(
