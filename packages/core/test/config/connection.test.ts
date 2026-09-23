@@ -282,6 +282,54 @@ test("parses a full WebRTC connection with stun, turn, and role", () => {
   expect(result.role).toBe("inviter");
 });
 
+test("a turn entry with a url and no username or credential parses as written", () => {
+  const result = parseConnectionConfig({
+    ...webrtcBase,
+    turn: [{ url: "turns:turn.example.org:443" }],
+  });
+  if (result.channel !== "webrtc") throw new Error("expected webrtc");
+  expect(result.turn).toEqual([{ url: "turns:turn.example.org:443" }]);
+});
+
+test.each([
+  ["a username with no credential", { username: "alice" }],
+  ["a credential with no username", { credential: "secret" }],
+])("a turn entry with %s is refused", (_, fields) => {
+  const result = safeParseConnectionConfig({
+    ...webrtcBase,
+    turn: [{ url: "turns:turn.example.org:443", ...fields }],
+  });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  expect(result.error.issues[0].path).toEqual(["turn", 0]);
+  expect(result.error.issues[0].message).toMatch(
+    /sets username and credential together, or neither/,
+  );
+});
+
+test("a turn entry with credential_type and no credential is refused", () => {
+  const result = safeParseConnectionConfig({
+    ...webrtcBase,
+    turn: [{ url: "turns:turn.example.org:443", credentialType: "hmac-sha1" }],
+  });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  expect(result.error.issues.map((i) => i.message)).toContain(
+    "a turn entry sets credential_type only with a credential; remove it " +
+      "from an entry whose credential is minted from the shared secret",
+  );
+});
+
+test("a url-only turn entry satisfies ice_transport_policy relay", () => {
+  expect(
+    safeParseConnectionConfig({
+      ...webrtcBase,
+      turn: [{ url: "turns:turn.example.org:443" }],
+      iceTransportPolicy: "relay",
+    }).success,
+  ).toBe(true);
+});
+
 test("parses a full SFTP connection with private key auth", () => {
   // SHA256: followed by 43 unpadded standard base64 chars; all-A is valid
   // (A is in both [A-Za-z0-9+/] for positions 1-42 and [AEIMQUYcgkosw048] for 43).

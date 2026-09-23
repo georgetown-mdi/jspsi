@@ -140,7 +140,8 @@ function resolveConnectionAtSignRefs(
       resolveHttpAuthAtSignRefs(resolved.iceProvision?.auth);
       if (resolved.turn !== undefined)
         for (const turn of resolved.turn)
-          turn.credential = resolveAtSignRef(turn.credential);
+          if (turn.credential !== undefined)
+            turn.credential = resolveAtSignRef(turn.credential);
       resolveProviderOptionsAtSignRefs(resolved);
       break;
     case "filedrop":

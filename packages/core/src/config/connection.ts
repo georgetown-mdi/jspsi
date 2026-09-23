@@ -394,7 +394,10 @@ export const AuthenticationSchema: z.ZodType<Authentication> = z.strictObject({
 
 /**
  * A TURN server used when a direct peer-to-peer connection cannot be
- * established.
+ * established. `username` and `credential` are set together or both left
+ * out: an entry with neither is presented a credential minted from the
+ * exchange's current shared secret on each run (docs/spec/PROTOCOL.md, "Relay
+ * credential derivation").
  */
 interface TurnServer {
   /**
@@ -402,12 +405,12 @@ interface TurnServer {
    * either unset or `tcp`, and `udp` permitted on a `turn:` url.
    */
   url: string;
-  username: string;
+  username?: string;
   /** TURN credential; @-file recommended. */
-  credential: string;
+  credential?: string;
   /**
    * `password` (default) | `hmac-sha1` for time-limited shared-secret
-   * credentials.
+   * credentials. Describes a static `credential`, so it requires one.
    */
   credentialType?: "password" | "hmac-sha1";
 }
@@ -612,12 +615,32 @@ export const StunUrlSchema = z
     ),
   );
 
-const TurnServerSchema: z.ZodType<TurnServer> = z.object({
-  url: TurnUrlSchema,
-  username: z.string().min(1),
-  credential: z.string().min(1),
-  credentialType: z.enum(["password", "hmac-sha1"]).optional(),
-});
+const TurnServerSchema: z.ZodType<TurnServer> = z
+  .object({
+    url: TurnUrlSchema,
+    username: z.string().min(1).optional(),
+    credential: z.string().min(1).optional(),
+    credentialType: z.enum(["password", "hmac-sha1"]).optional(),
+  })
+  .refine(
+    (server) =>
+      (server.username === undefined) === (server.credential === undefined),
+    {
+      error:
+        "a turn entry sets username and credential together, or neither to " +
+        "have its credential minted from the exchange's shared secret on " +
+        "each run",
+    },
+  )
+  .refine(
+    (server) =>
+      server.credentialType === undefined || server.credential !== undefined,
+    {
+      error:
+        "a turn entry sets credential_type only with a credential; remove it " +
+        "from an entry whose credential is minted from the shared secret",
+    },
+  );
 
 /**
  * A provisioning endpoint returning a combined set of ICE servers (STUN +
