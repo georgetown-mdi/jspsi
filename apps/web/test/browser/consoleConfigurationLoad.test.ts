@@ -14,7 +14,9 @@ import {
   CLOSE_CONFIGURATION_LABEL,
   CONFIGURATION_SAVED,
   NO_CONFIGURATION_IN_FOLDER,
+  OPENED_EXCHANGE_CONTINUES,
   OPEN_CONFIGURATION_LABEL,
+  START_OPENED_EXCHANGE_LABEL,
 } from "@console/mountedConfiguration";
 import { InviterScreen } from "@exchange/InviterScreen";
 import { isolatedColumnName } from "@components/ColumnName";
@@ -103,6 +105,9 @@ function openedBody(document: unknown): unknown {
 /** Each body a `PUT /api/jobs/config` sent, in order. */
 const savedBodies: Array<unknown> = [];
 
+/** Each body a `POST /api/jobs` sent, in order. */
+const createdBodies: Array<unknown> = [];
+
 /** Answer the console's job API, with `GET /api/jobs/config` under this test's
  * control. The work directory is empty and nothing else is provisioned unless
  * the test says otherwise. */
@@ -135,7 +140,10 @@ function stubConfigRoute(
       if (url === "/api/jobs/inputs/coverage") return json({ rates: [] });
       if (url === "/api/jobs/sftp")
         return json(mount.sftp ?? { configured: false });
-      if (url === "/api/jobs") return json({ id: "job-7" }, 201);
+      if (url === "/api/jobs") {
+        createdBodies.push(JSON.parse(String(init?.body)) as unknown);
+        return json({ id: "job-7" }, 201);
+      }
       if (url === "/api/jobs/job-7/events")
         return Promise.resolve(
           new Response(new ReadableStream<Uint8Array>(), {
@@ -174,6 +182,7 @@ afterEach(() => {
   window.localStorage.clear();
   vi.unstubAllGlobals();
   savedBodies.splice(0);
+  createdBodies.splice(0);
 });
 
 describe("the load offer on the file step", () => {
@@ -362,7 +371,7 @@ describe("the open configuration over the files it is derived across", () => {
       .not.toBeInTheDocument();
   });
 
-  test("an invitation created while it is open withholds both controls", async () => {
+  test("a run started while it is open withholds both controls and sends no invitation", async () => {
     stubConfigRoute(
       {
         status: 200,
@@ -388,10 +397,23 @@ describe("the open configuration over the files it is derived across", () => {
     await page
       .getByRole("button", { name: "Continue to review & create" })
       .click();
-    await page.getByRole("button", { name: "Create the invitation" }).click();
+    await expect
+      .element(page.getByText(OPENED_EXCHANGE_CONTINUES).first())
+      .toBeInTheDocument();
+    await page
+      .getByRole("button", { name: START_OPENED_EXCHANGE_LABEL })
+      .click();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toMatchTextContent("Your invitation is ready");
+      .toMatchTextContent("Waiting for your partner");
+    expect(
+      page.getByRole("heading", { name: "Share this invitation" }).query(),
+    ).toBeNull();
+    await vi.waitFor(() => expect(createdBodies).toHaveLength(1));
+    expect(createdBodies[0]).toMatchObject({
+      mountedConfigurationOpened: true,
+    });
+    expect(createdBodies[0]).not.toHaveProperty("sharedSecret");
 
     // Back to the step the load sits on: the terms it filled are sealed, so
     // neither opening another configuration nor closing this one is offered.

@@ -37,6 +37,11 @@ import {
 import { runDiagnosticsProblems } from "@psi/runDiagnosticsModel";
 
 import {
+  CONFIGURATION_SAVED,
+  OPENED_EXCHANGE_CONTINUES,
+  START_OPENED_EXCHANGE_LABEL,
+} from "@console/mountedConfiguration";
+import {
   CONFIG_EXCHANGE_FILES,
   exchangeFilesProblems,
 } from "@console/exchangeFilesModel";
@@ -45,7 +50,6 @@ import {
   SFTP_CONNECTION_TUNING,
   connectionTuningProblems,
 } from "@console/connectionTuningModel";
-import { CONFIGURATION_SAVED } from "@console/mountedConfiguration";
 import { ConnectionTuningCard } from "@console/ConnectionTuningCard";
 import { ExchangeFilesCard } from "@console/ExchangeFilesCard";
 import { ReceiptsCard } from "@console/ReceiptsCard";
@@ -102,6 +106,7 @@ export function ReviewCreateSection({
   loadedSftpForm,
   sftpSaveFilePreferred,
   runWithheld,
+  continuesOpenedExchange = false,
   connectionSettingsHeld,
   rendezvous,
   exchangeFiles,
@@ -142,6 +147,9 @@ export function ReviewCreateSection({
   /** Why the configuration opened from the mounted folder withholds the run,
    * undefined where nothing withholds it (`runWithheldReason`). */
   runWithheld?: string;
+  /** Whether the run continues the exchange the opened configuration set up,
+   * under the key file beside it, so the start action makes no invitation. */
+  continuesOpenedExchange?: boolean;
   /** Why the file-handling and connection-tuning cards take no edits, standing
    * in for them: the opened configuration's connection block is saved as the
    * file states it (`connectionSettingsHeldNotice`). Undefined where the
@@ -558,9 +566,14 @@ export function ReviewCreateSection({
           </p>
         </div>
       )}
+      {continuesOpenedExchange && (
+        <p className={styles.small}>{OPENED_EXCHANGE_CONTINUES}</p>
+      )}
       <div className={styles.workFoot}>
         <Button disabled={!canCreate} loading={minting} onClick={onCreate}>
-          Create the invitation
+          {continuesOpenedExchange
+            ? START_OPENED_EXCHANGE_LABEL
+            : "Create the invitation"}
         </Button>
         <Button variant="default" disabled={minting} onClick={onReset}>
           Reset to defaults

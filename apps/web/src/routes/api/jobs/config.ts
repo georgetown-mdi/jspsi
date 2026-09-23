@@ -5,10 +5,6 @@ import {
   handBackMountedConfiguration,
 } from "@jobs/configHandBack";
 import {
-  ConfigurationLoadRefusedError,
-  loadMountedConfiguration,
-} from "@jobs/configLoad";
-import {
   MAX_CONFIG_HAND_BACK_BODY_BYTES,
   gateJobRoute,
   readJobRequestBody,
@@ -18,6 +14,7 @@ import {
   jobJsonResponse,
   readJobApiConfig,
 } from "@jobs/gate";
+import { ConfigurationLoadRefusedError } from "@jobs/configLoad";
 import { formatFirstIssue } from "@jobs/schemaIssueMessage";
 import { jobConfigurationHandBackSchema } from "@jobs/intentSchemas";
 
@@ -38,6 +35,10 @@ import { jobConfigurationHandBackSchema } from "@jobs/intentSchemas";
  * and `warnings` the credential fields it cannot pre-fill -- names only in both,
  * since a setting's value is what can be the credential.
  *
+ * The configuration as this read found it is what a run of the opened
+ * configuration composes its recurring-run hand-off from, so a file changed
+ * between this read and the run is reported on the run rather than exported.
+ *
  * A file the console cannot open is a `400 { error }` naming the settings to fix
  * as the FILE spells them. The static `config` segment cannot be captured as a
  * job id: ids are validated as canonical v4 UUIDs before any use, which `config`
@@ -57,9 +58,7 @@ export const Route = createFileRoute("/api/jobs/config")({
         const gate = gateJobRoute(request);
         if (gate.kind === "response") return gate.response;
         try {
-          return jobJsonResponse(
-            loadMountedConfiguration(readJobApiConfig().dataRoot),
-          );
+          return jobJsonResponse(gate.manager.openMountedConfiguration());
         } catch (error) {
           if (error instanceof ConfigurationLoadRefusedError)
             return jobJsonResponse({ error: error.message }, 400);

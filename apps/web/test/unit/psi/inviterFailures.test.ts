@@ -15,12 +15,16 @@ import {
   RelayedTerminalError,
 } from "@psi/jobClient/serverJobExchangeDriver";
 import {
+  MOUNTED_KEY_FILE_ABSENT_REFUSAL,
+  MOUNTED_KEY_FILE_INVALID_REFUSAL,
+  SFTP_FINGERPRINT_LIST_REFUSAL,
+} from "@jobs/jobCreateRefusal";
+import {
   WEBRTC_ENDPOINT_HOST_REFUSED,
   WEBRTC_ENDPOINT_PATH_REFUSED,
   dialAsAcceptor,
 } from "@psi/transport/rendezvous";
 import { CSV_DELIMITER_SINGLE_COLUMN_REMEDY } from "@components/csvDelimiterChoice";
-import { SFTP_FINGERPRINT_LIST_REFUSAL } from "@jobs/jobCreateRefusal";
 import { failureFor } from "@exchange/useInviterExchange";
 
 import type { CSVRow, LinkageTerms, Metadata } from "@psilink/core";
@@ -390,6 +394,38 @@ describe("failureFor", () => {
     expect(failure.message).toContain("keep only the fingerprint");
     expect(failure.message).not.toContain("file");
   });
+
+  test.each([
+    [
+      MOUNTED_KEY_FILE_ABSENT_REFUSAL,
+      "Your working folder has no .psilink.key",
+    ],
+    [
+      MOUNTED_KEY_FILE_INVALID_REFUSAL,
+      "The .psilink.key in your working folder cannot be read",
+    ],
+  ] as const)(
+    "a run refused over the key file beside the configuration (%s) names that file",
+    (reason, title) => {
+      // Above the mounted-file copy: the input file is not at fault, and the
+      // copy says what to put back and what to do without it.
+      const failure = failureFor(
+        "config",
+        new JobApiRequestError(
+          400,
+          "POST /api/jobs failed with status 400",
+          undefined,
+          reason,
+        ),
+        WORK_FILE,
+        "filedrop",
+      );
+      expect(failure.category).toBe("config");
+      expect(failure.title).toBe(title);
+      expect(failure.message).toContain("beside psilink.yaml");
+      expect(failure.message).toContain("create a new invitation");
+    },
+  );
 
   test("the acceptor mounted-file 400 names its columns-step recovery", () => {
     // The acceptor's only config recovery button returns to its columns step (whose

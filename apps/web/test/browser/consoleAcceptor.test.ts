@@ -820,6 +820,7 @@ describe("console acceptor re-attaches on a busy create", () => {
     mode: "exchange",
     channel: "filedrop",
     usedKeyFile: true,
+    keyFileBesideConfiguration: false,
     credentialPasted: false,
     usedSigningIdentity: false,
     template: {

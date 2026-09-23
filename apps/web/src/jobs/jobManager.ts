@@ -52,6 +52,10 @@ import {
   spawnZeroSetupJob,
 } from "./cliDriver";
 import {
+  mountedConfigurationUnchanged,
+  openMountedConfiguration,
+} from "./configLoad";
+import {
   resolveSigningIdentityPath,
   runSigningFingerprint,
   signingCertificatePath,
@@ -61,7 +65,7 @@ import {
   signingIdentityTargetExists,
 } from "./signingIdentity";
 import { buildJobHandoff } from "./handoff";
-import { mountedExchangeDocument } from "./configLoad";
+import { checkedMountedKeyFilePath } from "./mountedKeyFile";
 import { probeSftpHostKey } from "./sftpProbe";
 import { removeSftpCredentialFile } from "./sftpScratch";
 import { validateAuthoredSftpServer } from "./sftpServer";
@@ -83,6 +87,10 @@ import type {
 } from "./intentSchemas";
 
 import type { ExchangeRecordOutcome, PartnerOriginText } from "@psilink/core";
+import type {
+  LoadedConfigurationResponse,
+  OpenedMountedConfiguration,
+} from "./configLoad";
 import type { JobHandoff } from "./handoff";
 import type { JobSftpServerEntry } from "./sftpServer";
 import type { RendezvousLeg } from "./jobRendezvous";
@@ -511,6 +519,14 @@ export class JobManager {
    * {@link SigningFingerprintBusyError} states.
    */
   private fingerprintInFlight = false;
+  /**
+   * The configuration the operator last opened off the mount, as that open
+   * read it: what a run of the opened configuration composes its hand-off
+   * from, rather than a read of the mount at run start. Replaced by each open,
+   * cleared by an open that finds no file or refuses one, and held in memory
+   * only, so a restart forgets it.
+   */
+  private openedConfiguration: OpenedMountedConfiguration | undefined;
 
   constructor(options: JobManagerOptions) {
     this.dataRoot = options.dataRoot;
@@ -571,6 +587,20 @@ export class JobManager {
     // The busy rejection holds the occupying exchange's id so the caller can
     // re-attach to it.
     if (this.slot !== null) throw new ExchangeBusyError(this.slotId()!);
+    // A run of the opened configuration continues the exchange under the key
+    // file beside it. Checked after the busy check, so a create posted to
+    // recover a lost attachment meets the rejection that re-attaches it, and
+    // before the slot is claimed, so a refusal leaves the console free.
+    const runsOpenedConfiguration =
+      intent.mode !== "zeroSetup" && intent.mountedConfigurationOpened === true;
+    const mountedKeyPath = runsOpenedConfiguration
+      ? checkedMountedKeyFilePath(this.dataRoot)
+      : undefined;
+    // Captured before any await, so an open landing while the run writes its
+    // documents affects only a later run.
+    const opened = runsOpenedConfiguration
+      ? this.openedConfiguration
+      : undefined;
     // Resolved after the busy check for the reason the refusal below states,
     // and before the slot is claimed, so a location naming no path in the
     // secrets mount leaves the console free rather than mid-create.
@@ -603,6 +633,8 @@ export class JobManager {
         serverEntry,
         mountedInputPath,
         identityPath,
+        mountedKeyPath,
+        opened,
       );
     } catch (error) {
       // spawnExchangeJob is the final fallible step of startJobInWorkdir, so
@@ -939,8 +971,11 @@ export class JobManager {
     serverEntry: JobSftpServerEntry | undefined,
     mountedInputPath: string | undefined,
     identityPath: string,
+    mountedKeyPath: string | undefined,
+    opened: OpenedMountedConfiguration | undefined,
   ): Promise<string> {
-    // Exchange composes a config document and a key file into the workdir;
+    // Exchange composes a config document into the workdir, and a key file
+    // beside it unless the run uses the one beside the opened configuration;
     // zero-setup writes NEITHER -- its connection rides argv and it has no
     // shared secret, so the workdir holds only input (when inline), output, and
     // the record pair.
@@ -952,6 +987,7 @@ export class JobManager {
             workdir,
             serverEntry,
             identityPath,
+            mountedKeyPath,
           );
 
     const inputPath = await this.writeJobInput(
@@ -973,16 +1009,20 @@ export class JobManager {
         ? this.signingPathsFor(workdir, identityPath).receiptOutput
         : null;
 
-    // The hand-off's merge base is the document the operator opened, so a run
-    // authored here from scratch takes no held setting from a configuration
-    // sitting in the mount that nobody read.
-    const mountedDocument =
-      intent.mode !== "zeroSetup" && intent.mountedConfigurationOpened === true
-        ? mountedExchangeDocument(this.dataRoot)
-        : undefined;
+    // The hand-off's merge base is the document the operator opened, as the
+    // open read it, so a run authored here from scratch takes no held setting
+    // from a configuration sitting in the mount that nobody read, and a file
+    // changed since the open is reported rather than exported.
+    const runsOpenedConfiguration =
+      intent.mode !== "zeroSetup" && intent.mountedConfigurationOpened === true;
+    const mountedDocument = opened?.document;
+    const openedConfigurationNotice = runsOpenedConfiguration
+      ? openedConfigurationWarning(this.dataRoot, opened)
+      : undefined;
     const handoff = buildJobHandoff(intent, serverEntry, {
       credentialPasted: this.authoredMaterializedCredentialPath !== undefined,
       filedropSplit: this.jobRendezvousOutboundDir !== undefined,
+      keyFileBesideConfiguration: mountedKeyPath !== undefined,
       ...(mountedDocument !== undefined ? { mountedDocument } : {}),
     });
 
@@ -1018,6 +1058,15 @@ export class JobManager {
     // to do, so the notice cannot send the operator to a control this very launch
     // already has.
     const sweepExchangeFiles = intent.sweepExchangeFiles === true;
+
+    if (openedConfigurationNotice !== undefined)
+      this.appendEvent(
+        record,
+        buildSynthesizedWarningEvent(
+          "relayOpenedConfigurationChanged",
+          openedConfigurationNotice,
+        ),
+      );
 
     // Each leg preflights independently and names itself, so a split console's
     // two mounts raise their own notices rather than one set the operator cannot
@@ -1070,13 +1119,16 @@ export class JobManager {
    * Compose and write the exchange mode's config and key files into the workdir,
    * returning their paths. The connection block is drawn only from the server-side
    * resources ({@link composeDocumentByChannel}); the key file holds the shared
-   * secret. Not reached on the zero-setup path, which writes neither.
+   * secret. Given `mountedKeyPath`, no key file is written: the run reads the one
+   * beside the opened configuration, and the CLI writes its rotated secret back
+   * there. Not reached on the zero-setup path, which writes neither.
    */
   private async writeExchangeDocuments(
     intent: JobExchangeIntent,
     workdir: string,
     serverEntry: JobSftpServerEntry | undefined,
     identityPath: string,
+    mountedKeyPath: string | undefined,
   ): Promise<{ configPath: string; keyPath: string }> {
     const configDocument = composeDocumentByChannel(
       intent,
@@ -1085,17 +1137,18 @@ export class JobManager {
       serverEntry,
       this.signingPathsFor(workdir, identityPath),
     );
-    const keyDocument = composeKeyFileDocument(intent);
     const configPath = await writeJobFile(
       workdir,
       JOB_FILE_NAMES.config,
       configDocument,
     );
-    const keyPath = await writeJobFile(
-      workdir,
-      JOB_FILE_NAMES.key,
-      keyDocument,
-    );
+    const keyPath =
+      mountedKeyPath ??
+      (await writeJobFile(
+        workdir,
+        JOB_FILE_NAMES.key,
+        composeKeyFileDocument(intent),
+      ));
     return { configPath, keyPath };
   }
 
@@ -1206,6 +1259,20 @@ export class JobManager {
     // The exactly-one-of intent schema guarantees one input source; refuse a
     // caller that bypassed it rather than spawning the CLI on an empty input.
     throw new Error("job intent carries neither inputCsv nor inputFile");
+  }
+
+  /**
+   * Open the configuration mounted in the working folder for `GET
+   * /api/jobs/config`, keeping it as opened for the run that follows.
+   *
+   * @throws {ConfigurationLoadRefusedError} when the file is not a
+   *   configuration the console can open; nothing is then kept as opened.
+   */
+  openMountedConfiguration(): LoadedConfigurationResponse {
+    this.openedConfiguration = undefined;
+    const { response, opened } = openMountedConfiguration(this.dataRoot);
+    this.openedConfiguration = opened;
+    return response;
   }
 
   /**
@@ -1701,6 +1768,32 @@ function rawChainLinks(error: Error): Array<string> {
  * reported as a hard error rather than a path outside the workdir the
  * artifact's endpoint would then serve.
  */
+/**
+ * The warning a run of the opened configuration raises when what it composes
+ * from is not what the working folder holds now, or undefined when the two
+ * agree. The run and its hand-off state the configuration as it was opened;
+ * the notice names the file and says how to run what it holds instead.
+ */
+function openedConfigurationWarning(
+  dataRoot: string,
+  opened: OpenedMountedConfiguration | undefined,
+): string | undefined {
+  if (opened === undefined)
+    return (
+      "The console has no record of the psilink.yaml you opened, so the " +
+      "recurring-run configuration for this run holds only the settings " +
+      "shown on these pages. To include the file's other settings, open the " +
+      "configuration again and start a new run."
+    );
+  if (mountedConfigurationUnchanged(dataRoot, opened.source)) return undefined;
+  return (
+    "The psilink.yaml in your working folder changed after you opened it. " +
+    "This run and its recurring-run configuration use the settings as you " +
+    "opened them, not the changed file. To use the changed file, open the " +
+    "configuration again and start a new run."
+  );
+}
+
 function workdirArtifactPath(workdir: string, name: string): string {
   const artifactPath = resolveWorkdirFile(workdir, name);
   if (artifactPath === null)

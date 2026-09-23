@@ -447,6 +447,7 @@ describe("parseHandoff and shellJoinCommand (browser reader)", () => {
       mode: "exchange",
       channel: "sftp",
       usedKeyFile: true,
+      keyFileBesideConfiguration: false,
       credentialPasted: false,
       usedSigningIdentity: false,
       template: {
@@ -470,6 +471,7 @@ describe("parseHandoff and shellJoinCommand (browser reader)", () => {
         mode: "exchange",
         channel: "sftp",
         usedKeyFile: true,
+        keyFileBesideConfiguration: false,
         credentialPasted: false,
         usedSigningIdentity: false,
         template: { kind: "command", argv: [1, 2] },
@@ -482,8 +484,25 @@ describe("parseHandoff and shellJoinCommand (browser reader)", () => {
         mode: "exchange",
         channel: "sftp",
         usedKeyFile: true,
+        keyFileBesideConfiguration: false,
         credentialPasted: false,
         template: { kind: "config", yaml: "connection:\n" },
+      }),
+    ).toBeNull();
+    // A body missing where its key file is would point the operator at no
+    // file, or at a dead one.
+    expect(
+      parseHandoff({
+        mode: "exchange",
+        channel: "sftp",
+        usedKeyFile: true,
+        credentialPasted: false,
+        usedSigningIdentity: false,
+        template: {
+          kind: "config",
+          yaml: "connection:\n",
+          argv: ["psilink", "exchange", "input.csv", "results.csv"],
+        },
       }),
     ).toBeNull();
     // A config hand-off with no command leaves the panel nothing to run it by.
@@ -492,6 +511,7 @@ describe("parseHandoff and shellJoinCommand (browser reader)", () => {
         mode: "exchange",
         channel: "sftp",
         usedKeyFile: true,
+        keyFileBesideConfiguration: false,
         credentialPasted: false,
         usedSigningIdentity: false,
         template: { kind: "config", yaml: "connection:\n" },

@@ -1,4 +1,5 @@
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -16,13 +17,10 @@ import {
   parseSensitiveYaml,
 } from "@psilink/core";
 
-import {
-  loadMountedConfiguration,
-  mountedExchangeDocument,
-} from "@jobs/configLoad";
 import { JobManager } from "@jobs/jobManager";
 import { authoringStateFromDocument } from "@console/loadedConfig";
 import { connectionTuningOptions } from "@console/connectionTuningModel";
+import { openMountedConfiguration } from "@jobs/configLoad";
 
 import {
   cliEntry,
@@ -135,8 +133,8 @@ afterEach(() => {
   rmSync(workspace.root, { recursive: true, force: true });
 });
 
-/** The shared secret psilink wrote into the key file beside the mounted
- * configuration, which is what the console's run holds the exchange to. */
+/** The shared secret the key file beside the mounted configuration holds,
+ * which is what the console's run holds the exchange to. */
 function mountedSharedSecret(mount: string): string {
   const parsed = parseSensitiveJson(
     readFileSync(path.join(mount, ".psilink.key"), "utf8"),
@@ -150,13 +148,14 @@ function mountedSharedSecret(mount: string): string {
 
 /**
  * The exchange the console runs for the configuration it opened: the settings
- * the document states, through the production load and the console's own
+ * the document states, through the manager's own open and the console's own
  * mapping. The linkage terms, metadata, and standardization are the file's,
- * unedited, and the intent reports the configuration as opened, which is what
- * has the run's hand-off merge the mounted document.
+ * unedited, and the intent reports the configuration as opened and states no
+ * secret, which has the run use the key file beside it and its hand-off merge
+ * the opened document.
  */
-function intentFromMount(mount: string): JobFiledropExchangeIntent {
-  const response = loadMountedConfiguration(mount);
+function intentFromOpen(manager: JobManager): JobFiledropExchangeIntent {
+  const response = manager.openMountedConfiguration();
   if (response.document === undefined)
     throw new Error("the mount holds no configuration to open");
   const loaded = authoringStateFromDocument(response.document);
@@ -167,7 +166,6 @@ function intentFromMount(mount: string): JobFiledropExchangeIntent {
     channel: "filedrop",
     side: "acceptor",
     linkageTerms: loaded.linkageTerms,
-    sharedSecret: mountedSharedSecret(mount),
     inputFile: { name: "input.csv" },
     mountedConfigurationOpened: true,
     ...(loaded.metadata !== undefined ? { metadata: loaded.metadata } : {}),
@@ -181,7 +179,7 @@ function intentFromMount(mount: string): JobFiledropExchangeIntent {
 
 /** The configuration the mount holds, as the export's merge base reads it. */
 function mountedDocumentOf(mount: string) {
-  const document = mountedExchangeDocument(mount);
+  const document = openMountedConfiguration(mount).opened?.document;
   if (document === undefined)
     throw new Error("the mount holds no configuration to open");
   return document;
@@ -259,7 +257,8 @@ describe.skipIf(!cliIsBuilt)(
       });
       managers.push(manager);
 
-      const id = await manager.createJob(intentFromMount(workspace.mount));
+      const secretBeforeRun = mountedSharedSecret(workspace.mount);
+      const id = await manager.createJob(intentFromOpen(manager));
       const partner = startCli({
         args: ["exchange", "input.csv", "out.csv"],
         cwd: workspace.partnerDir,
@@ -275,6 +274,16 @@ describe.skipIf(!cliIsBuilt)(
       expect(pairsFromResultCsv(workspace.partnerOutput)).toEqual(
         PARTNER_PAIRS,
       );
+
+      // The run continued the exchange under the key file beside the
+      // configuration and left its rotated secret there, as a command-line run
+      // does; it wrote no key file of its own.
+      expect(mountedSharedSecret(workspace.mount)).not.toBe(secretBeforeRun);
+      expect(
+        mountedSharedSecret(workspace.mount) ===
+          mountedSharedSecret(workspace.partnerDir),
+      ).toBe(true);
+      expect(existsSync(path.join(record.workdir, ".psilink.key"))).toBe(false);
 
       // The hand-off the same run composed is the configuration the operator
       // takes to cron: the terms the file stated, and the rendezvous folder as a

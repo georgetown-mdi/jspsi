@@ -88,7 +88,10 @@ export interface ServerJobExchangeDriverConfig {
    */
   side: JobExchangeSide;
   linkageTerms: LinkageTerms;
-  sharedSecret: string;
+  /** The shared secret the run's key file holds. Absent exactly on a run of the
+   * configuration opened off the mount ({@link mountedConfigurationOpened}),
+   * which uses the key file beside that configuration on the server. */
+  sharedSecret?: string;
   /** Where the console reads this party's input from: inline CSV content, or a
    * reference to a file in the operator-mounted work-input directory
    * ({@link JobInputSource}). Mapped to the intent's `inputCsv` / `inputFile` arm by
@@ -146,9 +149,10 @@ export interface ServerJobExchangeDriverConfig {
   csvDelimiter?: string;
   options?: JobExchangeOptions;
   /** Whether this run's settings came from the configuration the operator
-   * opened off the mount. Forwarded to the intent, where it decides whether the
-   * recurring-run hand-off merges the mounted document into its template: a run
-   * authored in the console states nothing from a file nobody read. */
+   * opened off the mount. Forwarded to the intent, where it has the run use the
+   * key file beside that configuration and decides whether the recurring-run
+   * hand-off merges the opened document into its template: a run authored in
+   * the console states nothing from a file nobody read. */
   mountedConfigurationOpened?: boolean;
   /** The operator's per-run diagnostic and recovery choices, forwarded to the
    * intent unchanged ({@link RunDiagnosticsIntentFields}). Absent for a run
@@ -1167,7 +1171,7 @@ export function intentFor(
   const shared = {
     side,
     linkageTerms,
-    sharedSecret,
+    ...(sharedSecret !== undefined ? { sharedSecret } : {}),
     ...(inputSource.kind === "inline"
       ? { inputCsv: inputSource.csv }
       : { inputFile: { name: inputSource.name } }),

@@ -175,12 +175,38 @@ describe("jobExchangeIntentSchema validates metadata and standardization", () =>
   });
 
   test("accepts mountedConfigurationOpened, both booleans", () => {
-    for (const opened of [false, true])
+    const { sharedSecret: _omitted, ...withoutSecret } = validIntent();
+    expect(
+      jobExchangeIntentSchema.safeParse(
+        validIntent({ mountedConfigurationOpened: false }),
+      ).success,
+    ).toBe(true);
+    expect(
+      jobExchangeIntentSchema.safeParse({
+        ...withoutSecret,
+        mountedConfigurationOpened: true,
+      }).success,
+    ).toBe(true);
+  });
+
+  test("an opened configuration's run states no secret, and every other one does", () => {
+    // The opened configuration's run uses the key file beside it, so a secret
+    // on its intent is one the run would ignore; an intent with neither has no
+    // secret to run under.
+    const { sharedSecret: _omitted, ...withoutSecret } = validIntent();
+    for (const schema of [jobExchangeIntentSchema, jobCreateIntentSchema]) {
       expect(
-        jobExchangeIntentSchema.safeParse(
-          validIntent({ mountedConfigurationOpened: opened }),
-        ).success,
-      ).toBe(true);
+        schema.safeParse(validIntent({ mountedConfigurationOpened: true }))
+          .success,
+      ).toBe(false);
+      expect(schema.safeParse(withoutSecret).success).toBe(false);
+      expect(
+        schema.safeParse({
+          ...withoutSecret,
+          mountedConfigurationOpened: false,
+        }).success,
+      ).toBe(false);
+    }
   });
 
   test("rejects a non-boolean mountedConfigurationOpened", () => {

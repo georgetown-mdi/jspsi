@@ -71,6 +71,7 @@ const RECOVERY_HANDOFF = {
   mode: "exchange",
   channel: "sftp",
   usedKeyFile: true,
+  keyFileBesideConfiguration: false,
   credentialPasted: false,
   usedSigningIdentity: false,
   template: {

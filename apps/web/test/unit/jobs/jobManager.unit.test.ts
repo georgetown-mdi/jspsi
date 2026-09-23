@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -32,6 +33,10 @@ import {
   JobApiRequestError,
   createServerJobExchangeDriver,
 } from "@psi/jobClient/serverJobExchangeDriver";
+import {
+  MAX_MOUNTED_KEY_FILE_BYTES,
+  MountedKeyFileRefusedError,
+} from "@jobs/mountedKeyFile";
 import { generateJobId, writeJobFile } from "@jobs/workdir";
 import { JobInputNotFoundError } from "@jobs/workInputs";
 import { SIGNING_IDENTITY_FILE_NAME } from "@jobs/signingIdentity";
@@ -53,6 +58,7 @@ import {
   validZeroSetupSftpIntent,
 } from "../../utils/jobFixtures";
 
+import type * as workdirModule from "@jobs/workdir";
 import type { BufferedEvent, JobRecord } from "@jobs/jobManager";
 import type {
   CliDriverHandlers,
@@ -2411,13 +2417,16 @@ describe("a filedrop run that would publish the signing identity", () => {
   });
 });
 
-// The hand-off's merge base is the configuration the operator opened, reported
-// on the intent. A `psilink.yaml` in the mount that nobody opened is not read at
+// The hand-off's merge base is the configuration the operator opened, as the
+// open read it. A `psilink.yaml` in the mount that nobody opened is not read at
 // all, so an exchange authored in the console exports only what it composed.
 describe("the mounted configuration as the hand-off's merge base", () => {
   /** A manager whose mounted working folder holds a command-line configuration
-   * stating a setting the console composes no key for. */
-  function managerOverMountedConfiguration(): JobManager {
+   * stating a setting the console composes no key for, and its key file. */
+  function managerOverMountedConfiguration(): {
+    manager: JobManager;
+    root: string;
+  } {
     const rendezvousDir = rendezvousRoot();
     const root = tempDataRoot("mounted-config");
     roots.push(root);
@@ -2432,6 +2441,11 @@ describe("the mounted configuration as the hand-off's merge base", () => {
         }),
       ),
     );
+    fs.writeFileSync(
+      path.join(root, ".psilink.key"),
+      JSON.stringify({ sharedSecret: MOUNTED_SHARED_SECRET }),
+      { mode: 0o600 },
+    );
     const manager = new JobManager({
       dataRoot: root,
       binaryPath: STUB_CLI_PATH,
@@ -2439,27 +2453,344 @@ describe("the mounted configuration as the hand-off's merge base", () => {
       childEnv: { STUB_FD3_EVENTS: JSON.stringify([RESULT_EVENT]) },
     });
     managers.push(manager);
-    return manager;
+    return { manager, root };
   }
 
   async function handoffTemplate(
+    manager: JobManager,
     intent: JobFiledropExchangeIntent,
   ): Promise<string> {
-    const manager = managerOverMountedConfiguration();
     const id = await manager.createJob(intent);
     const handoff = manager.getJobHandoff(id)!;
     return handoff.template.kind === "config" ? handoff.template.yaml : "";
   }
 
+  function handoffTemplateOf(manager: JobManager, id: string): string {
+    const handoff = manager.getJobHandoff(id)!;
+    return handoff.template.kind === "config" ? handoff.template.yaml : "";
+  }
+
   test("an exchange authored here keeps nothing from the mounted file", async () => {
-    expect(await handoffTemplate(validIntent())).not.toContain(
+    const { manager } = managerOverMountedConfiguration();
+    manager.openMountedConfiguration();
+    expect(await handoffTemplate(manager, validIntent())).not.toContain(
       "token_max_age_days",
     );
   });
 
   test("an exchange composed from the opened file keeps its held settings", async () => {
+    const { manager } = managerOverMountedConfiguration();
+    manager.openMountedConfiguration();
+    expect(await handoffTemplate(manager, openedIntent())).toContain(
+      "token_max_age_days: 30",
+    );
+  });
+
+  test("a file changed after the open is reported, and the opened one exported", async () => {
+    const { manager, root } = managerOverMountedConfiguration();
+    manager.openMountedConfiguration();
+    const configPath = path.join(root, "psilink.yaml");
+    fs.writeFileSync(
+      configPath,
+      fs
+        .readFileSync(configPath, "utf8")
+        .replace("token_max_age_days: 30", "token_max_age_days: 7"),
+    );
+    const id = await manager.createJob(openedIntent());
+    const handoff = manager.getJobHandoff(id)!;
     expect(
-      await handoffTemplate(validIntent({ mountedConfigurationOpened: true })),
+      handoff.template.kind === "config" ? handoff.template.yaml : "",
     ).toContain("token_max_age_days: 30");
+    const warnings = manager
+      .getJob(id)!
+      .events.map((entry) => entry.event)
+      .filter((event) => event.source === "relayOpenedConfigurationChanged");
+    expect(warnings).toHaveLength(1);
+    expect(String(warnings[0].message)).toContain(
+      "The psilink.yaml in your working folder changed after you opened it.",
+    );
+  });
+
+  test("an open landing while the run writes its documents leaves the run's merge base alone", async () => {
+    const { manager, root } = managerOverMountedConfiguration();
+    manager.openMountedConfiguration();
+    const configPath = path.join(root, "psilink.yaml");
+    const actual = await vi.importActual<typeof workdirModule>("@jobs/workdir");
+    vi.mocked(writeJobFile).mockImplementationOnce(async (...args) => {
+      fs.writeFileSync(
+        configPath,
+        fs
+          .readFileSync(configPath, "utf8")
+          .replace("token_max_age_days: 30", "token_max_age_days: 7"),
+      );
+      manager.openMountedConfiguration();
+      return actual.writeJobFile(...args);
+    });
+    const id = await manager.createJob(openedIntent());
+    expect(vi.mocked(writeJobFile)).toHaveBeenCalled();
+    const yaml = handoffTemplateOf(manager, id);
+    expect(yaml).toContain("token_max_age_days: 30");
+    expect(yaml).not.toContain("token_max_age_days: 7");
+  });
+
+  test("an unchanged file raises no notice", async () => {
+    const { manager } = managerOverMountedConfiguration();
+    manager.openMountedConfiguration();
+    const id = await manager.createJob(openedIntent());
+    expect(
+      manager
+        .getJob(id)!
+        .events.some(
+          (entry) => entry.event.source === "relayOpenedConfigurationChanged",
+        ),
+    ).toBe(false);
+  });
+
+  test("a run of a configuration never opened here says so and exports only what it composed", async () => {
+    const { manager } = managerOverMountedConfiguration();
+    const id = await manager.createJob(openedIntent());
+    const handoff = manager.getJobHandoff(id)!;
+    expect(
+      handoff.template.kind === "config" ? handoff.template.yaml : "",
+    ).not.toContain("token_max_age_days");
+    expect(
+      manager
+        .getJob(id)!
+        .events.some(
+          (entry) => entry.event.source === "relayOpenedConfigurationChanged",
+        ),
+    ).toBe(true);
+  });
+});
+
+/** A secret of the canonical shape, distinct from {@link VALID_SHARED_SECRET},
+ * standing for the one a command-line run left in the mounted key file. */
+const MOUNTED_SHARED_SECRET = "B".repeat(42) + "A";
+
+/** A filedrop intent for a run of the opened configuration: no secret, since
+ * the run uses the key file beside the configuration. */
+function openedIntent(): JobFiledropExchangeIntent {
+  const { sharedSecret: _omitted, ...intent } = validIntent();
+  return { ...intent, mountedConfigurationOpened: true };
+}
+
+// A run of the opened configuration continues the exchange under the key file
+// beside it: the CLI is pointed at that file, which it rotates in place, and
+// no secret is minted or written into the run's own folder.
+describe("the key file beside the opened configuration", () => {
+  /** A mounted working folder holding a configuration and, unless told
+   * otherwise, the given key-file body. */
+  function mountWith(keyFile: string | undefined): string {
+    const root = tempDataRoot("opened-key");
+    roots.push(root);
+    fs.mkdirSync(root, { recursive: true });
+    fs.writeFileSync(
+      path.join(root, "psilink.yaml"),
+      stringifyYaml(
+        snakeizeKeys({
+          connection: { channel: "filedrop", path: "/srv/exchange" },
+          linkageTerms: validLinkageTerms(),
+        }),
+      ),
+    );
+    if (keyFile !== undefined)
+      fs.writeFileSync(path.join(root, ".psilink.key"), keyFile, {
+        mode: 0o600,
+      });
+    return root;
+  }
+
+  /** A manager over `root` whose spawn is captured rather than run. */
+  function capturingManager(root: string): {
+    manager: JobManager;
+    spawned: Array<{ configPath: string; keyPath: string }>;
+  } {
+    const spawned: Array<{ configPath: string; keyPath: string }> = [];
+    vi.spyOn(cliDriver, "spawnExchangeJob").mockImplementation((args) => {
+      spawned.push({ configPath: args.configPath, keyPath: args.keyPath });
+      return { signal: () => true, isRunning: () => true };
+    });
+    const manager = new JobManager({
+      dataRoot: root,
+      binaryPath: STUB_CLI_PATH,
+      jobRendezvousDir: rendezvousRoot(),
+    });
+    managers.push(manager);
+    return { manager, spawned };
+  }
+
+  test("an opened configuration's run uses the key file beside it", async () => {
+    const root = mountWith(
+      JSON.stringify({ sharedSecret: MOUNTED_SHARED_SECRET }),
+    );
+    const { manager, spawned } = capturingManager(root);
+    manager.openMountedConfiguration();
+    const id = await manager.createJob(openedIntent());
+    expect(spawned).toHaveLength(1);
+    expect(spawned[0].keyPath).toBe(path.join(root, ".psilink.key"));
+    const record = manager.getJob(id)!;
+    expect(fs.existsSync(path.join(record.workdir, ".psilink.key"))).toBe(
+      false,
+    );
+    expect(
+      JSON.parse(fs.readFileSync(path.join(root, ".psilink.key"), "utf8")),
+    ).toEqual({ sharedSecret: MOUNTED_SHARED_SECRET });
+    expect(manager.getJobHandoff(id)?.keyFileBesideConfiguration).toBe(true);
+  });
+
+  test("a key file stating an expiry and an unknown key is one the run accepts", async () => {
+    // The CLI's reader strips an unknown key and takes an ISO expiry, so the
+    // console refuses no file the run itself would read.
+    const root = mountWith(
+      JSON.stringify({
+        sharedSecret: MOUNTED_SHARED_SECRET,
+        expires: "2030-01-01T00:00:00.000Z",
+        note: "kept by the operator",
+      }),
+    );
+    const { manager, spawned } = capturingManager(root);
+    await manager.createJob(openedIntent());
+    expect(spawned[0].keyPath).toBe(path.join(root, ".psilink.key"));
+  });
+
+  test("an exchange authored here still mints its own key file", async () => {
+    const root = mountWith(
+      JSON.stringify({ sharedSecret: MOUNTED_SHARED_SECRET }),
+    );
+    const { manager, spawned } = capturingManager(root);
+    manager.openMountedConfiguration();
+    const id = await manager.createJob(validIntent());
+    const record = manager.getJob(id)!;
+    const workdirKey = path.join(record.workdir, ".psilink.key");
+    expect(spawned[0].keyPath).toBe(workdirKey);
+    expect(JSON.parse(fs.readFileSync(workdirKey, "utf8"))).toEqual({
+      sharedSecret: VALID_SHARED_SECRET,
+    });
+    expect(manager.getJobHandoff(id)?.keyFileBesideConfiguration).toBe(false);
+  });
+
+  test.each([
+    ["absent", undefined],
+    ["invalid", "not json"],
+    ["invalid", JSON.stringify({ sharedSecret: "too-short" })],
+    ["invalid", JSON.stringify({ secret: MOUNTED_SHARED_SECRET })],
+    [
+      "invalid",
+      JSON.stringify({ sharedSecret: MOUNTED_SHARED_SECRET, expires: "soon" }),
+    ],
+  ] as const)(
+    "refuses the run, before anything is written, when the key file is %s",
+    async (fault, keyFile) => {
+      const root = mountWith(keyFile);
+      const { manager, spawned } = capturingManager(root);
+      manager.openMountedConfiguration();
+      const refusal = await manager
+        .createJob(openedIntent())
+        .catch((error: unknown) => error);
+      expect(refusal).toBeInstanceOf(MountedKeyFileRefusedError);
+      expect((refusal as MountedKeyFileRefusedError).fault).toBe(fault);
+      expect(String((refusal as Error).message)).not.toContain(
+        MOUNTED_SHARED_SECRET,
+      );
+      expect(spawned).toHaveLength(0);
+      expect(manager.occupiedSlotId()).toBeNull();
+      expect(
+        fs
+          .readdirSync(root)
+          .filter((name) => name !== "psilink.yaml" && name !== ".psilink.key"),
+      ).toEqual([]);
+    },
+  );
+
+  test("a key file that is a directory is refused as invalid", async () => {
+    const root = mountWith(undefined);
+    fs.mkdirSync(path.join(root, ".psilink.key"));
+    const { manager } = capturingManager(root);
+    await expect(manager.createJob(openedIntent())).rejects.toMatchObject({
+      fault: "invalid",
+    });
+  });
+
+  test("a FIFO named .psilink.key is refused as invalid, without blocking", async () => {
+    let mkfifoAvailable = true;
+    const root = mountWith(undefined);
+    try {
+      execFileSync("mkfifo", [path.join(root, ".psilink.key")]);
+    } catch {
+      mkfifoAvailable = false;
+    }
+    if (!mkfifoAvailable) {
+      console.warn("skipping FIFO test: mkfifo is not available");
+      return;
+    }
+    const { manager, spawned } = capturingManager(root);
+    const started = Date.now();
+    await expect(manager.createJob(openedIntent())).rejects.toMatchObject({
+      fault: "invalid",
+    });
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(spawned).toHaveLength(0);
+  });
+
+  test("a .psilink.key symlink to /dev/zero is refused as invalid, without blocking", async () => {
+    if (!fs.existsSync("/dev/zero")) {
+      console.warn("skipping /dev/zero test: /dev/zero is not available");
+      return;
+    }
+    const root = mountWith(undefined);
+    fs.symlinkSync("/dev/zero", path.join(root, ".psilink.key"));
+    const { manager, spawned } = capturingManager(root);
+    const started = Date.now();
+    await expect(manager.createJob(openedIntent())).rejects.toMatchObject({
+      fault: "invalid",
+    });
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(spawned).toHaveLength(0);
+  });
+
+  test("a key file over the size cap is refused as invalid", async () => {
+    const root = mountWith("x".repeat(MAX_MOUNTED_KEY_FILE_BYTES + 1));
+    const { manager, spawned } = capturingManager(root);
+    await expect(manager.createJob(openedIntent())).rejects.toMatchObject({
+      fault: "invalid",
+    });
+    expect(spawned).toHaveLength(0);
+  });
+
+  test("a well-formed key file padded past the size cap is refused as invalid", async () => {
+    const padded =
+      JSON.stringify({ sharedSecret: MOUNTED_SHARED_SECRET }) +
+      " ".repeat(MAX_MOUNTED_KEY_FILE_BYTES + 1);
+    const root = mountWith(padded);
+    const { manager, spawned } = capturingManager(root);
+    await expect(manager.createJob(openedIntent())).rejects.toMatchObject({
+      fault: "invalid",
+    });
+    expect(spawned).toHaveLength(0);
+  });
+
+  test("no job-API answer for an opened run holds the mounted secret", async () => {
+    const root = mountWith(
+      JSON.stringify({ sharedSecret: MOUNTED_SHARED_SECRET }),
+    );
+    const manager = new JobManager({
+      dataRoot: root,
+      binaryPath: STUB_CLI_PATH,
+      jobRendezvousDir: rendezvousRoot(),
+      childEnv: { STUB_FD3_EVENTS: JSON.stringify([RESULT_EVENT]) },
+    });
+    managers.push(manager);
+    const opened = manager.openMountedConfiguration();
+    fs.appendFileSync(path.join(root, "psilink.yaml"), "# edited\n");
+    const id = await manager.createJob(openedIntent());
+    const record = manager.getJob(id)!;
+    await waitForTerminal(record);
+    const answers = JSON.stringify([
+      opened,
+      manager.getJobView(id),
+      manager.getJobHandoff(id),
+      record.events,
+    ]);
+    expect(answers).not.toContain(MOUNTED_SHARED_SECRET);
   });
 });

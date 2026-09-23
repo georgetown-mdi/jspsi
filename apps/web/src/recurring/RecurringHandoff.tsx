@@ -106,6 +106,7 @@ function HandoffBody({ handoff }: { handoff: JobHandoff }) {
           yaml={handoff.template.yaml}
           command={runCommand}
           usedKeyFile={handoff.usedKeyFile}
+          keyFileBesideConfiguration={handoff.keyFileBesideConfiguration}
           usedSigningIdentity={handoff.usedSigningIdentity}
         />
       ) : (
@@ -156,11 +157,13 @@ function ConfigSteps({
   yaml,
   command,
   usedKeyFile,
+  keyFileBesideConfiguration,
   usedSigningIdentity,
 }: {
   yaml: string;
   command: string;
   usedKeyFile: boolean;
+  keyFileBesideConfiguration: boolean;
   usedSigningIdentity: boolean;
 }) {
   return (
@@ -177,13 +180,17 @@ function ConfigSteps({
             Copy the shared secret into that folder
           </p>
           <p className={styles.small}>
-            This run writes its shared secret to .psilink.key in the exchange
-            folder. Copy that file into the same folder as psilink.yaml,
-            readable only by you (chmod 600 on Linux/macOS). The secret rotates
-            at each run's handshake, before any data moves -- even a run that
-            later failed has usually rotated it -- so take your copy from the
-            file as it stands after your last run here, never from an earlier
-            one.
+            {keyFileBesideConfiguration
+              ? "This run used the .psilink.key beside psilink.yaml in your " +
+                "working folder and wrote its new shared secret back to that " +
+                "file."
+              : "This run writes its shared secret to .psilink.key in the " +
+                "exchange folder."}{" "}
+            Copy that file into the same folder as psilink.yaml, readable only
+            by you (chmod 600 on Linux/macOS). The secret rotates at each run's
+            handshake, before any data moves -- even a run that later failed has
+            usually rotated it -- so take your copy from the file as it stands
+            after your last run here, never from an earlier one.
           </p>
         </li>
       )}
