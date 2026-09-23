@@ -36,9 +36,11 @@ import {
   linkageTermsStandingOf,
   persistExpectedPartnerDeduplicate,
   persistExpectedPayloadColumns,
+  persistInvitationRelay,
   persistOutboundPayloadConsent,
   reconcileConflictError,
   warnOnLinkageRuleSetCitationDrift,
+  type InvitationRelayRefresh,
   type ReconcileDiff,
 } from "../config";
 import { detectFileConflicts } from "../fileUtils";
@@ -867,6 +869,36 @@ function readExistingAcceptConfig(
   }
 }
 
+// The end of the log line an acceptance that keeps its configuration writes,
+// stating what became of `connection.invitation_relay`.
+function keptConfigurationRelayNote(
+  refresh: InvitationRelayRefresh,
+  invitationNamesRelay: boolean,
+): string {
+  switch (refresh) {
+    case "set":
+      return (
+        "its linkage settings and your own connection settings are " +
+        "unchanged, and its invitation_relay is set to the relay this " +
+        "invitation names."
+      );
+    case "removed":
+      return (
+        "its linkage settings and your own connection settings are " +
+        "unchanged, and its invitation_relay is removed, since this " +
+        "invitation names no relay."
+      );
+    case "absent":
+      return "the connection and linkage settings are unchanged.";
+    case "notWebrtc":
+      return invitationNamesRelay
+        ? "the connection and linkage settings are unchanged. Its " +
+            "connection is not webrtc, so it does not use the relay this " +
+            "invitation names."
+        : "the connection and linkage settings are unchanged.";
+  }
+}
+
 /**
  * Reconcile a pre-existing configuration file against an acceptance. Returns
  * `false` when no config was at `configPath` (a fresh one will be written);
@@ -1343,11 +1375,25 @@ export async function handler(argv: Arguments): Promise<void> {
         // compares no output field, so a partner-supplied invitation cannot
         // delete the record from a config that still transmits.
         persistOutboundPayloadConsent(configPath, reuseOutboundPayloadConsent);
+        // The relay the terms review just showed is the one the kept
+        // configuration's runs use: `invitation_relay` is refreshed from this
+        // invitation, and the operator's own `turn`/`stun` are left alone.
+        const invitationRelay =
+          ready.token.connectionEndpoint?.channel === "webrtc"
+            ? ready.token.connectionEndpoint.relay
+            : undefined;
+        const relayRefresh = persistInvitationRelay(
+          configPath,
+          invitationRelay,
+        );
         log.info(
           `reused the existing configuration at ${redactAndRenderOperatorSuppliedText(
             operatorSuppliedText(configPath),
-          )}; it already matches ` +
-            "the invitation, so the connection and linkage settings are unchanged.",
+          )}; it already matches the invitation, so ` +
+            keptConfigurationRelayNote(
+              relayRefresh,
+              invitationRelay !== undefined,
+            ),
         );
       } else if (ready.seeded && ready.connection.channel === "webrtc")
         // A webrtc connection block is complete as seeded: the endpoint is the

@@ -1,15 +1,23 @@
-import { ZodError } from "zod";
+import { ZodError, z } from "zod";
 import { expect, test } from "vitest";
 
 import {
   MAX_RECONNECT_ATTEMPTS,
+  MAX_RELAY_LOCATOR_URL_LENGTH,
   SHARED_SECRET_REGEX,
+  StunUrlSchema,
+  TurnUrlSchema,
   generateSharedSecret,
   parseConnectionConfig,
+  relayLocatorSchema,
   safeParseConnectionConfig,
   safeParseFileSyncOptions,
   withRetainModeImplications,
 } from "../../src/config/connection";
+import {
+  decodeInvitation,
+  encodeInvitation,
+} from "../../src/config/invitation";
 
 import type { FileSyncOptions } from "../../src/config/connection";
 
@@ -1102,6 +1110,14 @@ test.each([
   // A quoted entry can include padding; the host requirement is applied to the
   // trimmed value, so the padding decides nothing.
   ["stun:stun.example.org:3478 ", true],
+  // A user before the host is refused, and a stun url takes no query string.
+  ["stun:user@stun.example.org:3478", false],
+  ["stun:@stun.example.org", false],
+  ["stun:stun.example.org:3478?x=a@b", false],
+  ["stun:stun.example.org:3478?transport=udp", false],
+  // RFC 7064 defines no path or fragment.
+  ["stun:stun.example.org:3478/", false],
+  ["stun:stun.example.org:3478#x", false],
 ])('STUN URI "%s" is %s', (uri, valid) => {
   const result = safeParseConnectionConfig({ ...webrtcBase, stun: [uri] });
   expect(result.success).toBe(valid);
@@ -1112,8 +1128,9 @@ test("a host-less STUN entry is refused with the form it needs", () => {
   expect(result.success).toBe(false);
   if (result.success) return;
   const messages = result.error.issues.map((i) => i.message);
-  expect(messages.some((m) => m.includes("stun entry must name a host"))).toBe(
-    true,
+  expect(messages).toContain(
+    "the 1st stun url must name a host after stun: or stuns:, for example " +
+      "stun:stun.example.org:3478",
   );
   expect(messages.some((m) => m.includes("stun:stun.example.org"))).toBe(true);
 });
@@ -1136,6 +1153,16 @@ test.each([
   ["turn: ", false],
   ["turn:?transport=tcp", false],
   ["turn:turn.example.org:3478 ", true],
+  // A credential goes in the entry's username and credential fields, never in
+  // the url, before the host or in the query.
+  ["turn:user@turn.example.org:3478", false],
+  ["turns:user:secret@turn.example.org:443", false],
+  ["turn:@turn.example.org", false],
+  ["turn:turn.example.org:3478?x=a@b", false],
+  // RFC 7065 defines no path or fragment.
+  ["turns:turn.example.org:443/path", false],
+  ["turn:turn.example.org#x", false],
+  ["turns:turn.example.org:443?transport=tcp#x", false],
 ])('TURN URL "%s" is %s', (url, valid) => {
   const result = safeParseConnectionConfig({
     ...webrtcBase,
@@ -1155,11 +1182,12 @@ test.each([
   ["turn:turn.example.org:3478?transport=udp", true],
   ["turn:turn.example.org:3478?transport=tcp", true],
   ["turns:turn.example.org:5349?transport=tcp", true],
-  ["turn:turn.example.org:3478?foo=bar", true],
-  ["turn:turn.example.org:3478?transport=tcp&foo=bar", true],
+  // werift keeps these, but transport is a turn url's only parameter.
+  ["turn:turn.example.org:3478?foo=bar", false],
+  ["turn:turn.example.org:3478?transport=tcp&foo=bar", false],
   // The parameter name is read case-sensitively, so this url sets no transport
-  // at all and werift keeps the entry on its default.
-  ["turn:turn.example.org:3478?Transport=tcp", true],
+  // at all, and werift keeps the entry on its default.
+  ["turn:turn.example.org:3478?Transport=tcp", false],
   ["turn:turn.example.org:3478?transport=tcp&transport=udp", true],
   ["turns:turn.example.org:5349?transport=udp", false],
   ["turn:turn.example.org:3478?transport=UDP", false],
@@ -1241,11 +1269,342 @@ test("a host-less TURN url is refused with the form it needs", () => {
   if (result.success) return;
   const messages = result.error.issues.map((i) => i.message);
   expect(
-    messages.some((m) => m.includes("turn entry's url must name a host")),
+    messages.some((m) => m.includes("the 1st turn url must name a host")),
   ).toBe(true);
   expect(messages.some((m) => m.includes("turns:relay.example.org:443"))).toBe(
     true,
   );
+});
+
+test("a TURN url naming a user is refused without repeating the credential", () => {
+  const result = safeParseConnectionConfig({
+    ...webrtcBase,
+    turn: [
+      {
+        url: "turns:alice:hunter2@turn.example.org:443",
+        username: "u",
+        credential: "c",
+      },
+    ],
+  });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  const messages = result.error.issues.map((i) => i.message);
+  expect(messages).toContain(
+    "the 1st turn url names a user before its host; put the credential in " +
+      "the entry's username and credential fields, or leave it out of a " +
+      "relay an invitation names",
+  );
+  expect(messages.join("\n")).not.toMatch(/alice|hunter2|turn\.example/);
+});
+
+test("a STUN url naming a user is refused naming its position", () => {
+  const result = safeParseConnectionConfig({
+    ...webrtcBase,
+    stun: ["stun:stun.example.org:3478", "stun:alice@stun.example.org:3478"],
+  });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  expect(result.error.issues.map((i) => i.message)).toContain(
+    "the 2nd stun url names a user before its host; a stun server takes " +
+      "no credential, so leave it out",
+  );
+});
+
+// --- relay url query parameters ----------------------------------------------
+
+function grammarMessages(
+  schema: typeof TurnUrlSchema,
+  url: string,
+): Array<string> {
+  const result = schema.safeParse(url);
+  return result.success ? [] : result.error.issues.map((i) => i.message);
+}
+
+test("a TURN url setting only transport is accepted", () => {
+  expect(
+    TurnUrlSchema.safeParse("turns:relay.example.org:443?transport=tcp"),
+  ).toMatchObject({ success: true });
+});
+
+test("a TURN url setting another query parameter is refused naming no part of it", () => {
+  const messages = grammarMessages(
+    TurnUrlSchema,
+    "turns:relay.example.org:443?transport=tcp&credential=hunter2",
+  );
+  expect(messages).toEqual([
+    "the turn url may set no query parameter other than transport; a " +
+      "credential goes in the entry's username and credential fields",
+  ]);
+  expect(messages.join("\n")).not.toMatch(/hunter2|credential"/);
+});
+
+test("a TURN url query parameter with no value is refused without naming it", () => {
+  const messages = grammarMessages(
+    TurnUrlSchema,
+    "turn:relay.example.org:3478?hunter2",
+  );
+  expect(messages).toEqual([
+    "the turn url may set no query parameter other than transport; a " +
+      "credential goes in the entry's username and credential fields",
+  ]);
+});
+
+test("a STUN url with a query string is refused naming no part of it", () => {
+  expect(
+    grammarMessages(StunUrlSchema, "stun:relay.example.org:3478?x=1"),
+  ).toEqual([
+    "the stun url may set no query parameter; a stun url takes no query " +
+      "string, for example stun:stun.example.org:3478",
+  ]);
+});
+
+// --- a relay url refusal repeats none of the url -----------------------------
+
+// Each url's user, password, path, query value, fragment, and host carry a
+// marker no refusal text holds, so finding one means the url was repeated.
+const URL_TEXT = /u5er|pw9|SECRET|frag7|relayhost/;
+
+test.each([
+  [
+    TurnUrlSchema,
+    "TURN:u5er:pw9@relayhost#frag7",
+    "names a user before its host",
+  ],
+  [
+    TurnUrlSchema,
+    "turn:u5er@relayhost?credential=SECRET",
+    "names a user before its host",
+  ],
+  [StunUrlSchema, "stun:relayhost/SECRETPATH", "has a path after its host"],
+  [StunUrlSchema, "Stun:relayhost#frag7", "has a fragment"],
+  [
+    TurnUrlSchema,
+    "turn:u5er:pw9@relayhost" + "h".repeat(2000) + "#frag7",
+    "names a user before its host",
+  ],
+])("%#: a refusal of %s names the part, never the url", (schema, url, part) => {
+  const messages = grammarMessages(schema, url);
+  const kind = schema === StunUrlSchema ? "stun" : "turn";
+  expect(messages[0]).toMatch(new RegExp(`^the ${kind} url ${part}`));
+  expect(messages.join("\n")).not.toMatch(URL_TEXT);
+});
+
+test("a url in the right scheme but uppercase is refused for its scheme", () => {
+  expect(grammarMessages(TurnUrlSchema, "TURN:relayhost")).toEqual([
+    "the turn url must write its scheme in lowercase, turn: or turns:",
+  ]);
+  expect(grammarMessages(StunUrlSchema, "Stun:relayhost")).toEqual([
+    "the stun url must write its scheme in lowercase, stun: or stuns:",
+  ]);
+});
+
+test("a url in another scheme is refused for its scheme", () => {
+  const messages = grammarMessages(TurnUrlSchema, "https://u5er@relayhost");
+  expect(messages).toEqual([
+    "the turn url must begin with turn: or turns:, for example " +
+      "turns:relay.example.org:443?transport=tcp",
+  ]);
+});
+
+test("a 2000-character relay locator url is refused by length, naming its position", () => {
+  const url =
+    "turn:u5er:pw9@relayhost" + "h".repeat(2000) + "?credential=SECRET#frag7";
+  const result = relayLocatorSchema(() => "unknown keys").safeParse({
+    turn: ["turn:relay.example.org", url],
+  });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  const messages = result.error.issues.map((i) => i.message);
+  expect(messages).toContain(
+    `the 2nd turn url is longer than ${MAX_RELAY_LOCATOR_URL_LENGTH} characters`,
+  );
+  expect(messages.every((m) => m.startsWith("the 2nd turn url "))).toBe(true);
+  expect(messages.join("\n")).not.toMatch(URL_TEXT);
+});
+
+test.each([
+  [1, "1st"],
+  [2, "2nd"],
+  [3, "3rd"],
+  [4, "4th"],
+  [11, "11th"],
+  [12, "12th"],
+  [13, "13th"],
+  [21, "21st"],
+  [22, "22nd"],
+  [111, "111th"],
+])("the url at position %i is named the %s", (position, name) => {
+  const urls = Array.from({ length: position }, (_, index) =>
+    index === position - 1 ? "stun:relayhost#frag7" : "stun:stun.example.org",
+  );
+  const result = z.array(StunUrlSchema).safeParse(urls);
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  expect(result.error.issues.map((i) => i.message)).toEqual([
+    `the ${name} stun url has a fragment; a stun url takes no path or ` +
+      "fragment, for example stun:stun.example.org:3478",
+  ]);
+});
+
+test("a refused query key stops at the fragment", () => {
+  const messages = grammarMessages(
+    TurnUrlSchema,
+    "turn:relay.example.org?k#SECRETFRAG=v",
+  );
+  expect(messages.join("\n")).not.toContain("SECRET");
+});
+
+// --- no layer repeats any of a refused relay url -----------------------------
+
+const MARKERS = /SECRET|ssw0rd|u5er|pw9|frag7/;
+
+const relayTerms = {
+  version: "1.0.0",
+  identity: "Test Party",
+  date: "2025-01-01",
+  algorithm: "psi" as const,
+  linkageStrategy: "cascade" as const,
+  output: { expectsOutput: true, shareWithPartner: false },
+  deduplicate: false,
+  linkageFields: [{ name: "ssn", type: "ssn" as const }],
+  linkageKeys: [{ name: "SSN", elements: [{ field: "ssn" }] }],
+};
+
+// The encoding without schema validation, so decodeInvitation is handed a
+// token encodeInvitation would refuse to produce.
+async function encodeUnvalidated(obj: unknown): Promise<string> {
+  const toBase64Url = (b: Uint8Array): string =>
+    btoa(Array.from(b, (byte) => String.fromCharCode(byte)).join(""))
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=/g, "");
+  const bytes = new TextEncoder().encode(JSON.stringify(obj));
+  const hash = await globalThis.crypto.subtle.digest("SHA-256", bytes);
+  return toBase64Url(bytes) + toBase64Url(new Uint8Array(hash).slice(0, 4));
+}
+
+async function refusalOf(run: () => unknown): Promise<string> {
+  try {
+    await run();
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+  throw new Error("expected a refusal");
+}
+
+// Each url paired with the host its refusals must not name, where the host is
+// distinctive enough to search for.
+test.each([
+  ["TURN:u5er:pw9@relayhost#frag7", "relayhost"],
+  ["turn:u5er@relayhost?credential=SECRET", "relayhost"],
+  ["stun:relayhost/SECRETPATH", "relayhost"],
+  ["turn:u5er:pw9@relayhost" + "h".repeat(2000) + "#frag7", "relayhost"],
+  ["turn:alice:pa?ssw0rdSECRET=x@relay.example.org", "relay.example.org"],
+  ["stun:u?SECRET=1@h", undefined],
+  ["turn:h?SECRET", undefined],
+  ["turn:h?a=1&SECRET=2", undefined],
+])("%#: no refusal of a relay url repeats it", async (url, host) => {
+  const kind = /^turns?:/i.test(url) ? "turn" : "stun";
+  const schema = kind === "turn" ? TurnUrlSchema : StunUrlSchema;
+  const entry = kind === "turn" ? { url, username: "u", credential: "c" } : url;
+  const token = {
+    version: "1",
+    linkageTerms: relayTerms,
+    sharedSecret: "A".repeat(43),
+    connectionEndpoint: {
+      channel: "webrtc",
+      host: "signal.example",
+      relay: { [kind]: [url] },
+    },
+  };
+  const refusals = [
+    grammarMessages(schema, url).join("\n"),
+    await refusalOf(() =>
+      parseConnectionConfig({ ...webrtcBase, [kind]: [entry] }),
+    ),
+    await refusalOf(() =>
+      parseConnectionConfig({
+        ...webrtcBase,
+        invitation_relay: { [kind]: [url] },
+      }),
+    ),
+    await refusalOf(() =>
+      encodeInvitation(token as Parameters<typeof encodeInvitation>[0]),
+    ),
+    await refusalOf(async () =>
+      decodeInvitation(await encodeUnvalidated(token)),
+    ),
+  ];
+  for (const refusal of refusals) {
+    expect(refusal).not.toBe("");
+    expect(refusal).not.toMatch(MARKERS);
+    if (host !== undefined) expect(refusal).not.toContain(host);
+  }
+});
+
+test.each([
+  [
+    TurnUrlSchema,
+    "turn:alice:pa?ssw0rdSECRET=x@relay.example.org",
+    "the turn url names a user before its host; put the credential in the " +
+      "entry's username and credential fields, or leave it out of a relay " +
+      "an invitation names",
+  ],
+  [
+    StunUrlSchema,
+    "stun:u?SECRET=1@h",
+    "the stun url names a user before its host; a stun server takes no " +
+      "credential, so leave it out",
+  ],
+])(
+  "%#: a url holding an @ read as a query is refused for its user",
+  (schema, url, expected) => {
+    expect(grammarMessages(schema, url)).toEqual([expected]);
+  },
+);
+
+test.each([
+  [
+    TurnUrlSchema,
+    "turns:relay.example.org:443/SECRETPATH",
+    "the turn url has a path after its host; a turn url takes no path or " +
+      "fragment, for example turns:relay.example.org:443?transport=tcp",
+  ],
+  [
+    TurnUrlSchema,
+    "turn:relay.example.org#SECRETFRAG",
+    "the turn url has a fragment; a turn url takes no path or fragment, " +
+      "for example turns:relay.example.org:443?transport=tcp",
+  ],
+  [
+    StunUrlSchema,
+    "stun:stun.example.org:3478/SECRETPATH",
+    "the stun url has a path after its host; a stun url takes no path or " +
+      "fragment, for example stun:stun.example.org:3478",
+  ],
+  [
+    StunUrlSchema,
+    "stun:stun.example.org:3478#SECRETFRAG",
+    "the stun url has a fragment; a stun url takes no path or fragment, " +
+      "for example stun:stun.example.org:3478",
+  ],
+])(
+  "%#: a path or fragment is refused by kind, never by value",
+  (schema, url, expected) => {
+    const messages = grammarMessages(schema, url);
+    expect(messages).toContain(expected);
+    expect(messages.join("\n")).not.toContain("SECRET");
+  },
+);
+
+test("a fragment after a TURN query is refused without its value", () => {
+  const messages = grammarMessages(
+    TurnUrlSchema,
+    "turns:relay.example.org:443?transport=tcp#SECRETFRAG",
+  );
+  expect(messages.some((m) => m.includes("has a fragment"))).toBe(true);
+  expect(messages.join("\n")).not.toContain("SECRET");
 });
 
 test("a padded TURN url names a host, and parses without its padding", () => {

@@ -581,7 +581,7 @@ connection:
   role: inviter
 ```
 
-The peer addresses are derived from the shared secret, so there is nothing to fill in beyond the coordination server; [`connection.role`](#connectionrole) is `inviter` on the party that issued the invitation and `acceptor` on the party that accepted it. `psilink accept` seeds this block whole from the invitation, so it usually needs no edit at all.
+The peer addresses are derived from the shared secret, so there is nothing to fill in beyond the coordination server; [`connection.role`](#connectionrole) is `inviter` on the party that issued the invitation and `acceptor` on the party that accepted it. `psilink accept` seeds this block whole from the invitation -- the relay the invitation names included, as [`invitation_relay`](#connectioninvitation_relay) -- so it usually needs no edit at all.
 
 A webrtc connection takes only the keys listed below. One it does not define -- `ice_transport_polcy` for [`ice_transport_policy`](#connectionice_transport_policy), or a key that belongs under `server` written beside it -- is a usage error (exit 64) naming the key, rather than a setting dropped in silence.
 
@@ -758,7 +758,7 @@ connection:
 *Required:* no  
 *Applies to:* `webrtc`
 
-STUN servers for ICE candidate gathering. Each entry is a string in `stun:` or `stuns:` URI format and must name a host: a scheme with no host (`stun:`) names no server, and since a configured list replaces the built-in default it would leave the run with no STUN at all, so it is refused. Mutually exclusive with `ice_provision`; if `ice_provision` is present, `stun` is invalid.
+STUN servers for ICE candidate gathering. Each entry is a string in `stun:` or `stuns:` URI format and must name a host: a scheme with no host (`stun:`) names no server, and since a configured list replaces the built-in default it would leave the run with no STUN at all, so it is refused. An entry naming a user before its host (`stun:user@host`), or holding a query string (`stun:host:3478?x=1`), a path (`stun:host:3478/x`), or a fragment (`stun:host:3478#x`), is refused too: a STUN server takes no credential and a STUN URI defines no query parameter, path, or fragment. A refusal names the entry and the refused part and never repeats the url. Mutually exclusive with `ice_provision`; if `ice_provision` is present, `stun` is invalid.
 
 > **Honored by the CLI only.** The CLI builds its peer connection from `stun` and `turn`, and a configured list replaces the built-in default rather than adding to it, so the list you author is the list used. The browser client takes its servers from its own relay setting instead ([COMMUNICATION.md](COMMUNICATION.md#stunturn)), so on a web-conducted exchange these fields change no candidate the browser gathers. See [CLI.md](CLI.md#stun-and-what-it-discloses) for the default that applies when neither is set, what it discloses, and the idiom for gathering host candidates only.
 
@@ -779,9 +779,11 @@ TURN servers for the case where a direct peer-to-peer connection cannot be estab
 
 The CLI passes these entries to its peer connection (the browser client uses its own relay setting instead -- see [`connection.stun`](#connectionstun)). What a relayed run has been verified to do, the certificate the CLI requires of a relay before it will use one, and the wait such a run leaves behind afterwards are in [CLI.md](CLI.md#turn).
 
+A `url` may set no query parameter other than `transport`, the only one a TURN URI defines: any other (`?credential=...`) is refused without naming it or its value, so a credential pasted into the url is not repeated in the error, and a `url` holding an `@` is refused as naming a user before its host, since a password can hold a `?`. A TURN URI defines no path or fragment either, so a `url` with one (`turns:host:443/x`, `turn:host#x`) is refused naming which, never its value. A refusal names the entry and the refused part and never repeats the url.
+
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `url` | string | yes | TURN server URI: `turn:` or `turns:` followed by a host, with `transport` unset or lowercase `tcp` (`udp` too on a `turn:` url). A host-less `turn:`, or any other `transport` value, is refused |
+| `url` | string | yes | TURN server URI: `turn:` or `turns:` followed by a host, with `transport` unset or lowercase `tcp` (`udp` too on a `turn:` url). A host-less `turn:`, a user before the host (`turn:user@host` -- the credential goes in `username` and `credential`), a path, a fragment, or any other `transport` value, is refused |
 | `username` | string | yes | TURN username |
 | `credential` | string | yes | TURN credential; `@`-file recommended |
 | `credential_type` | enum | no | `password` (default) \| `hmac-sha1` |
@@ -794,6 +796,35 @@ connection:
       credential: "@/run/secrets/turn.key"
 ```
 
+### `connection.invitation_relay`
+
+*Type:* object  
+*Required:* no  
+*Applies to:* `webrtc`
+
+The relay the invitation you accepted named: your partner's TURN and STUN urls, written here by `psilink accept` and kept by the web app with a saved exchange. An acceptance that keeps an existing configuration refreshes this block from the invitation it accepts -- set to the relay that invitation names, removed when it names none -- and leaves the rest of the connection block as it is. It holds urls only -- `turn` and `stun`, each a list in the grammar of [`connection.turn`](#connectionturn)'s `url` and [`connection.stun`](#connectionstun) -- and a `username`, `credential`, or any other key is refused.
+
+A run prefers it to your own settings, one kind at a time: its `turn` urls replace your [`turn`](#connectionturn) entries, and its `stun` urls replace your [`stun`](#connectionstun) list, each only where it names some. Where it names none of a kind, or is absent, your own setting of that kind is used, so your `turn` and `stun` stay the fallback. Each run signs in to the invitation's TURN urls with a credential it derives from the exchange's current shared secret, valid for an hour; nothing is stored. Its TURN urls also satisfy [`ice_transport_policy: relay`](#connectionice_transport_policy).
+
+The relay's operator learns your network address on every run that contacts it, whether or not any traffic is relayed, which is why an acceptance names the relay before you consent. To stop using it, delete the block. The format and the credential derivation: [PROTOCOL.md](spec/PROTOCOL.md#the-invitations-relay-locator).
+
+An inviter names its relay from its own settings -- each `turn` entry's `url` and its `stun` list, never a username or credential. A `psilink invite` over a `ws://` or `wss://` URL builds its connection from the URL alone, which holds no `turn` or `stun`, so its invitation names no relay.
+
+The web app follows the same rules with the browser's own relay setting (the Relay server page, `/relay`) in place of `turn` and `stun`: an acceptance and each re-run of a saved exchange relay through the invitation's relay, and a web inviter names its own relay setting's urls in the invitation.
+
+```yaml
+connection:
+  channel: webrtc
+  server:
+    host: peers.example.org
+  role: acceptor
+  invitation_relay:
+    turn:
+      - "turns:relay.example.org:443?transport=tcp"
+    stun:
+      - "stun:relay.example.org:3478"
+```
+
 ### `connection.ice_transport_policy`
 
 *Type:* enum (`all` | `relay`)  
@@ -803,13 +834,13 @@ connection:
 
 Which candidate types ICE may use. `all` permits host, server-reflexive and relay candidates. `relay` gathers relay candidates only, so this party offers the partner no host or server-reflexive address and every path the exchange can take runs through a configured TURN server.
 
-`relay` requires a source of relay candidates: a connection that sets it with no `turn` entry is a usage error (exit 64) before anything is dialed, since it could gather nothing to pair.
+`relay` requires a source of relay candidates: a connection that sets it with no `turn` entry, and no TURN url in [`invitation_relay`](#connectioninvitation_relay), is a usage error (exit 64) before anything is dialed, since it could gather nothing to pair.
 
 Every WebRTC run states the policy it applied as it opens the rendezvous -- the configured value, or the default where the connection sets none -- so a run's own log says which candidate types it gathered under.
 
 It holds for a `turn` entry the ICE layer keeps. An entry whose `url` sets a `transport` the layer cannot use is dropped there, which would leave a relay-only run gathering host candidates, so the accepted `transport` values ([`connection.turn`](#connectionturn)) are the ones it keeps and any other is refused at parse.
 
-> **Honored by the CLI only**, like `stun` and `turn` (see [`connection.stun`](#connectionstun)). It is each party's own setting rather than a term of the exchange: it constrains only the candidates this party gathers, an invitation cannot carry it, and the partner is unaffected. What it is for, and what a run configured with it reports, are in [CLI.md](CLI.md#turn).
+> **Honored by the CLI only**, like `stun` and `turn` (see [`connection.stun`](#connectionstun)). It is each party's own setting rather than a term of the exchange: it constrains only the candidates this party gathers, an invitation cannot include it, and the partner is unaffected. What it is for, and what a run configured with it reports, are in [CLI.md](CLI.md#turn).
 
 ```yaml
 connection:
@@ -1586,6 +1617,7 @@ The cells:
 | `connection.role` | authored | not applicable | carried |
 | `connection.stun` | carried | not applicable | refused |
 | `connection.turn` | carried | not applicable | refused |
+| `connection.invitation_relay` | authored (recorded on accept) | not applicable | carried (recorded on accept; the browser relays through it on each re-run) |
 | `connection.ice_transport_policy` | carried | not applicable | refused |
 | `connection.ice_provision` | refused | not applicable | refused |
 | `connection.proxy` | not applicable | refused | not applicable |

@@ -716,6 +716,12 @@ export interface InvitationSummary {
    * HTML.
    */
   connectionPath?: Displayable;
+  /**
+   * The relay a webrtc endpoint names, each url sanitized for display. Present
+   * only when the endpoint names one; a list is empty when the relay names no
+   * url of that kind.
+   */
+  relay?: { turn: Array<Displayable>; stun: Array<Displayable> };
 }
 
 /**
@@ -1733,6 +1739,16 @@ export function summarizeInvitation(
     summary.expires = redactAndSanitizeForDisplay(source.expires);
 
   if (connectionPath !== undefined) summary.connectionPath = connectionPath;
+
+  if (endpoint?.channel === "webrtc" && endpoint.relay !== undefined)
+    summary.relay = {
+      turn: (endpoint.relay.turn ?? []).map((url) =>
+        redactAndSanitizeForDisplay(url),
+      ),
+      stun: (endpoint.relay.stun ?? []).map((url) =>
+        redactAndSanitizeForDisplay(url),
+      ),
+    };
 
   return summary;
 }

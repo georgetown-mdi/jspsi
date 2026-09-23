@@ -155,20 +155,40 @@ export function parseRelayUrlLines(
 }
 
 /**
- * The relay a run's peer connection gathers against: the one the invitation
- * names when it names one, else this browser's own setting, else none. A
- * stored setting this build cannot read is no relay, and is logged.
+ * A relay's TURN and STUN urls with each list optional: the shape of core's
+ * `RelayLocator`, which an invitation endpoint and a stored connection's
+ * `invitationRelay` hold, and of the urls an inviter names.
+ */
+export interface RelayUrls {
+  turn?: ReadonlyArray<string>;
+  stun?: ReadonlyArray<string>;
+}
+
+/**
+ * The relay a run's peer connection gathers against, chosen per kind as the
+ * command line chooses (`selectRunRelay` in core): the invitation's TURN urls
+ * when it names any, else this browser's own; likewise for STUN. With no
+ * invitation relay it is this browser's own setting, and with neither it is
+ * none. A stored setting this build cannot read is no relay, and is logged.
  */
 export function relayForRun(
-  invitationRelay?: RelayLocator,
+  invitationRelay?: RelayUrls,
   readOwn: () => OwnRelayRead = readOwnRelaySetting,
 ): RelayLocator | undefined {
-  if (invitationRelay !== undefined) return invitationRelay;
   const own = readOwn();
   if (own.kind === "unreadable")
     log.warn(
-      "the stored relay setting could not be read, so this run uses no relay; " +
-        "set it again in Relay settings",
+      "the stored relay setting could not be read, so this run uses no relay " +
+        "of its own; set it again in Relay settings",
     );
-  return own.kind === "set" ? own.relay : undefined;
+  const ownRelay = own.kind === "set" ? own.relay : undefined;
+  const invitationTurn = invitationRelay?.turn ?? [];
+  const invitationStun = invitationRelay?.stun ?? [];
+  if (invitationTurn.length + invitationStun.length === 0) return ownRelay;
+  return {
+    turn:
+      invitationTurn.length > 0 ? [...invitationTurn] : (ownRelay?.turn ?? []),
+    stun:
+      invitationStun.length > 0 ? [...invitationStun] : (ownRelay?.stun ?? []),
+  };
 }

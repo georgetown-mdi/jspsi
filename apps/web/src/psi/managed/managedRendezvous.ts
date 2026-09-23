@@ -19,9 +19,10 @@
  * mint uses. Origin isolation makes this airtight: a record exists only at the
  * origin it was deposited at, so the app's own location is always the correct
  * signaling source -- it cannot go stale against a redeployment and cannot be
- * poisoned at rest. The stored connection block is read for exactly one bit, its
+ * poisoned at rest. The stored connection block is read for two things: its
  * `channel` discriminant, to reject a non-webrtc record as not re-runnable in
- * the browser before any connection.
+ * the browser before any connection, and the `invitationRelay` an acceptor's
+ * record keeps from the invitation it accepted.
  *
  * The two rendezvous functions are injected (defaulting to the real
  * {@link listenAsInviter} / {@link dialAsAcceptor}) so the dispatch and the
@@ -56,8 +57,8 @@ const defaultFlows: ManagedRendezvousFlows = {
  * Reject a stored record whose exchange is not the webrtc channel: only a webrtc
  * exchange is coordinated live from the browser, so any other channel cannot
  * re-run here and fails before any connection. This dispatchability check reads
- * only the connection's `channel` discriminant -- the locator fields stay inert
- * per the spec (the block is persisted for document fidelity, not read).
+ * only the connection's `channel` discriminant -- the `server` locator fields
+ * stay inert per the spec (persisted for document fidelity, not read).
  */
 export function assertManagedRerunDispatchable(
   exchangeFile: ExchangeSpec,
@@ -96,8 +97,9 @@ type ManagedRendezvousAcquisition =
  * {@link ./managedRunDriver.ts}). Absent, the dial keeps the flows' shared
  * default.
  *
- * Both flows gather against the relay {@link relayForRun} selects, read at the
- * start of each run.
+ * Both flows gather against the relay {@link relayForRun} selects from the
+ * stored connection's `invitationRelay` and this browser's own setting, read at
+ * the start of each run.
  */
 export async function beginManagedRendezvous(
   side: ManagedExchangeSide,
@@ -112,7 +114,10 @@ export async function beginManagedRendezvous(
   const flows = options.flows ?? defaultFlows;
   const signal = options.signal;
   assertManagedRerunDispatchable(exchangeFile);
-  const relay = relayForRun();
+  const connection = exchangeFile.connection;
+  const relay = relayForRun(
+    connection.channel === "webrtc" ? connection.invitationRelay : undefined,
+  );
   if (side === "inviter") {
     const peer = await flows.listenAsInviter(sharedSecret, { signal, relay });
     return { side: "inviter", peer };

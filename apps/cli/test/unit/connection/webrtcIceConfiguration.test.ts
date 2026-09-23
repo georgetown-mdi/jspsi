@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 
-import { UsageError } from "@psilink/core";
+import { UsageError, mintRunRelayCredential } from "@psilink/core";
 
 import {
   NO_ICE_SERVERS_WARNING,
@@ -9,6 +9,7 @@ import {
   brokerLocationFromConnection,
   buildPeerConfiguration,
   iceServersFromConnection,
+  invitationRelayCredentialForRun,
 } from "../../../src/connection/webrtc/weriftPeer";
 
 // --- config -> ICE server list ----------------------------------------------
@@ -50,6 +51,98 @@ test("each TURN server becomes its own credentialed entry", () => {
       credential: "secret-two",
     },
   ]);
+});
+
+// --- the invitation's relay -------------------------------------------------
+
+const OWN_TURN = [
+  {
+    url: "turns:own.example:443?transport=tcp",
+    username: "operator",
+    credential: "own-secret",
+  },
+];
+const INVITATION_RELAY = {
+  turn: [
+    "turns:partner.example:443?transport=tcp",
+    "turn:partner.example:3478",
+  ],
+  stun: ["stun:partner.example:3478"],
+};
+const RUN_CREDENTIAL = {
+  username: "1767229200:psilink",
+  credential: "bWludGVk",
+  expiresAt: new Date("2026-01-01T01:00:00Z"),
+};
+
+test("the invitation's relay is used in place of the connection's own, with the run's credential", () => {
+  expect(
+    iceServersFromConnection(
+      {
+        stun: ["stun:own.example:3478"],
+        turn: OWN_TURN,
+        invitationRelay: INVITATION_RELAY,
+      },
+      RUN_CREDENTIAL,
+    ),
+  ).toEqual([
+    { urls: INVITATION_RELAY.stun },
+    ...INVITATION_RELAY.turn.map((url) => ({
+      urls: url,
+      username: RUN_CREDENTIAL.username,
+      credential: RUN_CREDENTIAL.credential,
+    })),
+  ]);
+});
+
+test("a connection falls back to its own TURN where the invitation's relay names none", () => {
+  expect(
+    iceServersFromConnection({
+      turn: OWN_TURN,
+      invitationRelay: { stun: INVITATION_RELAY.stun },
+    }),
+  ).toEqual([
+    { urls: INVITATION_RELAY.stun },
+    {
+      urls: OWN_TURN[0].url,
+      username: OWN_TURN[0].username,
+      credential: OWN_TURN[0].credential,
+    },
+  ]);
+});
+
+test("the invitation's TURN urls with no minted credential is a fault, not an unauthenticated entry", () => {
+  expect(() =>
+    iceServersFromConnection({ invitationRelay: INVITATION_RELAY }),
+  ).toThrow(/no relay credential was minted/);
+});
+
+test("a run mints a credential only when it uses the invitation's TURN urls", async () => {
+  const secret = "A".repeat(43);
+  const now = new Date("2026-01-01T00:00:00Z");
+  const minted = await invitationRelayCredentialForRun(
+    { invitationRelay: INVITATION_RELAY },
+    secret,
+    now,
+  );
+  expect(minted).toEqual(await mintRunRelayCredential(secret, now));
+  expect(
+    await invitationRelayCredentialForRun(
+      { turn: OWN_TURN, invitationRelay: { stun: INVITATION_RELAY.stun } },
+      secret,
+      now,
+    ),
+  ).toBeUndefined();
+  expect(
+    await invitationRelayCredentialForRun({ turn: OWN_TURN }, secret, now),
+  ).toBeUndefined();
+  expect(
+    await invitationRelayCredentialForRun(
+      { invitationRelay: INVITATION_RELAY },
+      undefined,
+      now,
+    ),
+  ).toBeUndefined();
 });
 
 test("a connection with neither STUN nor TURN resolves to no servers", () => {

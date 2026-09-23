@@ -684,6 +684,22 @@ export const CONSENT_FACTS = {
       "that transcript afterwards is your partner's decision, not something " +
       "this tool controls.",
   },
+  invitationRelay: {
+    basis: "enforced",
+    reason:
+      "The urls shown are the invitation's own, and a side that relays " +
+      "through them is choosing to with its own software: the command line " +
+      "and the browser select them in place of their own relay settings and " +
+      "mint the credential themselves, so nothing about which relay a side " +
+      "contacts rests on " +
+      "the partner's cooperation. What the relay's operator can observe is " +
+      "the note's, since that follows from contacting the relay at all.",
+    note:
+      "Your partner named this relay for the exchange to connect through, " +
+      "and your side uses it in place of any relay of your own. The relay's " +
+      "operator learns your network address on every run, whether or not " +
+      "any traffic passes through the relay.",
+  },
 } as const satisfies Record<string, ConsentFact>;
 
 /** A key of {@link CONSENT_FACTS}. */

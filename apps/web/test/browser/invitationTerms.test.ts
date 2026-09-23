@@ -1043,6 +1043,40 @@ describe("InvitationTerms: the exchange's retained files", () => {
   });
 });
 
+describe("InvitationTerms: the relay a webrtc invitation names", () => {
+  const PRODUCES = "What the exchange produces";
+
+  test("the relay's urls are named before consent, with core's note verbatim", async () => {
+    await renderTerms(terms, {
+      connectionEndpoint: {
+        channel: "webrtc",
+        host: "peer.example.org",
+        relay: {
+          turn: ["turns:relay.example.org:443?transport=tcp"],
+          stun: ["stun:relay.example.org:3478"],
+        },
+      },
+    });
+    await expect.element(group(PRODUCES)).toBeInTheDocument();
+    const text = group(PRODUCES).element().textContent;
+    expect(text).toContain("Relay your partner named");
+    expect(text).toContain("TURN turns:relay.example.org:443?transport=tcp");
+    expect(text).toContain("STUN stun:relay.example.org:3478");
+    expect(text).toContain(CONSENT_FACTS.invitationRelay.note);
+  });
+
+  test("nothing is said for a webrtc endpoint naming no relay", async () => {
+    await renderTerms(terms, {
+      connectionEndpoint: { channel: "webrtc", host: "peer.example.org" },
+    });
+    await expect.element(group(PRODUCES)).toBeInTheDocument();
+    expect(app.container.textContent).not.toContain("Relay your partner named");
+    expect(app.container.textContent).not.toContain(
+      CONSENT_FACTS.invitationRelay.note,
+    );
+  });
+});
+
 describe("InvitationTerms: always-visible egress and legal-agreement facts, tiered by direction", () => {
   // Render a chosen terms object under the given perspective. These facts live in the
   // always-visible core, each under the direction tier it belongs to; the detail they

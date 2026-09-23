@@ -79,6 +79,7 @@ const seams = {
   generateSecret: () => FRESH_SECRET,
   encode: encodeInvitation,
   now: () => NOW,
+  ownRelay: undefined,
 };
 
 describe("composeManagedReinvite", () => {
@@ -125,6 +126,32 @@ describe("composeManagedReinvite", () => {
     expect(JSON.stringify(token.connectionEndpoint)).not.toMatch(
       /stale-signaling/,
     );
+  });
+
+  test("names the inviter's own relay urls and no credential", async () => {
+    const ownRelay = {
+      turn: ["turns:relay.example.org:443?transport=tcp"],
+      stun: ["stun:relay.example.org:3478"],
+    };
+    const reinvite = await composeManagedReinvite(inviterRecord(), location, {
+      ...seams,
+      ownRelay,
+    });
+    const token = await decodeInvitation(reinvite.encoded);
+    expect(token.connectionEndpoint).toStrictEqual({
+      channel: "webrtc",
+      host: "example.org",
+      port: 3000,
+      path: "/api/",
+      relay: ownRelay,
+    });
+  });
+
+  test("with no own relay the invitation names none", async () => {
+    const token = await decodeInvitation(
+      (await composeManagedReinvite(inviterRecord(), location, seams)).encoded,
+    );
+    expect(token.connectionEndpoint).not.toHaveProperty("relay");
   });
 
   test("the deep link contains the encoded token in its fragment", async () => {

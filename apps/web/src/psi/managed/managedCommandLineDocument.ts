@@ -60,6 +60,10 @@ const WIDEST_WEBRTC_PROBE_LOCATOR: WebRTCExchangeLocator = {
   host: "locator.invalid",
   port: 443,
   path: "/",
+  relay: {
+    turn: ["turns:relay.example.org:443?transport=tcp"],
+    stun: ["stun:stun.example.org:3478"],
+  },
 };
 
 /**

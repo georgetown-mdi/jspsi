@@ -232,7 +232,9 @@ export function connectionFromEndpoint(
       // stamps it (withWebRTCPeerRole), and `psilink exchange` refuses a
       // connection that reaches it without one (see webRtcDialFrom). webrtc
       // needs no credential placeholder either -- it authenticates from the
-      // shared secret, not a username/password.
+      // shared secret, not a username/password. The inviter's relay is kept
+      // as `invitation_relay`, beside and never inside this party's own
+      // `turn`/`stun`, which stay the operator's to set.
       const connection: WebRTCConnectionConfig = {
         channel: "webrtc",
         server: {
@@ -240,6 +242,9 @@ export function connectionFromEndpoint(
           port: endpoint.port,
           path: endpoint.path,
         },
+        ...(endpoint.relay !== undefined
+          ? { invitationRelay: endpoint.relay }
+          : {}),
       };
       return { connection, seeded: true };
     }

@@ -28,6 +28,10 @@ import {
   parseManagedExchangeRecord,
   runnableManagedExchangeOrRefuse,
 } from "@psi/managed/managedExchangeRecord";
+import {
+  composeManagedDocument,
+  webrtcLocatorFromEndpoint,
+} from "@exchange/manageOfferModel";
 import { importManagedExchangeArtifact } from "@psi/managed/managedExchangeArtifact";
 
 import type {
@@ -550,6 +554,36 @@ describe("a webrtc connection outside the credential-free locator subset", () =>
       channel: "webrtc",
       server: { host: "signaling.example.org" },
       role: record.side,
+    });
+  });
+});
+
+describe("an accepted exchange whose invitation named a relay", () => {
+  test("exports the relay as invitation_relay", () => {
+    const relay = {
+      turn: ["turns:relay.example.org:443?transport=tcp"],
+      stun: ["stun:relay.example.org:3478"],
+    };
+    const record = managedRecord({
+      side: "acceptor",
+      exchangeFile: composeManagedDocument(
+        { side: "acceptor", linkageTerms },
+        webrtcLocatorFromEndpoint({
+          channel: "webrtc",
+          host: "signaling.example.org",
+          relay,
+        }),
+      ),
+    });
+
+    const exported = composeManagedCronExport(record).config.text;
+
+    expect(exported).toContain("invitation_relay:");
+    expect(parseExportedConfig(record).connection).toEqual({
+      channel: "webrtc",
+      server: { host: "signaling.example.org" },
+      invitationRelay: relay,
+      role: "acceptor",
     });
   });
 });

@@ -29,7 +29,8 @@
  * - `connectionEndpoint` -- built FRESH from this app's current signaling location,
  *   not the document's stored `server` locator: the inviter derives its rendezvous
  *   from `window.location` on the re-run path, so the stored locator is inert (see
- *   docs/spec/MANAGED_EXCHANGE_RECORD.md, "Role: a local `side` field").
+ *   docs/spec/MANAGED_EXCHANGE_RECORD.md, "Role: a local `side` field"). It names
+ *   the inviter's own relay, passed in by the host, as a new invitation does.
  * - `sharedSecret` -- a fresh setup secret, superseding the desynced one.
  * - `expires` -- a fresh bounded setup lifetime on the TOKEN (the invitation-in-
  *   transit bound). The RECORD's own `expires` is re-derived from the max-age policy,
@@ -52,7 +53,7 @@ import {
   MAX_INVITATION_LIFETIME_SECONDS,
 } from "@psilink/core";
 
-import { deepLinkFor, webrtcEndpointFromLocation } from "../invitation";
+import { deepLinkFor, invitationWebrtcEndpoint } from "../invitation";
 import { rotationWriteBack } from "./managedRunRotate";
 
 import type {
@@ -61,6 +62,7 @@ import type {
 } from "./managedExchangeRecord";
 import type { InvitationLocation } from "../invitation";
 import type { InvitationToken } from "@psilink/core";
+import type { RelayUrls } from "../transport/ownRelaySetting";
 import type { RotationWriteBack } from "./managedRunRotate";
 
 /**
@@ -128,13 +130,14 @@ function buildReinviteToken(
   location: InvitationLocation,
   freshSecret: string,
   tokenExpires: string,
+  ownRelay: RelayUrls | undefined,
 ): InvitationToken {
   return {
     version: "1",
     linkageTerms: record.exchangeFile.linkageTerms,
     sharedSecret: freshSecret,
     expires: tokenExpires,
-    connectionEndpoint: webrtcEndpointFromLocation(location),
+    connectionEndpoint: invitationWebrtcEndpoint(location, ownRelay),
     ...(record.exchangeFile.disclosedPayloadColumns !== undefined
       ? { disclosedPayloadColumns: record.exchangeFile.disclosedPayloadColumns }
       : {}),
@@ -155,6 +158,9 @@ interface ManagedReinviteSeams {
    * {@link INVITATION_LIFETIME_SECONDS} and is bounded by
    * {@link MAX_INVITATION_LIFETIME_SECONDS}. */
   lifetimeSeconds?: number;
+  /** This browser's own relay, which the invitation names; `undefined` names
+   * none. */
+  ownRelay: RelayUrls | undefined;
 }
 
 /**
@@ -194,7 +200,13 @@ export async function composeManagedReinvite(
   const now = seams.now();
   const freshSecret = seams.generateSecret();
   const tokenExpires = new Date(now + lifetimeSeconds * 1000).toISOString();
-  const token = buildReinviteToken(record, location, freshSecret, tokenExpires);
+  const token = buildReinviteToken(
+    record,
+    location,
+    freshSecret,
+    tokenExpires,
+    seams.ownRelay,
+  );
   const encoded = await seams.encode(token);
   return {
     encoded,

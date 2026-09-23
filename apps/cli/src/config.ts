@@ -11,6 +11,7 @@ import type {
   LinkageTerms,
   Metadata,
   OutboundPayloadConsent,
+  RelayLocator,
   SigningConfig,
   Standardization,
 } from "@psilink/core";
@@ -1828,6 +1829,59 @@ export function persistExpectedPartnerDeduplicate(
     },
   );
   writeFileOwnerOnly(configPath, serialized);
+}
+
+/**
+ * What {@link persistInvitationRelay} did to a kept configuration's
+ * `connection.invitation_relay`.
+ */
+export type InvitationRelayRefresh = "set" | "removed" | "absent" | "notWebrtc";
+
+/**
+ * Write, overwrite, or remove `connection.invitation_relay` in an existing
+ * `psilink.yaml` from the invitation an acceptance has just consented to,
+ * leaving every other key of the connection block untouched. The field is
+ * invitation-derived rather than the operator's own, so an acceptance that
+ * keeps the configuration refreshes it: a relay a prior invitation named must
+ * not stay in force after the operator was shown this invitation's.
+ *
+ * `relay === undefined` removes the field. A connection block whose channel
+ * is not webrtc holds no relay and is left as it is.
+ *
+ * Rewritten with the same owner-only permissions {@link saveConfig} uses.
+ * Throws if the file cannot be read or parsed, since the caller just read it.
+ */
+export function persistInvitationRelay(
+  configPath: string,
+  relay: RelayLocator | undefined,
+): InvitationRelayRefresh {
+  // Widened by the assertion: the edit callback assigns it, which control-flow
+  // narrowing does not follow.
+  let outcome = "notWebrtc" as InvitationRelayRefresh;
+  const serialized = editSensitiveYamlDocument(
+    fs.readFileSync(configPath, "utf8"),
+    configFileLabel(configPath),
+    (doc) => {
+      if (doc.getIn(["connection", "channel"]) !== "webrtc") return;
+      const field = ["connection", "invitation_relay"];
+      if (relay === undefined) {
+        outcome = doc.hasIn(field) ? "removed" : "absent";
+        doc.deleteIn(field);
+        return;
+      }
+      outcome = "set";
+      doc.setIn(
+        field,
+        doc.createNode({
+          ...(relay.turn !== undefined ? { turn: relay.turn } : {}),
+          ...(relay.stun !== undefined ? { stun: relay.stun } : {}),
+        }),
+      );
+    },
+  );
+  if (outcome === "set" || outcome === "removed")
+    writeFileOwnerOnly(configPath, serialized);
+  return outcome;
 }
 
 // --- Config reader -----------------------------------------------------------

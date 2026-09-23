@@ -3,7 +3,10 @@ import { describe, expect, test } from "vitest";
 import {
   deriveRelayKey,
   mintRelayCredential,
+  mintRunRelayCredential,
   RELAY_CREDENTIAL_MAX_TTL_SECONDS,
+  RUN_RELAY_CREDENTIAL_LABEL,
+  selectRunRelay,
 } from "../src/relayCredential";
 import { generateSharedSecret } from "../src/config/connection";
 
@@ -115,5 +118,84 @@ describe("mintRelayCredential", () => {
       ttlSeconds: RELAY_CREDENTIAL_MAX_TTL_SECONDS,
     });
     expect(minted.expiresAt).toEqual(new Date("2026-01-01T01:00:00Z"));
+  });
+});
+
+describe("selectRunRelay", () => {
+  const ownTurn = [
+    {
+      url: "turns:own.example:443?transport=tcp",
+      username: "operator",
+      credential: "own-secret",
+    },
+  ];
+  const ownStun = ["stun:own.example:3478"];
+  const invitationRelay = {
+    turn: ["turns:partner.example:443?transport=tcp"],
+    stun: ["stun:partner.example:3478"],
+  };
+
+  test("prefers the invitation's relay over the connection's own", () => {
+    expect(
+      selectRunRelay({ turn: ownTurn, stun: ownStun, invitationRelay }),
+    ).toEqual({
+      turn: { source: "invitation", urls: invitationRelay.turn },
+      stun: { source: "invitation", urls: invitationRelay.stun },
+    });
+  });
+
+  test("falls back to its own relay, per kind, where the invitation names none", () => {
+    expect(
+      selectRunRelay({
+        turn: ownTurn,
+        stun: ownStun,
+        invitationRelay: { stun: invitationRelay.stun },
+      }),
+    ).toEqual({
+      turn: { source: "own", servers: ownTurn },
+      stun: { source: "invitation", urls: invitationRelay.stun },
+    });
+    expect(
+      selectRunRelay({
+        turn: ownTurn,
+        stun: ownStun,
+        invitationRelay: { turn: invitationRelay.turn },
+      }),
+    ).toEqual({
+      turn: { source: "invitation", urls: invitationRelay.turn },
+      stun: { source: "own", urls: ownStun },
+    });
+  });
+
+  test("with no invitation relay, selects exactly the connection's own", () => {
+    expect(selectRunRelay({ turn: ownTurn, stun: ownStun })).toEqual({
+      turn: { source: "own", servers: ownTurn },
+      stun: { source: "own", urls: ownStun },
+    });
+    expect(selectRunRelay({ stun: [] })).toEqual({
+      stun: { source: "own", urls: [] },
+    });
+    expect(selectRunRelay({})).toEqual({});
+  });
+});
+
+describe("mintRunRelayCredential", () => {
+  test("signs under the key derived from the secret, for the ceiling, with the fixed label", async () => {
+    const minted = await mintRunRelayCredential(FIXED_SECRET, NOW);
+    expect(minted).toEqual(
+      await mintRelayCredential({
+        key: FIXED_RELAY_KEY,
+        label: RUN_RELAY_CREDENTIAL_LABEL,
+        ttlSeconds: RELAY_CREDENTIAL_MAX_TTL_SECONDS,
+        now: NOW,
+      }),
+    );
+    expect(minted.username).toBe(`1767229200:${RUN_RELAY_CREDENTIAL_LABEL}`);
+  });
+
+  test("refuses a value that is not a shared secret", async () => {
+    await expect(mintRunRelayCredential("nope", NOW)).rejects.toThrow(
+      /SHARED_SECRET_REGEX/,
+    );
   });
 });

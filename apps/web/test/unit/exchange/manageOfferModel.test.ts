@@ -113,6 +113,29 @@ describe("webrtcLocatorFromEndpoint", () => {
       ),
     ).not.toThrow();
   });
+
+  test("keeps the invitation's relay, which the acceptor's record holds as invitationRelay", () => {
+    const relay = {
+      turn: ["turns:relay.example.org:443?transport=tcp"],
+      stun: ["stun:relay.example.org:3478"],
+    };
+    const locator = webrtcLocatorFromEndpoint({ ...invitationEndpoint, relay });
+    expect(locator).toMatchObject({ relay });
+    const doc = composeManagedDocument(
+      { side: "acceptor", linkageTerms: inviterTerms },
+      locator,
+    );
+    expect(doc.connection).toMatchObject({ invitationRelay: relay });
+    expect(doc.connection).not.toHaveProperty("turn");
+  });
+
+  test("an invitation naming no relay leaves the record without one", () => {
+    const doc = composeManagedDocument(
+      { side: "acceptor", linkageTerms: inviterTerms },
+      webrtcLocatorFromEndpoint(invitationEndpoint),
+    );
+    expect(doc.connection).not.toHaveProperty("invitationRelay");
+  });
 });
 
 describe("composeManagedDocument", () => {

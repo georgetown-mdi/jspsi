@@ -669,6 +669,14 @@ export function displayInvitation(params: {
   // fact itself at one line.
   if (summary.disclosesRetainedFiles)
     emit(`    ${CONSENT_FACTS.retainedFiles.note}`);
+  // Named before consent because accepting sets this party's run to contact
+  // it: the urls are the partner's, escaped in the summary.
+  if (summary.relay !== undefined) {
+    emit(`  ${marked("relay your partner named", "invitationRelay")}:`);
+    for (const url of summary.relay.turn) emit(`    TURN ${url}`);
+    for (const url of summary.relay.stun) emit(`    STUN ${url}`);
+    emit(`    ${CONSENT_FACTS.invitationRelay.note}`);
+  }
   // The linkage strategy is a mandatory-consistency term like the
   // algorithm, and single-pass is disclosure-affecting -- the critical
   // thing the acceptor consents to here -- so show it plainly plus, for

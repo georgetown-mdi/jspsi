@@ -291,11 +291,15 @@ test.each(TRANSPORT_FORMS)(
  * The forms the schema refuses although werift keeps them. The schema holds
  * every occurrence of `transport` to the rule instead of resting on werift
  * reading the first, so a url setting it twice is refused where the two values
- * disagree. Listing them here keeps the correspondence below exact in both
- * directions: any other divergence fails an arm.
+ * disagree, and it refuses every query parameter but `transport`, the name
+ * read case-sensitively. Listing them here keeps the correspondence below
+ * exact in both directions: any other divergence fails an arm.
  */
 const REFUSED_THOUGH_KEPT = new Set([
   "turns:127.0.0.1:5349?transport=tcp&transport=udp",
+  "turn:127.0.0.1:3478?transport=tcp&foo=bar",
+  "turn:127.0.0.1:3478?foo=bar",
+  "turn:127.0.0.1:3478?Transport=tcp",
 ]);
 
 test.each(TRANSPORT_FORMS)(

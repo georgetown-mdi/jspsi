@@ -45,13 +45,15 @@ stand.
   objection under [Runbook relay](#runbook-relay) that a one-hour credential
   would expire before a slow acceptance stands as a lifetime mismatch, not as a
   prohibition.
-- **The inviter's relay does not serve both parties in the first cut.** Each
-  party relays through its own relay, with a credential derived from the
-  exchange's shared secret
-  ([PROTOCOL.md](../spec/PROTOCOL.md#relay-credential-derivation)), so no relay
-  entry or relay credential passes between the parties and the invitation holds
-  only its signaling locator. Delivering an inviter's relay to a partner who has
-  none, sealed at rendezvous, is a later option and not part of that cut.
+- **The invitation names the inviter's relay, never its credential.** The
+  invitation may hold the inviting party's relay locator -- its TURN and STUN
+  addresses -- and the accepting party relays through that relay in place of
+  its own rather than merging the two into one list. Both parties derive the
+  relay credential from the exchange's shared secret
+  ([PROTOCOL.md](../spec/PROTOCOL.md#the-invitations-relay-locator)), so no
+  relay credential passes between them. Each party's own relay is the fallback
+  where the invitation names none. Delivering a relay sealed at rendezvous is a
+  later option and not part of this cut.
 
 Taken from the relay measurement rather than measured again: TURN over TLS on
 443 relays a UDP-blocked CLI party, through TLS interception once the
@@ -425,15 +427,14 @@ browser's relay entry can come only from the deployment.
   without holding a credential. It serves recurring and browser parties with no
   operator in the loop, and it is where a runbook relay ends up once its
   partners block UDP.
-- **Runbook relay:** be the inviter. The inviter's relay serves both parties,
-  so the party that has one should send the invitation. (Superseded for the
-  first cut, where each party uses its own relay; see
-  [What this record assumes](#what-this-record-assumes).) Pair the reference relay
+- **Runbook relay:** be the inviter. The invitation names the inviter's relay
+  and the acceptor relays through it, so the party that has one should send the
+  invitation (see [What this record assumes](#what-this-record-assumes)). Pair the reference relay
   with a stable name registered well ahead, and with an allow-and-do-not-inspect
   request to each partner's network team at onboarding.
-- **No relay of its own:** be the acceptor, and use the inviter's relay (not
-  available in the first cut; see
-  [What this record assumes](#what-this-record-assumes)). Where
+- **No relay of its own:** be the acceptor, and use the inviter's relay, which
+  the invitation names (the command line and the web app both relay through
+  it). Where
   the partner has none, choose a managed relay that signs a BAA or document a
   conduit determination, and set its credential lifetime.
 - **Every profile:** name the relay in the data sharing agreement, as the SFTP

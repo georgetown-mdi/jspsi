@@ -4311,6 +4311,38 @@ describe("displayInvitation: the declared terms it discloses (columns, citations
     }
   });
 
+  test("displayInvitation: a webrtc endpoint's relay is named before consent, escaped, and nothing is said without one", () => {
+    const log = getLogger("accept-display-relay-test");
+    log.setLevel("silent");
+    const relayEndpoint: ConnectionEndpoint = {
+      channel: "webrtc",
+      host: "peer.example.org",
+      relay: {
+        turn: ["turns:relay.example.org:443?transport=tcp"],
+        stun: ["stun:relay.example.org\u001b[31m:3478"],
+      },
+    };
+    const lines = renderDisplayInvitation(
+      log,
+      sampleToken(FUTURE(), relayEndpoint),
+    ).split("\n");
+    const heading = lines.indexOf("  relay your partner named (enforced):");
+    expect(heading).toBeGreaterThanOrEqual(0);
+    expect(lines.slice(heading + 1, heading + 4)).toEqual([
+      "    TURN turns:relay.example.org:443?transport=tcp",
+      "    STUN stun:relay.example.org\\x1b[31m:3478",
+      `    ${CONSENT_FACTS.invitationRelay.note}`,
+    ]);
+    expect(heading).toBeLessThan(lines.indexOf(REPEAT_HEADING));
+
+    const without = renderDisplayInvitation(
+      log,
+      sampleToken(FUTURE(), { channel: "webrtc", host: "peer.example.org" }),
+    );
+    expect(without).not.toContain("relay your partner named");
+    expect(without).not.toContain(CONSENT_FACTS.invitationRelay.note);
+  });
+
   test("displayInvitation: a split-directory endpoint states the retention with no declaration", () => {
     // The seeded sub-case: this accept builds its connection from the endpoint and
     // is put in retain mode by its shape (a split pair cannot be configured
@@ -4451,6 +4483,16 @@ describe("displayInvitation: the declared terms it discloses (columns, citations
       ...sampleToken(FUTURE()),
       linkageTerms: { ...CONSENT_PROBE_TERMS, deduplicate: true },
     });
+    // The named relay is the eleventh: like the retain declaration it is held
+    // on the token rather than in the terms, on the endpoint this time.
+    const namingRelay = renderDisplayInvitation(
+      log,
+      sampleToken(FUTURE(), {
+        channel: "webrtc",
+        host: "peer.example.org",
+        relay: { turn: ["turns:relay.example.org:443"] },
+      }),
+    );
     const rendered = [
       acceptorWithheld,
       inviterWithheld,
@@ -4462,6 +4504,7 @@ describe("displayInvitation: the declared terms it discloses (columns, citations
       deduplicatingTableWithheld,
       inviterLearnsNoMembership,
       deduplicatingSharedResult,
+      namingRelay,
     ].join("\n");
 
     // The whole table, rather than a list restated here: a caveat this renderer
@@ -5427,6 +5470,53 @@ describe("handler: '--consent-to-terms' gates the confirmation prompt", () => {
         throw new Error("expected webrtc");
       expect(parsed.connection.role).toBe("acceptor");
       expect(raw).toContain("role: acceptor");
+    } finally {
+      exit.mockRestore();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("handler: an accepted webrtc invitation's relay is written as invitation_relay, leaving turn and stun unset", async () => {
+    // The configuration is where the partner's signaling endpoint is kept for
+    // every later `psilink exchange`, so the relay is kept there too -- beside
+    // this party's own relay settings, not in them.
+    const { dir, configFile, keyFile } = offlineAcceptFixture();
+    const exit = vi
+      .spyOn(process, "exit")
+      .mockImplementation((() => undefined) as never);
+    const relay = {
+      turn: ["turns:relay.example.org:443?transport=tcp"],
+      stun: ["stun:relay.example.org:3478"],
+    };
+    try {
+      const encoded = await encodeInvitation(
+        sampleToken(new Date(Date.now() + 3_600_000).toISOString(), {
+          channel: "webrtc",
+          host: "peer.example.org",
+          path: "/psi",
+          relay,
+        }),
+      );
+      await acceptHandler({
+        _: [],
+        $0: "psilink",
+        identity: "Agency B",
+        args: [encoded],
+        "consent-to-terms": true,
+        "config-file": configFile,
+        "key-file": keyFile,
+        "log-level": "silent",
+        record: false,
+      } as unknown as Arguments);
+      expect(exit).not.toHaveBeenCalled();
+      const raw = fs.readFileSync(configFile, "utf8");
+      expect(raw).toContain("invitation_relay:");
+      const parsed = parseExchangeSpec(YAML.parse(raw));
+      if (parsed.connection.channel !== "webrtc")
+        throw new Error("expected webrtc");
+      expect(parsed.connection.invitationRelay).toEqual(relay);
+      expect(parsed.connection.turn).toBeUndefined();
+      expect(parsed.connection.stun).toBeUndefined();
     } finally {
       exit.mockRestore();
       fs.rmSync(dir, { recursive: true, force: true });
@@ -6971,6 +7061,103 @@ describe("handler: offline accept-reuse refreshes the received-payload commitmen
       ).toThrow(/payload disclosure mismatch/);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// --- offline accept-reuse refreshes the invitation's relay -----------------------
+
+describe("handler: offline accept-reuse refreshes the invitation's relay", () => {
+  const OWN_TURN = [
+    {
+      url: "turns:own-relay.example.org:443?transport=tcp",
+      username: "own-user",
+      credential: "own-credential",
+    },
+  ];
+  const OWN_STUN = ["stun:own-stun.example.org:3478"];
+  const NEW_RELAY = {
+    turn: ["turns:new-relay.example.org:443?transport=tcp"],
+    stun: ["stun:new-relay.example.org:3478"],
+  };
+
+  function writeKeptWebrtcConfig(
+    configFile: string,
+    invitationRelay?: { turn?: string[]; stun?: string[] },
+  ): void {
+    writeExistingConfig(configFile, {
+      connection: {
+        channel: "webrtc",
+        server: { host: "peer.example.org", path: "/psi" },
+        role: "acceptor",
+        turn: OWN_TURN,
+        stun: OWN_STUN,
+        ...(invitationRelay !== undefined ? { invitationRelay } : {}),
+      },
+    });
+  }
+
+  async function acceptOver(
+    fixture: ReturnType<typeof offlineAcceptFixture>,
+    relay: { turn?: string[]; stun?: string[] } | undefined,
+  ): Promise<{ connection: ConnectionConfig; stderr: string }> {
+    const encoded = await encodeInvitation(
+      sampleToken(FUTURE(), {
+        ...WEBRTC_ENDPOINT,
+        ...(relay !== undefined ? { relay } : {}),
+      }),
+    );
+    const { stderrWrites } = await runOfflineAcceptCapturingStdio({
+      encoded,
+      fixture,
+      flags: { "consent-to-terms": true },
+    });
+    const raw = fs.readFileSync(fixture.configFile, "utf8");
+    return {
+      connection: parseExchangeSpec(YAML.parse(raw)).connection,
+      stderr: stderrWrites.join(""),
+    };
+  }
+
+  test("handler: a kept configuration takes the relay the invitation names", async () => {
+    const fixture = offlineAcceptFixture();
+    try {
+      writeKeptWebrtcConfig(fixture.configFile, {
+        turn: ["turns:stale-relay.example.org:443"],
+      });
+      const { connection, stderr } = await acceptOver(fixture, NEW_RELAY);
+      expect(connection).toMatchObject({
+        channel: "webrtc",
+        invitationRelay: NEW_RELAY,
+        turn: OWN_TURN,
+        stun: OWN_STUN,
+      });
+      expect(stderr).toContain(
+        "its invitation_relay is set to the relay this invitation names",
+      );
+    } finally {
+      fs.rmSync(fixture.dir, { recursive: true, force: true });
+    }
+  });
+
+  test("handler: a kept configuration's stale relay is removed when the invitation names none", async () => {
+    const fixture = offlineAcceptFixture();
+    try {
+      writeKeptWebrtcConfig(fixture.configFile, {
+        turn: ["turns:stale-relay.example.org:443"],
+      });
+      const { connection, stderr } = await acceptOver(fixture, undefined);
+      expect(connection).toMatchObject({
+        channel: "webrtc",
+        turn: OWN_TURN,
+        stun: OWN_STUN,
+      });
+      expect(connection).not.toHaveProperty("invitationRelay");
+      expect(stderr).toContain(
+        "its invitation_relay is removed, since this invitation names no relay",
+      );
+    } finally {
+      fs.rmSync(fixture.dir, { recursive: true, force: true });
     }
   });
 });

@@ -166,6 +166,13 @@ export const hostileSource: HostileSource = {
   connectionEndpoint: { channel: "filedrop", path: `drop${BEL}box` },
 };
 
+// The relay hosts a hostile invitation names, held apart from the urls so no
+// url literal in shipped source names a host.
+const HOSTILE_RELAY_HOSTS = {
+  turn: `relay${ESC}.example`,
+  stun: `relay${RLO}.example`,
+};
+
 /**
  * @internal
  *
@@ -178,4 +185,20 @@ export const hostileSource: HostileSource = {
 export const hostileVariants: ReadonlyArray<{
   name: string;
   source: HostileSource;
-}> = [{ name: "transforms on both swapped elements", source: hostileSource }];
+}> = [
+  { name: "transforms on both swapped elements", source: hostileSource },
+  {
+    name: "a webrtc endpoint naming a relay",
+    source: {
+      ...hostileSource,
+      connectionEndpoint: {
+        channel: "webrtc",
+        host: "peer.example",
+        relay: {
+          turn: [`turns:${HOSTILE_RELAY_HOSTS.turn}:443`],
+          stun: [`stun:${HOSTILE_RELAY_HOSTS.stun}`],
+        },
+      },
+    },
+  },
+];

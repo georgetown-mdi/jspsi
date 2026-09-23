@@ -440,10 +440,11 @@ export function InvitationTerms({
    * screen from the decoded token; omitted by the inviter's own preview. */
   inviterRetainsFiles?: boolean;
   /** The invitation's credential-free connection endpoint, passed by the acceptor
-   * screen from the decoded token. Read for its SHAPE alone: a split
+   * screen from the decoded token. Read for its shape and its relay: a split
    * inbound/outbound endpoint requires retain mode, so it states the retention
    * above even where the token declares nothing -- otherwise a party seeded into
-   * retain mode from the endpoint would consent with nothing said. */
+   * retain mode from the endpoint would consent with nothing said -- and a
+   * webrtc endpoint's relay is named before consent. */
   connectionEndpoint?: ConnectionEndpoint;
   /** This viewer's OWN outbound disclosure: the columns it will send to its
    * partner for matched records. Distinct from {@link disclosedPayloadColumns}
@@ -1009,6 +1010,27 @@ export function InvitationTerms({
             </Text>
             <Text size="xs" c="dimmed">
               {CONSENT_FACTS.retainedFiles.note}
+            </Text>
+          </Term>
+        )}
+
+        {/* The relay a webrtc invitation names, shown before consent. The urls
+            are partner text, escaped in the summary and rendered as text
+            children only. */}
+        {summary.relay !== undefined && (
+          <Term label="Relay your partner named">
+            {summary.relay.turn.map((url, index) => (
+              <Text size="sm" key={`turn-${index}`}>
+                TURN {url}
+              </Text>
+            ))}
+            {summary.relay.stun.map((url, index) => (
+              <Text size="sm" key={`stun-${index}`}>
+                STUN {url}
+              </Text>
+            ))}
+            <Text size="xs" c="dimmed">
+              {CONSENT_FACTS.invitationRelay.note}
             </Text>
           </Term>
         )}

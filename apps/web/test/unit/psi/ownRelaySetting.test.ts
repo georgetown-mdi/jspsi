@@ -145,9 +145,37 @@ describe("relayForRun", () => {
   };
 
   test("prefers the invitation's relay over the own setting", () => {
+    const named: RelayLocator = {
+      turn: ["turns:partner-relay.example.org:443"],
+      stun: ["stun:partner-relay.example.org:3478"],
+    };
+    expect(relayForRun(named, () => ({ kind: "set", relay: OWN }))).toEqual(
+      named,
+    );
+  });
+
+  test("chooses per kind: a kind the invitation leaves unnamed is the own setting's", () => {
     expect(
       relayForRun(invitation, () => ({ kind: "set", relay: OWN })),
-    ).toEqual(invitation);
+    ).toEqual({ turn: invitation.turn, stun: OWN.stun });
+    expect(
+      relayForRun({ stun: ["stun:partner-relay.example.org:3478"] }, () => ({
+        kind: "set",
+        relay: OWN,
+      })),
+    ).toEqual({
+      turn: OWN.turn,
+      stun: ["stun:partner-relay.example.org:3478"],
+    });
+  });
+
+  test("uses the invitation's relay alone with no own setting", () => {
+    expect(relayForRun(invitation, () => ({ kind: "none" }))).toEqual(
+      invitation,
+    );
+    expect(relayForRun(invitation, () => ({ kind: "unreadable" }))).toEqual(
+      invitation,
+    );
   });
 
   test("falls back to the own setting", () => {

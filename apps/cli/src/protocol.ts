@@ -38,6 +38,7 @@ import type {
   MessageConnection,
   PreparedExchange,
   ExchangeBootstrapResult,
+  RelayCredential,
   SigningIdentity,
   WebRTCConnectionConfig,
 } from "@psilink/core";
@@ -50,6 +51,7 @@ import { openWebRtcMessageConnection } from "./connection/webrtc/webrtcMessageCo
 import {
   brokerLocationFromConnection,
   iceServersFromConnection,
+  invitationRelayCredentialForRun,
 } from "./connection/webrtc/weriftPeer";
 import { persistPartnerFingerprint } from "./config";
 import { buildRotatedKeyFile, saveKeyFile } from "./keyFile";
@@ -333,6 +335,10 @@ interface WebRtcDial {
  * (`apps/web/src/psi/authenticateExchange.ts`), which is what lets a CLI peer
  * complete an exchange with one.
  *
+ * @param invitationRelayCredential This run's credential for the TURN urls
+ *   the connection's invitation relay names
+ *   (`invitationRelayCredentialForRun`); unused when the run relays through
+ *   its own `turn` entries.
  * @throws {UsageError} when the run holds no shared secret, when the connection
  *   names no role, when the server block cannot be resolved to a broker, or
  *   when the connection sets `ice_provision` (via `iceServersFromConnection`).
@@ -341,6 +347,7 @@ interface WebRtcDial {
 export function webRtcDialFrom(
   connection: WebRTCConnectionConfig,
   sharedSecret: string | undefined,
+  invitationRelayCredential?: RelayCredential,
 ): WebRtcDial {
   if (sharedSecret === undefined)
     throw new UsageError(WEBRTC_RENDEZVOUS_SECRET_REQUIRED);
@@ -358,7 +365,10 @@ export function webRtcDialFrom(
       location: brokerLocationFromConnection(connection.server),
       role,
       sharedSecret,
-      iceServers: iceServersFromConnection(connection),
+      iceServers: iceServersFromConnection(
+        connection,
+        invitationRelayCredential,
+      ),
       ...(connection.iceTransportPolicy !== undefined && {
         iceTransportPolicy: connection.iceTransportPolicy,
       }),
@@ -1453,7 +1463,7 @@ interface PreparedTransport {
  * try block, so a throw is a "prepare"-phase fault and no connection has been
  * opened.
  */
-function prepareTransport(
+async function prepareTransport(
   build: PreparedTransport,
   params: {
     connection: ProtocolConnectionConfig;
@@ -1467,7 +1477,7 @@ function prepareTransport(
     log: ReturnType<typeof getLogger>;
     emit: (fn: (e: EventStreamEmitter) => void) => void;
   },
-): void {
+): Promise<void> {
   const {
     connection,
     auth,
@@ -1565,7 +1575,22 @@ function prepareTransport(
     // misconfigured connection fails with no socket opened and no id
     // registered. The file-sync construction below has no webrtc
     // counterpart: on this channel there is no client to build.
-    build.webRtcDial = webRtcDialFrom(connection, auth?.sharedSecret);
+    const invitationRelayCredential = await invitationRelayCredentialForRun(
+      connection,
+      auth?.sharedSecret,
+      new Date(),
+    );
+    build.webRtcDial = webRtcDialFrom(
+      connection,
+      auth?.sharedSecret,
+      invitationRelayCredential,
+    );
+    if (invitationRelayCredential !== undefined)
+      log.info(
+        "relaying through the TURN server your partner's invitation named, " +
+          "with a credential derived from the exchange's shared secret that " +
+          `expires at ${invitationRelayCredential.expiresAt.toISOString()}`,
+      );
   } else {
     const client =
       connection.channel === "filedrop"
@@ -2108,7 +2133,7 @@ export async function runProtocol(
   // terminal-error-emission sites (phase "prepare" here), so exactly one
   // terminal event fires per run.
   try {
-    prepareTransport(build, {
+    await prepareTransport(build, {
       connection,
       auth,
       saveIntent,

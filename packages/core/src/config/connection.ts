@@ -3,6 +3,8 @@ import { camelizeKeys } from "../utils/camelizeKeys.js";
 import { safeParseCamelized } from "./safeParseCamelized.js";
 import { randomBytes, toBase64Url } from "../utils/crypto.js";
 import { pathsResolveToSameDir } from "../utils/pathCompare.js";
+import { maxCodeUnits } from "../utils/maxCodeUnits.js";
+import { boundedArray } from "../utils/boundedArray.js";
 
 // --- HTTP service authentication ---------------------------------------------
 
@@ -418,8 +420,91 @@ interface TurnServer {
 // applied to the trimmed value, and the trimmed value is what the connection
 // holds, so the padding a quoted entry can carry decides nothing: a padded
 // `turn:relay.example.org:3478` names its host, and a padded `turn:` none.
-const TURN_URL_PATTERN = /^turns?:[^\s:?][^\s?]*(?:\?\S*)?$/;
-const STUN_URI_PATTERN = /^stuns?:[^\s:?][^\s?]*(?:\?\S*)?$/;
+// Neither admits a user before the host (`turn:user@host`), a path, or a
+// fragment: a TURN credential goes in the entry's own fields, RFC 7064/7065
+// define no path or fragment, and a url an invitation holds names only where
+// the relay is.
+const TURN_URL_PATTERN = /^turns?:[^\s:?@/#][^\s?@/#]*(?:\?[^\s#]*)?$/;
+const STUN_URI_PATTERN = /^stuns?:[^\s:?@/#][^\s?@/#]*(?:\?[^\s#]*)?$/;
+
+const SCHEME_PREFIX = /^([a-z][a-z0-9+.-]*):/i;
+const USER_BEFORE_HOST = /^[a-z]+:[^?]*@/i;
+const PATH_AFTER_HOST = /^[a-z]+:[^\s/?#@]+\//i;
+
+type RelayUrlIssue = {
+  input?: unknown;
+  path?: ReadonlyArray<PropertyKey> | undefined;
+};
+
+function ordinal(position: number): string {
+  const lastTwo = position % 100;
+  if (lastTwo >= 11 && lastTwo <= 13) return `${position}th`;
+  switch (position % 10) {
+    case 1:
+      return `${position}st`;
+    case 2:
+      return `${position}nd`;
+    case 3:
+      return `${position}rd`;
+    default:
+      return `${position}th`;
+  }
+}
+
+// How a relay url refusal names the url: by kind, and by position when the
+// url sits in a list (a stun entry, or a turn entry's `url`). A refusal prints
+// no character of the url itself: a user, path, query, or fragment may hold a
+// credential, and a malformed url marks no reliable end to its host.
+function relayUrlEntry(kind: "turn" | "stun", issue: RelayUrlIssue): string {
+  const path = issue.path ?? [];
+  const last = path.at(-1);
+  const index =
+    typeof last === "number"
+      ? last
+      : last === "url" && typeof path.at(-2) === "number"
+        ? (path.at(-2) as number)
+        : undefined;
+  return index === undefined
+    ? `the ${kind} url`
+    : `the ${ordinal(index + 1)} ${kind} url`;
+}
+
+function userBeforeHostRefusal(kind: "turn" | "stun"): string {
+  return kind === "turn"
+    ? "names a user before its host; put the credential in the entry's " +
+        "username and credential fields, or leave it out of a relay an " +
+        "invitation names"
+    : "names a user before its host; a stun server takes no credential, so " +
+        "leave it out";
+}
+
+function urlGrammarMessage(
+  kind: "turn" | "stun",
+  example: string,
+): (issue: RelayUrlIssue) => string {
+  const schemes = `${kind}: or ${kind}s:`;
+  const noPathOrFragment = `a ${kind} url takes no path or fragment, for example ${example}`;
+  return (issue) => {
+    const entry = relayUrlEntry(kind, issue);
+    const url = typeof issue.input === "string" ? issue.input : "";
+    const scheme = SCHEME_PREFIX.exec(url)?.[1];
+    const ours =
+      scheme !== undefined &&
+      (scheme.toLowerCase() === kind || scheme.toLowerCase() === `${kind}s`);
+    const refusal = !ours
+      ? `must begin with ${schemes}, for example ${example}`
+      : USER_BEFORE_HOST.test(url)
+        ? userBeforeHostRefusal(kind)
+        : url.includes("#")
+          ? `has a fragment; ${noPathOrFragment}`
+          : PATH_AFTER_HOST.test(url)
+            ? `has a path after its host; ${noPathOrFragment}`
+            : scheme !== scheme.toLowerCase()
+              ? `must write its scheme in lowercase, ${schemes}`
+              : `must name a host after ${schemes}, for example ${example}`;
+    return `${entry} ${refusal}`;
+  };
+}
 
 // werift refuses a turn url whose `transport` parameter holds anything but
 // lowercase `tcp` or `udp`, and refuses `udp` on a `turns:` url, continuing
@@ -442,36 +527,89 @@ function turnUrlTransportIsSupported(url: string): boolean {
   return true;
 }
 
+// A TURN uri defines one query parameter, `transport` (RFC 7065), and a STUN
+// uri none (RFC 7064), so any other is refused rather than passed on, where a
+// pasted credential could reach an invitation. The refusal names no part of
+// the query, and a url holding an `@` is told it names a user before its
+// host, since a password can hold a `?` the grammar reads as a query.
+function hasRefusedQueryParameter(
+  url: string,
+  allowed: ReadonlyArray<string>,
+): boolean {
+  const queryStart = url.indexOf("?");
+  if (queryStart === -1) return false;
+  const query = url.slice(queryStart + 1).split("#")[0] ?? "";
+  return query.split("&").some((parameter) => {
+    const separator = parameter.indexOf("=");
+    const name = separator === -1 ? parameter : parameter.slice(0, separator);
+    return !allowed.includes(name);
+  });
+}
+
+function queryParameterRefinement(
+  kind: "turn" | "stun",
+  allowed: ReadonlyArray<string>,
+  refusal: string,
+): [(url: string) => boolean, { error: (issue: RelayUrlIssue) => string }] {
+  return [
+    (url) => !hasRefusedQueryParameter(url, allowed),
+    {
+      error: (issue) => {
+        const url = typeof issue.input === "string" ? issue.input : "";
+        return `${relayUrlEntry(kind, issue)} ${url.includes("@") ? userBeforeHostRefusal(kind) : refusal}`;
+      },
+    },
+  ];
+}
+
 /**
  * The url grammar of a `turn` entry: a `turn:` or `turns:` url naming a host,
- * with a `transport` the ICE layer keeps. Parses to the trimmed url.
+ * with a `transport` the ICE layer keeps and no other query parameter. Parses
+ * to the trimmed url. Shared by the connection block's `turn` entries and the
+ * relay locator an invitation may name, so both accept the same urls.
  */
 export const TurnUrlSchema = z
   .string()
   .trim()
-  .regex(
-    TURN_URL_PATTERN,
-    "a turn entry's url must name a host after turn: or turns:, for " +
-      "example turns:relay.example.org:443?transport=tcp",
-  )
-  .refine(turnUrlTransportIsSupported, {
-    message:
-      "a turn entry's url may leave transport unset or set it to lowercase " +
-      "tcp, and a turn: url may also set it to udp, for example " +
+  .regex(TURN_URL_PATTERN, {
+    error: urlGrammarMessage(
+      "turn",
       "turns:relay.example.org:443?transport=tcp",
-  });
+    ),
+  })
+  .refine(turnUrlTransportIsSupported, {
+    error: (issue) =>
+      `${relayUrlEntry("turn", issue)} may leave transport unset or set it ` +
+      "to lowercase tcp, and a turn: url may also set it to udp, for " +
+      "example turns:relay.example.org:443?transport=tcp",
+  })
+  .refine(
+    ...queryParameterRefinement(
+      "turn",
+      ["transport"],
+      "may set no query parameter other than transport; a credential goes " +
+        "in the entry's username and credential fields",
+    ),
+  );
 
 /**
- * The grammar of a `stun` entry: a `stun:` or `stuns:` url naming a host.
- * Parses to the trimmed url.
+ * The grammar of a `stun` entry: a `stun:` or `stuns:` url naming a host,
+ * with no query string. Parses to the trimmed url. Shared like
+ * {@link TurnUrlSchema}.
  */
 export const StunUrlSchema = z
   .string()
   .trim()
-  .regex(
-    STUN_URI_PATTERN,
-    "a stun entry must name a host after stun: or stuns:, for " +
-      "example stun:stun.example.org:3478",
+  .regex(STUN_URI_PATTERN, {
+    error: urlGrammarMessage("stun", "stun:stun.example.org:3478"),
+  })
+  .refine(
+    ...queryParameterRefinement(
+      "stun",
+      [],
+      "may set no query parameter; a stun url takes no query string, for " +
+        "example stun:stun.example.org:3478",
+    ),
   );
 
 const TurnServerSchema: z.ZodType<TurnServer> = z.object({
@@ -825,6 +963,86 @@ const FileSyncOptionsSchema: z.ZodType<FileSyncOptions> = z
     path: ["retainFiles"],
   });
 
+// --- Relay locator -----------------------------------------------------------
+
+/**
+ * Where a relay is reached, and nothing that authenticates to it: TURN and
+ * STUN urls under the grammar of the connection block's own `turn` and `stun`
+ * entries. An invitation's webrtc endpoint may name one, and the accepting
+ * side keeps it on its connection as
+ * {@link WebRTCConnectionConfig.invitationRelay}. Each party mints the TURN
+ * credential from the exchange's shared secret (docs/spec/PROTOCOL.md, "Relay
+ * credential derivation"), so the locator has no username or credential field.
+ */
+export interface RelayLocator {
+  /** TURN urls; non-empty when present. */
+  turn?: string[];
+  /** STUN urls; non-empty when present. */
+  stun?: string[];
+}
+
+/** Upper bound on the urls in each list of a {@link RelayLocator}. */
+export const MAX_RELAY_LOCATOR_URLS = 8;
+
+/**
+ * Upper bound on one relay locator url, in UTF-16 code units: a 256-character
+ * host plus the scheme, port and `transport` parameter fits well inside it.
+ */
+export const MAX_RELAY_LOCATOR_URL_LENGTH = 1024;
+
+const relayUrlList = (url: z.ZodType<string>, name: "turn" | "stun") =>
+  boundedArray(
+    url.check(
+      maxCodeUnits(
+        MAX_RELAY_LOCATOR_URL_LENGTH,
+        (issue) =>
+          `${relayUrlEntry(name, issue)} is longer than ` +
+          `${MAX_RELAY_LOCATOR_URL_LENGTH} characters`,
+      ),
+    ),
+    MAX_RELAY_LOCATOR_URLS,
+    `a relay locator's ${name} list must not exceed ` +
+      `${MAX_RELAY_LOCATOR_URLS} urls`,
+    1,
+  );
+
+/**
+ * Build the strict {@link RelayLocator} schema. Every key outside
+ * `turn`/`stun`, a `username` or `credential` included, is refused rather than
+ * stripped, with `unknownKeysMessage` naming the keys; a locator naming no url
+ * is refused too. The invitation endpoint and the connection block each supply
+ * their own message: one names keys a partner wrote, the other keys the
+ * operator wrote.
+ */
+export function relayLocatorSchema(
+  unknownKeysMessage: (keys: ReadonlyArray<string>) => string,
+): z.ZodType<RelayLocator> {
+  return z
+    .strictObject(
+      {
+        turn: relayUrlList(TurnUrlSchema, "turn").optional(),
+        stun: relayUrlList(StunUrlSchema, "stun").optional(),
+      },
+      {
+        error: (issue) =>
+          issue.code === "unrecognized_keys"
+            ? unknownKeysMessage(issue.keys)
+            : undefined,
+      },
+    )
+    .refine((relay) => relay.turn !== undefined || relay.stun !== undefined, {
+      message:
+        "a relay locator must name at least one turn or stun url; omit it " +
+        "when there is no relay to name",
+    });
+}
+
+const ConnectionRelayLocatorSchema = relayLocatorSchema(
+  (keys) =>
+    `invitation_relay has no ${keys.length === 1 ? "key" : "keys"} ` +
+    `${keys.join(", ")}; it holds only turn and stun url lists`,
+);
+
 // --- Connection config -------------------------------------------------------
 
 /**
@@ -851,14 +1069,21 @@ export interface WebRTCConnectionConfig {
   /** TURN servers for relaying when no direct path can be found. */
   turn?: TurnServer[];
   /**
+   * The relay named by the invitation this connection was accepted from. Its
+   * TURN urls replace {@link turn} and its STUN urls replace {@link stun},
+   * each only when the locator names that kind, with the TURN credential
+   * minted from the shared secret on each run.
+   */
+  invitationRelay?: RelayLocator;
+  /**
    * Which candidate types ICE may use. `all` permits host, server-reflexive
    * and relay candidates; `relay` gathers relay candidates only, so every
    * path the exchange can take runs through a configured TURN server and no
    * host or server-reflexive address is offered to the partner. Omitting it
    * leaves the transport's own default, which is `all`.
    *
-   * `relay` needs a source of relay candidates, so it requires `turn` or
-   * `iceProvision`.
+   * `relay` needs a source of relay candidates, so it requires `turn`,
+   * `iceProvision`, or an {@link invitationRelay} naming a TURN url.
    */
   iceTransportPolicy?: "all" | "relay";
   /**
@@ -969,6 +1194,7 @@ const WebRTCConnectionConfigSchema = z.strictObject(
     role: z.enum(["inviter", "acceptor"]).optional(),
     stun: z.array(StunUrlSchema).optional(),
     turn: z.array(TurnServerSchema).optional(),
+    invitationRelay: ConnectionRelayLocatorSchema.optional(),
     iceTransportPolicy: z.enum(["all", "relay"]).optional(),
     iceProvision: IceProvisionSchema.optional(),
     options: SharedOptionsSchema.optional(),
@@ -1066,14 +1292,16 @@ export const ConnectionConfigSchema: z.ZodType<ConnectionConfig> = z
   // here answers at config time what would otherwise be a rendezvous that runs
   // its whole budget and then reports that no relay candidate was gathered.
   // An `iceProvision` endpoint also answers with relay servers, so it satisfies
-  // the policy here; the message names only `turn`, the one source an
-  // application dials today (the CLI refuses `iceProvision` outright).
+  // the policy here, as does an invitation relay naming a TURN url; the message
+  // names only `turn`, the one source the operator authors (the CLI refuses
+  // `iceProvision` outright).
   .refine(
     (conn) =>
       !(
         conn.channel === "webrtc" &&
         conn.iceTransportPolicy === "relay" &&
         (conn.turn === undefined || conn.turn.length === 0) &&
+        conn.invitationRelay?.turn === undefined &&
         conn.iceProvision === undefined
       ),
     {

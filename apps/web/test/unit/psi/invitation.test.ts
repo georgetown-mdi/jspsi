@@ -10,6 +10,7 @@ import {
   assertPayloadSendDisclosed,
   decodeInvitation,
   disclosedColumnNames,
+  encodeInvitation,
   getDefaultLinkageTerms,
   inferMetadata,
   summarizeInvitation,
@@ -22,10 +23,12 @@ import {
   InvitationFileError,
   deepLinkFor,
   generateInvitation,
+  invitationWebrtcEndpoint,
   tokenFromInput,
   webrtcEndpointFromLocation,
 } from "../../../src/psi/invitation.js";
 import { prepareAcceptedInvitation } from "../../../src/psi/acceptInvitation.js";
+import { writeOwnRelaySetting } from "../../../src/psi/transport/ownRelaySetting.js";
 
 import type { LinkageTerms, Metadata } from "@psilink/core";
 import type { InvitationLocation } from "../../../src/psi/invitation.js";
@@ -115,6 +118,39 @@ describe("generateInvitation", () => {
       host: "example.org",
       port: 8443,
       path: "/api/",
+    });
+  });
+
+  describe("with this browser's own relay set", () => {
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    test("the webrtc invitation names its urls and no credential", async () => {
+      const values = new Map<string, string>();
+      vi.stubGlobal("localStorage", {
+        getItem: (key: string) => values.get(key) ?? null,
+        setItem: (key: string, value: string) => void values.set(key, value),
+        removeItem: (key: string) => void values.delete(key),
+      });
+      const ownRelay = {
+        turn: ["turns:relay.example.org:443?transport=tcp"],
+        stun: ["stun:relay.example.org:3478"],
+      };
+      writeOwnRelaySetting(ownRelay);
+      const { encoded } = await generateInvitation({
+        inviterName: "County Health Dept",
+        file: csvStream(),
+        location,
+      });
+      const token = await decodeInvitation(encoded);
+      expect(token.connectionEndpoint).toStrictEqual({
+        channel: "webrtc",
+        host: "example.org",
+        port: 8443,
+        path: "/api/",
+        relay: ownRelay,
+      });
     });
   });
 
@@ -1475,6 +1511,37 @@ describe("webrtcEndpointFromLocation", () => {
     expect(
       webrtcEndpointFromLocation({ hostname: "example.org", port: "8080abc" }),
     ).toStrictEqual({ channel: "webrtc", host: "example.org", path: "/api/" });
+  });
+});
+
+describe("invitationWebrtcEndpoint", () => {
+  test("with no own relay, is this app's signaling locator alone", () => {
+    expect(invitationWebrtcEndpoint(location, undefined)).toStrictEqual(
+      webrtcEndpointFromLocation(location),
+    );
+  });
+
+  test("names the inviter's own relay urls, and they round-trip through the token", async () => {
+    const endpoint = invitationWebrtcEndpoint(location, {
+      turn: ["turns:relay.example.org:443?transport=tcp"],
+      stun: ["stun:relay.example.org:3478"],
+    });
+    expect(endpoint).toStrictEqual({
+      ...webrtcEndpointFromLocation(location),
+      relay: {
+        turn: ["turns:relay.example.org:443?transport=tcp"],
+        stun: ["stun:relay.example.org:3478"],
+      },
+    });
+    const decoded = await decodeInvitation(
+      await encodeInvitation({
+        version: "1",
+        linkageTerms: getDefaultLinkageTerms("County Health Dept"),
+        sharedSecret: "A".repeat(43),
+        connectionEndpoint: endpoint,
+      }),
+    );
+    expect(decoded.connectionEndpoint).toStrictEqual(endpoint);
   });
 });
 

@@ -14,6 +14,7 @@ import {
   getDefaultLinkageTerms,
   inferMetadata,
   overlongDisclosedColumnPositions,
+  relayLocatorFromOwnRelay,
   stripInvitationWhitespace,
 } from "@psilink/core";
 
@@ -22,6 +23,7 @@ import { linkageRefusalFor } from "./linkageRefusal";
 import { loadCSVFileOffMainThread } from "./workers/csvParseController";
 import { ownColumnsField } from "./ownColumnsModel";
 import { payloadSendForMetadata } from "./metadataEditing";
+import { relayForRun } from "./transport/ownRelaySetting";
 import { standardizationForTerms } from "./authoring/advancedInviteTerms";
 
 import type {
@@ -39,6 +41,7 @@ import type {
 
 import type { LinkageRefusal } from "./linkageRefusal";
 import type { OwnColumnsChoice } from "./ownColumnsModel";
+import type { RelayUrls } from "./transport/ownRelaySetting";
 
 /**
  * The CSV input {@link generateInvitation} parses: exactly what
@@ -294,6 +297,22 @@ export function webrtcEndpointFromLocation(loc: {
   return endpoint;
 }
 
+/**
+ * The webrtc endpoint a web invitation holds: this app's signaling locator
+ * ({@link webrtcEndpointFromLocation}) plus the inviter's own relay, composed
+ * by core's `relayLocatorFromOwnRelay` and omitted when there is none. The one
+ * place a web inviter's relay reaches an invitation; both mint paths -- a new
+ * invitation and a managed re-invite -- call it.
+ */
+export function invitationWebrtcEndpoint(
+  loc: { hostname: string; port: string },
+  ownRelay: RelayUrls | undefined,
+): WebRTCEndpoint {
+  const endpoint = webrtcEndpointFromLocation(loc);
+  const relay = relayLocatorFromOwnRelay(ownRelay);
+  return relay !== undefined ? { ...endpoint, relay } : endpoint;
+}
+
 /** Build the deep-link URL with `encoded` in the fragment (see
  * {@link GeneratedInvitation.deepLink} for why the fragment, not a query). */
 export function deepLinkFor(origin: string, encoded: string): string {
@@ -338,7 +357,8 @@ export type ConnectionEndpointRequest =
 /**
  * Resolve a {@link ConnectionEndpointRequest} to the {@link ConnectionEndpoint}
  * the token holds. The webrtc request is built from the inviter's browser
- * {@link InvitationLocation}; an sftp/filedrop request passes through verbatim
+ * {@link InvitationLocation} and names the relay this inviter's own run gathers
+ * against ({@link relayForRun}); an sftp/filedrop request passes through verbatim
  * (its locator fields were authored by the caller). No credential can appear
  * in any branch -- the endpoint types admit none -- and `encodeInvitation`
  * validates the result through the strict endpoint schema regardless.
@@ -347,7 +367,8 @@ function resolveConnectionEndpoint(
   request: ConnectionEndpointRequest,
   location: InvitationLocation,
 ): ConnectionEndpoint {
-  if (request.channel === "webrtc") return webrtcEndpointFromLocation(location);
+  if (request.channel === "webrtc")
+    return invitationWebrtcEndpoint(location, relayForRun());
   return request;
 }
 

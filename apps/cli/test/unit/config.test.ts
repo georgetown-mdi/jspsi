@@ -46,6 +46,7 @@ import {
   persistExpectedPartnerDeduplicate,
   persistExpectedPayloadColumns,
   persistHostKeyFingerprint,
+  persistInvitationRelay,
   persistPartnerFingerprint,
   persistOutboundPayloadConsent,
   readConfigLinkageSource,
@@ -1663,6 +1664,55 @@ test("persistExpectedPayloadColumns throws (not silently) on a malformed config"
   expect(() =>
     persistExpectedPayloadColumns(configPath, ["diagnosis"]),
   ).toThrow(UsageError);
+  expect(fs.readFileSync(configPath, "utf8")).toBe(original);
+});
+
+// --- persistInvitationRelay ---------------------------------------------------
+
+test("persistInvitationRelay sets the relay and keeps the rest of the connection block", () => {
+  const configPath = path.join(dir, "psilink.yaml");
+  fs.writeFileSync(
+    configPath,
+    [
+      "connection:",
+      "  channel: webrtc # the broker",
+      "  server:",
+      "    host: peer.example.org",
+      "  stun:",
+      "    - stun:own.example.org:3478",
+      "",
+    ].join("\n"),
+  );
+  expect(
+    persistInvitationRelay(configPath, {
+      turn: ["turns:relay.example.org:443"],
+    }),
+  ).toBe("set");
+  const raw = fs.readFileSync(configPath, "utf8");
+  expect(raw).toContain("channel: webrtc # the broker");
+  expect(YAML.parse(raw).connection).toEqual({
+    channel: "webrtc",
+    server: { host: "peer.example.org" },
+    stun: ["stun:own.example.org:3478"],
+    invitation_relay: { turn: ["turns:relay.example.org:443"] },
+  });
+});
+
+test("persistInvitationRelay leaves a connection that is not webrtc as it is", () => {
+  const configPath = path.join(dir, "psilink.yaml");
+  const original = [
+    "connection:",
+    "  channel: sftp",
+    "  server:",
+    "    host: h",
+    "",
+  ].join("\n");
+  fs.writeFileSync(configPath, original);
+  expect(
+    persistInvitationRelay(configPath, {
+      turn: ["turns:relay.example.org:443"],
+    }),
+  ).toBe("notWebrtc");
   expect(fs.readFileSync(configPath, "utf8")).toBe(original);
 });
 

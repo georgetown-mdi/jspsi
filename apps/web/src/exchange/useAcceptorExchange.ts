@@ -458,7 +458,7 @@ export function useAcceptorExchange({
         throw new Error("the browser acceptor path requires a WebRTC endpoint");
       const [peer, conn] = await dialAsAcceptor(token.sharedSecret, endpoint, {
         signal,
-        relay: relayForRun(),
+        relay: relayForRun(endpoint.relay),
       });
       return { peer, conn, psi, prepared };
     };

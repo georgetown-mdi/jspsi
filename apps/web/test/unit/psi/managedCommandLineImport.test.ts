@@ -750,6 +750,26 @@ describe("import then export", () => {
     expect(reexported.retentionDisposition).toBe(note);
   });
 
+  test("a relay the accepted invitation named survives the round trip", () => {
+    const invitationRelay = {
+      turn: ["turns:relay.example.org:443?transport=tcp"],
+      stun: ["stun:relay.example.org:3478"],
+    };
+    const composed = commandLineDocument();
+    const imported = configText({
+      ...composed,
+      connection: { ...composed.connection, invitationRelay },
+    });
+    const record = readManagedCommandLineConfiguration(imported);
+
+    expect(record.exchangeFile.connection).toMatchObject({ invitationRelay });
+    const reexported = composeManagedCronExportConfig(record).config.text;
+    expect(reexported).toContain("invitation_relay:");
+    expect(
+      parseExchangeSpec(parseSensitiveYaml(reexported, "re-export")),
+    ).toEqual(parseExchangeSpec(parseSensitiveYaml(imported, "import")));
+  });
+
   test("the fail-closed per-party fields survive the round trip", () => {
     const exported = exportedConfigText({
       exchangeFile: composedDocument({

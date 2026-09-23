@@ -16,7 +16,9 @@ import {
   listenAsInviter,
 } from "../../../src/psi/transport/rendezvous.js";
 import { DEFAULT_PEER_WAIT_TIMEOUT_MS } from "../../../src/psi/transport/waitForConnection.js";
+import { relayForRun } from "../../../src/psi/transport/ownRelaySetting.js";
 
+import type { OwnRelayRead } from "../../../src/psi/transport/ownRelaySetting.js";
 import type Peer from "peerjs";
 import type { PeerOptions } from "peerjs";
 import type { RelayLocator } from "../../../src/psi/transport/rendezvous.js";
@@ -230,5 +232,68 @@ describe.each([
         },
       ],
     });
+  });
+});
+
+// The acceptor seat dials the invitation's endpoint with the relay
+// `relayForRun(endpoint.relay)` selects (useAcceptorExchange, managed re-run).
+describe("the acceptor seat's dial of an invitation endpoint", () => {
+  const OWN: RelayLocator = {
+    turn: ["turns:own-relay.example.org:443?transport=tcp"],
+    stun: ["stun:own-relay.example.org:3478"],
+  };
+  const NAMED = {
+    turn: ["turns:partner-relay.example.org:443?transport=tcp"],
+    stun: ["stun:partner-relay.example.org:3478"],
+  };
+
+  async function dialConfig(
+    invited: WebRTCEndpoint,
+    readOwn: () => OwnRelayRead,
+    secret: string,
+  ): Promise<RTCConfiguration> {
+    const options = await peerOptionsOf((factory) =>
+      dialAsAcceptor(secret, invited, {
+        relay: relayForRun(invited.relay, readOwn),
+        peerFactory: factory,
+      }),
+    );
+    return options.config as RTCConfiguration;
+  }
+
+  test("prefers the invitation's relay over this browser's own", async () => {
+    stubWindow();
+    const secret = generateSharedSecret();
+    const config = await dialConfig(
+      { ...endpoint, relay: NAMED },
+      () => ({
+        kind: "set",
+        relay: OWN,
+      }),
+      secret,
+    );
+    const urls = config.iceServers?.flatMap((server) => server.urls);
+    expect(urls).toEqual([...NAMED.stun, ...NAMED.turn]);
+  });
+
+  test("falls back to this browser's own relay when the invitation names none", async () => {
+    stubWindow();
+    const config = await dialConfig(
+      endpoint,
+      () => ({ kind: "set", relay: OWN }),
+      generateSharedSecret(),
+    );
+    const urls = config.iceServers?.flatMap((server) => server.urls);
+    expect(urls).toEqual([...OWN.stun, ...OWN.turn]);
+  });
+
+  test("with neither is built with the unchanged configuration", async () => {
+    stubWindow();
+    const config = await dialConfig(
+      endpoint,
+      () => ({ kind: "none" }),
+      generateSharedSecret(),
+    );
+    expect(config).toStrictEqual(NO_RELAY_CONFIG);
   });
 });

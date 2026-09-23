@@ -447,10 +447,13 @@ Candidate members, by title:
 ## Addendum, 2026-09-22: where the credential derivation landed
 
 The per-exchange credential this record recommends has a specified derivation:
-each party derives a relay key from the exchange's shared secret, mints its
-time-limited relay credentials from that key, and relays through a relay its
-own side controls
-([PROTOCOL.md](../spec/PROTOCOL.md#relay-credential-derivation)). The relay's
+each party derives a relay key from the exchange's shared secret and mints its
+time-limited relay credentials from that key
+([PROTOCOL.md](../spec/PROTOCOL.md#relay-credential-derivation)). The
+invitation may name the inviter's relay, addresses only, and the accepting
+party relays through it; each party's own relay is the fallback where the
+invitation names none
+([PROTOCOL.md](../spec/PROTOCOL.md#the-invitations-relay-locator)). The relay's
 per-exchange key table, with registering and revoking a key, follows it.
 
 The next step is the browser's own TURN entry, which
