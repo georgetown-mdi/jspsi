@@ -25,6 +25,18 @@ export const RELAY_OPERATOR_DISCLOSURE =
   "before it knows whether a direct connection will work. The relay forwards " +
   "encrypted traffic only and cannot read the exchange.";
 
+/**
+ * What the relay must hold for each run's credential, shown in the page's
+ * opening paragraph and stated in docs/COMMUNICATION.md.
+ */
+export const RELAY_KEY_NOTICE =
+  "Each exchange signs in to the relay with a credential derived from that " +
+  "exchange's current shared secret and valid for at most one hour, so the " +
+  "relay must hold the key derived from the current secret. The shared secret " +
+  "changes after every successful run and this app does not register each " +
+  "run's key with the relay itself, so a recurring exchange through your " +
+  "relay needs its key registered with the relay again after each run.";
+
 /** The field error for one list's parse, or `undefined` when it parsed. */
 function fieldError(lines: RelayUrlLines): string | undefined {
   if (lines.ok) return undefined;
@@ -101,10 +113,8 @@ export function RelaySettingsScreen() {
       <p className={`${styles.small} ${styles.sub}`}>
         When a direct connection to your partner cannot be made, your browser
         can connect through a TURN relay your side runs. Enter the relay&apos;s
-        addresses here. They are kept in this browser for this site only. Each
-        exchange signs in to the relay with a credential derived from that
-        exchange&apos;s shared secret and valid for at most one hour, so the
-        relay must be set up to accept those credentials.
+        addresses here. They are kept in this browser for this site only.{" "}
+        {RELAY_KEY_NOTICE}
       </p>
 
       <h2>What the relay&apos;s operator learns</h2>

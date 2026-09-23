@@ -9,6 +9,7 @@ import { createElement } from "react";
 import "@mantine/core/styles.css";
 
 import {
+  RELAY_KEY_NOTICE,
   RELAY_OPERATOR_DISCLOSURE,
   RelaySettingsScreen,
 } from "@exchange/RelaySettingsScreen";
@@ -56,6 +57,12 @@ describe("RelaySettingsScreen", () => {
       .element(page.getByText(RELAY_OPERATOR_DISCLOSURE))
       .toBeVisible();
     expect(readOwnRelaySetting()).toEqual({ kind: "none" });
+  });
+
+  test("states that each run's relay key must be registered again", async () => {
+    await mountScreen();
+
+    await expect.element(page.getByText(RELAY_KEY_NOTICE)).toBeVisible();
   });
 
   test("an invalid TURN url is reported on the TURN field alone and nothing is saved", async () => {
