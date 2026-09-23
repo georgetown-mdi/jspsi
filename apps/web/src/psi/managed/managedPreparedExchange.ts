@@ -34,8 +34,9 @@
  *
  * The document's `includeOwnColumns` rides into `prepareForExchange` beside the
  * metadata, so a re-run's result file holds the same own columns the operator
- * chose when the exchange was authored. A record holding no such key composes
- * the result the partner's values alone make up.
+ * chose for this exchange. A record holding no such key composes the result
+ * the partner's values alone make up. Its `retentionDisposition` rides in the
+ * same way, into the exchange record the run writes.
  *
  * Pure and exported so the terms binding and the enforcement are the tested
  * boundary, pinned without a connection.
@@ -77,6 +78,9 @@ export function prepareManagedRerunExchange(
         : {}),
       ...(exchangeFile.includeOwnColumns !== undefined
         ? { includeOwnColumns: exchangeFile.includeOwnColumns }
+        : {}),
+      ...(exchangeFile.retentionDisposition !== undefined
+        ? { retentionDisposition: exchangeFile.retentionDisposition }
         : {}),
     },
     exchangeFile.linkageTerms.identity,

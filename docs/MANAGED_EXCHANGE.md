@@ -762,7 +762,10 @@ a single column, the shape a file separated by something other than the delimite
 this exchange reads it by comes out as. Where it did, the next visit and the
 between-visit notification state the separator as the way forward instead of the
 agreed keys -- there is nothing to decide with the partner, and copy sending the
-operator to do so would not reach the remedy.
+operator to do so would not reach the remedy. The separator is one of the
+exchange's **Local settings**: choosing a different one there re-reads the input
+file with it and says whether the file then covers every agreed key, before the
+change is saved.
 
 #### An input that has not changed since the last run
 
@@ -1194,9 +1197,12 @@ What the import accepts is what this app can hold:
   the partnership this party takes; the command line refuses a webrtc connection
   that names none, and so does this. An sftp or filedrop connection has no `role`.
 
-What is editable is what a browser-run exchange edits in place: the label, and
-the maximum age for the exchange's secret, which the exported configuration
-carries as `authentication.token_max_age_days` for the command-line run to apply.
+What is editable is what a browser-run exchange edits in place: the label; the
+maximum age for the exchange's secret, which the exported configuration holds as
+`authentication.token_max_age_days` for the command-line run to apply; and the
+three settings of the file that are this party's alone -- which of its own columns
+its result file holds (`include_own_columns`), how its input file separates fields
+(`csv_delimiter`), and its retention note (`retention_disposition`).
 The agreed terms are read-only here as everywhere else -- exchanging on different
 terms is a new exchange, agreed with the partner. An import that is not edited
 exports back to the same configuration, and an edited one exports back with the
@@ -1205,8 +1211,8 @@ edits and every other setting as the file stated it.
 The page states three more things where they apply:
 
 - **The settings it keeps without showing them.** Every setting of the file
-  other than the connection and the agreed terms the page shows -- `metadata`,
-  `retention_disposition`, a connection's `options`, an sftp connection's
+  other than the connection, the agreed terms, and the settings it edits --
+  `metadata`, a connection's `options`, an sftp connection's
   credential references, host-key pin, and the rest -- is kept unchanged and
   named, in the file's own snake_case, with a pointer to the file as the place to
   edit it.
@@ -1558,8 +1564,10 @@ different linkage columns, a different disclosed payload set, a different
 partner -- is exactly what a managed exchange cannot be edited into. Agreeing
 or changing a cadence is not in that class (a schedule is neither a term nor a
 credential), and neither are this party's own local acts: pausing, deleting,
-migrating the exchange to another device, or dropping the next extract at the
-agreed path.
+migrating the exchange to another device, dropping the next extract at the
+agreed path, or changing which of its own columns its result file holds, how its
+input file separates fields, or its retention note -- none of the three changes
+what is sent.
 
 What the standing input file discloses is the one part of that agreement a
 later period can move without anyone re-authoring anything: the set a run sends

@@ -703,12 +703,30 @@ export const CERTIFICATE_EXPORT_NOTICE =
   "to pin you; the certificate file is for an auditor who wants to check a " +
   "receipt without either party's help.";
 
-/** What the console says about the retention note's audience and its limits. */
+/** The retention note field's label, on every surface that authors it. */
+export const RETENTION_NOTE_LABEL = "Retention note for your own record";
+
+/** The retention note field's example, on every surface that authors it. */
+export const RETENTION_NOTE_PLACEHOLDER =
+  "Filed in the association database; kept six years under the records schedule, then purged.";
+
+/** What a surface authoring the retention note says about its audience and its
+ * limits. */
 export const RETENTION_NOTE_NOTICE =
   "This note is filed with your own exchange record and nothing else: it is " +
   "never sent to your partner, never checked against theirs, and never part of " +
   "the agreed terms. Write where this result is filed and how long it is kept -- " +
   "never a name, an identifier, or any value from the data.";
+
+/** The web app's form of the notice: the stored document and every export
+ * carry the note, and the notice says so. */
+export const RETENTION_NOTE_NOTICE_WEB =
+  "This note is kept in this browser's storage with your own exchange " +
+  "record, which anyone reading that storage can see, and it goes into " +
+  "every configuration file you export. It is never sent to your partner, " +
+  "never checked against theirs, and never part of the agreed terms. Write " +
+  "where this result is filed and how long it is kept -- never a name, an " +
+  "identifier, or any value from the data.";
 
 /**
  * The weight the card shows one advisory at. Both are warn-and-guide and

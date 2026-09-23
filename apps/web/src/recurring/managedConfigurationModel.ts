@@ -66,11 +66,15 @@ const KEY_FILE_ELSEWHERE_STATUS =
 const CHANNEL_ELSEWHERE_STATUS =
   "Configuration only - this app cannot run it, run it with psilink";
 
-/** The two document settings the configuration view shows, read-only: every
+/** The document settings the configuration surface shows: the connection and
+ * the terms read-only, and the three this party's settings editor edits. Every
  * other setting the document states is held without being shown. */
 const SHOWN_DOCUMENT_FIELDS: ReadonlySet<string> = new Set([
   "connection",
   "linkageTerms",
+  "includeOwnColumns",
+  "csvDelimiter",
+  "retentionDisposition",
 ]);
 
 /**
@@ -111,7 +115,8 @@ export function sidelessRowLabel(
 /**
  * The settings a stored document states that the configuration view neither
  * shows nor edits, named in snake_case and sorted: every top-level setting but
- * the connection and the linkage terms, the connection's `options` block, and
+ * the connection, the linkage terms, and the three the settings editor edits,
+ * the connection's `options` block, and
  * every connection setting beyond the channel's locator, none of which the
  * connection rows show. Each is written back to the configuration the surface
  * exports exactly as it was read.

@@ -88,14 +88,11 @@ export const UNEXPLAINED_FAILURE_TITLE =
  * ({@link ../../recurring/managedRunLaunchModel.ts}) and the between-visit
  * notification ({@link ./betweenVisitNotice.ts}).
  *
- * It names a file saved with the separator this exchange reads, or a fresh setup
- * where the separator is chosen, rather than the delimiter field the intake
- * surfaces offer ({@link ../../components/csvDelimiterChoice.ts}): a record's
- * delimiter is fixed for the partnership, so no surface reading this copy has
- * that field on it.
+ * It names the control by its label and the section holding it, since the
+ * notification is read away from the exchange's page.
  */
 export const SINGLE_COLUMN_DELIMITER_REMEDY =
   "Its fields may be separated by a character other than the one this " +
-  "exchange reads it with. Save the input file with the separator this " +
-  "exchange was set up to read, or set the exchange up again with your " +
-  "partner and choose your file's separator at its file step.";
+  "exchange reads it with. Save the input file with that separator, or " +
+  'change "How your file separates fields" in this exchange\'s local ' +
+  "settings to your file's separator.";

@@ -92,6 +92,7 @@ import {
   REPEATED_MISS_TITLE,
   UNCHANGED_INPUT_TITLE,
 } from "./scheduleSurfacingModel";
+import { LocalDocumentFields } from "./LocalDocumentFields";
 import { useInputFileModifiedAt } from "./useInputFileModifiedAt";
 import { useLocalFieldsDraft } from "./useLocalFieldsDraft";
 
@@ -192,7 +193,8 @@ export function ManagedExchangeDetail({
    * read the store again so the section shows what it actually holds. Rejects on
    * a store failure; the confirm shows the failure and stays open. */
   onClearParkedResults: () => Promise<void>;
-  /** Persist an in-place edit to the local fields (label, max-token-age policy).
+  /** Persist an in-place edit to the local fields (label, schedule,
+   * max-token-age policy, and the document's own settings).
    * Rejects on a store failure; the editor shows the failure and keeps the
    * form. */
   onSaveLocalFields: (edits: ManagedExchangeLocalEdits) => Promise<void>;
@@ -425,10 +427,11 @@ function ConfigurationView({
 }
 
 /**
- * The local-fields editor: the label, the agreed run schedule, and the
- * max-token-age policy edit in place, without touching the partnership (see
- * docs/spec/MANAGED_EXCHANGE_RECORD.md -- a reschedule or a label change is
- * neither a terms change nor a credential). Editing the max-age policy
+ * The local-fields editor: the label, the agreed run schedule, the
+ * max-token-age policy, and the document's own-columns choice, separator, and
+ * retention note ({@link LocalDocumentFields}) edit in place, without touching
+ * the partnership (see docs/spec/MANAGED_EXCHANGE_RECORD.md -- none of them is
+ * a terms change or a credential). Editing the max-age policy
  * re-derives `expires` conservatively at the store boundary (an edit never
  * extends the stored credential's life without a rotation); this form only
  * collects the policy, not the derivation.
@@ -466,6 +469,7 @@ function LocalFieldsEditor({
   onGrantOutputFolder: () => Promise<void>;
   onStopUsingOutputFolder: () => Promise<void>;
 }) {
+  const draft = useLocalFieldsDraft(record);
   const {
     label,
     editLabel,
@@ -477,13 +481,14 @@ function LocalFieldsEditor({
     maxAgeError,
     tokenMaxAgeDays,
     tokenMaxAgeDaysEdit,
+    documentEdits,
     labelValid,
     canSave: localFieldsSavable,
     saving,
     saved,
     failed,
     submit,
-  } = useLocalFieldsDraft(record);
+  } = draft;
   const [scheduleEnabled, setScheduleEnabled] = useState(
     record.schedule !== undefined,
   );
@@ -550,6 +555,7 @@ function LocalFieldsEditor({
     const edits: ManagedExchangeLocalEdits = {
       label,
       tokenMaxAgeDays: tokenMaxAgeDaysEdit,
+      ...documentEdits,
       ...(scheduleChange !== undefined ? { schedule: scheduleChange } : {}),
     };
     submit(() => onSave(edits));
@@ -666,6 +672,7 @@ function LocalFieldsEditor({
           ? `Stored secret lapses ${dateLabel(new Date(record.expires))}.`
           : "No age bound is set; the stored secret does not lapse by age."}
       </p>
+      <LocalDocumentFields draft={draft} />
       {failed && (
         <Alert color="red" title="That could not be saved" mt="sm" mb="sm">
           These settings were not saved. Nothing changed; try again.

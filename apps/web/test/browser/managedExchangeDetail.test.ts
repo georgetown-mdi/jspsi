@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   RECORDED_LINKAGE_RULE_SET_CAVEAT,
   getDefaultLinkageTerms,
+  inferMetadata,
 } from "@psilink/core";
 
 import { page, userEvent } from "vitest/browser";
@@ -1322,6 +1323,110 @@ describe("managed exchange detail run schedule", () => {
       .toBeInTheDocument();
     await flushPendingUpdates();
     expect(input.reads).toEqual([]);
+  });
+});
+
+describe("managed exchange detail document settings", () => {
+  const INPUT_COLUMNS = ["client_id", "first_name", "last_name", "dob"];
+
+  /** A stub input-file pointer over a semicolon-separated file holding
+   * {@link INPUT_COLUMNS}, counting the reads made through it. */
+  function semicolonInputStub() {
+    const reads: Array<string> = [];
+    const handle = {
+      kind: "file",
+      name: "input.csv",
+      queryPermission: () => Promise.resolve("granted"),
+      getFile: () => {
+        reads.push("getFile");
+        return Promise.resolve(
+          new File(
+            [`${INPUT_COLUMNS.join(";")}\n17;Ada;Lovelace;12/10/1815\n`],
+            "input.csv",
+          ),
+        );
+      },
+    };
+    return { handle: handle as unknown as FileSystemFileHandle, reads };
+  }
+
+  function renderDetail(
+    stored: ReturnType<typeof record>,
+    onSaveLocalFields: (edits: ManagedExchangeLocalEdits) => Promise<void>,
+  ) {
+    app.render(
+      createElement(ManagedExchangeDetail, {
+        record: stored,
+        parkedResultsRead: { kind: "none" },
+        accountingRead: { kind: "none" },
+        onResetAccounting: () => Promise.resolve(),
+        onRetryAccountingRead: () => undefined,
+        onRetryParkedResultsRead: () => undefined,
+        onClearParkedResults: () => Promise.resolve(),
+        onGrantOutputFolder: () => Promise.resolve(),
+        onStopUsingOutputFolder: () => Promise.resolve(),
+        onSaveLocalFields,
+        onReinviteToChangeTerms: () => undefined,
+        canReinvite: true,
+        reinviting: false,
+        reinviteFailed: false,
+        compromiseResponse: false,
+        runInFlight: false,
+        runHoldsReinvite: false,
+        unfiledDisclosureRead: { kind: "none" },
+        unrecordedRunFlagged: false,
+        onUnrecordedRunFlagShown: () => undefined,
+        onFileUnfiledDisclosures: () => Promise.resolve(),
+      }),
+    );
+  }
+
+  test("a changed separator re-reads the stored file before the save writes it", async () => {
+    const input = semicolonInputStub();
+    const saved: Array<ManagedExchangeLocalEdits> = [];
+    const metadata = inferMetadata(INPUT_COLUMNS, []);
+    const stored = record("inviter", {
+      inputFileHandle: input.handle,
+      exchangeFile: composeManagedExchangeFile({
+        connection: webrtcLocator,
+        linkageTerms: getDefaultLinkageTerms("County Health Dept", metadata),
+        metadata,
+      }),
+    });
+    renderDetail(stored, (edits) => {
+      saved.push(edits);
+      return Promise.resolve();
+    });
+
+    const separator = page.getByRole("combobox", {
+      name: "How your file separates fields",
+    });
+    await expect.element(separator).toHaveValue(",");
+    // The stored separator needs no re-read.
+    expect(input.reads).toEqual([]);
+
+    await separator.selectOptions("|");
+    await expect
+      .element(page.getByText("reads as a single column", { exact: false }))
+      .toBeInTheDocument();
+
+    await separator.selectOptions(";");
+    await expect
+      .element(
+        page.getByText("reads as 4 columns with this separator", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+    expect(input.reads).toHaveLength(2);
+
+    await page.getByRole("button", { name: "Save settings" }).click();
+    await vi.waitFor(() => {
+      expect(saved).toHaveLength(1);
+    });
+    expect(saved[0].csvDelimiter).toBe(";");
+    expect(saved[0]).not.toHaveProperty("includeOwnColumns");
+    expect(saved[0]).not.toHaveProperty("retentionDisposition");
   });
 });
 

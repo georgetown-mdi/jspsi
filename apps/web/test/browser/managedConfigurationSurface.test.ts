@@ -5,6 +5,8 @@ import {
   assembleExchangeSpec,
   connectionFromLocator,
   getDefaultLinkageTerms,
+  parseExchangeSpec,
+  parseSensitiveYaml,
 } from "@psilink/core";
 
 import { page } from "vitest/browser";
@@ -138,6 +140,101 @@ describe("the surface of an imported configuration", () => {
   });
 });
 
+describe("the settings of the imported document", () => {
+  const note = "Filed with the program office for seven years.";
+
+  test("each control starts on the value the imported document states", async () => {
+    const created = await createManagedExchange({
+      ...configurationOnly(),
+      exchangeFile: composeManagedExchangeFile({
+        connection: { channel: "webrtc", host: "signaling.example.org" },
+        linkageTerms,
+        includeOwnColumns: "all",
+        csvDelimiter: "|",
+        retentionDisposition: note,
+      }),
+    });
+
+    app.render(createElement(ManagedRunSurface, { id: created.id }));
+
+    await expect
+      .element(
+        page.getByRole("combobox", {
+          name: "Your own columns in your result file",
+        }),
+      )
+      .toHaveValue("all");
+    await expect
+      .element(
+        page.getByRole("combobox", { name: "How your file separates fields" }),
+      )
+      .toHaveValue("|");
+    await expect
+      .element(
+        page.getByRole("textbox", {
+          name: "Retention note for your own record",
+        }),
+      )
+      .toHaveValue(note);
+    // Edited here, so not among the settings kept without an editor.
+    expect(
+      page
+        .getByText("keeps unchanged but does not show", { exact: false })
+        .query(),
+    ).toBeNull();
+  });
+
+  test("the edits land on the stored record and in the download", async () => {
+    const created = await createManagedExchange(configurationOnly());
+    const downloads = captureDownloads();
+    try {
+      app.render(createElement(ManagedRunSurface, { id: created.id }));
+
+      await expect
+        .element(
+          page.getByRole("textbox", {
+            name: "Retention note for your own record",
+          }),
+        )
+        .toBeInTheDocument();
+      await page
+        .getByRole("combobox", { name: "Your own columns in your result file" })
+        .selectOptions("disclosed");
+      await page
+        .getByRole("combobox", { name: "How your file separates fields" })
+        .selectOptions(";");
+      await page
+        .getByRole("textbox", { name: "Retention note for your own record" })
+        .fill(note);
+      await page.getByRole("button", { name: "Save settings" }).click();
+
+      await expect
+        .element(page.getByText("Settings saved", { exact: false }))
+        .toBeInTheDocument();
+      await page
+        .getByRole("button", {
+          name: `Download ${CRON_EXPORT_CONFIG_FILE_NAME}`,
+        })
+        .click();
+      await downloads.settled();
+    } finally {
+      downloads.restore();
+    }
+
+    const stored = await getManagedExchange(created.id);
+    expect(stored?.exchangeFile.includeOwnColumns).toBe("disclosed");
+    expect(stored?.exchangeFile.csvDelimiter).toBe(";");
+    expect(stored?.exchangeFile.retentionDisposition).toBe(note);
+    const [file] = downloads.captured;
+    const downloaded = parseExchangeSpec(
+      parseSensitiveYaml(file.text, CRON_EXPORT_CONFIG_FILE_NAME),
+    );
+    expect(downloaded.includeOwnColumns).toBe("disclosed");
+    expect(downloaded.csvDelimiter).toBe(";");
+    expect(downloaded.retentionDisposition).toBe(note);
+  });
+});
+
 describe("the surface of a configuration on a channel this app does not run", () => {
   test("names the channel, withholds the run, and states each notice", async () => {
     const created = await createManagedExchange({
@@ -152,7 +249,7 @@ describe("the surface of a configuration on a channel this app does not run", ()
           linkageTerms,
         }),
         outboundPayloadConsent: { status: "pending" },
-        retentionDisposition: "Filed with the program office.",
+        expectedPartnerDeduplicate: true,
       },
     });
 
@@ -167,7 +264,7 @@ describe("the surface of a configuration on a channel this app does not run", ()
       )
       .toBeInTheDocument();
     await expect
-      .element(page.getByText("retention_disposition", { exact: false }))
+      .element(page.getByText("expected_partner_deduplicate", { exact: false }))
       .toBeInTheDocument();
     await expect
       .element(

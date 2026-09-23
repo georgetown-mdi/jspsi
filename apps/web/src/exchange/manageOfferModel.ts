@@ -24,9 +24,13 @@
  */
 
 import {
+  MAX_TEXT_LENGTH,
   MAX_TOKEN_MAX_AGE_DAYS,
   deriveOutboundPayloadConsent,
 } from "@psilink/core";
+
+import { NOTE_CONTROL_CHAR_PATTERN } from "@jobs/intentSchemas";
+import { RETENTION_NOTE_PROBLEM } from "@psi/receiptsModel";
 
 import {
   MAX_LABEL_LENGTH,
@@ -167,6 +171,12 @@ export interface ManagedExchangeDocumentParts {
    * the operator left the delimiter to detection.
    */
   csvDelimiter?: ExchangeSpec["csvDelimiter"];
+  /**
+   * This party's note on where its results are filed and how long they are
+   * kept, written into its own exchange record at each run. Local: it is never
+   * sent and moves no term. Absent where the operator wrote none.
+   */
+  retentionDisposition?: ExchangeSpec["retentionDisposition"];
 }
 
 /**
@@ -222,11 +232,14 @@ export function composeManagedDocument(
     ...(parts.csvDelimiter !== undefined
       ? { csvDelimiter: parts.csvDelimiter }
       : {}),
+    ...(parts.retentionDisposition !== undefined
+      ? { retentionDisposition: parts.retentionDisposition }
+      : {}),
   });
 }
 
-/** The operator's choices on the manage offer: the display label and whether to
- * opt into a max-age policy. The schedule is not among them, by design: it is a
+/** The operator's choices on the manage offer: the display label, whether to
+ * opt into a max-age policy, and the retention note. The schedule is not among them, by design: it is a
  * cadence agreed with the partner out of band, which the operator decides once
  * they have the exchange in front of them, on its own page's local-fields editor
  * (see {@link ./scheduleEntryModel.ts}). */
@@ -236,6 +249,9 @@ export interface ManageOfferChoices {
   /** The operator's opt-in max-token-age policy in whole days, or `undefined`
    * for the default (no bound). */
   tokenMaxAgeDays?: number;
+  /** The retention note as {@link retentionNoteValue} resolves it, or
+   * `undefined` where the operator wrote none. */
+  retentionDisposition?: string;
 }
 
 /** Everything a completion surface supplies to turn the offer into a deposit: the
@@ -256,7 +272,7 @@ export interface ManagedDepositInputs {
   /** An input-file handle pointer, where the File System Access API yielded one;
    * absent otherwise (the record field is optional). */
   inputFileHandle?: FileSystemFileHandle;
-  /** The operator's label and opt-in max-age policy. */
+  /** The operator's label, opt-in max-age policy, and retention note. */
   choices: ManageOfferChoices;
 }
 
@@ -295,7 +311,12 @@ export function buildManagedDeposit(
   return {
     label: inputs.choices.label,
     exchangeFile: composeManagedDocument(
-      inputs.documentParts,
+      {
+        ...inputs.documentParts,
+        ...(inputs.choices.retentionDisposition !== undefined
+          ? { retentionDisposition: inputs.choices.retentionDisposition }
+          : {}),
+      },
       inputs.connection,
     ),
     side: inputs.documentParts.side,
@@ -359,3 +380,32 @@ export function maxAgeCadenceNote(
  * shape"). */
 export const LABEL_GUIDANCE =
   "Name the partnership so you recognize it later. The label is never sent, but three things show it: this browser's storage, which anyone reading it can see; the name of every results file, in a folder you grant and in a copy you download; and, if you turn on between-visit notifications, a notification your device may show on a locked screen or mirror to your other devices. Keep agreement numbers, contact details, and other sensitive counterparty information out of it.";
+
+/** The problem a retention note holding a control character reports. A tab,
+ * a line break, or a carriage return is fine: the note is written in a
+ * multi-line field. */
+export const RETENTION_NOTE_CONTROL_CHARACTER_PROBLEM =
+  "The retention note must not contain a control character (a NUL or an " +
+  "ESC, for instance). A tab, a line break, or a carriage return is fine.";
+
+/**
+ * The field error for a retention note as typed, or `undefined` where the note
+ * can be saved. The bound is the one the exchange document puts on the field;
+ * the control-character rule is the console's for the same note, so a note
+ * one app accepts the other does too. An empty note is no note.
+ */
+export function retentionNoteError(note: string): string | undefined {
+  const trimmed = note.trim();
+  if (trimmed.length > MAX_TEXT_LENGTH) return RETENTION_NOTE_PROBLEM;
+  if (NOTE_CONTROL_CHAR_PATTERN.test(trimmed))
+    return RETENTION_NOTE_CONTROL_CHARACTER_PROBLEM;
+  return undefined;
+}
+
+/** The retention note a document holds for the note as typed: trimmed, and
+ * `undefined` where nothing is left, since the document field admits no empty
+ * note. */
+export function retentionNoteValue(note: string): string | undefined {
+  const trimmed = note.trim();
+  return trimmed === "" ? undefined : trimmed;
+}

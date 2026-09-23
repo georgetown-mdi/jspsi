@@ -36,6 +36,7 @@ import type {
   ConnectionConfig,
   ExchangeSpec,
   OutboundPayloadConsent,
+  OwnColumnSelection,
   WebRTCExchangeLocator,
 } from "@psilink/core";
 import type { ZodType } from "zod";
@@ -771,6 +772,10 @@ export interface ManagedExchangeFileComposition {
    * chosen at the file step and held verbatim so a run with nobody present reads
    * the file the way the operator does. Absent reads and writes commas. */
   csvDelimiter?: ExchangeSpec["csvDelimiter"];
+  /** This party's note on where its results are filed and how long they are
+   * kept, written into its own exchange record at each run. Absent where the
+   * operator wrote none. */
+  retentionDisposition?: ExchangeSpec["retentionDisposition"];
 }
 
 /**
@@ -1249,10 +1254,12 @@ export function applyManagedExchangeOutputDirectory(
 }
 
 /** The local fields an operator may edit in place without a re-invite: the
- * display label, the run schedule, and the max-token-age policy. The agreed
- * terms are fixed for the partnership -- a re-invite only refreshes the secret,
- * and a terms change is a new exchange, not a re-invite -- so the document and
- * the secret are not editable here. */
+ * display label, the run schedule, the max-token-age policy, and the three
+ * per-party settings of the document that are not terms (its own-columns
+ * choice, its field delimiter, and its retention note). The agreed terms and
+ * the connection are fixed for the partnership -- a re-invite only refreshes
+ * the secret, and a terms change is a new exchange, not a re-invite -- so they
+ * and the secret are not editable here. */
 export interface ManagedExchangeLocalEdits {
   /** A new display label (validated to {@link MAX_LABEL_LENGTH}). */
   label?: string;
@@ -1260,14 +1267,30 @@ export interface ManagedExchangeLocalEdits {
   schedule?: ManagedExchangeSchedule | null;
   /** A new max-token-age policy, or `null` to drop it. */
   tokenMaxAgeDays?: number | null;
+  /** A new `includeOwnColumns` for the document, or `null` to drop it. */
+  includeOwnColumns?: OwnColumnSelection | null;
+  /** A new `csvDelimiter` for the document, or `null` to drop it (a comma). */
+  csvDelimiter?: string | null;
+  /** A new `retentionDisposition` for the document, or `null` to drop it. */
+  retentionDisposition?: string | null;
 }
+
+/** The edits that change the document rather than a record field. */
+const LOCAL_DOCUMENT_EDIT_FIELDS = [
+  "includeOwnColumns",
+  "csvDelimiter",
+  "retentionDisposition",
+] as const satisfies ReadonlyArray<
+  keyof ManagedExchangeLocalEdits & keyof ExchangeSpec
+>;
 
 /**
  * Apply local edits to a record, producing a validated new record. Only the
- * label, schedule, and max-token-age policy update in place; a `null` drops the
- * corresponding optional field. The result is re-validated through the schema, so
- * an over-long label is rejected here exactly as at create. The input record is
- * not mutated.
+ * label, schedule, max-token-age policy, and the document's three per-party
+ * settings update in place; a `null` drops the corresponding optional field. The
+ * result is re-validated through the schema, so an over-long label, a refused
+ * delimiter, or an own-columns choice on a count-only exchange is rejected here
+ * exactly as at create or import. The input record is not mutated.
  *
  * An edit to `tokenMaxAgeDays` re-derives `expires` conservatively through
  * {@link deriveEditedExpiry}: a shorter policy recomputes the bound from the
@@ -1291,6 +1314,20 @@ export function applyManagedExchangeLocalEdits(
   if (edits.schedule !== undefined) {
     if (edits.schedule === null) delete next.schedule;
     else next.schedule = edits.schedule;
+  }
+  if (LOCAL_DOCUMENT_EDIT_FIELDS.some((field) => edits[field] !== undefined)) {
+    const exchangeFile: ExchangeSpec = { ...record.exchangeFile };
+    if (edits.includeOwnColumns === null) delete exchangeFile.includeOwnColumns;
+    else if (edits.includeOwnColumns !== undefined)
+      exchangeFile.includeOwnColumns = edits.includeOwnColumns;
+    if (edits.csvDelimiter === null) delete exchangeFile.csvDelimiter;
+    else if (edits.csvDelimiter !== undefined)
+      exchangeFile.csvDelimiter = edits.csvDelimiter;
+    if (edits.retentionDisposition === null)
+      delete exchangeFile.retentionDisposition;
+    else if (edits.retentionDisposition !== undefined)
+      exchangeFile.retentionDisposition = edits.retentionDisposition;
+    next.exchangeFile = exchangeFile;
   }
   if (edits.tokenMaxAgeDays !== undefined) {
     if (edits.tokenMaxAgeDays === null) delete next.tokenMaxAgeDays;
