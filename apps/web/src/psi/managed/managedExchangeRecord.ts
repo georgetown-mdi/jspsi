@@ -124,6 +124,34 @@ export function channelThisAppDoesNotRun(
 }
 
 /**
+ * The top-level document parts this app holds unchanged and cannot run. A
+ * `signing` block configures receipt signing, which this app does not do, so a
+ * run here would complete without the receipt the document asks for.
+ */
+export const DOCUMENT_PARTS_THIS_APP_DOES_NOT_RUN = [
+  "signing",
+] as const satisfies ReadonlyArray<keyof ExchangeSpec>;
+
+/** A top-level document part this app holds unchanged and cannot run. */
+export type DocumentPartThisAppDoesNotRun =
+  (typeof DOCUMENT_PARTS_THIS_APP_DOES_NOT_RUN)[number];
+
+/**
+ * The parts of a document this app holds but cannot run, in a fixed order. The
+ * one place "does this document run here" is read off its parts rather than
+ * its channel: the record schema refuses a secret beside one, so a record
+ * stating one is a configuration only, and every surface that withholds the
+ * run for one names it from here.
+ */
+export function documentPartsThisAppDoesNotRun(
+  exchangeFile: ExchangeSpec,
+): Array<DocumentPartThisAppDoesNotRun> {
+  return DOCUMENT_PARTS_THIS_APP_DOES_NOT_RUN.filter(
+    (part) => exchangeFile[part] !== undefined,
+  );
+}
+
+/**
  * Upper bound on {@link ManagedExchangeSchedule.intervalDays}: an annual cadence,
  * the longest partnership recurrence the design serves. It also bounds how far
  * past any instant a window can fall, which is what lets every surface render an
@@ -331,8 +359,10 @@ export interface ManagedExchangeRecord {
    * withholds every run here: {@link runnableManagedExchange} is the one
    * narrowing to the record shape the run, rotation, re-invite, and backup paths
    * take, so a configuration-only record cannot be handed to any of them.
-   * Present only on a webrtc connection, the one channel this app runs, so a
-   * record on any other channel is a configuration only. */
+   * Present only on a webrtc connection, the one channel this app runs, and
+   * only beside a document stating no part this app cannot run
+   * ({@link documentPartsThisAppDoesNotRun}), so a record on any other channel
+   * or stating such a part is a configuration only. */
   sharedSecret?: string;
   /** ISO 8601 UTC instant after which {@link sharedSecret} must not be used;
    * absent means no bound is in force. Only {@link tokenMaxAgeDays} writes it. */
@@ -509,11 +539,13 @@ export const keyFileFieldsSchema: ZodType<ManagedExchangeKeyFields> = z
  * secret it does not have, a schedule nothing here would execute, or the
  * bookkeeping of runs it never made.
  *
- * The other two bind the record to its connection's channel. A secret is held
- * only on a webrtc connection, the one channel this app runs, so a record on any
- * other channel is a configuration only and the narrowing that withholds its run
- * is the same one. `side` is held exactly when the connection is webrtc, the one
- * channel whose document names a `role` for it to stand for.
+ * The next two bind the secret to a document this app runs. A secret is held
+ * only on a webrtc connection, the one channel this app runs, and only beside a
+ * document stating no part this app cannot run
+ * ({@link documentPartsThisAppDoesNotRun}), so a record on any other channel or
+ * stating such a part is a configuration only, and the narrowing that withholds
+ * its run is the same one. `side` is held exactly when the connection is
+ * webrtc, the one channel whose document names a `role` for it to stand for.
  */
 const ManagedExchangeRecordSchema: ZodType<ManagedExchangeRecord> = z
   .object({
@@ -553,6 +585,16 @@ const ManagedExchangeRecordSchema: ZodType<ManagedExchangeRecord> = z
       message:
         "a record holding a sharedSecret runs in this app, which runs webrtc " +
         "exchanges only",
+    },
+  )
+  .refine(
+    (record) =>
+      record.sharedSecret === undefined ||
+      documentPartsThisAppDoesNotRun(record.exchangeFile).length === 0,
+    {
+      message:
+        "a record holding a sharedSecret runs in this app, so its document " +
+        "states no part this app cannot run (signing)",
     },
   )
   .refine(

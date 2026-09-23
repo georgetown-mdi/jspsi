@@ -9,12 +9,13 @@
  * its own channel expands to ({@link connectionFromLocator}), and the document
  * only the top-level fields the record composer produces
  * ({@link composeManagedExchangeFile}), plus the `authentication` block the
- * export injects from the local max-age policy. The shared exchange-file schema is
- * wider than both: it can represent a TURN `credential`, a `provider_options`
- * map, an `ice_provision` auth block, a PeerJS `server.key`/`server.username`,
- * a shared secret, and a `signing` block (`identity_file`, `receipt_output`,
- * `partner_fingerprint`), and the CLI resolves an `@path` in the file it loads
- * (`apps/cli/src/util/atSignRefs.ts`).
+ * export injects from the local max-age policy and the parts this app holds
+ * unchanged without running them ({@link DOCUMENT_PARTS_THIS_APP_DOES_NOT_RUN}:
+ * a `signing` block, whose record is a configuration only). The shared
+ * exchange-file schema is wider than both: it can represent a TURN
+ * `credential`, a `provider_options` map, an `ice_provision` auth block, a
+ * PeerJS `server.key`/`server.username`, and a shared secret, and the CLI
+ * resolves an `@path` in the file it loads (`apps/cli/src/util/atSignRefs.ts`).
  *
  * An sftp connection is held whole beyond its locator: a record on sftp runs
  * nowhere in this app, so every setting of its connection is only written back
@@ -34,7 +35,10 @@ import {
   snakeizeKey,
 } from "@psilink/core";
 
-import { composeManagedExchangeFile } from "./managedExchangeRecord";
+import {
+  DOCUMENT_PARTS_THIS_APP_DOES_NOT_RUN,
+  composeManagedExchangeFile,
+} from "./managedExchangeRecord";
 
 import type {
   ConnectionConfig,
@@ -420,21 +424,21 @@ function composableDocumentFields(): ReadonlySet<string> {
 
 /**
  * The top-level fields a command-line document may hold: what the app can
- * compose (above), plus the `authentication` block holding the max-age policy.
- * Nothing else the shared exchange-file schema can represent belongs in a
- * managed exchange's psilink.yaml.
+ * compose (above), the `authentication` block holding the max-age policy, and
+ * the parts held unchanged on a record that does not run here. Nothing else
+ * the shared exchange-file schema can represent belongs in a managed
+ * exchange's psilink.yaml.
  */
 const COMMAND_LINE_DOCUMENT_FIELDS: ReadonlySet<string> = new Set([
   ...composableDocumentFields(),
   "authentication",
+  ...DOCUMENT_PARTS_THIS_APP_DOES_NOT_RUN,
 ]);
 
 /**
  * A document's top-level fields outside {@link COMMAND_LINE_DOCUMENT_FIELDS},
  * named in the operator's own snake_case spelling and sorted. Names only -- a
- * field's VALUE is what the CLI would act on (a path it opens as this party's
- * signing identity, a path it writes a receipt to, a fingerprint it pins a
- * partner certificate against) and never enters a message.
+ * field's VALUE is what the CLI would act on, and never enters a message.
  */
 export function fieldsOutsideComposableDocument(
   document: ExchangeSpec,

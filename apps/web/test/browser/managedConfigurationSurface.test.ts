@@ -278,6 +278,38 @@ describe("the surface of a configuration on a channel this app does not run", ()
     );
   });
 
+  test("names a signing block as the reason it does not run here", async () => {
+    const identityFile = "@/run/signing/psilink-signing-identity.json";
+    const created = await createManagedExchange({
+      ...configurationOnly(),
+      exchangeFile: {
+        ...configurationOnly().exchangeFile,
+        signing: { mode: "certificate", identityFile },
+      },
+    });
+
+    app.render(createElement(ManagedRunSurface, { id: created.id }));
+
+    await expect
+      .element(
+        page.getByText("states signing, which this app cannot run", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByRole("button", {
+          name: `Download ${CRON_EXPORT_CONFIG_FILE_NAME}`,
+        }),
+      )
+      .toBeInTheDocument();
+    expect(page.getByRole("button", { name: "Run exchange" }).query()).toBe(
+      null,
+    );
+    expect(page.getByText(identityFile, { exact: false }).query()).toBe(null);
+  });
+
   test("warns about a credential named by @path, on the page and the export", async () => {
     const connection = connectionFromLocator({
       channel: "sftp",
@@ -332,5 +364,30 @@ describe("the list row of an imported configuration", () => {
       .toBeInTheDocument();
     expect(page.getByRole("button", { name: "Run" }).query()).toBe(null);
     expect(page.getByText("Back up this exchange").query()).toBe(null);
+  });
+
+  test("states a signing block beside the Open action in place of Run", async () => {
+    await createManagedExchange({
+      ...configurationOnly(),
+      exchangeFile: {
+        ...configurationOnly().exchangeFile,
+        signing: { mode: "certificate" },
+      },
+    });
+
+    app.render(createElement(SavedExchanges));
+
+    await expect
+      .element(
+        page.getByText(
+          "Configuration only - this app cannot run its signing settings",
+          { exact: false },
+        ),
+      )
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByRole("button", { name: "Open" }))
+      .toBeInTheDocument();
+    expect(page.getByRole("button", { name: "Run" }).query()).toBe(null);
   });
 });
