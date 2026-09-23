@@ -20,6 +20,7 @@ import {
 import { HANDSHAKE_ROLE_FOR_SIDE } from "@psi/handshakeRole";
 import { createBrowserExchangeDriver } from "@psi/exchangeDriver";
 import { dialAsAcceptor } from "@psi/transport/rendezvous";
+import { relayForRun } from "@psi/transport/ownRelaySetting";
 
 import { deploymentProfile } from "@utils/clientConfig";
 import { whenDiagnostic } from "@utils/diagnostics";
@@ -457,6 +458,7 @@ export function useAcceptorExchange({
         throw new Error("the browser acceptor path requires a WebRTC endpoint");
       const [peer, conn] = await dialAsAcceptor(token.sharedSecret, endpoint, {
         signal,
+        relay: relayForRun(),
       });
       return { peer, conn, psi, prepared };
     };

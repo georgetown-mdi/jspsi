@@ -276,3 +276,63 @@ describe("per-run peer id derives fresh from the current secret", () => {
     expect(otherExpected).not.toBe(expected);
   });
 });
+
+describe("beginManagedRendezvous: relay", () => {
+  const ownRelay = {
+    turn: ["turns:relay.example.org:443?transport=tcp"],
+    stun: [],
+  };
+
+  function stubOwnRelay(): void {
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) =>
+        key === "psilink-own-relay"
+          ? JSON.stringify({ version: 1, ...ownRelay })
+          : null,
+    });
+  }
+
+  test.each(["inviter", "acceptor"] as const)(
+    "the %s's flow gathers against this browser's own relay",
+    async (side) => {
+      stubAppLocation();
+      stubOwnRelay();
+      const relays: Array<unknown> = [];
+      const flows: ManagedRendezvousFlows = {
+        listenAsInviter: (_secret, options) => {
+          relays.push(options?.relay);
+          return Promise.resolve(fakePeer("inviter"));
+        },
+        dialAsAcceptor: (_secret, _endpoint, options) => {
+          relays.push(options?.relay);
+          return Promise.resolve([fakePeer("acceptor"), fakeConn()]);
+        },
+      };
+
+      await beginManagedRendezvous(
+        side,
+        generateSharedSecret(),
+        exchangeFile(),
+        {
+          flows,
+        },
+      );
+
+      expect(relays).toEqual([ownRelay]);
+    },
+  );
+
+  test("with no own relay the flows get none", async () => {
+    stubAppLocation();
+    const { flows, acceptorCalls } = recordingFlows();
+
+    await beginManagedRendezvous(
+      "acceptor",
+      generateSharedSecret(),
+      exchangeFile(),
+      { flows },
+    );
+
+    expect(acceptorCalls[0].options?.relay).toBeUndefined();
+  });
+});

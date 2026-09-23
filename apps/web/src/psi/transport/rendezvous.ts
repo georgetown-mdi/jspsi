@@ -2,9 +2,12 @@ import Peer from "peerjs";
 
 import {
   ConnectionError,
+  RELAY_CREDENTIAL_MAX_TTL_SECONDS,
   authorityMovingSignalingField,
+  deriveRelayKey,
   deriveRendezvousPeerId,
   getLogger,
+  mintRelayCredential,
 } from "@psilink/core";
 
 import { isDiagnosticMode, whenDiagnostic } from "@utils/diagnostics";
@@ -70,8 +73,70 @@ interface SignalingLocation {
 }
 
 /**
- * Build the PeerJS options for a signaling location. ICE is public STUN
- * only, no TURN by default (a self-hosted TURN server is a future option).
+ * A relay a peer connection gathers candidates against: TURN and STUN urls
+ * under core's `connection.turn` / `connection.stun` grammar, and no
+ * credential. The credential is minted per run from the exchange's shared
+ * secret ({@link buildIceServers}).
+ */
+export interface RelayLocator {
+  /** `turn:` / `turns:` urls, served by one relay under one credential. */
+  turn: ReadonlyArray<string>;
+  /** `stun:` / `stuns:` urls; a relay naming any url replaces the default
+   * pair, so a relay naming TURN urls alone gathers no STUN candidate. */
+  stun: ReadonlyArray<string>;
+}
+
+/** The STUN pair a run with no relay, or a relay naming no url, uses. */
+const DEFAULT_STUN_URLS = [
+  "stun:stun.l.google.com:19302",
+  "stun:44.247.30.68:443",
+];
+
+/**
+ * Lifetime of the relay credential a run mints. It must outlast the peer wait
+ * ({@link DEFAULT_PEER_WAIT_TIMEOUT_MS}) and the exchange after it, and core
+ * refuses anything over one hour, so it is that ceiling.
+ */
+export const RELAY_CREDENTIAL_TTL_SECONDS = RELAY_CREDENTIAL_MAX_TTL_SECONDS;
+
+/** The label in a minted credential's username, `<expiry>:<label>`. */
+const RELAY_CREDENTIAL_LABEL = "psilink";
+
+/**
+ * The ICE server list for one run. With no relay, or one naming no url, it is
+ * the default STUN pair alone. Otherwise it holds the relay's STUN urls as one
+ * entry when it names any, and its TURN urls as one entry holding a credential
+ * minted at `now` from the relay key the exchange's shared secret derives, and
+ * no default pair: the CLI's `connection.stun` / `connection.turn` rule, where
+ * a configured list replaces the default. Nothing minted or derived outlives
+ * the returned list.
+ *
+ * @internal
+ */
+export async function buildIceServers(
+  relay: RelayLocator | undefined,
+  sharedSecret: string,
+  now: Date,
+): Promise<Array<RTCIceServer>> {
+  if (relay === undefined || relay.turn.length + relay.stun.length === 0)
+    return [{ urls: [...DEFAULT_STUN_URLS] }];
+  const iceServers: Array<RTCIceServer> = [];
+  if (relay.stun.length > 0) iceServers.push({ urls: [...relay.stun] });
+  if (relay.turn.length > 0) {
+    const { username, credential } = await mintRelayCredential({
+      key: await deriveRelayKey(sharedSecret),
+      label: RELAY_CREDENTIAL_LABEL,
+      ttlSeconds: RELAY_CREDENTIAL_TTL_SECONDS,
+      now,
+    });
+    iceServers.push({ urls: [...relay.turn], username, credential });
+  }
+  return iceServers;
+}
+
+/**
+ * Build the PeerJS options for a signaling location and a run's ICE server
+ * list ({@link buildIceServers}).
  *
  * `redactableIds` are the session's derived rendezvous ids; the installed
  * `logFunction` strips them from PeerJS output at every debug level, not
@@ -81,6 +146,7 @@ interface SignalingLocation {
 function buildPeerOptions(
   loc: SignalingLocation,
   redactableIds: ReadonlyArray<string>,
+  iceServers: Array<RTCIceServer>,
 ): PeerOptions {
   return {
     host: loc.host,
@@ -90,9 +156,7 @@ function buildPeerOptions(
     debug: resolvePeerDebugLevel(config.PEERJS_DEBUG_LEVEL, isDiagnosticMode()),
     logFunction: createRedactingLogFunction(redactableIds),
     config: {
-      iceServers: [
-        { urls: ["stun:stun.l.google.com:19302", "stun:44.247.30.68:443"] },
-      ],
+      iceServers,
       sdpSemantics: "unified-plan",
       iceTransportPolicy: "all",
     },
@@ -235,21 +299,27 @@ function waitForPeerOpen(
  * @param sharedSecret  The invitation's shared secret; the inviter id is derived
  *                      from it.
  * @param options       `signal` cancels the listen before or during broker
- *                      registration; `peerFactory` injects the {@link Peer}
- *                      constructor for testing.
+ *                      registration; `relay` is the relay this run gathers
+ *                      against, none when absent; `peerFactory` injects the
+ *                      {@link Peer} constructor for testing.
  */
 export async function listenAsInviter(
   sharedSecret: string,
-  options?: { signal?: AbortSignal; peerFactory?: PeerFactory },
+  options?: {
+    signal?: AbortSignal;
+    relay?: RelayLocator;
+    peerFactory?: PeerFactory;
+  },
 ): Promise<Peer> {
   const makePeer = options?.peerFactory ?? defaultPeerFactory;
   const signal = options?.signal;
   // Derive both ids: the inviter listens on its own, but the acceptor's id is
   // the remote id PeerJS interpolates into its warnings, so the redacting log
   // function must know it too (see buildPeerOptions).
-  const [inviterId, acceptorId] = await Promise.all([
+  const [inviterId, acceptorId, iceServers] = await Promise.all([
     deriveRendezvousPeerId(sharedSecret, "inviter"),
     deriveRendezvousPeerId(sharedSecret, "acceptor"),
+    buildIceServers(options?.relay, sharedSecret, new Date()),
   ]);
   const loc = inviterLocationFromWindow();
   // Short-circuit before any broker contact. Placed after the (fast) async
@@ -263,7 +333,7 @@ export async function listenAsInviter(
   log.debug(`derived inviter peer id ${inviterId}`);
   const peer = makePeer(
     inviterId,
-    buildPeerOptions(loc, [inviterId, acceptorId]),
+    buildPeerOptions(loc, [inviterId, acceptorId], iceServers),
   );
   try {
     await waitForPeerOpen(peer, { signal });
@@ -458,14 +528,17 @@ async function dialInviterWithRetry(
  *                      from it.
  * @param endpoint      The invitation's WebRTC signaling endpoint.
  * @param options       `signal` cancels the dial (and its retry loop) on unmount;
- *                      `peerFactory` injects the {@link Peer} constructor for
- *                      testing; the `*Ms` overrides tune the retry timing.
+ *                      `relay` is the relay this run gathers against, none when
+ *                      absent; `peerFactory` injects the {@link Peer}
+ *                      constructor for testing; the `*Ms` overrides tune the
+ *                      retry timing.
  */
 export async function dialAsAcceptor(
   sharedSecret: string,
   endpoint: WebRTCEndpoint,
   options?: {
     signal?: AbortSignal;
+    relay?: RelayLocator;
     peerFactory?: PeerFactory;
     retryDelayMs?: number;
     openTimeoutMs?: number;
@@ -474,9 +547,10 @@ export async function dialAsAcceptor(
 ): Promise<[Peer, DataConnection]> {
   const makePeer = options?.peerFactory ?? defaultPeerFactory;
   const signal = options?.signal;
-  const [inviterId, acceptorId] = await Promise.all([
+  const [inviterId, acceptorId, iceServers] = await Promise.all([
     deriveRendezvousPeerId(sharedSecret, "inviter"),
     deriveRendezvousPeerId(sharedSecret, "acceptor"),
+    buildIceServers(options?.relay, sharedSecret, new Date()),
   ]);
   const loc = acceptorLocationFromEndpoint(endpoint);
   // Derived ids are rendezvous addresses that correlate exchanges; keep them
@@ -491,7 +565,7 @@ export async function dialAsAcceptor(
   log.debug(`derived peer ids: inviter ${inviterId}, acceptor ${acceptorId}`);
   const peer = makePeer(
     acceptorId,
-    buildPeerOptions(loc, [inviterId, acceptorId]),
+    buildPeerOptions(loc, [inviterId, acceptorId], iceServers),
   );
   try {
     await waitForPeerOpen(peer, { signal });

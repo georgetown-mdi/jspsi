@@ -33,13 +33,13 @@ export interface RelayCredential {
 }
 
 /**
- * Derive the per-exchange relay key from the invitation's shared secret. Both
- * parties compute the same key; it is the secret the relay checks credentials
- * against and the key {@link mintRelayCredential} signs with. The construction:
- * docs/spec/PROTOCOL.md, "Relay credential derivation".
+ * Derive the per-exchange relay key from the exchange's current shared secret.
+ * Both parties compute the same key; it is the secret the relay checks
+ * credentials against and the key {@link mintRelayCredential} signs with. The
+ * construction: docs/spec/PROTOCOL.md, "Relay credential derivation".
  *
- * @param sharedSecret  The invitation's base64url-encoded 32-byte shared secret,
- *                      matching {@link SHARED_SECRET_REGEX}.
+ * @param sharedSecret  The exchange's current base64url-encoded 32-byte shared
+ *                      secret, matching {@link SHARED_SECRET_REGEX}.
  * @returns The 32-byte key as lowercase hex, the string the relay stores.
  * @throws {Error} if `sharedSecret` is not a base64url-encoded 32-byte value.
  */

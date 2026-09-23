@@ -30,6 +30,7 @@
 
 import { dialAsAcceptor, listenAsInviter } from "../transport/rendezvous";
 import { invitationLocation } from "../invitationLocation";
+import { relayForRun } from "../transport/ownRelaySetting";
 import { webrtcEndpointFromLocation } from "../invitation";
 
 import type { DataConnection } from "peerjs";
@@ -94,6 +95,9 @@ type ManagedRendezvousAcquisition =
  * the inbound wait begins, and the caller bounds that wait itself (see
  * {@link ./managedRunDriver.ts}). Absent, the dial keeps the flows' shared
  * default.
+ *
+ * Both flows gather against the relay {@link relayForRun} selects, read at the
+ * start of each run.
  */
 export async function beginManagedRendezvous(
   side: ManagedExchangeSide,
@@ -108,13 +112,15 @@ export async function beginManagedRendezvous(
   const flows = options.flows ?? defaultFlows;
   const signal = options.signal;
   assertManagedRerunDispatchable(exchangeFile);
+  const relay = relayForRun();
   if (side === "inviter") {
-    const peer = await flows.listenAsInviter(sharedSecret, { signal });
+    const peer = await flows.listenAsInviter(sharedSecret, { signal, relay });
     return { side: "inviter", peer };
   }
   const endpoint = webrtcEndpointFromLocation(invitationLocation());
   const [peer, conn] = await flows.dialAsAcceptor(sharedSecret, endpoint, {
     signal,
+    relay,
     ...(options.peerWaitTimeoutMs !== undefined
       ? { totalTimeoutMs: options.peerWaitTimeoutMs }
       : {}),
