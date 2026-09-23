@@ -256,7 +256,7 @@ function probeIntentFields(): JobExchangeIntentBase {
 
 /** The paths a certificate-mode composition names. Server-chosen for every run,
  * so a loaded document's own two are not held: a run uses the console's, and
- * the hand-back states the document's own unless the operator converted it
+ * the hand-off states the document's own unless the operator converted it
  * ({@link signingPathSettings}). */
 const PROBE_SIGNING_PATHS = {
   identityFile: "/probe/identity.json",
@@ -627,7 +627,7 @@ export function credentialFieldsNotAdopted(
  * spells them: the settings a conversion replaces with the console's own
  * identity file and receipt path. A run of the document unconverted is withheld
  * while it signs, since the console signs only with its own identity and
- * serves only its own receipt; the hand-back states them as read.
+ * serves only its own receipt; the hand-off states them as read.
  */
 export function signingPathSettings(document: ExchangeSpec): Array<string> {
   const { signing } = document;
@@ -643,7 +643,7 @@ export function signingPathSettings(document: ExchangeSpec): Array<string> {
  * The shared-folder paths a filedrop document states, as the file spells them:
  * the settings a conversion replaces with the console's mounted folders. A run
  * uses the mounted folders whether or not the document is converted; the
- * hand-back of an unconverted document states these as read.
+ * hand-off of an unconverted document states these as read.
  */
 export function folderPathSettings(document: ExchangeSpec): Array<string> {
   const { connection } = document;

@@ -463,7 +463,7 @@ export function InviterScreen() {
   }
 
   // Convert the open configuration to the console's own paths: the run's
-  // signing identity and receipt and the hand-back's placeholders.
+  // signing identity and receipt and the hand-off's placeholders.
   function convertMountedConfiguration() {
     dispatch({ type: "mounted-configuration-converted" });
   }
@@ -552,6 +552,10 @@ export function InviterScreen() {
     chosenRunMode === "server-job"
       ? unconvertedSigningWithheldReason(mountedConfiguration, receipts.mode)
       : undefined;
+  const signingWithheldConversion =
+    signingWithheld === undefined
+      ? undefined
+      : conversionStatement(mountedConfiguration);
 
   // The console reads the mounted file, so a server-job run holds only a REFERENCE
   // (the opaque name), never the content.
@@ -1593,12 +1597,10 @@ export function InviterScreen() {
                 {...(saveBackOffered
                   ? { onSaveConfiguration: () => void saveConfiguration() }
                   : {})}
-                {...(signingWithheld !== undefined
+                {...(signingWithheldConversion !== undefined
                   ? {
                       conversion: {
-                        statement:
-                          conversionStatement(mountedConfiguration) ??
-                          signingWithheld,
+                        statement: signingWithheldConversion,
                         onConvert: convertMountedConfiguration,
                       },
                     }

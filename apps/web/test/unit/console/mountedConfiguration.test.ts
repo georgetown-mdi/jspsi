@@ -191,8 +191,27 @@ describe("an opened configuration's own paths, until converted", () => {
     expect(statement).toContain(
       "signing.identity_file, signing.receipt_output, connection.path",
     );
-    expect(statement).toContain("keeps them as your file states them");
+    expect(statement).toContain(
+      "A run with a signed receipt waits until you convert",
+    );
+    expect(statement).toContain(
+      "The run uses the console's mounted folder either way.",
+    );
+    expect(statement).toContain(
+      "a placeholder in place of signing.identity_file, connection.path",
+    );
     expect(statement).toContain("names no receipt file");
+  });
+
+  test("converting only a folder path changes only the scheduled configuration", () => {
+    const statement = conversionStatement(openedWithPaths([]));
+    expect(statement).toContain("names a path of its own: connection.path.");
+    expect(statement).toContain(
+      "The run uses the console's mounted folder either way.",
+    );
+    expect(statement).toContain("Converting changes only the configuration");
+    expect(statement).not.toContain("signed receipt");
+    expect(statement).not.toContain("receipt file");
   });
 
   test("once converted, the run is released and the statement says so", () => {

@@ -2631,7 +2631,7 @@ describe("an opened configuration's own signing paths", () => {
     expect(manager.occupiedSlotId()).toBeNull();
   });
 
-  test("a signed run of it converted runs, and hands back the console's paths", async () => {
+  test("a signed run of it converted runs, and its hand-off states the console's paths", async () => {
     const manager = managerOverSignedConfiguration("certificate");
     const id = await manager.createJob(signedOpenedIntent(true));
     const yaml = handoffYaml(manager, id);
@@ -2642,7 +2642,7 @@ describe("an opened configuration's own signing paths", () => {
     expect(yaml).not.toContain(OPERATOR_FOLDER);
   });
 
-  test("an unsigned run of it unconverted hands back every path it read", async () => {
+  test("an unsigned run of it unconverted has a hand-off stating every path it read", async () => {
     const manager = managerOverSignedConfiguration("none");
     const id = await manager.createJob(openedIntent());
     const yaml = handoffYaml(manager, id);

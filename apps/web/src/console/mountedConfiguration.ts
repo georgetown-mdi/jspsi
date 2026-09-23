@@ -78,7 +78,7 @@ export type MountedConfigurationState =
    * and replaces every notice about the run with the one naming the channel.
    * `signingPaths` and `folderPaths` are the paths the file states that a
    * conversion replaces with the console's own, and `converted` is the
-   * operator's choice to convert: until then the hand-back states those paths
+   * operator's choice to convert: until then the hand-off states those paths
    * as read, and a signed run is withheld while `signingPaths` names any
    * ({@link unconvertedSigningWithheldReason}). */
   | {
@@ -221,10 +221,15 @@ export function conversionOffered(
   );
 }
 
+/** How the operator's user-visible text names the recurring-run hand-off. */
+const SCHEDULED_CONFIGURATION =
+  "the configuration the console gives you to run on a schedule";
+
 /**
  * What the operator is told before converting, naming every setting the
  * conversion replaces as the file spells them, or undefined where none is
- * offered.
+ * offered. A run uses the console's mounted folder either way; converting
+ * releases a signed run and changes what the hand-off states.
  */
 export function conversionStatement(
   state: MountedConfigurationState,
@@ -232,29 +237,36 @@ export function conversionStatement(
   if (state.status !== "opened" || state.converted === true) return undefined;
   const replaced = pathsConversionReplaces(state);
   if (replaced.length === 0) return undefined;
-  const one = replaced.length === 1;
-  const signs = (state.signingPaths ?? []).length > 0;
-  const receipt = (state.signingPaths ?? []).includes("signing.receipt_output");
+  const signingPaths = state.signingPaths ?? [];
+  const signs = signingPaths.length > 0;
+  const folders = (state.folderPaths ?? []).length > 0;
+  const receipt = signingPaths.includes("signing.receipt_output");
+  const placeholders = replaced.filter(
+    (setting) => setting !== "signing.receipt_output",
+  );
+  const handoff =
+    placeholders.length > 0
+      ? "it then states a placeholder in place of " +
+        nameList(placeholders) +
+        ", to set on the machine you schedule from" +
+        (receipt ? ", and names no receipt file" : "")
+      : "it then names no receipt file";
   return (
     "Your psilink.yaml names " +
-    (one ? "a path" : "paths") +
+    (replaced.length === 1 ? "a path" : "paths") +
     " of its own: " +
     nameList(replaced) +
-    ". The configuration the console hands back keeps " +
-    (one ? "it" : "them") +
-    " as your file states " +
-    (one ? "it" : "them") +
     "." +
     (signs
-      ? " The console signs only with its own signing identity, so a run " +
-        "here with a signed receipt waits until you convert."
+      ? " A run with a signed receipt waits until you convert, which lets " +
+        "it go ahead with the console's own signing identity and receipt file."
       : "") +
-    " Converting replaces " +
-    (one ? "it" : "them") +
-    " with the console's own, for the run and in the configuration it hands " +
-    "back, which then states a placeholder for each path to set on the " +
-    "machine you schedule from" +
-    (receipt ? " and names no receipt file" : "") +
+    (folders ? " The run uses the console's mounted folder either way." : "") +
+    " Converting " +
+    (signs ? "also changes " : "changes only ") +
+    SCHEDULED_CONFIGURATION +
+    ": " +
+    handoff +
     "."
   );
 }
@@ -265,9 +277,14 @@ export function convertedStatement(
 ): string | undefined {
   if (state.status !== "opened" || state.converted !== true) return undefined;
   return (
-    "Converted: the run and the configuration the console hands back use " +
-    "the console's own paths in place of " +
+    "Converted: " +
+    SCHEDULED_CONFIGURATION +
+    " states the console's own paths in place of " +
     nameList(pathsConversionReplaces(state)) +
+    ((state.signingPaths ?? []).length > 0
+      ? ", and a run with a signed receipt uses the console's signing " +
+        "identity and receipt file"
+      : "") +
     ". Close this configuration and open it again to keep your file's own."
   );
 }

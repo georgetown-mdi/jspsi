@@ -265,7 +265,7 @@ type FiledropConnection = Extract<
  * the shared folder or folder pair, where the run kept the document's filedrop
  * channel, and the signing block as {@link handBackSigning} writes it for the
  * run's own receipt choice -- the identity and receipt paths the document
- * states, under the mode the operator left or chose. The hand-back is the
+ * states, under the mode the operator left or chose. The hand-off is the
  * operator's file, so a path of theirs stays theirs until they convert it.
  */
 function withPathsAsRead(

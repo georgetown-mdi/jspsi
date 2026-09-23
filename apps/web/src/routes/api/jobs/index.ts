@@ -65,7 +65,9 @@ import { jobCreateIntentSchema } from "@jobs/intentSchemas";
  * host-key fingerprint answers `{ "reason": "sftp-fingerprint-list" }`, and a
  * run of the opened configuration refused over the `.psilink.key` beside it
  * answers `{ "reason": "mounted-key-file-absent" }` or
- * `{ "reason": "mounted-key-file-invalid" }`. Each is about console state
+ * `{ "reason": "mounted-key-file-invalid" }`, and a signed run of it naming
+ * unconverted signing paths answers
+ * `{ "reason": "mounted-signing-paths-unconverted" }`. Each is about console state
  * rather than the intent, so the browser cannot otherwise say what to fix.
  */
 export const Route = createFileRoute("/api/jobs/")({
