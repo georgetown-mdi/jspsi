@@ -87,6 +87,8 @@ describe("block-sleep-poll hook", () => {
       "while pgrep -f 'npm run build' >/dev/null\ndo\n  sleep 5\ndone",
       "npm run build & until ! pgrep -f rollup; do sleep 1; done; echo built",
       "timeout 30 npm test; while kill -0 1234; do sleep 2; done",
+      "timeout 5 bash -c 'true'; while kill -0 1234; do sleep 2; done",
+      "timeout 5 bash -c 'true' && until ! pgrep -f vitest; do sleep 3; done",
     ];
     for (const command of refused) {
       const { status, stderr } = verdict(command);
@@ -100,6 +102,7 @@ describe("block-sleep-poll hook", () => {
   it("allows a process wait bounded by a timeout wrapper or a counter", () => {
     expectAllowed([
       "timeout 600 bash -c 'while kill -0 1234 2>/dev/null; do sleep 2; done'",
+      'timeout 600 bash -c "while kill -0 $pid 2>/dev/null; do sleep 2; done"',
       "timeout -s KILL 10m sh -c 'until ! pgrep -f vitest; do sleep 5; done'",
       'n=0; while kill -0 "$pid" 2>/dev/null && [ $((n+=1)) -le 300 ]; do sleep 2; done',
       "i=0; until ! pgrep vitest; do sleep 2; i=$((i+1)); [ $i -ge 60 ] && break; done",

@@ -62,14 +62,36 @@ const COUNTS = /\$\(\(|\(\(|\blet\s|\bexpr\s|\bSECONDS\b/;
 const TIMEOUT_SHELL =
   /\btimeout\s[^;&|\n]*\b(?:bash|sh|zsh|dash)\s+(?:-\w+\s+)*-\w*c\b/;
 
+// True when the loop starting at loopIndex sits inside the quoted script
+// of a timeout-wrapped shell: the quote opening that shell's -c argument
+// is still open where the loop starts.
+function insideTimeoutShell(command, loopIndex) {
+  const prefix = command.slice(0, loopIndex);
+  let wrapper = null;
+  for (const found of prefix.matchAll(new RegExp(TIMEOUT_SHELL.source, "g"))) {
+    wrapper = found;
+  }
+  if (wrapper === null) return false;
+  const script = prefix.slice(wrapper.index + wrapper[0].length);
+  const opener = /^\s*(['"])/.exec(script);
+  if (opener === null) return false;
+  const quote = opener[1];
+  const rest = script.slice(opener[0].length);
+  const closers = rest
+    .split(quote)
+    .filter((_, i, all) => i < all.length - 1)
+    .filter((piece) => !piece.endsWith("\\")).length;
+  return closers % 2 === 0;
+}
+
 // True when the command holds a loop that waits on a process with no timeout
-// wrapper ahead of it and no counter or deadline inside it.
+// wrapper enclosing it and no counter or deadline inside it.
 function hasUnboundedProcessWait(command) {
   for (const match of command.matchAll(WAIT_LOOP)) {
     const [, condition, body] = match;
     if (!WATCHES_PROCESS.test(condition) || !SLEEPS.test(body)) continue;
     if (COUNTS.test(condition) || COUNTS.test(body)) continue;
-    if (TIMEOUT_SHELL.test(command.slice(0, match.index))) continue;
+    if (insideTimeoutShell(command, match.index)) continue;
     return true;
   }
   return false;
