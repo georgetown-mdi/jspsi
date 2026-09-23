@@ -718,6 +718,16 @@ export const RETENTION_NOTE_NOTICE =
   "the agreed terms. Write where this result is filed and how long it is kept -- " +
   "never a name, an identifier, or any value from the data.";
 
+/** The web app's form of the notice: the stored document and every export
+ * carry the note, and the notice says so. */
+export const RETENTION_NOTE_NOTICE_WEB =
+  "This note is kept in this browser's storage with your own exchange " +
+  "record, which anyone reading that storage can see, and it goes into " +
+  "every configuration file you export. It is never sent to your partner, " +
+  "never checked against theirs, and never part of the agreed terms. Write " +
+  "where this result is filed and how long it is kept -- never a name, an " +
+  "identifier, or any value from the data.";
+
 /**
  * The weight the card shows one advisory at. Both are warn-and-guide and
  * neither blocks the run: a `warning` is what this run costs the operator

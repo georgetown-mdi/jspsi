@@ -14,7 +14,7 @@ import { Link } from "@tanstack/react-router";
 
 import {
   RETENTION_NOTE_LABEL,
-  RETENTION_NOTE_NOTICE,
+  RETENTION_NOTE_NOTICE_WEB,
   RETENTION_NOTE_PLACEHOLDER,
 } from "@psi/receiptsModel";
 import { probeManagedStoreOpen } from "@psi/managed/managedExchangeStore";
@@ -206,7 +206,7 @@ export function ManageExchangeOffer({
       )}
       <Textarea
         label={RETENTION_NOTE_LABEL}
-        description={RETENTION_NOTE_NOTICE}
+        description={RETENTION_NOTE_NOTICE_WEB}
         placeholder={RETENTION_NOTE_PLACEHOLDER}
         autosize
         minRows={2}

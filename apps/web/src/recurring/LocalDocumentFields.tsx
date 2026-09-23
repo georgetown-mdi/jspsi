@@ -7,7 +7,7 @@ import {
 import { OWN_COLUMNS_LABELS, OWN_COLUMNS_ORDER } from "@psi/ownColumnsModel";
 import {
   RETENTION_NOTE_LABEL,
-  RETENTION_NOTE_NOTICE,
+  RETENTION_NOTE_NOTICE_WEB,
   RETENTION_NOTE_PLACEHOLDER,
 } from "@psi/receiptsModel";
 
@@ -99,7 +99,7 @@ export function LocalDocumentFields({
         ))}
       <Textarea
         label={RETENTION_NOTE_LABEL}
-        description={RETENTION_NOTE_NOTICE}
+        description={RETENTION_NOTE_NOTICE_WEB}
         placeholder={RETENTION_NOTE_PLACEHOLDER}
         autosize
         minRows={2}
