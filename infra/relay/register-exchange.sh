@@ -6,8 +6,8 @@
 # The key is the exchange's relay key (docs/spec/PROTOCOL.md, Relay credential
 # derivation). coturn reads the table per request, so a credential minted under
 # it authenticates from the next allocation on, with no restart. An exchange
-# already registered has its prior key removed first, so the relay holds only
-# the current one.
+# already registered has its new key added before its prior key is removed, so
+# both keys allocate for a moment and the exchange is never left without one.
 set -euo pipefail
 
 if [ "$#" -ne 2 ]; then
@@ -28,15 +28,18 @@ if [ -n "$HOLDER" ] && [ "$HOLDER" != "$ID" ]; then
 fi
 
 PRIOR="$(key_of "$ID")"
-if [ -n "$PRIOR" ]; then
-  turnadmin -X "$PRIOR" >/dev/null || die "could not remove exchange $ID's prior key from the secrets table"
-  write_mapping "$ID"
+if [ "$PRIOR" = "$KEY" ]; then
+  printf 'exchange %s (realm %s) already has this key registered\n' "$ID" "$REALM"
+  exit 0
 fi
+
 turnadmin -s "$KEY" >/dev/null || die "could not add exchange $ID's key to the secrets table"
 write_mapping "$ID" "$KEY"
 
-if [ -n "$PRIOR" ]; then
-  printf 'registered exchange %s (realm %s), replacing its prior key\n' "$ID" "$REALM"
-else
+if [ -z "$PRIOR" ]; then
   printf 'registered exchange %s (realm %s)\n' "$ID" "$REALM"
+  exit 0
 fi
+turnadmin -X "$PRIOR" >/dev/null ||
+  die "registered exchange $ID's new key, but could not remove its prior key $PRIOR from the secrets table; it still authenticates until removed with the image's turnadmin -X $PRIOR -r $REALM"
+printf 'registered exchange %s (realm %s), replacing its prior key\n' "$ID" "$REALM"

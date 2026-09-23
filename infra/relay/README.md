@@ -144,9 +144,15 @@ revoke-exchange.sh <exchange-id>
   starting with `-`; the key is 64 lowercase hex characters, the form coturn
   keys its HMAC with. Either script refuses a malformed argument and names it.
 - **Registering.** Adds the key's row. An exchange already registered has its
-  prior row deleted first, so the relay holds only its current key -- register
-  again after each [rotation](../../docs/spec/PROTOCOL.md#shared-secret-rotation).
-  A key another exchange holds is refused.
+  new row added, then its prior row deleted, so the relay ends holding only its
+  current key and both keys allocate for the moment between -- register again
+  after each [rotation](../../docs/spec/PROTOCOL.md#shared-secret-rotation). If
+  the delete fails, the script exits non-zero naming the prior key, which stays
+  in the table until you delete it by hand. Registering the key an exchange
+  already holds changes nothing. A key another exchange holds is refused.
+- **The key on the command line.** The key is an argument to both the script
+  and the container it starts, so it is visible in the host's process table
+  while the command runs; do not run it on a host other accounts share.
 - **Revoking.** Deletes the exchange's row. A new allocation under the key is
   refused within about 200 ms, with no restart. An allocation already open is
   NOT cut: its refreshes kept succeeding for over two minutes after the delete,

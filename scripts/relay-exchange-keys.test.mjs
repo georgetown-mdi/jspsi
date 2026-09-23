@@ -25,6 +25,7 @@ const BASH = existsSync("/bin/bash") ? "/bin/bash" : "bash";
 
 const KEY_A = "a".repeat(64);
 const KEY_B = "0123456789abcdef".repeat(4);
+const KEY_C = "fedcba9876543210".repeat(4);
 
 const tmpDirs = [];
 
@@ -113,20 +114,48 @@ describe("register-exchange.sh", () => {
     expect(host.mapMode()).toBe(0o600);
   });
 
-  it("removes an exchange's prior key before adding its new one", () => {
+  it("rotates by adding the new key, then deleting the prior one", () => {
     const host = fixtureHost();
     host.register("exchange-1", KEY_A);
     host.register("exchange-2", KEY_B);
-    const result = host.register("exchange-1", KEY_B.replace("0", "f"));
+    const result = host.register("exchange-1", KEY_C);
     expect(result.status, result.stderr).toBe(0);
-    expect(result.turnadmin.map((line) => line.split(" ")[1])).toEqual([
-      "-X",
-      "-s",
-    ]);
-    expect(result.turnadmin[0]).toContain(`-X ${KEY_A}`);
-    expect(host.mapping()).toBe(
-      `exchange-2 ${KEY_B}\nexchange-1 ${KEY_B.replace("0", "f")}\n`,
+    expect(result.turnadmin.map((line) => line.split(" ").slice(1, 3))).toEqual(
+      [
+        ["-s", KEY_C],
+        ["-X", KEY_A],
+      ],
     );
+    expect(host.mapping()).toBe(`exchange-2 ${KEY_B}\nexchange-1 ${KEY_C}\n`);
+  });
+
+  it("keeps the prior key and mapping when the new key's add fails", () => {
+    const host = fixtureHost();
+    host.register("exchange-1", KEY_A);
+    host.failTurnadminOn("-s");
+    const result = host.register("exchange-1", KEY_C);
+    expect(result.status).toBe(1);
+    expect(result.turnadmin.map((line) => line.split(" ")[1])).toEqual(["-s"]);
+    expect(host.mapping()).toBe(`exchange-1 ${KEY_A}\n`);
+  });
+
+  it("maps the new key and names the prior one when its delete fails", () => {
+    const host = fixtureHost();
+    host.register("exchange-1", KEY_A);
+    host.failTurnadminOn("-X");
+    const result = host.register("exchange-1", KEY_C);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(`could not remove its prior key ${KEY_A}`);
+    expect(host.mapping()).toBe(`exchange-1 ${KEY_C}\n`);
+  });
+
+  it("changes nothing when the exchange already holds the key", () => {
+    const host = fixtureHost();
+    host.register("exchange-1", KEY_A);
+    const result = host.register("exchange-1", KEY_A);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.turnadmin).toEqual([]);
+    expect(host.mapping()).toBe(`exchange-1 ${KEY_A}\n`);
   });
 
   it("refuses a key another exchange holds", () => {
