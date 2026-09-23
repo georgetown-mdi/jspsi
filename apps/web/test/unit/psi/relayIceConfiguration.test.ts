@@ -23,8 +23,9 @@ import type { RelayLocator } from "../../../src/psi/transport/rendezvous.js";
 import type { WebRTCEndpoint } from "@psilink/core";
 
 // The ICE configuration the browser's peer connection is built with: the
-// default STUN pair alone with no relay, and with a relay a TURN entry whose
-// credential is minted for this run from the exchange's shared secret.
+// default STUN pair alone with no relay, and with a relay its own urls in
+// place of that pair, the TURN entry holding a credential minted for this run
+// from the exchange's shared secret.
 
 /** The configuration every run used before a relay could be supplied. */
 const NO_RELAY_CONFIG = {
@@ -87,7 +88,17 @@ describe("buildIceServers", () => {
     ).toEqual(NO_RELAY_CONFIG.iceServers);
   });
 
-  test("with a relay adds a TURN entry minted from the shared secret", async () => {
+  test("with a relay naming no url is the default STUN pair alone", async () => {
+    expect(
+      await buildIceServers(
+        { turn: [], stun: [] },
+        generateSharedSecret(),
+        NOW,
+      ),
+    ).toEqual(NO_RELAY_CONFIG.iceServers);
+  });
+
+  test("with TURN urls alone is the TURN entry alone, with no STUN entry", async () => {
     const secret = generateSharedSecret();
     const expected = await mintRelayCredential({
       key: await deriveRelayKey(secret),
@@ -96,14 +107,34 @@ describe("buildIceServers", () => {
       now: NOW,
     });
 
-    expect(await buildIceServers(RELAY, secret, NOW)).toEqual([
-      NO_RELAY_CONFIG.iceServers[0],
+    const iceServers = await buildIceServers(RELAY, secret, NOW);
+    expect(iceServers).toEqual([
       {
         urls: RELAY.turn,
         username: expected.username,
         credential: expected.credential,
       },
     ]);
+    expect(
+      iceServers
+        .flatMap((server) => server.urls)
+        .filter((url) => url.startsWith("stun")),
+    ).toEqual([]);
+  });
+
+  test("with TURN and STUN urls holds the relay's STUN entry and the TURN entry", async () => {
+    const relay: RelayLocator = {
+      turn: RELAY.turn,
+      stun: ["stun:stun.example.org:3478"],
+    };
+    const iceServers = await buildIceServers(
+      relay,
+      generateSharedSecret(),
+      NOW,
+    );
+    expect(iceServers).toHaveLength(2);
+    expect(iceServers[0]).toEqual({ urls: ["stun:stun.example.org:3478"] });
+    expect(iceServers[1].urls).toEqual(RELAY.turn);
   });
 
   test("the relay's STUN urls replace the default pair", async () => {
@@ -117,7 +148,7 @@ describe("buildIceServers", () => {
   });
 
   test("the credential expires one lifetime after the run starts", async () => {
-    const [, turn] = await buildIceServers(RELAY, generateSharedSecret(), NOW);
+    const [turn] = await buildIceServers(RELAY, generateSharedSecret(), NOW);
     const expiry = Number(turn.username?.split(":")[0]);
     expect(expiry).toBe(NOW.getTime() / 1000 + RELAY_CREDENTIAL_TTL_SECONDS);
   });
@@ -135,8 +166,8 @@ describe("buildIceServers", () => {
       generateSharedSecret(),
       NOW,
     );
-    expect(later[1].username).not.toBe(first[1].username);
-    expect(otherExchange[1].credential).not.toBe(first[1].credential);
+    expect(later[0].username).not.toBe(first[0].username);
+    expect(otherExchange[0].credential).not.toBe(first[0].credential);
   });
 });
 
@@ -176,7 +207,7 @@ describe.each([
     expect(options.config).toStrictEqual(NO_RELAY_CONFIG);
   });
 
-  test("with a relay holds a TURN entry minted for this run", async () => {
+  test("with a TURN-only relay holds the TURN entry minted for this run alone", async () => {
     stubWindow();
     vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
     const secret = generateSharedSecret();
@@ -192,7 +223,6 @@ describe.each([
     expect(options.config).toStrictEqual({
       ...NO_RELAY_CONFIG,
       iceServers: [
-        ...NO_RELAY_CONFIG.iceServers,
         {
           urls: RELAY.turn,
           username: expected.username,

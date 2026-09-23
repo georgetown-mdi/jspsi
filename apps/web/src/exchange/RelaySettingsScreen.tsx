@@ -133,7 +133,7 @@ export function RelaySettingsScreen() {
         />
         <Textarea
           label="STUN server urls"
-          description="One per line; leave empty to keep the default STUN servers. For example: stun:stun.example.org:3478"
+          description="One per line; left empty, a saved TURN relay is used with no STUN server. For example: stun:stun.example.org:3478"
           autosize
           minRows={2}
           value={stunText}

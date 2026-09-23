@@ -81,11 +81,12 @@ interface SignalingLocation {
 export interface RelayLocator {
   /** `turn:` / `turns:` urls, served by one relay under one credential. */
   turn: ReadonlyArray<string>;
-  /** `stun:` / `stuns:` urls; a non-empty list replaces the default pair. */
+  /** `stun:` / `stuns:` urls; a relay naming any url replaces the default
+   * pair, so a relay naming TURN urls alone gathers no STUN candidate. */
   stun: ReadonlyArray<string>;
 }
 
-/** The STUN pair a run with no relay, or a relay naming no STUN url, uses. */
+/** The STUN pair a run with no relay, or a relay naming no url, uses. */
 const DEFAULT_STUN_URLS = [
   "stun:stun.l.google.com:19302",
   "stun:44.247.30.68:443",
@@ -102,11 +103,13 @@ export const RELAY_CREDENTIAL_TTL_SECONDS = RELAY_CREDENTIAL_MAX_TTL_SECONDS;
 const RELAY_CREDENTIAL_LABEL = "psilink";
 
 /**
- * The ICE server list for one run. With no relay it is the default STUN pair
- * alone. With a relay, its STUN urls replace that pair when it names any, and
- * its TURN urls follow as one entry holding a credential minted at `now` from
- * the relay key the exchange's shared secret derives. Nothing minted or
- * derived outlives the returned list.
+ * The ICE server list for one run. With no relay, or one naming no url, it is
+ * the default STUN pair alone. Otherwise it holds the relay's STUN urls as one
+ * entry when it names any, and its TURN urls as one entry holding a credential
+ * minted at `now` from the relay key the exchange's shared secret derives, and
+ * no default pair: the CLI's `connection.stun` / `connection.turn` rule, where
+ * a configured list replaces the default. Nothing minted or derived outlives
+ * the returned list.
  *
  * @internal
  */
@@ -115,10 +118,10 @@ export async function buildIceServers(
   sharedSecret: string,
   now: Date,
 ): Promise<Array<RTCIceServer>> {
-  if (relay === undefined) return [{ urls: [...DEFAULT_STUN_URLS] }];
-  const iceServers: Array<RTCIceServer> = [
-    { urls: [...(relay.stun.length > 0 ? relay.stun : DEFAULT_STUN_URLS)] },
-  ];
+  if (relay === undefined || relay.turn.length + relay.stun.length === 0)
+    return [{ urls: [...DEFAULT_STUN_URLS] }];
+  const iceServers: Array<RTCIceServer> = [];
+  if (relay.stun.length > 0) iceServers.push({ urls: [...relay.stun] });
   if (relay.turn.length > 0) {
     const { username, credential } = await mintRelayCredential({
       key: await deriveRelayKey(sharedSecret),
