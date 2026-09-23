@@ -39,3 +39,8 @@
 # carriage return as part of the filename and fails with "No such file or
 # directory" instead of verifying it.
 /lib/*.tgz.sha256 -text
+
+# apps/cli/test/unit/writtenConfigBytes.test.ts asserts these fixtures byte for
+# byte against saveConfig's LF output, so a Windows checkout under Git for
+# Windows' core.autocrlf=true default must not rewrite them to CRLF.
+/apps/cli/test/fixtures/writtenConfig/*.yaml -text
