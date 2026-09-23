@@ -157,17 +157,6 @@ describe("a configuration on a channel this app does not run", () => {
 });
 
 describe("a record the composer refuses", () => {
-  /** A receipt-signing block, every field of which is live on the operator's
-   * scheduled CLI run: `identityFile` is opened as this party's private signing
-   * identity, `receiptOutput` is a verbatim local write path, and
-   * `partnerFingerprint` is the pin a partner certificate is trusted against. */
-  const signing = {
-    mode: "certificate",
-    identityFile: "@/home/other/psilink-signing.identity",
-    partnerFingerprint: "0123456789012345678901234567890123456789abA",
-    receiptOutput: "/home/other/receipts/planted-receipt.json",
-  } as const;
-
   test("an authentication block on the stored document is refused, secret and all", () => {
     // The panel gate sees the same secret-bearing block the composer refuses, and
     // renders the reason on screen -- so the reason must name the block and none
@@ -188,30 +177,5 @@ describe("a record the composer refuses", () => {
     if (state.kind !== "refused") return;
     expect(state.reason).toContain("authentication");
     expect(state.reason).not.toContain(secret);
-  });
-
-  test("an out-of-composition document field is refused, naming no value", () => {
-    // A signing block rides a hand-crafted artifact into a record the read path
-    // admits (pinned in the composer's own suite), so the panel is a surface the
-    // block reaches: every field here would be live on the operator's scheduled
-    // run, and the reason names the block rather than any path or fingerprint.
-    const state = managedCronExportPanelState(
-      managedRecord({
-        exchangeFile: assembleExchangeSpec({
-          connection: connectionFromLocator(webrtcLocator),
-          linkageTerms,
-          signing,
-        }),
-      }),
-    );
-    expect(state.kind).toBe("refused");
-    if (state.kind !== "refused") return;
-    expect(state.reason).toContain("signing");
-    for (const value of [
-      signing.identityFile,
-      signing.partnerFingerprint,
-      signing.receiptOutput,
-    ])
-      expect(state.reason).not.toContain(value);
   });
 });

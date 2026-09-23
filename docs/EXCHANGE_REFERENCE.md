@@ -1646,10 +1646,10 @@ The cells:
 | `authentication.expires` | not applicable | refused | refused |
 | `authentication.token_max_age_days` | carried | carried with a notice (not applied to the console's run) | authored |
 | **[Signing](#signing)** | | | |
-| `signing.mode` | carried | authored | refused |
-| `signing.identity_file` | carried | authored (a location you pick in the console; the path the file states is not kept) | refused |
-| `signing.partner_fingerprint` | authored (pinned on first contact) | authored | refused |
-| `signing.receipt_output` | carried | not applicable | refused |
+| `signing.mode` | carried | authored | opens and is carried with a notice, but refused at run |
+| `signing.identity_file` | carried | authored (a location you pick in the console; the path the file states is not kept) | opens and is carried with a notice, but refused at run |
+| `signing.partner_fingerprint` | authored (pinned on first contact) | authored | opens and is carried with a notice, but refused at run |
+| `signing.receipt_output` | carried | not applicable | opens and is carried with a notice, but refused at run |
 | **Other top-level settings** | | | |
 | `retention_disposition` | carried | authored | authored |
 | `include_own_columns` | carried | authored | authored |

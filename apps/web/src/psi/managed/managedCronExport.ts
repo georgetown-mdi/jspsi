@@ -29,16 +29,17 @@
  * - It REFUSES any stored document the app could not have held: a
  *   connection holding a field outside what a configuration on its channel
  *   holds, or a literal credential, a stored `authentication` block, or a
- *   top-level document field outside the record composer's own input. Each is
- *   reachable only by importing a hand-crafted artifact, whose embedded
+ *   top-level document field outside what a command-line configuration holds.
+ *   Each is reachable only by importing a hand-crafted artifact, whose embedded
  *   document validates against the full exchange schema -- which can represent
  *   a TURN `credential`, a `provider_options` map, an `ice_provision` auth
- *   block, a PeerJS `server.key`/`server.username`, a shared secret, and a
- *   `signing` block (`identity_file`, `receipt_output`,
- *   `partner_fingerprint`). A connection on a channel this app does not run
- *   exports like any other: exporting it is how the operator runs it, and an
- *   sftp `@path` reference it holds is written back as read, for the CLI to
- *   resolve (`apps/cli/src/util/atSignRefs.ts`).
+ *   block, a PeerJS `server.key`/`server.username`, and a shared secret. A
+ *   connection on a channel this app does not run exports like any other:
+ *   exporting it is how the operator runs it, and an sftp `@path` reference it
+ *   holds is written back as read, for the CLI to resolve
+ *   (`apps/cli/src/util/atSignRefs.ts`). A `signing` block a configuration-only
+ *   record holds is written back as read too; the record schema refuses one
+ *   beside a secret, so no artifact installs it.
  *
  * The key file is a plaintext credential under the CLI key file's own trust
  * model: custody and storage permissions, never a passphrase (the spec's
@@ -198,24 +199,19 @@ function assertNoStoredAuthentication(exchangeFile: ExchangeSpec): void {
 }
 
 /**
- * Refuse a document holding a top-level field the app could not have
- * composed: the exchange-file schema is broader than the record composer --
- * it admits a `signing` block -- and it is what an imported artifact's
- * embedded document validates against, so this gate keeps the document
- * spread from republishing a hand-crafted field into the emitted
- * psilink.yaml. A hard refusal, not a warning: this is remote content the
- * operator cannot inspect.
+ * Refuse a document holding a top-level field outside what a command-line
+ * configuration holds ({@link fieldsOutsideComposableDocument}), so the
+ * document spread cannot republish a field no import admitted into the
+ * emitted psilink.yaml.
  */
 function assertComposableDocumentFields(document: ExchangeSpec): void {
   const outside = fieldsOutsideComposableDocument(document);
   if (outside.length > 0)
     throw new Error(
       "a managed exchange is exported to the command line only from the " +
-        "document this app composes (the agreed linkage terms, this party's " +
-        "metadata, standardization, and payload commitments, and the " +
-        "connection); the stored document carries " +
-        "field(s) outside it, which the exported psilink.yaml would republish " +
-        "for the CLI to open, write, or pin. Remove: " +
+        "document fields a command-line configuration holds here; the stored " +
+        "document carries field(s) outside them, which the exported " +
+        "psilink.yaml would republish. Remove: " +
         outside.join(", "),
     );
 }

@@ -8,6 +8,7 @@ import {
 
 import {
   configurationOnlyLead,
+  configurationOnlyStatus,
   fileReferenceExportNote,
   fileReferenceNotice,
   heldSettings,
@@ -76,6 +77,44 @@ describe("why nothing here runs the exchange", () => {
 
     expect(lead).toContain(".psilink.key");
     expect(lead).not.toContain("channel:");
+  });
+});
+
+describe("a signing block this app cannot run", () => {
+  const signing = {
+    mode: "certificate",
+    identityFile: "@/run/signing/psilink-signing-identity.json",
+    partnerFingerprint: "0123456789012345678901234567890123456789abA",
+    receiptOutput: "/srv/receipts",
+  } as const;
+
+  test("on webrtc, the lead names the block and why, not the key file", () => {
+    const lead = configurationOnlyLead(configuration("webrtc", { signing }));
+
+    expect(lead).toContain("states signing, which this app cannot run");
+    expect(lead).toContain("does not sign exchange receipts");
+    expect(lead).toContain("run the exchange with psilink");
+    expect(lead).not.toContain(".psilink.key");
+    for (const value of Object.values(signing))
+      if (value !== "certificate") expect(lead).not.toContain(value);
+  });
+
+  test("on another channel, the lead names the channel and the block", () => {
+    const lead = configurationOnlyLead(configuration("sftp", { signing }));
+
+    expect(lead).toContain("SFTP (channel: sftp)");
+    expect(lead).toContain("states signing, which this app cannot run");
+  });
+
+  test("the list row withholds the run for the same reason", () => {
+    expect(configurationOnlyStatus(configuration("webrtc", { signing }))).toBe(
+      "Configuration only - this app cannot run its signing settings, run " +
+        "it with psilink",
+    );
+  });
+
+  test("is named by the lead rather than among the held settings", () => {
+    expect(heldSettings(configuration("webrtc", { signing }))).toEqual([]);
   });
 });
 

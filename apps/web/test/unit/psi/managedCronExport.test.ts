@@ -644,35 +644,31 @@ describe("a signing block on the stored document", () => {
     receiptOutput: "/home/other/receipts/planted-receipt.json",
   } as const;
 
-  function importedRecordWithSigning(): RunnableManagedExchangeRecord {
-    return importedRecordWithDocument(
-      assembleExchangeSpec({
-        connection: connectionFromLocator(webrtcLocator),
-        linkageTerms,
-        signing,
-      }),
-    );
-  }
-
-  test("rides a hand-crafted artifact into a record the read path admits", () => {
-    // Unreachable through the app: the record composer's input has no signing
-    // field, and the read path refines away only an authentication block. So the
-    // import succeeds and the export is the only gate between the block and the
-    // emitted psilink.yaml.
-    const record = importedRecordWithSigning();
-    expect(record.exchangeFile.signing).toEqual(signing);
-    expect(() => parseManagedExchangeRecord(record)).not.toThrow();
+  const documentWithSigning = assembleExchangeSpec({
+    connection: connectionFromLocator(webrtcLocator),
+    linkageTerms,
+    signing,
   });
 
-  test("is refused rather than republished, naming the block and no value", () => {
-    const message = exportRefusal(importedRecordWithSigning());
-    expect(message).toContain("signing");
-    for (const value of [
-      signing.identityFile,
-      signing.partnerFingerprint,
-      signing.receiptOutput,
-    ])
-      expect(message).not.toContain(value);
+  test("cannot ride an artifact into a record holding a secret", () => {
+    expect(() => importedRecordWithDocument(documentWithSigning)).toThrow(
+      ZodError,
+    );
+  });
+
+  test("is exported unchanged from a configuration-only record", () => {
+    const record = buildManagedExchangeRecord({
+      label: "Imported quarterly",
+      exchangeFile: documentWithSigning,
+      side: "inviter",
+    });
+    const exported = parseExchangeSpec(
+      parseSensitiveYaml(
+        composeManagedCronExportConfig(record).config.text,
+        "exported psilink.yaml",
+      ),
+    );
+    expect(exported.signing).toEqual(signing);
   });
 });
 

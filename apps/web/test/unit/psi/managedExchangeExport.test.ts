@@ -1,6 +1,5 @@
 import {
   assembleExchangeSpec,
-  connectionFromLocator,
   generateSharedSecret,
   getDefaultLinkageTerms,
 } from "@psilink/core";
@@ -370,29 +369,6 @@ describe("dispatchManagedCronExport", () => {
         };
       },
       /authentication block/,
-    ],
-    [
-      "a top-level field outside the composition",
-      () =>
-        buildManagedExchangeRecord({
-          label: "Riverbend quarterly",
-          exchangeFile: assembleExchangeSpec({
-            connection: connectionFromLocator({
-              channel: "webrtc",
-              host: "signaling.example.org",
-            }),
-            linkageTerms,
-            signing: {
-              mode: "certificate",
-              identityFile: "@/home/other/psilink-signing.identity",
-              partnerFingerprint: "0123456789012345678901234567890123456789abA",
-              receiptOutput: "/home/other/receipts/planted-receipt.json",
-            },
-          }),
-          side: "inviter",
-          sharedSecret: generateSharedSecret(),
-        }),
-      /Remove: signing/,
     ],
   ];
 

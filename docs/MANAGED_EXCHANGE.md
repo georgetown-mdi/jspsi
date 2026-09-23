@@ -1168,6 +1168,10 @@ place of the Run and schedule controls:
   not conduct -- it runs live browser exchanges (webrtc) only. The page names the
   channel and says to run the exchange with psilink on the command line; a key
   file would not change that.
+- **A configuration with a `signing` block** asks for a signed exchange receipt,
+  which this browser does not produce. The page names `signing` as the part
+  this app cannot run, on any channel, and so does the list on webrtc; a key
+  file would not change that either.
 
 Nothing about the exchange on the other machine changes by importing its
 configuration -- it keeps running there, from the files it already has.
@@ -1186,7 +1190,11 @@ What the import accepts is what this app can hold:
   -- host, port, username, folders, `options`, `host_key_fingerprint`,
   `keyboard_interactive`, `proxy`, `provision`, and `provider_options` -- since
   nothing here runs it and each setting goes back into the file psilink runs.
-  A signing identity or receipt path is refused on every channel.
+- **A `signing` block, held unchanged.** The mode, `identity_file`,
+  `partner_fingerprint`, and `receipt_output` are kept exactly as the file
+  writes them -- an `@` in a path is text, and this browser opens no file it
+  names -- with no editor here, and the exported configuration states the block
+  as the imported one did. The exchange runs with psilink.
 - **Credentials as `@path` references, never as values.** An sftp `password`,
   `private_key`, or `private_key_passphrase`, the `bearer` or `password` of a
   `proxy` or `provision` block's `auth`, and a `password`, `passphrase`,

@@ -30,11 +30,13 @@
  *   A stored document holds no `authentication` block at all, so the block is
  *   read for that one policy and dropped.
  *
- * A configuration on any channel imports. This app runs webrtc exchanges only,
- * and that limit is met where a run would start rather than here: a record on
- * another channel is a configuration only, which the record's own shape keeps
- * from every run (docs/spec/MANAGED_EXCHANGE_RECORD.md, "The configuration-only
- * record").
+ * A configuration on any channel imports, and so does one stating a part this
+ * app cannot run -- a `signing` block, held unchanged for the file psilink
+ * runs, every `@` in it as the text the file wrote. This app runs webrtc
+ * exchanges without receipt signing, and that limit is met where a run would
+ * start rather than here: such a record is a configuration only, which the
+ * record's own shape keeps from every run (docs/spec/MANAGED_EXCHANGE_RECORD.md,
+ * "The configuration-only record").
  *
  * Three levels are guarded against an extra key: the top-level document, the
  * connection, and connection.server (the bespoke allowlist below, since the
@@ -43,12 +45,12 @@
  * document may hold only what the app itself composes, and the connection what
  * a configuration on its channel holds ({@link ./managedCommandLineDocument.ts}):
  * a credential-free locator on webrtc and filedrop, which keeps a TURN
- * credential, an ICE provisioning block, or a signing identity path from being
- * stored here, and the whole connection on sftp, whose record runs nowhere
- * here. An sftp credential is held as an `@path` reference and refused as a
- * literal value. A shared secret in the file is refused on the same terms: this
- * import brings back configuration, and the key file stays with the machine
- * that runs the exchange.
+ * credential or an ICE provisioning block from being stored here, and the
+ * whole connection on sftp, whose record runs nowhere here. An sftp credential
+ * is held as an `@path` reference and refused as a literal value. A shared
+ * secret in the file is refused on the same terms: this import brings back
+ * configuration, and the key file stays with the machine that runs the
+ * exchange.
  */
 
 import { ZodError } from "zod";
@@ -286,9 +288,8 @@ export function readManagedCommandLineConfiguration(
   const outside = fieldsOutsideComposableDocument(exchangeFile);
   if (outside.length > 0)
     throw new ManagedConfigurationRefusedError(
-      "This configuration holds settings this app does not keep -- a file " +
-        "the command line would open or write, or a fingerprint it would " +
-        "pin. Remove these top-level lines and import it again: " +
+      "This configuration holds settings this app does not keep. Remove " +
+        "these top-level lines and import it again: " +
         outside.join(", ") +
         ". The configuration this app hands back leaves them out, so add " +
         "them back to that file before you run it.",

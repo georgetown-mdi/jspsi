@@ -8,7 +8,8 @@
  * Four things are said, each only where it holds:
  *
  * - why nothing here runs it: the channel, where the document names one this
- *   app does not conduct, or else the key file that stayed on the command line;
+ *   app does not conduct, and each part it states that this app cannot run
+ *   (a `signing` block), or else the key file that stayed on the command line;
  * - which settings the document states that this surface keeps unchanged
  *   without showing or editing them (docs/spec/EXCHANGE_FILE.md, "What a
  *   consumer does with a setting it cannot honor");
@@ -24,12 +25,16 @@
 import { snakeizeKey } from "@psilink/core";
 
 import {
+  channelThisAppDoesNotRun,
+  documentPartsThisAppDoesNotRun,
+} from "@psi/managed/managedExchangeRecord";
+import {
   connectionSettingsBeyondLocator,
   fileReferenceFields,
 } from "@psi/managed/managedCommandLineDocument";
-import { channelThisAppDoesNotRun } from "@psi/managed/managedExchangeRecord";
 
 import type {
+  DocumentPartThisAppDoesNotRun,
   ManagedElsewhereChannel,
   ManagedExchangeRecord,
 } from "@psi/managed/managedExchangeRecord";
@@ -66,6 +71,41 @@ const KEY_FILE_ELSEWHERE_STATUS =
 const CHANNEL_ELSEWHERE_STATUS =
   "Configuration only - this app cannot run it, run it with psilink";
 
+/** Why this app cannot run each part {@link documentPartsThisAppDoesNotRun}
+ * names. */
+const UNRUNNABLE_PART_REASONS: Record<DocumentPartThisAppDoesNotRun, string> = {
+  signing: "this app does not sign exchange receipts",
+};
+
+/** The parts a document states that this app cannot run, named as the file
+ * spells them. */
+function unrunnablePartNames(record: ManagedExchangeRecord): Array<string> {
+  return documentPartsThisAppDoesNotRun(record.exchangeFile).map((part) =>
+    snakeizeKey(part),
+  );
+}
+
+/**
+ * The sentences naming the parts a document states that this app cannot run,
+ * and why, or undefined where it states none. Each part is named as the file
+ * spells it and never with its value.
+ */
+function unrunnablePartsSentences(
+  record: ManagedExchangeRecord,
+): string | undefined {
+  const parts = documentPartsThisAppDoesNotRun(record.exchangeFile);
+  if (parts.length === 0) return undefined;
+  const one = parts.length === 1;
+  return (
+    `This configuration states ${unrunnablePartNames(record).join(", ")}, ` +
+    "which this app cannot run: " +
+    parts.map((part) => UNRUNNABLE_PART_REASONS[part]).join("; ") +
+    ". The psilink.yaml you download states " +
+    (one ? "it" : "each") +
+    " as your file does."
+  );
+}
+
 /** The document settings the configuration surface shows: the connection and
  * the terms read-only, and the three this party's settings editor edits. Every
  * other setting the document states is held without being shown. */
@@ -80,26 +120,42 @@ const SHOWN_DOCUMENT_FIELDS: ReadonlySet<string> = new Set([
 /**
  * What a configuration-only surface leads with: why this browser does not run
  * the exchange, and where it does run. A channel this app does not conduct is
- * named first, since a key file would not change it; on this app's own channel
- * the reason is the key file that stayed with the command line.
+ * named first, since a key file would not change it, then each part the
+ * document states that this app cannot run, which a key file would not change
+ * either; on this app's own channel with no such part, the reason is the key
+ * file that stayed with the command line.
  */
 export function configurationOnlyLead(record: ManagedExchangeRecord): string {
   const channel = channelThisAppDoesNotRun(record.exchangeFile);
-  if (channel === undefined) return KEY_FILE_ELSEWHERE_LEAD;
-  return (
+  const parts = unrunnablePartsSentences(record);
+  if (channel === undefined)
+    return parts === undefined
+      ? KEY_FILE_ELSEWHERE_LEAD
+      : "This exchange was imported from a command-line configuration. " +
+          `${parts} Its other settings are editable here; run the exchange ` +
+          "with psilink.";
+  const channelLead =
     `This configuration runs over ${ELSEWHERE_CHANNEL_NAMES[channel]}. This ` +
     "app runs only live exchanges in the browser (channel: webrtc), so it " +
     "cannot run this one: run it with psilink on the command line. Its " +
     "settings are editable here, and the psilink.yaml you download below is " +
-    "the file to run."
-  );
+    "the file to run.";
+  return parts === undefined ? channelLead : `${channelLead} ${parts}`;
 }
 
-/** The list row's one-line status for a configuration-only exchange. */
+/** The list row's one-line status for a configuration-only exchange: the
+ * channel where this app does not run it, then the parts it cannot run, then
+ * the key file that stayed on the command line. */
 export function configurationOnlyStatus(record: ManagedExchangeRecord): string {
-  return channelThisAppDoesNotRun(record.exchangeFile) === undefined
-    ? KEY_FILE_ELSEWHERE_STATUS
-    : CHANNEL_ELSEWHERE_STATUS;
+  if (channelThisAppDoesNotRun(record.exchangeFile) !== undefined)
+    return CHANNEL_ELSEWHERE_STATUS;
+  const parts = unrunnablePartNames(record);
+  if (parts.length > 0)
+    return (
+      `Configuration only - this app cannot run its ${parts.join(", ")} ` +
+      "settings, run it with psilink"
+    );
+  return KEY_FILE_ELSEWHERE_STATUS;
 }
 
 /** What the list names a sideless configuration by: the channel this app does
@@ -115,16 +171,21 @@ export function sidelessRowLabel(
 /**
  * The settings a stored document states that the configuration view neither
  * shows nor edits, named in snake_case and sorted: every top-level setting but
- * the connection, the linkage terms, and the three the settings editor edits,
- * the connection's `options` block, and
- * every connection setting beyond the channel's locator, none of which the
- * connection rows show. Each is written back to the configuration the surface
- * exports exactly as it was read.
+ * the connection, the linkage terms, the three the settings editor edits, and
+ * the parts the lead names as ones this app cannot run, then the connection's
+ * `options` block and every connection setting beyond the channel's locator,
+ * none of which the connection rows show. Each is written back to the
+ * configuration the surface exports exactly as it was read.
  */
 export function heldSettings(record: ManagedExchangeRecord): Array<string> {
   const { exchangeFile } = record;
+  const namedByLead: ReadonlySet<string> = new Set(
+    documentPartsThisAppDoesNotRun(exchangeFile),
+  );
   const topLevel = Object.keys(exchangeFile)
-    .filter((field) => !SHOWN_DOCUMENT_FIELDS.has(field))
+    .filter(
+      (field) => !SHOWN_DOCUMENT_FIELDS.has(field) && !namedByLead.has(field),
+    )
     .map((field) => snakeizeKey(field));
   const connectionOptions =
     "options" in exchangeFile.connection &&

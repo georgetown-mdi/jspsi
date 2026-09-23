@@ -23,6 +23,7 @@ import {
   applyManagedExchangeLocalEdits,
   buildManagedExchangeRecord,
   composeManagedExchangeFile,
+  documentPartsThisAppDoesNotRun,
   runnableManagedExchange,
   runnableManagedExchangeOrRefuse,
 } from "@psi/managed/managedExchangeRecord";
@@ -553,20 +554,6 @@ describe("refusing what this app cannot hold", () => {
     expect(message).not.toContain(credential);
   });
 
-  test("a document holding a signing block is refused by field name", () => {
-    const identityFile = "@/home/operator/signing-identity-not-in-any-message";
-    const message = refusal(
-      configText(
-        commandLineDocument({
-          signing: { mode: "certificate", identityFile },
-        }),
-      ),
-    );
-
-    expect(message).toContain("signing");
-    expect(message).not.toContain(identityFile);
-  });
-
   test("a shared secret in the file is refused: the key file is not imported", () => {
     const secret = generateSharedSecret();
     const message = refusal(
@@ -881,6 +868,86 @@ describe("import, edit, and export on every channel", () => {
       });
     },
   );
+});
+
+describe("a signing block this app cannot run", () => {
+  // Every field the block can hold, each with a value the round trip must not
+  // touch: an `@` in a local path is text here, never a file reference.
+  const signing = {
+    mode: "certificate",
+    identityFile: "@/run/signing/psilink-signing-identity.json",
+    partnerFingerprint: "0123456789012345678901234567890123456789abA",
+    receiptOutput: "~/receipts/@quarterly",
+  } as const;
+
+  const signingInFile = {
+    mode: "certificate",
+    identity_file: signing.identityFile,
+    partner_fingerprint: signing.partnerFingerprint,
+    receipt_output: signing.receiptOutput,
+  };
+
+  test("imports as a configuration only, holding the block unchanged", () => {
+    const record = readManagedCommandLineConfiguration(
+      configText(commandLineDocument({ signing })),
+    );
+
+    expect(record.exchangeFile.signing).toEqual(signing);
+    expect(record.sharedSecret).toBeUndefined();
+    expect(runnableManagedExchange(record)).toBe(false);
+    expect(documentPartsThisAppDoesNotRun(record.exchangeFile)).toEqual([
+      "signing",
+    ]);
+  });
+
+  test.each([
+    ["webrtc", commandLineDocument({ signing })],
+    ["sftp", documentOn(sftpLocator, { signing })],
+    ["filedrop", documentOn(filedropLocator, { signing })],
+  ] as const)(
+    "on %s, an edited import exports the block with every value unchanged",
+    (_channel, document) => {
+      const source = configText(document);
+      const imported = readManagedCommandLineConfiguration(source);
+      const edited = applyManagedExchangeLocalEdits(imported, {
+        label: "Riverbend quarterly",
+        tokenMaxAgeDays: 30,
+        csvDelimiter: ";",
+        retentionDisposition: "Filed with the program office.",
+      });
+
+      expect(edited.exchangeFile.signing).toEqual(signing);
+      const text = composeManagedCronExportConfig(edited).config.text;
+      expect(parseSensitiveYaml(text, "re-export")).toMatchObject({
+        signing: signingInFile,
+      });
+      expect(
+        parseExchangeSpec(parseSensitiveYaml(text, "re-export")).signing,
+      ).toEqual(signing);
+    },
+  );
+
+  test("an unedited import exports the document it read", () => {
+    const source = configText(commandLineDocument({ signing }));
+    const record = readManagedCommandLineConfiguration(source);
+
+    expect(
+      parseExchangeSpec(
+        parseSensitiveYaml(
+          composeManagedCronExportConfig(record).config.text,
+          "re-export",
+        ),
+      ),
+    ).toEqual(parseExchangeSpec(parseSensitiveYaml(source, "import")));
+  });
+
+  test("a record holding a secret cannot also hold the block", () => {
+    expect(() =>
+      buildManagedExchangeRecord(
+        newExchange({ exchangeFile: { ...composedDocument(), signing } }),
+      ),
+    ).toThrow(ZodError);
+  });
 });
 
 describe("routing a file to its leg", () => {
