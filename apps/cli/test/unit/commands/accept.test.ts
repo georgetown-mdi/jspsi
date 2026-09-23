@@ -7065,6 +7065,103 @@ describe("handler: offline accept-reuse refreshes the received-payload commitmen
   });
 });
 
+// --- offline accept-reuse refreshes the invitation's relay -----------------------
+
+describe("handler: offline accept-reuse refreshes the invitation's relay", () => {
+  const OWN_TURN = [
+    {
+      url: "turns:own-relay.example.org:443?transport=tcp",
+      username: "own-user",
+      credential: "own-credential",
+    },
+  ];
+  const OWN_STUN = ["stun:own-stun.example.org:3478"];
+  const NEW_RELAY = {
+    turn: ["turns:new-relay.example.org:443?transport=tcp"],
+    stun: ["stun:new-relay.example.org:3478"],
+  };
+
+  function writeKeptWebrtcConfig(
+    configFile: string,
+    invitationRelay?: { turn?: string[]; stun?: string[] },
+  ): void {
+    writeExistingConfig(configFile, {
+      connection: {
+        channel: "webrtc",
+        server: { host: "peer.example.org", path: "/psi" },
+        role: "acceptor",
+        turn: OWN_TURN,
+        stun: OWN_STUN,
+        ...(invitationRelay !== undefined ? { invitationRelay } : {}),
+      },
+    });
+  }
+
+  async function acceptOver(
+    fixture: ReturnType<typeof offlineAcceptFixture>,
+    relay: { turn?: string[]; stun?: string[] } | undefined,
+  ): Promise<{ connection: ConnectionConfig; stderr: string }> {
+    const encoded = await encodeInvitation(
+      sampleToken(FUTURE(), {
+        ...WEBRTC_ENDPOINT,
+        ...(relay !== undefined ? { relay } : {}),
+      }),
+    );
+    const { stderrWrites } = await runOfflineAcceptCapturingStdio({
+      encoded,
+      fixture,
+      flags: { "consent-to-terms": true },
+    });
+    const raw = fs.readFileSync(fixture.configFile, "utf8");
+    return {
+      connection: parseExchangeSpec(YAML.parse(raw)).connection,
+      stderr: stderrWrites.join(""),
+    };
+  }
+
+  test("handler: a kept configuration takes the relay the invitation names", async () => {
+    const fixture = offlineAcceptFixture();
+    try {
+      writeKeptWebrtcConfig(fixture.configFile, {
+        turn: ["turns:stale-relay.example.org:443"],
+      });
+      const { connection, stderr } = await acceptOver(fixture, NEW_RELAY);
+      expect(connection).toMatchObject({
+        channel: "webrtc",
+        invitationRelay: NEW_RELAY,
+        turn: OWN_TURN,
+        stun: OWN_STUN,
+      });
+      expect(stderr).toContain(
+        "its invitation_relay is set to the relay this invitation names",
+      );
+    } finally {
+      fs.rmSync(fixture.dir, { recursive: true, force: true });
+    }
+  });
+
+  test("handler: a kept configuration's stale relay is removed when the invitation names none", async () => {
+    const fixture = offlineAcceptFixture();
+    try {
+      writeKeptWebrtcConfig(fixture.configFile, {
+        turn: ["turns:stale-relay.example.org:443"],
+      });
+      const { connection, stderr } = await acceptOver(fixture, undefined);
+      expect(connection).toMatchObject({
+        channel: "webrtc",
+        turn: OWN_TURN,
+        stun: OWN_STUN,
+      });
+      expect(connection).not.toHaveProperty("invitationRelay");
+      expect(stderr).toContain(
+        "its invitation_relay is removed, since this invitation names no relay",
+      );
+    } finally {
+      fs.rmSync(fixture.dir, { recursive: true, force: true });
+    }
+  });
+});
+
 // --- the acceptance's terms-side commitment reaches the config ------------------
 
 describe("the acceptance's terms-side commitment reaches the config", () => {

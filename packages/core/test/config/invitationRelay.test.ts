@@ -192,6 +192,27 @@ describe("the invitation's relay locator", () => {
     );
   });
 
+  test.each([
+    ["path", "turns:relay.example.org:443/SECRETPATH", "has a path"],
+    ["fragment", "turn:relay.example.org#SECRETFRAG", "has a fragment"],
+  ])(
+    "a url with a %s is refused at decode without its value",
+    async (_, url, refusal) => {
+      const token = tokenWithEndpoint({
+        channel: "webrtc",
+        host: "signal.example",
+        relay: { turn: [url] },
+      });
+      const error: unknown = await decodeInvitation(
+        await encodeRaw(token),
+      ).catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(ZodError);
+      const message = (error as ZodError).message;
+      expect(message).toContain(refusal);
+      expect(message).not.toContain("SECRET");
+    },
+  );
+
   test("a relay on a file-sync endpoint is refused", async () => {
     const token = tokenWithEndpoint({
       channel: "sftp",

@@ -5,6 +5,11 @@ import { randomBytes, toBase64Url } from "../utils/crypto.js";
 import { pathsResolveToSameDir } from "../utils/pathCompare.js";
 import { maxCodeUnits } from "../utils/maxCodeUnits.js";
 import { boundedArray } from "../utils/boundedArray.js";
+import { redactPrivateKeyMaterial } from "../utils/sanitizeErrorForDisplay.js";
+import {
+  boundRawFragmentForFit,
+  clipToRenderedCost,
+} from "../utils/sanitizeForDisplay.js";
 
 // --- HTTP service authentication ---------------------------------------------
 
@@ -420,33 +425,76 @@ interface TurnServer {
 // applied to the trimmed value, and the trimmed value is what the connection
 // holds, so the padding a quoted entry can carry decides nothing: a padded
 // `turn:relay.example.org:3478` names its host, and a padded `turn:` none.
-// Neither admits a user before the host (`turn:user@host`): a TURN credential
-// goes in the entry's own fields, and a url an invitation carries holds none.
-const TURN_URL_PATTERN = /^turns?:[^\s:?@][^\s?@]*(?:\?\S*)?$/;
-const STUN_URI_PATTERN = /^stuns?:[^\s:?@][^\s?@]*(?:\?\S*)?$/;
+// Neither admits a user before the host (`turn:user@host`), a path, or a
+// fragment: a TURN credential goes in the entry's own fields, RFC 7064/7065
+// define no path or fragment, and a url an invitation holds names only where
+// the relay is.
+const TURN_URL_PATTERN = /^turns?:[^\s:?@/#][^\s?@/#]*(?:\?[^\s#]*)?$/;
+const STUN_URI_PATTERN = /^stuns?:[^\s:?@/#][^\s?@/#]*(?:\?[^\s#]*)?$/;
 
 const USER_BEFORE_HOST = /^([a-z]+:)[^?]*@/;
+const SCHEME = /^[a-z]+:/;
+const HOST_AND_PORT = /^[^\s/?#@]*/;
+const PATH_AFTER_HOST = /^[a-z]+:[^\s/?#@]+\//;
 
-// The url with the part before its host elided, so the refusal names the entry
-// without repeating a credential written there.
-function withUserElided(url: string): string {
-  return url.replace(USER_BEFORE_HOST, "$1...@");
+// Code units a relay url refusal may echo of the url.
+/** @internal */
+export const RELAY_URL_DISPLAY_LENGTH = 64;
+
+// The scheme and the host and port of a refused url, and nothing else: a
+// user, path, query, or fragment may hold a credential. A user before the host
+// shows as `...@`; when the part before the last `@` has a `/` or `#`, that
+// `@` may sit in a path rather than end a user, so no host is shown. Redacted
+// and fitted as the invitation's key names are (invitation.ts).
+function relayUrlForDisplay(url: string): string {
+  const user = USER_BEFORE_HOST.exec(url);
+  if (user !== null) {
+    const scheme = user[1] ?? "";
+    const userPart = user[0].slice(scheme.length);
+    const host = /[/#]/.test(userPart)
+      ? ""
+      : (HOST_AND_PORT.exec(url.slice(user[0].length))?.[0] ?? "");
+    return fittedRelayUrlPart(`${scheme}...@${host}`);
+  }
+  const scheme = SCHEME.exec(url)?.[0] ?? "";
+  const host = HOST_AND_PORT.exec(url.slice(scheme.length))?.[0] ?? "";
+  return fittedRelayUrlPart(`${scheme}${host}`);
+}
+
+function fittedRelayUrlPart(shown: string): string {
+  return clipToRenderedCost(
+    redactPrivateKeyMaterial(
+      boundRawFragmentForFit(shown, RELAY_URL_DISPLAY_LENGTH),
+    ),
+    RELAY_URL_DISPLAY_LENGTH,
+  );
 }
 
 function urlGrammarMessage(
   kind: "turn" | "stun",
   hostMessage: string,
+  example: string,
 ): (issue: { input?: unknown }) => string {
   const credentialHome =
     kind === "turn"
       ? "put the credential in the entry's username and credential fields, " +
         "or leave it out of a relay an invitation names"
       : "a stun server takes no credential, so leave it out";
-  return (issue) =>
-    typeof issue.input === "string" && USER_BEFORE_HOST.test(issue.input)
-      ? `the ${kind} url ${withUserElided(issue.input)} names a user before ` +
-        `its host; ${credentialHome}`
-      : hostMessage;
+  const noPathOrFragment = `a ${kind} url takes no path or fragment, for example ${example}`;
+  return (issue) => {
+    if (typeof issue.input !== "string") return hostMessage;
+    const url = issue.input;
+    const refusal = USER_BEFORE_HOST.test(url)
+      ? `names a user before its host; ${credentialHome}`
+      : url.includes("#")
+        ? `has a fragment; ${noPathOrFragment}`
+        : PATH_AFTER_HOST.test(url)
+          ? `has a path after its host; ${noPathOrFragment}`
+          : undefined;
+    return refusal === undefined
+      ? hostMessage
+      : `the ${kind} url ${relayUrlForDisplay(url)} ${refusal}`;
+  };
 }
 
 // werift refuses a turn url whose `transport` parameter holds anything but
@@ -487,7 +535,9 @@ function refusedQueryParameterMessage(
       return "a query parameter with no value";
     }
     const name = parameter.slice(0, separator);
-    if (!allowed.includes(name)) return `the query parameter "${name}"`;
+    if (!allowed.includes(name)) {
+      return `the query parameter "${fittedRelayUrlPart(name)}"`;
+    }
   }
   return undefined;
 }
@@ -522,6 +572,7 @@ export const TurnUrlSchema = z
       "turn",
       "a turn entry's url must name a host after turn: or turns:, for " +
         "example turns:relay.example.org:443?transport=tcp",
+      "turns:relay.example.org:443?transport=tcp",
     ),
   })
   .refine(turnUrlTransportIsSupported, {
@@ -552,6 +603,7 @@ export const StunUrlSchema = z
       "stun",
       "a stun entry must name a host after stun: or stuns:, for " +
         "example stun:stun.example.org:3478",
+      "stun:stun.example.org:3478",
     ),
   })
   .check(
