@@ -4,6 +4,8 @@ import { expect, test } from "vitest";
 import {
   MAX_RECONNECT_ATTEMPTS,
   SHARED_SECRET_REGEX,
+  StunUrlSchema,
+  TurnUrlSchema,
   generateSharedSecret,
   parseConnectionConfig,
   safeParseConnectionConfig,
@@ -1102,10 +1104,11 @@ test.each([
   // A quoted entry can include padding; the host requirement is applied to the
   // trimmed value, so the padding decides nothing.
   ["stun:stun.example.org:3478 ", true],
-  // A user before the host is refused; an @ in the query names no user.
+  // A user before the host is refused, and a stun url takes no query string.
   ["stun:user@stun.example.org:3478", false],
   ["stun:@stun.example.org", false],
-  ["stun:stun.example.org:3478?x=a@b", true],
+  ["stun:stun.example.org:3478?x=a@b", false],
+  ["stun:stun.example.org:3478?transport=udp", false],
 ])('STUN URI "%s" is %s', (uri, valid) => {
   const result = safeParseConnectionConfig({ ...webrtcBase, stun: [uri] });
   expect(result.success).toBe(valid);
@@ -1141,11 +1144,11 @@ test.each([
   ["turn:?transport=tcp", false],
   ["turn:turn.example.org:3478 ", true],
   // A credential goes in the entry's username and credential fields, never in
-  // the url; an @ in the query names no user.
+  // the url, before the host or in the query.
   ["turn:user@turn.example.org:3478", false],
   ["turns:user:secret@turn.example.org:443", false],
   ["turn:@turn.example.org", false],
-  ["turn:turn.example.org:3478?x=a@b", true],
+  ["turn:turn.example.org:3478?x=a@b", false],
 ])('TURN URL "%s" is %s', (url, valid) => {
   const result = safeParseConnectionConfig({
     ...webrtcBase,
@@ -1165,11 +1168,12 @@ test.each([
   ["turn:turn.example.org:3478?transport=udp", true],
   ["turn:turn.example.org:3478?transport=tcp", true],
   ["turns:turn.example.org:5349?transport=tcp", true],
-  ["turn:turn.example.org:3478?foo=bar", true],
-  ["turn:turn.example.org:3478?transport=tcp&foo=bar", true],
+  // werift keeps these, but transport is a turn url's only parameter.
+  ["turn:turn.example.org:3478?foo=bar", false],
+  ["turn:turn.example.org:3478?transport=tcp&foo=bar", false],
   // The parameter name is read case-sensitively, so this url sets no transport
-  // at all and werift keeps the entry on its default.
-  ["turn:turn.example.org:3478?Transport=tcp", true],
+  // at all, and werift keeps the entry on its default.
+  ["turn:turn.example.org:3478?Transport=tcp", false],
   ["turn:turn.example.org:3478?transport=tcp&transport=udp", true],
   ["turns:turn.example.org:5349?transport=udp", false],
   ["turn:turn.example.org:3478?transport=UDP", false],
@@ -1291,6 +1295,56 @@ test("a STUN url naming a user is refused with the url named", () => {
     "the stun url stun:...@stun.example.org:3478 names a user before its " +
       "host; a stun server takes no credential, so leave it out",
   );
+});
+
+// --- relay url query parameters ----------------------------------------------
+
+function grammarMessages(
+  schema: typeof TurnUrlSchema,
+  url: string,
+): Array<string> {
+  const result = schema.safeParse(url);
+  return result.success ? [] : result.error.issues.map((i) => i.message);
+}
+
+test("a TURN url setting only transport is accepted", () => {
+  expect(
+    TurnUrlSchema.safeParse("turns:relay.example.org:443?transport=tcp"),
+  ).toMatchObject({ success: true });
+});
+
+test("a TURN url setting another query parameter is refused naming its key only", () => {
+  const messages = grammarMessages(
+    TurnUrlSchema,
+    "turns:relay.example.org:443?transport=tcp&credential=hunter2",
+  );
+  expect(messages).toEqual([
+    'a turn url may not set the query parameter "credential"; transport is ' +
+      "its only parameter, and a credential goes in the entry's username " +
+      "and credential fields",
+  ]);
+  expect(messages.join("\n")).not.toContain("hunter2");
+});
+
+test("a TURN url query parameter with no value is refused without naming it", () => {
+  const messages = grammarMessages(
+    TurnUrlSchema,
+    "turn:relay.example.org:3478?hunter2",
+  );
+  expect(messages).toEqual([
+    "a turn url may not set a query parameter with no value; transport is " +
+      "its only parameter, and a credential goes in the entry's username " +
+      "and credential fields",
+  ]);
+});
+
+test("a STUN url with a query string is refused naming its key", () => {
+  expect(
+    grammarMessages(StunUrlSchema, "stun:relay.example.org:3478?x=1"),
+  ).toEqual([
+    'a stun url may not set the query parameter "x"; a stun url takes no ' +
+      "query string, for example stun:stun.example.org:3478",
+  ]);
 });
 
 test("a padded TURN url names a host, and parses without its padding", () => {

@@ -470,11 +470,49 @@ function turnUrlTransportIsSupported(url: string): boolean {
   return true;
 }
 
+// A TURN uri defines one query parameter, `transport` (RFC 7065), and a STUN
+// uri none (RFC 7064), so any other is refused rather than passed on, where a
+// pasted credential could reach an invitation. The refusal names the key only:
+// a parameter with no `=` may be a bare secret, so it is not named at all.
+function refusedQueryParameterMessage(
+  url: string,
+  allowed: ReadonlyArray<string>,
+): string | undefined {
+  const queryStart = url.indexOf("?");
+  if (queryStart === -1) return undefined;
+  for (const parameter of url.slice(queryStart + 1).split("&")) {
+    const separator = parameter.indexOf("=");
+    if (separator === -1) {
+      if (allowed.includes(parameter)) continue;
+      return "a query parameter with no value";
+    }
+    const name = parameter.slice(0, separator);
+    if (!allowed.includes(name)) return `the query parameter "${name}"`;
+  }
+  return undefined;
+}
+
+function queryParameterCheck(
+  kind: "turn" | "stun",
+  allowed: ReadonlyArray<string>,
+  remedy: string,
+): (context: z.core.ParsePayload<string>) => void {
+  return (context) => {
+    const refused = refusedQueryParameterMessage(context.value, allowed);
+    if (refused === undefined) return;
+    context.issues.push({
+      code: "custom",
+      input: context.value,
+      message: `a ${kind} url may not set ${refused}; ${remedy}`,
+    });
+  };
+}
+
 /**
  * The url grammar of a `turn` entry: a `turn:` or `turns:` url naming a host,
- * with a `transport` the ICE layer keeps. Parses to the trimmed url. Shared by
- * the connection block's `turn` entries and the relay locator an invitation
- * may name, so both accept the same urls.
+ * with a `transport` the ICE layer keeps and no other query parameter. Parses
+ * to the trimmed url. Shared by the connection block's `turn` entries and the
+ * relay locator an invitation may name, so both accept the same urls.
  */
 export const TurnUrlSchema = z
   .string()
@@ -491,11 +529,20 @@ export const TurnUrlSchema = z
       "a turn entry's url may leave transport unset or set it to lowercase " +
       "tcp, and a turn: url may also set it to udp, for example " +
       "turns:relay.example.org:443?transport=tcp",
-  });
+  })
+  .check(
+    queryParameterCheck(
+      "turn",
+      ["transport"],
+      "transport is its only parameter, and a credential goes in the " +
+        "entry's username and credential fields",
+    ),
+  );
 
 /**
- * The grammar of a `stun` entry: a `stun:` or `stuns:` url naming a host.
- * Parses to the trimmed url. Shared like {@link TurnUrlSchema}.
+ * The grammar of a `stun` entry: a `stun:` or `stuns:` url naming a host,
+ * with no query string. Parses to the trimmed url. Shared like
+ * {@link TurnUrlSchema}.
  */
 export const StunUrlSchema = z
   .string()
@@ -506,7 +553,15 @@ export const StunUrlSchema = z
       "a stun entry must name a host after stun: or stuns:, for " +
         "example stun:stun.example.org:3478",
     ),
-  });
+  })
+  .check(
+    queryParameterCheck(
+      "stun",
+      [],
+      "a stun url takes no query string, for example " +
+        "stun:stun.example.org:3478",
+    ),
+  );
 
 const TurnServerSchema: z.ZodType<TurnServer> = z.object({
   url: TurnUrlSchema,

@@ -4319,7 +4319,7 @@ describe("displayInvitation: the declared terms it discloses (columns, citations
       host: "peer.example.org",
       relay: {
         turn: ["turns:relay.example.org:443?transport=tcp"],
-        stun: ["stun:relay.example.org:3478?x=\u001b[31m"],
+        stun: ["stun:relay.example.org\u001b[31m:3478"],
       },
     };
     const lines = renderDisplayInvitation(
@@ -4330,7 +4330,7 @@ describe("displayInvitation: the declared terms it discloses (columns, citations
     expect(heading).toBeGreaterThanOrEqual(0);
     expect(lines.slice(heading + 1, heading + 4)).toEqual([
       "    TURN turns:relay.example.org:443?transport=tcp",
-      "    STUN stun:relay.example.org:3478?x=\\x1b[31m",
+      "    STUN stun:relay.example.org\\x1b[31m:3478",
       `    ${CONSENT_FACTS.invitationRelay.note}`,
     ]);
     expect(heading).toBeLessThan(lines.indexOf(REPEAT_HEADING));

@@ -758,7 +758,7 @@ connection:
 *Required:* no  
 *Applies to:* `webrtc`
 
-STUN servers for ICE candidate gathering. Each entry is a string in `stun:` or `stuns:` URI format and must name a host: a scheme with no host (`stun:`) names no server, and since a configured list replaces the built-in default it would leave the run with no STUN at all, so it is refused. An entry naming a user before its host (`stun:user@host`) is refused too: a STUN server takes no credential. Mutually exclusive with `ice_provision`; if `ice_provision` is present, `stun` is invalid.
+STUN servers for ICE candidate gathering. Each entry is a string in `stun:` or `stuns:` URI format and must name a host: a scheme with no host (`stun:`) names no server, and since a configured list replaces the built-in default it would leave the run with no STUN at all, so it is refused. An entry naming a user before its host (`stun:user@host`), or holding a query string (`stun:host:3478?x=1`), is refused too: a STUN server takes no credential and a STUN URI defines no query parameter. Mutually exclusive with `ice_provision`; if `ice_provision` is present, `stun` is invalid.
 
 > **Honored by the CLI only.** The CLI builds its peer connection from `stun` and `turn`, and a configured list replaces the built-in default rather than adding to it, so the list you author is the list used. The browser client takes its servers from its own relay setting instead ([COMMUNICATION.md](COMMUNICATION.md#stunturn)), so on a web-conducted exchange these fields change no candidate the browser gathers. See [CLI.md](CLI.md#stun-and-what-it-discloses) for the default that applies when neither is set, what it discloses, and the idiom for gathering host candidates only.
 
@@ -778,6 +778,8 @@ connection:
 TURN servers for the case where a direct peer-to-peer connection cannot be established. Credential type `hmac-sha1` indicates how a deployment MINTS a time-limited credential rather than how a client presents one -- the minted value is still sent as the password -- so both types take the same shape here. Mutually exclusive with `ice_provision`; if `ice_provision` is present, `turn` is invalid.
 
 The CLI passes these entries to its peer connection (the browser client uses its own relay setting instead -- see [`connection.stun`](#connectionstun)). What a relayed run has been verified to do, the certificate the CLI requires of a relay before it will use one, and the wait such a run leaves behind afterwards are in [CLI.md](CLI.md#turn).
+
+A `url` may set no query parameter other than `transport`, the only one a TURN URI defines: any other (`?credential=...`) is refused with its name, never its value, so a credential pasted into the url is not repeated in the error.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
@@ -1615,7 +1617,7 @@ The cells:
 | `connection.role` | authored | not applicable | carried |
 | `connection.stun` | carried | not applicable | refused |
 | `connection.turn` | carried | not applicable | refused |
-| `connection.invitation_relay` | authored (recorded on accept) | not applicable | refused (an exchange accepted in the app records it, and exporting that exchange is refused) |
+| `connection.invitation_relay` | authored (recorded on accept) | not applicable | carried (recorded on accept; the browser does not relay through it) |
 | `connection.ice_transport_policy` | carried | not applicable | refused |
 | `connection.ice_provision` | refused | not applicable | refused |
 | `connection.proxy` | not applicable | refused | not applicable |

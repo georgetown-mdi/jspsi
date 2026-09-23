@@ -208,11 +208,11 @@ describe("the invitation's relay locator", () => {
       tokenWithEndpoint({
         channel: "webrtc",
         host: "signal.example",
-        relay: { turn: ["turns:relay.example.org:443?x=\u001b[31m"] },
+        relay: { turn: ["turns:relay.example.org\u001b[31m:443"] },
       }),
     );
     expect(summary.relay).toEqual({
-      turn: ["turns:relay.example.org:443?x=\\x1b[31m"],
+      turn: ["turns:relay.example.org\\x1b[31m:443"],
       stun: [],
     });
   });
