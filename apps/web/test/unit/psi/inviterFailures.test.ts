@@ -445,7 +445,8 @@ describe("failureFor", () => {
       "This configuration names its own signing paths",
     );
     expect(failure.message).toContain("Convert the configuration");
-    expect(failure.message).toContain("turn receipts off");
+    expect(failure.message).toContain("turn the signed receipt off");
+    expect(failure.message).toContain("keeps your file's signing settings");
   });
 
   test("the acceptor mounted-file 400 names its columns-step recovery", () => {

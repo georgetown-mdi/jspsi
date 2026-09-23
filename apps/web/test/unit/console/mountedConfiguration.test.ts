@@ -169,6 +169,10 @@ describe("an opened configuration's own paths, until converted", () => {
     expect(reason).toContain("signing.identity_file, signing.receipt_output");
     expect(reason).toContain(CONVERT_CONFIGURATION_LABEL);
     expect(reason).toContain("turn the signed receipt off");
+    expect(reason).toContain(
+      "this exchange then runs unsigned, and the configuration the console " +
+        "gives you to run on a schedule keeps your file's signing settings",
+    );
   });
 
   test("an unsigned run of it is not withheld", () => {
@@ -194,6 +198,10 @@ describe("an opened configuration's own paths, until converted", () => {
     expect(statement).toContain(
       "A run with a signed receipt waits until you convert",
     );
+    expect(statement).toContain(
+      "With the signed receipt off, this exchange runs unsigned",
+    );
+    expect(statement).toContain("keeps your file's signing settings");
     expect(statement).toContain(
       "The run uses the console's mounted folder either way.",
     );

@@ -259,7 +259,10 @@ export function conversionStatement(
     "." +
     (signs
       ? " A run with a signed receipt waits until you convert, which lets " +
-        "it go ahead with the console's own signing identity and receipt file."
+        "it go ahead with the console's own signing identity and receipt " +
+        "file. With the signed receipt off, this exchange runs unsigned and " +
+        SCHEDULED_CONFIGURATION +
+        " keeps your file's signing settings as they are."
       : "") +
     (folders ? " The run uses the console's mounted folder either way." : "") +
     " Converting " +
@@ -276,14 +279,16 @@ export function convertedStatement(
   state: MountedConfigurationState,
 ): string | undefined {
   if (state.status !== "opened" || state.converted !== true) return undefined;
+  const signs = (state.signingPaths ?? []).length > 0;
   return (
     "Converted: " +
     SCHEDULED_CONFIGURATION +
     " states the console's own paths in place of " +
     nameList(pathsConversionReplaces(state)) +
-    ((state.signingPaths ?? []).length > 0
+    (signs
       ? ", and a run with a signed receipt uses the console's signing " +
-        "identity and receipt file"
+        "identity and receipt file. With the signed receipt off, it states " +
+        "no signing settings at all"
       : "") +
     ". Close this configuration and open it again to keep your file's own."
   );
@@ -326,8 +331,13 @@ export function unconvertedSigningWithheldReason(
     " of its own (" +
     nameList(signingPaths) +
     "), and the console signs only with its own signing identity. Choose " +
-    `${CONVERT_CONFIGURATION_LABEL} to have the console's take over, turn ` +
-    "the signed receipt off, or run the file with psilink on the command line."
+    `${CONVERT_CONFIGURATION_LABEL} to sign with the console's identity; ` +
+    SCHEDULED_CONFIGURATION +
+    " then states the console's paths in place of yours. Or turn the " +
+    "signed receipt off: this exchange then runs unsigned, and " +
+    SCHEDULED_CONFIGURATION +
+    " keeps your file's signing settings as they are. Or run the file with " +
+    "psilink on the command line."
   );
 }
 

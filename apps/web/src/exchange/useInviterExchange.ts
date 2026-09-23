@@ -269,8 +269,11 @@ export function failureFor(
       message:
         "The console did not start this exchange. Your psilink.yaml names " +
         "its own signing identity or receipt file, and the console signs only " +
-        "with its own. Convert the configuration on the first step to use the " +
-        "console's, or turn receipts off, then start the run again.",
+        "with its own. Convert the configuration on the first step to sign " +
+        "with the console's identity, or turn the signed receipt off to run " +
+        "this exchange unsigned, then start the run again. With the signed " +
+        "receipt off, the configuration the console gives you to run on a " +
+        "schedule keeps your file's signing settings as they are.",
     };
   // A console job create rejected the mounted file: a 400 the driver categorizes
   // `config`. The file is the likely fault, so the alert names it -- except on

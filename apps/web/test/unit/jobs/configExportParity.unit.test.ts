@@ -163,26 +163,36 @@ describe("the settings a loaded configuration keeps in the export", () => {
     ).toBe(HANDOFF_SHARED_DIRECTORY_PLACEHOLDER);
   });
 
-  test("an unconverted export states both signing paths as read", () => {
+  test("an unsigned run over an unconverted certificate file hands off its signing block unchanged", () => {
     const document = mountedDocument(
       { tokenMaxAgeDays: 30 },
       { signing: MOUNTED_SIGNING },
     );
-    const exported = exportOver(document, {
-      signing: {
-        mode: "certificate",
-        partnerFingerprint: PARTNER_FINGERPRINT,
-      },
+    const exported = exportOver(document, { signing: { mode: "none" } });
+    expect(exportedValue(exported, "signing")).toEqual({
+      mode: "certificate",
+      partner_fingerprint: PARTNER_FINGERPRINT,
+      identity_file: MOUNTED_SIGNING.identityFile,
+      receipt_output: MOUNTED_SIGNING.receiptOutput,
     });
-    expect(exportedValue(exported, "signing.identity_file")).toBe(
-      MOUNTED_SIGNING.identityFile,
-    );
-    expect(exportedValue(exported, "signing.receipt_output")).toBe(
-      MOUNTED_SIGNING.receiptOutput,
-    );
     expect(carriedThroughFields(document)).toEqual([
       "authentication.token_max_age_days",
     ]);
+  });
+
+  test("a signed run over an unconverted file with no signing block names the placeholder identity", () => {
+    const document = mountedDocument({ tokenMaxAgeDays: 30 });
+    const exported = exportOver(document, {
+      signing: {
+        mode: "certificate",
+        partnerFingerprint: CONSOLE_PARTNER_FINGERPRINT,
+      },
+    });
+    expect(exportedValue(exported, "signing")).toEqual({
+      mode: "certificate",
+      partner_fingerprint: CONSOLE_PARTNER_FINGERPRINT,
+      identity_file: HANDOFF_SIGNING_IDENTITY_PLACEHOLDER,
+    });
   });
 
   test("an unconverted export keeps a signing block under a mode left unchanged", () => {
@@ -219,39 +229,36 @@ describe("the settings a loaded configuration keeps in the export", () => {
     expect(exportedValue(exported, "signing.receipt_output")).toBeUndefined();
   });
 
-  test("signing turned off in the console drops a mounted signing block", () => {
+  test("signing turned off in the console drops a converted signing block", () => {
     const document = mountedDocument(
       { tokenMaxAgeDays: 30 },
       { signing: MOUNTED_SIGNING },
     );
     // No `signing` override: the run's own intent composes no signing block.
-    const exported = exportOver(document);
+    const exported = exportOver(document, {}, true);
     expect(exportedValue(exported, "signing")).toBeUndefined();
     expect(exported).not.toContain("signing:");
   });
 
-  test.each([false, true])(
-    "the console's partner pin overrides the mounted one (converted: %s)",
-    (converted) => {
-      const document = mountedDocument(
-        { tokenMaxAgeDays: 30 },
-        { signing: MOUNTED_SIGNING },
-      );
-      const exported = exportOver(
-        document,
-        {
-          signing: {
-            mode: "certificate",
-            partnerFingerprint: CONSOLE_PARTNER_FINGERPRINT,
-          },
+  test("the console's partner pin overrides the mounted one once converted", () => {
+    const document = mountedDocument(
+      { tokenMaxAgeDays: 30 },
+      { signing: MOUNTED_SIGNING },
+    );
+    const exported = exportOver(
+      document,
+      {
+        signing: {
+          mode: "certificate",
+          partnerFingerprint: CONSOLE_PARTNER_FINGERPRINT,
         },
-        converted,
-      );
-      expect(exportedValue(exported, "signing.partner_fingerprint")).toBe(
-        CONSOLE_PARTNER_FINGERPRINT,
-      );
-    },
-  );
+      },
+      true,
+    );
+    expect(exportedValue(exported, "signing.partner_fingerprint")).toBe(
+      CONSOLE_PARTNER_FINGERPRINT,
+    );
+  });
 
   test("a setting the console composes no key for is written back", () => {
     expect(exportOver(mountedDocument({ tokenMaxAgeDays: 30 }))).toContain(

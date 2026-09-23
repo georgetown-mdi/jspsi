@@ -263,10 +263,12 @@ type FiledropConnection = Extract<
 /**
  * The composition with the paths an unconverted opened document read put back:
  * the shared folder or folder pair, where the run kept the document's filedrop
- * channel, and the signing block as {@link handBackSigning} writes it for the
- * run's own receipt choice -- the identity and receipt paths the document
- * states, under the mode the operator left or chose. The hand-off is the
- * operator's file, so a path of theirs stays theirs until they convert it.
+ * channel, and the document's signing block exactly as read for a run that
+ * signs nothing. The run's receipt mode is the run's choice; the hand-off is
+ * the operator's file, so a path and a mode of theirs stay theirs until they
+ * convert it. A signed run reaches here only for a document stating no signing
+ * path (the create refuses the rest), and gets the block
+ * {@link handBackSigning} writes for it.
  */
 function withPathsAsRead(
   composed: ExchangeSpec,
@@ -274,15 +276,18 @@ function withPathsAsRead(
   intent: JobExchangeIntent,
 ): ExchangeSpec {
   const { signing: composedSigning, ...rest } = composed;
-  const signing = handBackSigning(
-    {
-      mode: intent.signing?.mode ?? "none",
-      ...(composedSigning?.partnerFingerprint !== undefined
-        ? { partnerFingerprint: composedSigning.partnerFingerprint }
-        : {}),
-    },
-    mountedDocument.signing,
-  );
+  const signing =
+    intent.signing?.mode === "certificate"
+      ? handBackSigning(
+          {
+            mode: "certificate",
+            ...(composedSigning?.partnerFingerprint !== undefined
+              ? { partnerFingerprint: composedSigning.partnerFingerprint }
+              : {}),
+          },
+          mountedDocument.signing,
+        )
+      : mountedDocument.signing;
   const read = mountedDocument.connection;
   const connection =
     composed.connection.channel === "filedrop" && read.channel === "filedrop"
@@ -362,9 +367,9 @@ function composedHandoffSpec(
  * linkage terms, the signing paths, each already placeholdered above or, for
  * a document the operator did not convert, put back as read). A block
  * in {@link COMPOSED_BLOCKS} the composition did not write for this run -- an
- * operator who mounted a `signing` block and turned signing off in the console
- * -- is therefore absent from the export rather than surviving from the
- * mount: the composition's absence is itself the operator's edit. So no
+ * operator who converted a mounted `signing` block and turned signing off in
+ * the console -- is therefore absent from the export rather than surviving
+ * from the mount: the composition's absence is itself the operator's edit. So no
  * container path and no credential from the opened file reaches the template,
  * and no held setting outlives a run that replaced it. What survives is the
  * settings the console has no control for and never composes, which the load
