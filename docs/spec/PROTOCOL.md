@@ -1015,7 +1015,7 @@ This is a cross-implementation contract: both implementations compute the same i
 
 ## Relay credential derivation
 
-A party whose WebRTC connection needs a TURN relay uses the relay the invitation names, or one its own side controls where the invitation names none (see [The invitation's relay locator](#the-invitations-relay-locator) below), and authenticates to it with a credential derived from the invitation's 32-byte shared secret, so no relay password is sent in the invitation or out of band. The relay is coturn, in its `use-auth-secret` mode: it holds a table of shared secrets and accepts a time-limited credential signed under any of them. The reference relay under `infra/relay` configures a single static secret; the per-exchange table, and the register and revoke steps that go with it, are the relay change that follows this derivation.
+A party whose WebRTC connection needs a TURN relay uses the relay the invitation names, or one its own side controls where the invitation names none (see [The invitation's relay locator](#the-invitations-relay-locator) below), and authenticates to it with a credential derived from the invitation's 32-byte shared secret, so no relay password is sent in the invitation or out of band. The relay is coturn, in its `use-auth-secret` mode: it holds a table of shared secrets and accepts a time-limited credential signed under any of them. The reference relay under `infra/relay` holds one entry per exchange in that table, added and removed by its operator's register and revoke scripts.
 
 **The relay key.** One key per exchange, which the relay's operator registers as an entry in the relay's secrets table. The key is derived from the exchange's current shared secret, so it changes at each [rotation](#shared-secret-rotation), and a relay must hold the key derived from the current secret:
 
@@ -1023,7 +1023,7 @@ A party whose WebRTC connection needs a TURN relay uses the relay the invitation
 relay_key = hex(HKDF-SHA-256(ikm = secret, salt = 0x00 * 32, info = "psilink-relay-key-v1", 32))
 ```
 
-The key is the whole 32-byte output as 64 lowercase hex characters. coturn stores the entry as a string and keys its HMAC with that string's bytes, so the HMAC key is the 64 ASCII characters, not the 32 decoded bytes. The info string is a single fixed label in the [domain-separation label space](#p-256-authenticated-key-exchange), so the relay's operator, who holds the relay key, learns no other key derived from the secret.
+The key is the whole 32-byte output as 64 lowercase hex characters. coturn stores the entry as a string and keys its HMAC with that string's bytes, so the HMAC key is the 64 ASCII characters, not the 32 decoded bytes; `infra/relay/verify.sh` checks this against the running relay, which must refuse a credential keyed with the decoded bytes and accept one keyed with the characters. The info string is a single fixed label in the [domain-separation label space](#p-256-authenticated-key-exchange), so the relay's operator, who holds the relay key, learns no other key derived from the secret.
 
 **The credential.** coturn's time-limited credential format, minted locally from the relay key without contacting the relay:
 
@@ -1036,7 +1036,7 @@ The credential is standard base64 with padding. `label` is chosen by the party m
 
 HMAC-SHA-1 appears here only because coturn's credential format fixes it; it is not a psilink security primitive. The credential authorizes use of the relay and nothing else: the exchange's confidentiality and authentication rest on DTLS and the key exchange above, not on it.
 
-**What the relay key grants.** While the relay key is registered with a relay, holding the exchange's shared secret is equivalent to holding access to that relay: the key is computable from the secret, and the relay, not psilink, decides which expiries it honors. The 3600-second ceiling above bounds only the credentials psilink mints; anyone holding the key can mint one with a later expiry. Removing the key from the relay's secrets table is the revocation.
+**What the relay key grants.** While the relay key is registered with a relay, holding the exchange's shared secret is equivalent to holding access to that relay: the key is computable from the secret, and the relay, not psilink, decides which expiries it honors. The 3600-second ceiling above bounds only the credentials psilink mints; anyone holding the key can mint one with a later expiry. Removing the key from the relay's secrets table is the revocation: coturn then refuses a new allocation under the key, and does not end one already open.
 
 ### The invitation's relay locator
 

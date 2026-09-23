@@ -3,9 +3,9 @@
 Everything needed to bring up a self-hosted TURN relay that carries a psilink
 WebRTC exchange for a party on a network that blocks UDP or admits only TCP/443:
 a digest-pinned coturn image, a hardened configuration, the systemd unit that
-supervises it, an ACME renewal that keeps its certificate current, a per-exchange
-credential helper, and a verification script that asks the deployed relay whether
-it is doing its job.
+supervises it, an ACME renewal that keeps its certificate current, scripts that
+register and revoke each exchange's relay key, and a verification script that
+asks the deployed relay whether it is doing its job.
 
 The relay runs on a **dedicated instance**, provisioned from this reference
 rather than configured by hand. [`aws/provision.md`](aws/provision.md) is how one
@@ -55,6 +55,15 @@ covered and what it did not is in
 Fix what the next real run against those gets wrong rather than loosening a
 probe until it passes.
 
+**The per-exchange secrets table has not been driven through these scripts.**
+What coturn 4.18.0 does with the table -- two rows both authenticate, an
+unregistered secret is refused, a deleted row refuses new allocations and leaves
+open ones running, the static secret and the rows are a union, and the HMAC key
+is the 64 hex characters -- was measured by hand against the pinned image
+on 2026-09-23. `register-exchange.sh`, `revoke-exchange.sh`, the data
+directory's ownership, and `verify.sh`'s secrets-table probes have not yet run
+against a relay.
+
 `render-config.sh` and `mint-credential.sh` were also driven locally against a
 fixture before the live run: `render-config.sh` renders the template, writes
 at mode 600, and refuses a leftover placeholder, a placeholder named in a
@@ -69,10 +78,11 @@ the delivery decision is in
 [`docs/notes/standing-relay-delivery.md`](../../docs/notes/standing-relay-delivery.md).
 Neither is restated here.
 
-Nothing in this directory runs in CI. No workflow, package script, or test
-invokes it, and none of it is a build input. The one repository-level coupling is
-the docker Dependabot entry for `/infra/relay`, which raises a base image bump as
-a pull request.
+Nothing in this directory runs a relay in CI. Two tests under `scripts/` drive
+`certs/deploy-hook.sh`, the key scripts, and `render-config.sh` against a fixture
+host with a stub container runtime, and none of it is a build input. The one
+other repository-level coupling is the docker Dependabot entry for
+`/infra/relay`, which raises a base image bump as a pull request.
 
 ## Order of operations
 
@@ -83,16 +93,16 @@ a pull request.
    refuses to run without it; nothing defaults to a hostname.
 3. Put `/etc/psilink-relay/acme.env` from [`certs/env.example`](certs/env.example)
    at mode 600, with the DNS provider's credential.
-4. Run `install.sh` as root. It installs a container runtime, mints the static
-   authentication secret if the host has none, builds the image, obtains a
-   certificate, renders the configuration, installs the unit and the two timers,
-   starts the relay, and runs `verify.sh`.
+4. Run `install.sh` as root. It installs a container runtime, builds the image,
+   creates the data directory for the secrets table, obtains a certificate,
+   renders the configuration, installs the unit and the two timers, starts the
+   relay, and runs `verify.sh`.
 5. Read `verify.sh`'s output. A relay that starts and cannot allocate looks
    identical from the console.
-6. Per exchange: `mint-credential.sh [name] [ttl]` prints a credential and the
-   `connection.turn` entry it goes in. One hour by default -- what a leaked
-   credential is worth is the length of one exchange, not the life of the
-   deployment.
+6. Per exchange: `register-exchange.sh <exchange-id> <key-hex64>` with the
+   exchange's relay key, and `revoke-exchange.sh <exchange-id>` when it ends --
+   see [Per-exchange keys](#per-exchange-keys). The parties mint their own
+   credentials from that key.
 
 `install.sh` is idempotent. Run it again after an edit to the template, the unit,
 or the Dockerfile and it converges.
@@ -108,11 +118,65 @@ or the Dockerfile and it converges.
 | `psilink-relay-docker.service` | The same container on a docker host: a plain systemd unit running `docker run` in the foreground, installed as `/etc/systemd/system/psilink-relay.service`. Same image, mounts, and flags as the Quadlet unit -- the two are edited together |
 | `psilink-relay-verify.service`, `.timer` | The daily verification. A standing relay is idle between exchanges, so nothing else notices it stopped carrying allocations until a partner is waiting on one |
 | `install.sh` | The whole install, idempotent |
-| `verify.sh` | Drives a real TURNS handshake, a real allocation, and a probe that an allocation toward an internal address is refused. Passes only on an observed refusal: a question that could not be asked reports UNCLEAR and fails. Connects to the realm's name by default; `PSILINK_RELAY_VERIFY_CONNECT` overrides the TCP connect target while the realm still names the SNI and TURN realm -- `install.sh` sets it to the instance's private address for the end-of-install run, because EC2 does not hairpin an instance's traffic back to its own Elastic IP, while the daily timer stays on the public name so it fails if that path breaks. `PSILINK_RELAY_VERIFY_WAIT` sets how many seconds it retries a bare TCP connect before its first probe, waiting for a just-(re)started listener to come up; 30 by default |
-| `mint-credential.sh` | One time-limited credential: `<expiry>:<name>` as the username, the base64 HMAC-SHA1 of it as the password |
+| `register-exchange.sh`, `revoke-exchange.sh`, `exchange-keys.sh` | Add and remove one exchange's relay key in the secrets table; the third is the shared part both source. See [Per-exchange keys](#per-exchange-keys) |
+| `verify.sh` | Drives a real TURNS handshake, a real allocation, a probe that an allocation toward an internal address is refused, and the secrets table: two keys registered for the run both allocate, an unregistered key and a credential keyed with a key's decoded bytes are refused, and a revoked key's new allocation is refused. It revokes its own keys on exit. Passes only on an observed refusal: a question that could not be asked reports UNCLEAR and fails. Connects to the realm's name by default; `PSILINK_RELAY_VERIFY_CONNECT` overrides the TCP connect target while the realm still names the SNI and TURN realm -- `install.sh` sets it to the instance's private address for the end-of-install run, because EC2 does not hairpin an instance's traffic back to its own Elastic IP, while the daily timer stays on the public name so it fails if that path breaks. `PSILINK_RELAY_VERIFY_WAIT` sets how many seconds it retries a bare TCP connect before its first probe, waiting for a just-(re)started listener to come up; 30 by default |
+| `mint-credential.sh` | One time-limited credential under the static secret, on a host that holds one: `<expiry>:<name>` as the username, the base64 HMAC-SHA1 of it as the password |
 | `relay.env.example` | The host's one configuration file, copied to `/etc/psilink-relay/relay.env` |
 | `certs/` | ACME DNS-01 renewal: the timer and its unit, the client-neutral `renew.sh`, the deploy hook, and the provider credential's example |
 | `aws/` | The AWS-specific half: instance provisioning, the IMDSv2 external-address helper, and the demo box's stop/start scripts |
+
+## Per-exchange keys
+
+Each exchange has its own relay key, derived from the exchange's shared secret
+([PROTOCOL.md, Relay credential derivation](../../docs/spec/PROTOCOL.md#relay-credential-derivation)).
+The relay holds one row per registered exchange in coturn's `turn_secret` table,
+in the SQLite file `/var/lib/psilink-relay/turndb` (mounted at
+`/var/lib/coturn/turndb`), and accepts a credential minted under any row.
+
+Run both scripts as root on the relay host, from `/opt/psilink-relay`:
+
+```sh
+register-exchange.sh <exchange-id> <key-hex64>
+revoke-exchange.sh <exchange-id>
+```
+
+- **The arguments.** The exchange id is 1 to 128 of `[A-Za-z0-9._-]`, not
+  starting with `-`; the key is 64 lowercase hex characters, the form coturn
+  keys its HMAC with. Either script refuses a malformed argument and names it.
+- **Registering.** Adds the key's row. An exchange already registered has its
+  prior row deleted first, so the relay holds only its current key -- register
+  again after each [rotation](../../docs/spec/PROTOCOL.md#shared-secret-rotation).
+  A key another exchange holds is refused.
+- **Revoking.** Deletes the exchange's row. A new allocation under the key is
+  refused within about 200 ms, with no restart. An allocation already open is
+  NOT cut: its refreshes kept succeeding for over two minutes after the delete,
+  through a forced re-authentication, measured against coturn 4.18.0. It ends
+  when the client stops refreshing or its lifetime lapses. Whether coturn also
+  ends it at the credential's expiry (at most 3600 s for a credential psilink
+  mints) has not been measured.
+- **Lifetime.** A registered row lives until it is revoked or replaced. No
+  expiry or renewal policy for rows is decided yet.
+- **The mapping.** `turn_secret` is keyed by realm and key and holds no exchange
+  id, so the scripts keep `/etc/psilink-relay/exchange-keys`, one
+  `<exchange-id> <key>` line per registered exchange, mode 600. A text file
+  rather than a second SQLite database, because the host has no `sqlite3`
+  requirement and the image carries no `sqlite3` binary; it sits under `/etc`,
+  not in the data directory, so only root can change which row an exchange owns.
+  The scripts hold a lock on `exchange-keys.lock` for each edit.
+- **How they reach the table.** Through the relay image's own `turnadmin`
+  (`-s` to add, `-X` to delete, with the server's realm), in a throwaway
+  container with no network, as the image's account -- which owns the data
+  directory, so the SQLite file `turnadmin` creates on the first registration
+  is one the server can read. A host with coturn's `turnadmin` installed could
+  run the same commands against `/var/lib/psilink-relay/turndb` as that account.
+
+**The static secret is optional.** A host holding
+`/etc/psilink-relay/static-auth-secret` renders it beside the table, and coturn
+accepts a credential under the static secret or any row -- measured, so a
+relay can move to per-exchange keys with its static secret still set, while
+credentials from `mint-credential.sh` keep working. To finish the move, delete
+the file and restart `psilink-relay.service`. `install.sh` keeps a secret it
+finds and mints none.
 
 ## Supervision and the container runtime
 
@@ -202,8 +266,10 @@ given.
 
 | path | what goes there |
 | --- | --- |
-| `/etc/psilink-relay/static-auth-secret` | The static secret every credential is minted under, mode 600. `install.sh` mints one if the host has none. It never appears on a unit's `ExecStart` line, in a tracked file, or in the journal |
-| `/etc/psilink-relay/turnserver.conf` | The rendered configuration, mode 600, because it carries that secret. Rendered from the tracked template on every start |
+| `/etc/psilink-relay/static-auth-secret` | Optional. The static secret `mint-credential.sh` signs under, mode 600. It never appears on a unit's `ExecStart` line, in a tracked file, or in the journal |
+| `/etc/psilink-relay/turnserver.conf` | The rendered configuration, mode 600, because it can hold that secret. Rendered from the tracked template on every start |
+| `/etc/psilink-relay/exchange-keys` | Which registered key belongs to which exchange, mode 600 |
+| `/var/lib/psilink-relay/turndb` | The secrets table, owned by the container's uid |
 | `/etc/psilink-relay/certs/` | The certificate and private key the ACME hook deploys. The key is mode 600 and owned by the container's uid |
 | `/etc/psilink-relay/relay.env` | The realm, the port range, the quotas, and the external-address helper. Copy [`relay.env.example`](relay.env.example) |
 | `/etc/psilink-relay/acme.env` | The ACME contact, client, provider, and the provider's credential. Copy [`certs/env.example`](certs/env.example) |

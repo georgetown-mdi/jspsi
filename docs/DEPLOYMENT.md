@@ -10,7 +10,14 @@ This document covers the deployment and operation of the supporting services req
 
 psilink does not bundle a STUN or TURN server. A deployment needing NAT traversal for WebRTC either points at a commercial ICE-credential service (Twilio Network Traversal Service and equivalents return time-limited credentials on demand; see [COMMUNICATION.md#stunturn](COMMUNICATION.md#stunturn)) or operates a relay of its own.
 
-For the self-hosted case, [`infra/relay/`](../infra/relay/README.md) is a reference deployment of coturn on a dedicated instance: a digest-pinned image, a hardened configuration, the unit that supervises it, ACME certificate renewal, a per-exchange credential helper, and a verification script. Its README is the operational document -- what to launch, what to open, and the order of operations -- and its [Provenance](../infra/relay/README.md#provenance) section states how far the reference has been driven and what remains undriven. Treat it as a starting point to verify in your own environment rather than a validated configuration.
+For the self-hosted case, [`infra/relay/`](../infra/relay/README.md) is a reference deployment of coturn on a dedicated instance: a digest-pinned image, a hardened configuration, the unit that supervises it, ACME certificate renewal, scripts that register and revoke each exchange's relay key, and a verification script. Its README is the operational document -- what to launch, what to open, and the order of operations -- and its [Provenance](../infra/relay/README.md#provenance) section states how far the reference has been driven and what remains undriven. Treat it as a starting point to verify in your own environment rather than a validated configuration.
+
+The reference relay authenticates against a table of per-exchange keys ([Per-exchange keys](../infra/relay/README.md#per-exchange-keys)):
+
+- **One key per exchange.** Each exchange's relay key, derived from its shared secret ([PROTOCOL.md](spec/PROTOCOL.md#relay-credential-derivation)), is a row the relay's operator adds with `register-exchange.sh` and removes with `revoke-exchange.sh`. The relay reads the table per request, so neither needs a restart.
+- **What revoking stops.** New allocations under the key. An allocation already open is not cut.
+- **How long a row lives.** Until it is revoked or replaced by the exchange's next key. A policy for expiring rows is not yet decided.
+- **The static secret during a migration.** A relay may keep its single static secret set beside the table: coturn accepts a credential under either, so credentials minted under the static secret keep working until the operator removes it.
 
 A relay forwards the encrypted WebRTC channel without terminating it, so it sees addresses, timing, and volume and no exchange data. That holds whether the relay is yours or a vendor's, which is why a commercial service is an acceptable option; see [SECURITY_DESIGN.md](SECURITY_DESIGN.md#channel-security).
 
