@@ -139,8 +139,11 @@ one this app does not run, and the key file otherwise.
 sign exchange receipts, so a run here would complete without the receipt the
 block asks for. The record schema refuses a `sharedSecret` beside the block on
 the same terms as beside another channel, so the one narrowing withholds the
-run, and an artifact holding both is refused whole rather than installed. The
-command-line import holds the block unchanged -- every field, an `@` in any of
+run, and an artifact holding both is refused whole rather than installed, under
+the generic newer-version reason, since no artifact this app exports holds
+both; a record such an artifact installed before this rule fails the list read
+and is discarded from the recovery surface. The command-line import holds the
+block unchanged -- every field, an `@` in any of
 its values kept as text and never resolved in the browser -- no editor changes
 it, and the export writes it back as read. The configuration page names the
 block, as the file spells it, as the part this app cannot run, in place of the
