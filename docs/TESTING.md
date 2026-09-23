@@ -888,6 +888,13 @@ there too, so nothing lands in the working tree; the nightly workflow
 ([`.github/workflows/nightly_mutation.yaml`](../.github/workflows/nightly_mutation.yaml))
 checks out `staging` explicitly and uploads both as a run artifact.
 
+A test nested in a `describe` block is counted by this runner as covering a
+mutant but not as killing it. Measured 2026-09-23 on `abortMarker.ts`: the
+same 21 tests scored 55% while nested and 91% once moved to the top level of
+the file, with no other change. Until the cause is settled, write a
+mutation-targeted test at the top level of its file, and read a file's score
+knowing that its `describe`-nested tests contribute nothing to it.
+
 ### The floors
 
 `packages/core/stryker.config.mjs` holds the corpus and each file's committed
