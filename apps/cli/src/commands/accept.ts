@@ -928,7 +928,7 @@ function reconcileAcceptConfig(params: {
    * The disclosed subset this acceptance consents to, from the invitation token.
    * Compared against the kept config's recorded commitment only to warn about a
    * removal; what is persisted is decided by the caller's own write (see
-   * {@link persistExpectedPayloadColumns}).
+   * {@link refreshAcceptanceRecords}).
    */
   consentedPayloadColumns: string[] | undefined;
   target?: RunnableConnectionConfig;
