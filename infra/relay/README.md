@@ -169,8 +169,11 @@ because a rebuilt image is where that uid moves.
 
 The hook **restarts** rather than reloads. Whether a signal makes coturn re-read
 its certificate is a question nobody has driven against the real server, so the
-hook does the thing that certainly works; the timer runs at a fixed early hour
-because a restart drops any allocation in flight.
+hook does the thing that certainly works. A restart drops any allocation in
+flight, so the hook restarts only when the certificate or key it deploys differs
+from the copy already in `/etc/psilink-relay/certs` in content or owner -- on
+most days the timer fires, the ACME client renews nothing and the relay keeps
+running -- and the timer runs at a fixed early hour for the day it does renew.
 
 ## Portability
 
