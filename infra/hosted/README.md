@@ -34,16 +34,7 @@ Two settings differ from the committed files by design: `DisableDefaultEC2Securi
 
 ## How the inbound rules are held
 
-The intended posture is one security group per instance, admitting `:443` from Cloudflare's published ranges and nothing else inbound, and holding after a `rebuild-environment` or a platform update as well as after a configuration deployment.
-
-By default Elastic Beanstalk creates a security group of its own for each environment's instances, owned by the environment's CloudFormation stack, and a rebuild or a platform update recreates it from the platform's template. A rule list this root does not own cannot be held by it. So this root sets `DisableDefaultEC2SecurityGroup` to `true` on both environments: the platform creates no group of its own, and the group in `security_group.tf` -- owned by this root, with inline rules that make its inbound list exclusive -- is the only one attached. Because the choice is an option setting, it is part of the environment configuration, which a rebuild replays; a revoke is not.
-
-The alternatives, and why they were not taken:
-
-- **Look the platform's group up with a data source and attach rules to it** (`aws_vpc_security_group_ingress_rule`). That can add rules to a group but cannot remove one it did not create, and a rebuild gives the group a new id and a fresh rule set that no apply has seen.
-- **Import the platform's group into this state.** Inline rules on an imported group would make its list exclusive, so an apply removes any rule not declared here. But the group has two owners, and after a rebuild the state names a group that no longer exists: holding the posture needs a re-import and an apply after every rebuild, and between the two the group is the platform's.
-
-The shared group this root adopts is the group both environments already attach, so adopting it changes no id either instance uses.
+The intended posture is one security group per instance, admitting `:443` from Cloudflare's published ranges and nothing else inbound, and holding after a `rebuild-environment` or a platform update as well as after a configuration deployment. This root sets `DisableDefaultEC2SecurityGroup` to `true` on both environments, so the platform creates no group of its own and the group in `security_group.tf` -- owned by this root, with inline rules that make its inbound list exclusive, and the group both environments already attach -- is the only one attached; a rebuild replays the setting. Why this and not a data-source lookup or an import of the platform's group is in [the design note](../../docs/notes/hosted-environment-opentofu.md).
 
 ## State and credentials
 
@@ -128,6 +119,7 @@ For whoever runs this root for the first time, with the tools and credentials th
 
 Each is something the first run confirms or corrects:
 
+- Each environment's `description` in `terraform.tfvars` is its live one. The root passes it to the environment as given, so an apply clears a live description the file leaves out and replaces one it states differently; copy each from `aws elasticbeanstalk describe-environments --environment-names <name> --query 'Environments[0].Description'` before the first plan.
 - OpenTofu 1.10 or later, for the S3 backend's `use_lockfile`. On an older release, drop that line and name a DynamoDB lock table in `backend.hcl` instead.
 - The Cloudflare provider's v5 schema: the `cloudflare_ip_ranges` data source exposes `ipv4_cidrs` and `ipv6_cidrs`; `cloudflare_zone_setting` takes `setting_id` and `value`, with HSTS under `security_header` as a `strict_transport_security` object; `cloudflare_dns_record` takes the full name and requires `ttl`, where `1` is automatic.
 - HSTS `nosniff` is `false`. `docs/DEPLOYMENT.md` does not record it; if the plan proposes changing it, record the live value there and match it here.

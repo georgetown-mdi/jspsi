@@ -22,9 +22,14 @@ origin_security_group = {
 
 cloudflare_zone_id = "<Cloudflare zone id>"
 
+# Each description must be the environment's live one, from
+# aws elasticbeanstalk describe-environments --environment-names <name>
+# An apply clears a live description left out here. The production
+# configuration file states none, so its value is only in the live account.
 environments = {
   production = {
     name        = "<production EB_ENVIRONMENT_NAME>"
+    description = "<production environment description>"
     public_name = "<production public name>"
   }
   staging = {
