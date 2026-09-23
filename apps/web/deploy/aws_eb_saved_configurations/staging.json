@@ -51,7 +51,7 @@
         {
           "Namespace": "aws:autoscaling:launchconfiguration",
           "OptionName": "DisableDefaultEC2SecurityGroup",
-          "Value": "false"
+          "Value": "true"
         },
         {
           "Namespace": "aws:autoscaling:launchconfiguration",
@@ -119,7 +119,7 @@
           "ResourceName": "AWSEBEC2LaunchTemplate",
           "Namespace": "aws:autoscaling:launchconfiguration",
           "OptionName": "SecurityGroups",
-          "Value": "sg-0f57df31cf3bbf9d8,sg-03eba33452d0c9f9c"
+          "Value": "sg-0f57df31cf3bbf9d8"
         },
         {
           "ResourceName": "AWSEBAutoScalingGroup",
