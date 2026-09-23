@@ -14,6 +14,7 @@ import {
   MAX_IMPORT_FILE_BYTES,
   ManagedImportCustodyUnreadableError,
   ManagedImportHandedOffError,
+  importManagedConfigurationFile,
   importManagedExchangeFile,
 } from "@psi/managed/managedExchangeImport";
 import {
@@ -23,6 +24,7 @@ import {
   openManagedExchangeDatabase,
   requestPersistentStorage,
 } from "@psi/managed/managedExchangeStore";
+import { MAX_CONFIGURATION_IMPORT_BYTES } from "@psi/managed/managedCommandLineImport";
 import { listManagedLocalState } from "@psi/managed/managedLocalState";
 
 import { Lobby } from "@exchange/Lobby";
@@ -38,7 +40,9 @@ import {
 } from "./managedHandoffGate";
 import {
   IMPORT_FAILURE_TITLE,
+  UNREADABLE_CONFIGURATION_REASON,
   UNREADABLE_IMPORT_REASON,
+  configurationImportFailureReason,
   importFailureReason,
 } from "./managedImportFailure";
 import { BetweenVisitNotifications } from "./BetweenVisitNotifications";
@@ -47,6 +51,7 @@ import { managedImportGrantNotice } from "./managedImportGrantNotice";
 import { recoveryRows } from "./savedExchangesRecovery";
 
 import type { ManagedImportGrantNotice } from "./managedImportGrantNotice";
+import type { ManagedImportResult } from "@psi/managed/managedExchangeImport";
 import type { ManagedSpentHandoff } from "@psi/managed/managedLocalState";
 import type { RecoveryRow } from "./savedExchangesRecovery";
 import type { SavedExchangeRow } from "./savedExchangesModel";
@@ -189,9 +194,9 @@ function SavedExchangesSurface({
 
 /** The populated run list: a row per stored exchange with a run/open action and the
  * always-available delete, above a primary create entry into the invite/configure
- * flow (where saving as recurring happens at share time) and the one-off quick-path
- * alternative. Deleting a row calls `reload`, so the list reflects the removal without
- * a page navigation. */
+ * flow (where saving as recurring happens at share time), the one-off quick-path
+ * alternative, and the command-line configuration import. Deleting a row calls
+ * `reload`, so the list reflects the removal without a page navigation. */
 function SavedExchangesList({
   rows,
   reload,
@@ -260,6 +265,7 @@ function SavedExchangesList({
         </Anchor>{" "}
         sets a TURN relay your side connects through.
       </p>
+      <ImportConfigurationFile />
     </>
   );
 }
@@ -645,7 +651,9 @@ function importFailureAlert(error: unknown): ImportFailureAlert {
  * which lands as a configuration-only exchange. The file decides which, not the
  * control ({@link importManagedExchangeFile}). A successful import puts the
  * operator on the imported exchange's own surface, so it is a way forward even
- * when the list read itself cannot be mended.
+ * when the list read itself cannot be mended. A populated list offers the
+ * configuration leg alone ({@link ImportConfigurationFile}): a backup installs
+ * a runnable record, and is imported only beside an empty or unreadable list.
  *
  * A file the import will not take is refused with the reason its failure has
  * ({@link importFailureReason}): a configuration this app cannot hold says what
@@ -667,47 +675,12 @@ function importFailureAlert(error: unknown): ImportFailureAlert {
  * choose again, and the notice is only read where it is shown. An import with nothing
  * to say goes straight through. */
 function ImportExchangeFile() {
-  const navigate = useNavigate();
-  const [importFailure, setImportFailure] = useState<ImportFailureAlert>();
-  const [grantNotice, setGrantNotice] = useState<{
-    id: string;
-    notice: ManagedImportGrantNotice;
-  }>();
-
-  function onFile(file: File | null) {
-    if (file === null) return;
-    setImportFailure(undefined);
-    setGrantNotice(undefined);
-    // Cap the file size before reading it: both files are small operator-held
-    // documents, so an over-cap file is refused with the unreadable-file copy
-    // rather than read into memory ahead of the bounded parse.
-    if (file.size > MAX_IMPORT_FILE_BYTES) {
-      setImportFailure({
-        color: "red",
-        title: IMPORT_FAILURE_TITLE,
-        reason: UNREADABLE_IMPORT_REASON,
-      });
-      return;
-    }
-    void (async () => {
-      try {
-        const source = await file.text();
-        // Best-effort persistence on the imported record's origin, the same request
-        // a create makes; a denied grant does not fail the import.
-        void requestPersistentStorage();
-        const { record, missingGrants } =
-          await importManagedExchangeFile(source);
-        const notice = managedImportGrantNotice(missingGrants);
-        if (notice !== undefined) {
-          setGrantNotice({ id: record.id, notice });
-          return;
-        }
-        await navigate({ to: "/saved/$id", params: { id: record.id } });
-      } catch (error) {
-        setImportFailure(importFailureAlert(error));
-      }
-    })();
-  }
+  const { onFile, outcome } = useImportFile({
+    maxBytes: MAX_IMPORT_FILE_BYTES,
+    oversizeReason: UNREADABLE_IMPORT_REASON,
+    importFile: importManagedExchangeFile,
+    failureAlert: importFailureAlert,
+  });
 
   return (
     <div className={styles.callout}>
@@ -719,6 +692,127 @@ function ImportExchangeFile() {
         key file stays where it is, so that exchange keeps running from the
         command line and not in this browser.
       </p>
+      <ImportOutcomeAlerts outcome={outcome} />
+      <FileButton
+        accept="application/json,.json,application/yaml,.yaml,.yml"
+        onChange={onFile}
+      >
+        {(props) => (
+          <Button mt="sm" variant="default" {...props}>
+            Import a file
+          </Button>
+        )}
+      </FileButton>
+    </div>
+  );
+}
+
+/** The configuration import beside a populated list: a command-line
+ * `psilink.yaml` lands as a configuration-only exchange, the same record the
+ * shared control installs from one ({@link importManagedConfigurationFile}), on
+ * any channel. A backup file is refused here by name
+ * ({@link configurationImportFailureReason}) rather than restored. */
+function ImportConfigurationFile() {
+  const { onFile, outcome } = useImportFile({
+    maxBytes: MAX_CONFIGURATION_IMPORT_BYTES,
+    oversizeReason: UNREADABLE_CONFIGURATION_REASON,
+    importFile: importManagedConfigurationFile,
+    failureAlert: (error) => ({
+      color: "red",
+      title: IMPORT_FAILURE_TITLE,
+      reason: configurationImportFailureReason(error),
+    }),
+  });
+
+  return (
+    <div className={styles.callout}>
+      <p className={styles.calloutLead}>Import a command-line configuration.</p>
+      <p className={styles.small}>
+        Import a psilink.yaml to edit its settings here. Its key file stays
+        where it is, so that exchange keeps running from the command line and
+        not in this browser.
+      </p>
+      <ImportOutcomeAlerts outcome={outcome} />
+      <FileButton accept="application/yaml,.yaml,.yml" onChange={onFile}>
+        {(props) => (
+          <Button mt="sm" variant="default" {...props}>
+            Import a psilink.yaml
+          </Button>
+        )}
+      </FileButton>
+    </div>
+  );
+}
+
+/** What an import control shows once a file has been tried: a grant notice
+ * with the way onward, or the refusal. */
+interface ImportOutcome {
+  grantNotice?: { id: string; notice: ManagedImportGrantNotice };
+  failure?: ImportFailureAlert;
+}
+
+/** Read a chosen file through `importFile` and go to the imported exchange, or
+ * hold the notice or refusal the control shows instead. A file over `maxBytes`
+ * is refused with `oversizeReason` before it is read. */
+function useImportFile({
+  maxBytes,
+  oversizeReason,
+  importFile,
+  failureAlert,
+}: {
+  maxBytes: number;
+  oversizeReason: string;
+  importFile: (source: string) => Promise<ManagedImportResult>;
+  failureAlert: (error: unknown) => ImportFailureAlert;
+}): { onFile: (file: File | null) => void; outcome: ImportOutcome } {
+  const navigate = useNavigate();
+  const [outcome, setOutcome] = useState<ImportOutcome>({});
+
+  function onFile(file: File | null) {
+    if (file === null) return;
+    setOutcome({});
+    // Cap the file size before reading it: both files are small operator-held
+    // documents, so an over-cap file is refused with the unreadable-file copy
+    // rather than read into memory ahead of the bounded parse.
+    if (file.size > maxBytes) {
+      setOutcome({
+        failure: {
+          color: "red",
+          title: IMPORT_FAILURE_TITLE,
+          reason: oversizeReason,
+        },
+      });
+      return;
+    }
+    void (async () => {
+      try {
+        const source = await file.text();
+        // Best-effort persistence on the imported record's origin, the same request
+        // a create makes; a denied grant does not fail the import.
+        void requestPersistentStorage();
+        const { record, missingGrants } = await importFile(source);
+        const notice = managedImportGrantNotice(missingGrants);
+        if (notice !== undefined) {
+          setOutcome({ grantNotice: { id: record.id, notice } });
+          return;
+        }
+        await navigate({ to: "/saved/$id", params: { id: record.id } });
+      } catch (error) {
+        setOutcome({ failure: failureAlert(error) });
+      }
+    })();
+  }
+
+  return { onFile, outcome };
+}
+
+/** The alerts an import control shows under its lead: the grant notice with its
+ * button onward, and the refusal. */
+function ImportOutcomeAlerts({ outcome }: { outcome: ImportOutcome }) {
+  const navigate = useNavigate();
+  const { grantNotice, failure } = outcome;
+  return (
+    <>
       {grantNotice !== undefined && (
         <Alert color="yellow" title={grantNotice.notice.title} mb="sm">
           <p className={styles.small}>{grantNotice.notice.lead}</p>
@@ -740,21 +834,11 @@ function ImportExchangeFile() {
           </Button>
         </Alert>
       )}
-      {importFailure !== undefined && (
-        <Alert color={importFailure.color} title={importFailure.title} mb="sm">
-          {importFailure.reason}
+      {failure !== undefined && (
+        <Alert color={failure.color} title={failure.title} mb="sm">
+          {failure.reason}
         </Alert>
       )}
-      <FileButton
-        accept="application/json,.json,application/yaml,.yaml,.yml"
-        onChange={onFile}
-      >
-        {(props) => (
-          <Button mt="sm" variant="default" {...props}>
-            Import a file
-          </Button>
-        )}
-      </FileButton>
-    </div>
+    </>
   );
 }

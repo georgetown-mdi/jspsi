@@ -3,7 +3,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { generateSharedSecret, getDefaultLinkageTerms } from "@psilink/core";
 
-import { page } from "vitest/browser";
+import { page, userEvent } from "vitest/browser";
 
 import { createElement } from "react";
 
@@ -13,14 +13,24 @@ import { SavedExchanges, SavedExchangesHome } from "@recurring/SavedExchanges";
 import {
   clearManagedExchanges,
   createManagedExchange,
+  listManagedExchanges,
   spendManagedExchangeIfCurrent,
 } from "@psi/managed/managedExchangeStore";
 import {
   composeManagedExchangeFile,
   runnableManagedExchangeOrRefuse,
 } from "@psi/managed/managedExchangeRecord";
+import {
+  encodeManagedExchangeArtifact,
+  serializeManagedExchangeArtifact,
+} from "@psi/managed/managedExchangeArtifact";
+import {
+  listManagedLocalState,
+  markManagedExchangeBackedUp,
+} from "@psi/managed/managedLocalState";
+import { BACKUP_NOT_CONFIGURATION_REASON } from "@recurring/managedImportFailure";
 import { Lobby } from "@exchange/Lobby";
-import { markManagedExchangeBackedUp } from "@psi/managed/managedLocalState";
+import { composeManagedCronExport } from "@psi/managed/managedCronExport";
 import styles from "@styles/app.module.css";
 
 import { createAppMount } from "./renderApp";
@@ -702,5 +712,88 @@ describe("saved list route: delete is a fully supported, always-available action
       .element(page.getByText("You have none saved yet.", { exact: false }))
       .toBeInTheDocument();
     expect(page.getByText("Riverbend quarterly").query()).toBeNull();
+  });
+});
+
+describe("saved list route: a populated list imports a command-line configuration", () => {
+  /** Choose `bytes` as `name` in the one file input the surface renders. */
+  async function chooseFile(bytes: string, name: string): Promise<void> {
+    await userEvent.upload(
+      page.elementLocator(
+        document.querySelector('input[type="file"]') as HTMLElement,
+      ),
+      new File([bytes], name),
+    );
+  }
+
+  test("offers the configuration import, and not the shared backup import", async () => {
+    await createRunnableExchange(newExchange());
+
+    app.render(createElement(SavedExchanges));
+
+    await expect
+      .element(page.getByRole("button", { name: "Import a psilink.yaml" }))
+      .toBeInTheDocument();
+    expect(page.getByRole("button", { name: "Import a file" }).query()).toBe(
+      null,
+    );
+  });
+
+  test("a psilink.yaml lands beside the listed exchanges as a configuration only", async () => {
+    const listed = await createRunnableExchange(newExchange());
+    const configuration = composeManagedCronExport(
+      await createRunnableExchange(
+        newExchange({ label: "Exported", side: "acceptor" }),
+      ),
+    ).config.text;
+    app.render(createElement(SavedExchanges));
+    await expect
+      .element(page.getByRole("button", { name: "Import a psilink.yaml" }))
+      .toBeInTheDocument();
+
+    await chooseFile(configuration, "psilink.yaml");
+
+    await expect
+      .poll(async () => (await listManagedExchanges()).length)
+      .toBe(3);
+    const imported = (await listManagedExchanges()).filter(
+      (record) => record.sharedSecret === undefined,
+    );
+    expect(imported).toHaveLength(1);
+    expect(imported[0].side).toBe("acceptor");
+    expect(imported[0].id).not.toBe(listed.id);
+  });
+
+  test("a backup is refused as a backup there, and the handed-off refusal stays with the shared import", async () => {
+    // The shared import meets this backup with the handed-off refusal beside an
+    // unreadable list (savedExchangesFailed.test.ts). Beside a readable one, the
+    // configuration import refuses any backup before the reconciliation runs.
+    const record = await createRunnableExchange(
+      newExchange({ label: "Riverbend quarterly" }),
+    );
+    const backup = serializeManagedExchangeArtifact(
+      encodeManagedExchangeArtifact(record),
+    );
+    await spendManagedExchangeIfCurrent(
+      record.id,
+      record.sharedSecret,
+      "2026-07-12T09:00:00.000Z",
+      "command-line",
+    );
+    app.render(createElement(SavedExchanges));
+    await expect
+      .element(page.getByRole("button", { name: "Import a psilink.yaml" }))
+      .toBeInTheDocument();
+
+    await chooseFile(backup, "psilink-managed-backup-2026-07-11.json");
+
+    await expect
+      .element(page.getByText(BACKUP_NOT_CONFIGURATION_REASON))
+      .toBeInTheDocument();
+    expect(page.getByText("That exchange was handed off").query()).toBeNull();
+    const stored = await listManagedExchanges();
+    expect(stored.map((entry) => entry.id)).toEqual([record.id]);
+    const local = await listManagedLocalState();
+    expect(local.get(record.id)?.spent?.handoff).toBe("command-line");
   });
 });

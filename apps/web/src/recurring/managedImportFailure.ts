@@ -26,6 +26,10 @@
  * builds already agree. A file written in the previous artifact format is the
  * opposite direction and has neither remedy: no build reads it again, so it is
  * named as what it is and the operator is pointed at a fresh exchange.
+ *
+ * The configuration-only control beside a populated list takes no backup, so
+ * its refusals speak of the configuration file alone
+ * ({@link configurationImportFailureReason}).
  */
 
 import { ZodError } from "zod";
@@ -34,6 +38,7 @@ import { sanitizeErrorForDisplay } from "@psilink/core";
 
 import { ManagedArtifactOutdatedError } from "@psi/managed/managedExchangeArtifact";
 import { ManagedConfigurationRefusedError } from "@psi/managed/managedCommandLineImport";
+import { ManagedImportBackupNotConfigurationError } from "@psi/managed/managedExchangeImport";
 
 /** The heading every import refusal here is shown under. */
 export const IMPORT_FAILURE_TITLE = "That file could not be imported";
@@ -85,4 +90,32 @@ export function importFailureReason(error: unknown): string {
   return error instanceof ZodError
     ? UNRECOGNIZED_IMPORT_REASON
     : UNREADABLE_IMPORT_REASON;
+}
+
+/** The configuration-only import's file is not a document this app can parse,
+ * or it is over the import cap and was refused before any parse. */
+export const UNREADABLE_CONFIGURATION_REASON =
+  "The configuration file could not be read. Check that you chose the " +
+  "psilink.yaml the command line runs and that it is a valid YAML file.";
+
+/** The configuration-only import was given a backup file. A backup is imported
+ * only where no exchange is listed or the list cannot be read, so the reason
+ * names the file this control takes and where the backup goes instead. */
+export const BACKUP_NOT_CONFIGURATION_REASON =
+  "This is a backup file exported from this app, not a command-line " +
+  "psilink.yaml. Choose a psilink.yaml here. A backup file is imported only " +
+  "while this browser lists no recurring exchanges or cannot read them.";
+
+/**
+ * Which refusal the configuration-only import is shown as. A configuration
+ * this app cannot hold states its own reason, escaped for display here as in
+ * {@link importFailureReason}; a backup file is named as one; everything else
+ * leaves the operator with the file to check.
+ */
+export function configurationImportFailureReason(error: unknown): string {
+  if (error instanceof ManagedConfigurationRefusedError)
+    return sanitizeErrorForDisplay(error);
+  if (error instanceof ManagedImportBackupNotConfigurationError)
+    return BACKUP_NOT_CONFIGURATION_REASON;
+  return UNREADABLE_CONFIGURATION_REASON;
 }

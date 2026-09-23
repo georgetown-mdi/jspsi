@@ -112,6 +112,11 @@ describe("store opens but the read fails", () => {
     await expect
       .element(page.getByRole("button", { name: "Import a file" }))
       .toBeInTheDocument();
+    // The shared import stands here in place of the configuration-only one a
+    // readable list offers.
+    expect(
+      page.getByRole("button", { name: "Import a psilink.yaml" }).query(),
+    ).toBeNull();
   });
 });
 

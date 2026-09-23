@@ -13,6 +13,10 @@
  *   attests a file this browser restores a secret from. A file holding neither
  *   is that record's own backup, on the machine that runs it.
  *
+ * The configuration leg also has an entry of its own
+ * ({@link importManagedConfigurationFile}) that refuses a backup, for a
+ * control offered where the backup leg is not.
+ *
  * What follows is the backup leg: a take-over that installs the artifact as the
  * one owner on this device (see docs/MANAGED_EXCHANGE.md, "Eviction recovery is the
  * import flow" and "Export/import is migration, not sync"). Restoring after eviction
@@ -282,17 +286,41 @@ export const MAX_IMPORT_FILE_BYTES = Math.max(
 export function managedImportFileKind(
   source: string,
 ): "backup" | "command-line-configuration" {
+  const probed = probeImportFile(source);
+  return probed === "unparseable" ? "backup" : probed;
+}
+
+/** What the bytes hold, keeping apart the bytes that parse as neither file:
+ * the shared control hands those to the backup leg, and the configuration-only
+ * control to its own. */
+function probeImportFile(
+  source: string,
+): "backup" | "command-line-configuration" | "unparseable" {
   let probed: unknown;
   try {
     probed = parseSensitiveYaml(source, "managed exchange import");
   } catch {
-    return "backup";
+    return "unparseable";
   }
   const tagged =
     typeof probed === "object" &&
     probed !== null &&
     "artifactVersion" in probed;
   return tagged ? "backup" : "command-line-configuration";
+}
+
+/**
+ * Raised when the configuration-only import is given the app's own backup
+ * file. That import installs configuration-only records alone, so a file
+ * tagged as a backup is refused on that tag and nothing is written.
+ */
+export class ManagedImportBackupNotConfigurationError extends Error {
+  constructor() {
+    super(
+      "this file is a managed-exchange backup, which the configuration import does not take",
+    );
+    this.name = "ManagedImportBackupNotConfigurationError";
+  }
 }
 
 /**
@@ -319,6 +347,36 @@ export async function importManagedExchangeFile(
 ): Promise<ManagedImportResult> {
   if (managedImportFileKind(source) === "backup")
     return importManagedExchange(source, deps);
+  return installConfiguration(source, deps);
+}
+
+/**
+ * Import a command-line `psilink.yaml` as a configuration-only record, and
+ * refuse the app's own backup file. The configuration leg of
+ * {@link importManagedExchangeFile} alone: whatever it installs holds no
+ * secret, so nothing it writes can run here.
+ *
+ * @throws {ManagedImportBackupNotConfigurationError} if the file is a backup;
+ *   nothing is written.
+ * @throws {UsageError} if the bytes are not parseable YAML.
+ * @throws {ManagedConfigurationRefusedError} if the configuration fails the
+ *   exchange-file schema, or is one this app cannot hold.
+ * @throws {ZodError} if the record built from it, or the install, fails.
+ */
+export async function importManagedConfigurationFile(
+  source: string,
+  deps: Pick<ManagedImportDeps, "install"> = defaultDeps,
+): Promise<ManagedImportResult> {
+  if (probeImportFile(source) === "backup")
+    throw new ManagedImportBackupNotConfigurationError();
+  return installConfiguration(source, deps);
+}
+
+/** Read a configuration and install it as a fresh configuration-only record. */
+async function installConfiguration(
+  source: string,
+  deps: Pick<ManagedImportDeps, "install">,
+): Promise<ManagedImportResult> {
   const record = await deps.install(
     readManagedCommandLineConfiguration(source),
   );

@@ -7,20 +7,24 @@ import {
 
 import { stringify as stringifyYaml } from "yaml";
 
+import { importManagedConfigurationFile } from "@psi/managed/managedExchangeImport";
 import { readManagedCommandLineConfiguration } from "@psi/managed/managedCommandLineImport";
 
+import {
+  BACKUP_NOT_CONFIGURATION_REASON,
+  OUTDATED_IMPORT_REASON,
+  UNREADABLE_CONFIGURATION_REASON,
+  UNREADABLE_IMPORT_REASON,
+  UNRECOGNIZED_IMPORT_REASON,
+  configurationImportFailureReason,
+  importFailureReason,
+} from "@recurring/managedImportFailure";
 import {
   MANAGED_EXCHANGE_PREVIOUS_ARTIFACT_VERSION,
   buildManagedExchangeRecord,
   composeManagedExchangeFile,
   runnableManagedExchangeOrRefuse,
 } from "@psi/managed/managedExchangeRecord";
-import {
-  OUTDATED_IMPORT_REASON,
-  UNREADABLE_IMPORT_REASON,
-  UNRECOGNIZED_IMPORT_REASON,
-  importFailureReason,
-} from "@recurring/managedImportFailure";
 import {
   encodeManagedExchangeArtifact,
   importManagedExchangeArtifact,
@@ -249,5 +253,56 @@ describe("the artifact this build writes", () => {
         ),
       ),
     ).not.toThrow();
+  });
+});
+
+/** The reason the configuration-only import shows for bytes it refuses, driven
+ * through that import with an install that must never be reached. */
+async function reasonForImportingAsConfiguration(
+  source: string,
+): Promise<string> {
+  try {
+    await importManagedConfigurationFile(source, {
+      install: () => {
+        throw new Error("a refused file reached the install");
+      },
+    });
+  } catch (error) {
+    return configurationImportFailureReason(error);
+  }
+  throw new Error("the configuration import was expected to refuse this file");
+}
+
+describe("what the configuration-only import says", () => {
+  test("a backup file is named as one, with where a backup is imported", async () => {
+    const reason = await reasonForImportingAsConfiguration(
+      serialize(artifactDocument()),
+    );
+
+    expect(reason).toBe(BACKUP_NOT_CONFIGURATION_REASON);
+    expect(reason).toBe(
+      "This is a backup file exported from this app, not a command-line " +
+        "psilink.yaml. Choose a psilink.yaml here. A backup file is imported " +
+        "only while this browser lists no recurring exchanges or cannot read " +
+        "them.",
+    );
+  });
+
+  test("a configuration it cannot hold names the fields, as the shared import does", async () => {
+    const document = configurationDocument();
+    const refused = { ...document, csvDelimiter: ";;" };
+
+    expect(
+      await reasonForImportingAsConfiguration(
+        stringifyYaml(snakeizeKeys(refused)),
+      ),
+    ).toBe(reasonForImportingConfiguration(refused));
+  });
+
+  test("bytes that do not parse point at the configuration file, not a backup", async () => {
+    const reason = await reasonForImportingAsConfiguration("\tnot: [yaml");
+
+    expect(reason).toBe(UNREADABLE_CONFIGURATION_REASON);
+    expect(reason).not.toContain("backup");
   });
 });
