@@ -11,7 +11,8 @@ mint-layer guarantees layered on top of it. It also covers the versioning and
 compatibility policy between a continuously-deployed web app and a pinned CLI,
 the payload-disclosure commitments its fields hold and the run-time gates that
 enforce them, the channel-binding semantics an accepting tool must honor, and the
-path the shared secret takes (never the file). It is the implementation-level
+path the shared secret takes (never the file), and the terms update that
+changes an established partnership's terms without it. It is the implementation-level
 complement to the
 field-level [exchange reference](../EXCHANGE_REFERENCE.md), which an operator
 opens to author or read a `psilink.yaml`, and to the **Provisioning the key file
@@ -519,7 +520,9 @@ the pre-record laziness, stated as a limit: a mint over a config with no
 metadata block publishes no commitment either, so both gates end up absent and a
 later unattended exchange from that config transmits its inferred set unchecked,
 exactly as every pre-record config does. The removal there weakens no previously
-enforced set, but nothing replaces it.
+enforced set, but nothing replaces it. A [terms update](#terms-update) is held to the same
+rule: applying one rewrites the terms and every record they bear on in one write,
+and minting one refreshes the minting party's records as an invitation mint does.
 
 ### The no-output send gate
 
@@ -576,9 +579,71 @@ Every path that reaches an acceptance records it: the CLI's offline accept write
 it into the config it composes, the online accept includes it in the bootstrap's
 config write and refreshes a reused config in place, the browser's managed
 deposit persists it into the record's document, and a console server-job accept
-forwards it into the composed config. A later run restores it from the config
+forwards it into the composed config. `psilink apply` writes the `deduplicate`
+a [terms update](#terms-update) states for its sender, in the same write that
+adopts the update's terms. A later run restores it from the config
 onto `prepared.expectedPartnerDeduplicate`. No mint path records it: an inviter
 accepted no declaration.
+
+## Terms update
+
+A terms update is the artifact that changes an established partnership's linkage terms without a new invitation (`psilink update` mints it, `psilink apply` consumes it; operator behavior in [CLI.md](../CLI.md#changing-the-terms-of-an-established-partnership)). It is implemented in `packages/core/src/config/termsUpdate.ts`.
+
+### Relation to the invitation token
+
+The two artifacts state the sending party's terms the same way, and differ in what else they hold:
+
+| | Invitation token | Terms update |
+| --- | --- | --- |
+| Linkage terms | the inviter's, validated by the same camelizing schema | the sender's, validated by the same schema |
+| Disclosed columns | `disclosedPayloadColumns` | `disclosedPayloadColumns`, same bounds, same two cross-field refusals against `payload.send` |
+| Shared secret | the setup secret | none |
+| Connection endpoint | optional locator | none |
+| Expiry | optional | none |
+| Integrity | a 4-byte checksum against transcription errors only | HMAC-SHA-256 under a key derived from the shared secret |
+
+A terms update therefore cannot establish or re-establish a partnership: without the secret its holder cannot authenticate a key exchange, and without an endpoint it names no rendezvous. It is not confidential in the way an invitation is. Its reader learns the linkage terms and the disclosed column names, not a credential.
+
+The applying party derives its own terms from the update with `deriveAcceptedLinkageTerms`, exactly as an acceptance derives them from an invitation, with one difference: its own `deduplicate` is passed through from the configuration it already holds, where an acceptance takes `false`.
+
+### Wire format
+
+The encoded update is `BODY.MAC`, two unpadded base64url strings joined by `.`:
+
+- `BODY` encodes the UTF-8 bytes of a JSON object with exactly the keys `kind` (the string `terms-update`), `version` (`"1"`), `partnership`, `linkageTerms`, and optionally `disclosedPayloadColumns`. The object is strict: any other key is refused.
+- `MAC` encodes `HMAC-SHA-256(mac_key, BODY bytes)`, 32 bytes, computed over the exact bytes `BODY` encodes, so no canonical re-serialization is involved.
+
+The whole string is bounded by the invitation's encoded-length bound (`MAX_ENCODED_INVITATION_LENGTH`), checked before any decoding.
+
+Both derived values come from the decoded 32-byte shared secret, with the application HKDF (`hkdfDerive`: HKDF-SHA-256, zero salt) under labels in the [domain-separation label space](PROTOCOL.md#p-256-authenticated-key-exchange):
+
+```
+partnership = base64url(HKDF(secret, "psilink-terms-update-v1:partnership", 16))
+mac_key     = HKDF(secret, "psilink-terms-update-v1:mac", 32)
+```
+
+The partnership identifier is a one-way function of the secret both parties hold, so neither needs anything beyond its key file to compute it, and it reveals nothing about the secret. It follows the secret: every rotation gives the partnership a new identifier, so an update made before an exchange no longer matches after it.
+
+### Verification order
+
+`decodeTermsUpdate` checks, in order, and refuses with `TermsUpdateRefusedError` naming the check:
+
+1. **Format**: the length bound, the `BODY.MAC` shape, base64url, and a 32-byte MAC.
+2. **MAC**: the tag is recomputed over the body bytes and compared in constant time, before the body is validated or anything in it is returned. Where it fails, the body is read only far enough to find a `partnership` string: one that differs from the local identifier is refused as `partnership` (another partnership, or a secret replaced since), anything else as `authentication` (altered content).
+3. **Schema**: the authenticated body is validated as above; a failure is refused as `format`. An authenticated body whose `partnership` differs from the local identifier is refused as `partnership`.
+
+The CLI then refuses, before any display, an update whose terms name the applying party's own identity, since that is the applying party's own update.
+
+### What applying writes
+
+Applying rewrites `linkage_terms` and every record that follows from it in one atomic write (`persistTermsUpdate`, `apps/cli/src/config.ts`), after reading the edited document back through `parseExchangeSpec`; a document that would not load is refused and the file left unchanged. The records follow the [lifecycle rule](#the-acceptors-outbound-consent-assertoutboundpayloadconsented) above:
+
+- `expected_payload_columns` takes the update's disclosed columns, and is removed where the update states none.
+- `expected_partner_deduplicate` takes the update's `deduplicate`.
+- `outbound_payload_consent` is derived from the new output terms and the configuration's own metadata, and is `pending` where the new terms share with the partner and no metadata block states the set.
+- `disclosed_payload_columns`, where recorded, is restated from the configuration's metadata, or removed where it has none; an absent one stays absent.
+
+Minting an update refreshes the minting party's own records on the rule an invitation minted from the same configuration follows: `disclosed_payload_columns` from its metadata, and `outbound_payload_consent` removed. Neither command writes the key file or any key of the connection block.
 
 ## Channel-binding semantics
 

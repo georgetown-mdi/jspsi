@@ -14,12 +14,14 @@ import {
 } from "../../loggingTestSupport";
 
 import { handler as acceptHandler } from "../../../src/commands/accept";
+import { handler as applyHandler } from "../../../src/commands/apply";
 import { mountHandler, probeHandler } from "../../../src/commands/doctor";
 import { handler as exchangeHandler } from "../../../src/commands/exchange";
 import { handler as fingerprintHandler } from "../../../src/commands/fingerprint";
 import { handler as initHandler } from "../../../src/commands/init";
 import { handler as inviteHandler } from "../../../src/commands/invite";
 import { handler as probeHostKeyHandler } from "../../../src/commands/probeHostKey";
+import { handler as updateHandler } from "../../../src/commands/update";
 import { handler as verifyReceiptHandler } from "../../../src/commands/verifyReceipt";
 import { handler as zeroSetupHandler } from "../../../src/commands/zeroSetup";
 import { captureProcessExit } from "../../exitCapture";
@@ -108,6 +110,7 @@ interface CommandEntryPoint {
 
 const COMMAND_ENTRY_POINTS: CommandEntryPoint[] = [
   { entryPoint: "accept.ts#handler", run: acceptHandler },
+  { entryPoint: "apply.ts#handler", run: applyHandler },
   { entryPoint: "doctor.ts#mountHandler", run: mountHandler },
   { entryPoint: "doctor.ts#probeHandler", run: probeHandler },
   { entryPoint: "exchange.ts#handler", run: exchangeHandler },
@@ -115,6 +118,7 @@ const COMMAND_ENTRY_POINTS: CommandEntryPoint[] = [
   { entryPoint: "init.ts#handler", run: initHandler },
   { entryPoint: "invite.ts#handler", run: inviteHandler },
   { entryPoint: "probeHostKey.ts#handler", run: probeHostKeyHandler },
+  { entryPoint: "update.ts#handler", run: updateHandler },
   { entryPoint: "verifyReceipt.ts#handler", run: verifyReceiptHandler },
   { entryPoint: "zeroSetup.ts#handler", run: zeroSetupHandler },
 ];

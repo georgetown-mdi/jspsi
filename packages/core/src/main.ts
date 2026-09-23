@@ -381,6 +381,15 @@ export {
   relayLocatorFromOwnRelay,
   stripInvitationWhitespace,
 } from "./config/invitation";
+export {
+  MAX_ENCODED_TERMS_UPDATE_LENGTH,
+  TERMS_UPDATE_DERIVATIONS,
+  TermsUpdateRefusedError,
+  decodeTermsUpdate,
+  encodeTermsUpdate,
+  termsUpdatePartnership,
+} from "./config/termsUpdate";
+export type { TermsUpdate, TermsUpdateCheck } from "./config/termsUpdate";
 export type {
   ConnectionEndpoint,
   FileDropEndpoint,

@@ -3,14 +3,7 @@ import type { Argv, Arguments } from "yargs";
 import {
   getLogger,
   encodeInvitation,
-  assertAlgorithmImplemented,
-  assertCountOnlyTransmitsNoColumn,
-  assertDeduplicateImplemented,
   assertDisclosedNamesCarriable,
-  assertFanOutImplemented,
-  assertPayloadSendDisclosed,
-  assertStandardizationMatchesTerms,
-  assertTransformsCompile,
   CONNECTION_BLOCK_NOTICE,
   DEFAULT_PEER_TIMEOUT_MS,
   disclosedColumnNames,
@@ -38,6 +31,7 @@ import {
   warnOnLinkageRuleSetCitationDrift,
 } from "../config";
 import { writeTermsRecord } from "../acceptedTermsRecords";
+import { assertConfigTermsRunnable } from "../configTermsGuards";
 import { detectFileConflicts } from "../fileUtils";
 import { resolveIdentity, resolveInvitationIdentity } from "../partyIdentity";
 import { resolveRecordOutput } from "../recordFile";
@@ -761,84 +755,10 @@ export async function validateInvite(params: {
       );
     }
 
-    // Fail closed, before the token is minted, on a count-only (`psi-c`) config
-    // whose own metadata would transmit a column: the algorithm exchanges no
-    // payload in either direction, and no other check here covers that shape.
-    // Ahead of the generic payload-disclosure guard and the algorithm gate
-    // below, so the operator is told the specific rule broken. Gated on an
-    // explicit metadata block, like the payload guard below: without one,
-    // metadata is inferred from the exchange's input columns, which this
-    // offline mint never reads.
-    assertCountOnlyTransmitsNoColumn(
-      configTerms.algorithm,
-      configSource.metadata,
-    );
-
-    // Reject a payload.send that does not match what this party's metadata
-    // discloses, before the token is minted, so the partner's consent screen and
-    // the encoded token never state a dictionary that misstates what is sent (a
-    // column metadata gates off, or one it transmits but the dictionary omits);
-    // the exchange-time check in prepareForExchange protects the record but runs
-    // too late for the consent surface. Only this config-as-source path can hold
-    // a hand-authored payload.send -- the online and infer paths build terms
-    // from columns and author none. Gated on an explicit metadata block: without
-    // one, metadata is inferred from the exchange's input columns (unknown
-    // here), left to the exchange-time check.
-    if (configSource.metadata !== undefined)
-      assertPayloadSendDisclosed(
-        configTerms.payload,
-        configSource.metadata,
-        configTerms.output,
-      );
-
-    // Fail closed, before the token is minted, on a config whose authored
-    // standardization contradicts its own linkage terms -- the mint-boundary
-    // counterpart of the exchange-time check in prepareForExchange, since this is
-    // the only offline mint that holds a hand-authored standardization. Gated on
-    // an explicit standardization: absent, the exchange reconstructs one from the
-    // terms, which cannot contradict them. Mirrors the assertPayloadSendDisclosed
-    // guard above: never disclose a token the exchange would then reject
-    // (exit 64).
-    if (configSource.standardization !== undefined)
-      assertStandardizationMatchesTerms(
-        configSource.standardization,
-        configTerms,
-      );
-
-    // Fail closed, before the token is minted, on a config whose `algorithm` the
-    // run cannot honor -- the mint-boundary counterpart of the same exchange-time
-    // check, so this hand-authored offline mint never discloses an invitation the
-    // config's own `psilink exchange` would then refuse (exit 64). Unconditional,
-    // unlike the two guards above: `algorithm` is always present, and only this
-    // config-as-source path can hold a hand-authored one (the online and infer
-    // paths always build `psi` via getDefaultLinkageTerms). See
-    // assertAlgorithmImplemented.
-    assertAlgorithmImplemented(configTerms.algorithm);
-
-    // Likewise fail closed pre-mint on a `deduplicate: true` term the agreed
-    // strategy cannot match: the schema alone admits it beside a `single-pass`
-    // strategy, and only this hand-authored config-as-source path can hold that
-    // pair (the online and infer paths build terms via getDefaultLinkageTerms,
-    // which is always deduplicate: false). See assertDeduplicateImplemented.
-    assertDeduplicateImplemented(configTerms);
-
-    // Likewise fail closed pre-mint on a transform that fans one value out into
-    // several match candidates under a strategy that matches one value per
-    // record, where a splitting record contributes no key at all. Covers this
-    // path's terms and, where the config holds one, its hand-authored
-    // standardization -- the two places only this config-as-source path can
-    // declare a fan-out step (the online and infer paths build terms and
-    // standardization from columns, which declare none). See
-    // assertFanOutImplemented.
-    assertFanOutImplemented(configTerms, configSource.standardization);
-
-    // And fail closed pre-mint on a step whose compile throws -- a `pad_left`
-    // with no length, a multi-character fill, an unrecognized function name.
-    // The pipeline is built before the first row, so such a step aborts the
-    // run this invitation sets up only after the partner has accepted it. Same
-    // two pipelines, same reason only this config-as-source path can declare
-    // one by hand. See assertTransformsCompile.
-    assertTransformsCompile(configTerms, configSource.standardization);
+    // Fail closed, before the token is minted, on terms this config's own
+    // exchange would refuse, so the partner is never handed an invitation it
+    // accepts only to have the first run refuse it.
+    assertConfigTermsRunnable(configTerms, configSource);
 
     // Include the disclosed-columns subset only when the config declares an
     // explicit metadata block: without one the run infers metadata from the

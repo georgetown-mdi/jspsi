@@ -6,6 +6,7 @@ import ts from "typescript";
 import { describe, expect, test } from "vitest";
 
 import { ABORT_TOKEN_ROLES, AEAD_CONTEXTS } from "../src/auth";
+import { TERMS_UPDATE_DERIVATIONS } from "../src/config/termsUpdate";
 import { RENDEZVOUS_ROLES } from "../src/rendezvous";
 
 // The domain-separation label space of docs/spec/PROTOCOL.md ("The
@@ -38,6 +39,7 @@ const LABEL_FAMILIES: ReadonlyMap<string, readonly string[]> = new Map<
     ["initiator-to-responder", "responder-to-initiator"],
   ],
   ["psilink-signed-receipt-binder-v1:", ["initiator", "responder"]],
+  ["psilink-terms-update-v1:", TERMS_UPDATE_DERIVATIONS],
 ]);
 
 // psilink- strings in core's source outside the label space: the key

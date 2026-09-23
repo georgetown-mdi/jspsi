@@ -27,6 +27,14 @@ import {
   handler as acceptHandler,
 } from "./commands/accept";
 import {
+  builder as updateBuilder,
+  handler as updateHandler,
+} from "./commands/update";
+import {
+  builder as applyBuilder,
+  handler as applyHandler,
+} from "./commands/apply";
+import {
   builder as initBuilder,
   handler as initHandler,
 } from "./commands/init";
@@ -96,6 +104,18 @@ export function buildCli(argv: string[]): Argv {
         "Accept a partner invitation (offline), or accept and run (online)",
         acceptBuilder,
         acceptHandler,
+      )
+      .command(
+        "update",
+        "Make a terms update for an established partnership (no new secret)",
+        updateBuilder,
+        updateHandler,
+      )
+      .command(
+        "apply [args..]",
+        "Apply a partner's terms update to this party's configuration",
+        applyBuilder,
+        applyHandler,
       )
       .command(
         "exchange <input> [output]",

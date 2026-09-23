@@ -584,16 +584,28 @@ const PARAMS_WIDTH_BOUND: ReadonlyMap<string, number> = new Map([
  * token's other fields and the strict connection-endpoint credential allowlist
  * are unaffected.
  *
- * Module-private by design: a `z.preprocess` that throws breaks
- * `.safeParse()`'s non-throwing contract, so keeping this off `@psilink/core`'s
- * public export means no external caller hits a surprise throw. Its only
- * consumer is {@link InvitationTokenSchema} (`.parse()`); a non-throwing
- * linkage-terms parse uses `safeParseLinkageTerms`.
+ * Kept off `@psilink/core`'s public export by design: a `z.preprocess` that
+ * throws breaks `.safeParse()`'s non-throwing contract, so no external caller
+ * hits a surprise throw. Its consumers are {@link InvitationTokenSchema} and
+ * the terms-update schema (`termsUpdate.ts`), both through `.parse()`; a
+ * non-throwing linkage-terms parse uses `safeParseLinkageTerms`.
  */
-const InvitationLinkageTermsSchema: z.ZodType<LinkageTerms> = z.preprocess(
-  (raw) => camelizeKeys(raw, PARAMS_WIDTH_BOUND),
-  LinkageTermsSchema,
-);
+export const InvitationLinkageTermsSchema: z.ZodType<LinkageTerms> =
+  z.preprocess(
+    (raw) => camelizeKeys(raw, PARAMS_WIDTH_BOUND),
+    LinkageTermsSchema,
+  );
+
+/**
+ * A disclosed-columns list as an invitation or a terms update states it: the
+ * bounds and name shape the field comments on {@link InvitationTokenBodySchema}
+ * describe, with a repeated name kept once.
+ */
+export const DisclosedPayloadColumnsSchema: z.ZodType<string[]> = boundedArray(
+  nameValue(z.string().min(1).check(maxCodeUnits(MAX_NAME_LENGTH))),
+  MAX_PAYLOAD_ENTRIES,
+  `disclosedPayloadColumns must not exceed ${MAX_PAYLOAD_ENTRIES} entries`,
+).transform((names) => columnsNamedOnce(names, (name) => name));
 
 const InvitationTokenBodySchema = z.object({
   version: z.literal("1"),
@@ -641,13 +653,7 @@ const InvitationTokenBodySchema = z.object({
   // still refused for its authored count. The acceptor consents to the column
   // once and writes it once as `expectedPayloadColumns`, which
   // reconcileReceivedPayload compares against the set the partner transmits.
-  disclosedPayloadColumns: boundedArray(
-    nameValue(z.string().min(1).check(maxCodeUnits(MAX_NAME_LENGTH))),
-    MAX_PAYLOAD_ENTRIES,
-    `disclosedPayloadColumns must not exceed ${MAX_PAYLOAD_ENTRIES} entries`,
-  )
-    .transform((names) => columnsNamedOnce(names, (name) => name))
-    .optional(),
+  disclosedPayloadColumns: DisclosedPayloadColumnsSchema.optional(),
   // The inviter's retain-mode declaration (see the interface field). A plain
   // optional boolean at the top level, so an older decoder's non-strict z.object
   // ignores it rather than rejecting the token -- the backward-compatible shape
@@ -662,12 +668,12 @@ const InvitationTokenBodySchema = z.object({
  * "this party discloses no column". An absent `send` binds nothing, so it is
  * neither this nor {@link declaresPayloadSendColumn}.
  */
-function declaresEmptyPayloadSend(terms: LinkageTerms): boolean {
+export function declaresEmptyPayloadSend(terms: LinkageTerms): boolean {
   return terms.payload?.send !== undefined && terms.payload.send.length === 0;
 }
 
 /** Whether the terms declare a `payload.send` naming at least one column. */
-function declaresPayloadSendColumn(terms: LinkageTerms): boolean {
+export function declaresPayloadSendColumn(terms: LinkageTerms): boolean {
   return (terms.payload?.send?.length ?? 0) > 0;
 }
 
