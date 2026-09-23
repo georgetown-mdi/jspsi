@@ -23,6 +23,7 @@ import { linkageRefusalFor } from "./linkageRefusal";
 import { loadCSVFileOffMainThread } from "./workers/csvParseController";
 import { ownColumnsField } from "./ownColumnsModel";
 import { payloadSendForMetadata } from "./metadataEditing";
+import { relayForRun } from "./transport/ownRelaySetting";
 import { standardizationForTerms } from "./authoring/advancedInviteTerms";
 
 import type {
@@ -40,6 +41,7 @@ import type {
 
 import type { LinkageRefusal } from "./linkageRefusal";
 import type { OwnColumnsChoice } from "./ownColumnsModel";
+import type { RelayUrls } from "./transport/ownRelaySetting";
 
 /**
  * The CSV input {@link generateInvitation} parses: exactly what
@@ -296,19 +298,6 @@ export function webrtcEndpointFromLocation(loc: {
 }
 
 /**
- * The browser's own relay, as the urls an invitation may name: TURN and STUN
- * urls, never a credential. The browser holds no relay setting, so every
- * inviter passes {@link NO_OWN_RELAY}.
- */
-export type OwnRelayUrls = {
-  turn?: ReadonlyArray<string>;
-  stun?: ReadonlyArray<string>;
-};
-
-/** The own relay an inviter passes while the browser has no relay setting. */
-export const NO_OWN_RELAY: OwnRelayUrls | undefined = undefined;
-
-/**
  * The webrtc endpoint a web invitation holds: this app's signaling locator
  * ({@link webrtcEndpointFromLocation}) plus the inviter's own relay, composed
  * by core's `relayLocatorFromOwnRelay` and omitted when there is none. The one
@@ -317,7 +306,7 @@ export const NO_OWN_RELAY: OwnRelayUrls | undefined = undefined;
  */
 export function invitationWebrtcEndpoint(
   loc: { hostname: string; port: string },
-  ownRelay: OwnRelayUrls | undefined,
+  ownRelay: RelayUrls | undefined,
 ): WebRTCEndpoint {
   const endpoint = webrtcEndpointFromLocation(loc);
   const relay = relayLocatorFromOwnRelay(ownRelay);
@@ -368,7 +357,8 @@ export type ConnectionEndpointRequest =
 /**
  * Resolve a {@link ConnectionEndpointRequest} to the {@link ConnectionEndpoint}
  * the token holds. The webrtc request is built from the inviter's browser
- * {@link InvitationLocation}; an sftp/filedrop request passes through verbatim
+ * {@link InvitationLocation} and names the relay this inviter's own run gathers
+ * against ({@link relayForRun}); an sftp/filedrop request passes through verbatim
  * (its locator fields were authored by the caller). No credential can appear
  * in any branch -- the endpoint types admit none -- and `encodeInvitation`
  * validates the result through the strict endpoint schema regardless.
@@ -378,7 +368,7 @@ function resolveConnectionEndpoint(
   location: InvitationLocation,
 ): ConnectionEndpoint {
   if (request.channel === "webrtc")
-    return invitationWebrtcEndpoint(location, NO_OWN_RELAY);
+    return invitationWebrtcEndpoint(location, relayForRun());
   return request;
 }
 

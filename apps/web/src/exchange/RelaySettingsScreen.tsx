@@ -114,8 +114,10 @@ export function RelaySettingsScreen() {
       <p className={`${styles.small} ${styles.sub}`}>
         When a direct connection to your partner cannot be made, your browser
         can connect through a TURN relay your side runs. Enter the relay&apos;s
-        addresses here. They are kept in this browser for this site only.{" "}
-        {RELAY_KEY_NOTICE}
+        addresses here. They are kept in this browser for this site only. An
+        invitation you send names these addresses so your partner connects
+        through the same relay, and an invitation you accept that names a relay
+        is used in their place. {RELAY_KEY_NOTICE}
       </p>
 
       <h2>What the relay&apos;s operator learns</h2>

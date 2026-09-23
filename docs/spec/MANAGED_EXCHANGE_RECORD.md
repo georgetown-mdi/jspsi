@@ -172,8 +172,8 @@ restricted to its credential-free locator subset: `server` locator fields only
 [PROTOCOL.md](PROTOCOL.md#the-invitations-relay-locator)), and no
 `turn`, `ice_provision`, or `provider_options` entries (a TURN entry holds
 relay credentials, and the provider map is opaque and `@`-file-pathed). An
-acceptor's record keeps `invitation_relay` so a re-run can relay through it;
-the browser's peer connection does not read it. This
+acceptor's record keeps `invitation_relay`, and each re-run relays through it
+(`beginManagedRendezvous`). This
 party's side lives in the local `side` field, not the document (see [Role: a
 local `side` field](#role-a-local-side-field-not-the-document)). The full shared schema **can** represent those
 credential-bearing fields, so the guarantee comes from composition, exactly as
@@ -254,7 +254,8 @@ On the webrtc re-run path the document's `server` locator is likewise inert: the
 inviter derives its signaling location from `window.location`, and the
 acceptor's came from the invitation endpoint at accept time. The connection
 block is persisted for document fidelity -- the document is kept verbatim, per
-the CLI-parity contract above -- not because the webrtc re-run reads it.
+the CLI-parity contract above -- not because the webrtc re-run reads it; the
+one field of it a re-run reads is an acceptor's `invitation_relay`.
 
 #### Versioning: an app upgrade can invalidate a stored record
 

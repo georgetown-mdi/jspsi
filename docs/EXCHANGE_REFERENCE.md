@@ -810,7 +810,7 @@ The relay's operator learns your network address on every run that contacts it, 
 
 An inviter names its relay from its own settings -- each `turn` entry's `url` and its `stun` list, never a username or credential. A `psilink invite` over a `ws://` or `wss://` URL builds its connection from the URL alone, which holds no `turn` or `stun`, so its invitation names no relay.
 
-> **Honored by the CLI only**, like `stun` and `turn`. The web app keeps the relay with a saved exchange and does not relay through it.
+The web app follows the same rules with the browser's own relay setting (the Relay server page, `/relay`) in place of `turn` and `stun`: an acceptance and each re-run of a saved exchange relay through the invitation's relay, and a web inviter names its own relay setting's urls in the invitation.
 
 ```yaml
 connection:
@@ -1617,7 +1617,7 @@ The cells:
 | `connection.role` | authored | not applicable | carried |
 | `connection.stun` | carried | not applicable | refused |
 | `connection.turn` | carried | not applicable | refused |
-| `connection.invitation_relay` | authored (recorded on accept) | not applicable | carried (recorded on accept; the browser does not relay through it) |
+| `connection.invitation_relay` | authored (recorded on accept) | not applicable | carried (recorded on accept; the browser relays through it on each re-run) |
 | `connection.ice_transport_policy` | carried | not applicable | refused |
 | `connection.ice_provision` | refused | not applicable | refused |
 | `connection.proxy` | not applicable | refused | not applicable |

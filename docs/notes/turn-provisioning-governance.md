@@ -433,8 +433,8 @@ browser's relay entry can come only from the deployment.
   with a stable name registered well ahead, and with an allow-and-do-not-inspect
   request to each partner's network team at onboarding.
 - **No relay of its own:** be the acceptor, and use the inviter's relay, which
-  the invitation names (the command line relays through it; the web app keeps
-  it with a saved exchange but does not relay through it). Where
+  the invitation names (the command line and the web app both relay through
+  it). Where
   the partner has none, choose a managed relay that signs a BAA or document a
   conduit determination, and set its credential lifetime.
 - **Every profile:** name the relay in the data sharing agreement, as the SFTP

@@ -16,11 +16,13 @@
 import { encodeInvitation, generateSharedSecret } from "@psilink/core";
 
 import { invitationLocation } from "../invitationLocation";
+import { relayForRun } from "../transport/ownRelaySetting";
 
 import { composeManagedReinvite } from "./managedReinvite";
 import { persistManagedExchangeReinvite } from "./managedExchangeStore";
 
 import type { ManagedReinvite } from "./managedReinvite";
+import type { RelayUrls } from "../transport/ownRelaySetting";
 import type { RunnableManagedExchangeRecord } from "./managedExchangeRecord";
 
 /** The dependencies the re-invite driver injects, defaulted to the real platform
@@ -36,6 +38,9 @@ interface ManagedReinviteDriverDeps {
   persistRotation: typeof persistManagedExchangeReinvite;
   /** The moment the setup lifetime and the record's max-age stamp count from. */
   now: () => number;
+  /** Read the relay the invitation names: the one this inviter's own run
+   * gathers against. */
+  ownRelay: () => RelayUrls | undefined;
 }
 
 const defaultDeps: ManagedReinviteDriverDeps = {
@@ -44,6 +49,7 @@ const defaultDeps: ManagedReinviteDriverDeps = {
   encode: encodeInvitation,
   persistRotation: persistManagedExchangeReinvite,
   now: () => Date.now(),
+  ownRelay: () => relayForRun(),
 };
 
 /** A completed re-invite: the shareable artifacts the operator forwards out-of-band,
@@ -82,6 +88,7 @@ export async function reinviteManagedExchange(
     generateSecret: deps.generateSecret,
     encode: deps.encode,
     now: deps.now,
+    ownRelay: deps.ownRelay(),
   });
   const persisted = await deps.persistRotation(record.id, reinvite.rotation);
   return { reinvite, record: persisted };

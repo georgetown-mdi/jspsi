@@ -322,6 +322,25 @@ describe("beginManagedRendezvous: relay", () => {
     },
   );
 
+  test("an acceptor's record passes the relay its invitation named", async () => {
+    stubAppLocation();
+    stubOwnRelay();
+    const named = {
+      turn: ["turns:partner-relay.example.org:443?transport=tcp"],
+      stun: ["stun:partner-relay.example.org:3478"],
+    };
+    const { flows, acceptorCalls } = recordingFlows();
+
+    await beginManagedRendezvous(
+      "acceptor",
+      generateSharedSecret(),
+      exchangeFile({ ...webrtcLocator, relay: named }),
+      { flows },
+    );
+
+    expect(acceptorCalls[0].options?.relay).toEqual(named);
+  });
+
   test("with no own relay the flows get none", async () => {
     stubAppLocation();
     const { flows, acceptorCalls } = recordingFlows();
