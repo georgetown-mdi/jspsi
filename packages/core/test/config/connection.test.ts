@@ -1102,6 +1102,10 @@ test.each([
   // A quoted entry can include padding; the host requirement is applied to the
   // trimmed value, so the padding decides nothing.
   ["stun:stun.example.org:3478 ", true],
+  // A user before the host is refused; an @ in the query names no user.
+  ["stun:user@stun.example.org:3478", false],
+  ["stun:@stun.example.org", false],
+  ["stun:stun.example.org:3478?x=a@b", true],
 ])('STUN URI "%s" is %s', (uri, valid) => {
   const result = safeParseConnectionConfig({ ...webrtcBase, stun: [uri] });
   expect(result.success).toBe(valid);
@@ -1136,6 +1140,12 @@ test.each([
   ["turn: ", false],
   ["turn:?transport=tcp", false],
   ["turn:turn.example.org:3478 ", true],
+  // A credential goes in the entry's username and credential fields, never in
+  // the url; an @ in the query names no user.
+  ["turn:user@turn.example.org:3478", false],
+  ["turns:user:secret@turn.example.org:443", false],
+  ["turn:@turn.example.org", false],
+  ["turn:turn.example.org:3478?x=a@b", true],
 ])('TURN URL "%s" is %s', (url, valid) => {
   const result = safeParseConnectionConfig({
     ...webrtcBase,
@@ -1245,6 +1255,41 @@ test("a host-less TURN url is refused with the form it needs", () => {
   ).toBe(true);
   expect(messages.some((m) => m.includes("turns:relay.example.org:443"))).toBe(
     true,
+  );
+});
+
+test("a TURN url naming a user is refused without repeating the credential", () => {
+  const result = safeParseConnectionConfig({
+    ...webrtcBase,
+    turn: [
+      {
+        url: "turns:alice:hunter2@turn.example.org:443",
+        username: "u",
+        credential: "c",
+      },
+    ],
+  });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  const messages = result.error.issues.map((i) => i.message);
+  expect(messages).toContain(
+    "the turn url turns:...@turn.example.org:443 names a user before its " +
+      "host; put the credential in the entry's username and credential " +
+      "fields, or leave it out of a relay an invitation names",
+  );
+  expect(messages.join("\n")).not.toMatch(/alice|hunter2/);
+});
+
+test("a STUN url naming a user is refused with the url named", () => {
+  const result = safeParseConnectionConfig({
+    ...webrtcBase,
+    stun: ["stun:alice@stun.example.org:3478"],
+  });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  expect(result.error.issues.map((i) => i.message)).toContain(
+    "the stun url stun:...@stun.example.org:3478 names a user before its " +
+      "host; a stun server takes no credential, so leave it out",
   );
 });
 

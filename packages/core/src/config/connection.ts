@@ -420,8 +420,34 @@ interface TurnServer {
 // applied to the trimmed value, and the trimmed value is what the connection
 // holds, so the padding a quoted entry can carry decides nothing: a padded
 // `turn:relay.example.org:3478` names its host, and a padded `turn:` none.
-const TURN_URL_PATTERN = /^turns?:[^\s:?][^\s?]*(?:\?\S*)?$/;
-const STUN_URI_PATTERN = /^stuns?:[^\s:?][^\s?]*(?:\?\S*)?$/;
+// Neither admits a user before the host (`turn:user@host`): a TURN credential
+// goes in the entry's own fields, and a url an invitation carries holds none.
+const TURN_URL_PATTERN = /^turns?:[^\s:?@][^\s?@]*(?:\?\S*)?$/;
+const STUN_URI_PATTERN = /^stuns?:[^\s:?@][^\s?@]*(?:\?\S*)?$/;
+
+const USER_BEFORE_HOST = /^([a-z]+:)[^?]*@/;
+
+// The url with the part before its host elided, so the refusal names the entry
+// without repeating a credential written there.
+function withUserElided(url: string): string {
+  return url.replace(USER_BEFORE_HOST, "$1...@");
+}
+
+function urlGrammarMessage(
+  kind: "turn" | "stun",
+  hostMessage: string,
+): (issue: { input?: unknown }) => string {
+  const credentialHome =
+    kind === "turn"
+      ? "put the credential in the entry's username and credential fields, " +
+        "or leave it out of a relay an invitation names"
+      : "a stun server takes no credential, so leave it out";
+  return (issue) =>
+    typeof issue.input === "string" && USER_BEFORE_HOST.test(issue.input)
+      ? `the ${kind} url ${withUserElided(issue.input)} names a user before ` +
+        `its host; ${credentialHome}`
+      : hostMessage;
+}
 
 // werift refuses a turn url whose `transport` parameter holds anything but
 // lowercase `tcp` or `udp`, and refuses `udp` on a `turns:` url, continuing
@@ -453,11 +479,13 @@ function turnUrlTransportIsSupported(url: string): boolean {
 export const TurnUrlSchema = z
   .string()
   .trim()
-  .regex(
-    TURN_URL_PATTERN,
-    "a turn entry's url must name a host after turn: or turns:, for " +
-      "example turns:relay.example.org:443?transport=tcp",
-  )
+  .regex(TURN_URL_PATTERN, {
+    error: urlGrammarMessage(
+      "turn",
+      "a turn entry's url must name a host after turn: or turns:, for " +
+        "example turns:relay.example.org:443?transport=tcp",
+    ),
+  })
   .refine(turnUrlTransportIsSupported, {
     message:
       "a turn entry's url may leave transport unset or set it to lowercase " +
@@ -472,11 +500,13 @@ export const TurnUrlSchema = z
 export const StunUrlSchema = z
   .string()
   .trim()
-  .regex(
-    STUN_URI_PATTERN,
-    "a stun entry must name a host after stun: or stuns:, for " +
-      "example stun:stun.example.org:3478",
-  );
+  .regex(STUN_URI_PATTERN, {
+    error: urlGrammarMessage(
+      "stun",
+      "a stun entry must name a host after stun: or stuns:, for " +
+        "example stun:stun.example.org:3478",
+    ),
+  });
 
 const TurnServerSchema: z.ZodType<TurnServer> = z.object({
   url: TurnUrlSchema,
@@ -941,8 +971,8 @@ export interface WebRTCConnectionConfig {
    * host or server-reflexive address is offered to the partner. Omitting it
    * leaves the transport's own default, which is `all`.
    *
-   * `relay` needs a source of relay candidates, so it requires `turn` or
-   * `iceProvision`.
+   * `relay` needs a source of relay candidates, so it requires `turn`,
+   * `iceProvision`, or an {@link invitationRelay} naming a TURN url.
    */
   iceTransportPolicy?: "all" | "relay";
   /**

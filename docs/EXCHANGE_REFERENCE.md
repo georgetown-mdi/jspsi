@@ -758,7 +758,7 @@ connection:
 *Required:* no  
 *Applies to:* `webrtc`
 
-STUN servers for ICE candidate gathering. Each entry is a string in `stun:` or `stuns:` URI format and must name a host: a scheme with no host (`stun:`) names no server, and since a configured list replaces the built-in default it would leave the run with no STUN at all, so it is refused. Mutually exclusive with `ice_provision`; if `ice_provision` is present, `stun` is invalid.
+STUN servers for ICE candidate gathering. Each entry is a string in `stun:` or `stuns:` URI format and must name a host: a scheme with no host (`stun:`) names no server, and since a configured list replaces the built-in default it would leave the run with no STUN at all, so it is refused. An entry naming a user before its host (`stun:user@host`) is refused too: a STUN server takes no credential. Mutually exclusive with `ice_provision`; if `ice_provision` is present, `stun` is invalid.
 
 > **Honored by the CLI only.** The CLI builds its peer connection from `stun` and `turn`, and a configured list replaces the built-in default rather than adding to it, so the list you author is the list used. The browser client takes its servers from its own relay setting instead ([COMMUNICATION.md](COMMUNICATION.md#stunturn)), so on a web-conducted exchange these fields change no candidate the browser gathers. See [CLI.md](CLI.md#stun-and-what-it-discloses) for the default that applies when neither is set, what it discloses, and the idiom for gathering host candidates only.
 
@@ -781,7 +781,7 @@ The CLI passes these entries to its peer connection (the browser client uses its
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `url` | string | yes | TURN server URI: `turn:` or `turns:` followed by a host, with `transport` unset or lowercase `tcp` (`udp` too on a `turn:` url). A host-less `turn:`, or any other `transport` value, is refused |
+| `url` | string | yes | TURN server URI: `turn:` or `turns:` followed by a host, with `transport` unset or lowercase `tcp` (`udp` too on a `turn:` url). A host-less `turn:`, a user before the host (`turn:user@host` -- the credential goes in `username` and `credential`), or any other `transport` value, is refused |
 | `username` | string | yes | TURN username |
 | `credential` | string | yes | TURN credential; `@`-file recommended |
 | `credential_type` | enum | no | `password` (default) \| `hmac-sha1` |
@@ -1615,6 +1615,7 @@ The cells:
 | `connection.role` | authored | not applicable | carried |
 | `connection.stun` | carried | not applicable | refused |
 | `connection.turn` | carried | not applicable | refused |
+| `connection.invitation_relay` | authored (recorded on accept) | not applicable | refused (an exchange accepted in the app records it, and exporting that exchange is refused) |
 | `connection.ice_transport_policy` | carried | not applicable | refused |
 | `connection.ice_provision` | refused | not applicable | refused |
 | `connection.proxy` | not applicable | refused | not applicable |

@@ -7,6 +7,7 @@ import {
   relayLocatorFromOwnRelay,
 } from "../../src/config/invitation";
 import {
+  MAX_RELAY_LOCATOR_URL_LENGTH,
   MAX_RELAY_LOCATOR_URLS,
   parseConnectionConfig,
 } from "../../src/config/connection";
@@ -157,6 +158,37 @@ describe("the invitation's relay locator", () => {
     });
     await expect(decodeInvitation(await encodeRaw(token))).rejects.toThrow(
       ZodError,
+    );
+  });
+
+  test("a url of exactly the length bound decodes, and one code unit over is refused", async () => {
+    const urlOfLength = (length: number): string =>
+      "turn:" + "r".repeat(length - "turn:".length);
+    const atBound = tokenWithEndpoint({
+      channel: "webrtc",
+      host: "signal.example",
+      relay: { turn: [urlOfLength(MAX_RELAY_LOCATOR_URL_LENGTH)] },
+    });
+    const decoded = await decodeInvitation(await encodeRaw(atBound));
+    expect(decoded.connectionEndpoint).toEqual(atBound.connectionEndpoint);
+    const overBound = tokenWithEndpoint({
+      channel: "webrtc",
+      host: "signal.example",
+      relay: { turn: [urlOfLength(MAX_RELAY_LOCATOR_URL_LENGTH + 1)] },
+    });
+    await expect(decodeInvitation(await encodeRaw(overBound))).rejects.toThrow(
+      ZodError,
+    );
+  });
+
+  test("a url naming a user before its host is refused at decode", async () => {
+    const token = tokenWithEndpoint({
+      channel: "webrtc",
+      host: "signal.example",
+      relay: { turn: ["turns:psilink:secret@relay.example.org:443"] },
+    });
+    await expect(decodeInvitation(await encodeRaw(token))).rejects.toThrow(
+      /turns:\.\.\.@relay\.example\.org:443 names a user before its host/,
     );
   });
 

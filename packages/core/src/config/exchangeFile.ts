@@ -342,9 +342,10 @@ export function mintExchangeSpec(input: ExchangeFileInput): ExchangeSpec {
  * {@link WebRTCEndpointSchema}-validated `host`/`port`/`path` into
  * `server`, and a url-only `relay` into `invitation_relay`, so no PeerJS
  * `server.key`, `server.username`, `turn`, `ice_provision`, or
- * `provider_options` entry is representable in the result. The locator is validated through {@link WebRTCEndpointSchema}
- * first, so a type-bypassed caller's unexpected key is rejected there, at the
- * locator, rather than reaching the connection this builds.
+ * `provider_options` entry is representable in the result. The locator is
+ * validated through {@link WebRTCEndpointSchema} first, so a type-bypassed
+ * caller's unexpected key is rejected there, at the locator, rather than
+ * reaching the connection this builds.
  */
 export function connectionFromLocator(
   locator: ExchangeLocator,
