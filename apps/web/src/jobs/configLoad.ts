@@ -16,9 +16,9 @@
  *   (docs/spec/EXCHANGE_FILE.md, "What a consumer does with a setting it cannot
  *   honor");
  * - a `connection` on a channel outside {@link OPENED_CHANNELS};
- * - an `authentication` block holding a shared secret or an expiry, which the
- *   console reads from the key file beside the configuration rather than from
- *   the document;
+ * - an `authentication` block holding a shared secret or an expiry, which
+ *   belong in the key file rather than the document, and which the console
+ *   replaces with a new secret for each invitation it creates;
  * - one of the records whose absence turns an enforcement off that a run
  *   composed here could not state back ({@link assertRecordsSurvive});
  * - a setting inside a block the composition writes, which the export could not
@@ -562,10 +562,10 @@ function openedChannel(document: ExchangeSpec): OpenedChannel {
 
 /**
  * Refuse an `authentication` block holding the secret or its expiry. The
- * console reads the shared secret from the key file beside the configuration
- * and writes a fresh one per run, so a secret in the document is a value it
- * would neither use nor be able to keep. `token_max_age_days` is held
- * unchanged, which {@link carriedThroughFields} names.
+ * console creates a new secret for each invitation and writes it to the run's
+ * own key file, so a secret in the document is a value it would neither use
+ * nor be able to keep. `token_max_age_days` is held unchanged, which
+ * {@link carriedThroughFields} names.
  */
 function assertNoStatedSecret(document: ExchangeSpec): void {
   const authentication = document.authentication;
@@ -578,8 +578,9 @@ function assertNoStatedSecret(document: ExchangeSpec): void {
   throw new ConfigurationLoadRefusedError(
     "This configuration's authentication block states " +
       named.join(" and ") +
-      ". The console reads the shared secret from the .psilink.key file " +
-      "beside the configuration, so remove " +
+      ". The shared secret and its expiry belong in the .psilink.key file, " +
+      "not the configuration, and the console creates a new secret for each " +
+      "invitation, so remove " +
       (named.length === 1 ? "that line" : "those lines") +
       " and open it again.",
   );

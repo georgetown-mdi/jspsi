@@ -183,6 +183,21 @@ describe("what the load discloses", () => {
     expect(message).not.toContain("x".repeat(43));
   });
 
+  test("the shared-secret refusal names the remedy, not a key file the console reads", () => {
+    const message = refusal(
+      savedSftpDocument({
+        authentication: {
+          shared_secret: "b".repeat(42) + "A",
+          expires: "2030-01-01T00:00:00.000Z",
+        },
+      }),
+    );
+    expect(message).toContain("shared_secret and expires");
+    expect(message).toContain("remove those lines and open it again");
+    expect(message).toContain("new secret for each invitation");
+    expect(message).not.toMatch(/console reads/);
+  });
+
   test("an absent file is present: false with no error", () => {
     // The route's own absent-file answer; `readMountedConfiguration` is only
     // reached once bytes exist, so the shape is asserted at the loader below.

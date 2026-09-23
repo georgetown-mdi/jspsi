@@ -36,8 +36,8 @@ export async function fetchRecurringHandoff(
  * Validate a hand-off response body into a {@link JobHandoff}, or null when it is
  * not a well-formed hand-off -- a partial or ill-formed body renders nothing
  * rather than a half-built panel. The template is discriminated on `kind`: a
- * `config` holds a `yaml` string, a `command` holds an `argv` array of
- * strings.
+ * `config` holds a `yaml` string, and both kinds hold the command they run as
+ * an `argv` array of strings.
  *
  * @internal exported for the unit test.
  */
@@ -72,24 +72,24 @@ export function parseHandoff(body: unknown): JobHandoff | null {
 function parseTemplate(value: unknown): JobHandoffTemplate | null {
   if (value === null || typeof value !== "object" || Array.isArray(value))
     return null;
-  const { kind } = value as Record<string, unknown>;
+  const { kind, argv } = value as { kind?: unknown; argv?: unknown };
+  if (!isCommandArgv(argv)) return null;
   if (kind === "config") {
     const { yaml } = value as { yaml?: unknown };
     return typeof yaml === "string" && yaml.length > 0
-      ? { kind: "config", yaml }
+      ? { kind: "config", yaml, argv }
       : null;
   }
-  if (kind === "command") {
-    const { argv } = value as { argv?: unknown };
-    if (
-      !Array.isArray(argv) ||
-      argv.length === 0 ||
-      !argv.every((token): token is string => typeof token === "string")
-    )
-      return null;
-    return { kind: "command", argv };
-  }
+  if (kind === "command") return { kind: "command", argv };
   return null;
+}
+
+function isCommandArgv(argv: unknown): argv is Array<string> {
+  return (
+    Array.isArray(argv) &&
+    argv.length > 0 &&
+    argv.every((token): token is string => typeof token === "string")
+  );
 }
 
 /**

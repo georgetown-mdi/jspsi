@@ -75,6 +75,7 @@ const RECOVERY_HANDOFF = {
   usedSigningIdentity: false,
   template: {
     kind: "config",
+    argv: ["psilink", "exchange", "input.csv", "results.csv"],
     yaml: "connection:\n  channel: sftp\n",
   },
 } satisfies JobHandoff;

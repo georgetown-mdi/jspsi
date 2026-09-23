@@ -45,6 +45,11 @@ export type LoadedChannel = LoadedAuthoringState["channel"];
 /** A channel the console opens a configuration on but does not conduct. */
 type UnconductedChannel = Exclude<LoadedChannel, JobChannel>;
 
+/** A conducted channel this console can be left with nothing to run over: a
+ * shared directory needs a mounted folder, while SFTP is always offered, since
+ * the operator authors its connection in the console. */
+export type UnofferedChannel = Extract<JobChannel, "filedrop">;
+
 /** What the load control shows. */
 export type MountedConfigurationState =
   /** Nothing read yet: the control offers the load. */
@@ -57,10 +62,10 @@ export type MountedConfigurationState =
   | { status: "unavailable" }
   /** The configuration is open, and these are the notices beside it.
    * `transportUnavailable` is the channel the file runs over where this console
-   * cannot run it, so the transport stays where the review step had it;
-   * `notApplied` names the settings the operator's own input file could not
-   * supply and `notCovered` the settings whose own column set does not reach
-   * every column that file has, both settled once the held terms reach it;
+   * has nothing to run it over, so the transport stays where the review step
+   * had it; `notApplied` names the settings the operator's own input file could
+   * not supply and `notCovered` the settings whose own column set does not
+   * reach every column that file has, both settled once the held terms reach it;
    * `pendingOutboundConsent` is the consent record the file states as pending,
    * which no run that shares results with the partner gets past.
    * `notConducted` is the file's channel where the console conducts no
@@ -71,7 +76,7 @@ export type MountedConfigurationState =
       carriedThrough: Array<string>;
       warnings: Array<string>;
       notConducted?: UnconductedChannel;
-      transportUnavailable?: JobChannel;
+      transportUnavailable?: UnofferedChannel;
       notApplied?: Array<string>;
       notCovered?: Array<string>;
       pendingOutboundConsent?: boolean;
@@ -254,13 +259,9 @@ const RECORDS_WITH_NO_CONTROL: ReadonlyArray<
 
 /** What the operator is told about a configuration whose channel this console
  * has nothing to run it over: the review step keeps the transport it already
- * had, and each case names what would make the file's own channel runnable
- * here -- a mounted shared folder, or an authored SFTP connection. */
-const TRANSPORT_UNAVAILABLE_NOTICE: Record<JobChannel, string> = {
-  sftp:
-    "This configuration runs over SFTP, and this console has no SFTP " +
-    "connection to run it with. Author one in the connection step below, or " +
-    "choose how this exchange runs on the review step.",
+ * had, and the notice names what would make the file's own channel runnable
+ * here. */
+const TRANSPORT_UNAVAILABLE_NOTICE: Record<UnofferedChannel, string> = {
   filedrop:
     "This configuration runs over a shared directory, and this console has " +
     "no shared folder mounted. Mount one and set JOB_RENDEZVOUS_DIR to run " +
@@ -592,7 +593,7 @@ export function mountedConfigurationNotices(
  * transport and so withholds none. */
 export function withUnavailableTransport(
   state: MountedConfigurationState,
-  channel: JobChannel,
+  channel: UnofferedChannel,
 ): MountedConfigurationState {
   if (state.status !== "opened") return state;
   return { ...state, transportUnavailable: channel };

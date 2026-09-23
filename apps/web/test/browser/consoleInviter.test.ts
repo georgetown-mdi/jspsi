@@ -1394,6 +1394,7 @@ describe("console inviter re-attaches on a busy create", () => {
     usedSigningIdentity: false,
     template: {
       kind: "config",
+      argv: ["psilink", "exchange", "input.csv", "results.csv"],
       yaml: "connection:\n  channel: sftp\n  server:\n    host: sftp.example.gov\n",
     },
   } satisfies JobHandoff;
@@ -1765,6 +1766,7 @@ describe("console inviter recurring hand-off availability", () => {
     usedSigningIdentity: false,
     template: {
       kind: "config",
+      argv: ["psilink", "exchange", "input.csv", "results.csv"],
       yaml: "connection:\n  channel: sftp\n  server:\n    host: sftp.example.gov\n",
     },
   } satisfies JobHandoff;

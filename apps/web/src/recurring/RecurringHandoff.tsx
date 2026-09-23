@@ -89,14 +89,8 @@ export function RecurringHandoff({
  * the default expanded panel (under its own heading) and the collapsible
  * disclosure (under the toggle summary). */
 function HandoffBody({ handoff }: { handoff: JobHandoff }) {
-  const runCommand =
-    handoff.template.kind === "command"
-      ? shellJoinCommand(handoff.template.argv)
-      : "psilink exchange input.csv results.csv";
-  const windowsScheduledCommand =
-    handoff.template.kind === "command"
-      ? windowsJoinCommand(handoff.template.argv)
-      : runCommand;
+  const runCommand = shellJoinCommand(handoff.template.argv);
+  const windowsScheduledCommand = windowsJoinCommand(handoff.template.argv);
 
   return (
     <>
@@ -110,6 +104,7 @@ function HandoffBody({ handoff }: { handoff: JobHandoff }) {
       {handoff.template.kind === "config" ? (
         <ConfigSteps
           yaml={handoff.template.yaml}
+          command={runCommand}
           usedKeyFile={handoff.usedKeyFile}
           usedSigningIdentity={handoff.usedSigningIdentity}
         />
@@ -159,10 +154,12 @@ function HandoffBody({ handoff }: { handoff: JobHandoff }) {
  * the exchange command. */
 function ConfigSteps({
   yaml,
+  command,
   usedKeyFile,
   usedSigningIdentity,
 }: {
   yaml: string;
+  command: string;
   usedKeyFile: boolean;
   usedSigningIdentity: boolean;
 }) {
@@ -209,10 +206,7 @@ function ConfigSteps({
       )}
       <li>
         <p className={styles.handoffStepLabel}>Run the exchange</p>
-        <CopyableCode
-          code="psilink exchange input.csv results.csv"
-          ariaLabel="recurring exchange command"
-        />
+        <CopyableCode code={command} ariaLabel="recurring exchange command" />
         {usedSigningIdentity && (
           <p className={styles.small}>
             The configuration names no receipt file, so each scheduled run

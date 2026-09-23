@@ -36,6 +36,7 @@ import {
 } from "@console/loadedConfig";
 import {
   editorFromCsv,
+  editorWithColumnDisclosure,
   editorWithIncludeOwnColumns,
   editorWithOutputDirection,
 } from "@psi/inviterEditor";
@@ -635,6 +636,23 @@ describe("a sealed draft takes no configuration", () => {
     expect(state.loadedSftpForm).toBeUndefined();
   });
 
+  test("a read that was in flight at the mint stops showing as in flight", () => {
+    const reading = inviterScreenReducer(INVITER_SCREEN_INITIAL, {
+      type: "mounted-configuration-reading",
+    });
+    const minted: InviterScreenState = {
+      ...reading,
+      editor: { sealed: true } as never,
+    };
+    const landed = loadedInto(minted, sftpDocument());
+    expect(landed.mountedConfiguration).toEqual(MOUNTED_CONFIGURATION_UNREAD);
+    expect(landed.loadedConfiguration).toBeUndefined();
+    expect(landed.delimiterChoice).toBe(minted.delimiterChoice);
+    expect(
+      mountedConfigurationOfferable(landed.mountedConfiguration, true),
+    ).toBe(false);
+  });
+
   test("a close landing after the mint keeps the records on the run", () => {
     // The records are what put the disclosure commitment back on the intent,
     // so dropping them after the mint would compose a run with nothing left
@@ -840,6 +858,11 @@ describe("a loaded configuration reaches the editor once a file is read", () => 
       loadedInto(INVITER_SCREEN_INITIAL, sftpDocument()),
     );
     expect(applied.editor?.transport).toBe("sftp");
+    // SFTP is offered with no connection authored, so the load has no
+    // unavailable-transport notice to give for it.
+    expect(applied.mountedConfiguration).not.toHaveProperty(
+      "transportUnavailable",
+    );
   });
 
   test("a shared-folder document selects filedrop where the mount is there", () => {
@@ -1093,6 +1116,51 @@ describe("a column the configuration does not name is kept back", () => {
   test("with no configuration open the same file still infers", () => {
     const own = withFileCommitted(INVITER_SCREEN_INITIAL, acquired());
     expect(columnRole(own, "program_code")).toMatchObject({
+      role: "payload",
+      isPayload: true,
+    });
+  });
+});
+
+// A document stating no `metadata` has no column roles of its own, so opening it
+// over a file the operator already edited keeps their edits rather than
+// returning the draft to what the file's headers infer.
+describe("a document stating no column roles keeps the operator's own", () => {
+  function withProgramCodeIgnored(): InviterScreenState {
+    const committed = withFileCommitted(INVITER_SCREEN_INITIAL, acquired());
+    if (committed.editor === undefined || committed.acquired === undefined)
+      throw new Error("expected a committed file");
+    return inviterScreenReducer(committed, {
+      type: "column-edited",
+      editor: editorWithColumnDisclosure(
+        committed.editor,
+        committed.acquired,
+        "program_code",
+        "ignored",
+      ).editor,
+      announcement: "",
+    });
+  }
+
+  test("a column the operator set ignored stays ignored", () => {
+    const opened = withLoadedTermsDerived(
+      loadedInto(withProgramCodeIgnored(), sftpDocument()),
+    );
+    expect(columnRole(opened, "program_code")).toMatchObject({
+      role: "ignored",
+      isPayload: false,
+    });
+    expect(noticesOf(opened)).toEqual([]);
+  });
+
+  test("a document that states its roles still replaces them", () => {
+    const opened = withLoadedTermsDerived(
+      loadedInto(
+        withProgramCodeIgnored(),
+        sftpDocument({ metadata: documentColumns() }),
+      ),
+    );
+    expect(columnRole(opened, "program_code")).toMatchObject({
       role: "payload",
       isPayload: true,
     });

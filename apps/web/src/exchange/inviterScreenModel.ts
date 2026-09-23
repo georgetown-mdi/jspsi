@@ -654,8 +654,11 @@ export function inviterScreenReducer(
     case "mounted-configuration-read": {
       // A sealed draft is an invitation already minted from other terms: the
       // load would fill the cards and the records while leaving those terms
-      // untouched, so there is nothing here a read may do.
-      if (state.editor?.sealed === true) return state;
+      // untouched, so the read only ends its own pending state.
+      if (state.editor?.sealed === true)
+        return state.mountedConfiguration.status === "reading"
+          ? { ...state, mountedConfiguration: MOUNTED_CONFIGURATION_UNREAD }
+          : state;
       const read = mountedConfigurationRead(action.answer);
       const loaded = read.loaded;
       if (loaded === undefined)
@@ -684,9 +687,9 @@ export function inviterScreenReducer(
       return {
         ...state,
         mountedConfiguration:
-          conducted === undefined || offeredTransport !== undefined
-            ? read.state
-            : withUnavailableTransport(read.state, conducted),
+          conducted === "filedrop" && offeredTransport === undefined
+            ? withUnavailableTransport(read.state, conducted)
+            : read.state,
         connectionTuning: loaded.connectionTuning,
         exchangeFiles: loaded.exchangeFiles,
         receipts: {

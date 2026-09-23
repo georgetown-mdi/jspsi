@@ -93,6 +93,26 @@ describe("buildJobHandoff composes a portable, secret-free template", () => {
     expect(yaml.toLowerCase()).not.toContain("secret");
   });
 
+  test("the exchange command ends on the zero-setup command's own positionals", () => {
+    const facts = { credentialPasted: false, filedropSplit: false };
+    const exchange = buildJobHandoff(
+      validSftpIntent({ sharedSecret: DISTINCT_SECRET }),
+      testSftpServerEntry(),
+      facts,
+    );
+    const zeroSetup = buildJobHandoff(
+      validZeroSetupSftpIntent(),
+      testSftpServerEntry(),
+      facts,
+    );
+    expect(exchange.template.argv).toEqual([
+      "psilink",
+      "exchange",
+      ...zeroSetup.template.argv.slice(-2),
+    ]);
+    expect(exchange.template.argv.join(" ")).not.toContain(DISTINCT_SECRET);
+  });
+
   test("an sftp exchange placeholders a private-key passphrase distinctly", () => {
     const handoff = buildJobHandoff(
       validSftpIntent(),
@@ -429,9 +449,17 @@ describe("parseHandoff and shellJoinCommand (browser reader)", () => {
       usedKeyFile: true,
       credentialPasted: false,
       usedSigningIdentity: false,
-      template: { kind: "config", yaml: "connection:\n  channel: sftp\n" },
+      template: {
+        kind: "config",
+        yaml: "connection:\n  channel: sftp\n",
+        argv: ["psilink", "exchange", "input.csv", "results.csv"],
+      },
     });
-    expect(parsed?.template.kind).toBe("config");
+    expect(parsed?.template).toEqual({
+      kind: "config",
+      yaml: "connection:\n  channel: sftp\n",
+      argv: ["psilink", "exchange", "input.csv", "results.csv"],
+    });
   });
 
   test("a malformed hand-off is null (fail-safe)", () => {
@@ -455,6 +483,17 @@ describe("parseHandoff and shellJoinCommand (browser reader)", () => {
         channel: "sftp",
         usedKeyFile: true,
         credentialPasted: false,
+        template: { kind: "config", yaml: "connection:\n" },
+      }),
+    ).toBeNull();
+    // A config hand-off with no command leaves the panel nothing to run it by.
+    expect(
+      parseHandoff({
+        mode: "exchange",
+        channel: "sftp",
+        usedKeyFile: true,
+        credentialPasted: false,
+        usedSigningIdentity: false,
         template: { kind: "config", yaml: "connection:\n" },
       }),
     ).toBeNull();

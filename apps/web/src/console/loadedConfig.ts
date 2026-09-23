@@ -414,6 +414,10 @@ function metadataWithLoadedColumns(
  * could not be placed, leaves that setting named there. `notCovered` names the
  * other direction, the file holding columns the document's own set does not
  * state, each of which is held back rather than disclosed.
+ *
+ * A document stating no `metadata` has no column roles to put back, so the
+ * import binds against the roles the draft already holds, the operator's own
+ * edits included.
  */
 export function editorWithLoadedTerms(
   editor: InviterEditor,
@@ -426,7 +430,9 @@ export function editorWithLoadedTerms(
 } {
   if (editor.sealed === true) return { editor, notApplied: [], notCovered: [] };
   const columns = metadataWithLoadedColumns(
-    editor.seed.metadata,
+    loaded.metadata === undefined
+      ? editor.draft.metadata
+      : editor.seed.metadata,
     loaded.metadata,
   );
   let next = editorWithImportedTerms(

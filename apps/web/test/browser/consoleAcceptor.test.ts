@@ -824,6 +824,7 @@ describe("console acceptor re-attaches on a busy create", () => {
     usedSigningIdentity: false,
     template: {
       kind: "config",
+      argv: ["psilink", "exchange", "input.csv", "results.csv"],
       yaml: "connection:\n  channel: filedrop\n  path: /mnt/rendezvous\n",
     },
   } satisfies JobHandoff;

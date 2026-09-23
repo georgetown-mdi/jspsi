@@ -69,6 +69,7 @@ const CONFIG_HANDOFF = {
   usedSigningIdentity: false,
   template: {
     kind: "config",
+    argv: ["psilink", "exchange", "input.csv", "results.csv"],
     yaml:
       "connection:\n  channel: sftp\n  server:\n    host: sftp.example.gov\n" +
       "    password: '@/path/to/your/credential-file'\n",
@@ -166,7 +167,7 @@ describe("RecurringHandoff panel", () => {
       .toBeInTheDocument();
 
     const text = () => app.container.textContent;
-    // The config template and the fixed exchange command.
+    // The config template and the exchange command the hand-off states.
     expect(text()).toContain("channel: sftp");
     expect(text()).toContain("psilink exchange input.csv results.csv");
     // The copy-the-key step and both scheduler snippets.
@@ -175,6 +176,28 @@ describe("RecurringHandoff panel", () => {
     expect(text()).toContain("schtasks /Create");
     // An unsigned run is told nothing about copying a signing identity.
     expect(text()).not.toContain("Copy your signing identity");
+  });
+
+  test("the invitation run's command and schedule lines are the hand-off's own", async () => {
+    stubHandoff({
+      ...CONFIG_HANDOFF,
+      template: {
+        ...CONFIG_HANDOFF.template,
+        argv: ["psilink", "exchange", "clients.csv", "matches.csv"],
+      },
+    } satisfies JobHandoff);
+    app.render(createElement(RecurringHandoff, { jobId: JOB_ID }));
+
+    await expect
+      .element(page.getByRole("heading", { name: HANDOFF_HEADING }))
+      .toBeInTheDocument();
+
+    const text = () => app.container.textContent;
+    expect(text()).toMatch(
+      /0 2 \* \* \* cd .* && psilink exchange clients\.csv matches\.csv/,
+    );
+    expect(text()).toContain("schtasks /Create");
+    expect(text()).not.toContain("input.csv");
   });
 
   test("adds the copy-the-identity step for a run that signed its receipts", async () => {
