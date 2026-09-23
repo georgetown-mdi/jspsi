@@ -1,0 +1,35 @@
+# Copy to terraform.tfvars, which is gitignored, and replace every <...> value.
+# The unbracketed values are the ones the committed configuration files under
+# apps/web/deploy/aws_eb_saved_configurations/ state.
+
+aws_account_id = "<12-digit account id>"
+aws_region     = "us-west-2"
+
+application_name = "<EB_APPLICATION_NAME>"
+platform_arn     = "arn:aws:elasticbeanstalk:us-west-2::platform/Node.js 24 running on 64bit Amazon Linux 2023/6.11.7"
+
+vpc_id    = "<vpc-...>"
+subnet_id = "<subnet-...>"
+
+notification_endpoint = "<notification address>"
+
+# The live group's own name and description, from
+# aws ec2 describe-security-groups --group-ids <sg-...>
+origin_security_group = {
+  name        = "<group name>"
+  description = "<group description>"
+}
+
+cloudflare_zone_id = "<Cloudflare zone id>"
+
+environments = {
+  production = {
+    name        = "<production EB_ENVIRONMENT_NAME>"
+    public_name = "<production public name>"
+  }
+  staging = {
+    name        = "<staging EB_ENVIRONMENT_NAME>"
+    description = "Staging environment for <EB_APPLICATION_NAME>."
+    public_name = "<staging public name>"
+  }
+}

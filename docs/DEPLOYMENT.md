@@ -100,17 +100,36 @@ The project runs one public deployment of the web application, for evaluation an
 
 Two environments run the same application, a staging one and a production one, each a single Elastic Beanstalk instance behind a Cloudflare front. Their environment configuration is kept in the repository as one exported file per environment -- `production.json` and `staging.json` under [`apps/web/deploy/aws_eb_saved_configurations/`](../apps/web/deploy/aws_eb_saved_configurations/README.md) -- so a console change that nobody wrote down is a diff rather than a discovery. Each file is an `aws elasticbeanstalk describe-configuration-settings` response rewritten by the `redact.mjs` script beside it, which replaces the account id, the application and environment names, the notification address and the EC2 key name and keeps every other value as exported; that directory's README holds the refresh commands, what each placeholder replaces, and the form the inbound rules take. The settings no export carries -- everything on the Cloudflare side, and the rule list of the shared security group -- are recorded below instead.
 
+Beside the exports, an OpenTofu root, [`infra/hosted/`](../infra/hosted/README.md), describes both environments, the one security group their instances attach, and the Cloudflare zone, and the maintainer applies it from outside the container. Its README holds where its state and credentials live, how it is applied, and how a plan is read for drift. It has not been run against the account yet; until it is, the exports and the recorded values below are the whole record, and its README names the checks that first run makes.
+
+### Which source governs each setting
+
+Two sources in the repository state the environment's settings, and each setting has one that governs it -- the one a change is made in -- while the other records it.
+
+| Setting | Governed by | Recorded in |
+| ------- | ----------- | ----------- |
+| The option settings `infra/hosted/environments.tf` declares: capacity and instance types, VPC and subnet, the attached security group and `DisableDefaultEC2SecurityGroup`, log streaming and retention, health reporting, the proxy server, the deployment and managed-update policy, the service roles, the notification address, and the application's environment variables | The OpenTofu root | The exported configuration files, re-exported after each apply |
+| The option settings the root leaves out: the machine image, the platform's template parameters and launch-control values, the notification topic, the EC2 key pair (absent), and options with no value -- listed in [the root's README](../infra/hosted/README.md#option-settings-it-leaves-out) | The exported configuration files, applied as [below](#applying-a-saved-configuration) | The same files |
+| The instances' inbound rules: one security group, `:443` from Cloudflare's published ranges and nothing else. The platform creates no group of its own | The OpenTofu root, which reads the ranges from Cloudflare at plan time | `recorded-origin.json` beside the exports, compared daily by [the drift check](#checking-for-certificate-and-range-drift) |
+| Cloudflare: the proxy on both public names, SSL/TLS mode, Always Use HTTPS, HSTS | The OpenTofu root | [The recorded values below](#recorded-settings-and-their-source) |
+| The application version an environment runs | [`eb_deploy.yaml`](../.github/workflows/eb_deploy.yaml); the root ignores it | Neither |
+| The origin certificate | The `cert/` prefix of the deployment bucket, installed by [the route below](#reinstalling-the-origin-certificate) | `recorded-origin.json` and the recorded values below |
+| The instance profile's policies (the Session Manager route), the application version lifecycle rule, and the other rows below that neither source expresses | The account, changed by hand | The recorded values below |
+
+A change to a setting the root governs is made in the root and applied; one made in a console is undone by the next apply. The re-export that follows either is the record, not the change.
+
 ### Refreshing the configuration after a console change
 
 A setting changed in a console, or by an `update-environment` call, is invisible to the repository until someone exports it. So a console change is finished when the repository states it:
 
-1. Re-export every environment the change touched, run it through `redact.mjs`, commit the result, and read the diff -- the commands are in that README. A change to something the two environments share -- the instance profile, the shared security group, the certificate objects -- touches both.
-2. Update the recorded values below for anything an export does not carry, and move its measurement date to the date the change landed.
-3. For a Cloudflare-side change there is nothing to export: the recorded values below are the whole record, and updating them is the step.
+1. If the setting is one [the OpenTofu root governs](#which-source-governs-each-setting), make the change in the root and apply it, or apply the root unchanged to put the setting back; `tofu plan` shows which the console change was.
+2. Re-export every environment the change touched, run it through `redact.mjs`, commit the result, and read the diff -- the commands are in that README. A change to something the two environments share -- the instance profile, the shared security group, the certificate objects -- touches both.
+3. Update the recorded values below for anything an export does not carry, and move its measurement date to the date the change landed.
+4. For a Cloudflare-side change there is nothing to export: the recorded values below are the whole record, and updating them is the step.
 
 ### Applying a saved configuration
 
-Applying means replaying a checked-in configuration onto an environment -- after recreating one, or to put a drifted one back. It is a separate path from deploying the application: [`eb_deploy.yaml`](../.github/workflows/eb_deploy.yaml) creates an application version from the pushed commit and calls `update-environment --version-label`, and reads nothing from the saved-configuration directory.
+Applying means replaying a checked-in configuration onto an environment -- after recreating one, or to put a drifted one back. For the settings the OpenTofu root governs, applying is `tofu apply` from [`infra/hosted/`](../infra/hosted/README.md#applying); replaying an export is for the settings the root leaves out, and one that replays a setting the root declares is overwritten by the next apply. It is a separate path from deploying the application: [`eb_deploy.yaml`](../.github/workflows/eb_deploy.yaml) creates an application version from the pushed commit and calls `update-environment --version-label`, and reads nothing from the saved-configuration directory.
 
 - The option settings of a committed file are applied either as a configuration template for the application that the environment is then updated against, or as the option settings of an `update-environment` call. No apply has been run from this repository yet, so the first one is also the verification of the exact commands: run it against staging, and correct the README with what the tool accepted.
 - Substitute the replaced identifiers back before applying. A committed file states them as placeholders, which no AWS call accepts.
@@ -142,7 +161,7 @@ node apps/web/deploy/aws_eb_saved_configurations/check-origin-drift.mjs
 
 A run by hand needs read credentials for the AWS account, which no development container holds, so it is the maintainer's to run outside the container. What to do with each result, from the daily run or by hand:
 
-- **A comparison found a difference.** Correct the account first where it is the account that is wrong: issue a replacement Origin CA certificate and install it by the route above when the expiry is inside the margin, and authorize a published range the rules do not admit and revoke a range Cloudflare no longer publishes -- authorize before revoking, since a revoke first drops live requests from the range being replaced. Then re-run the check and commit the record it prints, which is what the account and Cloudflare now hold. Where the account is already right, the record alone is stale, and committing that block is the whole fix.
+- **A comparison found a difference.** Correct the account first where it is the account that is wrong: issue a replacement Origin CA certificate and install it by the route above when the expiry is inside the margin, and apply [the OpenTofu root](../infra/hosted/README.md#reading-a-plan-for-drift) when the rules and the published ranges differ -- it reads the ranges from Cloudflare at plan time, so its plan is the list of rules to add and remove. Then re-run the check and commit the record it prints, which is what the account and Cloudflare now hold. Where the account is already right, the record alone is stale, and committing that block is the whole fix.
 - **A comparison could not run.** The run had no credentials for the account, no route to `cloudflare.com`, or an answer it could not read, so a value it compares was never read. It exits 2 rather than 0 and compares nothing in place of what it could not read, so fix the run and repeat it rather than reading a 2 as agreement.
 
 #### Creating the role the scheduled run assumes
@@ -243,7 +262,7 @@ Values these passes did not measure, unrecorded rather than assumed:
 
 - Cloudflare's retention for the sampled request logs and security analytics it holds on the Free plan. Cloudflare holds request metadata for everything it forwards, under its own policy; the period is not measured.
 - Whether Cloudflare caches any response. Every probed path answered as dynamic; static assets were not probed.
-- Whether the inbound rules survive `rebuild-environment` or a managed platform update. They survive a configuration deployment; the rest is the verification named in the saved-configuration README, which the maintainer runs against the live account.
+- Whether the inbound rules survive `rebuild-environment` or a managed platform update. They survive a configuration deployment. The OpenTofu root is the route by which they are meant to survive the rest, and the verification is a step of [its first run](../infra/hosted/README.md#the-first-run-against-the-live-account), which the maintainer runs against the live account.
 - The volume and cost of the streamed logs. The stored-bytes figure lagged far behind ingestion at measurement time and was not a usable number.
 - Whether an environment recreated under its old name streams into the same log groups. The group names derive from the environment name, but confirming it means tearing an environment down.
 - Instance internals -- the rotation fragments and disk use -- on the staging environment. Those were read on production, and staging runs the same platform version.

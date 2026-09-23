@@ -1,0 +1,14 @@
+# State, plans, the operator's values and the backend location stay on the
+# operator's machine or in the state bucket. The tracked halves are the
+# .example files beside them.
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+*.tfvars.json
+backend.hcl
+override.tf
+*_override.tf
+crash.log
+crash.*.log
