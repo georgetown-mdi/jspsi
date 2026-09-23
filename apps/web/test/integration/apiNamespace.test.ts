@@ -434,8 +434,10 @@ describe.skipIf(!hasBuild)("the /api namespace's refusal", () => {
         DOUBLE_ENCODED_DOT_TARGET,
         ACCEPT_VALUES[1][1],
       );
-      expect(answered.status).toBe(500);
-      expect(answered.body).toContain("Only HTML requests are supported here");
+      expect(answered.status).toBe(406);
+      expect(answered.body).toContain(
+        '{"error":"Only HTML requests are supported here"}',
+      );
     });
 
     test("the broker answers GET /api/peerjs/id", async () => {
