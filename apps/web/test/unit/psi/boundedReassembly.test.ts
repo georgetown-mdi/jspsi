@@ -496,11 +496,11 @@ describe("boundChunkReassembly: deserialized-structure bound at the unpack choke
 
   test("keeps the set frame of a file at the intake cap inside the frame envelope", () => {
     // The narrowest row shape docs/spec/PROTOCOL.md measures is a two-column id
-    // and email file at 33.4 bytes a row. One distinct key value per row puts
+    // and email file at 33.5 bytes a row. One distinct key value per row puts
     // one 35-byte encrypted element per row in a single set frame, so an
     // intake cap past about 245 MiB would admit a file whose set frame the
     // receiving tab refuses mid-exchange.
-    const narrowestBytesPerRow = 33.4;
+    const narrowestBytesPerRow = 33.5;
     const encryptedElementBytes = 35;
     const rowsAtCap = Math.ceil(MAX_CSV_FILE_BYTES / narrowestBytesPerRow);
     expect(rowsAtCap * encryptedElementBytes).toBeLessThan(
