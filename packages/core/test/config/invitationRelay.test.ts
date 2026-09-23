@@ -188,7 +188,7 @@ describe("the invitation's relay locator", () => {
       relay: { turn: ["turns:psilink:secret@relay.example.org:443"] },
     });
     await expect(decodeInvitation(await encodeRaw(token))).rejects.toThrow(
-      /turns:\.\.\.@relay\.example\.org:443 names a user before its host/,
+      /the 1st turn url names a user before its host/,
     );
   });
 

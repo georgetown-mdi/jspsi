@@ -32,6 +32,9 @@ import { z } from "zod";
  * to Zod's own comparison. `test/utils/maxCodeUnits.test.ts` pins that
  * against the rendered text of the `.max()` this stands in for.
  *
+ * A `message` may be a function of the issue, as a check's own `error` may,
+ * to name where the value sits from the issue's `path`.
+ *
  * A named `message` goes in the check's own `error` rather than in the issue
  * pushed below: Zod resolves a check's message after it sets the issue's
  * `path`, so an issue that already holds a message serializes its keys in a
@@ -39,12 +42,14 @@ import { z } from "zod";
  */
 export const maxCodeUnits = (
   maximum: number,
-  message?: string,
+  message?: string | ((issue: z.core.$ZodRawIssue) => string),
 ): z.core.$ZodCheck<string> => {
   const check = new z.core.$ZodCheckMaxLength({
     check: "max_length",
     maximum,
-    ...(message === undefined ? {} : { error: () => message }),
+    ...(message === undefined
+      ? {}
+      : { error: typeof message === "string" ? () => message : message }),
   });
   const zodLengthComparison = check._zod.check;
   check._zod.check = (payload) => {

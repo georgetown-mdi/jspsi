@@ -432,49 +432,57 @@ interface TurnServer {
 const TURN_URL_PATTERN = /^turns?:[^\s:?@/#][^\s?@/#]*(?:\?[^\s#]*)?$/;
 const STUN_URI_PATTERN = /^stuns?:[^\s:?@/#][^\s?@/#]*(?:\?[^\s#]*)?$/;
 
-const USER_BEFORE_HOST = /^([a-z]+:)[^?]*@/;
-const SCHEME = /^[a-z]+:/;
-const HOST_AND_PORT = /^[^\s/?#@]*/;
-const PATH_AFTER_HOST = /^[a-z]+:[^\s/?#@]+\//;
+const SCHEME_PREFIX = /^([a-z][a-z0-9+.-]*):/i;
+const USER_BEFORE_HOST = /^[a-z]+:[^?]*@/i;
+const PATH_AFTER_HOST = /^[a-z]+:[^\s/?#@]+\//i;
 
-// Code units a relay url refusal may echo of the url.
+// Code units a refused query key may show.
 /** @internal */
-export const RELAY_URL_DISPLAY_LENGTH = 64;
+export const RELAY_QUERY_KEY_DISPLAY_LENGTH = 64;
 
-// The scheme and the host and port of a refused url, and nothing else: a
-// user, path, query, or fragment may hold a credential. A user before the host
-// shows as `...@`; when the part before the last `@` has a `/` or `#`, that
-// `@` may sit in a path rather than end a user, so no host is shown. Redacted
-// and fitted as the invitation's key names are (invitation.ts).
-function relayUrlForDisplay(url: string): string {
-  const user = USER_BEFORE_HOST.exec(url);
-  if (user !== null) {
-    const scheme = user[1] ?? "";
-    const userPart = user[0].slice(scheme.length);
-    const host = /[/#]/.test(userPart)
-      ? ""
-      : (HOST_AND_PORT.exec(url.slice(user[0].length))?.[0] ?? "");
-    return fittedRelayUrlPart(`${scheme}...@${host}`);
+type RelayUrlIssue = {
+  input?: unknown;
+  path?: ReadonlyArray<PropertyKey> | undefined;
+};
+
+function ordinal(position: number): string {
+  const lastTwo = position % 100;
+  if (lastTwo >= 11 && lastTwo <= 13) return `${position}th`;
+  switch (position % 10) {
+    case 1:
+      return `${position}st`;
+    case 2:
+      return `${position}nd`;
+    case 3:
+      return `${position}rd`;
+    default:
+      return `${position}th`;
   }
-  const scheme = SCHEME.exec(url)?.[0] ?? "";
-  const host = HOST_AND_PORT.exec(url.slice(scheme.length))?.[0] ?? "";
-  return fittedRelayUrlPart(`${scheme}${host}`);
 }
 
-function fittedRelayUrlPart(shown: string): string {
-  return clipToRenderedCost(
-    redactPrivateKeyMaterial(
-      boundRawFragmentForFit(shown, RELAY_URL_DISPLAY_LENGTH),
-    ),
-    RELAY_URL_DISPLAY_LENGTH,
-  );
+// How a relay url refusal names the url: by kind, and by position when the
+// url sits in a list (a stun entry, or a turn entry's `url`). A refusal prints
+// no character of the url itself: a user, path, query, or fragment may hold a
+// credential, and a malformed url marks no reliable end to its host.
+function relayUrlEntry(kind: "turn" | "stun", issue: RelayUrlIssue): string {
+  const path = issue.path ?? [];
+  const last = path.at(-1);
+  const index =
+    typeof last === "number"
+      ? last
+      : last === "url" && typeof path.at(-2) === "number"
+        ? (path.at(-2) as number)
+        : undefined;
+  return index === undefined
+    ? `the ${kind} url`
+    : `the ${ordinal(index + 1)} ${kind} url`;
 }
 
 function urlGrammarMessage(
   kind: "turn" | "stun",
-  hostMessage: string,
   example: string,
-): (issue: { input?: unknown }) => string {
+): (issue: RelayUrlIssue) => string {
+  const schemes = `${kind}: or ${kind}s:`;
   const credentialHome =
     kind === "turn"
       ? "put the credential in the entry's username and credential fields, " +
@@ -482,18 +490,24 @@ function urlGrammarMessage(
       : "a stun server takes no credential, so leave it out";
   const noPathOrFragment = `a ${kind} url takes no path or fragment, for example ${example}`;
   return (issue) => {
-    if (typeof issue.input !== "string") return hostMessage;
-    const url = issue.input;
-    const refusal = USER_BEFORE_HOST.test(url)
-      ? `names a user before its host; ${credentialHome}`
-      : url.includes("#")
-        ? `has a fragment; ${noPathOrFragment}`
-        : PATH_AFTER_HOST.test(url)
-          ? `has a path after its host; ${noPathOrFragment}`
-          : undefined;
-    return refusal === undefined
-      ? hostMessage
-      : `the ${kind} url ${relayUrlForDisplay(url)} ${refusal}`;
+    const entry = relayUrlEntry(kind, issue);
+    const url = typeof issue.input === "string" ? issue.input : "";
+    const scheme = SCHEME_PREFIX.exec(url)?.[1];
+    const ours =
+      scheme !== undefined &&
+      (scheme.toLowerCase() === kind || scheme.toLowerCase() === `${kind}s`);
+    const refusal = !ours
+      ? `must begin with ${schemes}, for example ${example}`
+      : USER_BEFORE_HOST.test(url)
+        ? `names a user before its host; ${credentialHome}`
+        : url.includes("#")
+          ? `has a fragment; ${noPathOrFragment}`
+          : PATH_AFTER_HOST.test(url)
+            ? `has a path after its host; ${noPathOrFragment}`
+            : scheme !== scheme.toLowerCase()
+              ? `must write its scheme in lowercase, ${schemes}`
+              : `must name a host after ${schemes}, for example ${example}`;
+    return `${entry} ${refusal}`;
   };
 }
 
@@ -520,15 +534,18 @@ function turnUrlTransportIsSupported(url: string): boolean {
 
 // A TURN uri defines one query parameter, `transport` (RFC 7065), and a STUN
 // uri none (RFC 7064), so any other is refused rather than passed on, where a
-// pasted credential could reach an invitation. The refusal names the key only:
-// a parameter with no `=` may be a bare secret, so it is not named at all.
-function refusedQueryParameterMessage(
+// pasted credential could reach an invitation. The refusal names the key only,
+// fitted to RELAY_QUERY_KEY_DISPLAY_LENGTH: a parameter with no `=` may be a
+// bare secret, so it is not named at all, and the query ends at a `#` so no
+// fragment text reaches a key.
+function refusedQueryParameter(
   url: string,
   allowed: ReadonlyArray<string>,
 ): string | undefined {
   const queryStart = url.indexOf("?");
   if (queryStart === -1) return undefined;
-  for (const parameter of url.slice(queryStart + 1).split("&")) {
+  const query = url.slice(queryStart + 1).split("#")[0] ?? "";
+  for (const parameter of query.split("&")) {
     const separator = parameter.indexOf("=");
     if (separator === -1) {
       if (allowed.includes(parameter)) continue;
@@ -536,26 +553,34 @@ function refusedQueryParameterMessage(
     }
     const name = parameter.slice(0, separator);
     if (!allowed.includes(name)) {
-      return `the query parameter "${fittedRelayUrlPart(name)}"`;
+      const shown = clipToRenderedCost(
+        redactPrivateKeyMaterial(
+          boundRawFragmentForFit(name, RELAY_QUERY_KEY_DISPLAY_LENGTH),
+        ),
+        RELAY_QUERY_KEY_DISPLAY_LENGTH,
+      );
+      return `the query parameter "${shown}"`;
     }
   }
   return undefined;
 }
 
-function queryParameterCheck(
+function queryParameterRefinement(
   kind: "turn" | "stun",
   allowed: ReadonlyArray<string>,
   remedy: string,
-): (context: z.core.ParsePayload<string>) => void {
-  return (context) => {
-    const refused = refusedQueryParameterMessage(context.value, allowed);
-    if (refused === undefined) return;
-    context.issues.push({
-      code: "custom",
-      input: context.value,
-      message: `a ${kind} url may not set ${refused}; ${remedy}`,
-    });
-  };
+): [(url: string) => boolean, { error: (issue: RelayUrlIssue) => string }] {
+  return [
+    (url) => refusedQueryParameter(url, allowed) === undefined,
+    {
+      error: (issue) => {
+        const url = typeof issue.input === "string" ? issue.input : "";
+        const refused =
+          refusedQueryParameter(url, allowed) ?? "a query parameter";
+        return `${relayUrlEntry(kind, issue)} may not set ${refused}; ${remedy}`;
+      },
+    },
+  ];
 }
 
 /**
@@ -570,19 +595,17 @@ export const TurnUrlSchema = z
   .regex(TURN_URL_PATTERN, {
     error: urlGrammarMessage(
       "turn",
-      "a turn entry's url must name a host after turn: or turns:, for " +
-        "example turns:relay.example.org:443?transport=tcp",
       "turns:relay.example.org:443?transport=tcp",
     ),
   })
   .refine(turnUrlTransportIsSupported, {
-    message:
-      "a turn entry's url may leave transport unset or set it to lowercase " +
-      "tcp, and a turn: url may also set it to udp, for example " +
-      "turns:relay.example.org:443?transport=tcp",
+    error: (issue) =>
+      `${relayUrlEntry("turn", issue)} may leave transport unset or set it ` +
+      "to lowercase tcp, and a turn: url may also set it to udp, for " +
+      "example turns:relay.example.org:443?transport=tcp",
   })
-  .check(
-    queryParameterCheck(
+  .refine(
+    ...queryParameterRefinement(
       "turn",
       ["transport"],
       "transport is its only parameter, and a credential goes in the " +
@@ -599,15 +622,10 @@ export const StunUrlSchema = z
   .string()
   .trim()
   .regex(STUN_URI_PATTERN, {
-    error: urlGrammarMessage(
-      "stun",
-      "a stun entry must name a host after stun: or stuns:, for " +
-        "example stun:stun.example.org:3478",
-      "stun:stun.example.org:3478",
-    ),
+    error: urlGrammarMessage("stun", "stun:stun.example.org:3478"),
   })
-  .check(
-    queryParameterCheck(
+  .refine(
+    ...queryParameterRefinement(
       "stun",
       [],
       "a stun url takes no query string, for example " +
@@ -995,7 +1013,14 @@ export const MAX_RELAY_LOCATOR_URL_LENGTH = 1024;
 
 const relayUrlList = (url: z.ZodType<string>, name: "turn" | "stun") =>
   boundedArray(
-    url.check(maxCodeUnits(MAX_RELAY_LOCATOR_URL_LENGTH)),
+    url.check(
+      maxCodeUnits(
+        MAX_RELAY_LOCATOR_URL_LENGTH,
+        (issue) =>
+          `${relayUrlEntry(name, issue)} is longer than ` +
+          `${MAX_RELAY_LOCATOR_URL_LENGTH} characters`,
+      ),
+    ),
     MAX_RELAY_LOCATOR_URLS,
     `a relay locator's ${name} list must not exceed ` +
       `${MAX_RELAY_LOCATOR_URLS} urls`,
