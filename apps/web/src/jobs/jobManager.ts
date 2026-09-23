@@ -591,10 +591,16 @@ export class JobManager {
     // file beside it. Checked after the busy check, so a create posted to
     // recover a lost attachment meets the rejection that re-attaches it, and
     // before the slot is claimed, so a refusal leaves the console free.
-    const mountedKeyPath =
-      intent.mode !== "zeroSetup" && intent.mountedConfigurationOpened === true
-        ? checkedMountedKeyFilePath(this.dataRoot)
-        : undefined;
+    const runsOpenedConfiguration =
+      intent.mode !== "zeroSetup" && intent.mountedConfigurationOpened === true;
+    const mountedKeyPath = runsOpenedConfiguration
+      ? checkedMountedKeyFilePath(this.dataRoot)
+      : undefined;
+    // Captured before any await, so an open landing while the run writes its
+    // documents affects only a later run.
+    const opened = runsOpenedConfiguration
+      ? this.openedConfiguration
+      : undefined;
     // Resolved after the busy check for the reason the refusal below states,
     // and before the slot is claimed, so a location naming no path in the
     // secrets mount leaves the console free rather than mid-create.
@@ -628,6 +634,7 @@ export class JobManager {
         mountedInputPath,
         identityPath,
         mountedKeyPath,
+        opened,
       );
     } catch (error) {
       // spawnExchangeJob is the final fallible step of startJobInWorkdir, so
@@ -965,6 +972,7 @@ export class JobManager {
     mountedInputPath: string | undefined,
     identityPath: string,
     mountedKeyPath: string | undefined,
+    opened: OpenedMountedConfiguration | undefined,
   ): Promise<string> {
     // Exchange composes a config document into the workdir, and a key file
     // beside it unless the run uses the one beside the opened configuration;
@@ -1007,9 +1015,6 @@ export class JobManager {
     // changed since the open is reported rather than exported.
     const runsOpenedConfiguration =
       intent.mode !== "zeroSetup" && intent.mountedConfigurationOpened === true;
-    const opened = runsOpenedConfiguration
-      ? this.openedConfiguration
-      : undefined;
     const mountedDocument = opened?.document;
     const openedConfigurationNotice = runsOpenedConfiguration
       ? openedConfigurationWarning(this.dataRoot, opened)
@@ -1257,11 +1262,6 @@ export class JobManager {
   }
 
   /**
-   * The active record when the slot holds one matching this id and it has not
-   * been deleted, else undefined. A deleted (but not-yet-freed) slot shows
-   * 404 here.
-   */
-  /**
    * Open the configuration mounted in the working folder for `GET
    * /api/jobs/config`, keeping it as opened for the run that follows.
    *
@@ -1275,6 +1275,11 @@ export class JobManager {
     return response;
   }
 
+  /**
+   * The active record when the slot holds one matching this id and it has not
+   * been deleted, else undefined. A deleted (but not-yet-freed) slot shows
+   * 404 here.
+   */
   getJob(id: string): JobRecord | undefined {
     const slot = this.slot;
     if (

@@ -284,7 +284,7 @@ export function composeSftpConfigDocument(
 /**
  * Serialize the CLI key file body. Only the shared secret is written; no
  * `expires` is stamped, so a server-driven job holds no invitation-token
- * lifetime of its own. Channel-independent: both arms have `sharedSecret`.
+ * lifetime of its own.
  *
  * @throws {Error} for an intent stating no secret -- a run of the opened
  *   configuration, which uses the key file beside it and composes none.

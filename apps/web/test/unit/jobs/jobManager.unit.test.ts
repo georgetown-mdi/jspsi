@@ -54,6 +54,7 @@ import {
   validZeroSetupSftpIntent,
 } from "../../utils/jobFixtures";
 
+import type * as workdirModule from "@jobs/workdir";
 import type { BufferedEvent, JobRecord } from "@jobs/jobManager";
 import type {
   CliDriverHandlers,
@@ -2460,6 +2461,11 @@ describe("the mounted configuration as the hand-off's merge base", () => {
     return handoff.template.kind === "config" ? handoff.template.yaml : "";
   }
 
+  function handoffTemplateOf(manager: JobManager, id: string): string {
+    const handoff = manager.getJobHandoff(id)!;
+    return handoff.template.kind === "config" ? handoff.template.yaml : "";
+  }
+
   test("an exchange authored here keeps nothing from the mounted file", async () => {
     const { manager } = managerOverMountedConfiguration();
     manager.openMountedConfiguration();
@@ -2499,6 +2505,28 @@ describe("the mounted configuration as the hand-off's merge base", () => {
     expect(String(warnings[0].message)).toContain(
       "The psilink.yaml in your working folder changed after you opened it.",
     );
+  });
+
+  test("an open landing while the run writes its documents leaves the run's merge base alone", async () => {
+    const { manager, root } = managerOverMountedConfiguration();
+    manager.openMountedConfiguration();
+    const configPath = path.join(root, "psilink.yaml");
+    const actual = await vi.importActual<typeof workdirModule>("@jobs/workdir");
+    vi.mocked(writeJobFile).mockImplementationOnce(async (...args) => {
+      fs.writeFileSync(
+        configPath,
+        fs
+          .readFileSync(configPath, "utf8")
+          .replace("token_max_age_days: 30", "token_max_age_days: 7"),
+      );
+      manager.openMountedConfiguration();
+      return actual.writeJobFile(...args);
+    });
+    const id = await manager.createJob(openedIntent());
+    expect(vi.mocked(writeJobFile)).toHaveBeenCalled();
+    const yaml = handoffTemplateOf(manager, id);
+    expect(yaml).toContain("token_max_age_days: 30");
+    expect(yaml).not.toContain("token_max_age_days: 7");
   });
 
   test("an unchanged file raises no notice", async () => {
