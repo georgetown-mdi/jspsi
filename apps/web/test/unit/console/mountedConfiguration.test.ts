@@ -455,16 +455,6 @@ describe("the notices name the settings and say what happens to them", () => {
     expect(notices[0]).toMatch(/review step/);
   });
 
-  test("an sftp channel with no connection names the step that authors one", () => {
-    const read = mountedConfigurationRead(opened());
-    const notices = mountedConfigurationNotices(
-      withUnavailableTransport(read.state, "sftp"),
-    );
-    expect(notices[0]).toContain("over SFTP");
-    expect(notices[0]).toMatch(/connection step/);
-    expect(notices[0]).toMatch(/review step/);
-  });
-
   test("a setting the input file cannot supply is named, not dropped", () => {
     const notice = termsNotAppliedNotice(["metadata", "standardization"]);
     expect(notice).toContain("metadata, standardization");
@@ -474,23 +464,27 @@ describe("the notices name the settings and say what happens to them", () => {
 
   test("what the file could not supply is stated last", () => {
     const read = mountedConfigurationRead(
-      opened({}, ["signing.receipt_output"], ["connection.server.password"]),
+      opened(
+        { channel: "filedrop" },
+        ["signing.receipt_output"],
+        ["connection.server.password"],
+      ),
     );
     const notices = mountedConfigurationNotices(
       withUnavailableTransport(
         withTermsNotApplied(read.state, ["metadata"]),
-        "sftp",
+        "filedrop",
       ),
     );
     expect(notices).toHaveLength(4);
-    expect(notices[0]).toContain("over SFTP");
+    expect(notices[0]).toContain("shared directory");
     expect(notices[1]).toContain("signing.receipt_output");
     expect(notices[2]).toContain("connection.server.password");
     expect(notices[3]).toContain("metadata");
   });
 
   test("a load that opened nothing takes neither added notice", () => {
-    expect(withUnavailableTransport({ status: "absent" }, "sftp")).toEqual({
+    expect(withUnavailableTransport({ status: "absent" }, "filedrop")).toEqual({
       status: "absent",
     });
     expect(withTermsNotApplied({ status: "absent" }, ["metadata"])).toEqual({

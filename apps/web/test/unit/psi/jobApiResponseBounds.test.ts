@@ -285,7 +285,11 @@ describe("a hand-off body over its cap fails the reader safely", () => {
       usedKeyFile: true,
       credentialPasted: false,
       usedSigningIdentity: false,
-      template: { kind: "config", yaml: "version: 1\n" },
+      template: {
+        kind: "config",
+        yaml: "version: 1\n",
+        argv: ["psilink", "exchange", "input.csv", "results.csv"],
+      },
     });
     await expect(
       fetchRecurringHandoff("job-1", answering(body)),
@@ -398,7 +402,11 @@ describe("a well-formed body under its cap reaches the client", () => {
       usedKeyFile: true,
       credentialPasted: false,
       usedSigningIdentity: false,
-      template: { kind: "config", yaml: "version: 1\n" },
+      template: {
+        kind: "config",
+        yaml: "version: 1\n",
+        argv: ["psilink", "exchange", "input.csv", "results.csv"],
+      },
     };
     await expect(
       fetchRecurringHandoff("job-1", answering(JSON.stringify(handoff))),

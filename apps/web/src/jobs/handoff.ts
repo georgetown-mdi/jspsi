@@ -83,18 +83,21 @@ export interface JobHandoff {
    * partner's pin would reject.
    */
   usedSigningIdentity: boolean;
-  /** The portable template itself: the exchange config document (exchange mode) or
-   * the zero-setup command tokens (zeroSetup mode). */
+  /** The portable template itself: the exchange config document and the command
+   * that runs it (exchange mode), or the zero-setup command tokens (zeroSetup
+   * mode). */
   template: JobHandoffTemplate;
 }
 
 /**
  * The portable template, discriminated on which artifact the mode produces: the
- * `psilink.yaml` config text an exchange-mode recurring run loads, or the argv
+ * `psilink.yaml` config text an exchange-mode recurring run loads, beside the
+ * argv tokens of the `psilink exchange` command that loads it, or the argv
  * tokens of the zero-setup command a Direct-mode recurring run invokes.
  */
 export type JobHandoffTemplate =
-  { kind: "config"; yaml: string } | { kind: "command"; argv: Array<string> };
+  | { kind: "config"; yaml: string; argv: Array<string> }
+  | { kind: "command"; argv: Array<string> };
 
 /** The placeholder a container-internal credential `@path` is shown as. The
  * operator replaces it with the path to their own credential file. */
@@ -148,8 +151,8 @@ export const HANDOFF_INBOUND_DIRECTORY_URL_PLACEHOLDER =
 export const HANDOFF_SIGNING_IDENTITY_PLACEHOLDER =
   "/path/to/your/signing-identity.json";
 
-/** The input/output positionals the recurring command template names, matching the
- * console's `results.csv` download name so the two flows read consistently. */
+/** The input/output positionals both recurring command templates name, matching
+ * the console's `results.csv` download name so the two flows read consistently. */
 const HANDOFF_INPUT_NAME = "input.csv";
 const HANDOFF_OUTPUT_NAME = "results.csv";
 
@@ -216,7 +219,9 @@ const HANDOFF_SIGNING_PATHS: JobSigningPaths = {
  * server entry on sftp, a placeholder rendezvous path on filedrop, and
  * {@link HANDOFF_SIGNING_PATHS} on both). Recomposing, rather than reading
  * and munging the on-disk file, keeps the container path out by
- * construction.
+ * construction. The command that runs it ends on the same input/output
+ * positionals as the zero-setup command, and names no config or key file: the
+ * panel has both copied into the folder the command runs in.
  */
 function buildExchangeHandoffTemplate(
   intent: JobExchangeIntent,
@@ -230,6 +235,7 @@ function buildExchangeHandoffTemplate(
       composedHandoffSpec(intent, serverEntry, filedropSplit),
       mountedDocument,
     ),
+    argv: ["psilink", "exchange", HANDOFF_INPUT_NAME, HANDOFF_OUTPUT_NAME],
   };
 }
 
