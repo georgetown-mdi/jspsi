@@ -124,6 +124,16 @@ describe("the relay certificate deploy hook", () => {
     expect(noop.stderr).toContain("unchanged");
   });
 
+  it("says the relay is not running on a no-op day while it is stopped", () => {
+    const host = fixtureHost();
+    host.issue(1);
+    host.run();
+    host.stopService();
+    const noop = host.run();
+    expect(noop.restarted).toBe(false);
+    expect(noop.stderr).toContain("not running");
+  });
+
   it("restarts the relay once the client renews the certificate", () => {
     const host = fixtureHost();
     host.issue(1);

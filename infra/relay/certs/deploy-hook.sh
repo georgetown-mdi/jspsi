@@ -54,7 +54,11 @@ chown "$UID_IN_IMAGE" "$DEST/privkey.pem" "$DEST/fullchain.pem"
 log "certificate deployed to $DEST, key owned by uid $UID_IN_IMAGE"
 
 if [ -z "$CHANGED" ]; then
-  log "certificate and key unchanged; psilink-relay.service left running"
+  if systemctl is-active --quiet psilink-relay.service; then
+    log "certificate and key unchanged; psilink-relay.service left running"
+  else
+    log "certificate and key unchanged; psilink-relay.service is not running and was not started"
+  fi
   exit 0
 fi
 
