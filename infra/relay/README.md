@@ -167,7 +167,9 @@ revoke-exchange.sh <exchange-id>
   exchange holds is refused.
 - **The key on the command line.** The key is an argument to both the script
   and the container it starts, so it is visible in the host's process table
-  while the command runs; do not run it on a host other accounts share.
+  while the command runs, it stays in the shell's history, and a command run
+  through `sudo` may be logged with its arguments; do not run it on a host
+  other accounts share, and clear the history line after registering.
 - **Revoking.** Deletes the exchange's row. A new allocation under the key is
   refused within about 200 ms, with no restart. An allocation already open is
   NOT cut: its refreshes kept succeeding for over two minutes after the delete,
