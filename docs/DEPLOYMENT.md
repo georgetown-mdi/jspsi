@@ -287,6 +287,16 @@ The flag is read once per page load, so set or clear it and then reload. It is s
 
 The derived rendezvous peer ids are redacted out of the PeerJS console output before printing, so a verbose capture contains no rendezvous id even with the flag on. It is not, however, unconditionally safe to share: at this level PeerJS also logs connection-establishment detail -- SDP and ICE candidates -- which includes the local machine's private/LAN IP addresses and network topology. Treat a verbose capture as a diagnostic containing network internals: share it only with trusted support, and review it first if your network layout is sensitive. The same caution covers the whole capture, not only the PeerJS lines: the app's own exchange-failure errors the flag re-enables contain the partner's signaling host/port and transport-error text -- the same network-internals class, not invitation secrets, session keys, or record data, which never reach these logs.
 
+### A relay that could not be reached
+
+When a browser exchange uses a relay (a TURN server, from the operator's own relay setting or the invitation) and the connection does not open, the failure alert says whether the relay gave the browser a relay address:
+
+- The relay gave none and the browser reported an error for it: the alert names the relay url and that error -- for example `error 701: Failed to establish connection` for a relay the browser could not reach -- instead of a bare "connection open timed out".
+- The relay gave none and the browser reported no error before the connection attempt ended: the alert names the relay url alone. The browser can take longer to give up on an unanswered UDP relay than the exchange waits for the connection.
+- The relay gave an address, or no relay is configured: the alert keeps the plain timeout, which points at the path between the two parties rather than at a relay that answered.
+
+Check the relay url, that the relay is running, and that this network allows outbound connections to its host and port. Each party's alert reports the relay its own browser used.
+
 ## Console
 
 The web application also runs as the **console**: a single-party graphical front end that drives that party's own `psilink` exchange from a container on the operator's own machine, so an operator creates, watches, and downloads the result of an exchange without invoking the CLI by hand. Turning its job API on, the environment variables and mounts it takes, where to publish its port, and what an operator can author in it are in [CONSOLE.md](CONSOLE.md).

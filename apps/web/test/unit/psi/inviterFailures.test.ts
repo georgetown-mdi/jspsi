@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  ConnectionError,
   LinkageTermsUnsatisfiableError,
   OperatorConfigError,
   generateSharedSecret,
@@ -245,6 +246,27 @@ describe("failureFor", () => {
       "the partner closed the connection\ncaused by: read ECONNRESET",
     );
   });
+
+  test.each(["inviter", "acceptor"] as const)(
+    "a failed relay is reported on the %s seat's retryable alert",
+    (seat) => {
+      const relayFailure = new ConnectionError(
+        "The connection did not open: no relay candidate was gathered. The " +
+          "browser reported an error for relay server turns:relay.invalid:443 " +
+          "(error 701: Failed to establish connection).",
+        "transport",
+      );
+      const failure = failureFor(
+        "exchange",
+        relayFailure,
+        undefined,
+        "browser",
+        seat,
+      );
+      expect(failure.title).toBe("Exchange failed");
+      expect(failure.reportedCause).toBe(relayFailure.message);
+    },
+  );
 
   test("a browser-raised exchange failure reports its own chain", () => {
     // The public web seat has no console relaying a rendered chain, so its

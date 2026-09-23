@@ -1,4 +1,6 @@
-import { withTimeout } from "@psilink/core";
+import { TimeoutError, withTimeout } from "@psilink/core";
+
+import { watchIceGathering, withIceServerFailure } from "./iceGathering";
 
 import type { DataConnection } from "peerjs";
 
@@ -19,12 +21,17 @@ const DEFAULT_OPEN_TIMEOUT_MS = 30_000;
  * The timeout bounds connection setup: WebRTC negotiation does not always report
  * a stall as an `"error"` or `"close"`, so without it a peer stuck in ICE
  * negotiation would hang this promise (and the exchange) indefinitely.
+ *
+ * Where no configured relay gave a relay candidate, the rejection names the
+ * relay server and the error the browser reported for it instead
+ * ({@link withIceServerFailure}).
  */
 export function waitForConnectionOpen(
   conn: DataConnection,
   timeoutMs: number = DEFAULT_OPEN_TIMEOUT_MS,
 ): Promise<void> {
   if (conn.open) return Promise.resolve();
+  watchIceGathering(conn);
   let detach = () => {};
   const opened = new Promise<void>((resolve, reject) => {
     const onOpen = () => resolve();
@@ -41,7 +48,11 @@ export function waitForConnectionOpen(
   });
   // withTimeout owns the deadline timer; detach() runs on every settle path
   // (open, pre-open error/close, or timeout) so no listener is left attached.
-  return withTimeout(opened, timeoutMs, "connection open timed out").finally(
-    detach,
-  );
+  return withTimeout(opened, timeoutMs, "connection open timed out")
+    .catch((err: unknown) => {
+      throw err instanceof Error
+        ? withIceServerFailure(conn, err, err instanceof TimeoutError)
+        : err;
+    })
+    .finally(detach);
 }
