@@ -46,6 +46,7 @@ ExecStart=/usr/bin/docker run --rm --name psilink-relay \
   --log-driver journald \
   -v /etc/psilink-relay/turnserver.conf:/etc/coturn/turnserver.conf:ro \
   -v /etc/psilink-relay/certs:/etc/coturn/certs:ro \
+  -v /var/lib/psilink-relay:/var/lib/coturn \
   localhost/psilink-relay:installed \
   -c /etc/coturn/turnserver.conf
 ExecStop=-/usr/bin/docker stop psilink-relay

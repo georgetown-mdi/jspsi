@@ -30,6 +30,7 @@ REALM="${PSILINK_RELAY_REALM:-}"
 [ -n "$REALM" ] || die "PSILINK_RELAY_REALM is unset in $ENV_FILE"
 
 SECRET_FILE="${PSILINK_RELAY_SECRET_FILE:-$ETC/static-auth-secret}"
+[ -e "$SECRET_FILE" ] || die "this relay holds no static secret at $SECRET_FILE; register the exchange's relay key with register-exchange.sh instead"
 [ -r "$SECRET_FILE" ] || die "cannot read $SECRET_FILE; mint as the account that owns it"
 
 NAME="${1:-psilink}"
