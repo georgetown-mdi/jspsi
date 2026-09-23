@@ -22,12 +22,15 @@ import {
   createServerJobExchangeDriver,
 } from "@psi/jobClient/serverJobExchangeDriver";
 import {
+  SFTP_FINGERPRINT_LIST_REFUSAL,
+  SIGNING_IDENTITY_IN_RENDEZVOUS_REFUSAL,
+} from "@jobs/jobCreateRefusal";
+import {
   discardServerJob,
   writeAttachment,
 } from "@psi/jobClient/consoleJobAttachment";
 import { CSV_DELIMITER_SINGLE_COLUMN_REMEDY } from "@components/csvDelimiterChoice";
 import { HANDSHAKE_ROLE_FOR_SIDE } from "@psi/handshakeRole";
-import { SIGNING_IDENTITY_IN_RENDEZVOUS_REFUSAL } from "@jobs/jobCreateRefusal";
 import { consoleJobColumnRefusalAlert } from "@psi/columnNames";
 import { consolePartnerCertificateRefusal } from "@console/partnerCertificateRefusal";
 import { createBrowserExchangeDriver } from "@psi/exchangeDriver";
@@ -201,6 +204,23 @@ export function failureFor(
           "shared folder a mount of its own (JOB_RENDEZVOUS_DIR), separate " +
           "from the folder holding your key, input, and results, then run the " +
           "exchange again.",
+    };
+  // A direct sftp run refused over the saved connection's several host-key
+  // fingerprints. Above the mounted-file branch: the file is not at fault.
+  // Classified `config`: a retry refuses identically until the connection is
+  // edited, which start-over reaches through the server step.
+  if (
+    error instanceof JobApiRequestError &&
+    error.refusalReason === SFTP_FINGERPRINT_LIST_REFUSAL
+  )
+    return {
+      category: "config",
+      title: "The saved SFTP connection holds more than one fingerprint",
+      message:
+        "The console did not start this exchange. The saved SFTP connection " +
+        "holds more than one server identity fingerprint, and a direct " +
+        "exchange pins one. Start over, choose Edit connection on the server " +
+        "step, and keep only the fingerprint the server presents now.",
     };
   // A console job create rejected the mounted file: a 400 the driver categorizes
   // `config`. The file is the likely fault, so the alert names it -- except on

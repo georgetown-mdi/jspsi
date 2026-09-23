@@ -12,10 +12,14 @@ import {
   gateJobRoute,
   readJobRequestBody,
 } from "@jobs/routeSupport";
+import {
+  SFTP_FINGERPRINT_LIST_REFUSAL,
+  SIGNING_IDENTITY_IN_RENDEZVOUS_REFUSAL,
+} from "@jobs/jobCreateRefusal";
 import { jobEmptyResponse, jobJsonResponse } from "@jobs/gate";
 import { JobInputNotFoundError } from "@jobs/workInputs";
-import { SIGNING_IDENTITY_IN_RENDEZVOUS_REFUSAL } from "@jobs/jobCreateRefusal";
 import { SigningIdentityLocationError } from "@jobs/signingIdentity";
+import { ZeroSetupFingerprintListError } from "@jobs/intentArgv";
 import { jobCreateIntentSchema } from "@jobs/intentSchemas";
 
 /**
@@ -49,11 +53,13 @@ import { jobCreateIntentSchema } from "@jobs/intentSchemas";
  * rejection is a 409 containing only the occupying exchange's id (nothing else about
  * it), disclosed to the same-origin operator on their own loopback console.
  *
- * One 400 does hold a body: a filedrop intent refused because a rendezvous
- * directory holds this party's signing identity answers
- * `{ "reason": "signing-identity-in-rendezvous" }` -- a fixed token, no path --
- * since that refusal is about the console's mounts rather than the intent, and
- * the browser cannot otherwise say what to fix.
+ * Two 400s do hold a body, each a fixed token and nothing else: a filedrop
+ * intent refused because a rendezvous directory holds this party's signing
+ * identity answers `{ "reason": "signing-identity-in-rendezvous" }`, and a
+ * zero-setup sftp intent refused because the saved connection pins more than one
+ * host-key fingerprint answers `{ "reason": "sftp-fingerprint-list" }`. Each is
+ * about console state rather than the intent, so the browser cannot otherwise
+ * say what to fix.
  */
 export const Route = createFileRoute("/api/jobs/")({
   server: {
@@ -86,6 +92,14 @@ export const Route = createFileRoute("/api/jobs/")({
           if (error instanceof JobSigningIdentityExposedError)
             return jobJsonResponse(
               { reason: SIGNING_IDENTITY_IN_RENDEZVOUS_REFUSAL },
+              400,
+            );
+          // A direct sftp run cannot pass on the saved connection's several
+          // host-key fingerprints; the fix is in the saved connection, which the
+          // intent does not state, so the body names the refusal.
+          if (error instanceof ZeroSetupFingerprintListError)
+            return jobJsonResponse(
+              { reason: SFTP_FINGERPRINT_LIST_REFUSAL },
               400,
             );
           // A mounted input that names no regular file, a filedrop intent with no

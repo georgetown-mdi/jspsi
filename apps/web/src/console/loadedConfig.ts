@@ -303,19 +303,31 @@ function editorConstraintsFor(
   )?.constraints;
 }
 
+/** Whether a field states constraints of its own: ones that are neither empty
+ * nor the ones the editor writes for the field's type. An empty or absent set
+ * states no constraint to name. */
+function statesOwnConstraints(field: LinkageField): boolean {
+  if (
+    field.constraints === undefined ||
+    Object.keys(field.constraints).length === 0
+  )
+    return false;
+  return (
+    canonicalString(field.constraints) !==
+    canonicalString(editorConstraintsFor(field.type) ?? null)
+  );
+}
+
 /**
  * The linkage-terms settings a loaded document states that no control here
  * edits, named as the file spells them, for the carry-through notice. Each is
  * held on the draft ({@link editorWithLoadedTerms}) and stated by the run and
  * the hand-back as the file states it. A field's constraints are named only
- * where they are not the ones the editor itself writes for that field's type.
+ * where they state something other than what the editor itself writes for that
+ * field's type ({@link statesOwnConstraints}).
  */
 export function termsSettingsWithNoControl(terms: LinkageTerms): Array<string> {
-  const ownConstraints = terms.linkageFields.some(
-    (field) =>
-      canonicalString(field.constraints ?? null) !==
-      canonicalString(editorConstraintsFor(field.type) ?? null),
-  );
+  const ownConstraints = terms.linkageFields.some(statesOwnConstraints);
   return [
     ...(ownConstraints ? [HELD_TERMS_SETTINGS.constraints] : []),
     ...(terms.payload?.send?.some((column) => column.description !== undefined)

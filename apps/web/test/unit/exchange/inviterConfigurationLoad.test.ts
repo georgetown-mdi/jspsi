@@ -1560,6 +1560,35 @@ describe("terms settings with no control reach the run and the hand-back", () =>
     expect(noticesOf(imported).join(" ")).not.toContain("linkage_terms");
   });
 
+  test("a terms import stating empty constraints names no constraints", () => {
+    const opened = openedAndRead();
+    if (opened.editor === undefined || opened.acquired === undefined)
+      throw new Error("expected an editor over a committed file");
+    const defaults = getDefaultLinkageTerms("County Health");
+    const importedTerms = {
+      ...defaults,
+      linkageFields: defaults.linkageFields.map((field) => ({
+        ...field,
+        constraints: {},
+      })),
+    };
+    const imported = inviterScreenReducer(opened, {
+      type: "editor-replaced",
+      editor: editorWithImportedTerms(
+        opened.editor,
+        opened.acquired,
+        importedTerms,
+      ),
+      announcement: "Imported. Review the loaded terms before creating.",
+    });
+    expect(firstNameField(composedTerms(imported))?.constraints).not.toEqual(
+      constraints,
+    );
+    expect(noticesOf(imported).join(" ")).not.toContain(
+      "linkage_terms.linkage_fields.constraints",
+    );
+  });
+
   test("closing the configuration stops holding them", () => {
     const closed = inviterScreenReducer(openedAndRead(), {
       type: "loaded-configuration-discarded",

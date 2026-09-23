@@ -557,16 +557,32 @@ function fingerprintErrorFor(
       "A direct exchange accepts one server identity fingerprint. Enter the " +
       "one the server presents now."
     );
-  for (const entry of entries) {
+  for (const [index, entry] of entries.entries()) {
     const error = fingerprintEntryError(entry);
-    if (error !== undefined) return error;
+    if (error === undefined) continue;
+    return entries.length === 1
+      ? error
+      : `Fingerprint ${index + 1} (${fingerprintPreview(entry)}): ${error}`;
   }
   return undefined;
+}
+
+// Long enough to tell entries apart by their start, short enough that a pasted
+// value is not echoed back whole.
+const FINGERPRINT_PREVIEW_LENGTH = 16;
+
+/** The start of a fingerprint entry, for naming it in a message. */
+function fingerprintPreview(entry: string): string {
+  return entry.length <= FINGERPRINT_PREVIEW_LENGTH
+    ? entry
+    : `${entry.slice(0, FINGERPRINT_PREVIEW_LENGTH)}...`;
 }
 
 /** One fingerprint entry's error message, or undefined when it is valid. */
 function fingerprintEntryError(fingerprint: string): string | undefined {
   if (HOST_KEY_FINGERPRINT_REGEX.test(fingerprint)) return undefined;
+  if (fingerprint.startsWith("@"))
+    return "Enter a literal fingerprint, not an @-file reference.";
   if (SIGNING_FINGERPRINT_SHAPE.test(fingerprint))
     return (
       "This looks like a signing fingerprint (43 characters, no prefix), not " +

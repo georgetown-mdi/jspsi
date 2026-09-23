@@ -35,6 +35,7 @@ import {
   validInputFileIntent,
   validIntent,
   validSftpIntent,
+  validZeroSetupSftpIntent,
 } from "../../utils/jobFixtures";
 
 import type {
@@ -2468,6 +2469,40 @@ describe("POST /api/jobs bounds the body before schema parse", () => {
     })) as Response;
     // A 404 (not 413) proves the oversized body was never read: the gate ran first.
     expect(response.status).toBe(404);
+  });
+});
+
+describe("POST /api/jobs and a saved fingerprint list", () => {
+  test("a direct sftp run is a 400 naming the refusal, and frees the slot", async () => {
+    const { manager, credentialRef } = enableJobApiWithSftpServer();
+    manager.authorSftpServer({
+      host: "sftp.example.org",
+      path: "/exchange",
+      hostKeyFingerprint: [
+        TEST_HOST_KEY_FINGERPRINT,
+        `SHA256:${"B".repeat(42)}A`,
+      ],
+      credential: { kind: "ref", ref: credentialRef, credType: "password" },
+    });
+    const response = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validZeroSetupSftpIntent()),
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ reason: "sftp-fingerprint-list" });
+
+    // Edited down to one fingerprint, the same intent starts.
+    manager.authorSftpServer({
+      host: "sftp.example.org",
+      path: "/exchange",
+      hostKeyFingerprint: TEST_HOST_KEY_FINGERPRINT,
+      credential: { kind: "ref", ref: credentialRef, credType: "password" },
+    });
+    const retried = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validZeroSetupSftpIntent()),
+      params: {},
+    })) as Response;
+    expect(retried.status).toBe(201);
   });
 });
 
