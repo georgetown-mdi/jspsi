@@ -59,7 +59,7 @@ describe("the WebRTC inbound bound constants", () => {
   test("hold the values the channel-security spec names", () => {
     expect(MAX_WEBRTC_FRAME_BYTES).toBe(268_435_456);
     expect(MAX_WEBRTC_REASSEMBLY_DEPTH).toBe(256);
-    expect(MAX_WEBRTC_STRING_BYTES).toBe(104_857_600);
+    expect(MAX_WEBRTC_STRING_BYTES).toBe(209_715_200);
     expect(MAX_CHUNKS_PER_REASSEMBLY).toBe(131_072);
     expect(MAX_CONCURRENT_REASSEMBLIES).toBe(8);
     expect(MIN_CHUNK_RESIDENT_BYTES).toBe(256);
@@ -89,7 +89,7 @@ describe("scanFrameStructure", () => {
     // header alone: a str32 declaring the cap is admitted (the scan runs off the
     // end of the buffer, which it treats as a truncated frame and delegates),
     // and one byte more draws the string rule. Declaring rather than packing the
-    // payload keeps a 100 MiB allocation out of a unit test; the differential
+    // payload keeps a cap-sized allocation out of a unit test; the differential
     // suite drives real strings through the same rule.
     expect(
       scanFrameStructure(

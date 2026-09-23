@@ -48,7 +48,7 @@ export type CSVParseRows = CSVParseResult["data"];
  * never pays, so the net saving can be smaller than the raw parse cost. The
  * 4 MiB line is a reasoned default, not a measured optimum -- tunable like
  * `MAX_CSV_FILE_BYTES` and the nonEmptyAggregate thresholds -- well below the
- * 100 MB intake cap the worst-case parse this offloads is bounded by.
+ * intake cap the worst-case parse this offloads is bounded by.
  */
 export const CSV_WORKER_FILE_BYTE_THRESHOLD = 4 * 1024 * 1024;
 

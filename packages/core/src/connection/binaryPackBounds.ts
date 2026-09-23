@@ -38,7 +38,7 @@
  * Value: 268,435,456 bytes (256 MiB), a chosen browser-tab memory envelope
  * above the realistic largest legitimate PSI set frame (one party's set as
  * raw EC points, 35 bytes/element, so a few-million-element set is tens to
- * low-hundreds of MiB; `MAX_CSV_FILE_BYTES`, 100 MiB, bounds it upstream) and
+ * low-hundreds of MiB; `MAX_CSV_FILE_BYTES`, 200 MiB, bounds it upstream) and
  * below an allocation that would crash the tab. This counts the wire
  * (reassembled) bytes. BinaryPack `unpack` retains a multiple of them, so this
  * is the quantity the retained structure is bounded against: the measured
@@ -124,7 +124,7 @@ export const MIN_CHUNK_RESIDENT_BYTES = 256;
  * legitimate frame. `apps/web/test/unit/psi/boundedReassembly.test.ts` holds
  * the two together -- core cannot import an app. Fixed, not configurable.
  */
-export const MAX_WEBRTC_STRING_BYTES = 100 * 1024 ** 2;
+export const MAX_WEBRTC_STRING_BYTES = 200 * 1024 ** 2;
 
 /**
  * Which pre-scan rule refused a frame, with the fixed limit that rule

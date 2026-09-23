@@ -1,6 +1,10 @@
 import { describe, expect, test, vi } from "vitest";
 
-import { ConnectionError, MAX_WEBRTC_STRING_BYTES } from "@psilink/core";
+import {
+  ConnectionError,
+  MAX_WEBRTC_FRAME_BYTES,
+  MAX_WEBRTC_STRING_BYTES,
+} from "@psilink/core";
 
 import { MAX_CSV_FILE_BYTES } from "@components/csvIntake";
 
@@ -488,6 +492,20 @@ describe("boundChunkReassembly: deserialized-structure bound at the unpack choke
     // must not be refused here. Core cannot import the app that owns the intake
     // cap, so the two are held together here.
     expect(MAX_WEBRTC_STRING_BYTES).toBe(MAX_CSV_FILE_BYTES);
+  });
+
+  test("keeps the set frame of a file at the intake cap inside the frame envelope", () => {
+    // The narrowest row shape docs/spec/PROTOCOL.md measures is a two-column id
+    // and email file at 33.4 bytes a row. One distinct key value per row puts
+    // one 35-byte encrypted element per row in a single set frame, so an
+    // intake cap past about 245 MiB would admit a file whose set frame the
+    // receiving tab refuses mid-exchange.
+    const narrowestBytesPerRow = 33.4;
+    const encryptedElementBytes = 35;
+    const rowsAtCap = Math.ceil(MAX_CSV_FILE_BYTES / narrowestBytesPerRow);
+    expect(rowsAtCap * encryptedElementBytes).toBeLessThan(
+      MAX_WEBRTC_FRAME_BYTES,
+    );
   });
 });
 
