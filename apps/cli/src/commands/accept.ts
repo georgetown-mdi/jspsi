@@ -5,8 +5,6 @@ import type { Argv, Arguments } from "yargs";
 import {
   assertCountOnlyTransmitsNoColumn,
   CONNECTION_BLOCK_NOTICE,
-  deriveAcceptedLinkageTerms,
-  deriveOutboundPayloadConsent,
   disclosedColumnNames,
   getLogger,
   parseExchangeSpec,
@@ -22,7 +20,6 @@ import type {
   ExchangeSpec,
   InvitationToken,
   LinkageTerms,
-  OutboundPayloadConsent,
   PreparedExchange,
   WebRTCConnectionConfig,
 } from "@psilink/core";
@@ -32,17 +29,19 @@ import {
   configWithNamedRuleSetRules,
   csvDelimiterForRun,
   describeConfigSchemaError,
-  diffLinkageTerms,
-  linkageTermsStandingOf,
-  persistExpectedPartnerDeduplicate,
-  persistExpectedPayloadColumns,
   persistInvitationRelay,
-  persistOutboundPayloadConsent,
   reconcileConflictError,
-  warnOnLinkageRuleSetCitationDrift,
   type InvitationRelayRefresh,
   type ReconcileDiff,
 } from "../config";
+import {
+  deriveAcceptedInvitationTerms,
+  deriveOutboundConsentRecords,
+  diffKeptLinkageTerms,
+  receivedCommitmentRemovalWarning,
+  refreshAcceptanceRecords,
+  type AcceptedInvitationTerms,
+} from "../acceptedTermsRecords";
 import { detectFileConflicts } from "../fileUtils";
 import {
   ACCEPT_IDENTITY_QUESTION,
@@ -244,6 +243,8 @@ export function resolveAcceptPositionals(positionals: Array<unknown>):
  * to confirm. Cleaning warnings are logged here so they precede the prompt.
  */
 type AcceptReady = {
+  /** What this acceptance takes from the invitation it validated. */
+  accepted: AcceptedInvitationTerms;
   /**
    * True when a pre-existing config was reconciled against the invitation (and,
    * online, the URL) and matched, so it is kept untouched and only the key file
@@ -440,10 +441,8 @@ export async function validateAccept(params: {
   // output as a mirror, so a verbatim copy only happens to agree in the symmetric
   // both-receive case and would abort any one-sided exchange. The shared core
   // helper also backs the web acceptor (see deriveAcceptedLinkageTerms).
-  const myTerms: LinkageTerms = deriveAcceptedLinkageTerms(
-    token.linkageTerms,
-    myIdentity,
-  );
+  const accepted = deriveAcceptedInvitationTerms(token, myIdentity);
+  const myTerms: LinkageTerms = accepted.linkageTerms;
 
   if (resolved.mode === "online") {
     const { url, input, output } = resolved;
@@ -515,7 +514,7 @@ export async function validateAccept(params: {
         configPath: options.configFile,
         existing: keptConfig,
         myTerms,
-        consentedPayloadColumns: token.disclosedPayloadColumns,
+        consentedPayloadColumns: accepted.expectedPayloadColumns,
         target: connection,
         log,
       });
@@ -561,19 +560,20 @@ export async function validateAccept(params: {
     // operator consented to (see reconcileReceivedPayload). Absent on an
     // invitation that had no disclosed subset (an older or metadata-unknown
     // mint path), which this party then reconciles lazily instead.
-    prepared.expectedPayloadColumns = token.disclosedPayloadColumns;
+    prepared.expectedPayloadColumns = accepted.expectedPayloadColumns;
     // Bind the inviting party's own side of the cardinality to what this
     // acceptance consented to: the invitation declared it, the consent surface
     // stated it, and nothing in the agreed terms compares the two sides -- so a
     // partner presenting a different value at the terms exchange is refused
     // before any key or payload moves (see
     // assertPresentedDeduplicateMatchesInvitation).
-    prepared.expectedPartnerDeduplicate = token.linkageTerms.deduplicate;
+    prepared.expectedPartnerDeduplicate = accepted.expectedPartnerDeduplicate;
     return {
       mode: "online",
       url,
       output,
       token,
+      accepted,
       connection,
       dataSpec,
       prepared,
@@ -594,7 +594,7 @@ export async function validateAccept(params: {
       configPath: options.configFile,
       existing: keptConfig,
       myTerms,
-      consentedPayloadColumns: token.disclosedPayloadColumns,
+      consentedPayloadColumns: accepted.expectedPayloadColumns,
       log,
     });
   const { connection: endpointConnection, seeded } = connectionFromEndpoint(
@@ -706,12 +706,13 @@ export async function validateAccept(params: {
     // The same two bindings the URL-driven mode sets on its prepared exchange,
     // for the same single run: the columns the invitation declared its party
     // will send, and the cardinality side it declared for itself.
-    prepared.expectedPayloadColumns = token.disclosedPayloadColumns;
-    prepared.expectedPartnerDeduplicate = token.linkageTerms.deduplicate;
+    prepared.expectedPayloadColumns = accepted.expectedPayloadColumns;
+    prepared.expectedPartnerDeduplicate = accepted.expectedPartnerDeduplicate;
     return {
       mode: "endpointRun",
       output: resolved.output,
       token,
+      accepted,
       connection: runnableConnection,
       // What the socket will actually dial, not the endpoint's own text: the URL
       // parser normalizes a host on its way to the wire, so naming the partner's
@@ -730,6 +731,7 @@ export async function validateAccept(params: {
   return {
     mode: "offline",
     token,
+    accepted,
     connection,
     seeded,
     dataSpec,
@@ -926,7 +928,7 @@ function reconcileAcceptConfig(params: {
    * The disclosed subset this acceptance consents to, from the invitation token.
    * Compared against the kept config's recorded commitment only to warn about a
    * removal; what is persisted is decided by the caller's own write (see
-   * {@link persistExpectedPayloadColumns}).
+   * {@link refreshAcceptanceRecords}).
    */
   consentedPayloadColumns: string[] | undefined;
   target?: RunnableConnectionConfig;
@@ -951,19 +953,13 @@ function reconcileAcceptConfig(params: {
   // standing read here is the file's as it stands, before this acceptance
   // records itself on it: terms no earlier acceptance stands behind are still
   // the operator's alone to correct at this point.
-  warnOnLinkageRuleSetCitationDrift(
-    existing.linkageTerms,
+  const conflicts = diffKeptLinkageTerms({
     configPath,
+    existing,
+    accepted: myTerms,
+    citationDriftAlternative: "decline-to-reuse",
     log,
-    linkageTermsStandingOf(existing),
-    "decline-to-reuse",
-  );
-
-  const { conflicts, warnings } = diffLinkageTerms(
-    existing.linkageTerms,
-    myTerms,
-  );
-  for (const w of warnings) log.warn(w);
+  });
 
   const conn: { conflicts: ReconcileDiff[]; warnings: string[] } =
     target !== undefined
@@ -998,30 +994,13 @@ function reconcileAcceptConfig(params: {
   // re-accepted from an invitation with no disclosed subset -- the contract
   // leaves no set standing that this acceptance did not show -- so the next run
   // reconciles the received payload lazily instead. The warning puts that
-  // removal in front of the operator before they confirm. A recorded EMPTY set
-  // is named rather than listed: it is the strictest commitment (receive
-  // nothing) and has no column names to show. Each name is partner-sourced (the
-  // inviter's namespace), so it is redacted and escaped here and printed one
-  // per line -- a name that includes a list separator cannot then be misread as
-  // two.
-  const recordedLockIn = existing.expectedPayloadColumns;
-  if (recordedLockIn !== undefined && consentedPayloadColumns === undefined)
-    log.warn(
-      `this invitation declares no disclosed columns, so accepting it clears ` +
-        `the list of columns you previously agreed to receive, recorded in ` +
-        `${redactAndRenderOperatorSuppliedText(
-          operatorSuppliedText(configPath),
-        )}. That list holds the partner's payload to ` +
-        (recordedLockIn.length === 0
-          ? "no columns at all (a strict receive-nothing consent)."
-          : "exactly these columns:\n" +
-            recordedLockIn
-              .map((column) => `  - ${redactAndSanitizeForDisplay(column)}`)
-              .join("\n")) +
-        `\nWithout it the next 'psilink exchange' from this configuration ` +
-        `accepts whatever columns the partner transmits. To keep the check, ask ` +
-        `the inviting party for an invitation that declares the columns it sends.`,
-    );
+  // removal in front of the operator before they confirm.
+  const commitmentRemoval = receivedCommitmentRemovalWarning({
+    configPath,
+    recorded: existing.expectedPayloadColumns,
+    consented: consentedPayloadColumns,
+  });
+  if (commitmentRemoval !== undefined) log.warn(commitmentRemoval);
 
   log.info(
     conn.warnings.length === 0
@@ -1148,27 +1127,18 @@ export async function handler(argv: Arguments): Promise<void> {
       // configuration this acceptance writes so a later run cannot transmit a set no
       // party chose. Derived from the same metadata the display's set resolves from,
       // so what is recorded is exactly what the prompt below shows (or what
-      // --consent-to-terms records advance consent to).
-      const outboundPayloadConsent = deriveOutboundPayloadConsent(
-        ready.dataSpec.linkageTerms.output,
+      // --consent-to-terms records advance consent to). A REUSED config's record
+      // follows that config's own output terms instead: undefined only where the
+      // kept config itself does not share, or none is kept, where a leftover
+      // record is inert.
+      const {
+        fresh: outboundPayloadConsent,
+        kept: reuseOutboundPayloadConsent,
+      } = deriveOutboundConsentRecords({
+        acceptedOutput: ready.dataSpec.linkageTerms.output,
         ownMetadata,
-      );
-      // What a REUSED config's record becomes: the later run is governed by the
-      // kept config's own terms, and reconciliation compares no output field, so
-      // an invitation whose mirror says "nothing transmitted" cannot decide that
-      // for a kept config that still shares -- deleting the record would leave
-      // the run's gate blind and transmit an unconfirmed set on
-      // partner-controlled terms. Where the mirror yields no record but the kept
-      // config shares, the record becomes `pending`: this acceptance showed and
-      // confirmed no outbound set, so the next run asks, or refuses unattended.
-      // Undefined only where the kept config itself does not share, or none is
-      // kept, where a leftover record is inert.
-      const reuseOutboundPayloadConsent: OutboundPayloadConsent | undefined =
-        outboundPayloadConsent !== undefined
-          ? outboundPayloadConsent
-          : ready.existingOutputShares === true
-            ? { status: "pending" }
-            : undefined;
+        keptConfigurationShares: ready.existingOutputShares,
+      });
       // The coordination server this acceptance will dial itself, stated above
       // the terms and again in the question: on this path confirming is what
       // connects and transmits, and the locator is the invitation's rather than
@@ -1268,7 +1238,7 @@ export async function handler(argv: Arguments): Promise<void> {
           // with no disclosed subset -- record no commitment and remove a stale
           // one, leaving the exchange to reconcile lazily.
           receivedPayloadLockIn: {
-            consentedColumns: ready.token.disclosedPayloadColumns,
+            consentedColumns: ready.accepted.expectedPayloadColumns,
           },
           // Record this party's consent to its own outbound set in the same fresh
           // write, so a later `psilink exchange` from this configuration is held to
@@ -1285,7 +1255,7 @@ export async function handler(argv: Arguments): Promise<void> {
           // covers only this single run. Unlike the received-column commitment it
           // has no "holds nothing" case: `deduplicate` is mandatory in the
           // linkage terms every invitation states.
-          expectedPartnerDeduplicate: ready.token.linkageTerms.deduplicate,
+          expectedPartnerDeduplicate: ready.accepted.expectedPartnerDeduplicate,
         });
         // The summary only; the exit code a failed persistence implies was set
         // where that persistence was lost, so nothing here can raise or lower it.
@@ -1309,8 +1279,8 @@ export async function handler(argv: Arguments): Promise<void> {
         // namespace, distinct from payload.receive. Omitted -- and reconciled lazily
         // -- when the invitation had no disclosed subset (an older or
         // metadata-unknown mint).
-        ...(ready.token.disclosedPayloadColumns !== undefined
-          ? { expectedPayloadColumns: ready.token.disclosedPayloadColumns }
+        ...(ready.accepted.expectedPayloadColumns !== undefined
+          ? { expectedPayloadColumns: ready.accepted.expectedPayloadColumns }
           : {}),
         // Persist the invitation's declared cardinality side so the later
         // `psilink exchange` holds the partner's presented value to it
@@ -1320,7 +1290,7 @@ export async function handler(argv: Arguments): Promise<void> {
         // declaration held only in memory would bind nothing. The invitation's
         // linkage terms hold the INVITER's own side; this party's own value is
         // the mirror's false and rides `linkageTerms` in the spread above.
-        expectedPartnerDeduplicate: ready.token.linkageTerms.deduplicate,
+        expectedPartnerDeduplicate: ready.accepted.expectedPartnerDeduplicate,
         // This party's consent to its own outbound set (see its derivation above),
         // so the later `psilink exchange` sends exactly what was consented to here
         // or stops to ask. Omitted -- and the run left ungated -- only where nothing
@@ -1341,47 +1311,21 @@ export async function handler(argv: Arguments): Promise<void> {
       );
 
       if (ready.reuseExistingConfig) {
-        // Refresh the consented received-column commitment in the reused config:
-        // the operator has just re-consented to THIS invitation's terms (the
-        // prompt above, or --consent-to-terms, gates every write here), so it is
-        // rewritten to the token's disclosed subset, in the inviter's namespace.
-        // Unlike the connection and linkage blocks, which provisionConfigAndKey
-        // leaves untouched under reuse by design, this is a machine-managed
-        // consent record: leaving a stale prior value would false-abort the next
-        // recurring exchange after a legitimate re-consent. Undefined (an older
-        // or metadata-unknown mint) removes the field so the exchange reconciles
-        // lazily; an empty set is a strict "receive nothing".
-        persistExpectedPayloadColumns(
-          configPath,
-          ready.token.disclosedPayloadColumns,
-        );
-        // Refresh the invitation's declared cardinality side in the reused config
-        // for the same reason and at the same moment: the operator has just
-        // consented to THIS invitation's declaration, so a prior acceptance's
-        // value is rewritten rather than left to bind the next recurring exchange
-        // to terms nobody consented to. Always a boolean here -- the linkage-terms
-        // schema makes `deduplicate` mandatory -- so this acceptance never leaves
-        // the kept config unbound.
-        persistExpectedPartnerDeduplicate(
-          configPath,
-          ready.token.linkageTerms.deduplicate,
-        );
-        // Refresh this party's own outbound-set consent in the reused config: the
-        // operator has just re-consented on THIS acceptance, so the record is
-        // rewritten to what they were shown here. Where this acceptance could not
-        // resolve the set it records `pending`, which asks at the first run that
-        // can. The removal case follows the KEPT config's own output terms, not
-        // the invitation's mirror (the reuse derivation above): reconciliation
-        // compares no output field, so a partner-supplied invitation cannot
-        // delete the record from a config that still transmits.
-        persistOutboundPayloadConsent(configPath, reuseOutboundPayloadConsent);
+        // The operator has just re-consented to THIS invitation's terms (the
+        // prompt above, or --consent-to-terms, gates every write here), so the
+        // machine-managed consent records are rewritten while the connection and
+        // linkage blocks are kept: a prior value would false-abort the next
+        // recurring exchange or bind it to terms nobody consented to. The
+        // outbound record follows the KEPT config's own output terms.
+        refreshAcceptanceRecords(configPath, {
+          expectedPayloadColumns: ready.accepted.expectedPayloadColumns,
+          expectedPartnerDeduplicate: ready.accepted.expectedPartnerDeduplicate,
+          outboundPayloadConsent: reuseOutboundPayloadConsent,
+        });
         // The relay the terms review just showed is the one the kept
         // configuration's runs use: `invitation_relay` is refreshed from this
         // invitation, and the operator's own `turn`/`stun` are left alone.
-        const invitationRelay =
-          ready.token.connectionEndpoint?.channel === "webrtc"
-            ? ready.token.connectionEndpoint.relay
-            : undefined;
+        const invitationRelay = ready.accepted.invitationRelay;
         const relayRefresh = persistInvitationRelay(
           configPath,
           invitationRelay,

@@ -34,10 +34,10 @@ import type {
 import {
   csvDelimiterForRun,
   loadConfigLinkageSource,
-  persistDisclosedPayloadColumns,
   persistOutboundPayloadConsent,
   warnOnLinkageRuleSetCitationDrift,
 } from "../config";
+import { writeTermsRecord } from "../acceptedTermsRecords";
 import { detectFileConflicts } from "../fileUtils";
 import { resolveIdentity, resolveInvitationIdentity } from "../partyIdentity";
 import { resolveRecordOutput } from "../recordFile";
@@ -1095,10 +1095,10 @@ export async function handler(argv: Arguments): Promise<void> {
         // A config with no metadata publishes no subset, so the field is removed
         // rather than left stale. Before the token print, so a failure never
         // follows disclosure.
-        persistDisclosedPayloadColumns(
-          ready.configPath,
-          ready.disclosedPayloadColumns,
-        );
+        writeTermsRecord(ready.configPath, {
+          record: "disclosed_payload_columns",
+          columns: ready.disclosedPayloadColumns,
+        });
         // The outbound-consent record is the acceptor-role sibling of the
         // commitment above; this mint re-establishes the config as the inviting
         // side, whose outbound set is the commitment itself. An acceptor-era
