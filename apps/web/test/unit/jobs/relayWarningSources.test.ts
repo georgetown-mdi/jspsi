@@ -128,6 +128,11 @@ const FD3_LINE_CAP = 1_048_576;
 /** The value the filedrop rendezvous preflight's notices are stamped with. */
 const PREFLIGHT_SOURCE: RelayWarningSource = "relayRendezvousPreflight";
 
+/** The value a run of the opened configuration stamps on its notice that the
+ * mounted file is not the one opened; driven in jobManager.unit.test.ts. */
+const OPENED_CONFIGURATION_SOURCE: RelayWarningSource =
+  "relayOpenedConfigurationChanged";
+
 /** One degradation site, the fault that reaches it, and the value it claims. */
 const DEGRADATION_SITES: Array<{
   site: string;
@@ -192,9 +197,9 @@ describe("the relay stamps its own source on each degradation", () => {
 
   test("every declared source has a site pinned above", () => {
     const pinned = [...DEGRADATION_SITES.map((entry) => entry.source)];
-    expect([...pinned, PREFLIGHT_SOURCE].sort()).toEqual(
-      [...RELAY_WARNING_SOURCES].sort(),
-    );
+    expect(
+      [...pinned, PREFLIGHT_SOURCE, OPENED_CONFIGURATION_SOURCE].sort(),
+    ).toEqual([...RELAY_WARNING_SOURCES].sort());
   });
 });
 

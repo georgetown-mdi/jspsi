@@ -23,6 +23,7 @@ const COMMAND_HANDOFF = {
   mode: "zeroSetup",
   channel: "sftp",
   usedKeyFile: false,
+  keyFileBesideConfiguration: false,
   credentialPasted: false,
   usedSigningIdentity: false,
   template: {
@@ -45,6 +46,7 @@ const SPACED_COMMAND_HANDOFF = {
   mode: "zeroSetup",
   channel: "filedrop",
   usedKeyFile: false,
+  keyFileBesideConfiguration: false,
   credentialPasted: false,
   usedSigningIdentity: false,
   template: {
@@ -65,6 +67,7 @@ const CONFIG_HANDOFF = {
   mode: "exchange",
   channel: "sftp",
   usedKeyFile: true,
+  keyFileBesideConfiguration: false,
   credentialPasted: false,
   usedSigningIdentity: false,
   template: {

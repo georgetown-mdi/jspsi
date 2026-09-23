@@ -2472,6 +2472,33 @@ describe("POST /api/jobs bounds the body before schema parse", () => {
   });
 });
 
+describe("POST /api/jobs and the key file beside the opened configuration", () => {
+  /** A run of the opened configuration: no secret, the key file beside it. */
+  function openedIntent() {
+    const { sharedSecret: _omitted, ...intent } = validIntent();
+    return { ...intent, mountedConfigurationOpened: true };
+  }
+
+  test.each([
+    ["absent", undefined, "mounted-key-file-absent"],
+    ["not a key file", "{}", "mounted-key-file-invalid"],
+  ] as const)(
+    "a key file that is %s is a 400 naming the refusal",
+    async (_label, keyFile, reason) => {
+      const root = enableJobApi();
+      fs.mkdirSync(root, { recursive: true });
+      if (keyFile !== undefined)
+        fs.writeFileSync(path.join(root, ".psilink.key"), keyFile);
+      const response = (await handlersOf(CreateRoute).POST({
+        request: createRequest(openedIntent()),
+        params: {},
+      })) as Response;
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ reason });
+    },
+  );
+});
+
 describe("POST /api/jobs and a saved fingerprint list", () => {
   test("a direct sftp run is a 400 naming the refusal, and frees the slot", async () => {
     const { manager, credentialRef } = enableJobApiWithSftpServer();

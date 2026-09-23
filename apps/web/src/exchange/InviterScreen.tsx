@@ -532,6 +532,12 @@ export function InviterScreen() {
   // console filedrop as a save-a-file card, unlike the raw driver mapping): the
   // create branch and the live run both read it.
   const chosenRunMode = transportRunMode(available, transport);
+  // A console run of the opened configuration continues the exchange it set
+  // up, under the key file beside it on the server, so it sends no invitation.
+  const continuesOpenedExchange =
+    mountedConfiguration.status === "opened" &&
+    runWithheldReason(mountedConfiguration) === undefined &&
+    chosenRunMode === "server-job";
 
   // The console reads the mounted file, so a server-job run holds only a REFERENCE
   // (the opaque name), never the content.
@@ -1556,6 +1562,7 @@ export function InviterScreen() {
                 loadedSftpForm={loadedSftpForm}
                 sftpSaveFilePreferred={sftpSaveFilePreferred}
                 runWithheld={runWithheldReason(mountedConfiguration)}
+                continuesOpenedExchange={continuesOpenedExchange}
                 connectionSettingsHeld={connectionSettingsHeldNotice(
                   mountedConfiguration,
                 )}
@@ -1743,6 +1750,7 @@ export function InviterScreen() {
                 acceptKitExchange === undefined ? undefined : downloadAcceptKit
               }
               serverJob={chosenRunMode === "server-job"}
+              continuesOpenedExchange={continuesOpenedExchange}
               jobId={jobId}
               reattached={reattached}
               reattaching={reattaching}

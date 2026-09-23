@@ -22,6 +22,8 @@ import {
   createServerJobExchangeDriver,
 } from "@psi/jobClient/serverJobExchangeDriver";
 import {
+  MOUNTED_KEY_FILE_ABSENT_REFUSAL,
+  MOUNTED_KEY_FILE_INVALID_REFUSAL,
   SFTP_FINGERPRINT_LIST_REFUSAL,
   SIGNING_IDENTITY_IN_RENDEZVOUS_REFUSAL,
 } from "@jobs/jobCreateRefusal";
@@ -222,6 +224,39 @@ export function failureFor(
         "holds more than one server identity fingerprint, and a direct " +
         "exchange pins one. Start over, choose Edit connection on the server " +
         "step, and keep only the fingerprint the server presents now.",
+    };
+  // A run of the opened configuration refused over the key file beside it.
+  // Above the mounted-file branch: the input file is not at fault. Classified
+  // `config`: a retry refuses identically until the folder is fixed.
+  if (
+    error instanceof JobApiRequestError &&
+    error.refusalReason === MOUNTED_KEY_FILE_ABSENT_REFUSAL
+  )
+    return {
+      category: "config",
+      title: "Your working folder has no .psilink.key",
+      message:
+        "The console did not start this exchange. It continues the exchange " +
+        "your psilink.yaml set up, under the .psilink.key beside it, and " +
+        "there is none in your working folder. Put this exchange's " +
+        ".psilink.key back beside psilink.yaml, then start the run again. If " +
+        "you no longer have it, close the configuration and create a new " +
+        "invitation for your partner.",
+    };
+  if (
+    error instanceof JobApiRequestError &&
+    error.refusalReason === MOUNTED_KEY_FILE_INVALID_REFUSAL
+  )
+    return {
+      category: "config",
+      title: "The .psilink.key in your working folder cannot be read",
+      message:
+        "The console did not start this exchange. The .psilink.key beside " +
+        "psilink.yaml in your working folder is not a key file psilink can " +
+        "read. Check that it is a regular file with read permission, holding " +
+        "the key psilink wrote for this exchange, then start the run again. " +
+        "If you no longer have that key, close the configuration and create a " +
+        "new invitation for your partner.",
     };
   // A console job create rejected the mounted file: a 400 the driver categorizes
   // `config`. The file is the likely fault, so the alert names it -- except on
@@ -479,14 +514,17 @@ export function inviterServerJobConfig({
   loadedEnforcementRecords?: LoadedEnforcementRecords;
   /** Whether the operator opened the mounted configuration for this exchange,
    * forwarded unchanged. False for an exchange authored here, whose hand-off
-   * then merges nothing from the mount. */
+   * then merges nothing from the mount. True sends no secret: the run uses
+   * the key file beside the opened configuration. */
   mountedConfigurationOpened?: boolean;
 }): ServerJobExchangeDriverConfig {
   return {
     transport,
     side: "inviter",
     linkageTerms: minted.linkageTerms,
-    sharedSecret: minted.sharedSecret,
+    ...(mountedConfigurationOpened === true
+      ? {}
+      : { sharedSecret: minted.sharedSecret }),
     inputSource,
     ...(minted.metadata !== undefined ? { metadata: minted.metadata } : {}),
     ...(minted.standardization !== undefined

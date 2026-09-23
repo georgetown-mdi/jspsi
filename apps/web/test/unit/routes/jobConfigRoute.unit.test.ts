@@ -25,6 +25,13 @@ function tempDir(label: string): string {
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
+  // The route reads through the memoized manager, which holds the data root it
+  // was built with; each test enables its own.
+  (
+    globalThis as { jobManagerInstance?: { shutdown: () => void } }
+  ).jobManagerInstance?.shutdown();
+  (globalThis as { jobManagerInstance?: unknown }).jobManagerInstance =
+    undefined;
   for (const dir of dirs.splice(0))
     fs.rmSync(dir, { recursive: true, force: true });
 });

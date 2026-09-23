@@ -529,7 +529,10 @@ export type JobExchangeSide = "inviter" | "acceptor";
  *   partner-authored text (field names, key elements, transforms) holding no
  *   filesystem path, host, or command field.
  * - `sharedSecret` is credential material matching the CLI key-file shape,
- *   written into a fixed-name key file, never a path or argv fragment.
+ *   written into a fixed-name key file, never a path or argv fragment. It is
+ *   absent exactly when `mountedConfigurationOpened` is true: that run reads
+ *   the key file beside the mounted configuration instead (enforced by
+ *   {@link jobExchangeIntentSchema}).
  * - `inputCsv` is CONTENT the server writes to a fixed, server-chosen
  *   filename in the job workdir; the client never names a file. Exactly one
  *   of `inputCsv` or `inputFile` is set (enforced by
@@ -603,7 +606,13 @@ export interface JobExchangeIntentBase {
    */
   mode?: "exchange";
   linkageTerms: LinkageTerms;
-  sharedSecret: string;
+  /**
+   * The shared secret this run's key file holds. Absent exactly when
+   * {@link JobExchangeIntentBase.mountedConfigurationOpened} is true: a run of
+   * the opened configuration continues the exchange under the key file beside
+   * it, which the server reads and the browser never holds.
+   */
+  sharedSecret?: string;
   inputCsv?: string;
   inputFile?: JobInputFileReference;
   metadata?: Metadata;
@@ -703,10 +712,12 @@ export interface JobExchangeIntentBase {
   side?: JobExchangeSide;
   /**
    * Whether this run was composed from the configuration the operator opened
-   * off the mount. The recurring-run hand-off merges the mounted document's
-   * held top-level keys into its template only under this flag, so a run
-   * authored here from scratch exports nothing from a `psilink.yaml` the
-   * operator never opened (see `buildJobHandoff` in `./handoff`).
+   * off the mount. Under this flag the run takes its shared secret from the
+   * `.psilink.key` beside that configuration rather than from the intent, and
+   * the recurring-run hand-off merges the held top-level keys of the document
+   * the operator opened into its template, so a run authored here from scratch
+   * exports nothing from a `psilink.yaml` the operator never opened (see
+   * `buildJobHandoff` in `./handoff`).
    */
   mountedConfigurationOpened?: boolean;
   options?: JobExchangeOptions;
@@ -1082,7 +1093,8 @@ const jobExchangeIntentCommonFields = {
     .regex(
       SHARED_SECRET_REGEX,
       "sharedSecret must be a base64url-encoded 32-byte value (43 base64url characters)",
-    ),
+    )
+    .optional(),
   inputCsv: z
     .string()
     .min(1)
@@ -1158,6 +1170,31 @@ function hasExactlyOneInputSource(intent: {
 }
 
 /**
+ * Whether the intent names its secret source exactly once: a `sharedSecret`, or
+ * `mountedConfigurationOpened: true`, whose run reads the key file beside the
+ * mounted configuration. Both is an intent whose secret the run would ignore;
+ * neither is one with no secret at all.
+ */
+function hasExactlyOneSecretSource(intent: {
+  sharedSecret?: unknown;
+  mountedConfigurationOpened?: unknown;
+}): boolean {
+  return (
+    (intent.sharedSecret !== undefined) !==
+    (intent.mountedConfigurationOpened === true)
+  );
+}
+
+/** The refusal message {@link hasExactlyOneSecretSource} uses at both union
+ * levels, stated once so the two cannot drift. */
+const SECRET_SOURCE_ISSUE = {
+  message:
+    "exactly one of sharedSecret or mountedConfigurationOpened: true must be " +
+    "set: a run of the opened configuration uses the key file beside it",
+  path: ["sharedSecret"],
+};
+
+/**
  * The `mode` discriminant defaults to `"exchange"` when absent: the merged
  * exchange client (`serverJobExchangeDriver`) sends an intent with no `mode`, so
  * a body missing it is the exchange mode. A zero-setup body names itself. Applied
@@ -1225,13 +1262,15 @@ const UNNAMED_CERTIFICATE_PARTY_ISSUE = {
  * A union-level refine enforces exactly one input source -- inline
  * `inputCsv` or the mounted `inputFile` reference -- on both arms: the
  * arm's strict parse runs first, then the cross-field XOR rejects an
- * intent that names neither or both.
+ * intent that names neither or both. A second XOR holds the secret source
+ * the same way: a `sharedSecret`, or `mountedConfigurationOpened: true`.
  */
 export const jobExchangeIntentSchema: z.ZodType<JobExchangeIntent> = z
   .preprocess(withDefaultExchangeMode, jobExchangeChannelUnion)
   .refine(hasExactlyOneInputSource, {
     message: "exactly one of inputCsv or inputFile must be set",
   })
+  .refine(hasExactlyOneSecretSource, SECRET_SOURCE_ISSUE)
   // Certificate mode also requires a named party, matching core's own
   // pre-exchange gate (`assertCertificateModeNamesLocalParty`): a
   // certificate is trusted by the identity its holder used in the agreed
@@ -1339,6 +1378,10 @@ export const jobCreateIntentSchema: z.ZodType<JobCreateIntent> = z
   .refine(hasExactlyOneInputSource, {
     message: "exactly one of inputCsv or inputFile must be set",
   })
+  .refine(
+    (intent) => intent.mode !== "exchange" || hasExactlyOneSecretSource(intent),
+    SECRET_SOURCE_ISSUE,
+  )
   // Only an exchange job signs anything: the zero-setup arms hold no
   // `signing` block and no `linkageTerms` at all, so the discriminant
   // selects the arm the rule is about.

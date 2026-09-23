@@ -17,8 +17,8 @@
  *   honor");
  * - a `connection` on a channel outside {@link OPENED_CHANNELS};
  * - an `authentication` block holding a shared secret or an expiry, which
- *   belong in the key file rather than the document, and which the console
- *   replaces with a new secret for each invitation it creates;
+ *   belong in the key file rather than the document: a run of the opened
+ *   configuration uses the `.psilink.key` beside it ({@link ./mountedKeyFile});
  * - one of the records whose absence turns an enforcement off that a run
  *   composed here could not state back ({@link assertRecordsSurvive});
  * - a setting inside a block the composition writes, which the export could not
@@ -561,11 +561,11 @@ function openedChannel(document: ExchangeSpec): OpenedChannel {
 }
 
 /**
- * Refuse an `authentication` block holding the secret or its expiry. The
- * console creates a new secret for each invitation and writes it to the run's
- * own key file, so a secret in the document is a value it would neither use
- * nor be able to keep. `token_max_age_days` is held unchanged, which
- * {@link carriedThroughFields} names.
+ * Refuse an `authentication` block holding the secret or its expiry. A run of
+ * the opened configuration uses the `.psilink.key` beside it, whose secret the
+ * CLI rotates at each run, so a secret in the document is a value the run
+ * would neither use nor be able to keep. `token_max_age_days` is held
+ * unchanged, which {@link carriedThroughFields} names.
  */
 function assertNoStatedSecret(document: ExchangeSpec): void {
   const authentication = document.authentication;
@@ -578,9 +578,8 @@ function assertNoStatedSecret(document: ExchangeSpec): void {
   throw new ConfigurationLoadRefusedError(
     "This configuration's authentication block states " +
       named.join(" and ") +
-      ". The shared secret and its expiry belong in the .psilink.key file, " +
-      "not the configuration, and the console creates a new secret for each " +
-      "invitation, so remove " +
+      ". The shared secret and its expiry belong in the .psilink.key file " +
+      "beside the configuration, not in the configuration itself, so remove " +
       (named.length === 1 ? "that line" : "those lines") +
       " and open it again.",
   );
@@ -770,7 +769,11 @@ export function mountedConfigurationDocument(source: string): ExchangeSpec {
 export function readMountedConfiguration(
   source: string,
 ): LoadedConfigurationResponse {
-  const document = mountedConfigurationDocument(source);
+  return responseFor(mountedConfigurationDocument(source));
+}
+
+/** The response body stating an opened document. */
+function responseFor(document: ExchangeSpec): LoadedConfigurationResponse {
   return {
     configured: true,
     present: true,
@@ -781,7 +784,20 @@ export function readMountedConfiguration(
 }
 
 /**
- * Load the configuration mounted at `<dataRoot>/psilink.yaml`. An absent file is
+ * The configuration the operator opened, as the server keeps it for the run
+ * that follows: the bytes the open read, and the document they parse to where
+ * the console conducts its channel (undefined on another, whose run the
+ * browser withholds).
+ */
+export interface OpenedMountedConfiguration {
+  source: string;
+  document: ExchangeSpec | undefined;
+}
+
+/**
+ * Open the configuration mounted at `<dataRoot>/psilink.yaml`: the response
+ * body, and the configuration as opened, which a run of it composes from
+ * rather than from a later read of the mount. An absent file is
  * `present: false` and no error: a console whose operator has authored nothing
  * yet is the ordinary first run. A file that IS there but the load cannot open
  * -- unreadable, not a regular file, or over the size cap -- is refused ahead of
@@ -792,18 +808,59 @@ export function readMountedConfiguration(
  * @throws {ConfigurationLoadRefusedError} when the file is not a configuration
  *   the console can open.
  */
-export function loadMountedConfiguration(
-  dataRoot: string,
-): LoadedConfigurationResponse {
+export function openMountedConfiguration(dataRoot: string): {
+  response: LoadedConfigurationResponse;
+  opened: OpenedMountedConfiguration | undefined;
+} {
   const source = mountedConfigurationSource(dataRoot);
   if (source === null)
     return {
-      configured: true,
-      present: false,
-      carriedThrough: [],
-      warnings: [],
+      response: {
+        configured: true,
+        present: false,
+        carriedThrough: [],
+        warnings: [],
+      },
+      opened: undefined,
     };
-  return readMountedConfiguration(source);
+  const document = mountedConfigurationDocument(source);
+  return {
+    response: responseFor(document),
+    opened: {
+      source,
+      document: isJobChannel(document.connection.channel)
+        ? document
+        : undefined,
+    },
+  };
+}
+
+/**
+ * {@link openMountedConfiguration}'s response body alone.
+ *
+ * @throws {ConfigurationLoadRefusedError} when the file is not a configuration
+ *   the console can open.
+ */
+export function loadMountedConfiguration(
+  dataRoot: string,
+): LoadedConfigurationResponse {
+  return openMountedConfiguration(dataRoot).response;
+}
+
+/**
+ * Whether the mount still holds, byte for byte, the configuration opened from
+ * `openedSource`. A file removed, unreadable, or changed in any byte is not.
+ */
+export function mountedConfigurationUnchanged(
+  dataRoot: string,
+  openedSource: string,
+): boolean {
+  try {
+    return mountedConfigurationSource(dataRoot) === openedSource;
+  } catch (error) {
+    if (error instanceof ConfigurationLoadRefusedError) return false;
+    throw error;
+  }
 }
 
 /**
@@ -865,32 +922,6 @@ function mountedConfigurationSource(dataRoot: string): string | null {
     return buffer.subarray(0, bytesRead).toString("utf8");
   } finally {
     fs.closeSync(fd);
-  }
-}
-
-/**
- * The mounted configuration as a parsed document, for the export a run composes
- * ({@link ./handoff}): the settings it states that a composition here does not
- * emit are written back unchanged from this one, so the file the operator takes
- * to the command line states everything the file they opened stated.
- *
- * Undefined on every fault, a mount holding no configuration included, rather
- * than a refusal: a file this console could not have opened is not one the run
- * was composed from, and the export then states exactly what the console
- * composed. A configuration on a channel the console does not conduct is
- * undefined the same way, since the browser withholds its run.
- */
-export function mountedExchangeDocument(
-  dataRoot: string,
-): ExchangeSpec | undefined {
-  try {
-    const source = mountedConfigurationSource(dataRoot);
-    if (source === null) return undefined;
-    const document = mountedConfigurationDocument(source);
-    return isJobChannel(document.connection.channel) ? document : undefined;
-  } catch (error) {
-    if (error instanceof ConfigurationLoadRefusedError) return undefined;
-    throw error;
   }
 }
 

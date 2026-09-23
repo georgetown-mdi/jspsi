@@ -14,7 +14,8 @@ import {
   credentialFieldsNotAdopted,
   disclosedDocument,
   loadMountedConfiguration,
-  mountedExchangeDocument,
+  mountedConfigurationUnchanged,
+  openMountedConfiguration,
   readMountedConfiguration,
 } from "@jobs/configLoad";
 import { authoringStateFromDocument } from "@console/loadedConfig";
@@ -183,7 +184,7 @@ describe("what the load discloses", () => {
     expect(message).not.toContain("x".repeat(43));
   });
 
-  test("the shared-secret refusal names the remedy, not a key file the console reads", () => {
+  test("the shared-secret refusal names the remedy and the key file it belongs in", () => {
     const message = refusal(
       savedSftpDocument({
         authentication: {
@@ -194,8 +195,7 @@ describe("what the load discloses", () => {
     );
     expect(message).toContain("shared_secret and expires");
     expect(message).toContain("remove those lines and open it again");
-    expect(message).toContain("new secret for each invitation");
-    expect(message).not.toMatch(/console reads/);
+    expect(message).toContain(".psilink.key file beside the configuration");
   });
 
   test("an absent file is present: false with no error", () => {
@@ -405,13 +405,24 @@ describe("a configuration on a channel the console does not conduct", () => {
     expect(message).toContain("shared_secret");
   });
 
+  test("keeps the bytes it opened, and tells them from a changed file", () => {
+    const dir = mountHolding(savedSftpDocument());
+    const opened = openMountedConfiguration(dir).opened;
+    if (opened === undefined) throw new Error("the load opened nothing");
+    expect(mountedConfigurationUnchanged(dir, opened.source)).toBe(true);
+    fs.appendFileSync(path.join(dir, "psilink.yaml"), "# edited\n");
+    expect(mountedConfigurationUnchanged(dir, opened.source)).toBe(false);
+    fs.rmSync(path.join(dir, "psilink.yaml"));
+    expect(mountedConfigurationUnchanged(dir, opened.source)).toBe(false);
+  });
+
   test("gives a run composed here nothing to hold", () => {
-    expect(mountedExchangeDocument(mountHolding(webrtcDocument()))).toBe(
-      undefined,
-    );
     expect(
-      mountedExchangeDocument(mountHolding(savedSftpDocument()))?.connection
-        .channel,
+      openMountedConfiguration(mountHolding(webrtcDocument())).opened?.document,
+    ).toBe(undefined);
+    expect(
+      openMountedConfiguration(mountHolding(savedSftpDocument())).opened
+        ?.document?.connection.channel,
     ).toBe("sftp");
   });
 });

@@ -48,6 +48,7 @@ export function parseHandoff(body: unknown): JobHandoff | null {
     mode,
     channel,
     usedKeyFile,
+    keyFileBesideConfiguration,
     credentialPasted,
     usedSigningIdentity,
     template,
@@ -55,6 +56,7 @@ export function parseHandoff(body: unknown): JobHandoff | null {
   if (mode !== "exchange" && mode !== "zeroSetup") return null;
   if (channel !== "sftp" && channel !== "filedrop") return null;
   if (typeof usedKeyFile !== "boolean") return null;
+  if (typeof keyFileBesideConfiguration !== "boolean") return null;
   if (typeof credentialPasted !== "boolean") return null;
   if (typeof usedSigningIdentity !== "boolean") return null;
   const parsedTemplate = parseTemplate(template);
@@ -63,6 +65,7 @@ export function parseHandoff(body: unknown): JobHandoff | null {
     mode,
     channel,
     usedKeyFile,
+    keyFileBesideConfiguration,
     credentialPasted,
     usedSigningIdentity,
     template: parsedTemplate,

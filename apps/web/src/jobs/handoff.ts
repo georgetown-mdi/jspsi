@@ -66,6 +66,13 @@ export interface JobHandoff {
    */
   usedKeyFile: boolean;
   /**
+   * Whether the run used the `.psilink.key` beside the configuration opened in
+   * the working folder, rather than one written into the run's own folder.
+   * The panel then points at that file, which the run's handshake rotated in
+   * place. Always false for a zero-setup run, which uses no key file.
+   */
+  keyFileBesideConfiguration: boolean;
+  /**
    * Whether the authored SFTP credential arrived as a PASTED value
    * (materialized to a server-owned file) rather than a file the operator
    * owns. The panel shows the save-it-to-a-file caveat when true. Always
@@ -503,11 +510,16 @@ interface JobHandoffRunFacts {
    */
   filedropSplit: boolean;
   /**
-   * The configuration the console's mounted working folder holds, parsed.
-   * Present where the console could open it, and the settings of it a run
-   * composed here does not emit are written into the exchange mode's template
-   * unchanged (see {@link handoffConfigDocument}). A zero-setup run composes no
-   * configuration at all and reads it nowhere.
+   * Whether the run used the key file beside the opened configuration rather
+   * than one the console wrote into the run's own folder. Absent is false.
+   */
+  keyFileBesideConfiguration?: boolean;
+  /**
+   * The configuration the operator opened off the mounted working folder, as
+   * the open read it. The settings of it a run composed here does not emit are
+   * written into the exchange mode's template unchanged (see
+   * {@link handoffConfigDocument}). A zero-setup run composes no configuration
+   * at all and reads it nowhere.
    */
   mountedDocument?: ExchangeSpec;
 }
@@ -521,7 +533,12 @@ interface JobHandoffRunFacts {
 export function buildJobHandoff(
   intent: JobCreateIntent,
   serverEntry: JobSftpServerEntry | undefined,
-  { credentialPasted, filedropSplit, mountedDocument }: JobHandoffRunFacts,
+  {
+    credentialPasted,
+    filedropSplit,
+    keyFileBesideConfiguration = false,
+    mountedDocument,
+  }: JobHandoffRunFacts,
 ): JobHandoff {
   const zeroSetup = intent.mode === "zeroSetup";
   const split = intent.channel === "filedrop" && filedropSplit;
@@ -529,6 +546,7 @@ export function buildJobHandoff(
     mode: zeroSetup ? "zeroSetup" : "exchange",
     channel: intent.channel,
     usedKeyFile: !zeroSetup,
+    keyFileBesideConfiguration: !zeroSetup && keyFileBesideConfiguration,
     credentialPasted: intent.channel === "sftp" && credentialPasted,
     usedSigningIdentity:
       intent.mode !== "zeroSetup" && intent.signing?.mode === "certificate",

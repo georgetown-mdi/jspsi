@@ -1,6 +1,8 @@
 import { describe, expect, test } from "vitest";
 
+import { intentFor } from "@psi/jobClient/serverJobExchangeDriver";
 import { inviterServerJobConfig } from "@exchange/useInviterExchange";
+import { jobExchangeIntentSchema } from "@jobs/intentSchemas";
 
 import type { LinkageTerms, Metadata, Standardization } from "@psilink/core";
 
@@ -123,6 +125,22 @@ describe("inviterServerJobConfig", () => {
 
     expect(config.inputSource).toEqual({ kind: "inline", csv: inputCsv });
     expect(config.sharedSecret).toBe(sharedSecret);
+  });
+
+  test("sends no secret for a run of the opened configuration", () => {
+    // That run uses the key file beside the configuration on the server, so
+    // the minted secret never leaves the browser and the intent states none.
+    const config = inviterServerJobConfig({
+      minted,
+      inputSource: { kind: "inline", csv: inputCsv },
+      transport: { channel: "filedrop" },
+      mountedConfigurationOpened: true,
+    });
+    expect(config.sharedSecret).toBeUndefined();
+    expect(config.mountedConfigurationOpened).toBe(true);
+    const intent = intentFor(config);
+    expect("sharedSecret" in intent).toBe(false);
+    expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(true);
   });
 
   test("threads a console workFile reference through as the input source verbatim", () => {

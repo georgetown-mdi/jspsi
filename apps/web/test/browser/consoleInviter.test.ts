@@ -1390,6 +1390,7 @@ describe("console inviter re-attaches on a busy create", () => {
     mode: "exchange",
     channel: "sftp",
     usedKeyFile: true,
+    keyFileBesideConfiguration: false,
     credentialPasted: false,
     usedSigningIdentity: false,
     template: {
@@ -1762,6 +1763,7 @@ describe("console inviter recurring hand-off availability", () => {
     mode: "exchange",
     channel: "sftp",
     usedKeyFile: true,
+    keyFileBesideConfiguration: false,
     credentialPasted: false,
     usedSigningIdentity: false,
     template: {

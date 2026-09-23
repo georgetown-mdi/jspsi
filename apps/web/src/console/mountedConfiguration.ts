@@ -121,6 +121,16 @@ export const CONFIGURATION_LOAD_SEALED =
   "This exchange's invitation is already created. Start a new exchange to " +
   "open a configuration.";
 
+/** What the review and run steps say for a run of the opened configuration:
+ * it uses the key file beside that configuration, so no invitation is sent. */
+export const OPENED_EXCHANGE_CONTINUES =
+  "This run continues the exchange your psilink.yaml set up, under the " +
+  ".psilink.key beside it. No new invitation is made: your partner runs " +
+  "their side as they usually do.";
+
+/** The review step's start action for a run of the opened configuration. */
+export const START_OPENED_EXCHANGE_LABEL = "Start the exchange";
+
 /** The label of the control that closes an open configuration. */
 export const CLOSE_CONFIGURATION_LABEL = "Close this configuration";
 

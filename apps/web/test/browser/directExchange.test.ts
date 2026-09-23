@@ -1117,6 +1117,7 @@ describe("console direct re-attaches on a busy create", () => {
     mode: "zeroSetup",
     channel: "sftp",
     usedKeyFile: false,
+    keyFileBesideConfiguration: false,
     credentialPasted: false,
     usedSigningIdentity: false,
     template: {

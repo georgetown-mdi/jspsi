@@ -13,11 +13,14 @@ import {
   readJobRequestBody,
 } from "@jobs/routeSupport";
 import {
+  MOUNTED_KEY_FILE_ABSENT_REFUSAL,
+  MOUNTED_KEY_FILE_INVALID_REFUSAL,
   SFTP_FINGERPRINT_LIST_REFUSAL,
   SIGNING_IDENTITY_IN_RENDEZVOUS_REFUSAL,
 } from "@jobs/jobCreateRefusal";
 import { jobEmptyResponse, jobJsonResponse } from "@jobs/gate";
 import { JobInputNotFoundError } from "@jobs/workInputs";
+import { MountedKeyFileRefusedError } from "@jobs/mountedKeyFile";
 import { SigningIdentityLocationError } from "@jobs/signingIdentity";
 import { ZeroSetupFingerprintListError } from "@jobs/intentArgv";
 import { jobCreateIntentSchema } from "@jobs/intentSchemas";
@@ -53,13 +56,15 @@ import { jobCreateIntentSchema } from "@jobs/intentSchemas";
  * rejection is a 409 containing only the occupying exchange's id (nothing else about
  * it), disclosed to the same-origin operator on their own loopback console.
  *
- * Two 400s do hold a body, each a fixed token and nothing else: a filedrop
+ * Some 400s do hold a body, each a fixed token and nothing else: a filedrop
  * intent refused because a rendezvous directory holds this party's signing
- * identity answers `{ "reason": "signing-identity-in-rendezvous" }`, and a
+ * identity answers `{ "reason": "signing-identity-in-rendezvous" }`, a
  * zero-setup sftp intent refused because the saved connection pins more than one
- * host-key fingerprint answers `{ "reason": "sftp-fingerprint-list" }`. Each is
- * about console state rather than the intent, so the browser cannot otherwise
- * say what to fix.
+ * host-key fingerprint answers `{ "reason": "sftp-fingerprint-list" }`, and a
+ * run of the opened configuration refused over the `.psilink.key` beside it
+ * answers `{ "reason": "mounted-key-file-absent" }` or
+ * `{ "reason": "mounted-key-file-invalid" }`. Each is about console state
+ * rather than the intent, so the browser cannot otherwise say what to fix.
  */
 export const Route = createFileRoute("/api/jobs/")({
   server: {
@@ -100,6 +105,18 @@ export const Route = createFileRoute("/api/jobs/")({
           if (error instanceof ZeroSetupFingerprintListError)
             return jobJsonResponse(
               { reason: SFTP_FINGERPRINT_LIST_REFUSAL },
+              400,
+            );
+          // The key file beside the opened configuration is missing or is not
+          // a key file. The token says which, and nothing read from the file.
+          if (error instanceof MountedKeyFileRefusedError)
+            return jobJsonResponse(
+              {
+                reason:
+                  error.fault === "absent"
+                    ? MOUNTED_KEY_FILE_ABSENT_REFUSAL
+                    : MOUNTED_KEY_FILE_INVALID_REFUSAL,
+              },
               400,
             );
           // A mounted input that names no regular file, a filedrop intent with no

@@ -58,6 +58,7 @@ export const RELAY_WARNING_SOURCES = [
   "relayUnknownEvent",
   "relayProcessError",
   "relayRendezvousPreflight",
+  "relayOpenedConfigurationChanged",
 ] as const;
 
 /** One {@link RELAY_WARNING_SOURCES} value; see that list. */

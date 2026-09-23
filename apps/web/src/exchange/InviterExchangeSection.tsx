@@ -5,6 +5,7 @@ import { Button } from "@mantine/core";
 import { describeResolvedMatching } from "@psilink/core";
 
 import { dateTimeLabel, invitationUsable } from "@psi/formatting";
+import { OPENED_EXCHANGE_CONTINUES } from "@console/mountedConfiguration";
 import { RecurringHandoff } from "@recurring/RecurringHandoff";
 import styles from "@styles/app.module.css";
 
@@ -57,6 +58,7 @@ export function InviterExchangeSection({
   partnerAcceptsByCli,
   onDownloadAcceptKit,
   serverJob,
+  continuesOpenedExchange = false,
   jobId,
   reattached,
   reattaching,
@@ -88,6 +90,11 @@ export function InviterExchangeSection({
    * while the tab stays open, so the keep-open callout names the running exchange
    * the tab is holding rather than a browser listener. */
   serverJob: boolean;
+  /** Whether the run continues the exchange the opened configuration set up,
+   * under the key file beside it. The invitation this screen holds is then
+   * never sent: the share block gives way to a line saying so, and a retry
+   * does not wait on that invitation's expiry. */
+  continuesOpenedExchange?: boolean;
   /** The console job id of a server-job run, once created. Threads the run's job
    * to the recurring hand-off panel; undefined on a browser run. */
   jobId: string | undefined;
@@ -151,7 +158,8 @@ export function InviterExchangeSection({
   // exchange failure routes to start-over and stops advertising the link.
   const retryable =
     failure?.category === "exchange" &&
-    invitationUsable(invitation.expires, new Date());
+    (continuesOpenedExchange ||
+      invitationUsable(invitation.expires, new Date()));
 
   // Every non-retryable failure except output (whose exchange already succeeded, so
   // nothing here may invite a re-run) offers exactly one recovery: a fresh invitation
@@ -194,7 +202,9 @@ export function InviterExchangeSection({
         ? "Exchange complete"
         : phase === "running"
           ? "Exchange in progress"
-          : "Your invitation is ready";
+          : continuesOpenedExchange
+            ? "Waiting for your partner"
+            : "Your invitation is ready";
 
   return (
     <>
@@ -223,7 +233,11 @@ export function InviterExchangeSection({
           )}
           {offersStartOver && (
             <FailureRecoveryButton
-              label="Start over with a fresh invitation"
+              label={
+                continuesOpenedExchange
+                  ? "Start over"
+                  : "Start over with a fresh invitation"
+              }
               onAct={onStartOver}
               recordConfirm={recordConfirm}
             />
@@ -236,6 +250,11 @@ export function InviterExchangeSection({
           expiry) must not keep being advertised for copying, while a
           retryable failure's link stays valid for another attempt. */}
       {phase === "share" &&
+        continuesOpenedExchange &&
+        failure === undefined &&
+        !recovering && <p>{OPENED_EXCHANGE_CONTINUES}</p>}
+      {phase === "share" &&
+        !continuesOpenedExchange &&
         (failure === undefined || retryable) &&
         !recovering && (
           <>
