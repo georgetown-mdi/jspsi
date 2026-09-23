@@ -36,6 +36,7 @@ import {
 } from "./managedConfigurationModel";
 import { ConfigRowItem } from "./ManagedExchangeDetail";
 import { DeleteExchangeButton } from "./SavedExchanges";
+import { LocalDocumentFields } from "./LocalDocumentFields";
 import { useLocalFieldsDraft } from "./useLocalFieldsDraft";
 
 import type {
@@ -65,8 +66,9 @@ const UNNAMED_CONFIGURATION_TITLE = "Imported configuration";
  *
  * The agreed terms are read-only, as they are for a browser-run exchange: they
  * are the partnership's, not this browser's, and exchanging on different ones is
- * a new exchange. The label and the max-age policy edit in place through the
- * same store path a browser-run exchange edits through.
+ * a new exchange. The label, the max-age policy, and the document's own
+ * settings edit in place through the same store path a browser-run exchange
+ * edits through.
  */
 export function ManagedConfigurationSurface({
   record,
@@ -267,9 +269,11 @@ function ConfigurationExportPanel({
 
 /**
  * The settings that edit in place: the label this browser shows the exchange
- * under, and the max-age policy the exported configuration carries as
- * `authentication.token_max_age_days`. Both are written through the store's
- * single local-fields edit, the same one a browser-run exchange takes.
+ * under, the max-age policy the exported configuration holds as
+ * `authentication.token_max_age_days`, and the document's own-columns choice,
+ * separator, and retention note ({@link LocalDocumentFields}). All are written
+ * through the store's single local-fields edit, the same one a browser-run
+ * exchange takes.
  *
  * The policy bounds a secret this record does not hold, so nothing here lapses
  * anything: what it sets is the bound the command-line run stamps onto the
@@ -282,6 +286,7 @@ function ConfigurationSettingsEditor({
   record: ManagedExchangeRecord;
   onRecordEdited: (record: ManagedExchangeRecord) => void;
 }) {
+  const draft = useLocalFieldsDraft(record);
   const {
     label,
     editLabel,
@@ -291,19 +296,21 @@ function ConfigurationSettingsEditor({
     editMaxAgeDays,
     maxAgeError,
     tokenMaxAgeDaysEdit,
+    documentEdits,
     labelValid,
     canSave,
     saving,
     saved,
     failed,
     submit,
-  } = useLocalFieldsDraft(record);
+  } = draft;
 
   function save() {
     if (!canSave) return;
     const edits: ManagedExchangeLocalEdits = {
       label,
       tokenMaxAgeDays: tokenMaxAgeDaysEdit,
+      ...documentEdits,
     };
     submit(() =>
       updateManagedExchangeLocalFields(record.id, edits).then(onRecordEdited),
@@ -314,8 +321,8 @@ function ConfigurationSettingsEditor({
     <div className={styles.callout}>
       <h2 className={styles.eyebrow}>Settings</h2>
       <p className={styles.small}>
-        The label stays in this browser. The maximum age goes into the
-        configuration you download, and the command-line run applies it.
+        The label stays in this browser. The other settings go into the
+        configuration you download, and the command-line run applies them.
       </p>
       <TextInput
         label="Label"
@@ -350,6 +357,7 @@ function ConfigurationSettingsEditor({
           mt="xs"
         />
       )}
+      <LocalDocumentFields draft={draft} />
       {failed && (
         <Alert color="red" title="That could not be saved" mt="sm" mb="sm">
           These settings were not saved. Nothing changed; try again.

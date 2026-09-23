@@ -81,19 +81,31 @@ describe("why nothing here runs the exchange", () => {
 
 describe("the settings held without an editor", () => {
   test("are named in the file's snake_case, never their values", () => {
-    const disposition = "Filed with the program office for seven years.";
     const record = configuration("sftp", {
-      retentionDisposition: disposition,
-      csvDelimiter: ";",
+      disclosedPayloadColumns: ["program_code"],
+      expectedPartnerDeduplicate: true,
     });
 
     expect(heldSettings(record)).toEqual([
-      "csv_delimiter",
-      "retention_disposition",
+      "disclosed_payload_columns",
+      "expected_partner_deduplicate",
     ]);
     const notice = heldSettingsNotice(record);
-    expect(notice).toContain("csv_delimiter, retention_disposition");
-    expect(notice).not.toContain(disposition);
+    expect(notice).toContain(
+      "disclosed_payload_columns, expected_partner_deduplicate",
+    );
+    expect(notice).not.toContain("program_code");
+  });
+
+  test("leave out the three settings the settings editor edits", () => {
+    const record = configuration("sftp", {
+      includeOwnColumns: "all",
+      csvDelimiter: ";",
+      retentionDisposition: "Filed with the program office for seven years.",
+    });
+
+    expect(heldSettings(record)).toEqual([]);
+    expect(heldSettingsNotice(record)).toBeUndefined();
   });
 
   test("name the connection's options block, which the rows do not show", () => {

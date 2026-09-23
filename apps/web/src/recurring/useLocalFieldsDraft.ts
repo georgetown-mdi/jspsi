@@ -1,6 +1,28 @@
 import { useState } from "react";
 
-import { labelWithinCap, maxAgeDaysError } from "@exchange/manageOfferModel";
+import {
+  labelWithinCap,
+  maxAgeDaysError,
+  retentionNoteError,
+} from "@exchange/manageOfferModel";
+import { resolveCsvDelimiter } from "@components/csvDelimiterChoice";
+
+import {
+  changedCsvDelimiter,
+  localDocumentFieldEdits,
+  localDocumentFieldValuesFrom,
+  ownColumnsOffered,
+} from "./localDocumentFieldsModel";
+import { useDelimiterRecheck } from "./useDelimiterRecheck";
+
+import type {
+  DelimiterRecheck,
+  LocalDocumentFieldEdits,
+  LocalDocumentFieldValues,
+} from "./localDocumentFieldsModel";
+import type { CsvDelimiterChoice } from "@components/csvDelimiterChoice";
+import type { ExchangeSpec } from "@psilink/core";
+import type { OwnColumnsChoice } from "@psi/ownColumnsModel";
 
 /** Where the max-age field starts for an exchange that has no policy yet, so the
  * operator opting in edits a plausible bound rather than an empty field. */
@@ -10,10 +32,12 @@ const OPT_IN_TOKEN_MAX_AGE_DAYS = 90;
 interface LocalFieldsSource {
   label: string;
   tokenMaxAgeDays?: number;
+  exchangeFile: ExchangeSpec;
+  inputFileHandle?: FileSystemFileHandle;
 }
 
-/** The label and max-age draft a surface edits, and what it needs to show and
- * save it. */
+/** The label, max-age, and document-settings draft a surface edits, and what
+ * it needs to show and save it. */
 export interface LocalFieldsDraft {
   /** The label as typed. */
   label: string;
@@ -24,6 +48,26 @@ export interface LocalFieldsDraft {
   editLabel: (label: string) => void;
   editMaxAgeEnabled: (enabled: boolean) => void;
   editMaxAgeDays: (days: number | string) => void;
+  /** Which of this party's own columns its result file holds. */
+  ownColumns: OwnColumnsChoice;
+  /** Whether the document's terms give the own-columns choice a result file
+   * to act on; the control is shown only where they do. */
+  ownColumnsOffered: boolean;
+  editOwnColumns: (choice: OwnColumnsChoice) => void;
+  /** How this party's input file separates fields. */
+  delimiter: CsvDelimiterChoice;
+  editDelimiter: (choice: CsvDelimiterChoice) => void;
+  /** What re-reading the stored input file under a changed delimiter found,
+   * absent where the delimiter is unchanged or there is no file to re-read. */
+  delimiterRecheck: DelimiterRecheck | undefined;
+  /** The retention note as typed. */
+  retentionNote: string;
+  editRetentionNote: (note: string) => void;
+  /** The field error the retention note shows, absent where there is none. */
+  retentionError: string | undefined;
+  /** What the save writes for the document's settings: only the ones the
+   * operator changed. */
+  documentEdits: LocalDocumentFieldEdits;
   /** Note an edit to a field the surface holds itself, so a save already
    * reported stops being reported as this draft's state. */
   markEdited: () => void;
@@ -50,15 +94,21 @@ export interface LocalFieldsDraft {
 }
 
 /**
- * The two local fields every managed exchange has -- the label this browser
- * shows it under and the max-age policy bounding its secret -- as one editing
- * draft: the state, the validation both surfaces gate their save on, and the
- * save's own reported state.
+ * The local fields every managed exchange has -- the label this browser shows
+ * it under, the max-age policy bounding its secret, and the three settings of
+ * its document that are this party's alone ({@link
+ * ./localDocumentFieldsModel.ts}) -- as one editing draft: the state, the
+ * validation both surfaces gate their save on, and the save's own reported
+ * state.
+ *
+ * A changed delimiter re-reads the stored input file under it
+ * ({@link useDelimiterRecheck}), and the save waits for that read, so the
+ * editor states how the file reads before the new delimiter is stored.
  *
  * Shared because both surfaces that edit local fields ({@link
  * ./ManagedExchangeDetail.tsx} for a browser-run exchange, {@link
- * ./ManagedConfigurationSurface.tsx} for a configuration-only one) edit these
- * two on the same terms, while what each SAVES differs: the detail surface also
+ * ./ManagedConfigurationSurface.tsx} for a configuration-only one) edit them
+ * on the same terms, while what each SAVES differs: the detail surface also
  * writes a schedule, and each reaches the store its own way. So this holds the
  * draft and the save's state, and `submit` takes the write.
  *
@@ -77,6 +127,10 @@ export function useLocalFieldsDraft(
   const [maxAgeDays, setMaxAgeDays] = useState<number | string>(
     record.tokenMaxAgeDays ?? OPT_IN_TOKEN_MAX_AGE_DAYS,
   );
+  const [documentFields, setDocumentFields] =
+    useState<LocalDocumentFieldValues>(() =>
+      localDocumentFieldValuesFrom(record.exchangeFile),
+    );
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -87,6 +141,21 @@ export function useLocalFieldsDraft(
       ? maxAgeDays
       : undefined;
   const labelValid = labelWithinCap(label);
+  const delimiterRecheck = useDelimiterRecheck(
+    record.exchangeFile,
+    record.inputFileHandle,
+    changedCsvDelimiter(record.exchangeFile, documentFields.delimiter),
+  );
+  const retentionError = retentionNoteError(documentFields.retentionNote);
+  const documentFieldsValid =
+    resolveCsvDelimiter(documentFields.delimiter).ok &&
+    retentionError === undefined &&
+    delimiterRecheck?.kind !== "reading";
+
+  function editDocumentFields(edit: Partial<LocalDocumentFieldValues>) {
+    setDocumentFields((current) => ({ ...current, ...edit }));
+    setSaved(false);
+  }
 
   return {
     label,
@@ -104,12 +173,23 @@ export function useLocalFieldsDraft(
       setMaxAgeDays(days);
       setSaved(false);
     },
+    ownColumns: documentFields.ownColumns,
+    ownColumnsOffered: ownColumnsOffered(record.exchangeFile),
+    editOwnColumns: (ownColumns) => editDocumentFields({ ownColumns }),
+    delimiter: documentFields.delimiter,
+    editDelimiter: (delimiter) => editDocumentFields({ delimiter }),
+    delimiterRecheck,
+    retentionNote: documentFields.retentionNote,
+    editRetentionNote: (retentionNote) => editDocumentFields({ retentionNote }),
+    retentionError,
+    documentEdits: localDocumentFieldEdits(record.exchangeFile, documentFields),
     markEdited: () => setSaved(false),
     maxAgeError,
     tokenMaxAgeDays,
     tokenMaxAgeDaysEdit: maxAgeEnabled ? (tokenMaxAgeDays ?? null) : null,
     labelValid,
-    canSave: labelValid && !saving && maxAgeError === undefined,
+    canSave:
+      labelValid && !saving && maxAgeError === undefined && documentFieldsValid,
     saving,
     saved,
     failed,

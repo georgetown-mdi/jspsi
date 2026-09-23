@@ -7,10 +7,16 @@ import {
   Checkbox,
   NumberInput,
   TextInput,
+  Textarea,
 } from "@mantine/core";
 import { IconCircleCheck } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
 
+import {
+  RETENTION_NOTE_LABEL,
+  RETENTION_NOTE_NOTICE,
+  RETENTION_NOTE_PLACEHOLDER,
+} from "@psi/receiptsModel";
 import { probeManagedStoreOpen } from "@psi/managed/managedExchangeStore";
 
 import styles from "@styles/app.module.css";
@@ -22,6 +28,8 @@ import {
   labelWithinCap,
   maxAgeCadenceNote,
   maxAgeDaysError,
+  retentionNoteError,
+  retentionNoteValue,
 } from "./manageOfferModel";
 
 import type { ManageOfferChoices, ManageOfferStatus } from "./manageOfferModel";
@@ -81,6 +89,7 @@ export function ManageExchangeOffer({
   // an invalid state is representable and can block the deposit rather than
   // being coerced to a sentinel that silently drops the opted-in bound.
   const [maxAgeDays, setMaxAgeDays] = useState<number | string>(90);
+  const [retentionNote, setRetentionNote] = useState("");
   const storeAvailable = useManagedStoreAvailability();
 
   // A deposit only succeeds against a store this browser opened, so the
@@ -137,6 +146,8 @@ export function ManageExchangeOffer({
       : undefined;
   const cadenceNote = maxAgeCadenceNote(tokenMaxAgeDays);
   const labelValid = labelWithinCap(label);
+  const retentionError = retentionNoteError(retentionNote);
+  const retentionDisposition = retentionNoteValue(retentionNote);
   const depositing = status === "depositing";
   // A refusal names a column of the stored document, which none of this panel's
   // inputs changes, so the deposit is blocked rather than left clickable for the
@@ -144,6 +155,7 @@ export function ManageExchangeOffer({
   // fresh exchange, which mounts this panel anew.
   const canManage =
     labelValid &&
+    retentionError === undefined &&
     !depositing &&
     refusal === undefined &&
     (!maxAgeEnabled || maxAgeError === undefined);
@@ -192,6 +204,18 @@ export function ManageExchangeOffer({
       {cadenceNote !== undefined && (
         <p className={`${styles.small} ${styles.sub}`}>{cadenceNote}</p>
       )}
+      <Textarea
+        label={RETENTION_NOTE_LABEL}
+        description={RETENTION_NOTE_NOTICE}
+        placeholder={RETENTION_NOTE_PLACEHOLDER}
+        autosize
+        minRows={2}
+        maxRows={5}
+        value={retentionNote}
+        error={retentionError}
+        onChange={(event) => setRetentionNote(event.currentTarget.value)}
+        mt="sm"
+      />
       <p className={`${styles.small} ${styles.sub}`}>
         {handleCaptured
           ? "A scheduled run can re-read your input file from this browser without re-selecting it."
@@ -215,6 +239,9 @@ export function ManageExchangeOffer({
           onManage({
             label,
             ...(tokenMaxAgeDays !== undefined ? { tokenMaxAgeDays } : {}),
+            ...(retentionDisposition !== undefined
+              ? { retentionDisposition }
+              : {}),
           })
         }
       >

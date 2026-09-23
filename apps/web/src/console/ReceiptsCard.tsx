@@ -21,7 +21,9 @@ import { resolveSigningFingerprint } from "@psi/jobClient/signingIdentityClient"
 import {
   CERTIFICATE_EXPORT_NOTICE,
   IDENTITY_REGENERATION_NOTICE,
+  RETENTION_NOTE_LABEL,
   RETENTION_NOTE_NOTICE,
+  RETENTION_NOTE_PLACEHOLDER,
   SIGNING_IDENTITY_DIVERGENCE_POINTER,
   fingerprintRequestProblem,
   partnerPinStatement,
@@ -430,9 +432,9 @@ export function ReceiptsCard({
         )}
 
         <Textarea
-          label="Retention note for your own record"
+          label={RETENTION_NOTE_LABEL}
           description={RETENTION_NOTE_NOTICE}
-          placeholder="Filed in the association database; kept six years under the records schedule, then purged."
+          placeholder={RETENTION_NOTE_PLACEHOLDER}
           autosize
           minRows={2}
           maxRows={5}

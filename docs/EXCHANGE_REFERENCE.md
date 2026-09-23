@@ -1198,6 +1198,8 @@ A free-text pointer recorded verbatim in the exchange record, so an auditor can 
 retention_disposition: "Filed in Agency A association DB (links.prod); retained 6 years per records schedule RM-7, then purged."
 ```
 
+The console sets it on its receipts card. The web application offers it when you save an exchange as a recurring one, and a stored recurring exchange changes it under its settings; each later run of that exchange writes it into its record.
+
 ---
 
 ## Your own columns in the result
@@ -1234,7 +1236,7 @@ Two exchanges have no result table for the columns to reach, and they are treate
 
 The result's headers stay distinct: a partner payload column whose name collides with one already written takes a `their_` prefix. The full header-assignment order and fallback rule are in [PROTOCOL.md](spec/PROTOCOL.md#output).
 
-The key is read by the CLI and by the console when it runs a config file. The web application sets it from its "Matching & sharing" step, beside the per-column sharing choices, and writes it into every artifact that step's exchange produces: the result the browser downloads, the exchange file the save path writes, the config the console runs, and the stored record a recurring exchange re-runs from. The control is offered only where the exchange gives you a result table to write into, so it does not appear on a count-only exchange or on one whose `output` hands the result to your partner alone.
+The key is read by the CLI and by the console when it runs a config file. The web application sets it from its "Matching & sharing" step, beside the per-column sharing choices, and writes it into every artifact that step's exchange produces: the result the browser downloads, the exchange file the save path writes, the config the console runs, and the stored record a recurring exchange re-runs from. The control is offered only where the exchange gives you a result table to write into, so it does not appear on a count-only exchange or on one whose `output` hands the result to your partner alone. A stored recurring exchange changes it under its settings, offered on the same terms.
 
 Your own columns are not covered by the exchange record's commitments, which bind what was exchanged rather than what you filed beside it; verification of a result written with the key is unaffected ([EXCHANGE_RECORD.md](spec/EXCHANGE_RECORD.md#commitment-scheme)).
 
@@ -1267,7 +1269,7 @@ With the key absent, psilink reads the file with commas and writes the result wi
 
 A file read with the wrong delimiter is not refused by the read. It parses as a single column, and the refusal comes from the linkage-terms column check -- the input cannot satisfy the keys the terms declare -- which states the remedy: name your file's separator as the delimiter, or `detect` to take it from the file.
 
-The key is read by the CLI and by the console when it runs a config file. The web application offers the same choice at each of its file steps -- the invite paths, the acceptor's file step, and the re-supplied files on the verify page -- as a control beside the file picker, starting on the comma: name the separator, or choose to have it detected from the file. It is local to each party there as it is here: the choice stays in the browser, no invitation contains it, and a recurring exchange stores it with its own document -- the character, or the `detect` choice as a value of its own -- so an unattended run reads the file the way the operator chose. The console offers it at its own file steps too, beside the list of files in its mounted work directory: it profiles the selected file by the choice and states it as this key in the configuration it composes. Its Direct exchange flow composes no configuration, so there the choice reaches the run as the `--csv-delimiter` flag instead.
+The key is read by the CLI and by the console when it runs a config file. The web application offers the same choice at each of its file steps -- the invite paths, the acceptor's file step, and the re-supplied files on the verify page -- as a control beside the file picker, starting on the comma: name the separator, or choose to have it detected from the file. It is local to each party there as it is here: the choice stays in the browser, no invitation contains it, and a recurring exchange stores it with its own document -- the character, or the `detect` choice as a value of its own -- so an unattended run reads the file the way the operator chose. A stored recurring exchange changes it under its settings: choosing a different separator there reads the stored input file with it and states whether the file then covers every agreed key, before the change is saved. The console offers it at its own file steps too, beside the list of files in its mounted work directory: it profiles the selected file by the choice and states it as this key in the configuration it composes. Its Direct exchange flow composes no configuration, so there the choice reaches the run as the `--csv-delimiter` flag instead.
 
 ---
 
@@ -1609,9 +1611,9 @@ The cells:
 | `signing.partner_fingerprint` | authored (pinned on first contact) | authored | refused |
 | `signing.receipt_output` | carried | not applicable | refused |
 | **Other top-level settings** | | | |
-| `retention_disposition` | carried | authored | carried |
-| `include_own_columns` | carried | authored | carried |
-| `csv_delimiter` | authored | authored | carried |
+| `retention_disposition` | carried | authored | authored |
+| `include_own_columns` | carried | authored | authored |
+| `csv_delimiter` | authored | authored | authored |
 | **[Input metadata](#input-metadata)** | | | |
 | `metadata` (`name`, `type`, `role`, `is_payload`) | authored (inferred) | authored | carried |
 | `metadata` (`description`) | carried | carried | carried |

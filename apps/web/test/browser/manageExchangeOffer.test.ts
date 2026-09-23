@@ -121,6 +121,30 @@ describe("manage-exchange offer store gate", () => {
       .toBeInTheDocument();
   });
 
+  test("the retention note written at the offer reaches the deposit's choices", async () => {
+    probeStoreOpen.mockResolvedValue(true);
+    const onManage = vi.fn();
+    app.render(
+      createElement(ManageExchangeOffer, {
+        status: "idle",
+        handleCaptured: false,
+        onManage,
+      }),
+    );
+
+    await page
+      .getByRole("textbox", { name: "Retention note for your own record" })
+      .fill("  Filed with the program office for seven years.  ");
+    await page
+      .getByRole("button", { name: "Save as a recurring exchange" })
+      .click();
+
+    expect(onManage).toHaveBeenCalledWith({
+      label: "",
+      retentionDisposition: "Filed with the program office for seven years.",
+    });
+  });
+
   test("an unavailable store renders the accurate state and no form inputs", async () => {
     probeStoreOpen.mockResolvedValue(false);
     app.render(

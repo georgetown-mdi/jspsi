@@ -9,9 +9,7 @@
  * its own channel expands to ({@link connectionFromLocator}), and the document
  * only the top-level fields the record composer produces
  * ({@link composeManagedExchangeFile}), plus the `authentication` block the
- * export injects from the local max-age policy and the `retentionDisposition`
- * the record spec sanctions as operator-authored free text
- * (docs/spec/MANAGED_EXCHANGE_RECORD.md). The shared exchange-file schema is
+ * export injects from the local max-age policy. The shared exchange-file schema is
  * wider than both: it can represent a TURN `credential`, a `provider_options`
  * map, an `ice_provision` auth block, a PeerJS `server.key`/`server.username`,
  * a shared secret, and a `signing` block (`identity_file`, `receipt_output`,
@@ -411,22 +409,20 @@ function composableDocumentFields(): ReadonlySet<string> {
     outboundPayloadConsent: { status: "pending" },
     includeOwnColumns: "all",
     csvDelimiter: "|",
+    retentionDisposition: "composition probe",
   };
   return new Set(Object.keys(composeManagedExchangeFile(widestComposition)));
 }
 
 /**
  * The top-level fields a command-line document may hold: what the app can
- * compose (above), plus the `authentication` block holding the max-age policy,
- * plus the `retentionDisposition` the record spec sanctions on a stored document
- * as operator-authored free text (docs/spec/MANAGED_EXCHANGE_RECORD.md, the
- * `exchangeFile` row). Nothing else the shared exchange-file schema can
- * represent belongs in a managed exchange's psilink.yaml.
+ * compose (above), plus the `authentication` block holding the max-age policy.
+ * Nothing else the shared exchange-file schema can represent belongs in a
+ * managed exchange's psilink.yaml.
  */
 const COMMAND_LINE_DOCUMENT_FIELDS: ReadonlySet<string> = new Set([
   ...composableDocumentFields(),
   "authentication",
-  "retentionDisposition",
 ]);
 
 /**

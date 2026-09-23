@@ -1,4 +1,5 @@
 import {
+  MAX_TEXT_LENGTH,
   connectionFromLocator,
   deriveAcceptedLinkageTerms,
   disclosedColumnNames,
@@ -15,13 +16,17 @@ import {
   LABEL_GUIDANCE,
   MAX_LABEL_LENGTH,
   MAX_TOKEN_MAX_AGE_DAYS,
+  RETENTION_NOTE_CONTROL_CHARACTER_PROBLEM,
   buildManagedDeposit,
   composeManagedDocument,
   labelWithinCap,
   maxAgeCadenceNote,
   maxAgeDaysError,
+  retentionNoteError,
+  retentionNoteValue,
   webrtcLocatorFromEndpoint,
 } from "@exchange/manageOfferModel";
+import { RETENTION_NOTE_PROBLEM } from "@psi/receiptsModel";
 
 import type {
   ManagedDepositInputs,
@@ -590,6 +595,45 @@ describe("maxAgeDaysError", () => {
   test("rejects a value past the record schema's cap, naming the bound", () => {
     const error = maxAgeDaysError(MAX_TOKEN_MAX_AGE_DAYS + 1);
     expect(error).toContain(String(MAX_TOKEN_MAX_AGE_DAYS));
+  });
+});
+
+describe("the retention note at setup", () => {
+  const note = "Filed with the program office for seven years.";
+
+  test("a note the operator writes lands in the deposited document", () => {
+    const deposit = buildManagedDeposit(
+      depositInputs({
+        choices: { label: "Riverbend quarterly", retentionDisposition: note },
+      }),
+      Date.now(),
+    );
+    expect(deposit.exchangeFile.retentionDisposition).toBe(note);
+  });
+
+  test("no note deposits a document without the field", () => {
+    const deposit = buildManagedDeposit(depositInputs(), Date.now());
+    expect(deposit.exchangeFile).not.toHaveProperty("retentionDisposition");
+  });
+
+  test("the note is trimmed, and a blank one is no note", () => {
+    expect(retentionNoteValue(`  ${note}\n`)).toBe(note);
+    expect(retentionNoteValue(" \n ")).toBeUndefined();
+  });
+
+  test("a note within the document's bound, line breaks and tabs included, is admitted", () => {
+    expect(retentionNoteError("")).toBeUndefined();
+    expect(retentionNoteError("Filed:\tdb\r\nKept six years.")).toBeUndefined();
+    expect(retentionNoteError("x".repeat(MAX_TEXT_LENGTH))).toBeUndefined();
+  });
+
+  test("a note past the bound or holding a control character is refused", () => {
+    expect(retentionNoteError("x".repeat(MAX_TEXT_LENGTH + 1))).toBe(
+      RETENTION_NOTE_PROBLEM,
+    );
+    expect(retentionNoteError("Filed\u0000")).toBe(
+      RETENTION_NOTE_CONTROL_CHARACTER_PROBLEM,
+    );
   });
 });
 

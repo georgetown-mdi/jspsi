@@ -986,14 +986,16 @@ function markBackupOnLocalStore(
 }
 
 /**
- * Apply local edits (the label, schedule, and max-token-age policy -- the only
+ * Apply local edits (the label, schedule, max-token-age policy, and the
+ * document's own-columns choice, delimiter, and retention note -- the only
  * fields that update in place without a re-invite) to the stored record and
  * persist the result. The read, the edit application through
  * {@link applyManagedExchangeLocalEdits} (which re-validates), and the write-back
  * run inside one readwrite transaction ({@link readModifyWriteRecord}), so the
  * edit applies to the freshest stored record and cannot reintroduce a stale
- * secret over a concurrent rotation write. A change to the agreed terms is a re-invite,
- * not an edit here: the document and the secret are not editable through this path.
+ * secret over a concurrent rotation write. A change to the agreed terms is a new
+ * exchange, not an edit here: the terms, the connection, and the secret are not
+ * editable through this path.
  *
  * An edit to the max-token-age policy re-derives `expires` conservatively -- never
  * extending the stored credential's life without a rotation (see
