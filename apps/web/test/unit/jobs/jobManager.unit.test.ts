@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -32,9 +33,12 @@ import {
   JobApiRequestError,
   createServerJobExchangeDriver,
 } from "@psi/jobClient/serverJobExchangeDriver";
+import {
+  MAX_MOUNTED_KEY_FILE_BYTES,
+  MountedKeyFileRefusedError,
+} from "@jobs/mountedKeyFile";
 import { generateJobId, writeJobFile } from "@jobs/workdir";
 import { JobInputNotFoundError } from "@jobs/workInputs";
-import { MountedKeyFileRefusedError } from "@jobs/mountedKeyFile";
 import { SIGNING_IDENTITY_FILE_NAME } from "@jobs/signingIdentity";
 import { SIGNING_IDENTITY_IN_RENDEZVOUS_REFUSAL } from "@jobs/jobCreateRefusal";
 import { failureFor } from "@exchange/useInviterExchange";
@@ -2705,6 +2709,52 @@ describe("the key file beside the opened configuration", () => {
     await expect(manager.createJob(openedIntent())).rejects.toMatchObject({
       fault: "invalid",
     });
+  });
+
+  test("a FIFO named .psilink.key is refused as invalid, without blocking", async () => {
+    let mkfifoAvailable = true;
+    const root = mountWith(undefined);
+    try {
+      execFileSync("mkfifo", [path.join(root, ".psilink.key")]);
+    } catch {
+      mkfifoAvailable = false;
+    }
+    if (!mkfifoAvailable) {
+      console.warn("skipping FIFO test: mkfifo is not available");
+      return;
+    }
+    const { manager, spawned } = capturingManager(root);
+    const started = Date.now();
+    await expect(manager.createJob(openedIntent())).rejects.toMatchObject({
+      fault: "invalid",
+    });
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(spawned).toHaveLength(0);
+  });
+
+  test("a .psilink.key symlink to /dev/zero is refused as invalid, without blocking", async () => {
+    if (!fs.existsSync("/dev/zero")) {
+      console.warn("skipping /dev/zero test: /dev/zero is not available");
+      return;
+    }
+    const root = mountWith(undefined);
+    fs.symlinkSync("/dev/zero", path.join(root, ".psilink.key"));
+    const { manager, spawned } = capturingManager(root);
+    const started = Date.now();
+    await expect(manager.createJob(openedIntent())).rejects.toMatchObject({
+      fault: "invalid",
+    });
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(spawned).toHaveLength(0);
+  });
+
+  test("a key file over the size cap is refused as invalid", async () => {
+    const root = mountWith("x".repeat(MAX_MOUNTED_KEY_FILE_BYTES + 1));
+    const { manager, spawned } = capturingManager(root);
+    await expect(manager.createJob(openedIntent())).rejects.toMatchObject({
+      fault: "invalid",
+    });
+    expect(spawned).toHaveLength(0);
   });
 
   test("no job-API answer for an opened run holds the mounted secret", async () => {

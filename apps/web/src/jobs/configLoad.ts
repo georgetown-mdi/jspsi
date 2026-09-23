@@ -43,8 +43,6 @@
  * the document it opened, the last refusal above holding the list to those.
  */
 
-import fs from "node:fs";
-
 import {
   getDefaultLinkageTerms,
   parseExchangeSpec,
@@ -59,6 +57,7 @@ import {
 } from "@psi/exchangeDocumentRefusal";
 
 import { JOB_FILE_NAMES, isJobChannel } from "./intentSchemas";
+import { readBoundedMountedFile } from "./boundedMountedFile";
 
 import { composeConfigDocument, composeSftpConfigSpec } from "./intentConfig";
 import { resolveWorkdirFile } from "./workdir";
@@ -867,13 +866,10 @@ export function mountedConfigurationUnchanged(
  * The mounted configuration's bytes, or null where the mount holds no such file
  * at all.
  *
- * Every check and the read itself go through the one descriptor `openSync`
- * returns, so nothing between them can swap what `psilink.yaml` names. An
- * open failure is absent only when the entry does not exist (`ENOENT`);
- * any other open failure -- including a permission denied that a `stat`
- * would have missed -- is the unreadable refusal. The read is bounded to
- * one byte past the cap, so an over-large file is caught by what arrives
- * rather than by a size `fstat` reported earlier.
+ * Read through {@link readBoundedMountedFile}: an open failure other than
+ * `ENOENT` -- including a permission denied that a `stat` would have missed --
+ * is the unreadable refusal, as is anything at the name that is not a regular
+ * file.
  *
  * @throws {ConfigurationLoadRefusedError} when a file IS there and the console
  *   cannot read it -- unreadable, not a regular file, or over the size cap.
@@ -881,47 +877,16 @@ export function mountedConfigurationUnchanged(
 function mountedConfigurationSource(dataRoot: string): string | null {
   const filePath = resolveWorkdirFile(dataRoot, JOB_FILE_NAMES.config);
   if (filePath === null) return null;
-  let fd: number;
-  try {
-    // O_NONBLOCK, not the plain "r" flag: opening a FIFO for read-only blocks
-    // until a writer opens it, which would wedge this synchronous server on a
-    // FIFO named psilink.yaml (or a symlink to one). O_NONBLOCK makes that
-    // open return immediately instead; the fstat below then refuses it as not
-    // a regular file. A regular file ignores the flag, so its open and read
-    // are unchanged.
-    fd = fs.openSync(filePath, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw new ConfigurationLoadRefusedError(UNREADABLE_CONFIGURATION_MESSAGE);
-  }
-  try {
-    const stat = fs.fstatSync(fd);
-    if (!stat.isFile())
+  const read = readBoundedMountedFile(filePath, MAX_CONFIGURATION_FILE_BYTES);
+  switch (read.outcome) {
+    case "read":
+      return read.source;
+    case "absent":
+      return null;
+    case "unreadable":
       throw new ConfigurationLoadRefusedError(UNREADABLE_CONFIGURATION_MESSAGE);
-    if (stat.size > MAX_CONFIGURATION_FILE_BYTES)
+    case "over-large":
       throw new ConfigurationLoadRefusedError(OVER_LARGE_CONFIGURATION_MESSAGE);
-    const buffer = Buffer.alloc(MAX_CONFIGURATION_FILE_BYTES + 1);
-    let bytesRead = 0;
-    try {
-      while (bytesRead < buffer.length) {
-        const read = fs.readSync(
-          fd,
-          buffer,
-          bytesRead,
-          buffer.length - bytesRead,
-          null,
-        );
-        if (read === 0) break;
-        bytesRead += read;
-      }
-    } catch {
-      throw new ConfigurationLoadRefusedError(UNREADABLE_CONFIGURATION_MESSAGE);
-    }
-    if (bytesRead > MAX_CONFIGURATION_FILE_BYTES)
-      throw new ConfigurationLoadRefusedError(OVER_LARGE_CONFIGURATION_MESSAGE);
-    return buffer.subarray(0, bytesRead).toString("utf8");
-  } finally {
-    fs.closeSync(fd);
   }
 }
 

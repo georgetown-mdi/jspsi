@@ -11,18 +11,17 @@
  * of the two faults it is and nothing else.
  */
 
-import fs from "node:fs";
-
 import { z } from "zod";
 
 import { SHARED_SECRET_REGEX, parseSensitiveJson } from "@psilink/core";
 
 import { JOB_FILE_NAMES } from "./intentSchemas";
+import { readBoundedMountedFile } from "./boundedMountedFile";
 import { resolveWorkdirFile } from "./workdir";
 
 /** Upper bound, in bytes, on the key file this check reads. The file holds one
  * secret and one instant, so anything larger is not a key file. */
-const MAX_MOUNTED_KEY_FILE_BYTES = 10_000;
+export const MAX_MOUNTED_KEY_FILE_BYTES = 10_000;
 
 /**
  * The key-file shape, as the CLI's own reader holds it (`KeyFileSchema` in
@@ -58,9 +57,9 @@ export class MountedKeyFileRefusedError extends Error {
  * The path of the key file beside the mounted configuration, once it has been
  * read and checked against the key-file shape.
  *
- * Opened with O_NONBLOCK, so a FIFO at the name is refused as not a regular
- * file rather than blocking this synchronous server; read through the one
- * descriptor, bounded one byte past the cap.
+ * Read through {@link readBoundedMountedFile}, so a FIFO, a device, or a file
+ * over {@link MAX_MOUNTED_KEY_FILE_BYTES} at the name is refused as `invalid`
+ * without blocking this synchronous server.
  *
  * @throws {MountedKeyFileRefusedError} `absent` when no file is at the name,
  *   `invalid` when one is there and cannot be read or is not a key file.
@@ -68,43 +67,12 @@ export class MountedKeyFileRefusedError extends Error {
 export function checkedMountedKeyFilePath(dataRoot: string): string {
   const filePath = resolveWorkdirFile(dataRoot, JOB_FILE_NAMES.key);
   if (filePath === null) throw new MountedKeyFileRefusedError("absent");
-  let fd: number;
-  try {
-    fd = fs.openSync(filePath, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
-  } catch (error) {
-    throw new MountedKeyFileRefusedError(
-      (error as NodeJS.ErrnoException).code === "ENOENT" ? "absent" : "invalid",
-    );
-  }
-  let source: string;
-  try {
-    if (!fs.fstatSync(fd).isFile())
-      throw new MountedKeyFileRefusedError("invalid");
-    const buffer = Buffer.alloc(MAX_MOUNTED_KEY_FILE_BYTES + 1);
-    let bytesRead = 0;
-    while (bytesRead < buffer.length) {
-      const read = fs.readSync(
-        fd,
-        buffer,
-        bytesRead,
-        buffer.length - bytesRead,
-        null,
-      );
-      if (read === 0) break;
-      bytesRead += read;
-    }
-    if (bytesRead > MAX_MOUNTED_KEY_FILE_BYTES)
-      throw new MountedKeyFileRefusedError("invalid");
-    source = buffer.subarray(0, bytesRead).toString("utf8");
-  } catch (error) {
-    if (error instanceof MountedKeyFileRefusedError) throw error;
-    throw new MountedKeyFileRefusedError("invalid");
-  } finally {
-    fs.closeSync(fd);
-  }
+  const read = readBoundedMountedFile(filePath, MAX_MOUNTED_KEY_FILE_BYTES);
+  if (read.outcome === "absent") throw new MountedKeyFileRefusedError("absent");
+  if (read.outcome !== "read") throw new MountedKeyFileRefusedError("invalid");
   let parsed: unknown;
   try {
-    parsed = parseSensitiveJson(source, "mounted key file");
+    parsed = parseSensitiveJson(read.source, "mounted key file");
   } catch {
     throw new MountedKeyFileRefusedError("invalid");
   }
