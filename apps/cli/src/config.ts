@@ -1852,7 +1852,8 @@ export interface TermsUpdateWrite {
  * `expected_partner_deduplicate`, `outbound_payload_consent`, and
  * `disclosed_payload_columns` -- in one write, so no record is left stating a
  * commitment the new terms do not back. Every other key, the connection block
- * included, is left as the operator wrote it, comments and key order kept.
+ * included, keeps its values and its key order; the YAML round-trip may move
+ * an inline comment onto its own line and normalize spacing.
  *
  * The edited document is read back through the same schema `psilink
  * exchange` loads it with before it is written; a document that would not

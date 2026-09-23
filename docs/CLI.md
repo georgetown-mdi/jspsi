@@ -514,7 +514,7 @@ Confirming rewrites the configuration in one write. It replaces `linkage_terms` 
 - `outbound_payload_consent`: your consent to the columns you send, shown above, or a pending record where your configuration has no `metadata` block to state them
 - `disclosed_payload_columns`: where one is recorded, restated from your `metadata`, or removed where your configuration has none
 
-The connection block, every other key, and the key file are left as they are. Your next `psilink exchange` runs on the new terms.
+The connection block and every other key keep their values and order (the rewrite may move an inline comment onto its own line), and the key file is not touched. Your next `psilink exchange` runs on the new terms.
 
 ## Recurring exchange
 
