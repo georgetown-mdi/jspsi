@@ -1,7 +1,8 @@
 #!/bin/bash
 # Obtain or renew the relay's certificate by ACME DNS-01, then run the deploy
 # hook. Idempotent: an ACME client that finds a certificate with life left in it
-# does nothing, and the hook then re-owns what is already there.
+# does nothing, and the hook then re-owns what is already there and leaves the
+# relay running.
 #
 # DNS-01 rather than HTTP-01 because the relay listens on 443 and terminates TLS
 # for TURNS there. An HTTP-01 challenge would need a second service on 80 on the

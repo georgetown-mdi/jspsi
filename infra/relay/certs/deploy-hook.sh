@@ -1,6 +1,6 @@
 #!/bin/bash
-# Put a freshly issued certificate where the relay reads it, hand the key to the
-# account inside the container, and restart the relay.
+# Put the ACME client's certificate where the relay reads it, hand the key to the
+# account inside the container, and restart the relay when either changed.
 #
 # The chown is load-bearing, not tidiness. The relay measurement recorded coturn
 # silently falling back to its defaults on a private key it could not read --
@@ -12,8 +12,11 @@
 #
 # Restart rather than reload: whether coturn re-reads its certificate on a signal
 # is a question nobody has driven against the real server, so this does the thing
-# that certainly works. A relay restart drops any allocation in flight, which is
-# why the renewal timer runs at a fixed early hour rather than on exchange time.
+# that certainly works. A restart drops any allocation in flight, and renew.sh
+# calls this hook daily whether or not the client renewed, so the restart runs
+# only when the certificate or key differs from the deployed copy in content or
+# owner. The comparison reads the files, not the ACME client's exit status or
+# output, so it is the same for lego and acme.sh.
 #
 # A real Let's Encrypt certificate has been deployed through this script, on
 # the 2026-09-03/04 live run (infra/relay/README.md, Provenance).
@@ -38,11 +41,26 @@ SRC_KEY="${PSILINK_RELAY_KEY_SOURCE:-}"
 UID_IN_IMAGE="${PSILINK_RELAY_IMAGE_UID:-}"
 [ -n "$UID_IN_IMAGE" ] || die "PSILINK_RELAY_IMAGE_UID is unset in $ENV_FILE; install.sh reads it from the image"
 
+same_file() { [ -f "$2" ] && cmp -s "$1" "$2" && [ "$(stat -c %u "$2")" = "$UID_IN_IMAGE" ]; }
+CHANGED=yes
+if same_file "$SRC_CRT" "$DEST/fullchain.pem" && same_file "$SRC_KEY" "$DEST/privkey.pem"; then
+  CHANGED=
+fi
+
 install -d -m 755 "$DEST"
 install -m 644 "$SRC_CRT" "$DEST/fullchain.pem"
 install -m 600 "$SRC_KEY" "$DEST/privkey.pem"
 chown "$UID_IN_IMAGE" "$DEST/privkey.pem" "$DEST/fullchain.pem"
 log "certificate deployed to $DEST, key owned by uid $UID_IN_IMAGE"
+
+if [ -z "$CHANGED" ]; then
+  if systemctl is-active --quiet psilink-relay.service; then
+    log "certificate and key unchanged; psilink-relay.service left running"
+  else
+    log "certificate and key unchanged; psilink-relay.service is not running and was not started"
+  fi
+  exit 0
+fi
 
 # Nothing has started yet on a first install; install.sh starts it afterwards.
 if systemctl is-active --quiet psilink-relay.service; then

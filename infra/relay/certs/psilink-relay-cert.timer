@@ -2,10 +2,11 @@
 Description=Renew the psilink relay's TLS certificate daily
 
 [Timer]
-# Daily, because the ACME client renews only inside its window and does nothing
-# on the other days; the fixed early hour is when the deploy hook's relay restart
-# is least likely to land on an exchange in flight. The randomized delay keeps
-# several relays off the same second at the authority.
+# Daily, because the ACME client renews only inside its window. The deploy hook
+# runs every day too, and restarts the relay only on a day the certificate or
+# key changed; the fixed early hour is when that restart is least likely to land
+# on an exchange in flight. The randomized delay keeps several relays off the
+# same second at the authority.
 OnCalendar=*-*-* 03:00:00
 RandomizedDelaySec=1h
 Persistent=true
