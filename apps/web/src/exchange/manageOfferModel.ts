@@ -381,11 +381,12 @@ export function maxAgeCadenceNote(
 export const LABEL_GUIDANCE =
   "Name the partnership so you recognize it later. The label is never sent, but three things show it: this browser's storage, which anyone reading it can see; the name of every results file, in a folder you grant and in a copy you download; and, if you turn on between-visit notifications, a notification your device may show on a locked screen or mirror to your other devices. Keep agreement numbers, contact details, and other sensitive counterparty information out of it.";
 
-/** The problem a retention note holding a control character reports. A tab or
- * a line break is fine: the note is written in a multi-line field. */
+/** The problem a retention note holding a control character reports. A tab,
+ * a line break, or a carriage return is fine: the note is written in a
+ * multi-line field. */
 export const RETENTION_NOTE_CONTROL_CHARACTER_PROBLEM =
   "The retention note must not contain a control character (a NUL or an " +
-  "ESC, for instance). A tab or a line break is fine.";
+  "ESC, for instance). A tab, a line break, or a carriage return is fine.";
 
 /**
  * The field error for a retention note as typed, or `undefined` where the note
