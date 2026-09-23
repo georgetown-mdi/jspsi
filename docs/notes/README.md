@@ -30,7 +30,7 @@ stands, from a direction still open to a decision taken and built.
 | [fan-out-matching-resolution.md](fan-out-matching-resolution.md) | Built under `single-pass`; the cascade realization stays open work. |
 | [fips-provider-surface.md](fips-provider-surface.md) | Measurement, plus two decisions taken on it; whether to pursue a FIPS claim at all remains open. |
 | [fips-variant-image.md](fips-variant-image.md) | Decided, built, and published. |
-| [hosted-environment-opentofu.md](hosted-environment-opentofu.md) | Decided and written; not yet run against the live account. |
+| [hosted-environment-opentofu.md](hosted-environment-opentofu.md) | Decided and written; applied to the live account 2026-09-23. |
 | [key-establishment-fips-boundary.md](key-establishment-fips-boundary.md) | Decided and implemented. |
 | [linkage-rule-grounding.md](linkage-rule-grounding.md) | Proposal, pending adoption -- nothing here is adopted or shipped. |
 | [lockless-rendezvous-barrier.md](lockless-rendezvous-barrier.md) | Weighed and set aside; the shipped symmetric barrier stands. |
