@@ -195,7 +195,7 @@ describe("the row shown for a run too large to keep", () => {
     const summary = parkedResultsRows(tooLarge(4_000_000))[0].summary;
     expect(summary).toContain("4,000,000 matched records");
     expect(summary).toContain("210.0 MB");
-    expect(summary).toContain("100.0 MB this browser keeps");
+    expect(summary).toContain("200.0 MB this browser keeps");
     expect(summary).toContain("none of them were kept here");
     expect(summary).toContain("none were cut down to fit");
     expect(summary).toContain("Choose a folder");
@@ -263,7 +263,7 @@ describe("the warning a projected result size raises", () => {
     expect(warning).toContain("12,000 records");
     expect(warning).toContain("9,000");
     expect(warning).toContain("108,000,000 matched pairs");
-    expect(warning).toContain("100.0 MB this browser keeps");
+    expect(warning).toContain("200.0 MB this browser keeps");
     expect(warning).toContain("nothing here");
   });
 

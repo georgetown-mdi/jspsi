@@ -495,7 +495,7 @@ put an exchange on a schedule and again where they collect the results:
   nothing where results should be -- and the run itself stands: it rotated the
   secret and filed its disclosure.
 - **There is a size this browser will not keep**, and it is the size of file the
-  app will read: 100 MB, the same cap the intake dropzones apply. A result above
+  app will read: 200 MB, the same cap the intake dropzones apply. A result above
   it is kept whole or not at all -- nothing is kept and nothing is trimmed to fit
   -- and the next visit meets that state, the size the file weighed, and what to
   do about the granted folder, which takes a result of any size: choose one where

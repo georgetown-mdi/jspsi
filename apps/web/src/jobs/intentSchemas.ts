@@ -868,7 +868,7 @@ export function isJobChannel(channel: string): channel is JobChannel {
 
 /**
  * Upper bound on the `inputCsv` string length, anchored to the browser intake's
- * own file-size gate ({@link MAX_CSV_FILE_BYTES}, 100 MiB): a CSV that passed
+ * own file-size gate ({@link MAX_CSV_FILE_BYTES}): a CSV that passed
  * that gate must never be rejected here. This is a chars-vs-bytes approximation
  * (a JavaScript string length counts UTF-16 code units, not the bytes the file
  * gate measures), generous by construction -- the boundary byte cap

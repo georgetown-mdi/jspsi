@@ -163,9 +163,10 @@ export function gateJobRoute(request: Request): GateOutcome {
  * fields), so a valid body reaches a clean schema error rather than a `413`;
  * it is not sized to admit a pathological control-character payload, which is
  * not valid CSV. The uncapped standardization `params` is bounded only by
- * this cap.
+ * this cap. Derived from the input length -- twice it, plus 24 MiB -- so a
+ * raise of the intake cap moves it in the same edit.
  */
-export const MAX_JOB_BODY_BYTES = 224 * 1024 ** 2;
+export const MAX_JOB_BODY_BYTES = 2 * MAX_INPUT_CSV_LENGTH + 24 * 1024 ** 2;
 
 /**
  * The byte cap on a `PUT /api/jobs/sftp` authoring body: a small memory bound on
