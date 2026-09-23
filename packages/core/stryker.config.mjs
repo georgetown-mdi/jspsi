@@ -20,7 +20,7 @@
 // asserting the text.
 export const scoreFloors = {
   "packages/core/src/auth.ts": 73,
-  "packages/core/src/connection/abortMarker.ts": 57,
+  "packages/core/src/connection/abortMarker.ts": 91,
   "packages/core/src/connection/encryptedMessageConnection.ts": 89,
 };
 
