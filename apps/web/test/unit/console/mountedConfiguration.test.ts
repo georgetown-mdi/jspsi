@@ -9,6 +9,7 @@ import {
   CONFIGURATION_READ_UNAVAILABLE,
   CONFIGURATION_SAVED,
   CONFIGURATION_SAVE_UNAVAILABLE,
+  CONVERT_CONFIGURATION_LABEL,
   MOUNTED_CONFIGURATION_UNREAD,
   NO_CONFIGURATION_IN_FOLDER,
   PENDING_OUTBOUND_CONSENT_WARNING,
@@ -19,6 +20,9 @@ import {
   configurationSaveShown,
   configurationSaveState,
   connectionSettingsHeldNotice,
+  conversionOffered,
+  conversionStatement,
+  convertedStatement,
   credentialWarningNotice,
   divergedCommitmentNotice,
   divergedCommitmentWarning,
@@ -28,6 +32,8 @@ import {
   mountedConfigurationRead,
   runWithheldReason,
   termsNotAppliedNotice,
+  unconvertedSigningWithheldReason,
+  withConversion,
   withTermsNotApplied,
   withUnavailableTransport,
 } from "@console/mountedConfiguration";
@@ -119,6 +125,92 @@ describe("each answer lands the control in one state", () => {
     });
     expect(read.loaded?.channel).toBe("sftp");
     expect(read.loaded?.sftpForm?.host).toBe("sftp.partner.example");
+  });
+});
+
+describe("an opened configuration's own paths, until converted", () => {
+  /** An opened filedrop configuration stating both signing paths and its
+   * shared folder, as the load names them. */
+  function openedWithPaths(
+    signingPathSettings: Array<string> = [
+      "signing.identity_file",
+      "signing.receipt_output",
+    ],
+  ) {
+    return mountedConfigurationRead({
+      kind: "opened",
+      document: {
+        channel: "filedrop",
+        linkageTerms: getDefaultLinkageTerms("County Health"),
+      },
+      carriedThrough: [],
+      warnings: [],
+      signingPathSettings,
+      folderPathSettings: ["connection.path"],
+    }).state;
+  }
+
+  test("the read keeps the paths the load named on the state", () => {
+    const state = openedWithPaths();
+    expect(state).toMatchObject({
+      status: "opened",
+      signingPaths: ["signing.identity_file", "signing.receipt_output"],
+      folderPaths: ["connection.path"],
+    });
+    if (state.status !== "opened") throw new Error("expected an open state");
+    expect(state.converted).toBeUndefined();
+  });
+
+  test("a signed run of it is withheld, naming the settings and the conversion", () => {
+    const reason = unconvertedSigningWithheldReason(
+      openedWithPaths(),
+      "certificate",
+    );
+    expect(reason).toContain("signing.identity_file, signing.receipt_output");
+    expect(reason).toContain(CONVERT_CONFIGURATION_LABEL);
+    expect(reason).toContain("turn the signed receipt off");
+  });
+
+  test("an unsigned run of it is not withheld", () => {
+    expect(
+      unconvertedSigningWithheldReason(openedWithPaths(), "none"),
+    ).toBeUndefined();
+  });
+
+  test("a configuration naming only its folder withholds no signed run", () => {
+    expect(
+      unconvertedSigningWithheldReason(openedWithPaths([]), "certificate"),
+    ).toBeUndefined();
+  });
+
+  test("the conversion is offered with every setting it replaces stated", () => {
+    const state = openedWithPaths();
+    expect(conversionOffered(state, false)).toBe(true);
+    expect(conversionOffered(state, true)).toBe(false);
+    const statement = conversionStatement(state);
+    expect(statement).toContain(
+      "signing.identity_file, signing.receipt_output, connection.path",
+    );
+    expect(statement).toContain("keeps them as your file states them");
+    expect(statement).toContain("names no receipt file");
+  });
+
+  test("once converted, the run is released and the statement says so", () => {
+    const state = withConversion(openedWithPaths());
+    expect(unconvertedSigningWithheldReason(state, "certificate")).toBe(
+      undefined,
+    );
+    expect(conversionOffered(state, false)).toBe(false);
+    expect(conversionStatement(state)).toBeUndefined();
+    expect(convertedStatement(state)).toContain(
+      "in place of signing.identity_file, signing.receipt_output, connection.path",
+    );
+  });
+
+  test("a configuration naming no path of its own has nothing to convert", () => {
+    const state = mountedConfigurationRead(opened()).state;
+    expect(conversionOffered(state, false)).toBe(false);
+    expect(withConversion(state)).toBe(state);
   });
 });
 

@@ -1602,8 +1602,8 @@ The cells:
 | `outbound_payload_consent` | authored (the accept consent prompt) | carried with a notice | carried |
 | **[Connection](#connection)** | | | |
 | `connection.channel` | authored | authored (`sftp`, `filedrop`); `webrtc` opens but is refused at run | carried (`webrtc`); `sftp` and `filedrop` open but are refused at run |
-| `connection.path` (filedrop) | authored | not applicable | not applicable |
-| `connection.inbound_path`, `connection.outbound_path` (filedrop) | authored | not applicable | not applicable |
+| `connection.path` (filedrop) | authored | carried with a notice (the run uses the mounted folder; converting replaces it) | not applicable |
+| `connection.inbound_path`, `connection.outbound_path` (filedrop) | authored | carried with a notice (the run uses the mounted folders; converting replaces them) | not applicable |
 | `connection.server.host` (sftp) | authored | authored | not applicable |
 | `connection.server.port` (sftp) | authored | authored | not applicable |
 | `connection.server.path` (sftp) | authored | authored | not applicable |
@@ -1647,9 +1647,9 @@ The cells:
 | `authentication.token_max_age_days` | carried | carried with a notice (not applied to the console's run) | authored |
 | **[Signing](#signing)** | | | |
 | `signing.mode` | carried | authored | opens and is carried with a notice, but refused at run |
-| `signing.identity_file` | carried | authored (a location you pick in the console; the path the file states is not kept) | opens and is carried with a notice, but refused at run |
+| `signing.identity_file` | carried | carried with a notice (a signed run waits for converting, which replaces it with a location you pick in the console) | opens and is carried with a notice, but refused at run |
 | `signing.partner_fingerprint` | authored (pinned on first contact) | authored | opens and is carried with a notice, but refused at run |
-| `signing.receipt_output` | carried | not applicable | opens and is carried with a notice, but refused at run |
+| `signing.receipt_output` | carried | carried with a notice (a signed run waits for converting, which replaces it with the console's own) | opens and is carried with a notice, but refused at run |
 | **Other top-level settings** | | | |
 | `retention_disposition` | carried | authored | authored |
 | `include_own_columns` | carried | authored | authored |

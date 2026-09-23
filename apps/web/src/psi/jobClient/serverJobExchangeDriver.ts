@@ -154,6 +154,10 @@ export interface ServerJobExchangeDriverConfig {
    * hand-off merges the opened document into its template: a run authored in
    * the console states nothing from a file nobody read. */
   mountedConfigurationOpened?: boolean;
+  /** Whether the operator converted that configuration to the console's own
+   * folders and signing identity. Forwarded to the intent, where it decides
+   * whether the hand-off states those or the paths the file read. */
+  mountedConfigurationConverted?: boolean;
   /** The operator's per-run diagnostic and recovery choices, forwarded to the
    * intent unchanged ({@link RunDiagnosticsIntentFields}). Absent for a run
    * that asked for neither. */
@@ -1165,6 +1169,7 @@ export function intentFor(
     csvDelimiter,
     options,
     mountedConfigurationOpened,
+    mountedConfigurationConverted,
     runDiagnostics,
     receipts,
   } = config;
@@ -1190,6 +1195,9 @@ export function intentFor(
     ...(options !== undefined ? { options } : {}),
     ...(mountedConfigurationOpened !== undefined
       ? { mountedConfigurationOpened }
+      : {}),
+    ...(mountedConfigurationConverted !== undefined
+      ? { mountedConfigurationConverted }
       : {}),
     ...runDiagnostics,
     ...receipts,

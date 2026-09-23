@@ -9,10 +9,14 @@ import {
   CLOSE_CONFIGURATION_LABEL,
   CONFIGURATION_LOAD_SEALED,
   CONFIGURATION_READ_UNAVAILABLE,
+  CONVERT_CONFIGURATION_LABEL,
   NO_CONFIGURATION_IN_FOLDER,
   OPEN_CONFIGURATION_INVITATION,
   OPEN_CONFIGURATION_LABEL,
   configurationOpenedMessage,
+  conversionOffered,
+  conversionStatement,
+  convertedStatement,
   divergedCommitmentNotice,
   mountedConfigurationNotices,
   mountedConfigurationOfferable,
@@ -109,6 +113,7 @@ export function MountedConfigurationCard({
   disclosure,
   onOpen,
   onClose,
+  onConvert,
 }: {
   state: MountedConfigurationState;
   /** Whether an invitation is already minted from the terms the steps below
@@ -124,12 +129,18 @@ export function MountedConfigurationCard({
   /** Close the open configuration, dropping everything the load put into the
    * steps below and returning the offer. */
   onClose: () => void;
+  /** Convert the open configuration to the console's own paths. Offered, with
+   * the settings it replaces stated beside it, while the configuration names
+   * paths of its own and is not converted. */
+  onConvert: () => void;
 }) {
   const announcement = useDeferredAnnouncement(announcementFor(state));
   const notices = mountedConfigurationNotices(state, disclosure);
   const offerable = mountedConfigurationOfferable(state, sealed);
   const withheld =
     sealed && (state.status === "unread" || state.status === "unavailable");
+  const convertible = conversionOffered(state, sealed);
+  const converted = convertedStatement(state);
   return (
     <Stack gap="xs">
       <VisuallyHidden
@@ -171,6 +182,15 @@ export function MountedConfigurationCard({
               {CLOSE_CONFIGURATION_LABEL}
             </Button>
           )}
+          {convertible && (
+            <>
+              <Text size="sm">{conversionStatement(state)}</Text>
+              <Button size="xs" variant="default" onClick={onConvert}>
+                {CONVERT_CONFIGURATION_LABEL}
+              </Button>
+            </>
+          )}
+          {converted !== undefined && <Text size="sm">{converted}</Text>}
         </>
       )}
       <NoticesAlert notices={notices} />

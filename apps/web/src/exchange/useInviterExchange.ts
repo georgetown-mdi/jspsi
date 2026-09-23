@@ -24,6 +24,7 @@ import {
 import {
   MOUNTED_KEY_FILE_ABSENT_REFUSAL,
   MOUNTED_KEY_FILE_INVALID_REFUSAL,
+  MOUNTED_SIGNING_PATHS_UNCONVERTED_REFUSAL,
   SFTP_FINGERPRINT_LIST_REFUSAL,
   SIGNING_IDENTITY_IN_RENDEZVOUS_REFUSAL,
 } from "@jobs/jobCreateRefusal";
@@ -258,6 +259,19 @@ export function failureFor(
         "If you no longer have that key, close the configuration and create a " +
         "new invitation for your partner.",
     };
+  if (
+    error instanceof JobApiRequestError &&
+    error.refusalReason === MOUNTED_SIGNING_PATHS_UNCONVERTED_REFUSAL
+  )
+    return {
+      category: "config",
+      title: "This configuration names its own signing paths",
+      message:
+        "The console did not start this exchange. Your psilink.yaml names " +
+        "its own signing identity or receipt file, and the console signs only " +
+        "with its own. Convert the configuration on the first step to use the " +
+        "console's, or turn receipts off, then start the run again.",
+    };
   // A console job create rejected the mounted file: a 400 the driver categorizes
   // `config`. The file is the likely fault, so the alert names it -- except on
   // the sftp channel, where a vanished picked remote is equally likely, so that
@@ -483,6 +497,7 @@ export function inviterServerJobConfig({
   receipts,
   loadedEnforcementRecords,
   mountedConfigurationOpened,
+  mountedConfigurationConverted,
 }: {
   minted: Pick<
     GeneratedInvitation,
@@ -517,6 +532,9 @@ export function inviterServerJobConfig({
    * then merges nothing from the mount. True sends no secret: the run uses
    * the key file beside the opened configuration. */
   mountedConfigurationOpened?: boolean;
+  /** Whether the operator converted the opened configuration to the console's
+   * own folders and signing identity, forwarded unchanged. */
+  mountedConfigurationConverted?: boolean;
 }): ServerJobExchangeDriverConfig {
   return {
     transport,
@@ -539,6 +557,9 @@ export function inviterServerJobConfig({
     ...(receipts !== undefined ? { receipts } : {}),
     ...(mountedConfigurationOpened !== undefined
       ? { mountedConfigurationOpened }
+      : {}),
+    ...(mountedConfigurationConverted !== undefined
+      ? { mountedConfigurationConverted }
       : {}),
     ...loadedEnforcementRecords,
   };
@@ -570,6 +591,7 @@ export function useInviterExchange({
   receipts,
   loadedEnforcementRecords,
   mountedConfigurationOpened,
+  mountedConfigurationConverted,
 }: {
   invitation: GeneratedInvitation | undefined;
   inviterName: string;
@@ -612,6 +634,10 @@ export function useInviterExchange({
    * than whatever sits in the mount; unused on the browser path, which has no
    * mount and composes no configuration. */
   mountedConfigurationOpened?: boolean;
+  /** Whether the operator converted the opened configuration to the console's
+   * own folders and signing identity, forwarded to the intent; unused on the
+   * browser path for the same reason. */
+  mountedConfigurationConverted?: boolean;
 }): {
   run: ExchangeRun;
   outputs: RunOutputs | undefined;
@@ -813,6 +839,9 @@ export function useInviterExchange({
             : {}),
           ...(mountedConfigurationOpened !== undefined
             ? { mountedConfigurationOpened }
+            : {}),
+          ...(mountedConfigurationConverted !== undefined
+            ? { mountedConfigurationConverted }
             : {}),
         }),
         // Persist the created job's id so a reload or hard tab close can re-attach

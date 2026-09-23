@@ -440,6 +440,55 @@ describe("a load that does not proceed changes no step", () => {
   });
 });
 
+describe("converting an opened configuration to the console's paths", () => {
+  function openedWithSigningPaths(): InviterScreenState {
+    return inviterScreenReducer(INVITER_SCREEN_INITIAL, {
+      type: "mounted-configuration-read",
+      answer: {
+        kind: "opened",
+        document: {
+          channel: "filedrop",
+          linkageTerms: getDefaultLinkageTerms("County Health"),
+        },
+        carriedThrough: [],
+        warnings: [],
+        signingPathSettings: ["signing.identity_file"],
+        folderPathSettings: ["connection.path"],
+      },
+    });
+  }
+
+  test("marks the open configuration converted", () => {
+    const state = inviterScreenReducer(openedWithSigningPaths(), {
+      type: "mounted-configuration-converted",
+    });
+    expect(state.mountedConfiguration).toMatchObject({
+      status: "opened",
+      converted: true,
+    });
+  });
+
+  test("a sealed draft is not converted", () => {
+    const sealed: InviterScreenState = {
+      ...openedWithSigningPaths(),
+      editor: { sealed: true } as never,
+    };
+    expect(
+      inviterScreenReducer(sealed, { type: "mounted-configuration-converted" }),
+    ).toBe(sealed);
+  });
+
+  test("closing the configuration forgets the conversion", () => {
+    const converted = inviterScreenReducer(openedWithSigningPaths(), {
+      type: "mounted-configuration-converted",
+    });
+    const closed = inviterScreenReducer(converted, {
+      type: "loaded-configuration-discarded",
+    });
+    expect(closed.mountedConfiguration).toEqual({ status: "unread" });
+  });
+});
+
 describe("a webrtc configuration opens for review with its run withheld", () => {
   const state = inviterScreenReducer(INVITER_SCREEN_INITIAL, {
     type: "mounted-configuration-read",
