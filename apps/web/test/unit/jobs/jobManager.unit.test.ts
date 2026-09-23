@@ -2757,6 +2757,18 @@ describe("the key file beside the opened configuration", () => {
     expect(spawned).toHaveLength(0);
   });
 
+  test("a well-formed key file padded past the size cap is refused as invalid", async () => {
+    const padded =
+      JSON.stringify({ sharedSecret: MOUNTED_SHARED_SECRET }) +
+      " ".repeat(MAX_MOUNTED_KEY_FILE_BYTES + 1);
+    const root = mountWith(padded);
+    const { manager, spawned } = capturingManager(root);
+    await expect(manager.createJob(openedIntent())).rejects.toMatchObject({
+      fault: "invalid",
+    });
+    expect(spawned).toHaveLength(0);
+  });
+
   test("no job-API answer for an opened run holds the mounted secret", async () => {
     const root = mountWith(
       JSON.stringify({ sharedSecret: MOUNTED_SHARED_SECRET }),
