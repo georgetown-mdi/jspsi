@@ -614,6 +614,18 @@ connection:
       credential: "@/run/secrets/turn"
 ```
 
+**An entry with only a `url` gets a credential minted each run.** Leave out `username` and `credential` for a relay that accepts credentials derived from the exchange's shared secret, the way the relay an invitation names does:
+
+```yaml
+  turn:
+    - url: turns:relay.example.org:443?transport=tcp
+```
+
+- Each run mints the credential from the shared secret in the key file when it starts. Because the key file's secret rotates on every successful exchange, the credential is different each run, and nothing derived from the secret is written to the configuration or the key file.
+- The credential is valid for one hour from the start of the run, and the run's output states when it expires. The relay refuses the credential once it expires, so plan for the wait for the partner and the exchange to finish within that hour: keep `peer_timeout_ms` well under it on a relayed run.
+- A run with no shared secret refuses the entry, naming its url, before anything is dialed.
+- An invitation that names a relay replaces these entries, as it replaces static ones ([`invitation_relay`](EXCHANGE_REFERENCE.md#connectioninvitation_relay)).
+
 **A relayed exchange has been verified against the project's standing relay:** a CLI party with UDP blocked outright completed an authenticated exchange whose data-channel traffic the relay transported, over TURN-over-TLS on 443. werift verifies the TURN server's certificate, so a relay presenting a certificate the CLI host does not trust yields no relay candidate and no relayed path. Verify relayed connectivity in your own environment before depending on it. `ice_provision` (an ICE-credential API) is not supported by the CLI and is refused rather than ignored, so a connection that configures it does not silently fall back to the default.
 
 **To keep a run off any direct path, set `ice_transport_policy: relay`.** A relay entry alone does not force one: ICE tries every candidate it gathered and settles on whichever pair works first, which on a network where a direct path exists is a direct one. The relay-only policy gathers relay candidates and nothing else, so this party offers the partner no host or server-reflexive address and every path the exchange can take runs through the relay:

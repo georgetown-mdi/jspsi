@@ -1050,7 +1050,7 @@ A webrtc connection endpoint MAY hold `relay`, the inviting party's relay locato
 
 **Which relay a run uses.** The accepting party keeps the locator on its connection as `invitation_relay` ([EXCHANGE_REFERENCE.md](../EXCHANGE_REFERENCE.md#connectioninvitation_relay)), beside its own `turn` and `stun` rather than in them. A run chooses per kind (`selectRunRelay` in `packages/core/src/relayCredential.ts`): the invitation's TURN urls when it names any, else its own `turn` entries; the invitation's STUN urls when it names any, else its own `stun` list. A connection with no `invitation_relay` runs exactly its own lists.
 
-**The run credential.** A run that uses the invitation's TURN urls presents one credential to each of them, minted when the run starts (`mintRunRelayCredential`): the relay key derived from the shared secret the run holds, `ttl` = 3600, and `label` = `psilink`. The secret rotates on every successful handshake, so each run's credential derives from a different key, and nothing derived is stored.
+**The run credential.** A run that uses the invitation's TURN urls presents one credential to each of them, minted when the run starts (`mintRunRelayCredential`): the relay key derived from the shared secret the run holds, `ttl` = 3600, and `label` = `psilink`. A CLI run that uses its own `turn` entries presents the same minted credential to each entry that sets no `username` or `credential`, and an entry's own static pair to every other; a run holding no shared secret refuses such an entry by its url before anything is dialed. The secret rotates on every successful handshake, so each run's credential derives from a different key, and nothing derived is stored.
 
 # Post-linkage steps
 

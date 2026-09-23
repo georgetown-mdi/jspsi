@@ -496,3 +496,17 @@ test("resolveExchangeSpecRefs rejects an @path turn credential that resolves to 
   });
   expect(() => resolveExchangeSpecRefs(spec)).toThrow(UsageError);
 });
+
+test("resolveExchangeSpecRefs leaves a turn entry with no credential without one", () => {
+  const spec = parseSpec({
+    connection: {
+      channel: "webrtc",
+      server: { host: "peer" },
+      turn: [{ url: "turn:relay:3478" }],
+    },
+  });
+  const resolved = resolveExchangeSpecRefs(spec);
+  if (resolved.connection.channel !== "webrtc")
+    throw new Error("expected webrtc");
+  expect(resolved.connection.turn).toEqual([{ url: "turn:relay:3478" }]);
+});

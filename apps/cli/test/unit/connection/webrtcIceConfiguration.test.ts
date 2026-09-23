@@ -9,7 +9,9 @@ import {
   brokerLocationFromConnection,
   buildPeerConfiguration,
   iceServersFromConnection,
-  invitationRelayCredentialForRun,
+  relayCredentialForRun,
+  relayCredentialNotice,
+  turnEntryNeedsSecretMessage,
 } from "../../../src/connection/webrtc/weriftPeer";
 
 // --- config -> ICE server list ----------------------------------------------
@@ -120,29 +122,137 @@ test("the invitation's TURN urls with no minted credential is a fault, not an un
 test("a run mints a credential only when it uses the invitation's TURN urls", async () => {
   const secret = "A".repeat(43);
   const now = new Date("2026-01-01T00:00:00Z");
-  const minted = await invitationRelayCredentialForRun(
+  const minted = await relayCredentialForRun(
     { invitationRelay: INVITATION_RELAY },
     secret,
     now,
   );
   expect(minted).toEqual(await mintRunRelayCredential(secret, now));
   expect(
-    await invitationRelayCredentialForRun(
+    await relayCredentialForRun(
       { turn: OWN_TURN, invitationRelay: { stun: INVITATION_RELAY.stun } },
       secret,
       now,
     ),
   ).toBeUndefined();
   expect(
-    await invitationRelayCredentialForRun({ turn: OWN_TURN }, secret, now),
+    await relayCredentialForRun({ turn: OWN_TURN }, secret, now),
   ).toBeUndefined();
   expect(
-    await invitationRelayCredentialForRun(
+    await relayCredentialForRun(
       { invitationRelay: INVITATION_RELAY },
       undefined,
       now,
     ),
   ).toBeUndefined();
+});
+
+// --- an own turn entry with no username or credential -----------------------
+
+// Bytes 0x00..0x1f, base64url-encoded.
+const FIXED_SECRET = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
+// Computed outside this code, by OpenSSL 3.0, under the relay key HKDF-derived
+// from FIXED_SECRET (packages/core/test/relayCredential.test.ts):
+//   printf '%s' 1767229200:psilink \
+//     | openssl dgst -sha1 -hmac <FIXED_RELAY_KEY> -binary | openssl base64
+const FIXED_RUN_CREDENTIAL = "nkjUDyQQCYrMnLaZzMzT6F0mwpY=";
+const FIXED_NOW = new Date("2026-01-01T00:00:00Z");
+const URL_ONLY_TURN = [{ url: "turns:minted.example:443?transport=tcp" }];
+
+test("an own turn entry with no username or credential is presented the credential minted from the shared secret", async () => {
+  const minted = await relayCredentialForRun(
+    { turn: URL_ONLY_TURN },
+    FIXED_SECRET,
+    FIXED_NOW,
+  );
+  expect(minted).toEqual({
+    username: "1767229200:psilink",
+    credential: FIXED_RUN_CREDENTIAL,
+    expiresAt: new Date("2026-01-01T01:00:00Z"),
+  });
+  expect(
+    iceServersFromConnection({ turn: [...URL_ONLY_TURN, ...OWN_TURN] }, minted),
+  ).toEqual([
+    {
+      urls: URL_ONLY_TURN[0].url,
+      username: "1767229200:psilink",
+      credential: FIXED_RUN_CREDENTIAL,
+    },
+    {
+      urls: OWN_TURN[0].url,
+      username: OWN_TURN[0].username,
+      credential: OWN_TURN[0].credential,
+    },
+  ]);
+});
+
+test("a static turn entry is presented its own credential even when the run mints one", () => {
+  expect(iceServersFromConnection({ turn: OWN_TURN }, RUN_CREDENTIAL)).toEqual([
+    {
+      urls: OWN_TURN[0].url,
+      username: OWN_TURN[0].username,
+      credential: OWN_TURN[0].credential,
+    },
+  ]);
+});
+
+test("the invitation's TURN urls replace an own url-only entry, with one minted credential", async () => {
+  const connection = {
+    turn: URL_ONLY_TURN,
+    invitationRelay: { turn: INVITATION_RELAY.turn },
+  };
+  const minted = await relayCredentialForRun(
+    connection,
+    FIXED_SECRET,
+    FIXED_NOW,
+  );
+  expect(minted?.credential).toBe(FIXED_RUN_CREDENTIAL);
+  expect(
+    iceServersFromConnection(connection, minted).map(({ urls }) => urls),
+  ).toEqual(INVITATION_RELAY.turn);
+});
+
+test("an own url-only turn entry with no shared secret is refused naming the entry", async () => {
+  const run = relayCredentialForRun(
+    { turn: [...OWN_TURN, ...URL_ONLY_TURN] },
+    undefined,
+    FIXED_NOW,
+  );
+  await expect(run).rejects.toThrow(UsageError);
+  await expect(run).rejects.toThrow(
+    turnEntryNeedsSecretMessage(URL_ONLY_TURN[0].url),
+  );
+  expect(turnEntryNeedsSecretMessage(URL_ONLY_TURN[0].url)).toContain(
+    "turns:minted.example:443?transport=tcp",
+  );
+});
+
+test("an own url-only turn entry with no minted credential is a fault, not an unauthenticated entry", () => {
+  expect(() => iceServersFromConnection({ turn: URL_ONLY_TURN })).toThrow(
+    /no relay credential was minted/,
+  );
+});
+
+test("the minted credential's notice names the relay, its lifetime, and its expiry", () => {
+  expect(relayCredentialNotice({ turn: URL_ONLY_TURN }, RUN_CREDENTIAL)).toBe(
+    "relaying through turns:minted.example:443?transport=tcp, with a " +
+      "credential derived from the exchange's shared secret that is valid " +
+      "for 60 minutes and expires at 2026-01-01T01:00:00.000Z",
+  );
+  expect(
+    relayCredentialNotice(
+      { invitationRelay: INVITATION_RELAY },
+      RUN_CREDENTIAL,
+    ),
+  ).toMatch(
+    /^relaying through the TURN server your partner's invitation named/,
+  );
+  const mixed = relayCredentialNotice(
+    { turn: [...OWN_TURN, ...URL_ONLY_TURN] },
+    RUN_CREDENTIAL,
+  );
+  expect(mixed).toContain("turns:minted.example:443?transport=tcp");
+  expect(mixed).not.toContain("own.example");
 });
 
 test("a connection with neither STUN nor TURN resolves to no servers", () => {

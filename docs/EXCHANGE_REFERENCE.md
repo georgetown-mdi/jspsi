@@ -784,9 +784,9 @@ A `url` may set no query parameter other than `transport`, the only one a TURN U
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `url` | string | yes | TURN server URI: `turn:` or `turns:` followed by a host, with `transport` unset or lowercase `tcp` (`udp` too on a `turn:` url). A host-less `turn:`, a user before the host (`turn:user@host` -- the credential goes in `username` and `credential`), a path, a fragment, or any other `transport` value, is refused |
-| `username` | string | yes | TURN username |
-| `credential` | string | yes | TURN credential; `@`-file recommended |
-| `credential_type` | enum | no | `password` (default) \| `hmac-sha1` |
+| `username` | string | with `credential` | TURN username |
+| `credential` | string | with `username` | TURN credential; `@`-file recommended |
+| `credential_type` | enum | no | `password` (default) \| `hmac-sha1`; only with `credential` |
 
 ```yaml
 connection:
@@ -794,6 +794,14 @@ connection:
     - url: "turns:turn.example.org:443"
       username: alice
       credential: "@/run/secrets/turn.key"
+```
+
+**An entry with no `username` or `credential`.** Set both or neither. An entry with neither is for a relay that accepts credentials derived from the exchange's shared secret: each run mints one from the secret it currently holds, valid for one hour, and presents it to that entry. The run's output states when the credential expires. The minted credential and the key it is signed with are never written to the configuration or the key file; the next run mints again from the rotated secret. A run with no shared secret refuses such an entry, naming its url. The derivation: [PROTOCOL.md](spec/PROTOCOL.md#relay-credential-derivation).
+
+```yaml
+connection:
+  turn:
+    - url: "turns:relay.example.org:443?transport=tcp"
 ```
 
 ### `connection.invitation_relay`
