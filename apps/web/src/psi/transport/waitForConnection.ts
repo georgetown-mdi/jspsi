@@ -1,3 +1,5 @@
+import { watchIceGathering } from "./iceGathering";
+
 import type { DataConnection } from "peerjs";
 import type Peer from "peerjs";
 
@@ -58,7 +60,12 @@ export function waitForIncomingConnection(
       signal?.removeEventListener("abort", onAbort);
       action();
     };
-    const onConnection = (conn: DataConnection) => settle(() => resolve(conn));
+    // Watched in the tick PeerJS hands the connection out, before it gathers
+    // (see ./iceGathering.ts).
+    const onConnection = (conn: DataConnection) => {
+      watchIceGathering(conn);
+      settle(() => resolve(conn));
+    };
     const onAbort = () =>
       settle(() =>
         reject(new Error("waiting for the other party to connect was aborted")),

@@ -22,6 +22,7 @@ import {
   redactErrorIds,
   resolvePeerDebugLevel,
 } from "./peerLogging";
+import { watchIceGathering, withIceServerFailure } from "./iceGathering";
 
 import type { DataConnection, PeerOptions } from "peerjs";
 import type { WebRTCEndpoint } from "@psilink/core";
@@ -436,6 +437,7 @@ async function dialInviterWithRetry(
   const runAttempt = (attemptTimeoutMs: number): Promise<DialAttempt> =>
     new Promise<DialAttempt>((resolve, reject) => {
       const conn = peer.connect(inviterId, { reliable: true });
+      watchIceGathering(conn);
       let settled = false;
       const settle = (action: () => void) => {
         if (settled) return;
@@ -455,8 +457,9 @@ async function dialInviterWithRetry(
       // error would otherwise hang the attempt until the open timeout.
       const onConnError = (err: unknown) =>
         settle(() => {
+          const failure = withIceServerFailure(conn, asError(err), false);
           conn.close();
-          reject(asError(err));
+          reject(failure);
         });
       const onAbort = () =>
         settle(() => {
@@ -466,8 +469,13 @@ async function dialInviterWithRetry(
       const timer = setTimeout(
         () =>
           settle(() => {
+            const failure = withIceServerFailure(
+              conn,
+              new Error("timed out opening a connection to the inviter"),
+              true,
+            );
             conn.close();
-            reject(new Error("timed out opening a connection to the inviter"));
+            reject(failure);
           }),
         attemptTimeoutMs,
       );

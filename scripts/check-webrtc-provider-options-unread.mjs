@@ -114,6 +114,7 @@ export const WEB_FILES = [
   "apps/web/src/psi/transport/waitForOpen.ts",
   "apps/web/src/psi/transport/waitForPeerClose.ts",
   "apps/web/src/psi/transport/ownRelaySetting.ts",
+  "apps/web/src/psi/transport/iceGathering.ts",
   "apps/web/src/utils/diagnostics.ts",
   "apps/web/src/utils/clientConfig.ts",
 ];
