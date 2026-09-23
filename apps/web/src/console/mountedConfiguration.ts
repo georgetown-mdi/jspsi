@@ -3,7 +3,11 @@ import {
   isJobChannel,
 } from "@jobs/intentSchemas";
 
-import { authoringStateFromDocument } from "./loadedConfig";
+import {
+  HELD_TERMS_SETTINGS,
+  authoringStateFromDocument,
+  termsSettingsWithNoControl,
+} from "./loadedConfig";
 
 import type {
   ConfigurationHandBackAnswer,
@@ -286,12 +290,37 @@ export function recordsWithNoControl(
   ).map(([, field]) => field);
 }
 
-/** The records above as the file spells them, which a run here states from the
- * authoring state: every other held setting sits outside the blocks a run here
- * composes, so the export keeps it and the run does not apply it. */
-const RECORD_FIELDS_THE_RUN_STATES: ReadonlySet<string> = new Set(
-  RECORDS_WITH_NO_CONTROL.map(([, field]) => field),
-);
+/**
+ * The held settings a run here states from the authoring state, as the file
+ * spells them: the records above and the terms settings the draft holds
+ * ({@link termsSettingsWithNoControl}). Every other held setting sits outside
+ * the blocks a run here composes, so the export keeps it and the run does not
+ * apply it.
+ */
+function heldSettingTheRunStates(field: string): boolean {
+  return (
+    RECORDS_WITH_NO_CONTROL.some(([, record]) => record === field) ||
+    Object.values<string>(HELD_TERMS_SETTINGS).includes(field)
+  );
+}
+
+/**
+ * The held settings the notice names: the load's own list, less each terms
+ * setting the draft's terms no longer state once the loaded terms reached the
+ * input file ({@link RunDisclosure.termsSettingsStated}).
+ */
+function carriedThroughStated(
+  fields: ReadonlyArray<string>,
+  run: RunDisclosure | undefined,
+): ReadonlyArray<string> {
+  const stated = run?.termsSettingsStated;
+  if (stated === undefined) return fields;
+  const termsSettings: ReadonlyArray<string> =
+    Object.values(HELD_TERMS_SETTINGS);
+  return fields.filter(
+    (field) => !termsSettings.includes(field) || stated.includes(field),
+  );
+}
 
 /**
  * What the operator is told about the settings the console holds without an
@@ -305,9 +334,7 @@ export function carriedThroughNotice(
 ): string | undefined {
   if (fields.length === 0) return undefined;
   const one = fields.length === 1;
-  const notApplied = fields.filter(
-    (field) => !RECORD_FIELDS_THE_RUN_STATES.has(field),
-  );
+  const notApplied = fields.filter((field) => !heldSettingTheRunStates(field));
   const notAppliedOne = notApplied.length === 1;
   const notAppliedNames =
     notApplied.length === fields.length
@@ -477,6 +504,11 @@ export interface RunDisclosure {
    * since the run sends nothing at all. */
   sharesWithPartner: boolean;
   records: LoadedEnforcementRecords;
+  /** The terms settings with no control that the terms this draft builds
+   * state (`termsSettingsStatedBy`), once the open configuration's terms have
+   * reached the input file. Absent before then, where the load's own list is
+   * named, since the terms hold each setting once they reach it. */
+  termsSettingsStated?: ReadonlyArray<string>;
 }
 
 /** The commitments a loaded document can state about the columns this party
@@ -576,7 +608,7 @@ export function mountedConfigurationNotices(
     state.transportUnavailable === undefined
       ? undefined
       : TRANSPORT_UNAVAILABLE_NOTICE[state.transportUnavailable],
-    carriedThroughNotice(state.carriedThrough),
+    carriedThroughNotice(carriedThroughStated(state.carriedThrough, run)),
     credentialWarningNotice(state.warnings),
     termsNotAppliedNotice(state.notApplied ?? []),
     columnsNotCoveredNotice(state.notCovered ?? []),
@@ -642,6 +674,7 @@ export function mountedConfigurationRead(answer: MountedConfigurationAnswer): {
             ...new Set([
               ...answer.carriedThrough,
               ...recordsWithNoControl(loaded),
+              ...termsSettingsWithNoControl(loaded.linkageTerms),
             ]),
           ].sort(),
           warnings: answer.warnings,

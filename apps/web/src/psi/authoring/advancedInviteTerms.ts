@@ -25,6 +25,7 @@ import type {
   LinkageTerms,
   Metadata,
   OwnColumnSelection,
+  Payload,
   Standardization,
 } from "@psilink/core";
 
@@ -68,6 +69,7 @@ function reconcileImportedFields(
   draftKeys: ReadonlyArray<DraftKey>,
   authored: ReadonlyArray<LinkageField>,
   referenced: ReadonlySet<string>,
+  holdConstraints: boolean,
 ): Array<LinkageField> {
   const authoredByName = new Map(authored.map((field) => [field.name, field]));
   const referencedByAnyKey = referencedLinkageFieldNames(
@@ -82,18 +84,18 @@ function reconcileImportedFields(
       // referencing key dangles and blocks (lockstep with declarableFieldNames).
       if (authoredField === undefined) continue;
       // Emit the editor's authored field (type-default constraints), except preserve a
-      // benign empty `constraints: {}` verbatim -- and only when the imported field's
-      // TYPE also agrees with the authored field's: the referential-integrity refine
-      // checks a field's NAME only, so without this guard a type-confused field could be
-      // committed with a type the inviter's column does not back. A type mismatch falls
-      // through to the authored field.
-      result.push(
-        isEmptyConstraints(field.constraints) &&
-          authoredField.constraints === undefined &&
-          field.type === authoredField.type
-          ? field
-          : authoredField,
-      );
+      // benign empty `constraints: {}` verbatim, or the imported field's own
+      // constraints where a configuration opened in the console holds them -- and
+      // only when the imported field's TYPE also agrees with the authored field's: the
+      // referential-integrity refine checks a field's NAME only, so without this guard
+      // a type-confused field could be committed with a type the inviter's column does
+      // not back. A type mismatch falls through to the authored field.
+      const keepImported =
+        field.type === authoredField.type &&
+        (holdConstraints ||
+          (isEmptyConstraints(field.constraints) &&
+            authoredField.constraints === undefined));
+      result.push(keepImported ? field : authoredField);
       emitted.add(field.name);
     } else if (!referencedByAnyKey.has(field.name)) {
       // Declared but referenced by no key: inert, preserved verbatim.
@@ -232,6 +234,40 @@ export function importedCitationDropCause(
 }
 
 /**
+ * The payload the built terms state: the columns the draft's metadata sends,
+ * each with the description a held document gives a column of that name, and
+ * the held list of columns expected back. That list is left out where this
+ * party takes no result and it names a column, which core's schema refuses.
+ */
+function payloadWithHeldSettings(
+  sent: Payload | undefined,
+  held: Payload | undefined,
+  expectsOutput: boolean,
+): Payload | undefined {
+  if (held === undefined) return sent;
+  const descriptions = new Map(
+    (held.send ?? []).flatMap((column) =>
+      column.description === undefined
+        ? []
+        : [[column.name, column.description] as const],
+    ),
+  );
+  const send = sent?.send?.map((column) => {
+    const description = descriptions.get(column.name);
+    return description === undefined ? column : { ...column, description };
+  });
+  const receive =
+    held.receive !== undefined && (expectsOutput || held.receive.length === 0)
+      ? held.receive
+      : undefined;
+  if (send === undefined && receive === undefined) return undefined;
+  return {
+    ...(send !== undefined ? { send } : {}),
+    ...(receive !== undefined ? { receive } : {}),
+  };
+}
+
+/**
  * Build the {@link LinkageTerms} a draft represents. `version` and `date`
  * come from the seed unchanged (the editor exposes no control for them);
  * `algorithm`, `deduplicate`, `linkageStrategy`, `identity`, the `output`
@@ -245,6 +281,10 @@ export function importedCitationDropCause(
  * cites the built-in set, and an IMPORTED draft re-emits its source document's
  * citation state for as long as the built rules are still drawn from the set it
  * names.
+ *
+ * A draft opened from a console configuration also re-emits the terms settings
+ * it holds ({@link AdvancedInviteDraft.heldTermsSettings}): each imported
+ * field's own constraints, and the payload descriptions and receive list.
  *
  * Pure: it does not validate. {@link validateAdvancedInvite} runs the result
  * through the core schema, which stays the single validation source.
@@ -281,6 +321,7 @@ export function buildAdvancedTerms(draft: AdvancedInviteDraft): LinkageTerms {
           draft.keys,
           authored,
           referenced,
+          draft.heldTermsSettings !== undefined,
         );
 
   const terms: LinkageTerms = {
@@ -323,8 +364,13 @@ export function buildAdvancedTerms(draft: AdvancedInviteDraft): LinkageTerms {
   // trips core's assertPayloadSendDisclosed. Emitted regardless of output direction so
   // the preview states accurately what transmits; the incoherent "send while only I
   // receive" case is blocked by validateAdvancedInvite, not by silently dropping the
-  // still-transmitted columns from the declaration.
-  const payload = payloadSendForMetadata(draft.metadata);
+  // still-transmitted columns from the declaration. A held document's
+  // descriptions and receive list are added to it (payloadWithHeldSettings).
+  const payload = payloadWithHeldSettings(
+    payloadSendForMetadata(draft.metadata),
+    draft.heldTermsSettings?.payload,
+    terms.output.expectsOutput,
+  );
   if (payload !== undefined) terms.payload = payload;
 
   if (draft.legalAgreement !== undefined) {

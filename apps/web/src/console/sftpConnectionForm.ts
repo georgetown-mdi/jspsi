@@ -54,6 +54,9 @@ export interface SftpConnectionFormValues {
    * connection. */
   outboundDirectory: string;
   port: string;
+  /** One host-key fingerprint, or several separated by commas or spaces for a
+   * server whose key is changing: the connection accepts any one of them
+   * ({@link hostKeyFingerprintEntries}). */
   hostKeyFingerprint: string;
   method: SftpCredentialMethod;
   /** The chosen primary credential file, or undefined until one is picked/typed. */
@@ -136,6 +139,23 @@ interface SftpFormError {
 // host-key format check is HOST_KEY_FINGERPRINT_REGEX (imported from core, so it
 // cannot drift), re-run server-side on every PUT.
 const SIGNING_FINGERPRINT_SHAPE = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
+
+/**
+ * The fingerprints the fingerprint field holds, in the order written. Neither a
+ * comma nor whitespace is in the base64 alphabet a fingerprint is written in, so
+ * either separates two entries without ambiguity.
+ */
+export function hostKeyFingerprintEntries(value: string): Array<string> {
+  return value.split(/[\s,]+/).filter((entry) => entry !== "");
+}
+
+/** The fingerprint field's text for the fingerprints a configuration states. */
+export function hostKeyFingerprintField(
+  stated: string | ReadonlyArray<string> | undefined,
+): string {
+  if (stated === undefined) return "";
+  return typeof stated === "string" ? stated : stated.join(", ");
+}
 
 /** The connection fields a pasted `sftp://user@host:port/path` URL holds. */
 interface ParsedSftpUrl {
@@ -407,7 +427,7 @@ function credentialCoherenceError(
  * The first blocking error on the form, or undefined when the fields are savable.
  * Host, username, a literal fingerprint, and a credential source are required; the
  * port is optional but bounded; a typed credential/passphrase must be an `@path`.
- * The fingerprint is validated against core's `HOST_KEY_FINGERPRINT_REGEX`, and a
+ * Each fingerprint is validated against core's `HOST_KEY_FINGERPRINT_REGEX`, and a
  * value shaped like a signing fingerprint gets the confusion message. The two
  * companions of a sign-in method -- the key passphrase and keyboard-interactive
  * -- are held to core's rules over the combination by
@@ -418,10 +438,14 @@ function credentialCoherenceError(
  * right now ("How files are handled", the card on the same screen), read
  * only for the split-directory precondition: naming an outbound directory without
  * it is refused here rather than by the job the connection would later compose.
+ *
+ * `singleFingerprint` holds the field to one fingerprint, for a direct exchange:
+ * its run passes the pin as a command-line flag, which takes one value.
  */
 export function sftpFormError(
   values: SftpConnectionFormValues,
   retainFiles: boolean,
+  singleFingerprint = false,
 ): SftpFormError | undefined {
   if (values.host.trim() === "")
     return { field: "host", message: "Enter the SFTP server address." };
@@ -462,7 +486,10 @@ export function sftpFormError(
         message: "Enter a port number between 0 and 65535.",
       };
   }
-  const fingerprintError = fingerprintErrorFor(values.hostKeyFingerprint);
+  const fingerprintError = fingerprintErrorFor(
+    values.hostKeyFingerprint,
+    singleFingerprint,
+  );
   if (fingerprintError !== undefined)
     return { field: "hostKeyFingerprint", message: fingerprintError };
 
@@ -517,12 +544,45 @@ export function sftpFormError(
   return undefined;
 }
 
-/** The fingerprint field's error message, or undefined when it is a valid literal
- * OpenSSH SHA256 host-key fingerprint. */
-function fingerprintErrorFor(value: string): string | undefined {
-  const fingerprint = value.trim();
-  if (fingerprint === "") return "Enter the server's identity fingerprint.";
+/** The fingerprint field's error message, or undefined when every entry it holds
+ * is a valid literal OpenSSH SHA256 host-key fingerprint. */
+function fingerprintErrorFor(
+  value: string,
+  singleFingerprint: boolean,
+): string | undefined {
+  const entries = hostKeyFingerprintEntries(value);
+  if (entries.length === 0) return "Enter the server's identity fingerprint.";
+  if (singleFingerprint && entries.length > 1)
+    return (
+      "A direct exchange accepts one server identity fingerprint. Enter the " +
+      "one the server presents now."
+    );
+  for (const [index, entry] of entries.entries()) {
+    const error = fingerprintEntryError(entry);
+    if (error === undefined) continue;
+    return entries.length === 1
+      ? error
+      : `Fingerprint ${index + 1} (${fingerprintPreview(entry)}): ${error}`;
+  }
+  return undefined;
+}
+
+// Long enough to tell entries apart by their start, short enough that a pasted
+// value is not echoed back whole.
+const FINGERPRINT_PREVIEW_LENGTH = 16;
+
+/** The start of a fingerprint entry, for naming it in a message. */
+function fingerprintPreview(entry: string): string {
+  return entry.length <= FINGERPRINT_PREVIEW_LENGTH
+    ? entry
+    : `${entry.slice(0, FINGERPRINT_PREVIEW_LENGTH)}...`;
+}
+
+/** One fingerprint entry's error message, or undefined when it is valid. */
+function fingerprintEntryError(fingerprint: string): string | undefined {
   if (HOST_KEY_FINGERPRINT_REGEX.test(fingerprint)) return undefined;
+  if (fingerprint.startsWith("@"))
+    return "Enter a literal fingerprint, not an @-file reference.";
   if (SIGNING_FINGERPRINT_SHAPE.test(fingerprint))
     return (
       "This looks like a signing fingerprint (43 characters, no prefix), not " +
@@ -557,8 +617,10 @@ function fingerprintErrorFor(value: string): string | undefined {
 export function buildAuthoringRequest(
   values: SftpConnectionFormValues,
   retainFiles: boolean,
+  singleFingerprint = false,
 ): AuthoredSftpConnectionRequest | undefined {
-  if (sftpFormError(values, retainFiles) !== undefined) return undefined;
+  if (sftpFormError(values, retainFiles, singleFingerprint) !== undefined)
+    return undefined;
   const source = values.source;
   // sftpFormError guarantees a defined source; narrow for the type system.
   if (source === undefined) return undefined;
@@ -566,6 +628,7 @@ export function buildAuthoringRequest(
   const remoteDirectory = values.remoteDirectory.trim();
   const outboundDirectory = values.outboundDirectory.trim();
   const passphrase = values.passphrasePath.trim();
+  const fingerprints = hostKeyFingerprintEntries(values.hostKeyFingerprint);
   return {
     host: values.host.trim(),
     ...(port !== "" ? { port: Number(port) } : {}),
@@ -575,7 +638,8 @@ export function buildAuthoringRequest(
       : outboundDirectory === ""
         ? { path: remoteDirectory }
         : { inboundPath: remoteDirectory, outboundPath: outboundDirectory }),
-    hostKeyFingerprint: values.hostKeyFingerprint.trim(),
+    hostKeyFingerprint:
+      fingerprints.length === 1 ? fingerprints[0] : fingerprints,
     credential:
       source.kind === "mount"
         ? {

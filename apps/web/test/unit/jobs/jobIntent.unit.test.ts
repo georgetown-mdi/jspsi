@@ -13,6 +13,7 @@ import {
 } from "@psilink/core";
 
 import {
+  ZeroSetupFingerprintListError,
   zeroSetupFiledropArgv,
   zeroSetupOptionsArgv,
   zeroSetupSftpArgv,
@@ -1955,7 +1956,7 @@ describe("zeroSetupSftpArgv maps the effective connection to argv", () => {
     }
   });
 
-  test("an array (multi) fingerprint fails compose -- single-pin only this slice", () => {
+  test("an array (multi) fingerprint fails compose with the classified refusal", () => {
     expect(() =>
       zeroSetupSftpArgv({
         host: "sftp.example.org",
@@ -1965,7 +1966,7 @@ describe("zeroSetupSftpArgv maps the effective connection to argv", () => {
           `SHA256:${"B".repeat(43)}`,
         ],
       }),
-    ).toThrow(/single-valued/);
+    ).toThrow(ZeroSetupFingerprintListError);
   });
 
   test("omits --server-username when the entry holds none", () => {

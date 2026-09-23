@@ -19,6 +19,7 @@ import {
   dialAsAcceptor,
 } from "@psi/transport/rendezvous";
 import { CSV_DELIMITER_SINGLE_COLUMN_REMEDY } from "@components/csvDelimiterChoice";
+import { SFTP_FINGERPRINT_LIST_REFUSAL } from "@jobs/jobCreateRefusal";
 import { failureFor } from "@exchange/useInviterExchange";
 
 import type { CSVRow, LinkageTerms, Metadata } from "@psilink/core";
@@ -343,6 +344,29 @@ describe("failureFor", () => {
     expect(failure.title).toBe("The console could not start this exchange");
     expect(failure.message).not.toContain("status 400");
     expect(failure.message).toContain("SFTP");
+  });
+
+  test("a direct sftp run refused over a fingerprint list names the saved connection", () => {
+    // Above the mounted-file copy: the refusal names the saved connection, which
+    // the file cannot fix, and says what to edit it down to.
+    const failure = failureFor(
+      "config",
+      new JobApiRequestError(
+        400,
+        "POST /api/jobs failed with status 400",
+        undefined,
+        SFTP_FINGERPRINT_LIST_REFUSAL,
+      ),
+      WORK_FILE,
+      "sftp",
+    );
+    expect(failure.category).toBe("config");
+    expect(failure.title).toBe(
+      "The saved SFTP connection holds more than one fingerprint",
+    );
+    expect(failure.message).toContain("Edit connection");
+    expect(failure.message).toContain("keep only the fingerprint");
+    expect(failure.message).not.toContain("file");
   });
 
   test("the acceptor mounted-file 400 names its columns-step recovery", () => {

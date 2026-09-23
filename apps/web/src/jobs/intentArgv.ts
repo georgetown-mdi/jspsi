@@ -59,6 +59,22 @@ function buildZeroSetupSftpUrl(serverEntry: JobSftpServerEntry): string {
 }
 
 /**
+ * Thrown by {@link zeroSetupSftpArgv} when the authored connection pins more
+ * than one host-key fingerprint: the CLI flag a zero-setup run passes it on is
+ * single-valued. The job create route maps it to a 400 naming the refusal, since
+ * the connection is server-side state the browser's intent does not state.
+ */
+export class ZeroSetupFingerprintListError extends Error {
+  constructor() {
+    super(
+      "a zero-setup exchange cannot pin more than one host-key fingerprint; " +
+        "the CLI --server-host-key-fingerprint flag is single-valued",
+    );
+    this.name = "ZeroSetupFingerprintListError";
+  }
+}
+
+/**
  * Map the operator-authored SFTP server entry to the connection portion of a
  * zero-setup CLI argv: the `sftp://` URL positional plus the `--server-*` flags.
  * The argv analog of {@link composeSftpConfigDocument} -- it draws every field from
@@ -84,8 +100,8 @@ function buildZeroSetupSftpUrl(serverEntry: JobSftpServerEntry): string {
  * The host-key fingerprint is mandatory and always emitted: a zero-setup
  * run has no TTY, so trust-on-first-use is impossible and the pin is the
  * only host-key defense. The CLI flag is single-valued, so a
- * multi-fingerprint entry (an `Array`) is a compose-time error rather than
- * a silently dropped pin.
+ * multi-fingerprint entry (an `Array`) is a compose-time
+ * {@link ZeroSetupFingerprintListError} rather than a silently dropped pin.
  */
 export function zeroSetupSftpArgv(
   serverEntry: JobSftpServerEntry,
@@ -106,10 +122,7 @@ export function zeroSetupSftpArgv(
   if (serverEntry.keyboardInteractive === true)
     argv.push("--server-keyboard-interactive");
   if (Array.isArray(serverEntry.hostKeyFingerprint))
-    throw new Error(
-      "a zero-setup exchange cannot pin more than one host-key fingerprint; " +
-        "the CLI --server-host-key-fingerprint flag is single-valued",
-    );
+    throw new ZeroSetupFingerprintListError();
   argv.push(`--server-host-key-fingerprint=${serverEntry.hostKeyFingerprint}`);
   return argv;
 }

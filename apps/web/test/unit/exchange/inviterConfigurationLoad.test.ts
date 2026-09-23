@@ -33,15 +33,19 @@ import {
 import {
   csvDelimiterFromDocument,
   editorWithLoadedTerms,
+  termsSettingsStatedBy,
+  termsSettingsWithNoControl,
 } from "@console/loadedConfig";
 import {
   editorFromCsv,
   editorWithColumnDisclosure,
+  editorWithImportedTerms,
   editorWithIncludeOwnColumns,
   editorWithOutputDirection,
 } from "@psi/inviterEditor";
+import { inviterCreateStatus, reviewValidation } from "@psi/inviterModel";
 import { EMPTY_SFTP_FORM } from "@console/sftpConnectionForm";
-import { inviterCreateStatus } from "@psi/inviterModel";
+import { configurationHandBack } from "@console/configurationHandBack";
 import { outputForDirection } from "@psi/authoring/advancedInvite";
 
 import {
@@ -56,7 +60,7 @@ import { jobCreateIntentSchema } from "@jobs/intentSchemas";
 
 import { testSftpServerEntry } from "../../utils/jobFixtures";
 
-import type { ColumnMetadata, Metadata } from "@psilink/core";
+import type { ColumnMetadata, LinkageTerms, Metadata } from "@psilink/core";
 import type {
   JobInputSource,
   ServerJobExchangeTransport,
@@ -256,6 +260,10 @@ function noticesOf(state: InviterScreenState): Array<string> {
             state.editor.draft.outputDirection,
           ).shareWithPartner,
           records: state.loadedEnforcementRecords,
+          ...(state.loadedTermsFile !== undefined &&
+          state.loadedTermsFile === state.acquired
+            ? { termsSettingsStated: termsSettingsStatedBy(state.editor) }
+            : {}),
         },
   );
 }
@@ -1397,5 +1405,205 @@ describe("a consent record the configuration leaves pending", () => {
     expect(noticesOf(confirmed)).not.toContain(
       PENDING_OUTBOUND_CONSENT_WARNING,
     );
+  });
+});
+
+// The linkage-terms settings the invitation editor has no control for: a
+// field's own constraints, a sent column's description, and the columns this
+// party expects back. Each is held as the file states it, so the run started
+// here and the configuration saved back both state it unchanged, and the
+// notice beside the load names it.
+describe("terms settings with no control reach the run and the hand-back", () => {
+  const constraints = {
+    affixesAllowed: true,
+    allowedCharacters: "A-Za-z '-",
+    exclude: ["UNKNOWN"],
+  };
+  const description = "The program the client is enrolled in.";
+  const receive = [
+    { name: "partner_program", description: "The partner's program." },
+  ];
+
+  /** Default terms with one field's constraints, one sent column's
+   * description, and a receive list, none of which the editor offers a
+   * control for. */
+  function heldTerms() {
+    const terms = getDefaultLinkageTerms("County Health");
+    return {
+      ...terms,
+      linkageFields: terms.linkageFields.map((field) =>
+        field.type === "first_name" ? { ...field, constraints } : field,
+      ),
+      payload: { send: [{ name: "program_code", description }], receive },
+    };
+  }
+
+  function openedAndRead(): InviterScreenState {
+    return withFileRead(
+      loadedInto(
+        INVITER_SCREEN_INITIAL,
+        sftpDocument({
+          linkageTerms: heldTerms(),
+          metadata: documentColumns(),
+        }),
+      ),
+    );
+  }
+
+  function reviewedTerms(state: InviterScreenState) {
+    if (state.editor === undefined) throw new Error("expected an editor");
+    const terms = reviewValidation(state.editor).terms;
+    if (terms === undefined)
+      throw new Error("the loaded terms did not validate");
+    return terms;
+  }
+
+  /** The terms the configuration composed for the run states: a mint embeds
+   * the reviewed terms verbatim. */
+  function composedTerms(state: InviterScreenState) {
+    const intent = intentFor(
+      inviterServerJobConfig({
+        minted: {
+          linkageTerms: reviewedTerms(state),
+          sharedSecret: "a".repeat(43),
+        },
+        inputSource: { kind: "workFile", name: "cohort.csv" },
+        transport: { channel: "sftp" },
+      }),
+    );
+    if (intent.channel !== "sftp") throw new Error("expected an sftp intent");
+    return composeSftpConfigSpec(intent, testSftpServerEntry()).linkageTerms;
+  }
+
+  function handedBackTerms(state: InviterScreenState) {
+    if (state.editor === undefined) throw new Error("expected an editor");
+    return configurationHandBack({
+      editor: state.editor,
+      terms: reviewedTerms(state),
+      csvDelimiter: undefined,
+      receipts: RECEIPTS_DEFAULT,
+    }).linkageTerms;
+  }
+
+  function firstNameField(terms: LinkageTerms) {
+    return terms.linkageFields.find((field) => field.type === "first_name");
+  }
+
+  test("a linkage field's own constraints", () => {
+    const state = openedAndRead();
+    expect(firstNameField(composedTerms(state))?.constraints).toEqual(
+      constraints,
+    );
+    expect(firstNameField(handedBackTerms(state))?.constraints).toEqual(
+      constraints,
+    );
+  });
+
+  test("a sent column's description", () => {
+    const state = openedAndRead();
+    const sent = [{ name: "program_code", description }];
+    expect(composedTerms(state).payload?.send).toEqual(sent);
+    expect(handedBackTerms(state).payload?.send).toEqual(sent);
+  });
+
+  test("the columns expected back", () => {
+    const state = openedAndRead();
+    expect(composedTerms(state).payload?.receive).toEqual(receive);
+    expect(handedBackTerms(state).payload?.receive).toEqual(receive);
+  });
+
+  test("the notice beside the load names each one", () => {
+    const notice = noticesOf(openedAndRead()).find((text) =>
+      text.includes("has no control for"),
+    );
+    for (const field of [
+      "linkage_terms.linkage_fields.constraints",
+      "linkage_terms.payload.send.description",
+      "linkage_terms.payload.receive",
+    ])
+      expect(notice).toContain(field);
+  });
+
+  test("the columns expected back are left out once this party takes no result", () => {
+    const state = withOutputDirection(openedAndRead(), "partner");
+    const terms = reviewedTerms(state);
+    expect(terms.output.expectsOutput).toBe(false);
+    expect(terms.payload?.receive).toBeUndefined();
+    const notice = noticesOf(state).join(" ");
+    expect(notice).not.toContain("linkage_terms.payload.receive");
+    expect(notice).toContain("linkage_terms.payload.send.description");
+  });
+
+  test("a terms import from the keys tab replaces them, and the notice stops naming them", () => {
+    const opened = openedAndRead();
+    if (opened.editor === undefined || opened.acquired === undefined)
+      throw new Error("expected an editor over a committed file");
+    const imported = inviterScreenReducer(opened, {
+      type: "editor-replaced",
+      editor: editorWithImportedTerms(
+        opened.editor,
+        opened.acquired,
+        getDefaultLinkageTerms("County Health"),
+      ),
+      announcement: "Imported. Review the loaded terms before creating.",
+    });
+    const composed = composedTerms(imported);
+    expect(firstNameField(composed)?.constraints).not.toEqual(constraints);
+    expect(
+      composed.payload?.send?.some(
+        (column) => column.description !== undefined,
+      ),
+    ).not.toBe(true);
+    expect(composed.payload?.receive).toBeUndefined();
+    expect(termsSettingsWithNoControl(composed)).toEqual([]);
+    expect(termsSettingsWithNoControl(handedBackTerms(imported))).toEqual([]);
+    expect(noticesOf(imported).join(" ")).not.toContain("linkage_terms");
+  });
+
+  test("a terms import stating empty constraints names no constraints", () => {
+    const opened = openedAndRead();
+    if (opened.editor === undefined || opened.acquired === undefined)
+      throw new Error("expected an editor over a committed file");
+    const defaults = getDefaultLinkageTerms("County Health");
+    const importedTerms = {
+      ...defaults,
+      linkageFields: defaults.linkageFields.map((field) => ({
+        ...field,
+        constraints: {},
+      })),
+    };
+    const imported = inviterScreenReducer(opened, {
+      type: "editor-replaced",
+      editor: editorWithImportedTerms(
+        opened.editor,
+        opened.acquired,
+        importedTerms,
+      ),
+      announcement: "Imported. Review the loaded terms before creating.",
+    });
+    expect(firstNameField(composedTerms(imported))?.constraints).not.toEqual(
+      constraints,
+    );
+    expect(noticesOf(imported).join(" ")).not.toContain(
+      "linkage_terms.linkage_fields.constraints",
+    );
+  });
+
+  test("closing the configuration stops holding them", () => {
+    const closed = inviterScreenReducer(openedAndRead(), {
+      type: "loaded-configuration-discarded",
+      editor: editorFromCsv("County Health", acquired()),
+    });
+    expect(closed.editor?.draft.heldTermsSettings).toBeUndefined();
+  });
+
+  test("terms stating only what the editor writes name none of them", () => {
+    const state = withFileRead(
+      loadedInto(
+        INVITER_SCREEN_INITIAL,
+        sftpDocument({ metadata: documentColumns() }),
+      ),
+    );
+    expect(noticesOf(state).join(" ")).not.toContain("linkage_terms");
   });
 });

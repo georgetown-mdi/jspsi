@@ -29,9 +29,14 @@ import {
   CSV_DELIMITER_OTHER,
   INITIAL_CSV_DELIMITER_CHOICE,
 } from "@components/csvDelimiterChoice";
-import { isDisclosedToPartner } from "@psilink/core";
+import {
+  DEFAULT_LINKAGE_RULE_SET,
+  canonicalString,
+  isDisclosedToPartner,
+} from "@psilink/core";
 
 import { OWN_COLUMNS_DEFAULT } from "@psi/ownColumnsModel";
+import { buildAdvancedTerms } from "@psi/authoring/advancedInviteTerms";
 
 import {
   disclosureOf,
@@ -44,13 +49,14 @@ import {
   editorWithImportedTerms,
 } from "@psi/inviterEditor";
 
+import { EMPTY_SFTP_FORM, hostKeyFingerprintField } from "./sftpConnectionForm";
 import { CONNECTION_TUNING_DEFAULT } from "./connectionTuningModel";
-import { EMPTY_SFTP_FORM } from "./sftpConnectionForm";
 import { EXCHANGE_FILES_DEFAULT } from "./exchangeFilesModel";
 
 import type { AcquiredCsv, InviterEditor } from "@psi/inviterEditor";
 import type {
   ColumnMetadata,
+  LinkageField,
   LinkageTerms,
   Metadata,
   OutboundPayloadConsent,
@@ -212,15 +218,11 @@ export function exchangeFilesFromOptions(
  * or types the file again. Everything the form edits and the block states is
  * pre-filled, the host-key fingerprint included -- the console owns this mount,
  * and the fingerprint is the operator's own pin rather than a partner's claim.
- *
- * A fingerprint stated as a rotation LIST pre-fills the first entry: the form
- * holds one value, and the operator's own file still holds the rest until they
- * author the connection again.
+ * A fingerprint stated as a rotation list pre-fills every entry.
  */
 export function sftpFormFromServerBlock(
   server: DisclosedSftpServer,
 ): SftpConnectionFormValues {
-  const fingerprint = server.hostKeyFingerprint;
   return {
     ...EMPTY_SFTP_FORM,
     host: server.host,
@@ -228,9 +230,7 @@ export function sftpFormFromServerBlock(
     username: server.username ?? "",
     remoteDirectory: server.path ?? server.inboundPath ?? "",
     outboundDirectory: server.outboundPath ?? "",
-    hostKeyFingerprint: Array.isArray(fingerprint)
-      ? (fingerprint[0] ?? "")
-      : (fingerprint ?? ""),
+    hostKeyFingerprint: hostKeyFingerprintField(server.hostKeyFingerprint),
     method:
       server.credentialMethod === "private_key" ? "private_key" : "password",
     keyboardInteractive: server.keyboardInteractive ?? false,
@@ -292,6 +292,68 @@ export function authoringStateFromDocument(
       : {}),
   };
 }
+
+/** The constraints the editor writes for a field of `type`: the type's default
+ * field's own, or none for a type with no default field. */
+function editorConstraintsFor(
+  type: LinkageField["type"],
+): LinkageField["constraints"] {
+  return DEFAULT_LINKAGE_RULE_SET.linkageFields.find(
+    (field) => field.type === type,
+  )?.constraints;
+}
+
+/** Whether a field states constraints of its own: ones that are neither empty
+ * nor the ones the editor writes for the field's type. An empty or absent set
+ * states no constraint to name. */
+function statesOwnConstraints(field: LinkageField): boolean {
+  if (
+    field.constraints === undefined ||
+    Object.keys(field.constraints).length === 0
+  )
+    return false;
+  return (
+    canonicalString(field.constraints) !==
+    canonicalString(editorConstraintsFor(field.type) ?? null)
+  );
+}
+
+/**
+ * The linkage-terms settings a loaded document states that no control here
+ * edits, named as the file spells them, for the carry-through notice. Each is
+ * held on the draft ({@link editorWithLoadedTerms}) and stated by the run and
+ * the hand-back as the file states it. A field's constraints are named only
+ * where they state something other than what the editor itself writes for that
+ * field's type ({@link statesOwnConstraints}).
+ */
+export function termsSettingsWithNoControl(terms: LinkageTerms): Array<string> {
+  const ownConstraints = terms.linkageFields.some(statesOwnConstraints);
+  return [
+    ...(ownConstraints ? [HELD_TERMS_SETTINGS.constraints] : []),
+    ...(terms.payload?.send?.some((column) => column.description !== undefined)
+      ? [HELD_TERMS_SETTINGS.description]
+      : []),
+    ...(terms.payload?.receive !== undefined
+      ? [HELD_TERMS_SETTINGS.receive]
+      : []),
+  ];
+}
+
+/** The settings {@link termsSettingsWithNoControl} names that the terms
+ * `editor`'s draft builds still state: none of the held ones once a terms
+ * import replaces the terms a load held, and no receive list once this party
+ * takes no result. */
+export function termsSettingsStatedBy(editor: InviterEditor): Array<string> {
+  return termsSettingsWithNoControl(buildAdvancedTerms(editor.draft));
+}
+
+/** The names {@link termsSettingsWithNoControl} gives, as the file spells
+ * them. */
+export const HELD_TERMS_SETTINGS = {
+  constraints: "linkage_terms.linkage_fields.constraints",
+  description: "linkage_terms.payload.send.description",
+  receive: "linkage_terms.payload.receive",
+} as const;
 
 /** The parts of a loaded document the invitation editor takes once the input
  * file is read: the matching terms, and the column roles and cleaning pipeline
@@ -418,6 +480,11 @@ function metadataWithLoadedColumns(
  * A document stating no `metadata` has no column roles to put back, so the
  * import binds against the roles the draft already holds, the operator's own
  * edits included.
+ *
+ * The terms settings no control here edits -- each field's own constraints, a
+ * sent column's description, the columns expected back -- are held on the draft
+ * as the document states them, so the built terms state them unchanged; the
+ * notice beside the load names them ({@link termsSettingsWithNoControl}).
  */
 export function editorWithLoadedTerms(
   editor: InviterEditor,
@@ -435,12 +502,20 @@ export function editorWithLoadedTerms(
       : editor.seed.metadata,
     loaded.metadata,
   );
-  let next = editorWithImportedTerms(
+  const imported = editorWithImportedTerms(
     editor,
     csv,
     loaded.linkageTerms,
     columns.metadata,
   );
+  const { payload } = loaded.linkageTerms;
+  let next: InviterEditor = {
+    ...imported,
+    draft: {
+      ...imported.draft,
+      heldTermsSettings: payload === undefined ? {} : { payload },
+    },
+  };
   let cleaningWhole = true;
   for (const transformation of loaded.standardization ?? []) {
     const declared = next.draft.standardization.some(

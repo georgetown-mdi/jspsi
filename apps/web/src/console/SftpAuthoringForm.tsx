@@ -75,6 +75,7 @@ export function SftpAuthoringForm({
   retainFiles,
   reviewLocator,
   probeCeremony = "exchange",
+  singleFingerprint = false,
   onAuthored,
   onCancel,
 }: {
@@ -93,6 +94,9 @@ export function SftpAuthoringForm({
   reviewLocator?: SftpEndpointLocator;
   /** The host-key confirmation ceremony the probe presents (default `exchange`). */
   probeCeremony?: ProbeCeremony;
+  /** Hold the fingerprint field to one fingerprint, where the run passes the pin
+   * as a single-valued command-line flag (the direct-exchange path). */
+  singleFingerprint?: boolean;
   onAuthored: (connection: SftpConnectionProjection) => void;
   onCancel: () => void;
 }) {
@@ -122,7 +126,7 @@ export function SftpAuthoringForm({
   // fill a pin, so the probe clears a presented result when this changes.
   const probeTarget = probeTargetOf(values, reviewLocator);
 
-  const error = sftpFormError(values, retainFiles);
+  const error = sftpFormError(values, retainFiles, singleFingerprint);
   const fieldError = (field: SftpFormField): string | undefined =>
     attempted && error?.field === field ? error.message : undefined;
 
@@ -132,7 +136,7 @@ export function SftpAuthoringForm({
   };
 
   async function submit(): Promise<void> {
-    const body = buildAuthoringRequest(values, retainFiles);
+    const body = buildAuthoringRequest(values, retainFiles, singleFingerprint);
     if (body === undefined) {
       setAttempted(true);
       // The port lives under a collapsed Advanced section; open it so a blocking
@@ -227,7 +231,11 @@ export function SftpAuthoringForm({
       <TextInput
         ref={fingerprintRef}
         label="Server identity fingerprint"
-        description="The server's identity fingerprint -- ask whoever runs the SFTP server. It starts with SHA256:."
+        description={
+          singleFingerprint
+            ? "The server's identity fingerprint -- ask whoever runs the SFTP server. It starts with SHA256:."
+            : "The server's identity fingerprint -- ask whoever runs the SFTP server. It starts with SHA256:. While the server's key is being changed, enter each fingerprint it may present, separated by commas."
+        }
         required
         classNames={{ input: styles.mono }}
         value={values.hostKeyFingerprint}

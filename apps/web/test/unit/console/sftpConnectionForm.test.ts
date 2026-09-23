@@ -140,6 +140,85 @@ describe("sftpFormError", () => {
     );
     expect(error?.field).toBe("hostKeyFingerprint");
     expect(error?.message).toContain("SHA256:");
+    // The only entry is the whole field, so no position is named.
+    expect(error?.message).not.toMatch(/^Fingerprint 1/);
+  });
+
+  test("a lone @-file fingerprint gets the literal-fingerprint wording", () => {
+    const error = formError(
+      validForm({ hostKeyFingerprint: "@/run/secrets/host.fp" }),
+    );
+    expect(error?.field).toBe("hostKeyFingerprint");
+    expect(error?.message).toBe(
+      "Enter a literal fingerprint, not an @-file reference.",
+    );
+  });
+
+  describe("a rotation list of fingerprints", () => {
+    const next = `SHA256:${"B".repeat(42)}A`;
+
+    test("is sent as a list, whichever separator the operator used", () => {
+      for (const written of [
+        `${FINGERPRINT}, ${next}`,
+        `${FINGERPRINT} ${next}`,
+        ` ${FINGERPRINT},${next}, `,
+      ])
+        expect(
+          authoringRequest(validForm({ hostKeyFingerprint: written }))
+            ?.hostKeyFingerprint,
+        ).toEqual([FINGERPRINT, next]);
+    });
+
+    test("one fingerprint is sent as one value", () => {
+      expect(
+        authoringRequest(validForm({ hostKeyFingerprint: ` ${FINGERPRINT} ` }))
+          ?.hostKeyFingerprint,
+      ).toBe(FINGERPRINT);
+    });
+
+    test("one malformed entry blocks the save, named by position and start", () => {
+      const error = formError(
+        validForm({ hostKeyFingerprint: `${FINGERPRINT}, SHA256:short` }),
+      );
+      expect(error?.field).toBe("hostKeyFingerprint");
+      expect(error?.message).toMatch(/^Fingerprint 2 \(SHA256:short\): /);
+      expect(error?.message).toContain("SHA256: form");
+    });
+
+    test("a long bad entry is named by its first characters only", () => {
+      const long = `SHA256:${"C".repeat(60)}`;
+      const error = formError(
+        validForm({ hostKeyFingerprint: `${long} ${FINGERPRINT}` }),
+      );
+      expect(error?.message).toMatch(
+        /^Fingerprint 1 \(SHA256:CCCCCCCCC\.\.\.\): /,
+      );
+      expect(error?.message).not.toContain(long);
+    });
+
+    test("an @-file entry gets the literal-fingerprint wording", () => {
+      const error = formError(
+        validForm({
+          hostKeyFingerprint: `${FINGERPRINT}, @/run/secrets/host.fp`,
+        }),
+      );
+      expect(error?.message).toMatch(
+        /^Fingerprint 2 \(@\/run\/secrets\/ho\.\.\.\): /,
+      );
+      expect(error?.message).toContain(
+        "a literal fingerprint, not an @-file reference",
+      );
+    });
+
+    test("a direct exchange takes one fingerprint only", () => {
+      const values = validForm({
+        hostKeyFingerprint: `${FINGERPRINT}, ${next}`,
+      });
+      const error = sftpFormError(values, true, true);
+      expect(error?.field).toBe("hostKeyFingerprint");
+      expect(error?.message).toContain("one server identity fingerprint");
+      expect(buildAuthoringRequest(values, true, true)).toBeUndefined();
+    });
   });
 
   test("requires a credential source", () => {
