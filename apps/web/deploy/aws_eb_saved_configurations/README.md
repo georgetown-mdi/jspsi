@@ -4,6 +4,15 @@ This directory holds an exported configuration of each environment of the projec
 
 It sits beside `aws_eb/` rather than inside it because that tree is the deployed payload: the packaging step in [`eb_build_and_test.yaml`](../../../../.github/workflows/eb_build_and_test.yaml) copies all of it into the application bundle, and [`eb_deploy.yaml`](../../../../.github/workflows/eb_deploy.yaml) redeploys the environment on a push that touches it. A configuration export belongs to neither: nothing on the instance reads it, and re-exporting it is not a reason to redeploy the application.
 
+## These files and the OpenTofu root
+
+[`infra/hosted/`](../../../../infra/hosted/README.md) describes the same two environments as OpenTofu, and the two sources divide the settings between them:
+
+- **The root governs** every option setting it declares, the instances' inbound rules, and the Cloudflare zone settings. A change to one of those is made in the root and applied; these files record the result when they are re-exported after the apply.
+- **These files govern** the option settings the root leaves out -- the machine image, the platform's template parameters and launch-control values, the notification topic, the absent key pair -- and record every setting either source governs, so a change made outside both is still a diff here.
+
+The setting-by-setting table, with the sources for the values neither expresses, is in [docs/DEPLOYMENT.md](../../../../docs/DEPLOYMENT.md#which-source-governs-each-setting).
+
 ## The files
 
 | File              | Environment                                                    |
@@ -49,13 +58,12 @@ Everything else is kept as exported, including the security group, subnet and VP
 
 ## Inbound rules as option settings
 
-A security-group rule created or removed by an `authorize-security-group-ingress` or `revoke-security-group-ingress` call is not part of the environment configuration, so an operation that recreates an environment's own groups from its CloudFormation stack does not replay it. An option setting is part of the configuration. The inbound posture therefore belongs in these files rather than in a remembered sequence of revokes, as far as an option setting can express it:
+A security-group rule created or removed by an `authorize-security-group-ingress` or `revoke-security-group-ingress` call is not part of the environment configuration, so an operation that recreates an environment's resources from its CloudFormation stack does not replay it. An option setting is part of the configuration. The inbound posture is therefore held by option settings the OpenTofu root applies, and these files record them:
 
-- **Inbound `:22`.** Elastic Beanstalk creates the SSH ingress from `SSHSourceRestriction`, in the `aws:autoscaling:launchconfiguration` namespace, only when `EC2KeyName` is set. The committed files record `EC2KeyName` absent, so the platform creates no SSH ingress when it recreates an environment's groups, and the `SSHSourceRestriction` the files carry, still the platform default, is inert. Session Manager is the shell route; the rule set measured on the live groups is recorded separately in `docs/DEPLOYMENT.md`, and the two are not the same fact.
-- **`:443` from Cloudflare's ranges only.** That rule lives in a security group the platform did not create, shared by both environments, so its rule list is not an option setting of either environment. What the configuration can carry is the attachment of that group to the instances (`SecurityGroups`, same namespace). The rule's contents stay recorded as values in `docs/DEPLOYMENT.md`; applying them from the repository is the later infrastructure-as-code step.
-- **No inbound `:80`.** Which option setting, if any, expresses that on a single-instance environment is unrecorded; the committed files are where to read it.
+- **One security group, owned by the root.** The root declares `DisableDefaultEC2SecurityGroup` `true` and a `SecurityGroups` naming the one group it owns, so from its first apply the platform creates no security group of its own. Its inbound list is `:443` from Cloudflare's published ranges and nothing else, held by the root rather than by an option setting; why this form and not another is in [the root's README](../../../../infra/hosted/README.md#how-the-inbound-rules-are-held). Until that apply, these files record the platform's own group beside that one, with `DisableDefaultEC2SecurityGroup` `false`.
+- **No inbound `:22`.** Elastic Beanstalk creates an SSH ingress only when `EC2KeyName` is set. These files record it absent, and Session Manager is the shell route; the `SSHSourceRestriction` they state, still the platform default, is inert.
 
-Cloudflare publishes its ranges as a list that changes, and a range it adds is dropped at the origin, which shows as an intermittent edge error rather than as an outage. Reconciling the rule against the published list is what the check below does.
+Cloudflare publishes its ranges as a list that changes, and a range it adds is dropped at the origin, which shows as an intermittent edge error rather than as an outage. The check below reports a rule list that differs from the published one, and applying the root corrects it.
 
 ## Checking the origin certificate and the Cloudflare ranges
 
@@ -104,4 +112,4 @@ It is updated by hand, from the block a differing run prints: replace the file w
 
 ## The verification this directory still needs
 
-The inbound rules are known to survive a configuration deployment, measured 2026-09-17. Whether they survive `rebuild-environment` or a managed platform update, either of which recreates the platform's own security groups, is unverified: driving it needs the live account, so it is the maintainer's to run outside the container. Record the result here when it is run, with the date and the operation that was run.
+The inbound rules are known to survive a configuration deployment, measured 2026-09-17. Whether they survive `rebuild-environment` or a managed platform update is unverified: it is a step of [the OpenTofu root's first run](../../../../infra/hosted/README.md#the-first-run-against-the-live-account), and driving it needs the live account, so it is the maintainer's to run outside the container. Record the result here when it is run, with the date and the operation that was run.
