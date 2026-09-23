@@ -581,6 +581,9 @@ export type JobExchangeSide = "inviter" | "acceptor";
  * - `mountedConfigurationOpened` is a bare schema boolean selecting whether
  *   the recurring-run hand-off merges the mounted document into its template;
  *   it names no setting and contributes no value of its own.
+ * - `mountedConfigurationConverted` is a bare schema boolean selecting whether
+ *   that hand-off states the console's paths or the document's own; it names
+ *   no path and contributes no value of its own.
  * - `diagnosticRun` and `sweepExchangeFiles` are the per-run controls
  *   ({@link jobRunControlFields}): booleans that each select a fixed CLI
  *   flag and hold no value of their own.
@@ -720,6 +723,15 @@ export interface JobExchangeIntentBase {
    * `buildJobHandoff` in `./handoff`).
    */
   mountedConfigurationOpened?: boolean;
+  /**
+   * Whether the operator converted the opened configuration to the console's
+   * own resources. Read only beside `mountedConfigurationOpened`. Converted,
+   * the hand-off states the console's shared folder and signing identity (as
+   * placeholders) and no receipt file; unconverted, it states the paths the
+   * document read, and a certificate-mode run of a document stating a signing
+   * path is refused (see `createJob` in `./jobManager`).
+   */
+  mountedConfigurationConverted?: boolean;
   options?: JobExchangeOptions;
   eventStream?: boolean;
   diagnosticRun?: boolean;
@@ -1117,6 +1129,7 @@ const jobExchangeIntentCommonFields = {
   csvDelimiter: jobCsvDelimiterSchema.optional(),
   side: z.enum(["inviter", "acceptor"]).optional(),
   mountedConfigurationOpened: z.boolean().optional(),
+  mountedConfigurationConverted: z.boolean().optional(),
   eventStream: z.boolean().optional(),
   signing: jobSigningChoiceSchema.optional(),
   retentionDisposition: z

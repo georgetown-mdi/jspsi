@@ -144,7 +144,8 @@ export interface DisclosedSftpServer {
 }
 
 /** The `signing` settings the receipts card edits. The identity file and the
- * receipt output are the console's own paths, so neither is disclosed. */
+ * receipt output are paths, so neither is disclosed: the response names which
+ * of them the file states ({@link signingPathSettings}). */
 export interface DisclosedSigning {
   mode: SigningConfig["mode"];
   partnerFingerprint?: string;
@@ -199,6 +200,12 @@ export interface LoadedConfigurationResponse {
   document?: DisclosedExchangeDocument;
   carriedThrough: Array<string>;
   warnings: Array<string>;
+  /** The signing paths the file states, as it spells them
+   * ({@link signingPathSettings}). Absent where no file was opened. */
+  signingPathSettings?: Array<string>;
+  /** The shared-folder paths the file states, as it spells them
+   * ({@link folderPathSettings}). Absent where no file was opened. */
+  folderPathSettings?: Array<string>;
 }
 
 /**
@@ -247,8 +254,10 @@ function probeIntentFields(): JobExchangeIntentBase {
   };
 }
 
-/** The paths a certificate-mode composition names. Server-chosen on every run,
- * so a loaded document's own two are replaced rather than held. */
+/** The paths a certificate-mode composition names. Server-chosen for every run,
+ * so a loaded document's own two are not held: a run uses the console's, and
+ * the hand-back states the document's own unless the operator converted it
+ * ({@link signingPathSettings}). */
 const PROBE_SIGNING_PATHS = {
   identityFile: "/probe/identity.json",
   receiptOutput: "/probe/receipt",
@@ -383,8 +392,8 @@ function documentKeyPaths(value: unknown, parent = ""): Array<string> {
  * rendezvous form it composes. Measured once off the composers themselves, so a
  * field they stop emitting shows up as held rather than in a restated list that
  * would go on claiming it. A setting here is written at the composition's own
- * value, which for the rendezvous folder and the two signing paths is the
- * console's own resource rather than anything the document stated.
+ * value, which in a run for the rendezvous folder and the two signing paths is
+ * the console's own resource rather than anything the document stated.
  */
 const COMPOSED_FIELD_PATHS: ReadonlySet<string> = new Set([
   ...sftpProbeSpecs().flatMap((spec) => documentKeyPaths(spec)),
@@ -613,6 +622,43 @@ export function credentialFieldsNotAdopted(
     .sort();
 }
 
+/**
+ * The signing paths a document on a conducted channel states, as the file
+ * spells them: the settings a conversion replaces with the console's own
+ * identity file and receipt path. A run of the document unconverted is withheld
+ * while it signs, since the console signs only with its own identity and
+ * serves only its own receipt; the hand-back states them as read.
+ */
+export function signingPathSettings(document: ExchangeSpec): Array<string> {
+  const { signing } = document;
+  if (signing === undefined || !isJobChannel(document.connection.channel))
+    return [];
+  return [
+    ...(signing.identityFile !== undefined ? ["signing.identity_file"] : []),
+    ...(signing.receiptOutput !== undefined ? ["signing.receipt_output"] : []),
+  ];
+}
+
+/**
+ * The shared-folder paths a filedrop document states, as the file spells them:
+ * the settings a conversion replaces with the console's mounted folders. A run
+ * uses the mounted folders whether or not the document is converted; the
+ * hand-back of an unconverted document states these as read.
+ */
+export function folderPathSettings(document: ExchangeSpec): Array<string> {
+  const { connection } = document;
+  if (connection.channel !== "filedrop") return [];
+  return [
+    ...(connection.path !== undefined ? ["connection.path"] : []),
+    ...(connection.inboundPath !== undefined
+      ? ["connection.inbound_path"]
+      : []),
+    ...(connection.outboundPath !== undefined
+      ? ["connection.outbound_path"]
+      : []),
+  ];
+}
+
 /** The connection form's own fields, read off an sftp connection. */
 function disclosedServer(document: ExchangeSpec): DisclosedSftpServer {
   const { connection } = document;
@@ -779,6 +825,8 @@ function responseFor(document: ExchangeSpec): LoadedConfigurationResponse {
     document: disclosedDocument(document),
     carriedThrough: carriedThroughFields(document),
     warnings: credentialFieldsNotAdopted(document),
+    signingPathSettings: signingPathSettings(document),
+    folderPathSettings: folderPathSettings(document),
   };
 }
 

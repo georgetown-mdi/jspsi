@@ -217,6 +217,11 @@ describe("jobExchangeIntentSchema validates metadata and standardization", () =>
     expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(false);
   });
 
+  test("rejects a non-boolean mountedConfigurationConverted", () => {
+    const intent = { ...validIntent(), mountedConfigurationConverted: "true" };
+    expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(false);
+  });
+
   test("rejects a non-boolean expectedPartnerDeduplicate", () => {
     // A string reaching the composed config would be refused by core's schema at
     // config-parse time on the console, after the job was created; refusing it

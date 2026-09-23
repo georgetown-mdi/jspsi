@@ -23,11 +23,14 @@ import {
   JobRendezvousRetainRequiredError,
   JobRendezvousUnavailableError,
   JobSigningIdentityExposedError,
+  MountedSigningPathsUnconvertedError,
   SftpUnavailableError,
 } from "@jobs/jobManager";
 import {
   HANDOFF_INBOUND_DIRECTORY_PLACEHOLDER,
   HANDOFF_OUTBOUND_DIRECTORY_PLACEHOLDER,
+  HANDOFF_SHARED_DIRECTORY_PLACEHOLDER,
+  HANDOFF_SIGNING_IDENTITY_PLACEHOLDER,
 } from "@jobs/handoff";
 import {
   JobApiRequestError,
@@ -2560,6 +2563,102 @@ describe("the mounted configuration as the hand-off's merge base", () => {
           (entry) => entry.event.source === "relayOpenedConfigurationChanged",
         ),
     ).toBe(true);
+  });
+});
+
+describe("an opened configuration's own signing paths", () => {
+  const OPERATOR_IDENTITY = "/home/operator/.psilink/identity.json";
+  const OPERATOR_RECEIPT = "/home/operator/receipts/latest.json";
+  const OPERATOR_FOLDER = "/srv/exchange";
+
+  /** A manager whose mounted configuration names the operator's own signing
+   * identity and receipt file under `mode`, and its key file. */
+  function managerOverSignedConfiguration(
+    mode: "certificate" | "none",
+  ): JobManager {
+    const root = tempDataRoot("signed-config");
+    roots.push(root);
+    fs.mkdirSync(root, { recursive: true });
+    fs.writeFileSync(
+      path.join(root, "psilink.yaml"),
+      stringifyYaml(
+        snakeizeKeys({
+          connection: { channel: "filedrop", path: OPERATOR_FOLDER },
+          linkageTerms: validLinkageTerms(),
+          signing: {
+            mode,
+            identityFile: OPERATOR_IDENTITY,
+            receiptOutput: OPERATOR_RECEIPT,
+          },
+        }),
+      ),
+    );
+    fs.writeFileSync(
+      path.join(root, ".psilink.key"),
+      JSON.stringify({ sharedSecret: MOUNTED_SHARED_SECRET }),
+      { mode: 0o600 },
+    );
+    const manager = new JobManager({
+      dataRoot: root,
+      binaryPath: STUB_CLI_PATH,
+      jobRendezvousDir: rendezvousRoot(),
+      childEnv: { STUB_FD3_EVENTS: JSON.stringify([RESULT_EVENT]) },
+    });
+    managers.push(manager);
+    manager.openMountedConfiguration();
+    return manager;
+  }
+
+  function signedOpenedIntent(converted: boolean): JobFiledropExchangeIntent {
+    return {
+      ...openedIntent(),
+      signing: { mode: "certificate" },
+      ...(converted ? { mountedConfigurationConverted: true } : {}),
+    };
+  }
+
+  function handoffYaml(manager: JobManager, id: string): string {
+    const handoff = manager.getJobHandoff(id)!;
+    return handoff.template.kind === "config" ? handoff.template.yaml : "";
+  }
+
+  test("a signed run of it unconverted is refused before anything is written", async () => {
+    const manager = managerOverSignedConfiguration("certificate");
+    const refusal = await manager
+      .createJob(signedOpenedIntent(false))
+      .catch((error: unknown) => error);
+    expect(refusal).toBeInstanceOf(MountedSigningPathsUnconvertedError);
+    expect(manager.occupiedSlotId()).toBeNull();
+  });
+
+  test("a signed run of it converted runs, and hands back the console's paths", async () => {
+    const manager = managerOverSignedConfiguration("certificate");
+    const id = await manager.createJob(signedOpenedIntent(true));
+    const yaml = handoffYaml(manager, id);
+    expect(yaml).toContain(HANDOFF_SIGNING_IDENTITY_PLACEHOLDER);
+    expect(yaml).toContain(HANDOFF_SHARED_DIRECTORY_PLACEHOLDER);
+    expect(yaml).not.toContain(OPERATOR_IDENTITY);
+    expect(yaml).not.toContain("receipt_output");
+    expect(yaml).not.toContain(OPERATOR_FOLDER);
+  });
+
+  test("an unsigned run of it unconverted hands back every path it read", async () => {
+    const manager = managerOverSignedConfiguration("none");
+    const id = await manager.createJob(openedIntent());
+    const yaml = handoffYaml(manager, id);
+    expect(yaml).toContain(`identity_file: ${OPERATOR_IDENTITY}`);
+    expect(yaml).toContain(`receipt_output: ${OPERATOR_RECEIPT}`);
+    expect(yaml).toContain(`path: ${OPERATOR_FOLDER}`);
+  });
+
+  test("the load names the paths a conversion replaces", () => {
+    const manager = managerOverSignedConfiguration("certificate");
+    const response = manager.openMountedConfiguration();
+    expect(response.signingPathSettings).toEqual([
+      "signing.identity_file",
+      "signing.receipt_output",
+    ]);
+    expect(response.folderPathSettings).toEqual(["connection.path"]);
   });
 });
 

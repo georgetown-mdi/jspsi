@@ -156,6 +156,28 @@ describe("what the load discloses", () => {
     });
   });
 
+  test("the signing paths the file states are named, never sent", () => {
+    const response = loadDocument(
+      savedSftpDocument({
+        signing: {
+          mode: "certificate",
+          identity_file: "/home/operator/.psilink/identity.json",
+          receipt_output: "/home/operator/receipts/latest.json",
+        },
+      }),
+    );
+    expect(response.signingPathSettings).toEqual([
+      "signing.identity_file",
+      "signing.receipt_output",
+    ]);
+    expect(response.folderPathSettings).toEqual([]);
+    expect(JSON.stringify(response)).not.toContain("/home/operator");
+  });
+
+  test("a file stating no signing path names none", () => {
+    expect(loadDocument(savedSftpDocument()).signingPathSettings).toEqual([]);
+  });
+
   test("no credential value and no @ reference appears anywhere in the body", () => {
     const response = loadDocument(
       savedSftpDocument({
@@ -312,6 +334,29 @@ describe("a mounted file the load cannot open", () => {
     const dir = mountDir();
     fs.writeFileSync(path.join(dir, "psilink.yaml"), "x".repeat(1_000_000));
     expect(refusalFrom(dir)).not.toContain("too large");
+  });
+});
+
+describe("the shared-folder paths a filedrop file states", () => {
+  test("are named for the conversion, never sent", () => {
+    const response = loadDocument({
+      connection: {
+        channel: "filedrop",
+        inbound_path: "/srv/partner-in",
+        outbound_path: "/srv/partner-out",
+        options: {
+          retain_files: true,
+          timestamp_in_filename: true,
+          lockless_rendezvous: true,
+        },
+      },
+      linkage_terms: snakeizeKeys(terms()),
+    });
+    expect(response.folderPathSettings).toEqual([
+      "connection.inbound_path",
+      "connection.outbound_path",
+    ]);
+    expect(JSON.stringify(response)).not.toContain("/srv/partner");
   });
 });
 

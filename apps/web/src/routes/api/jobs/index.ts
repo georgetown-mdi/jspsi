@@ -5,6 +5,7 @@ import {
   JobRendezvousRetainRequiredError,
   JobRendezvousUnavailableError,
   JobSigningIdentityExposedError,
+  MountedSigningPathsUnconvertedError,
   SftpUnavailableError,
 } from "@jobs/jobManager";
 import {
@@ -15,6 +16,7 @@ import {
 import {
   MOUNTED_KEY_FILE_ABSENT_REFUSAL,
   MOUNTED_KEY_FILE_INVALID_REFUSAL,
+  MOUNTED_SIGNING_PATHS_UNCONVERTED_REFUSAL,
   SFTP_FINGERPRINT_LIST_REFUSAL,
   SIGNING_IDENTITY_IN_RENDEZVOUS_REFUSAL,
 } from "@jobs/jobCreateRefusal";
@@ -117,6 +119,13 @@ export const Route = createFileRoute("/api/jobs/")({
                     ? MOUNTED_KEY_FILE_ABSENT_REFUSAL
                     : MOUNTED_KEY_FILE_INVALID_REFUSAL,
               },
+              400,
+            );
+          // A signed run of the opened configuration whose own signing paths
+          // the operator did not convert to the console's.
+          if (error instanceof MountedSigningPathsUnconvertedError)
+            return jobJsonResponse(
+              { reason: MOUNTED_SIGNING_PATHS_UNCONVERTED_REFUSAL },
               400,
             );
           // A mounted input that names no regular file, a filedrop intent with no
