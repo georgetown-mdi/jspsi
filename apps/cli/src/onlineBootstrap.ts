@@ -40,15 +40,10 @@ import type {
   WebRTCConnectionConfig,
 } from "@psilink/core";
 
-import {
-  applyConnectionOverrides,
-  persistExpectedPartnerDeduplicate,
-  persistExpectedPayloadColumns,
-  persistOutboundPayloadConsent,
-  saveConfig,
-} from "./config";
+import { applyConnectionOverrides, saveConfig } from "./config";
 import { detectFileConflicts } from "./fileUtils";
 import { openEventStream, reportPersistenceLoss } from "./eventStream";
+import { writeAcceptanceRecordReportingLoss } from "./acceptedTermsRecords";
 import {
   applyConnectionCredentials,
   readConnectionCredentials,
@@ -1043,76 +1038,50 @@ export async function runOnlineBootstrap(params: {
           // rather than leave a set this acceptance did not consent to, while a
           // caller that owns no commitment (the inviter, which learns its
           // received set by observation) never reaches this write.
-          if (params.receivedPayloadLockIn !== undefined) {
-            try {
-              persistExpectedPayloadColumns(
-                params.configPath,
-                params.receivedPayloadLockIn.consentedColumns,
-              );
-            } catch (err) {
-              const notice =
-                `the exchange continues and the existing configuration at ` +
-                `${params.configPath} stands, but recording the columns you ` +
-                `consented to receive in it failed; the next 'psilink ` +
-                `exchange' holds the received payload to the set that ` +
-                `configuration already records, and checks it against no ` +
-                `consented set if it records none`;
-              getLogger(params.loggerName).warn(
-                `${notice}: ${sanitizeErrorForDisplay(err)}`,
-              );
-              reportPersistenceLoss(notice, eventStream);
-            }
-          }
+          const lossReport = {
+            log: {
+              warn: (message: string) =>
+                getLogger(params.loggerName).warn(message),
+            },
+            eventStream,
+          };
+          if (params.receivedPayloadLockIn !== undefined)
+            writeAcceptanceRecordReportingLoss(
+              params.configPath,
+              {
+                record: "expected_payload_columns",
+                columns: params.receivedPayloadLockIn.consentedColumns,
+              },
+              lossReport,
+            );
           // The outbound record's removal case follows the KEPT config's own
           // output terms rather than this parameter being absent: the caller
           // derives the reuse-path value from those terms (the accept handler's
           // reuse derivation), so undefined here means that config itself does
           // not transmit -- a leftover record is then inert against those same
           // terms -- and the record is left as it stands.
-          if (params.outboundPayloadConsent !== undefined) {
-            try {
-              persistOutboundPayloadConsent(
-                params.configPath,
-                params.outboundPayloadConsent,
-              );
-            } catch (err) {
-              const notice =
-                `the exchange continues and the existing configuration at ` +
-                `${params.configPath} stands, but recording your ` +
-                `outbound-column confirmation in it failed; the next ` +
-                `'psilink exchange' compares against the previously ` +
-                `recorded set and will show the columns and ask again if ` +
-                `they differ`;
-              getLogger(params.loggerName).warn(
-                `${notice}: ${sanitizeErrorForDisplay(err)}`,
-              );
-              reportPersistenceLoss(notice, eventStream);
-            }
-          }
+          if (params.outboundPayloadConsent !== undefined)
+            writeAcceptanceRecordReportingLoss(
+              params.configPath,
+              {
+                record: "outbound_payload_consent",
+                consent: params.outboundPayloadConsent,
+              },
+              lossReport,
+            );
           // The terms-side commitment is refreshed on the same gate as the
           // received one: its presence marks an acceptance, whose declaration
           // the operator has just consented to, while the inviter never reaches
           // this write.
-          if (params.expectedPartnerDeduplicate !== undefined) {
-            try {
-              persistExpectedPartnerDeduplicate(
-                params.configPath,
-                params.expectedPartnerDeduplicate,
-              );
-            } catch (err) {
-              const notice =
-                `the exchange continues and the existing configuration at ` +
-                `${params.configPath} stands, but recording the duplicate ` +
-                `matching your partner declared in it failed; the next ` +
-                `'psilink exchange' holds your partner to the value that ` +
-                `configuration already records, and to no value if it records ` +
-                `none`;
-              getLogger(params.loggerName).warn(
-                `${notice}: ${sanitizeErrorForDisplay(err)}`,
-              );
-              reportPersistenceLoss(notice, eventStream);
-            }
-          }
+          if (params.expectedPartnerDeduplicate !== undefined)
+            writeAcceptanceRecordReportingLoss(
+              params.configPath,
+              {
+                record: "expected_partner_deduplicate",
+                declared: params.expectedPartnerDeduplicate,
+              },
+              lossReport,
+            );
           // Unlike the offline path and the non-reuse branch below, there is no
           // config re-gate here: runProtocol already rotated and saved the key
           // before invoking this hook, so a config deleted during the handshake
