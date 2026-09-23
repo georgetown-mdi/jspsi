@@ -142,6 +142,47 @@ describe("sftpFormError", () => {
     expect(error?.message).toContain("SHA256:");
   });
 
+  describe("a rotation list of fingerprints", () => {
+    const next = `SHA256:${"B".repeat(42)}A`;
+
+    test("is sent as a list, whichever separator the operator used", () => {
+      for (const written of [
+        `${FINGERPRINT}, ${next}`,
+        `${FINGERPRINT} ${next}`,
+        ` ${FINGERPRINT},${next}, `,
+      ])
+        expect(
+          authoringRequest(validForm({ hostKeyFingerprint: written }))
+            ?.hostKeyFingerprint,
+        ).toEqual([FINGERPRINT, next]);
+    });
+
+    test("one fingerprint is sent as one value", () => {
+      expect(
+        authoringRequest(validForm({ hostKeyFingerprint: ` ${FINGERPRINT} ` }))
+          ?.hostKeyFingerprint,
+      ).toBe(FINGERPRINT);
+    });
+
+    test("one malformed entry blocks the save", () => {
+      const error = formError(
+        validForm({ hostKeyFingerprint: `${FINGERPRINT}, SHA256:short` }),
+      );
+      expect(error?.field).toBe("hostKeyFingerprint");
+      expect(error?.message).toContain("SHA256:");
+    });
+
+    test("a direct exchange takes one fingerprint only", () => {
+      const values = validForm({
+        hostKeyFingerprint: `${FINGERPRINT}, ${next}`,
+      });
+      const error = sftpFormError(values, true, true);
+      expect(error?.field).toBe("hostKeyFingerprint");
+      expect(error?.message).toContain("one server identity fingerprint");
+      expect(buildAuthoringRequest(values, true, true)).toBeUndefined();
+    });
+  });
+
   test("requires a credential source", () => {
     expect(formError(validForm({ source: undefined }))?.field).toBe(
       "credential",

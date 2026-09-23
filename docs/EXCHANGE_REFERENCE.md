@@ -1549,13 +1549,13 @@ The cells:
 | `linkage_terms.deduplicate` | authored (zero-setup exchange only) | authored | carried with a notice |
 | `expected_partner_deduplicate` | authored (recorded on accept) | carried with a notice | carried |
 | `linkage_terms.linkage_fields` (`name`, `type`) | authored (inferred) | authored (inferred) | carried with a notice |
-| `linkage_terms.linkage_fields` (`constraints`) | carried | dropped (the type's default constraints replace yours) | carried with a notice |
+| `linkage_terms.linkage_fields` (`constraints`) | carried | carried with a notice | carried with a notice |
 | `linkage_terms.linkage_keys` | authored (inferred) | authored | carried with a notice |
 | `linkage_terms.linkage_rule_set` | authored (inferred) | authored (inferred) | carried with a notice |
 | `linkage_terms.legal_agreement` | carried | authored | carried with a notice |
 | `linkage_terms.payload.send` (`name`) | carried | authored (inferred) | carried with a notice |
-| `linkage_terms.payload.send` (`description`) | carried | dropped | carried with a notice |
-| `linkage_terms.payload.receive` | carried | dropped | carried with a notice |
+| `linkage_terms.payload.send` (`description`) | carried | carried with a notice | carried with a notice |
+| `linkage_terms.payload.receive` | carried | carried with a notice (left out once you choose not to receive the results) | carried with a notice |
 | `expected_payload_columns` | authored (recorded on accept or save) | carried with a notice | carried |
 | `disclosed_payload_columns` | authored (recorded on invite) | carried with a notice | carried |
 | `outbound_payload_consent` | authored (the accept consent prompt) | carried with a notice | carried |
@@ -1573,7 +1573,7 @@ The cells:
 | `connection.server.private_key` | authored | authored (entered again; a warning names it) | not applicable |
 | `connection.server.private_key_passphrase` | authored | authored (entered again; a warning names it) | not applicable |
 | `connection.server.keyboard_interactive` | authored | authored | not applicable |
-| `connection.server.host_key_fingerprint` | authored | authored (one value; a rotation list is dropped to its first entry) | not applicable |
+| `connection.server.host_key_fingerprint` | authored | authored (a rotation list is entered separated by commas; a direct exchange takes one value) | not applicable |
 | `connection.server.certificate` | refused | refused | refused |
 | `connection.server.known_hosts` | refused | refused | refused |
 | `connection.server.provision` | carried (no effect yet) | refused | refused |

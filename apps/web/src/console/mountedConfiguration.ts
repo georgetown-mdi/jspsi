@@ -3,7 +3,11 @@ import {
   isJobChannel,
 } from "@jobs/intentSchemas";
 
-import { authoringStateFromDocument } from "./loadedConfig";
+import {
+  HELD_TERMS_SETTINGS,
+  authoringStateFromDocument,
+  termsSettingsWithNoControl,
+} from "./loadedConfig";
 
 import type {
   ConfigurationHandBackAnswer,
@@ -286,12 +290,19 @@ export function recordsWithNoControl(
   ).map(([, field]) => field);
 }
 
-/** The records above as the file spells them, which a run here states from the
- * authoring state: every other held setting sits outside the blocks a run here
- * composes, so the export keeps it and the run does not apply it. */
-const RECORD_FIELDS_THE_RUN_STATES: ReadonlySet<string> = new Set(
-  RECORDS_WITH_NO_CONTROL.map(([, field]) => field),
-);
+/**
+ * The held settings a run here states from the authoring state, as the file
+ * spells them: the records above and the terms settings the draft holds
+ * ({@link termsSettingsWithNoControl}). Every other held setting sits outside
+ * the blocks a run here composes, so the export keeps it and the run does not
+ * apply it.
+ */
+function heldSettingTheRunStates(field: string): boolean {
+  return (
+    RECORDS_WITH_NO_CONTROL.some(([, record]) => record === field) ||
+    Object.values<string>(HELD_TERMS_SETTINGS).includes(field)
+  );
+}
 
 /**
  * What the operator is told about the settings the console holds without an
@@ -305,9 +316,7 @@ export function carriedThroughNotice(
 ): string | undefined {
   if (fields.length === 0) return undefined;
   const one = fields.length === 1;
-  const notApplied = fields.filter(
-    (field) => !RECORD_FIELDS_THE_RUN_STATES.has(field),
-  );
+  const notApplied = fields.filter((field) => !heldSettingTheRunStates(field));
   const notAppliedOne = notApplied.length === 1;
   const notAppliedNames =
     notApplied.length === fields.length
@@ -642,6 +651,7 @@ export function mountedConfigurationRead(answer: MountedConfigurationAnswer): {
             ...new Set([
               ...answer.carriedThrough,
               ...recordsWithNoControl(loaded),
+              ...termsSettingsWithNoControl(loaded.linkageTerms),
             ]),
           ].sort(),
           warnings: answer.warnings,

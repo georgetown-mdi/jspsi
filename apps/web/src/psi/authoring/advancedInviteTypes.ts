@@ -9,6 +9,7 @@ import type {
   Metadata,
   Output,
   OwnColumnSelection,
+  Payload,
   Standardization,
 } from "@psilink/core";
 
@@ -206,6 +207,25 @@ export interface AdvancedInviteDraft {
    * keys were edited, reordered, or added to does not.
    */
   importedRuleSetCitation?: ImportedRuleSetCitation;
+  /**
+   * The terms settings a configuration opened in the console states that no
+   * control here edits, held so {@link buildAdvancedTerms} writes them back as
+   * the file states them. Set only by that load; absent on every other path,
+   * including the terms import, which refuses a field constraint it would
+   * otherwise have to hold.
+   */
+  heldTermsSettings?: HeldTermsSettings;
+}
+
+/**
+ * What {@link AdvancedInviteDraft.heldTermsSettings} holds. The fields' own
+ * constraints are read from {@link AdvancedInviteDraft.importedLinkageFields},
+ * so only the payload lists are held here.
+ */
+export interface HeldTermsSettings {
+  /** The document's `payload`: each sent column's description, keyed by the
+   * column's name, and the list of columns this party expects back. */
+  payload?: Payload;
 }
 
 /** The fixed starting point for an editor session: the auto-derived terms the

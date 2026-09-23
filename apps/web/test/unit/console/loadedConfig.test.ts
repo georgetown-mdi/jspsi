@@ -1,6 +1,12 @@
+import fs from "node:fs";
+import path from "node:path";
+
 import { describe, expect, test } from "vitest";
 
 import { getDefaultLinkageTerms } from "@psilink/core";
+
+import { composeSftpConfigSpec } from "@jobs/intentConfig";
+import { validateAuthoredSftpServer } from "@jobs/sftpServer";
 
 import {
   CONNECTION_TUNING_DEFAULT,
@@ -17,9 +23,14 @@ import {
   exchangeFilesFromOptions,
   sftpFormFromServerBlock,
 } from "@console/loadedConfig";
-import { EMPTY_SFTP_FORM } from "@console/sftpConnectionForm";
+import {
+  EMPTY_SFTP_FORM,
+  buildAuthoringRequest,
+} from "@console/sftpConnectionForm";
 import { INITIAL_CSV_DELIMITER_CHOICE } from "@components/csvDelimiterChoice";
 import { OWN_COLUMNS_DEFAULT } from "@psi/ownColumnsModel";
+
+import { tempDataRoot, validSftpIntent } from "../../utils/jobFixtures";
 
 import type { DisclosedExchangeDocument } from "@jobs/configLoad";
 
@@ -77,13 +88,38 @@ describe("the connection form a loaded server block seeds", () => {
     expect(form.outboundDirectory).toBe("/out");
   });
 
-  test("a rotation list fills the field with its first entry", () => {
-    const second = "SHA256:DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDA";
+  test("a rotation list reaches the connection the run composes", () => {
+    const rotation = [
+      FINGERPRINT,
+      "SHA256:DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDA",
+    ];
     const form = sftpFormFromServerBlock({
-      host: "h",
-      hostKeyFingerprint: [FINGERPRINT, second],
+      host: "sftp.partner.example",
+      username: "county",
+      hostKeyFingerprint: rotation,
     });
-    expect(form.hostKeyFingerprint).toBe(FINGERPRINT);
+    const secretsDir = tempDataRoot("loaded-rotation");
+    fs.mkdirSync(secretsDir, { recursive: true });
+    try {
+      const secretPath = path.join(secretsDir, "server-password");
+      fs.writeFileSync(secretPath, "not-read-by-validation\n");
+      const request = buildAuthoringRequest(
+        { ...form, source: { kind: "path", ref: `@${secretPath}` } },
+        false,
+      );
+      expect(request?.hostKeyFingerprint).toEqual(rotation);
+      const { entry } = validateAuthoredSftpServer(
+        request,
+        path.join(secretsDir, "data-root"),
+        [],
+      );
+      // The hand-off export composes the connection from this same entry.
+      const { connection } = composeSftpConfigSpec(validSftpIntent(), entry);
+      if (connection.channel !== "sftp") throw new Error("expected sftp");
+      expect(connection.server.hostKeyFingerprint).toEqual(rotation);
+    } finally {
+      fs.rmSync(secretsDir, { recursive: true, force: true });
+    }
   });
 
   test("a block stating no credential opens on the password method", () => {
