@@ -6,7 +6,8 @@ resource "cloudflare_dns_record" "public_name" {
   zone_id = var.cloudflare_zone_id
   name    = each.value.public_name
   type    = "CNAME"
-  content = aws_elastic_beanstalk_environment.hosted[each.key].cname
+  # Elastic Beanstalk reports the name in mixed case; the live record holds it lowercase.
+  content = lower(aws_elastic_beanstalk_environment.hosted[each.key].cname)
   proxied = true
   ttl     = 1
 

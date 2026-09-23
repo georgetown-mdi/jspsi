@@ -10,7 +10,8 @@ resource "aws_security_group" "origin" {
   vpc_id      = var.vpc_id
 
   ingress {
-    description      = "Cloudflare edge"
+    # The live rule's text: a different description replaces the rule on apply.
+    description      = "Cloudflare edge, fetched 2026-09-17"
     protocol         = "tcp"
     from_port        = 443
     to_port          = 443
@@ -25,6 +26,10 @@ resource "aws_security_group" "origin" {
     from_port   = 0
     to_port     = 0
     cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "jspsi-webserver"
   }
 
   lifecycle {

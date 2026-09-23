@@ -4,8 +4,8 @@ title: "Holding the Hosted Environment's Inbound Rules"
 
 # Holding the hosted environment's inbound rules in OpenTofu
 
-_Status: decided and written, 2026-09-22; not yet run against the live
-account. This note records how the OpenTofu root under
+_Status: decided and written, 2026-09-22; validated and planned against the
+live account, not yet applied. This note records how the OpenTofu root under
 [`infra/hosted/`](../../infra/hosted/README.md) holds the inbound rules of the
 project's own Elastic Beanstalk environments, and the two alternatives weighed
 against it. The operational steps -- adopting the live resources, applying,
