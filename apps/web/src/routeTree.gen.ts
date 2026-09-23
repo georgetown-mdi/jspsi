@@ -15,6 +15,7 @@ import { Route as BenchRouteRouteImport } from './routes/bench/route'
 import { Route as DirectRouteImport } from './routes/direct'
 import { Route as ExchangeRouteImport } from './routes/exchange'
 import { Route as QuickRouteImport } from './routes/quick'
+import { Route as RelayRouteImport } from './routes/relay'
 import { Route as VerifyRouteImport } from './routes/verify'
 import { Route as BenchIndexRouteImport } from './routes/bench/index'
 import { Route as BenchAcceptRouteImport } from './routes/bench/accept'
@@ -74,6 +75,11 @@ const ExchangeRoute = ExchangeRouteImport.update({
 const QuickRoute = QuickRouteImport.update({
   id: '/quick',
   path: '/quick',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RelayRoute = RelayRouteImport.update({
+  id: '/relay',
+  path: '/relay',
   getParentRoute: () => rootRouteImport,
 } as any)
 const VerifyRoute = VerifyRouteImport.update({
@@ -236,6 +242,7 @@ export interface FileRoutesByFullPath {
   '/direct': typeof DirectRoute
   '/exchange': typeof ExchangeRoute
   '/quick': typeof QuickRoute
+  '/relay': typeof RelayRoute
   '/verify': typeof VerifyRoute
   '/bench/accept': typeof BenchAcceptRoute
   '/bench/exchange': typeof BenchExchangeRoute
@@ -273,6 +280,7 @@ export interface FileRoutesByTo {
   '/direct': typeof DirectRoute
   '/exchange': typeof ExchangeRoute
   '/quick': typeof QuickRoute
+  '/relay': typeof RelayRoute
   '/verify': typeof VerifyRoute
   '/bench/accept': typeof BenchAcceptRoute
   '/bench/exchange': typeof BenchExchangeRoute
@@ -312,6 +320,7 @@ export interface FileRoutesById {
   '/direct': typeof DirectRoute
   '/exchange': typeof ExchangeRoute
   '/quick': typeof QuickRoute
+  '/relay': typeof RelayRoute
   '/verify': typeof VerifyRoute
   '/bench/accept': typeof BenchAcceptRoute
   '/bench/exchange': typeof BenchExchangeRoute
@@ -352,6 +361,7 @@ export interface FileRouteTypes {
     | '/direct'
     | '/exchange'
     | '/quick'
+    | '/relay'
     | '/verify'
     | '/bench/accept'
     | '/bench/exchange'
@@ -389,6 +399,7 @@ export interface FileRouteTypes {
     | '/direct'
     | '/exchange'
     | '/quick'
+    | '/relay'
     | '/verify'
     | '/bench/accept'
     | '/bench/exchange'
@@ -427,6 +438,7 @@ export interface FileRouteTypes {
     | '/direct'
     | '/exchange'
     | '/quick'
+    | '/relay'
     | '/verify'
     | '/bench/accept'
     | '/bench/exchange'
@@ -466,6 +478,7 @@ export interface RootRouteChildren {
   DirectRoute: typeof DirectRoute
   ExchangeRoute: typeof ExchangeRoute
   QuickRoute: typeof QuickRoute
+  RelayRoute: typeof RelayRoute
   VerifyRoute: typeof VerifyRoute
   SavedIdRoute: typeof SavedIdRoute
   SavedIndexRoute: typeof SavedIndexRoute
@@ -536,6 +549,13 @@ declare module '@tanstack/react-router' {
       path: '/quick'
       fullPath: '/quick'
       preLoaderRoute: typeof QuickRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/relay': {
+      id: '/relay'
+      path: '/relay'
+      fullPath: '/relay'
+      preLoaderRoute: typeof RelayRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/verify': {
@@ -776,6 +796,7 @@ const rootRouteChildren: RootRouteChildren = {
   DirectRoute: DirectRoute,
   ExchangeRoute: ExchangeRoute,
   QuickRoute: QuickRoute,
+  RelayRoute: RelayRoute,
   VerifyRoute: VerifyRoute,
   SavedIdRoute: SavedIdRoute,
   SavedIndexRoute: SavedIndexRoute,

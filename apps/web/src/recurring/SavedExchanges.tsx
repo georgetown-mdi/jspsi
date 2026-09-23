@@ -253,6 +253,13 @@ function SavedExchangesList({
         </Anchor>{" "}
         without saving it here.
       </p>
+      <p className={`${styles.sub} ${styles.small}`}>
+        Network blocks direct connections?{" "}
+        <Anchor inherit component={Link} to="/relay">
+          Relay server
+        </Anchor>{" "}
+        sets a TURN relay your side connects through.
+      </p>
     </>
   );
 }

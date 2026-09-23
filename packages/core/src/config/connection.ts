@@ -442,21 +442,40 @@ function turnUrlTransportIsSupported(url: string): boolean {
   return true;
 }
 
+/**
+ * The url grammar of a `turn` entry: a `turn:` or `turns:` url naming a host,
+ * with a `transport` the ICE layer keeps. Parses to the trimmed url.
+ */
+export const TurnUrlSchema = z
+  .string()
+  .trim()
+  .regex(
+    TURN_URL_PATTERN,
+    "a turn entry's url must name a host after turn: or turns:, for " +
+      "example turns:relay.example.org:443?transport=tcp",
+  )
+  .refine(turnUrlTransportIsSupported, {
+    message:
+      "a turn entry's url may leave transport unset or set it to lowercase " +
+      "tcp, and a turn: url may also set it to udp, for example " +
+      "turns:relay.example.org:443?transport=tcp",
+  });
+
+/**
+ * The grammar of a `stun` entry: a `stun:` or `stuns:` url naming a host.
+ * Parses to the trimmed url.
+ */
+export const StunUrlSchema = z
+  .string()
+  .trim()
+  .regex(
+    STUN_URI_PATTERN,
+    "a stun entry must name a host after stun: or stuns:, for " +
+      "example stun:stun.example.org:3478",
+  );
+
 const TurnServerSchema: z.ZodType<TurnServer> = z.object({
-  url: z
-    .string()
-    .trim()
-    .regex(
-      TURN_URL_PATTERN,
-      "a turn entry's url must name a host after turn: or turns:, for " +
-        "example turns:relay.example.org:443?transport=tcp",
-    )
-    .refine(turnUrlTransportIsSupported, {
-      message:
-        "a turn entry's url may leave transport unset or set it to lowercase " +
-        "tcp, and a turn: url may also set it to udp, for example " +
-        "turns:relay.example.org:443?transport=tcp",
-    }),
+  url: TurnUrlSchema,
   username: z.string().min(1),
   credential: z.string().min(1),
   credentialType: z.enum(["password", "hmac-sha1"]).optional(),
@@ -948,18 +967,7 @@ const WebRTCConnectionConfigSchema = z.strictObject(
     channel: z.literal("webrtc"),
     server: WebRTCServerSchema,
     role: z.enum(["inviter", "acceptor"]).optional(),
-    stun: z
-      .array(
-        z
-          .string()
-          .trim()
-          .regex(
-            STUN_URI_PATTERN,
-            "a stun entry must name a host after stun: or stuns:, for " +
-              "example stun:stun.example.org:3478",
-          ),
-      )
-      .optional(),
+    stun: z.array(StunUrlSchema).optional(),
     turn: z.array(TurnServerSchema).optional(),
     iceTransportPolicy: z.enum(["all", "relay"]).optional(),
     iceProvision: IceProvisionSchema.optional(),

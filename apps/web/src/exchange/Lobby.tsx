@@ -220,6 +220,13 @@ export function Lobby() {
               is where you restore a saved exchange from a backup file.
             </p>
           ))}
+        <p className={`${styles.sub} ${styles.small}`}>
+          Network blocks direct connections?{" "}
+          <Anchor inherit component={Link} to="/relay">
+            Relay server
+          </Anchor>{" "}
+          sets a TURN relay your side connects through.
+        </p>
         <div className={styles.howItWorks}>
           <p>
             <strong>How it works.</strong> Each of you keeps your file on your

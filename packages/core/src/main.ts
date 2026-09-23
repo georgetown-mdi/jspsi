@@ -271,6 +271,8 @@ export {
   MAX_TIMEOUT_SECONDS,
   MAX_TOKEN_MAX_AGE_DAYS,
   SHARED_SECRET_REGEX,
+  StunUrlSchema,
+  TurnUrlSchema,
   generateSharedSecret,
   safeParseConnectionConfig,
   safeParseFileSyncOptions,

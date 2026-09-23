@@ -34,6 +34,7 @@ import { createBrowserExchangeDriver } from "@psi/exchangeDriver";
 import { hasRecoveryHint } from "@psi/authenticateExchange";
 import { inviterExchangeDataSpec } from "@psi/authoring/advancedInvite";
 import { listenAsInviter } from "@psi/transport/rendezvous";
+import { relayForRun } from "@psi/transport/ownRelaySetting";
 import { waitForIncomingConnection } from "@psi/transport/waitForConnection";
 
 import { isConsoleBuild } from "@utils/clientConfig";
@@ -699,7 +700,10 @@ export function useInviterExchange({
       // connection. Destroy the peer on a wait failure so acquisition stays
       // atomic (the lifecycle's teardown only ever covers a returned
       // {peer, conn}).
-      const peer = await listenAsInviter(minted.sharedSecret, { signal });
+      const peer = await listenAsInviter(minted.sharedSecret, {
+        signal,
+        relay: relayForRun(),
+      });
       try {
         const conn = await waitForIncomingConnection(peer, { signal });
         return { peer, conn, psi, prepared };
