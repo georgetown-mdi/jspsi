@@ -166,7 +166,7 @@ describe("relayFailureMessage", () => {
   test("names each failed relay once and bounds how many it lists", () => {
     const { pc, conn } = relayConn([
       {
-        urls: ["turn:a.example:3478", "turn:b.example:3478"],
+        urls: ["a", "b", "c", "d"].map((host) => `turn:${host}.example:3478`),
         username: "u",
         credential: "c",
       },
@@ -191,10 +191,29 @@ describe("relayFailureMessage", () => {
     const { pc, conn } = relayConn();
     watchIceGathering(conn);
     for (let index = 0; index < MAX_RECORDED_ICE_ERRORS + 5; index += 1)
-      pc.fail(`${RELAY_URL}?n=${String(index)}`, 701, "timed out");
+      pc.fail(RELAY_URL, 701, `timed out ${String(index)}`);
     expect(iceGatheringRecordFor(conn)?.turnErrors).toHaveLength(
       MAX_RECORDED_ICE_ERRORS,
     );
+  });
+
+  test("records an error only for a configured relay url", () => {
+    const { pc, conn } = relayConn();
+    watchIceGathering(conn);
+    pc.fail("turns:elsewhere.example:443", 701, "unconfigured");
+    pc.fail(`${RELAY_URL}?transport=udp&x=1`, 701, "extra query");
+    pc.fail(`${RELAY_URL}?transport=tcp`, 701, "configured");
+    const record = iceGatheringRecordFor(conn);
+    if (record === undefined) throw new Error("no record");
+    expect(record.turnErrors.map((error) => error.url)).toEqual([
+      `${RELAY_URL}?transport=tcp`,
+    ]);
+    const message = relayFailureMessage(record, true) ?? "";
+    expect(message).toContain(
+      `${RELAY_URL}?transport=tcp (error 701: configured)`,
+    );
+    expect(message).not.toContain("elsewhere.example");
+    expect(message).not.toContain("x=1");
   });
 });
 
@@ -218,6 +237,9 @@ describe("dialAsAcceptor with a relay configured", () => {
 
   async function dialFailure(
     gather: (pc: FakePeerConnection) => void,
+    timeouts: { openTimeoutMs: number; totalTimeoutMs?: number } = {
+      openTimeoutMs: 20,
+    },
   ): Promise<unknown> {
     const fake = new FakePeer(gather);
     const dialing = dialAsAcceptor(
@@ -225,7 +247,7 @@ describe("dialAsAcceptor with a relay configured", () => {
       { channel: "webrtc", host: "127.0.0.1", port: 3000, path: "/api/" },
       {
         peerFactory: () => fake as unknown as Peer,
-        openTimeoutMs: 20,
+        ...timeouts,
       },
     ).catch((err: unknown) => err);
     await vi.waitFor(() =>
@@ -249,6 +271,25 @@ describe("dialAsAcceptor with a relay configured", () => {
     expect(error).toBeInstanceOf(ConnectionError);
     expect((error as Error).message).toContain(
       `relay server ${RELAY_URL} (error 701: TURN host lookup received error.)`,
+    );
+  });
+
+  test("an attempt clamped by the total budget does not blame a silent relay", async () => {
+    const error = await dialFailure(() => undefined, {
+      openTimeoutMs: 1000,
+      totalTimeoutMs: 20,
+    });
+    expect(error).not.toBeInstanceOf(ConnectionError);
+    expect((error as Error).message).toBe(
+      "timed out opening a connection to the inviter",
+    );
+  });
+
+  test("an attempt that runs the full open timeout names a silent relay", async () => {
+    const error = await dialFailure(() => undefined);
+    expect(error).toBeInstanceOf(ConnectionError);
+    expect((error as Error).message).toContain(
+      `Relay server ${RELAY_URL} did not give a relay address.`,
     );
   });
 });

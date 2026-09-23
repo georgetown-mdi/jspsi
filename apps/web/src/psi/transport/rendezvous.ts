@@ -472,7 +472,7 @@ async function dialInviterWithRetry(
             const failure = withIceServerFailure(
               conn,
               new Error("timed out opening a connection to the inviter"),
-              true,
+              attemptTimeoutMs >= openTimeoutMs,
             );
             conn.close();
             reject(failure);

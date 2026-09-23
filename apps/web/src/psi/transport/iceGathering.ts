@@ -29,7 +29,7 @@ export interface IceGatheringRecord {
   relayGathered: boolean;
   /** Whether gathering finished. */
   gatheringComplete: boolean;
-  /** Errors against a `turn:` / `turns:` url, at most {@link MAX_RECORDED_ICE_ERRORS}. */
+  /** Errors against a configured relay url, at most {@link MAX_RECORDED_ICE_ERRORS}. */
   turnErrors: Array<IceServerError>;
 }
 
@@ -60,6 +60,23 @@ function configuredTurnUrls(pc: RTCPeerConnection): Array<string> {
 }
 
 /**
+ * Whether `url` names one of `turnUrls`: as configured, or with the
+ * `?transport=` suffix Chromium appends when it reports an error. Anything
+ * else is not recorded, so a failure message names only configured relays.
+ */
+function isConfiguredTurnUrl(
+  url: string,
+  turnUrls: ReadonlyArray<string>,
+): boolean {
+  return turnUrls.some(
+    (turnUrl) =>
+      url === turnUrl ||
+      url === `${turnUrl}?transport=udp` ||
+      url === `${turnUrl}?transport=tcp`,
+  );
+}
+
+/**
  * Start recording what `conn`'s peer connection gathers. Idempotent, and a
  * no-op for a connection with no peer connection.
  */
@@ -85,7 +102,8 @@ export function watchIceGathering(conn: DataConnection): void {
   });
   pc.addEventListener("icecandidateerror", (event) => {
     const { url, errorCode, errorText } = event;
-    if (typeof url !== "string" || !isTurnUrl(url)) return;
+    if (typeof url !== "string" || !isConfiguredTurnUrl(url, record.turnUrls))
+      return;
     if (record.turnErrors.length >= MAX_RECORDED_ICE_ERRORS) return;
     record.turnErrors.push({
       url,
