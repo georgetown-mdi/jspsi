@@ -504,7 +504,10 @@ export function relayCredentialNotice(
   const relay =
     selectRunRelay(connection).turn?.source === "invitation"
       ? "the TURN server your partner's invitation named"
-      : "each `turn` entry that sets no username or credential";
+      : (connection.turn ?? [])
+          .filter((server) => server.credential === undefined)
+          .map((server) => server.url)
+          .join(", ");
   return (
     `relaying through ${relay}, with a credential derived from the ` +
     "exchange's shared secret that is valid for " +
