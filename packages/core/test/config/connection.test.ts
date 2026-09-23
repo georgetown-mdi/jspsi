@@ -4,7 +4,6 @@ import { expect, test } from "vitest";
 import {
   MAX_RECONNECT_ATTEMPTS,
   MAX_RELAY_LOCATOR_URL_LENGTH,
-  RELAY_QUERY_KEY_DISPLAY_LENGTH,
   SHARED_SECRET_REGEX,
   StunUrlSchema,
   TurnUrlSchema,
@@ -15,6 +14,10 @@ import {
   safeParseFileSyncOptions,
   withRetainModeImplications,
 } from "../../src/config/connection";
+import {
+  decodeInvitation,
+  encodeInvitation,
+} from "../../src/config/invitation";
 
 import type { FileSyncOptions } from "../../src/config/connection";
 
@@ -1324,17 +1327,16 @@ test("a TURN url setting only transport is accepted", () => {
   ).toMatchObject({ success: true });
 });
 
-test("a TURN url setting another query parameter is refused naming its key only", () => {
+test("a TURN url setting another query parameter is refused naming no part of it", () => {
   const messages = grammarMessages(
     TurnUrlSchema,
     "turns:relay.example.org:443?transport=tcp&credential=hunter2",
   );
   expect(messages).toEqual([
-    'the turn url may not set the query parameter "credential"; transport is ' +
-      "its only parameter, and a credential goes in the entry's username " +
-      "and credential fields",
+    "the turn url may set no query parameter other than transport; a " +
+      "credential goes in the entry's username and credential fields",
   ]);
-  expect(messages.join("\n")).not.toContain("hunter2");
+  expect(messages.join("\n")).not.toMatch(/hunter2|credential"/);
 });
 
 test("a TURN url query parameter with no value is refused without naming it", () => {
@@ -1343,18 +1345,17 @@ test("a TURN url query parameter with no value is refused without naming it", ()
     "turn:relay.example.org:3478?hunter2",
   );
   expect(messages).toEqual([
-    "the turn url may not set a query parameter with no value; transport is " +
-      "its only parameter, and a credential goes in the entry's username " +
-      "and credential fields",
+    "the turn url may set no query parameter other than transport; a " +
+      "credential goes in the entry's username and credential fields",
   ]);
 });
 
-test("a STUN url with a query string is refused naming its key", () => {
+test("a STUN url with a query string is refused naming no part of it", () => {
   expect(
     grammarMessages(StunUrlSchema, "stun:relay.example.org:3478?x=1"),
   ).toEqual([
-    'the stun url may not set the query parameter "x"; a stun url takes ' +
-      "no query string, for example stun:stun.example.org:3478",
+    "the stun url may set no query parameter; a stun url takes no query " +
+      "string, for example stun:stun.example.org:3478",
   ]);
 });
 
@@ -1446,16 +1447,6 @@ test.each([
   ]);
 });
 
-test("a long refused query key is shown capped", () => {
-  const [message] = grammarMessages(
-    TurnUrlSchema,
-    `turn:relay.example.org?${"k".repeat(2000)}=v`,
-  );
-  const key = /the query parameter "([^"]*)"/.exec(message ?? "")?.[1];
-  expect(key).toMatch(/\.\.\.\[truncated\]$/);
-  expect(key!.length).toBeLessThanOrEqual(RELAY_QUERY_KEY_DISPLAY_LENGTH);
-});
-
 test("a refused query key stops at the fragment", () => {
   const messages = grammarMessages(
     TurnUrlSchema,
@@ -1463,6 +1454,115 @@ test("a refused query key stops at the fragment", () => {
   );
   expect(messages.join("\n")).not.toContain("SECRET");
 });
+
+// --- no layer repeats any of a refused relay url -----------------------------
+
+const MARKERS = /SECRET|ssw0rd|u5er|pw9|frag7/;
+
+const relayTerms = {
+  version: "1.0.0",
+  identity: "Test Party",
+  date: "2025-01-01",
+  algorithm: "psi" as const,
+  linkageStrategy: "cascade" as const,
+  output: { expectsOutput: true, shareWithPartner: false },
+  deduplicate: false,
+  linkageFields: [{ name: "ssn", type: "ssn" as const }],
+  linkageKeys: [{ name: "SSN", elements: [{ field: "ssn" }] }],
+};
+
+// The encoding without schema validation, so decodeInvitation is handed a
+// token encodeInvitation would refuse to produce.
+async function encodeUnvalidated(obj: unknown): Promise<string> {
+  const toBase64Url = (b: Uint8Array): string =>
+    btoa(Array.from(b, (byte) => String.fromCharCode(byte)).join(""))
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=/g, "");
+  const bytes = new TextEncoder().encode(JSON.stringify(obj));
+  const hash = await globalThis.crypto.subtle.digest("SHA-256", bytes);
+  return toBase64Url(bytes) + toBase64Url(new Uint8Array(hash).slice(0, 4));
+}
+
+async function refusalOf(run: () => unknown): Promise<string> {
+  try {
+    await run();
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+  throw new Error("expected a refusal");
+}
+
+// Each url paired with the host its refusals must not name, where the host is
+// distinctive enough to search for.
+test.each([
+  ["TURN:u5er:pw9@relayhost#frag7", "relayhost"],
+  ["turn:u5er@relayhost?credential=SECRET", "relayhost"],
+  ["stun:relayhost/SECRETPATH", "relayhost"],
+  ["turn:u5er:pw9@relayhost" + "h".repeat(2000) + "#frag7", "relayhost"],
+  ["turn:alice:pa?ssw0rdSECRET=x@relay.example.org", "relay.example.org"],
+  ["stun:u?SECRET=1@h", undefined],
+  ["turn:h?SECRET", undefined],
+  ["turn:h?a=1&SECRET=2", undefined],
+])("%#: no refusal of a relay url repeats it", async (url, host) => {
+  const kind = /^turns?:/i.test(url) ? "turn" : "stun";
+  const schema = kind === "turn" ? TurnUrlSchema : StunUrlSchema;
+  const entry = kind === "turn" ? { url, username: "u", credential: "c" } : url;
+  const token = {
+    version: "1",
+    linkageTerms: relayTerms,
+    sharedSecret: "A".repeat(43),
+    connectionEndpoint: {
+      channel: "webrtc",
+      host: "signal.example",
+      relay: { [kind]: [url] },
+    },
+  };
+  const refusals = [
+    grammarMessages(schema, url).join("\n"),
+    await refusalOf(() =>
+      parseConnectionConfig({ ...webrtcBase, [kind]: [entry] }),
+    ),
+    await refusalOf(() =>
+      parseConnectionConfig({
+        ...webrtcBase,
+        invitation_relay: { [kind]: [url] },
+      }),
+    ),
+    await refusalOf(() =>
+      encodeInvitation(token as Parameters<typeof encodeInvitation>[0]),
+    ),
+    await refusalOf(async () =>
+      decodeInvitation(await encodeUnvalidated(token)),
+    ),
+  ];
+  for (const refusal of refusals) {
+    expect(refusal).not.toBe("");
+    expect(refusal).not.toMatch(MARKERS);
+    if (host !== undefined) expect(refusal).not.toContain(host);
+  }
+});
+
+test.each([
+  [
+    TurnUrlSchema,
+    "turn:alice:pa?ssw0rdSECRET=x@relay.example.org",
+    "the turn url names a user before its host; put the credential in the " +
+      "entry's username and credential fields, or leave it out of a relay " +
+      "an invitation names",
+  ],
+  [
+    StunUrlSchema,
+    "stun:u?SECRET=1@h",
+    "the stun url names a user before its host; a stun server takes no " +
+      "credential, so leave it out",
+  ],
+])(
+  "%#: a url holding an @ read as a query is refused for its user",
+  (schema, url, expected) => {
+    expect(grammarMessages(schema, url)).toEqual([expected]);
+  },
+);
 
 test.each([
   [

@@ -5,11 +5,6 @@ import { randomBytes, toBase64Url } from "../utils/crypto.js";
 import { pathsResolveToSameDir } from "../utils/pathCompare.js";
 import { maxCodeUnits } from "../utils/maxCodeUnits.js";
 import { boundedArray } from "../utils/boundedArray.js";
-import { redactPrivateKeyMaterial } from "../utils/sanitizeErrorForDisplay.js";
-import {
-  boundRawFragmentForFit,
-  clipToRenderedCost,
-} from "../utils/sanitizeForDisplay.js";
 
 // --- HTTP service authentication ---------------------------------------------
 
@@ -436,10 +431,6 @@ const SCHEME_PREFIX = /^([a-z][a-z0-9+.-]*):/i;
 const USER_BEFORE_HOST = /^[a-z]+:[^?]*@/i;
 const PATH_AFTER_HOST = /^[a-z]+:[^\s/?#@]+\//i;
 
-// Code units a refused query key may show.
-/** @internal */
-export const RELAY_QUERY_KEY_DISPLAY_LENGTH = 64;
-
 type RelayUrlIssue = {
   input?: unknown;
   path?: ReadonlyArray<PropertyKey> | undefined;
@@ -478,16 +469,20 @@ function relayUrlEntry(kind: "turn" | "stun", issue: RelayUrlIssue): string {
     : `the ${ordinal(index + 1)} ${kind} url`;
 }
 
+function userBeforeHostRefusal(kind: "turn" | "stun"): string {
+  return kind === "turn"
+    ? "names a user before its host; put the credential in the entry's " +
+        "username and credential fields, or leave it out of a relay an " +
+        "invitation names"
+    : "names a user before its host; a stun server takes no credential, so " +
+        "leave it out";
+}
+
 function urlGrammarMessage(
   kind: "turn" | "stun",
   example: string,
 ): (issue: RelayUrlIssue) => string {
   const schemes = `${kind}: or ${kind}s:`;
-  const credentialHome =
-    kind === "turn"
-      ? "put the credential in the entry's username and credential fields, " +
-        "or leave it out of a relay an invitation names"
-      : "a stun server takes no credential, so leave it out";
   const noPathOrFragment = `a ${kind} url takes no path or fragment, for example ${example}`;
   return (issue) => {
     const entry = relayUrlEntry(kind, issue);
@@ -499,7 +494,7 @@ function urlGrammarMessage(
     const refusal = !ours
       ? `must begin with ${schemes}, for example ${example}`
       : USER_BEFORE_HOST.test(url)
-        ? `names a user before its host; ${credentialHome}`
+        ? userBeforeHostRefusal(kind)
         : url.includes("#")
           ? `has a fragment; ${noPathOrFragment}`
           : PATH_AFTER_HOST.test(url)
@@ -534,50 +529,34 @@ function turnUrlTransportIsSupported(url: string): boolean {
 
 // A TURN uri defines one query parameter, `transport` (RFC 7065), and a STUN
 // uri none (RFC 7064), so any other is refused rather than passed on, where a
-// pasted credential could reach an invitation. The refusal names the key only,
-// fitted to RELAY_QUERY_KEY_DISPLAY_LENGTH: a parameter with no `=` may be a
-// bare secret, so it is not named at all, and the query ends at a `#` so no
-// fragment text reaches a key.
-function refusedQueryParameter(
+// pasted credential could reach an invitation. The refusal names no part of
+// the query, and a url holding an `@` is told it names a user before its
+// host, since a password can hold a `?` the grammar reads as a query.
+function hasRefusedQueryParameter(
   url: string,
   allowed: ReadonlyArray<string>,
-): string | undefined {
+): boolean {
   const queryStart = url.indexOf("?");
-  if (queryStart === -1) return undefined;
+  if (queryStart === -1) return false;
   const query = url.slice(queryStart + 1).split("#")[0] ?? "";
-  for (const parameter of query.split("&")) {
+  return query.split("&").some((parameter) => {
     const separator = parameter.indexOf("=");
-    if (separator === -1) {
-      if (allowed.includes(parameter)) continue;
-      return "a query parameter with no value";
-    }
-    const name = parameter.slice(0, separator);
-    if (!allowed.includes(name)) {
-      const shown = clipToRenderedCost(
-        redactPrivateKeyMaterial(
-          boundRawFragmentForFit(name, RELAY_QUERY_KEY_DISPLAY_LENGTH),
-        ),
-        RELAY_QUERY_KEY_DISPLAY_LENGTH,
-      );
-      return `the query parameter "${shown}"`;
-    }
-  }
-  return undefined;
+    const name = separator === -1 ? parameter : parameter.slice(0, separator);
+    return !allowed.includes(name);
+  });
 }
 
 function queryParameterRefinement(
   kind: "turn" | "stun",
   allowed: ReadonlyArray<string>,
-  remedy: string,
+  refusal: string,
 ): [(url: string) => boolean, { error: (issue: RelayUrlIssue) => string }] {
   return [
-    (url) => refusedQueryParameter(url, allowed) === undefined,
+    (url) => !hasRefusedQueryParameter(url, allowed),
     {
       error: (issue) => {
         const url = typeof issue.input === "string" ? issue.input : "";
-        const refused =
-          refusedQueryParameter(url, allowed) ?? "a query parameter";
-        return `${relayUrlEntry(kind, issue)} may not set ${refused}; ${remedy}`;
+        return `${relayUrlEntry(kind, issue)} ${url.includes("@") ? userBeforeHostRefusal(kind) : refusal}`;
       },
     },
   ];
@@ -608,8 +587,8 @@ export const TurnUrlSchema = z
     ...queryParameterRefinement(
       "turn",
       ["transport"],
-      "transport is its only parameter, and a credential goes in the " +
-        "entry's username and credential fields",
+      "may set no query parameter other than transport; a credential goes " +
+        "in the entry's username and credential fields",
     ),
   );
 
@@ -628,8 +607,8 @@ export const StunUrlSchema = z
     ...queryParameterRefinement(
       "stun",
       [],
-      "a stun url takes no query string, for example " +
-        "stun:stun.example.org:3478",
+      "may set no query parameter; a stun url takes no query string, for " +
+        "example stun:stun.example.org:3478",
     ),
   );
 

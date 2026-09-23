@@ -779,7 +779,7 @@ TURN servers for the case where a direct peer-to-peer connection cannot be estab
 
 The CLI passes these entries to its peer connection (the browser client uses its own relay setting instead -- see [`connection.stun`](#connectionstun)). What a relayed run has been verified to do, the certificate the CLI requires of a relay before it will use one, and the wait such a run leaves behind afterwards are in [CLI.md](CLI.md#turn).
 
-A `url` may set no query parameter other than `transport`, the only one a TURN URI defines: any other (`?credential=...`) is refused with its name, never its value, so a credential pasted into the url is not repeated in the error. A TURN URI defines no path or fragment either, so a `url` with one (`turns:host:443/x`, `turn:host#x`) is refused naming which, never its value. A refusal names the entry and the refused part and never repeats the url.
+A `url` may set no query parameter other than `transport`, the only one a TURN URI defines: any other (`?credential=...`) is refused without naming it or its value, so a credential pasted into the url is not repeated in the error, and a `url` holding an `@` is refused as naming a user before its host, since a password can hold a `?`. A TURN URI defines no path or fragment either, so a `url` with one (`turns:host:443/x`, `turn:host#x`) is refused naming which, never its value. A refusal names the entry and the refused part and never repeats the url.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
