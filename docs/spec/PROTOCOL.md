@@ -1011,7 +1011,7 @@ This is a cross-implementation contract: both implementations compute the same i
 
 A party whose WebRTC connection needs a TURN relay uses a relay its own side controls, and authenticates to it with a credential derived from the invitation's 32-byte shared secret, so no relay password is sent in the invitation or out of band. The relay is coturn, in its `use-auth-secret` mode: it holds a table of shared secrets and accepts a time-limited credential signed under any of them. The reference relay under `infra/relay` configures a single static secret; the per-exchange table, and the register and revoke steps that go with it, are the relay change that follows this derivation.
 
-**The relay key.** One key per exchange, which the relay's operator registers as an entry in the relay's secrets table:
+**The relay key.** One key per exchange, which the relay's operator registers as an entry in the relay's secrets table. The key is derived from the exchange's current shared secret, so it changes at each [rotation](#shared-secret-rotation), and a relay must hold the key derived from the current secret:
 
 ```
 relay_key = hex(HKDF-SHA-256(ikm = secret, salt = 0x00 * 32, info = "psilink-relay-key-v1", 32))

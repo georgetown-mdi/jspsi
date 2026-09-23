@@ -33,8 +33,9 @@ export const RELAY_KEY_NOTICE =
   "Each exchange signs in to the relay with a credential derived from that " +
   "exchange's current shared secret and valid for at most one hour, so the " +
   "relay must hold the key derived from the current secret. The shared secret " +
-  "changes after every successful run and this app does not register each " +
-  "run's key with the relay itself, so a recurring exchange through your " +
+  "changes after every run that completes its handshake, even one that then " +
+  "fails, and this app does not register each run's key with the relay " +
+  "itself, so a recurring exchange through your " +
   "relay needs its key registered with the relay again after each run.";
 
 /** The field error for one list's parse, or `undefined` when it parsed. */
