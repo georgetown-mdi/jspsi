@@ -36,6 +36,7 @@ import {
 } from "@psilink/core";
 
 import { OWN_COLUMNS_DEFAULT } from "@psi/ownColumnsModel";
+import { buildAdvancedTerms } from "@psi/authoring/advancedInviteTerms";
 
 import {
   disclosureOf,
@@ -48,8 +49,8 @@ import {
   editorWithImportedTerms,
 } from "@psi/inviterEditor";
 
-import { CONNECTION_TUNING_DEFAULT } from "./connectionTuningModel";
 import { EMPTY_SFTP_FORM, hostKeyFingerprintField } from "./sftpConnectionForm";
+import { CONNECTION_TUNING_DEFAULT } from "./connectionTuningModel";
 import { EXCHANGE_FILES_DEFAULT } from "./exchangeFilesModel";
 
 import type { AcquiredCsv, InviterEditor } from "@psi/inviterEditor";
@@ -324,6 +325,14 @@ export function termsSettingsWithNoControl(terms: LinkageTerms): Array<string> {
       ? [HELD_TERMS_SETTINGS.receive]
       : []),
   ];
+}
+
+/** The settings {@link termsSettingsWithNoControl} names that the terms
+ * `editor`'s draft builds still state: none of the held ones once a terms
+ * import replaces the terms a load held, and no receive list once this party
+ * takes no result. */
+export function termsSettingsStatedBy(editor: InviterEditor): Array<string> {
+  return termsSettingsWithNoControl(buildAdvancedTerms(editor.draft));
 }
 
 /** The names {@link termsSettingsWithNoControl} gives, as the file spells

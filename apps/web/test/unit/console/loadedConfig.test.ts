@@ -13,6 +13,10 @@ import {
   connectionTuningOptions,
 } from "@console/connectionTuningModel";
 import {
+  EMPTY_SFTP_FORM,
+  buildAuthoringRequest,
+} from "@console/sftpConnectionForm";
+import {
   EXCHANGE_FILES_DEFAULT,
   exchangeFilesOptions,
 } from "@console/exchangeFilesModel";
@@ -23,10 +27,6 @@ import {
   exchangeFilesFromOptions,
   sftpFormFromServerBlock,
 } from "@console/loadedConfig";
-import {
-  EMPTY_SFTP_FORM,
-  buildAuthoringRequest,
-} from "@console/sftpConnectionForm";
 import { INITIAL_CSV_DELIMITER_CHOICE } from "@components/csvDelimiterChoice";
 import { OWN_COLUMNS_DEFAULT } from "@psi/ownColumnsModel";
 

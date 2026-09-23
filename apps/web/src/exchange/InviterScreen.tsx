@@ -133,11 +133,14 @@ import {
   runWithheldReason,
 } from "@console/mountedConfiguration";
 import {
+  editorWithLoadedTerms,
+  termsSettingsStatedBy,
+} from "@console/loadedConfig";
+import {
   fetchMountedConfiguration,
   saveOpenedConfiguration,
 } from "@psi/jobClient/mountedConfigClient";
 import { configurationHandBack } from "@console/configurationHandBack";
-import { editorWithLoadedTerms } from "@console/loadedConfig";
 
 import {
   INVITER_SCREEN_INITIAL,
@@ -1325,6 +1328,9 @@ export function InviterScreen() {
           sharesWithPartner: outputForDirection(editor.draft.outputDirection)
             .shareWithPartner,
           records: loadedEnforcementRecords,
+          ...(loadedTermsFile !== undefined && loadedTermsFile === acquired
+            ? { termsSettingsStated: termsSettingsStatedBy(editor) }
+            : {}),
         };
 
   // Inside a Customize tab no spine step is current; the step the operator

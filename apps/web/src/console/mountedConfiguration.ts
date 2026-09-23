@@ -305,6 +305,24 @@ function heldSettingTheRunStates(field: string): boolean {
 }
 
 /**
+ * The held settings the notice names: the load's own list, less each terms
+ * setting the draft's terms no longer state once the loaded terms reached the
+ * input file ({@link RunDisclosure.termsSettingsStated}).
+ */
+function carriedThroughStated(
+  fields: ReadonlyArray<string>,
+  run: RunDisclosure | undefined,
+): ReadonlyArray<string> {
+  const stated = run?.termsSettingsStated;
+  if (stated === undefined) return fields;
+  const termsSettings: ReadonlyArray<string> =
+    Object.values(HELD_TERMS_SETTINGS);
+  return fields.filter(
+    (field) => !termsSettings.includes(field) || stated.includes(field),
+  );
+}
+
+/**
  * What the operator is told about the settings the console holds without an
  * editor, or undefined when the document states none. The console writes each
  * back unchanged, and the command line is where they are edited. A held setting
@@ -486,6 +504,11 @@ export interface RunDisclosure {
    * since the run sends nothing at all. */
   sharesWithPartner: boolean;
   records: LoadedEnforcementRecords;
+  /** The terms settings with no control that the terms this draft builds
+   * state (`termsSettingsStatedBy`), once the open configuration's terms have
+   * reached the input file. Absent before then, where the load's own list is
+   * named, since the terms hold each setting once they reach it. */
+  termsSettingsStated?: ReadonlyArray<string>;
 }
 
 /** The commitments a loaded document can state about the columns this party
@@ -585,7 +608,7 @@ export function mountedConfigurationNotices(
     state.transportUnavailable === undefined
       ? undefined
       : TRANSPORT_UNAVAILABLE_NOTICE[state.transportUnavailable],
-    carriedThroughNotice(state.carriedThrough),
+    carriedThroughNotice(carriedThroughStated(state.carriedThrough, run)),
     credentialWarningNotice(state.warnings),
     termsNotAppliedNotice(state.notApplied ?? []),
     columnsNotCoveredNotice(state.notCovered ?? []),

@@ -33,15 +33,18 @@ import {
 import {
   csvDelimiterFromDocument,
   editorWithLoadedTerms,
+  termsSettingsStatedBy,
+  termsSettingsWithNoControl,
 } from "@console/loadedConfig";
 import {
   editorFromCsv,
   editorWithColumnDisclosure,
+  editorWithImportedTerms,
   editorWithIncludeOwnColumns,
   editorWithOutputDirection,
 } from "@psi/inviterEditor";
-import { EMPTY_SFTP_FORM } from "@console/sftpConnectionForm";
 import { inviterCreateStatus, reviewValidation } from "@psi/inviterModel";
+import { EMPTY_SFTP_FORM } from "@console/sftpConnectionForm";
 import { configurationHandBack } from "@console/configurationHandBack";
 import { outputForDirection } from "@psi/authoring/advancedInvite";
 
@@ -257,6 +260,10 @@ function noticesOf(state: InviterScreenState): Array<string> {
             state.editor.draft.outputDirection,
           ).shareWithPartner,
           records: state.loadedEnforcementRecords,
+          ...(state.loadedTermsFile !== undefined &&
+          state.loadedTermsFile === state.acquired
+            ? { termsSettingsStated: termsSettingsStatedBy(state.editor) }
+            : {}),
         },
   );
 }
@@ -1522,6 +1529,35 @@ describe("terms settings with no control reach the run and the hand-back", () =>
     const terms = reviewedTerms(state);
     expect(terms.output.expectsOutput).toBe(false);
     expect(terms.payload?.receive).toBeUndefined();
+    const notice = noticesOf(state).join(" ");
+    expect(notice).not.toContain("linkage_terms.payload.receive");
+    expect(notice).toContain("linkage_terms.payload.send.description");
+  });
+
+  test("a terms import from the keys tab replaces them, and the notice stops naming them", () => {
+    const opened = openedAndRead();
+    if (opened.editor === undefined || opened.acquired === undefined)
+      throw new Error("expected an editor over a committed file");
+    const imported = inviterScreenReducer(opened, {
+      type: "editor-replaced",
+      editor: editorWithImportedTerms(
+        opened.editor,
+        opened.acquired,
+        getDefaultLinkageTerms("County Health"),
+      ),
+      announcement: "Imported. Review the loaded terms before creating.",
+    });
+    const composed = composedTerms(imported);
+    expect(firstNameField(composed)?.constraints).not.toEqual(constraints);
+    expect(
+      composed.payload?.send?.some(
+        (column) => column.description !== undefined,
+      ),
+    ).not.toBe(true);
+    expect(composed.payload?.receive).toBeUndefined();
+    expect(termsSettingsWithNoControl(composed)).toEqual([]);
+    expect(termsSettingsWithNoControl(handedBackTerms(imported))).toEqual([]);
+    expect(noticesOf(imported).join(" ")).not.toContain("linkage_terms");
   });
 
   test("closing the configuration stops holding them", () => {
