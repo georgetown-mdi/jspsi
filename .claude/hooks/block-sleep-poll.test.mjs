@@ -55,6 +55,7 @@ describe("block-sleep-poll hook", () => {
   it("allows a wait that is bounded by a condition rather than the clock", () => {
     expectAllowed([
       "until curl -sf localhost:3000; do sleep 5; done",
+      "until curl -sf http://localhost:3000/health; do sleep 2; done",
       "while ! test -f build/done; do sleep 30; done",
       "sleep 60 && npm run build",
       "npm run dev & sleep 30; curl localhost:3000",
@@ -77,6 +78,44 @@ describe("block-sleep-poll hook", () => {
   it("reads only a command that is a naked sleep", () => {
     expect(verdict("sleep 1.5h").stderr).toContain("5400-second sleep");
     expectAllowed(["sleep 90 &", "sleep", "sleep infinity", "sleep -- 90"]);
+  });
+
+  it("blocks an unbounded loop that waits on a process, naming the bounded form", () => {
+    const refused = [
+      "until [ -f /tmp/out ] && ! kill -0 $(pgrep -f vitest); do sleep 30; done",
+      'while kill -0 "$pid" 2>/dev/null; do sleep 2; done',
+      "while pgrep -f 'npm run build' >/dev/null\ndo\n  sleep 5\ndone",
+      "npm run build & until ! pgrep -f rollup; do sleep 1; done; echo built",
+      "timeout 30 npm test; while kill -0 1234; do sleep 2; done",
+    ];
+    for (const command of refused) {
+      const { status, stderr } = verdict(command);
+      expect(status, command).toBe(2);
+      expect(stderr, command).toContain("no upper bound");
+      expect(stderr, command).toContain("timeout 600 bash -c");
+      expect(stderr, command).toContain("$((n+=1))");
+    }
+  });
+
+  it("allows a process wait bounded by a timeout wrapper or a counter", () => {
+    expectAllowed([
+      "timeout 600 bash -c 'while kill -0 1234 2>/dev/null; do sleep 2; done'",
+      "timeout -s KILL 10m sh -c 'until ! pgrep -f vitest; do sleep 5; done'",
+      'n=0; while kill -0 "$pid" 2>/dev/null && [ $((n+=1)) -le 300 ]; do sleep 2; done',
+      "i=0; until ! pgrep vitest; do sleep 2; i=$((i+1)); [ $i -ge 60 ] && break; done",
+      "while kill -0 $pid && (( SECONDS < 600 )); do sleep 2; done",
+      "while kill -0 $pid && [ $SECONDS -lt 600 ]; do sleep 2; done",
+    ]);
+  });
+
+  it("allows a process check that is not a sleeping wait loop", () => {
+    expectAllowed([
+      "kill -0 1234 && echo alive",
+      "pgrep -f vitest || npm test",
+      "while pgrep -f vitest; do pkill -f vitest; done",
+      "for i in $(seq 60); do kill -0 $pid || break; sleep 2; done",
+      "grep -n 'until ! kill -0' .claude/hooks/*.mjs",
+    ]);
   });
 
   it("allows a malformed or absent payload rather than wedging Bash", () => {
