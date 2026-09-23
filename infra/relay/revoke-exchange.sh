@@ -20,5 +20,6 @@ check_exchange_id "$ID"
 KEY="$(key_of "$ID")"
 [ -n "$KEY" ] || die "exchange-id $ID is not registered on this relay"
 turnadmin -X "$KEY" >/dev/null || die "could not remove exchange $ID's key from the secrets table"
-write_mapping "$ID"
+write_mapping "$ID" ||
+  die "removed exchange $ID's key from the secrets table, but could not remove its line from $MAP_FILE; delete the line starting '$ID ' from that file by hand"
 printf 'revoked exchange %s (realm %s)\n' "$ID" "$REALM"

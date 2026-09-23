@@ -34,12 +34,13 @@ if [ "$PRIOR" = "$KEY" ]; then
 fi
 
 turnadmin -s "$KEY" >/dev/null || die "could not add exchange $ID's key to the secrets table"
-write_mapping "$ID" "$KEY"
+write_mapping "$ID" "$KEY" ||
+  die "added exchange $ID's new key to the secrets table, but could not record it in $MAP_FILE, which is unchanged; the new key authenticates until removed: $(list_table_hint) and remove with turnadmin -X, the same way, the one key no line of $MAP_FILE holds"
 
 if [ -z "$PRIOR" ]; then
   printf 'registered exchange %s (realm %s)\n' "$ID" "$REALM"
   exit 0
 fi
 turnadmin -X "$PRIOR" >/dev/null ||
-  die "registered exchange $ID's new key, but could not remove its prior key $PRIOR from the secrets table; it still authenticates until removed with the image's turnadmin -X $PRIOR -r $REALM"
+  die "registered exchange $ID's new key and pointed $MAP_FILE at it, but could not remove its prior key from the secrets table, where it still authenticates: $(list_table_hint) and remove with turnadmin -X, the same way, the one key no line of $MAP_FILE holds"
 printf 'registered exchange %s (realm %s), replacing its prior key\n' "$ID" "$REALM"

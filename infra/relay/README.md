@@ -119,7 +119,7 @@ or the Dockerfile and it converges.
 | `psilink-relay-verify.service`, `.timer` | The daily verification. A standing relay is idle between exchanges, so nothing else notices it stopped carrying allocations until a partner is waiting on one |
 | `install.sh` | The whole install, idempotent |
 | `register-exchange.sh`, `revoke-exchange.sh`, `exchange-keys.sh` | Add and remove one exchange's relay key in the secrets table; the third is the shared part both source. See [Per-exchange keys](#per-exchange-keys) |
-| `verify.sh` | Drives a real TURNS handshake, a real allocation, a probe that an allocation toward an internal address is refused, and the secrets table: two keys registered for the run both allocate, an unregistered key and a credential keyed with a key's decoded bytes are refused, and a revoked key's new allocation is refused. It revokes its own keys on exit. Passes only on an observed refusal: a question that could not be asked reports UNCLEAR and fails. Connects to the realm's name by default; `PSILINK_RELAY_VERIFY_CONNECT` overrides the TCP connect target while the realm still names the SNI and TURN realm -- `install.sh` sets it to the instance's private address for the end-of-install run, because EC2 does not hairpin an instance's traffic back to its own Elastic IP, while the daily timer stays on the public name so it fails if that path breaks. `PSILINK_RELAY_VERIFY_WAIT` sets how many seconds it retries a bare TCP connect before its first probe, waiting for a just-(re)started listener to come up; 30 by default |
+| `verify.sh` | Drives a real TURNS handshake, a real allocation, a probe that an allocation toward an internal address is refused, and the secrets table: two keys registered for the run both allocate, an unregistered key and a credential keyed with a key's decoded bytes are refused, and a revoked key's new allocation is refused. It revokes its own keys on exit, and warns naming the exchange id when one cannot be revoked. Passes only on an observed refusal: a question that could not be asked reports UNCLEAR and fails. Connects to the realm's name by default; `PSILINK_RELAY_VERIFY_CONNECT` overrides the TCP connect target while the realm still names the SNI and TURN realm -- `install.sh` sets it to the instance's private address for the end-of-install run, because EC2 does not hairpin an instance's traffic back to its own Elastic IP, while the daily timer stays on the public name so it fails if that path breaks. `PSILINK_RELAY_VERIFY_WAIT` sets how many seconds it retries a bare TCP connect before its first probe, waiting for a just-(re)started listener to come up; 30 by default |
 | `mint-credential.sh` | One time-limited credential under the static secret, on a host that holds one: `<expiry>:<name>` as the username, the base64 HMAC-SHA1 of it as the password |
 | `relay.env.example` | The host's one configuration file, copied to `/etc/psilink-relay/relay.env` |
 | `certs/` | ACME DNS-01 renewal: the timer and its unit, the client-neutral `renew.sh`, the deploy hook, and the provider credential's example |
@@ -147,9 +147,24 @@ revoke-exchange.sh <exchange-id>
   new row added, then its prior row deleted, so the relay ends holding only its
   current key and both keys allocate for the moment between -- register again
   after each [rotation](../../docs/spec/PROTOCOL.md#shared-secret-rotation). If
-  the delete fails, the script exits non-zero naming the prior key, which stays
-  in the table until you delete it by hand. Registering the key an exchange
-  already holds changes nothing. A key another exchange holds is refused.
+  the delete fails, the script exits non-zero: the new key is registered and
+  the mapping points at it, but the prior key stays in the table and still
+  authenticates until you delete it by hand. The message does not print the
+  key. List the table through the relay image, with the runtime `relay.env`
+  records, and delete the one key no line of `/etc/psilink-relay/exchange-keys`
+  holds:
+
+  ```sh
+  podman run --rm --network none -v /var/lib/psilink-relay:/var/lib/coturn \
+    --entrypoint turnadmin localhost/psilink-relay:installed \
+    -S -r <realm> -b /var/lib/coturn/turndb
+  podman run --rm --network none -v /var/lib/psilink-relay:/var/lib/coturn \
+    --entrypoint turnadmin localhost/psilink-relay:installed \
+    -X <key> -r <realm> -b /var/lib/coturn/turndb
+  ```
+
+  Registering the key an exchange already holds changes nothing. A key another
+  exchange holds is refused.
 - **The key on the command line.** The key is an argument to both the script
   and the container it starts, so it is visible in the host's process table
   while the command runs; do not run it on a host other accounts share.

@@ -54,27 +54,40 @@ turnadmin() {
     --entrypoint turnadmin "$IMAGE" "$@" -r "$REALM" -b /var/lib/coturn/turndb
 }
 
+# Every comparison is between concatenations, which awk compares as strings: a
+# bare field or -v value that looks numeric compares numerically, so "1.0"
+# would match "1" and "01" would match "1e0".
 key_of() {
   [ -f "$MAP_FILE" ] || return 0
-  awk -v id="$1" '$1 == id { print $2 }' "$MAP_FILE"
+  awk -v id="$1" '($1 "") == (id "") { print $2 }' "$MAP_FILE"
 }
 
 id_of_key() {
   [ -f "$MAP_FILE" ] || return 0
-  awk -v key="$1" '$2 == key { print $1 }' "$MAP_FILE"
+  awk -v key="$1" '($2 "") == (key "") { print $1 }' "$MAP_FILE"
 }
 
 # Rewrites the mapping without the exchange's line, plus "<id> <key>" when a key
-# is given, through a mode-600 temporary so a failure leaves the prior mapping.
+# is given, through a mode-600 temporary so a failure leaves the prior mapping
+# and no temporary.
 write_mapping() {
   local id="$1" key="${2:-}" tmp
-  tmp="$(mktemp "$MAP_FILE.XXXXXX")"
-  chmod 600 "$tmp"
-  if [ -f "$MAP_FILE" ]; then
-    awk -v id="$id" '$1 != id' "$MAP_FILE" > "$tmp"
+  tmp="$(mktemp "$MAP_FILE.XXXXXX")" || return 1
+  if ! {
+    chmod 600 "$tmp" &&
+      { [ ! -f "$MAP_FILE" ] || awk -v id="$id" '($1 "") != (id "")' "$MAP_FILE" > "$tmp"; } &&
+      { [ -z "$key" ] || printf '%s %s\n' "$id" "$key" >> "$tmp"; } &&
+      mv "$tmp" "$MAP_FILE"
+  }; then
+    rm -f "$tmp"
+    return 1
   fi
-  [ -z "$key" ] || printf '%s %s\n' "$id" "$key" >> "$tmp"
-  mv "$tmp" "$MAP_FILE"
+}
+
+# How to list the table by hand, for a message that leaves a row to remove.
+list_table_hint() {
+  printf "list the table with '%s run --rm --network none -v %s:/var/lib/coturn --entrypoint turnadmin %s -S -r %s -b /var/lib/coturn/turndb'" \
+    "$RUNTIME" "$DATA_DIR" "$IMAGE" "$REALM"
 }
 
 # One register or revoke at a time, so two runs cannot interleave their table

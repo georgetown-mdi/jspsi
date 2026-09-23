@@ -172,9 +172,18 @@ VERIFY_B=psilink-verify-b
 KEY_A="$(openssl rand -hex 32)"
 KEY_B="$(openssl rand -hex 32)"
 KEY_UNREGISTERED="$(openssl rand -hex 32)"
+# The ids this run registered and has not revoked; a failed revoke of one of
+# them leaves its row in the table, which the operator is told about.
+LIVE=()
 cleanup() {
-  "$HERE/revoke-exchange.sh" "$VERIFY_A" >/dev/null 2>&1
-  "$HERE/revoke-exchange.sh" "$VERIFY_B" >/dev/null 2>&1
+  local id
+  for id in "$VERIFY_A" "$VERIFY_B"; do
+    if "$HERE/revoke-exchange.sh" "$id" >/dev/null 2>&1; then continue; fi
+    case " ${LIVE[*]} " in
+      *" $id "*)
+        printf 'WARNING: could not revoke %s, so its key is left in the secrets table; run revoke-exchange.sh %s\n' "$id" "$id" >&2 ;;
+    esac
+  done
   return 0
 }
 trap cleanup EXIT
@@ -184,6 +193,8 @@ register() {
   if ! out="$("$HERE/register-exchange.sh" "$1" "$2" 2>&1)"; then
     report fail "could not register $1 for this run" "$(printf '%s' "$out" | tr '\n' ' ' | cut -c1-160)"
     TABLE_READY=0
+  else
+    LIVE+=("$1")
   fi
 }
 register "$VERIFY_A" "$KEY_A"
@@ -309,6 +320,7 @@ if [ "$TABLE_READY" = 1 ]; then
   expect_refused "a credential keyed with key B's 32 decoded bytes" "$U" "$(mint_over_decoded_bytes "$U" "$KEY_B")"
   expect_allocates "the same username's credential keyed with key B's 64 hex characters" "$U" "$(mint "$U" "$KEY_B")"
   if REV_OUT="$("$HERE/revoke-exchange.sh" "$VERIFY_A" 2>&1)"; then
+    LIVE=("$VERIFY_B")
     # Measured: a new allocation is refused within about 200 ms of the delete.
     sleep 1
     U="$(run_user verify-a-revoked)"
