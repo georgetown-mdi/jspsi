@@ -11,7 +11,9 @@ turnserver.conf
 static-auth-secret
 registrar-token
 exchange-keys
-exchange-keys.lock
+exchange-keys.imported
+turndb
+turndb-journal
 *.pem
 *.key
 *.crt

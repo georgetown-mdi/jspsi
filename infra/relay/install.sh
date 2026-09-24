@@ -130,17 +130,24 @@ fi
 command -v openssl >/dev/null 2>&1 || dnf -y install openssl
 command -v curl >/dev/null 2>&1 || dnf -y install curl
 
+# --- python3 ------------------------------------------------------------------
+# relay_table.py, which every key script, the sweep, and the registrar write the
+# secrets table through, runs on the distribution's python3 and its sqlite3
+# module; Amazon Linux 2023 ships both.
+command -v python3 >/dev/null 2>&1 || dnf -y install python3
+[ -x /usr/bin/python3 ] \
+  || die "the sweep and registrar units run /usr/bin/python3, which this host does not have; install python3 3.9 or later there and run again"
+/usr/bin/python3 -c 'import sqlite3' \
+  || die "/usr/bin/python3 has no sqlite3 module, which relay_table.py writes the secrets table with; install the distribution's python3 with its standard library and run again"
+
 # --- the registrar ------------------------------------------------------------
 # Optional: a host holding the relay-owner token runs the registrar (README.md,
-# The registrar), on the distribution's python3, which Amazon Linux 2023 ships.
+# The registrar).
 REGISTRAR_TOKEN_FILE="$ETC/registrar-token"
 REGISTRAR=0
 if [ -f "$REGISTRAR_TOKEN_FILE" ]; then
   REGISTRAR=1
   chmod 600 "$REGISTRAR_TOKEN_FILE"
-  command -v python3 >/dev/null 2>&1 || dnf -y install python3
-  [ -x /usr/bin/python3 ] \
-    || die "psilink-relay-registrar.service runs /usr/bin/python3, which this host does not have; install python3 3.9 or later there and run again, or delete $REGISTRAR_TOKEN_FILE to run without the registrar"
 fi
 
 # --- the static secret ------------------------------------------------------
@@ -174,21 +181,31 @@ IMAGE_UID="$("$RUNTIME" run --rm --entrypoint id "$IMAGE" -u | tr -d '[:space:]'
 case "$IMAGE_UID" in
   ''|*[!0-9]*) die "could not read the image's uid; got '$IMAGE_UID'" ;;
 esac
-log "the image runs as uid $IMAGE_UID"
+IMAGE_GID="$("$RUNTIME" run --rm --entrypoint id "$IMAGE" -g | tr -d '[:space:]')"
+case "$IMAGE_GID" in
+  ''|*[!0-9]*) die "could not read the image's gid; got '$IMAGE_GID'" ;;
+esac
+log "the image runs as uid $IMAGE_UID, gid $IMAGE_GID"
 record_env_value PSILINK_RELAY_IMAGE_UID "$IMAGE_UID"
+record_env_value PSILINK_RELAY_IMAGE_GID "$IMAGE_GID"
 
 # --- the secrets table ------------------------------------------------------
-# coturn reads the table's SQLite file as the image's account, and the key
-# scripts write it through the same image, so the directory is that account's.
-# turnadmin creates the file on the first registration.
-install -d -m 700 -o "$IMAGE_UID" /var/lib/psilink-relay
+# coturn creates the table's SQLite file at its first start and reads it as the
+# image's account. relay_table.py writes it as that same account -- the sweep
+# and registrar units run as it, and a key script run as root drops to it -- not
+# as another account in the image's group: SQLite's writer creates its journal
+# beside the file, and coturn, reading, must be able to roll back a journal a
+# failed write left, so the file, its journal, and the directory would all need
+# group write, which coturn does not give the file it creates. So the directory
+# is that account's alone, and the units run as its uid and gid.
+install -d -m 700 -o "$IMAGE_UID" -g "$IMAGE_GID" /var/lib/psilink-relay
 
 # --- the scripts this host runs ---------------------------------------------
 install -d -m 755 "$LIBEXEC" "$LIBEXEC/aws" "$LIBEXEC/certs"
 install -m 755 "$HERE/render-config.sh" "$HERE/verify.sh" "$HERE/mint-credential.sh" \
   "$HERE/register-exchange.sh" "$HERE/revoke-exchange.sh" "$HERE/sweep-exchanges.sh" \
   "$HERE/registrar.py" "$LIBEXEC/"
-install -m 644 "$HERE/turnserver.conf.tmpl" "$HERE/exchange-keys.sh" "$LIBEXEC/"
+install -m 644 "$HERE/turnserver.conf.tmpl" "$HERE/exchange-keys.sh" "$HERE/relay_table.py" "$LIBEXEC/"
 install -m 755 "$HERE/aws/external-ip.sh" "$LIBEXEC/aws/"
 install -m 755 "$HERE/certs/renew.sh" "$HERE/certs/deploy-hook.sh" "$LIBEXEC/certs/"
 
@@ -239,8 +256,14 @@ if [ -e "$STALE_UNIT" ]; then
 fi
 install -m 644 "$HERE/certs/psilink-relay-cert.service" "$HERE/certs/psilink-relay-cert.timer" "$UNIT_DIR/"
 install -m 644 "$HERE/psilink-relay-verify.service" "$HERE/psilink-relay-verify.timer" "$UNIT_DIR/"
-install -m 644 "$HERE/psilink-relay-sweep.service" "$HERE/psilink-relay-sweep.timer" \
-  "$HERE/psilink-relay-registrar.service" "$UNIT_DIR/"
+install -m 644 "$HERE/psilink-relay-sweep.timer" "$UNIT_DIR/"
+# The two units that run as the image's account, with its uid and gid filled in.
+for unit in psilink-relay-sweep.service psilink-relay-registrar.service; do
+  sed -e "s/__PSILINK_RELAY_IMAGE_UID__/$IMAGE_UID/g" -e "s/__PSILINK_RELAY_IMAGE_GID__/$IMAGE_GID/g" \
+    "$HERE/$unit" > "$UNIT_DIR/$unit.tmp"
+  chmod 644 "$UNIT_DIR/$unit.tmp"
+  mv "$UNIT_DIR/$unit.tmp" "$UNIT_DIR/$unit"
+done
 
 systemctl daemon-reload || die "systemctl daemon-reload failed, so systemd has not read the relay's unit; check systemd-analyze verify and run again"
 systemctl enable --now psilink-relay-cert.timer \
@@ -260,6 +283,28 @@ fi
 systemctl restart psilink-relay.service \
   || die "psilink-relay.service did not start; journalctl -u psilink-relay.service carries coturn's own output"
 log "psilink-relay.service started"
+
+# An install from before the mapping moved into the secrets table kept it as a
+# text file under /etc; its exchanges are carried into the table once coturn
+# has created it, and the file is set aside.
+OLD_MAP_FILE="$ETC/exchange-keys"
+if [ -f "$OLD_MAP_FILE" ]; then
+  for _ in $(seq 30); do
+    [ -f /var/lib/psilink-relay/turndb ] && break
+    sleep 1
+  done
+  (
+    set -a
+    # shellcheck disable=SC1090
+    . "$ENV_FILE"
+    set +a
+    /usr/bin/python3 -B "$LIBEXEC/relay_table.py" import-mapping "$OLD_MAP_FILE"
+  ) < /dev/null \
+    || die "could not carry $OLD_MAP_FILE into the secrets table; its exchanges cannot be revoked by id until it is. Fix the cause above and run install.sh again"
+  mv "$OLD_MAP_FILE" "$OLD_MAP_FILE.imported"
+  rm -f "$ETC/exchange-keys.lock"
+  log "carried $OLD_MAP_FILE into the secrets table and moved it to $OLD_MAP_FILE.imported"
+fi
 
 if [ "$REGISTRAR" = 1 ]; then
   systemctl enable psilink-relay-registrar.service \

@@ -1,11 +1,11 @@
 # The relay's registrar: registers and revokes exchange keys over HTTPS for a
 # caller holding the relay-owner token (README.md, The registrar). install.sh
-# puts this at /etc/systemd/system/ and enables it only on a host holding
-# /etc/psilink-relay/registrar-token.
+# renders this to /etc/systemd/system/, filling in the relay image's uid and
+# gid, and enables it only on a host holding /etc/psilink-relay/registrar-token.
 #
-# It runs as root because register-exchange.sh and revoke-exchange.sh do: they
-# write the root-only mapping under /etc/psilink-relay and start the relay image
-# on the container runtime.
+# It runs as the relay image's account, which owns the secrets table, with no
+# capability and no container runtime: the token and certificate reach it as
+# systemd credentials, since /etc/psilink-relay is root's alone.
 
 [Unit]
 Description=psilink relay registrar (HTTPS)
@@ -16,9 +16,46 @@ ConditionPathExists=/etc/psilink-relay/registrar-token
 
 [Service]
 EnvironmentFile=/etc/psilink-relay/relay.env
-ExecStart=/usr/bin/python3 /opt/psilink-relay/registrar.py
+ExecStart=/usr/bin/python3 -B /opt/psilink-relay/registrar.py
 Restart=always
 RestartSec=5
+User=__PSILINK_RELAY_IMAGE_UID__
+Group=__PSILINK_RELAY_IMAGE_GID__
+LoadCredential=registrar-token:/etc/psilink-relay/registrar-token
+LoadCredential=fullchain.pem:/etc/psilink-relay/certs/fullchain.pem
+LoadCredential=privkey.pem:/etc/psilink-relay/certs/privkey.pem
+
+# The sandbox, which psilink-relay-sweep.service repeats. The first seven
+# held under both runtimes on the 2026-09-24 host run, when the registrar ran
+# as root and started containers, with ProtectSystem at full and /etc writable;
+# the rest are what a process with neither admits.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/psilink-relay
+ProtectKernelTunables=true
+RestrictSUIDSGID=true
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+ProcSubset=pid
+PrivateDevices=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+RemoveIPC=true
+UMask=0077
 
 [Install]
 WantedBy=multi-user.target

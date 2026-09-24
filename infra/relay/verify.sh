@@ -178,37 +178,27 @@ KEY_A="$(openssl rand -hex 32)"
 KEY_B="$(openssl rand -hex 32)"
 KEY_R="$(openssl rand -hex 32)"
 KEY_UNREGISTERED="$(openssl rand -hex 32)"
-# Cleanup revokes each id, which drops its mapping line, then removes each key
-# from the table by value: a register can add the row and still fail, leaving a
-# key no mapping line holds.
+# Cleanup revokes each id, which removes its row and its mapping in one
+# transaction; an id already gone is not a failure.
 cleanup() {
-  local id
+  local id out status
   for id in "$VERIFY_A" "$VERIFY_B" "$VERIFY_R"; do
-    "$HERE/revoke-exchange.sh" "$id" > /dev/null 2>&1 || true
+    status=0
+    out="$("$HERE/revoke-exchange.sh" "$id" 2>&1)" || status=$?
+    case "$status" in
+      0|3) ;;
+      *) printf 'WARNING: could not revoke %s, so the key this run registered for it may still be in the secrets table; run revoke-exchange.sh %s once the table can be written: %s\n' "$id" "$id" "$(printf '%s' "$out" | tr '\n' ' ')" >&2 ;;
+    esac
   done
-  (
-    # shellcheck source=exchange-keys.sh
-    . "$HERE/exchange-keys.sh"
-    set -- "$VERIFY_A" "$KEY_A" "$VERIFY_B" "$KEY_B" "$VERIFY_R" "$KEY_R"
-    while [ "$#" -gt 0 ]; do
-      if [ -n "$2" ]; then
-        remove_key_by_value "$2"
-        case "$?" in
-          1) ;;
-          0) printf 'WARNING: the key this run registered for %s is still in the secrets table; run revoke-exchange.sh %s if %s has a line for it, otherwise %s\n' "$1" "$1" "$MAP_FILE" "$(list_table_hint)" >&2 ;;
-          *) printf 'WARNING: could not read the secrets table to confirm the key this run registered for %s left it; %s\n' "$1" "$(list_table_hint)" >&2 ;;
-        esac
-      fi
-      shift 2
-    done
-  ) < /dev/null || printf 'WARNING: could not check the secrets table for the keys this run registered for %s, %s, and %s; see the message above\n' "$VERIFY_A" "$VERIFY_B" "$VERIFY_R" >&2
   return 0
 }
 trap cleanup EXIT
 TABLE_READY=1
+# The ids are under verify.sh's reserved prefix, which register-exchange.sh
+# refuses from any other caller.
 register() {
   local out
-  if ! out="$("$HERE/register-exchange.sh" "$1" "$2" 2>&1)"; then
+  if ! out="$(printf '%s\n' "$2" | PSILINK_RELAY_VERIFY_RUN=1 "$HERE/register-exchange.sh" "$1" none 2>&1)"; then
     report fail "could not register $1 for this run" "$(printf '%s' "$out" | tr '\n' ' ')"
     TABLE_READY=0
   fi
@@ -360,6 +350,7 @@ registrar_status() {
   {
     printf 'url = "https://%s:%s/exchanges/%s"\n' "$REALM" "$REGISTRAR_PORT" "$VERIFY_R"
     printf 'request = "%s"\n' "$method"
+    printf 'header = "Psilink-Relay-Verify-Run: 1"\n'
     [ -z "$token" ] || printf 'header = "Authorization: Bearer %s"\n' "$token"
     if [ -n "$body" ]; then
       printf 'header = "Content-Type: application/json"\n'
@@ -375,13 +366,8 @@ registrar_read_back() {
   (
     # shellcheck source=exchange-keys.sh
     . "$HERE/exchange-keys.sh"
-    mapped="$(key_of "$VERIFY_R")"
-    listed=0
-    table_lists_key "$KEY_R" || listed=$?
-    if [ "$mapped" = "$KEY_R" ] && [ "$listed" -eq 0 ]; then exit 0; fi
-    if [ "$mapped" != "$KEY_R" ] && [ "$listed" -eq 1 ]; then exit 3; fi
-    exit 2
-  ) < /dev/null
+    printf '%s\n' "$KEY_R" | relay_table status "$VERIFY_R" 2>/dev/null
+  )
 }
 expect_status() {
   local label="$1" want="$2" got="$3"

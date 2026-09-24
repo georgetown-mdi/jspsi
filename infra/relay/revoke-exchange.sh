@@ -14,8 +14,4 @@ fi
 # shellcheck source=exchange-keys.sh
 . "$(cd "$(dirname "$0")" && pwd)/exchange-keys.sh"
 
-ID="$1"
-check_exchange_id "$ID"
-
-revoke_exchange "$ID" || die "$REVOKE_ERROR"
-printf 'revoked exchange %s (realm %s)\n' "$ID" "$REALM"
+relay_table revoke "$1" < /dev/null

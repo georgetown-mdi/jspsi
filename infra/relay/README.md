@@ -68,12 +68,16 @@ and `verify.sh`'s secrets-table probes ran against the pinned image in a
 throwaway Amazon Linux 2023 container with its own docker daemon, with every
 secrets-table probe passing, the table-only and static-secret cases alike.
 
-**The registrar, the lapse sweep, and `max-allocate-lifetime` have not run
-against a relay.** They are driven only against the fixture host below.
-Unmeasured: whether an unopenable `turndb` makes `turnadmin -S` print an
-`ERROR` line (the key scripts' read-back assumes it, measured for `-s` only),
-and how long an allocation open at a revoke survives under this template's
-`max-allocate-lifetime`.
+**The registrar, the lapse sweep, and `max-allocate-lifetime` were driven
+beside the pinned coturn on 2026-09-24**, on an Amazon Linux 2023 docker host
+and a Fedora 42 podman host, both installed by `install.sh`: registration,
+replacement, revocation, the sweep's lapse boundary, the registrar's refusals,
+and `verify.sh` with its registrar probe all behaved as this document states.
+That run went through the earlier write path, which ran `turnadmin` in a
+throwaway container; the write path is `relay_table.py`, which writes the same
+table directly, and its coupling to coturn's table is held by a check against
+the pinned image (below). What that run measured about open allocations is
+under Revoking in [Per-exchange keys](#per-exchange-keys).
 
 `render-config.sh` and `mint-credential.sh` were also driven locally against a
 fixture before the live run: `render-config.sh` renders the template, writes
@@ -89,10 +93,15 @@ the delivery decision is in
 [`docs/notes/standing-relay-delivery.md`](../../docs/notes/standing-relay-delivery.md).
 Neither is restated here.
 
-Nothing in this directory runs a relay in CI. Two tests under `scripts/` drive
-`certs/deploy-hook.sh`, the key scripts, the sweep, the registrar, `verify.sh`'s
-cleanup and registrar probe, and `render-config.sh` against a fixture host with
-a stub container runtime, and none of it is a build input. The one
+Nothing in this directory runs a relay in CI. Tests under `scripts/` drive
+`certs/deploy-hook.sh`, `relay_table.py`, the key scripts, the sweep, the
+registrar, `verify.sh`'s cleanup and registrar probe, and `render-config.sh`
+against a fixture host whose `turndb` is a real SQLite file holding coturn's
+`turn_secret` table. `scripts/relay-turn-secret-schema.test.mjs` holds that
+table's shape to the pinned image: where docker or podman answers, the image's
+own `turnadmin` creates a table, `relay_table.py` reads its row and writes its
+own, and `turnadmin` lists the result; where neither answers, the test is
+reported as skipped rather than passed. None of it is a build input. The one
 other repository-level coupling is the docker Dependabot entry for
 `/infra/relay`, which raises a base image bump as a pull request.
 
@@ -112,9 +121,9 @@ other repository-level coupling is the docker Dependabot entry for
    `verify.sh`.
 5. Read `verify.sh`'s output. A relay that starts and cannot allocate looks
    identical from the console.
-6. Per exchange: `register-exchange.sh <exchange-id> <key-hex64> [<max-age-days>]`
-   with the exchange's relay key, and `revoke-exchange.sh <exchange-id>` when it
-   ends -- see [Per-exchange keys](#per-exchange-keys) -- or the same through
+6. Per exchange: `register-exchange.sh <exchange-id> <max-age-days|none>`
+   with the exchange's relay key on standard input, and
+   `revoke-exchange.sh <exchange-id>` when it ends -- see [Per-exchange keys](#per-exchange-keys) -- or the same through
    [the registrar](#the-registrar). The parties mint their own credentials from
    that key.
 
@@ -132,10 +141,11 @@ or the Dockerfile and it converges.
 | `psilink-relay-docker.service` | The same container on a docker host: a plain systemd unit running `docker run` in the foreground, installed as `/etc/systemd/system/psilink-relay.service`. Same image, mounts, and flags as the Quadlet unit -- the two are edited together |
 | `psilink-relay-verify.service`, `.timer` | The daily verification. A standing relay is idle between exchanges, so nothing else notices it stopped carrying allocations until a partner is waiting on one |
 | `install.sh` | The whole install, idempotent |
-| `register-exchange.sh`, `revoke-exchange.sh`, `exchange-keys.sh` | Add and remove one exchange's relay key in the secrets table; the third is the shared part both source, and `sweep-exchanges.sh` too. See [Per-exchange keys](#per-exchange-keys) |
+| `relay_table.py` | The one write path to the secrets table: register, revoke, and sweep, each one SQLite transaction, as the relay image's account. Everything below that touches the table calls it. See [Per-exchange keys](#per-exchange-keys) |
+| `register-exchange.sh`, `revoke-exchange.sh`, `exchange-keys.sh` | Add and remove one exchange's relay key, through `relay_table.py`; the third is the shared part both source, and `sweep-exchanges.sh` and `verify.sh` too. See [Per-exchange keys](#per-exchange-keys) |
 | `sweep-exchanges.sh`, `psilink-relay-sweep.service`, `.timer` | Revokes every exchange whose registration has lapsed, hourly. See [Per-exchange keys](#per-exchange-keys), Lifetime |
-| `registrar.py`, `psilink-relay-registrar.service` | The optional HTTPS registrar, which runs the register and revoke scripts for a caller holding the relay-owner token. See [The registrar](#the-registrar) |
-| `verify.sh` | Drives a real TURNS handshake, a real allocation, a probe that an allocation toward an internal address is refused, and the secrets table: two keys registered for the run both allocate, an unregistered key and a credential keyed with a key's decoded bytes are refused, and a revoked key's new allocation is refused. Where the host holds a registrar token it also asks the registrar: calls with no token or a wrong one are answered 401 and write nothing, and a registration and a revocation with the token reach the mapping and the table; with no token it says it skipped the registrar. On exit it revokes its own exchanges, then removes each of its keys from the table by value, so a key whose register added the row and then failed is removed too, and confirms each is gone by listing the table; it warns naming the exchange id, never the key, for any key still listed or when the table cannot be read. Passes only on an observed refusal: a question that could not be asked reports UNCLEAR and fails. Connects to the realm's name by default; `PSILINK_RELAY_VERIFY_CONNECT` overrides the TCP connect target while the realm still names the SNI and TURN realm -- `install.sh` sets it to the instance's private address for the end-of-install run, because EC2 does not hairpin an instance's traffic back to its own Elastic IP, while the daily timer stays on the public name so it fails if that path breaks. `PSILINK_RELAY_VERIFY_WAIT` sets how many seconds it retries a bare TCP connect before its first probe, waiting for a just-(re)started listener to come up; 30 by default |
+| `registrar.py`, `psilink-relay-registrar.service` | The optional HTTPS registrar, which registers and revokes through `relay_table.py` for a caller holding the relay-owner token. See [The registrar](#the-registrar) |
+| `verify.sh` | Drives a real TURNS handshake, a real allocation, a probe that an allocation toward an internal address is refused, and the secrets table: two keys registered for the run both allocate, an unregistered key and a credential keyed with a key's decoded bytes are refused, and a revoked key's new allocation is refused. Where the host holds a registrar token it also asks the registrar: calls with no token or a wrong one are answered 401 and write nothing, and a registration and a revocation with the token reach the mapping and the table; with no token it says it skipped the registrar. Its exchanges are under the ids `psilink-verify-a`, `-b`, and `-registrar`, a prefix every other caller is refused. On exit it revokes them, each in one transaction, and warns naming the exchange id, never the key, for any it could not revoke. Passes only on an observed refusal: a question that could not be asked reports UNCLEAR and fails. Connects to the realm's name by default; `PSILINK_RELAY_VERIFY_CONNECT` overrides the TCP connect target while the realm still names the SNI and TURN realm -- `install.sh` sets it to the instance's private address for the end-of-install run, because EC2 does not hairpin an instance's traffic back to its own Elastic IP, while the daily timer stays on the public name so it fails if that path breaks. `PSILINK_RELAY_VERIFY_WAIT` sets how many seconds it retries a bare TCP connect before its first probe, waiting for a just-(re)started listener to come up; 30 by default |
 | `mint-credential.sh` | One time-limited credential under the static secret, on a host that holds one: `<expiry>:<name>` as the username, the base64 HMAC-SHA1 of it as the password |
 | `relay.env.example` | The host's one configuration file, copied to `/etc/psilink-relay/relay.env` |
 | `certs/` | ACME DNS-01 renewal: the timer and its unit, the client-neutral `renew.sh`, the deploy hook, and the provider credential's example |
@@ -150,101 +160,96 @@ in the SQLite file `/var/lib/psilink-relay/turndb` (mounted at
 `/var/lib/coturn/turndb`), and accepts a credential minted under any row.
 
 Run both scripts as root on the relay host, from `/opt/psilink-relay`, or call
-[the registrar](#the-registrar), which runs the same scripts:
+[the registrar](#the-registrar), which writes through the same code:
 
 ```sh
-register-exchange.sh <exchange-id> <key-hex64> [<max-age-days>]
+register-exchange.sh <exchange-id> <max-age-days|none>   # the key on standard input
 revoke-exchange.sh <exchange-id>
 ```
 
 - **The arguments.** The exchange id is 1 to 128 of `[A-Za-z0-9._-]`, not
   starting with `-`. An id containing a run of 64 hex characters of either
   case is refused, so a key passed in the id's place is never registered or
-  journaled. The key is 64 lowercase hex characters, the form coturn
-  keys its HMAC with. max-age-days, optional, is a whole number of days from 1
-  to 36500 -- see Lifetime below. Either script refuses a malformed argument
-  and names it, without printing the value.
-- **Registering.** Adds the key's row. An exchange already registered has its
-  new row added, then its prior row deleted, so the relay ends holding only its
-  current key and both keys allocate for the moment between -- register again
-  after each [rotation](../../docs/spec/PROTOCOL.md#shared-secret-rotation). If
-  the delete fails, the script exits non-zero: the new key is registered and
-  the mapping points at it, but the prior key stays in the table and still
-  authenticates until you delete it by hand. The message does not print the
-  key. List the table through the relay image, with the runtime `relay.env`
-  records, compare it against `/etc/psilink-relay/exchange-keys`, and delete
-  each listed key no line of that file holds:
+  journaled, and so is an id starting with `psilink-verify-`, which `verify.sh`
+  registers and revokes on every run. max-age-days is a whole number of days
+  from 1 to 36500, or `none` for a row that never lapses -- see Lifetime below;
+  it is required, so a registration never clears a lapse by leaving it out.
+  Either script refuses a malformed argument and names it, without printing the
+  value.
+- **The key.** 64 lowercase hex characters, the form coturn keys its HMAC with,
+  read from standard input: typed at a terminal, where it is not echoed, or
+  piped. It is never an argument, so it does not reach the process table, the
+  shell's history, or a `sudo` log:
 
   ```sh
-  podman run --rm --network none -v /var/lib/psilink-relay:/var/lib/coturn \
-    --entrypoint turnadmin localhost/psilink-relay:installed \
-    -S -r <realm> -b /var/lib/coturn/turndb
-  podman run --rm --network none -v /var/lib/psilink-relay:/var/lib/coturn \
-    --entrypoint turnadmin localhost/psilink-relay:installed \
-    -X <key> -r <realm> -b /var/lib/coturn/turndb
+  printf '%s\n' "$KEY" | /opt/psilink-relay/register-exchange.sh exchange-1 90
   ```
 
-  Registering the key an exchange already holds leaves the table alone and
-  renews the row: its mapping line takes the new registration time and the
-  call's max-age-days, or none when the call gives none. A key another
-  exchange holds is refused.
-- **The key on the command line.** The key is an argument to both the script
-  and the container it starts, so it is visible in the host's process table
-  while the command runs, it stays in the shell's history, and a command run
-  through `sudo` may be logged with its arguments; do not run it on a host
-  other accounts share, and clear the history line after registering.
-- **Revoking.** Deletes the exchange's row, whether by `revoke-exchange.sh`,
-  the registrar, or the sweep. What a revoke promises:
+- **Registering.** Adds the key's row and maps the exchange to it. An exchange
+  already registered has its prior row deleted in the same transaction, so the
+  relay holds only its current key from the moment the call returns -- register
+  again after each [rotation](../../docs/spec/PROTOCOL.md#shared-secret-rotation).
+  Registering the key an exchange already holds renews its row: the new
+  registration time and the call's max-age-days. A key another exchange holds
+  is refused. The message states the resulting lapse.
+- **Revoking.** Deletes the exchange's row and its mapping in one transaction,
+  whether by `revoke-exchange.sh`, the registrar, or the sweep. Measured against
+  coturn 4.18.0, what a revoke does and does not do:
   - A new allocation under the key is refused within about 200 ms, with no
-    restart (measured against coturn 4.18.0).
-  - An allocation already open is NOT cut: its refreshes kept succeeding for
-    over two minutes after the delete, through a forced re-authentication
-    (measured against coturn 4.18.0).
-  - Once its client stops refreshing, an open allocation ends within 600 s:
-    `turnserver.conf.tmpl` sets `max-allocate-lifetime=600`, the longest
-    lifetime one allocate or refresh is granted. Not yet measured against a
-    relay.
-  - Whether coturn also ends an allocation that keeps refreshing at its
-    credential's expiry (at most 3600 s after minting for a credential psilink
-    mints) has not been measured. Until it is, an allocation whose client keeps
-    refreshing is bounded by nothing on the relay side.
+    restart.
+  - An allocation already open is NOT cut. Its client keeps it for as long as
+    it keeps refreshing: refreshes under a revoked key and an expired credential
+    went on succeeding until the client exited, twelve minutes past the
+    credential's expiry, and coturn accepted every forced re-authentication
+    after a stale nonce, with the default nonce lifetime and with
+    `stale-nonce=60` alike. Neither a revoke nor a credential's expiry ends a
+    client that keeps refreshing, and a shorter `stale-nonce` does not help.
+  - `turnserver.conf.tmpl` sets `max-allocate-lifetime=600`, the longest
+    lifetime one allocate or refresh is granted. That bounds only a client that
+    stops refreshing: coturn closed such an allocation 600 s after its last
+    refresh.
 - **Lifetime.** A row registered with max-age-days lapses that many days after
-  its registration, and `sweep-exchanges.sh`, run hourly by
-  `psilink-relay-sweep.timer`, revokes it within the hour. Registering the
-  exchange's next key, or its current key again, replaces the row and restarts
-  the count, so each run's registration is the renewal and an exchange that keeps running is never
-  swept. max-age-days is the managed-exchange record's `tokenMaxAgeDays`
+  its registration, and the sweep -- `sweep-exchanges.sh`, or
+  `psilink-relay-sweep.timer` hourly -- revokes it within the hour. Registering
+  the exchange's next key, or its current key again, replaces the row and
+  restarts the count, so each run's registration is the renewal and an exchange
+  that keeps running is never swept. max-age-days is the managed-exchange
+  record's `tokenMaxAgeDays`
   ([MANAGED_EXCHANGE_RECORD.md, Persisted across runs](../../docs/spec/MANAGED_EXCHANGE_RECORD.md#persisted-across-runs)): each successful run stamps the stored secret's
   `expires` that many days out and rotates the secret, and the relay forgets
   the exchange's key at the same bound after which the record's secret lapses
   and a re-invite is needed. Its ceiling, 36500, is core's
   `MAX_TOKEN_MAX_AGE_DAYS` (`packages/core/src/config/connection.ts`). The
-  record's policy is off by default; a row registered without max-age-days,
-  like a record with no policy, has no lapse and lives until it is revoked or
-  replaced. There is no relay-side setting for the lapse.
+  record's policy is off by default; a row registered with `none`, like a record
+  with no policy, has no lapse and lives until it is revoked or replaced. There
+  is no relay-side setting for the lapse.
 - **The mapping.** `turn_secret` is keyed by realm and key and holds no exchange
-  id, so the scripts keep `/etc/psilink-relay/exchange-keys`, one
-  `<exchange-id> <key> <registered-at> <max-age-days>` line per registered
-  exchange, mode 600: registered-at is the Unix time of the registration, and
-  max-age-days is `-` for a row with no lapse. A line with only the first two
-  fields never lapses. A text file
-  rather than a second SQLite database, because the host has no `sqlite3`
-  requirement and the image carries no `sqlite3` binary; it sits under `/etc`,
-  not in the data directory, so only root can change which row an exchange owns.
-  The scripts hold a lock on `exchange-keys.lock` for each edit, and the sweep
-  for its whole run.
-- **How they reach the table.** Through the relay image's own `turnadmin`
-  (`-s` to add, `-X` to delete, with the server's realm), in a throwaway
-  container with no network, as the image's account -- which owns the data
-  directory, so the SQLite file `turnadmin` creates on the first registration
-  is one the server can read. A host with coturn's `turnadmin` installed could
-  run the same commands against `/var/lib/psilink-relay/turndb` as that account.
-  `turnadmin` exits 0 when a write fails -- a read-only or unopenable `turndb`
-  -- so each script lists the table after its write and judges the write by
-  whether the key is there, without printing the listing. A register whose key
-  did not reach the table, or a revoke whose key is still there, exits non-zero
-  with any error line coturn printed and leaves the mapping as it was, so the same
-  command can be run again once `turndb` is writable by the image's account.
+  id, so `relay_table.py` keeps a second table in the same file,
+  `psilink_exchange`: the exchange id, the realm, the key, the Unix time of the
+  registration, and max-age-days (empty for no lapse). coturn reads neither the
+  table nor anything else it does not know. One file means a register, revoke,
+  or sweep is one SQLite transaction across the row and the mapping: it lands
+  whole or not at all, and its result is the write's own, with nothing read
+  back. `install.sh` carries a mapping an earlier install kept in
+  `/etc/psilink-relay/exchange-keys` into the table once, and moves that file
+  to `exchange-keys.imported`.
+- **How they reach the table.** `relay_table.py`, on the host's own `python3`
+  and its `sqlite3` module, opens `/var/lib/psilink-relay/turndb` as the relay
+  image's account -- a script run as root drops to the account that owns the
+  file first -- so every file SQLite creates beside it is one coturn can use. No
+  container runtime is involved. It never creates `turndb`: coturn does at its
+  first start, and until then every call exits 1 naming the file. A table that
+  cannot be written -- read-only, unopenable, locked past 10 s -- exits 1 with
+  SQLite's own reason, having changed nothing. A row no exchange maps -- one
+  added by hand -- is removed by value, the key on standard input:
+  `printf '%s\n' "$KEY" | python3 /opt/psilink-relay/relay_table.py forget-key`,
+  with `relay.env`'s variables in the environment.
+- **A replaced `turndb` needs a restart.** coturn holds the file open. A
+  `turndb` deleted or replaced under a running coturn -- by hand, or a restore
+  from backup -- leaves the server reading the file it opened while every write
+  lands in the new one: a revoke reports success while the key still
+  allocates, and a registration does not allocate. After touching the file,
+  `systemctl restart psilink-relay.service`.
 
 **The static secret is optional.** A host holding
 `/etc/psilink-relay/static-auth-secret` renders it beside the table, and coturn
@@ -273,45 +278,58 @@ settings, never in a served bundle. To turn it off, delete the file and run
 `systemctl restart psilink-relay-registrar.service`.
 
 - **The calls.** Every request needs `Authorization: Bearer <token>`; without
-  it, or with a wrong token, the answer is 401 and nothing runs. A CORS
+  it, or with a wrong token, the answer is 401 and nothing is written. A CORS
   preflight (`OPTIONS`) is the one exception: a browser sends it with no
   token, and it is answered 204 and does nothing. Any other method -- `GET`,
   `TRACE`, `PROPFIND`, anything but `PUT`, `DELETE`, and `OPTIONS` -- is
-  answered 401 without the token and 405 with it, in JSON, and runs nothing.
+  answered 401 without the token and 405 with it, in JSON, and writes nothing.
 
-  | request | runs | answer |
+  | request | writes | answer |
   | --- | --- | --- |
-  | `PUT /exchanges/<exchange-id>` with `{"key": "<key-hex64>", "maxAgeDays": <days>}`, `maxAgeDays` optional | `register-exchange.sh <exchange-id> <key-hex64> [<days>]` | 200 and `{"message": ...}` |
-  | `DELETE /exchanges/<exchange-id>` | `revoke-exchange.sh <exchange-id>` | 200 and `{"message": ...}` |
+  | `PUT /exchanges/<exchange-id>` with `{"key": "<key-hex64>", "maxAgeDays": <days> \| null}` | what `register-exchange.sh <exchange-id> <days\|none>` writes | 200 and `{"message": ..., "maxAgeDays": ..., "lapsesAt": ...}` |
+  | `DELETE /exchanges/<exchange-id>` | what `revoke-exchange.sh <exchange-id>` writes | 200 and `{"message": ...}` |
 
+  `maxAgeDays` is required: a whole number of days, or `null` for a row that
+  never lapses. A body that leaves it out is refused, so a re-registration
+  cannot clear a lapse by omission, and the answer states the resulting lapse:
+  `maxAgeDays` as registered and `lapsesAt` as an ISO 8601 UTC time, or `null`.
   The registrar checks the exchange id, the key, and `maxAgeDays` against the
-  scripts' own rules (see [Per-exchange keys](#per-exchange-keys), The
-  arguments) and answers a value that fails them 400 with a fixed message
-  naming the field, never the value, before any script runs; the scripts
-  check again. A body that is not that JSON object is answered 400, one over
-  1024 bytes 413, and one without a `Content-Length` 411, each before any
-  script runs. A request line or header block the registrar cannot parse is
-  answered in JSON with the connection closed. A script
-  that refuses or fails is answered 409 with `{"error": ...}` holding its last
-  message, which never contains the key. Registering replaces the exchange's
-  prior row, as the script does; `maxAgeDays` is the record's `tokenMaxAgeDays`
-  (see [Per-exchange keys](#per-exchange-keys), Lifetime). One call runs at a
-  time.
+  rules in [Per-exchange keys](#per-exchange-keys), The arguments, and answers a
+  value that fails them 400 with a fixed message naming the field, never the
+  value, before anything is written. An id starting with `psilink-verify-` is
+  refused 400 unless the request carries `Psilink-Relay-Verify-Run: 1`, which
+  `verify.sh` sends and which the preflight does not allow a browser to send. A
+  body that is not that JSON object is answered 400, one over 1024 bytes 413,
+  and one without a `Content-Length` 411. A request line or header block the
+  registrar cannot parse is answered in JSON with the connection closed. A
+  refusal on the exchange's state -- a key another exchange holds, an id not
+  registered -- is answered 409, and a table that cannot be written 500, each
+  with `{"error": ...}`, which never contains the key. One write runs at a time.
+- **Authentication and CORS.** Authentication reads the `Authorization` header
+  and nothing else -- no cookie, no query parameter -- and no answer carries
+  `Access-Control-Allow-Credentials`, so a browser's ambient credentials never
+  authenticate a cross-origin call. `Access-Control-Allow-Origin: *` is safe for
+  that reason. `scripts/relay-exchange-keys.test.mjs` holds both.
 - **Where it listens.** HTTPS on `PSILINK_RELAY_REGISTRAR_PORT` in `relay.env`,
   8443 by default, on every address, with the relay's own certificate from
   `/etc/psilink-relay/certs`; the certificate deploy hook restarts it when the
   certificate changes. TURNS holds 443, so the registrar cannot share it. Open
   the port in the instance's security group to the addresses the operator
   registers from ([aws/provision.md](aws/provision.md), Ports).
-- **How it reaches the table.** It runs `register-exchange.sh` and
-  `revoke-exchange.sh` beside it, so the table and mapping have one write path
-  and every read-back and lock above applies. That is why it runs as root, as
-  the scripts do; it is `python3` from the distribution (3.9 or later, the
-  standard library only), which Amazon Linux 2023 ships. The key reaches the
-  scripts as an argument, with the process-table exposure described above.
+- **How it reaches the table, and as whom.** In-process, through
+  `relay_table.py`, so the table and mapping have one write path. It runs as the
+  relay image's uid and gid, which `install.sh` reads from the image and fills
+  into the unit, with no capability and no container runtime; the token and
+  certificate under the root-only `/etc/psilink-relay` reach it as systemd
+  credentials (`LoadCredential=`). The unit carries a full systemd sandbox --
+  read-only system and no home, a private `/tmp` and `/dev`, no kernel,
+  cgroup, clock, or hostname writes, the `@system-service` system calls, and
+  write access to `/var/lib/psilink-relay` alone -- and the sweep's unit the
+  same with no network. It is `python3` from the distribution (3.9 or later,
+  the standard library only), which Amazon Linux 2023 ships.
 - **What it logs.** One line per request to the journal (`journalctl -u
   psilink-relay-registrar.service`), naming the method, the status, and the
-  path, and any message a script printed. The path is logged only when it is
+  path, and the result of each write. The path is logged only when it is
   `/exchanges/<exchange-id>` with a well-formed id, and the method only when
   it is a standard one; any other path or method, and any part of a malformed
   request line, is replaced by a fixed placeholder, since it could hold a key
@@ -408,8 +426,7 @@ given.
 | `/etc/psilink-relay/static-auth-secret` | Optional. The static secret `mint-credential.sh` signs under, mode 600. It never appears on a unit's `ExecStart` line, in a tracked file, or in the journal |
 | `/etc/psilink-relay/registrar-token` | Optional. The relay-owner token the registrar requires, mode 600; the registrar runs only where it exists |
 | `/etc/psilink-relay/turnserver.conf` | The rendered configuration, mode 600, because it can hold that secret. Rendered from the tracked template on every start |
-| `/etc/psilink-relay/exchange-keys` | Which registered key belongs to which exchange, mode 600 |
-| `/var/lib/psilink-relay/turndb` | The secrets table, owned by the container's uid |
+| `/var/lib/psilink-relay/turndb` | The secrets table and the exchange mapping beside it, owned by the container's uid, in a mode-700 directory of that account's |
 | `/etc/psilink-relay/certs/` | The certificate and private key the ACME hook deploys. The key is mode 600 and owned by the container's uid |
 | `/etc/psilink-relay/relay.env` | The realm, the port range, the quotas, and the external-address helper. Copy [`relay.env.example`](relay.env.example) |
 | `/etc/psilink-relay/acme.env` | The ACME contact, client, provider, and the provider's credential. Copy [`certs/env.example`](certs/env.example) |
