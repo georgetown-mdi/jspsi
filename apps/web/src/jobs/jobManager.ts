@@ -54,6 +54,7 @@ import {
 import {
   mountedConfigurationUnchanged,
   openMountedConfiguration,
+  signingPathSettings,
 } from "./configLoad";
 import {
   resolveSigningIdentityPath,
@@ -199,6 +200,24 @@ export class JobSigningIdentityExposedError extends Error {
       "a rendezvous directory holds this party's signing identity, so the run would publish the private key",
     );
     this.name = "JobSigningIdentityExposedError";
+  }
+}
+
+/**
+ * Thrown by {@link JobManager.createJob} for a signed run of the opened
+ * configuration the operator did not convert, where that configuration states
+ * a signing path of its own. The console signs only with its own identity and
+ * writes the receipt only where it serves it, so running would replace the
+ * operator's paths without their say. The browser withholds this run and
+ * offers the conversion; this is the server's own check on it. The route maps
+ * it to a 400 naming the refusal.
+ */
+export class MountedSigningPathsUnconvertedError extends Error {
+  constructor() {
+    super(
+      "the opened configuration states signing paths of its own and was not converted to the console's",
+    );
+    this.name = "MountedSigningPathsUnconvertedError";
   }
 }
 
@@ -601,6 +620,14 @@ export class JobManager {
     const opened = runsOpenedConfiguration
       ? this.openedConfiguration
       : undefined;
+    if (
+      intent.mode !== "zeroSetup" &&
+      intent.mountedConfigurationConverted !== true &&
+      intent.signing?.mode === "certificate" &&
+      opened?.document !== undefined &&
+      signingPathSettings(opened.document).length > 0
+    )
+      throw new MountedSigningPathsUnconvertedError();
     // Resolved after the busy check for the reason the refusal below states,
     // and before the slot is claimed, so a location naming no path in the
     // secrets mount leaves the console free rather than mid-create.
@@ -1023,7 +1050,14 @@ export class JobManager {
       credentialPasted: this.authoredMaterializedCredentialPath !== undefined,
       filedropSplit: this.jobRendezvousOutboundDir !== undefined,
       keyFileBesideConfiguration: mountedKeyPath !== undefined,
-      ...(mountedDocument !== undefined ? { mountedDocument } : {}),
+      ...(mountedDocument !== undefined
+        ? {
+            mountedDocument,
+            mountedDocumentConverted:
+              intent.mode !== "zeroSetup" &&
+              intent.mountedConfigurationConverted === true,
+          }
+        : {}),
     });
 
     const record: JobRecord = {

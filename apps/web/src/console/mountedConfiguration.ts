@@ -18,6 +18,7 @@ import type {
   LoadedAuthoringState,
   LoadedEnforcementRecords,
 } from "./loadedConfig";
+import type { ReceiptsSigningMode } from "@psi/receiptsModel";
 
 /**
  * The console's offer to open the command-line configuration sitting in its
@@ -74,11 +75,19 @@ export type MountedConfigurationState =
    * which no run that shares results with the partner gets past.
    * `notConducted` is the file's channel where the console conducts no
    * exchange over it at all, derived once at the read: it withholds the run
-   * and replaces every notice about the run with the one naming the channel. */
+   * and replaces every notice about the run with the one naming the channel.
+   * `signingPaths` and `folderPaths` are the paths the file states that a
+   * conversion replaces with the console's own, and `converted` is the
+   * operator's choice to convert: until then the hand-off states those paths
+   * as read, and a signed run is withheld while `signingPaths` names any
+   * ({@link unconvertedSigningWithheldReason}). */
   | {
       status: "opened";
       carriedThrough: Array<string>;
       warnings: Array<string>;
+      signingPaths?: Array<string>;
+      folderPaths?: Array<string>;
+      converted?: true;
       notConducted?: UnconductedChannel;
       transportUnavailable?: UnofferedChannel;
       notApplied?: Array<string>;
@@ -180,6 +189,155 @@ export function runWithheldReason(
     `The console cannot run this ${state.notConducted} configuration: it ` +
     "conducts sftp and filedrop exchanges only. Save your changes to " +
     "psilink.yaml, then run it with psilink on the command line."
+  );
+}
+
+/** The label of the control that converts an opened configuration to the
+ * console's own paths. */
+export const CONVERT_CONFIGURATION_LABEL = "Use the console's paths";
+
+/** The paths a conversion of the open configuration replaces, as the file
+ * spells them: none for a state that is not an open configuration the console
+ * conducts. */
+export function pathsConversionReplaces(
+  state: MountedConfigurationState,
+): Array<string> {
+  if (state.status !== "opened" || state.notConducted !== undefined) return [];
+  return [...(state.signingPaths ?? []), ...(state.folderPaths ?? [])];
+}
+
+/** Whether the conversion is offered: an open configuration the console
+ * conducts, stating a path the conversion replaces, not converted yet, and no
+ * invitation minted from it. */
+export function conversionOffered(
+  state: MountedConfigurationState,
+  sealed: boolean,
+): boolean {
+  return (
+    !sealed &&
+    state.status === "opened" &&
+    state.converted !== true &&
+    pathsConversionReplaces(state).length > 0
+  );
+}
+
+/** How the operator's user-visible text names the recurring-run hand-off. */
+const SCHEDULED_CONFIGURATION =
+  "the configuration the console gives you to run on a schedule";
+
+/**
+ * What the operator is told before converting, naming every setting the
+ * conversion replaces as the file spells them, or undefined where none is
+ * offered. A run uses the console's mounted folder either way; converting
+ * releases a signed run and changes what the hand-off states.
+ */
+export function conversionStatement(
+  state: MountedConfigurationState,
+): string | undefined {
+  if (state.status !== "opened" || state.converted === true) return undefined;
+  const replaced = pathsConversionReplaces(state);
+  if (replaced.length === 0) return undefined;
+  const signingPaths = state.signingPaths ?? [];
+  const signs = signingPaths.length > 0;
+  const folders = (state.folderPaths ?? []).length > 0;
+  const receipt = signingPaths.includes("signing.receipt_output");
+  const placeholders = replaced.filter(
+    (setting) => setting !== "signing.receipt_output",
+  );
+  const handoff =
+    placeholders.length > 0
+      ? "it then states a placeholder in place of " +
+        nameList(placeholders) +
+        ", to set on the machine you schedule from" +
+        (receipt ? ", and names no receipt file" : "")
+      : "it then names no receipt file";
+  return (
+    "Your psilink.yaml names " +
+    (replaced.length === 1 ? "a path" : "paths") +
+    " of its own: " +
+    nameList(replaced) +
+    "." +
+    (signs
+      ? " A run with a signed receipt waits until you convert, which lets " +
+        "it go ahead with the console's own signing identity and receipt " +
+        "file. With the signed receipt off, this exchange runs unsigned and " +
+        SCHEDULED_CONFIGURATION +
+        " keeps your file's signing settings as they are."
+      : "") +
+    (folders ? " The run uses the console's mounted folder either way." : "") +
+    " Converting " +
+    (signs ? "also changes " : "changes only ") +
+    SCHEDULED_CONFIGURATION +
+    ": " +
+    handoff +
+    "."
+  );
+}
+
+/** What the operator is told once the open configuration is converted. */
+export function convertedStatement(
+  state: MountedConfigurationState,
+): string | undefined {
+  if (state.status !== "opened" || state.converted !== true) return undefined;
+  const signs = (state.signingPaths ?? []).length > 0;
+  return (
+    "Converted: " +
+    SCHEDULED_CONFIGURATION +
+    " states the console's own paths in place of " +
+    nameList(pathsConversionReplaces(state)) +
+    (signs
+      ? ", and a run with a signed receipt uses the console's signing " +
+        "identity and receipt file. With the signed receipt off, it states " +
+        "no signing settings at all"
+      : "") +
+    ". Close this configuration and open it again to keep your file's own."
+  );
+}
+
+/** The open configuration converted to the console's own paths. Any other
+ * state is returned unchanged. */
+export function withConversion(
+  state: MountedConfigurationState,
+): MountedConfigurationState {
+  if (state.status !== "opened" || pathsConversionReplaces(state).length === 0)
+    return state;
+  return { ...state, converted: true };
+}
+
+/**
+ * Why a signed run of the open configuration is withheld, or undefined where it
+ * is not: the operator chose a signed receipt, and the file names signing paths
+ * of its own they have not converted. The console signs only with its own
+ * identity and writes the receipt only where it serves it, so the run waits for
+ * the conversion rather than replacing the file's paths without a word.
+ */
+export function unconvertedSigningWithheldReason(
+  state: MountedConfigurationState,
+  receiptsMode: ReceiptsSigningMode,
+): string | undefined {
+  if (
+    receiptsMode !== "certificate" ||
+    state.status !== "opened" ||
+    state.notConducted !== undefined ||
+    state.converted === true
+  )
+    return undefined;
+  const signingPaths = state.signingPaths ?? [];
+  if (signingPaths.length === 0) return undefined;
+  const one = signingPaths.length === 1;
+  return (
+    "This configuration names " +
+    (one ? "a signing path" : "signing paths") +
+    " of its own (" +
+    nameList(signingPaths) +
+    "), and the console signs only with its own signing identity. Choose " +
+    `${CONVERT_CONFIGURATION_LABEL} to sign with the console's identity; ` +
+    SCHEDULED_CONFIGURATION +
+    " then states the console's paths in place of yours. Or turn the " +
+    "signed receipt off: this exchange then runs unsigned, and " +
+    SCHEDULED_CONFIGURATION +
+    " keeps your file's signing settings as they are. Or run the file with " +
+    "psilink on the command line."
   );
 }
 
@@ -688,6 +846,14 @@ export function mountedConfigurationRead(answer: MountedConfigurationAnswer): {
             ]),
           ].sort(),
           warnings: answer.warnings,
+          ...(answer.signingPathSettings !== undefined &&
+          answer.signingPathSettings.length > 0
+            ? { signingPaths: answer.signingPathSettings }
+            : {}),
+          ...(answer.folderPathSettings !== undefined &&
+          answer.folderPathSettings.length > 0
+            ? { folderPaths: answer.folderPathSettings }
+            : {}),
           ...(isJobChannel(loaded.channel)
             ? {}
             : { notConducted: loaded.channel }),

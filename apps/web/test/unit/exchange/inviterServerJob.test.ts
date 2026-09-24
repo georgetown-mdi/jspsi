@@ -143,6 +143,19 @@ describe("inviterServerJobConfig", () => {
     expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(true);
   });
 
+  test("forwards the operator's conversion of the opened configuration", () => {
+    const config = inviterServerJobConfig({
+      minted,
+      inputSource: { kind: "inline", csv: inputCsv },
+      transport: { channel: "filedrop" },
+      mountedConfigurationOpened: true,
+      mountedConfigurationConverted: true,
+    });
+    const intent = intentFor(config);
+    expect(intent.mountedConfigurationConverted).toBe(true);
+    expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(true);
+  });
+
   test("threads a console workFile reference through as the input source verbatim", () => {
     // The console invite sources from the operator-mounted file: the driver config
     // holds only the reference (name + profiled freshness pair), never content, so

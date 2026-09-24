@@ -130,7 +130,9 @@ import {
   configurationSaveShown,
   configurationSaveState,
   connectionSettingsHeldNotice,
+  conversionStatement,
   runWithheldReason,
+  unconvertedSigningWithheldReason,
 } from "@console/mountedConfiguration";
 import {
   editorWithLoadedTerms,
@@ -460,6 +462,12 @@ export function InviterScreen() {
     setConfigurationSave(configurationSaveState(answer, sent));
   }
 
+  // Convert the open configuration to the console's own paths: the run's
+  // signing identity and receipt and the hand-off's placeholders.
+  function convertMountedConfiguration() {
+    dispatch({ type: "mounted-configuration-converted" });
+  }
+
   // Close the open configuration: it stops being an input here, so the draft
   // falls back to what the file's own headers infer and the reducer drops
   // everything else the load filled.
@@ -538,6 +546,16 @@ export function InviterScreen() {
     mountedConfiguration.status === "opened" &&
     runWithheldReason(mountedConfiguration) === undefined &&
     chosenRunMode === "server-job";
+  // A signed console run of an opened configuration naming signing paths of
+  // its own waits for the operator to convert it to the console's.
+  const signingWithheld =
+    chosenRunMode === "server-job"
+      ? unconvertedSigningWithheldReason(mountedConfiguration, receipts.mode)
+      : undefined;
+  const signingWithheldConversion =
+    signingWithheld === undefined
+      ? undefined
+      : conversionStatement(mountedConfiguration);
 
   // The console reads the mounted file, so a server-job run holds only a REFERENCE
   // (the opaque name), never the content.
@@ -587,6 +605,9 @@ export function InviterScreen() {
     receipts: receiptsIntentFields(receipts),
     loadedEnforcementRecords,
     mountedConfigurationOpened: mountedConfiguration.status === "opened",
+    mountedConfigurationConverted:
+      mountedConfiguration.status === "opened" &&
+      mountedConfiguration.converted === true,
     ...(csvDelimiter !== undefined ? { csvDelimiter } : {}),
   });
 
@@ -1477,6 +1498,7 @@ export function InviterScreen() {
             disclosure={runDisclosure}
             onOpen={() => void openMountedConfiguration()}
             onClose={closeMountedConfiguration}
+            onConvert={convertMountedConfiguration}
           />
         )}
         {section === "file" && (
@@ -1561,7 +1583,9 @@ export function InviterScreen() {
                 sftpConnection={sftpConnection}
                 loadedSftpForm={loadedSftpForm}
                 sftpSaveFilePreferred={sftpSaveFilePreferred}
-                runWithheld={runWithheldReason(mountedConfiguration)}
+                runWithheld={
+                  runWithheldReason(mountedConfiguration) ?? signingWithheld
+                }
                 continuesOpenedExchange={continuesOpenedExchange}
                 connectionSettingsHeld={connectionSettingsHeldNotice(
                   mountedConfiguration,
@@ -1570,7 +1594,17 @@ export function InviterScreen() {
                   configurationSave,
                   currentHandBack,
                 )}
-                onSaveConfiguration={() => void saveConfiguration()}
+                {...(saveBackOffered
+                  ? { onSaveConfiguration: () => void saveConfiguration() }
+                  : {})}
+                {...(signingWithheldConversion !== undefined
+                  ? {
+                      conversion: {
+                        statement: signingWithheldConversion,
+                        onConvert: convertMountedConfiguration,
+                      },
+                    }
+                  : {})}
                 rendezvous={rendezvous}
                 exchangeFiles={exchangeFiles}
                 onExchangeFiles={(draft) =>

@@ -14,6 +14,7 @@ import { RECEIPTS_DEFAULT } from "@psi/receiptsModel";
 import {
   MOUNTED_CONFIGURATION_UNREAD,
   mountedConfigurationRead,
+  withConversion,
   withTermsNotApplied,
   withUnavailableTransport,
 } from "@console/mountedConfiguration";
@@ -422,6 +423,9 @@ export type InviterScreenAction =
       notApplied?: ReadonlyArray<string>;
       notCovered?: ReadonlyArray<string>;
     }
+  /** The operator converted the open configuration to the console's own
+   * paths. */
+  | { type: "mounted-configuration-converted" }
   /** The operator closed the open configuration: it stops being an input, so
    * every card and draft it seeded returns to its own authoring default along
    * with the terms, the records, the connection form and the notices, and the
@@ -740,6 +744,14 @@ export function inviterScreenReducer(
           "Loaded the configuration's matching terms. Review them before creating.",
       };
     }
+    case "mounted-configuration-converted":
+      // A sealed draft is an invitation already minted, whose run's hand-off
+      // was composed at its start: a conversion now would reach nothing.
+      if (state.editor?.sealed === true) return state;
+      return {
+        ...state,
+        mountedConfiguration: withConversion(state.mountedConfiguration),
+      };
     case "loaded-configuration-discarded":
       // A sealed draft is an invitation already minted over the records the
       // load put on the run: dropping them here would compose a run whose

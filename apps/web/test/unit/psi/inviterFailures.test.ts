@@ -17,6 +17,7 @@ import {
 import {
   MOUNTED_KEY_FILE_ABSENT_REFUSAL,
   MOUNTED_KEY_FILE_INVALID_REFUSAL,
+  MOUNTED_SIGNING_PATHS_UNCONVERTED_REFUSAL,
   SFTP_FINGERPRINT_LIST_REFUSAL,
 } from "@jobs/jobCreateRefusal";
 import {
@@ -426,6 +427,27 @@ describe("failureFor", () => {
       expect(failure.message).toContain("create a new invitation");
     },
   );
+
+  test("a signed run refused over the configuration's own signing paths offers the conversion", () => {
+    const failure = failureFor(
+      "config",
+      new JobApiRequestError(
+        400,
+        "POST /api/jobs failed with status 400",
+        undefined,
+        MOUNTED_SIGNING_PATHS_UNCONVERTED_REFUSAL,
+      ),
+      WORK_FILE,
+      "filedrop",
+    );
+    expect(failure.category).toBe("config");
+    expect(failure.title).toBe(
+      "This configuration names its own signing paths",
+    );
+    expect(failure.message).toContain("Convert the configuration");
+    expect(failure.message).toContain("turn the signed receipt off");
+    expect(failure.message).toContain("keeps your file's signing settings");
+  });
 
   test("the acceptor mounted-file 400 names its columns-step recovery", () => {
     // The acceptor's only config recovery button returns to its columns step (whose

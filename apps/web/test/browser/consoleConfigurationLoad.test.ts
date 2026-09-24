@@ -13,6 +13,7 @@ import { getDefaultLinkageTerms } from "@psilink/core";
 import {
   CLOSE_CONFIGURATION_LABEL,
   CONFIGURATION_SAVED,
+  CONVERT_CONFIGURATION_LABEL,
   NO_CONFIGURATION_IN_FOLDER,
   OPENED_EXCHANGE_CONTINUES,
   OPEN_CONFIGURATION_LABEL,
@@ -99,6 +100,8 @@ function openedBody(document: unknown): unknown {
     document,
     carriedThrough: [],
     warnings: [],
+    signingPathSettings: [],
+    folderPathSettings: [],
   };
 }
 
@@ -212,6 +215,8 @@ describe("the load offer on the file step", () => {
         document: CONFIG_DOCUMENT,
         carriedThrough: ["authentication.token_max_age_days"],
         warnings: ["connection.server.password"],
+        signingPathSettings: [],
+        folderPathSettings: [],
       },
     });
     app.render(createElement(InviterScreen));
@@ -239,6 +244,8 @@ describe("the load offer on the file step", () => {
         },
         carriedThrough: [],
         warnings: [],
+        signingPathSettings: [],
+        folderPathSettings: ["connection.path"],
       },
     });
     app.render(createElement(InviterScreen));
@@ -428,6 +435,70 @@ describe("the open configuration over the files it is derived across", () => {
     ).toBeNull();
     expect(
       page.getByRole("button", { name: CLOSE_CONFIGURATION_LABEL }).query(),
+    ).toBeNull();
+  });
+});
+
+// A signed run of a configuration naming its own signing paths waits for the
+// operator to convert it: the review step withholds the start, names the
+// settings, and offers the conversion beside it.
+describe("an opened configuration's own signing paths on the review step", () => {
+  test("withhold a signed run until converted", async () => {
+    stubConfigRoute(
+      {
+        status: 200,
+        body: {
+          ...(openedBody({
+            ...CONFIG_DOCUMENT,
+            metadata: STATED_COLUMNS,
+            signing: { mode: "certificate" },
+          }) as Record<string, unknown>),
+          signingPathSettings: ["signing.identity_file"],
+        },
+      },
+      {
+        files: [CLIENTS_FILE],
+        sftp: {
+          configured: true,
+          host: "sftp.partner.example",
+          port: 22,
+          path: "/exchange",
+        },
+      },
+    );
+    app.render(createElement(InviterScreen));
+    await userEvent.fill(page.getByLabelText("Your name"), "Dana Okafor");
+    await openConfiguration();
+    await expect
+      .element(page.getByText(/names a path of its own/).first())
+      .toBeInTheDocument();
+    await commitFile();
+    await page
+      .getByRole("button", { name: "Continue to matching & sharing" })
+      .click();
+    await page
+      .getByRole("button", { name: "Continue to review & create" })
+      .click();
+    await expect
+      .element(page.getByRole("button", { name: START_OPENED_EXCHANGE_LABEL }))
+      .toBeDisabled();
+    await expect
+      .element(
+        page
+          .getByText(
+            /names a signing path of its own \(signing\.identity_file\)/,
+          )
+          .first(),
+      )
+      .toBeInTheDocument();
+    await page
+      .getByRole("button", { name: CONVERT_CONFIGURATION_LABEL })
+      .click();
+    await expect
+      .element(page.getByText(/names a signing path of its own/).first())
+      .not.toBeInTheDocument();
+    expect(
+      page.getByRole("button", { name: CONVERT_CONFIGURATION_LABEL }).query(),
     ).toBeNull();
   });
 });

@@ -238,6 +238,12 @@ const EXCHANGE_INTENT_ROUTES: Record<
       "it selects whether the template is written over the mounted document; " +
       "what that document holds graduates as the held keys themselves",
   },
+  mountedConfigurationConverted: {
+    carries: "nothing",
+    because:
+      "it selects whether the template states the console's placeholders or " +
+      "the paths the mounted document read; the paths graduate as themselves",
+  },
   options: { carries: "tuningOptions" },
   eventStream: {
     carries: "nothing",

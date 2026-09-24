@@ -43,6 +43,23 @@ const MOUNTED_RENDEZVOUS_PATH = "/srv/partner-drop";
 /** A signing partner fingerprint of the canonical base64url shape. */
 const PARTNER_FINGERPRINT = "C".repeat(42) + "A";
 
+/** Retain mode with the two settings it requires, which a split folder pair
+ * requires in turn. */
+const RETAIN_OPTIONS = {
+  retainFiles: true,
+  timestampInFilename: true,
+  locklessRendezvous: true,
+};
+
+/** A signing block naming both paths of the machine the document was written
+ * on. */
+const MOUNTED_SIGNING = {
+  mode: "certificate" as const,
+  partnerFingerprint: PARTNER_FINGERPRINT,
+  identityFile: "/home/operator/.psilink/identity.json",
+  receiptOutput: "/home/operator/receipt.json",
+};
+
 /** A distinct partner fingerprint, standing in for the console run's own
  * signing values where a test asserts they override the mounted document's. */
 const CONSOLE_PARTNER_FINGERPRINT = "D".repeat(42) + "A";
@@ -62,10 +79,12 @@ describe("the settings a loaded configuration keeps in the export", () => {
     });
   }
 
-  /** The export of a file-drop run composed over that document. */
+  /** The export of a file-drop run composed over that document, which the
+   * operator converted to the console's own paths where `converted` says so. */
   function exportOver(
     document: ExchangeSpec | undefined,
     intentOverrides: Partial<JobFiledropExchangeIntent> = {},
+    converted = false,
   ): string {
     const handoff = buildJobHandoff(
       validIntent({ linkageTerms: validLinkageTerms(), ...intentOverrides }),
@@ -73,7 +92,9 @@ describe("the settings a loaded configuration keeps in the export", () => {
       {
         credentialPasted: false,
         filedropSplit: false,
-        ...(document !== undefined ? { mountedDocument: document } : {}),
+        ...(document !== undefined
+          ? { mountedDocument: document, mountedDocumentConverted: converted }
+          : {}),
       },
     );
     if (handoff.template.kind !== "config")
@@ -107,73 +128,135 @@ describe("the settings a loaded configuration keeps in the export", () => {
       expect(exportedValue(exported, field)).toEqual(30);
   });
 
-  test("the rendezvous folder the export writes over is named nowhere", () => {
+  test("an unconverted export states the rendezvous folder as read", () => {
     const document = mountedDocument({ tokenMaxAgeDays: 30 });
     expect(exportedValue(exportOver(document), "connection.path")).toBe(
-      HANDOFF_SHARED_DIRECTORY_PLACEHOLDER,
+      MOUNTED_RENDEZVOUS_PATH,
     );
     expect(carriedThroughFields(document)).not.toContain("connection.path");
   });
 
-  test("a signing path the export writes over is named nowhere", () => {
-    const signing = {
-      mode: "certificate" as const,
-      partnerFingerprint: PARTNER_FINGERPRINT,
-      identityFile: "/home/operator/.psilink/identity.json",
-      receiptOutput: "/home/operator/receipt.json",
-    };
-    const document = mountedDocument({ tokenMaxAgeDays: 30 }, { signing });
-    const exported = exportOver(document, {
-      signing: {
-        mode: "certificate",
-        partnerFingerprint: PARTNER_FINGERPRINT,
+  test("an unconverted export states a split folder pair as read", () => {
+    const document = parseExchangeSpec({
+      connection: {
+        channel: "filedrop",
+        inboundPath: "/srv/partner-in",
+        outboundPath: "/srv/partner-out",
+        options: RETAIN_OPTIONS,
       },
+      linkageTerms: validLinkageTerms(),
     });
-    expect(exportedValue(exported, "signing.identity_file")).toBe(
-      HANDOFF_SIGNING_IDENTITY_PLACEHOLDER,
+    const exported = exportOver(document, { options: RETAIN_OPTIONS });
+    expect(exportedValue(exported, "connection.inbound_path")).toBe(
+      "/srv/partner-in",
     );
-    expect(exportedValue(exported, "signing.receipt_output")).toBeUndefined();
+    expect(exportedValue(exported, "connection.outbound_path")).toBe(
+      "/srv/partner-out",
+    );
+    expect(exportedValue(exported, "connection.path")).toBeUndefined();
+  });
+
+  test("a converted export states the placeholder for the rendezvous folder", () => {
+    const document = mountedDocument({ tokenMaxAgeDays: 30 });
+    expect(
+      exportedValue(exportOver(document, {}, true), "connection.path"),
+    ).toBe(HANDOFF_SHARED_DIRECTORY_PLACEHOLDER);
+  });
+
+  test("an unsigned run over an unconverted certificate file hands off its signing block unchanged", () => {
+    const document = mountedDocument(
+      { tokenMaxAgeDays: 30 },
+      { signing: MOUNTED_SIGNING },
+    );
+    const exported = exportOver(document, { signing: { mode: "none" } });
+    expect(exportedValue(exported, "signing")).toEqual({
+      mode: "certificate",
+      partner_fingerprint: PARTNER_FINGERPRINT,
+      identity_file: MOUNTED_SIGNING.identityFile,
+      receipt_output: MOUNTED_SIGNING.receiptOutput,
+    });
     expect(carriedThroughFields(document)).toEqual([
       "authentication.token_max_age_days",
     ]);
   });
 
-  test("signing turned off in the console drops a mounted signing block", () => {
-    const signing = {
-      mode: "certificate" as const,
-      partnerFingerprint: PARTNER_FINGERPRINT,
-      identityFile: "/home/operator/.psilink/identity.json",
-      receiptOutput: "/home/operator/receipt.json",
-    };
-    const document = mountedDocument({ tokenMaxAgeDays: 30 }, { signing });
-    // No `signing` override: the run's own intent composes no signing block.
-    const exported = exportOver(document);
-    expect(exportedValue(exported, "signing")).toBeUndefined();
-    expect(exported).not.toContain("signing:");
-  });
-
-  test("signing turned on with different values overrides the mounted signing block", () => {
-    const mountedSigning = {
-      mode: "certificate" as const,
-      partnerFingerprint: PARTNER_FINGERPRINT,
-      identityFile: "/home/operator/.psilink/identity.json",
-      receiptOutput: "/home/operator/receipt.json",
-    };
-    const document = mountedDocument(
-      { tokenMaxAgeDays: 30 },
-      { signing: mountedSigning },
-    );
+  test("a signed run over an unconverted file with no signing block names the placeholder identity", () => {
+    const document = mountedDocument({ tokenMaxAgeDays: 30 });
     const exported = exportOver(document, {
       signing: {
         mode: "certificate",
         partnerFingerprint: CONSOLE_PARTNER_FINGERPRINT,
       },
     });
-    expect(exportedValue(exported, "signing.partner_fingerprint")).toBe(
-      CONSOLE_PARTNER_FINGERPRINT,
+    expect(exportedValue(exported, "signing")).toEqual({
+      mode: "certificate",
+      partner_fingerprint: CONSOLE_PARTNER_FINGERPRINT,
+      identity_file: HANDOFF_SIGNING_IDENTITY_PLACEHOLDER,
+    });
+  });
+
+  test("an unconverted export keeps a signing block under a mode left unchanged", () => {
+    const signing = {
+      mode: "none" as const,
+      identityFile: MOUNTED_SIGNING.identityFile,
+    };
+    const document = mountedDocument({ tokenMaxAgeDays: 30 }, { signing });
+    const exported = exportOver(document, { signing: { mode: "none" } });
+    expect(exportedValue(exported, "signing.mode")).toBe("none");
+    expect(exportedValue(exported, "signing.identity_file")).toBe(
+      MOUNTED_SIGNING.identityFile,
+    );
+  });
+
+  test("a converted export states the console's signing identity and no receipt file", () => {
+    const document = mountedDocument(
+      { tokenMaxAgeDays: 30 },
+      { signing: MOUNTED_SIGNING },
+    );
+    const exported = exportOver(
+      document,
+      {
+        signing: {
+          mode: "certificate",
+          partnerFingerprint: PARTNER_FINGERPRINT,
+        },
+      },
+      true,
     );
     expect(exportedValue(exported, "signing.identity_file")).toBe(
       HANDOFF_SIGNING_IDENTITY_PLACEHOLDER,
+    );
+    expect(exportedValue(exported, "signing.receipt_output")).toBeUndefined();
+  });
+
+  test("signing turned off in the console drops a converted signing block", () => {
+    const document = mountedDocument(
+      { tokenMaxAgeDays: 30 },
+      { signing: MOUNTED_SIGNING },
+    );
+    // No `signing` override: the run's own intent composes no signing block.
+    const exported = exportOver(document, {}, true);
+    expect(exportedValue(exported, "signing")).toBeUndefined();
+    expect(exported).not.toContain("signing:");
+  });
+
+  test("the console's partner pin overrides the mounted one once converted", () => {
+    const document = mountedDocument(
+      { tokenMaxAgeDays: 30 },
+      { signing: MOUNTED_SIGNING },
+    );
+    const exported = exportOver(
+      document,
+      {
+        signing: {
+          mode: "certificate",
+          partnerFingerprint: CONSOLE_PARTNER_FINGERPRINT,
+        },
+      },
+      true,
+    );
+    expect(exportedValue(exported, "signing.partner_fingerprint")).toBe(
+      CONSOLE_PARTNER_FINGERPRINT,
     );
   });
 
@@ -183,8 +266,12 @@ describe("the settings a loaded configuration keeps in the export", () => {
     );
   });
 
-  test("the composition wins over the document it was opened from", () => {
-    const exported = exportOver(mountedDocument({ tokenMaxAgeDays: 30 }));
+  test("a converted composition wins over the document it was opened from", () => {
+    const exported = exportOver(
+      mountedDocument({ tokenMaxAgeDays: 30 }),
+      {},
+      true,
+    );
     expect(exported).not.toContain(MOUNTED_RENDEZVOUS_PATH);
     expect(exported).toContain(HANDOFF_SHARED_DIRECTORY_PLACEHOLDER);
   });

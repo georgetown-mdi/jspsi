@@ -24,14 +24,16 @@ import type { JobConfigurationHandBack } from "@jobs/intentSchemas";
 export type MountedConfigurationAnswer =
   /** The mount holds no configuration -- the ordinary first run. */
   | { kind: "absent" }
-  /** The configuration, with the settings the console holds without an editor
-   * and the credential fields it cannot pre-fill, both named as the file spells
-   * them. */
+  /** The configuration, with the settings the console holds without an editor,
+   * the credential fields it cannot pre-fill, and the signing and shared-folder
+   * paths it states, each named as the file spells them. */
   | {
       kind: "opened";
       document: DisclosedExchangeDocument;
       carriedThrough: Array<string>;
       warnings: Array<string>;
+      signingPathSettings?: Array<string>;
+      folderPathSettings?: Array<string>;
     }
   /** The console refused the file, in its own words: the route's text names the
    * settings to fix as the file spells them. */
@@ -107,9 +109,24 @@ export async function fetchMountedConfiguration(
     const document = documentOf(body.document);
     const carriedThrough = namesOf(body.carriedThrough);
     const warnings = namesOf(body.warnings);
-    if (document === null || carriedThrough === null || warnings === null)
+    const signingPathSettings = namesOf(body.signingPathSettings);
+    const folderPathSettings = namesOf(body.folderPathSettings);
+    if (
+      document === null ||
+      carriedThrough === null ||
+      warnings === null ||
+      signingPathSettings === null ||
+      folderPathSettings === null
+    )
       return { kind: "unavailable" };
-    return { kind: "opened", document, carriedThrough, warnings };
+    return {
+      kind: "opened",
+      document,
+      carriedThrough,
+      warnings,
+      signingPathSettings,
+      folderPathSettings,
+    };
   } catch {
     return { kind: "unavailable" };
   }

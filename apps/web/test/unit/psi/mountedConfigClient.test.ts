@@ -48,13 +48,15 @@ describe("a definitive answer", () => {
     expect(urls).toEqual(["/api/jobs/config"]);
   });
 
-  test("a present configuration reads as opened, with both lists", async () => {
+  test("a present configuration reads as opened, with every list", async () => {
     const { fetchImpl } = answering(200, {
       configured: true,
       present: true,
       document: DOCUMENT,
       carriedThrough: ["authentication.token_max_age_days"],
       warnings: ["connection.server.password"],
+      signingPathSettings: ["signing.identity_file"],
+      folderPathSettings: [],
     });
     const answer = await fetchMountedConfiguration(fetchImpl);
     expect(answer.kind).toBe("opened");
@@ -64,6 +66,8 @@ describe("a definitive answer", () => {
       "authentication.token_max_age_days",
     ]);
     expect(answer.warnings).toEqual(["connection.server.password"]);
+    expect(answer.signingPathSettings).toEqual(["signing.identity_file"]);
+    expect(answer.folderPathSettings).toEqual([]);
   });
 
   test("a webrtc configuration reads as opened, for review", async () => {
@@ -76,6 +80,8 @@ describe("a definitive answer", () => {
       },
       carriedThrough: [],
       warnings: [],
+      signingPathSettings: [],
+      folderPathSettings: [],
     });
     const answer = await fetchMountedConfiguration(fetchImpl);
     if (answer.kind !== "opened") throw new Error("expected an opened answer");
@@ -133,6 +139,29 @@ describe("an answer this cannot read", () => {
         document: DOCUMENT,
         carriedThrough: [{ field: "authentication.token_max_age_days" }],
         warnings: [],
+      },
+    ],
+    [
+      "no signing path list",
+      200,
+      {
+        present: true,
+        document: DOCUMENT,
+        carriedThrough: [],
+        warnings: [],
+        folderPathSettings: [],
+      },
+    ],
+    [
+      "a folder path list holding something that is not a name",
+      200,
+      {
+        present: true,
+        document: DOCUMENT,
+        carriedThrough: [],
+        warnings: [],
+        signingPathSettings: [],
+        folderPathSettings: [{ field: "connection.path" }],
       },
     ],
     [

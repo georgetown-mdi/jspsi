@@ -5,6 +5,7 @@ import {
   JobRendezvousRetainRequiredError,
   JobRendezvousUnavailableError,
   JobSigningIdentityExposedError,
+  MountedSigningPathsUnconvertedError,
   SftpUnavailableError,
 } from "@jobs/jobManager";
 import {
@@ -15,6 +16,7 @@ import {
 import {
   MOUNTED_KEY_FILE_ABSENT_REFUSAL,
   MOUNTED_KEY_FILE_INVALID_REFUSAL,
+  MOUNTED_SIGNING_PATHS_UNCONVERTED_REFUSAL,
   SFTP_FINGERPRINT_LIST_REFUSAL,
   SIGNING_IDENTITY_IN_RENDEZVOUS_REFUSAL,
 } from "@jobs/jobCreateRefusal";
@@ -63,7 +65,9 @@ import { jobCreateIntentSchema } from "@jobs/intentSchemas";
  * host-key fingerprint answers `{ "reason": "sftp-fingerprint-list" }`, and a
  * run of the opened configuration refused over the `.psilink.key` beside it
  * answers `{ "reason": "mounted-key-file-absent" }` or
- * `{ "reason": "mounted-key-file-invalid" }`. Each is about console state
+ * `{ "reason": "mounted-key-file-invalid" }`, and a signed run of it naming
+ * unconverted signing paths answers
+ * `{ "reason": "mounted-signing-paths-unconverted" }`. Each is about console state
  * rather than the intent, so the browser cannot otherwise say what to fix.
  */
 export const Route = createFileRoute("/api/jobs/")({
@@ -117,6 +121,13 @@ export const Route = createFileRoute("/api/jobs/")({
                     ? MOUNTED_KEY_FILE_ABSENT_REFUSAL
                     : MOUNTED_KEY_FILE_INVALID_REFUSAL,
               },
+              400,
+            );
+          // A signed run of the opened configuration whose own signing paths
+          // the operator did not convert to the console's.
+          if (error instanceof MountedSigningPathsUnconvertedError)
+            return jobJsonResponse(
+              { reason: MOUNTED_SIGNING_PATHS_UNCONVERTED_REFUSAL },
               400,
             );
           // A mounted input that names no regular file, a filedrop intent with no

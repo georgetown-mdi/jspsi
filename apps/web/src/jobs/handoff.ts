@@ -52,6 +52,10 @@ import type { JobSftpServerEntry } from "./sftpServer";
  * - No container-internal path is ever present: the credential `@path`,
  *   every filedrop rendezvous mount, and the signing identity file are
  *   replaced with fixed placeholder tokens before the template is composed.
+ *   A configuration opened from the mount and not converted states its own
+ *   shared-folder and signing paths instead, as it read them
+ *   ({@link withPathsAsRead}): paths of the operator's machine, never the
+ *   console's.
  */
 export interface JobHandoff {
   /** The mode the run used: `exchange` (invitation, config-and-key driven) or
@@ -235,14 +239,87 @@ function buildExchangeHandoffTemplate(
   serverEntry: JobSftpServerEntry | undefined,
   filedropSplit: boolean,
   mountedDocument: ExchangeSpec | undefined,
+  mountedDocumentConverted: boolean,
 ): JobHandoffTemplate {
+  const composed = composedHandoffSpec(intent, serverEntry, filedropSplit);
   return {
     kind: "config",
     yaml: handoffConfigDocument(
-      composedHandoffSpec(intent, serverEntry, filedropSplit),
+      mountedDocument === undefined || mountedDocumentConverted
+        ? composed
+        : withPathsAsRead(composed, mountedDocument, intent),
       mountedDocument,
     ),
     argv: ["psilink", "exchange", HANDOFF_INPUT_NAME, HANDOFF_OUTPUT_NAME],
+  };
+}
+
+/** A filedrop connection, as core's spec types it. */
+type FiledropConnection = Extract<
+  ExchangeSpec["connection"],
+  { channel: "filedrop" }
+>;
+
+/**
+ * The composition with the paths an unconverted opened document read put back:
+ * the shared folder or folder pair, where the run kept the document's filedrop
+ * channel, and the document's signing block exactly as read for a run that
+ * signs nothing. The run's receipt mode is the run's choice; the hand-off is
+ * the operator's file, so a path and a mode of theirs stay theirs until they
+ * convert it. A signed run reaches here only for a document stating no signing
+ * path (the create refuses the rest), and gets the block
+ * {@link handBackSigning} writes for it.
+ */
+function withPathsAsRead(
+  composed: ExchangeSpec,
+  mountedDocument: ExchangeSpec,
+  intent: JobExchangeIntent,
+): ExchangeSpec {
+  const { signing: composedSigning, ...rest } = composed;
+  const signing =
+    intent.signing?.mode === "certificate"
+      ? handBackSigning(
+          {
+            mode: "certificate",
+            ...(composedSigning?.partnerFingerprint !== undefined
+              ? { partnerFingerprint: composedSigning.partnerFingerprint }
+              : {}),
+          },
+          mountedDocument.signing,
+        )
+      : mountedDocument.signing;
+  const read = mountedDocument.connection;
+  const connection =
+    composed.connection.channel === "filedrop" && read.channel === "filedrop"
+      ? { ...withoutFolderPaths(composed.connection), ...folderPathsOf(read) }
+      : composed.connection;
+  return {
+    ...rest,
+    connection,
+    ...(signing !== undefined ? { signing } : {}),
+  };
+}
+
+/** A filedrop connection with neither folder form, for a read one to fill. */
+function withoutFolderPaths(
+  connection: FiledropConnection,
+): FiledropConnection {
+  const { path, inboundPath, outboundPath, ...rest } = connection;
+  return rest;
+}
+
+/** The folder form a filedrop connection states, whichever of the two. */
+function folderPathsOf(
+  connection: FiledropConnection,
+): Pick<FiledropConnection, "path" | "inboundPath" | "outboundPath"> {
+  return {
+    ...(connection.path !== undefined ? { path: connection.path } : {}),
+    ...(connection.inboundPath !== undefined
+      ? { inboundPath: connection.inboundPath }
+      : {}),
+    ...(connection.outboundPath !== undefined
+      ? { outboundPath: connection.outboundPath }
+      : {}),
   };
 }
 
@@ -287,11 +364,12 @@ function composedHandoffSpec(
  * the mounted document's top-level keys OUTSIDE {@link COMPOSED_BLOCKS} (the
  * settings the console has no editor for, held unchanged) with the composed
  * document (every block the composition emits, whole -- the connection, the
- * linkage terms, the signing paths, each already placeholdered above). A block
+ * linkage terms, the signing paths, each already placeholdered above or, for
+ * a document the operator did not convert, put back as read). A block
  * in {@link COMPOSED_BLOCKS} the composition did not write for this run -- an
- * operator who mounted a `signing` block and turned signing off in the console
- * -- is therefore absent from the export rather than surviving from the
- * mount: the composition's absence is itself the operator's edit. So no
+ * operator who converted a mounted `signing` block and turned signing off in
+ * the console -- is therefore absent from the export rather than surviving
+ * from the mount: the composition's absence is itself the operator's edit. So no
  * container path and no credential from the opened file reaches the template,
  * and no held setting outlives a run that replaced it. What survives is the
  * settings the console has no control for and never composes, which the load
@@ -522,6 +600,12 @@ interface JobHandoffRunFacts {
    * at all and reads it nowhere.
    */
   mountedDocument?: ExchangeSpec;
+  /**
+   * Whether the operator converted {@link mountedDocument} to the console's own
+   * resources, so the template states the console's placeholders rather than
+   * the paths the document read ({@link withPathsAsRead}). Absent is false.
+   */
+  mountedDocumentConverted?: boolean;
 }
 
 /**
@@ -538,6 +622,7 @@ export function buildJobHandoff(
     filedropSplit,
     keyFileBesideConfiguration = false,
     mountedDocument,
+    mountedDocumentConverted = false,
   }: JobHandoffRunFacts,
 ): JobHandoff {
   const zeroSetup = intent.mode === "zeroSetup";
@@ -557,6 +642,7 @@ export function buildJobHandoff(
           serverEntry,
           split,
           mountedDocument,
+          mountedDocumentConverted,
         ),
   };
 }

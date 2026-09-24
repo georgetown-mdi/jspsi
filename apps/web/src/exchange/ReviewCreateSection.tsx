@@ -38,6 +38,7 @@ import { runDiagnosticsProblems } from "@psi/runDiagnosticsModel";
 
 import {
   CONFIGURATION_SAVED,
+  CONVERT_CONFIGURATION_LABEL,
   OPENED_EXCHANGE_CONTINUES,
   START_OPENED_EXCHANGE_LABEL,
 } from "@console/mountedConfiguration";
@@ -129,6 +130,7 @@ export function ReviewCreateSection({
   onNavigate,
   configurationSave,
   onSaveConfiguration,
+  conversion,
 }: {
   editor: InviterEditor;
   csv: AcquiredCsv;
@@ -198,6 +200,10 @@ export function ReviewCreateSection({
    * Offered only where that configuration withholds the run
    * ({@link runWithheld}), since a run hands back its own configuration. */
   onSaveConfiguration?: () => void;
+  /** The conversion of the opened configuration to the console's own paths,
+   * offered here where it is what releases the withheld run: the statement of
+   * what it replaces (`conversionStatement`), and the action. */
+  conversion?: { statement: string; onConvert: () => void };
 }) {
   const consoleBuild = isConsoleBuild();
   const online = useOnlineStatus();
@@ -564,6 +570,14 @@ export function ReviewCreateSection({
                 ? configurationSave.message
                 : ""}
           </p>
+        </div>
+      )}
+      {conversion !== undefined && (
+        <div className={styles.workFoot}>
+          <p className={styles.small}>{conversion.statement}</p>
+          <Button variant="default" onClick={conversion.onConvert}>
+            {CONVERT_CONFIGURATION_LABEL}
+          </Button>
         </div>
       )}
       {continuesOpenedExchange && (
