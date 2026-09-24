@@ -14,7 +14,48 @@ import { configDefaults, defineConfig } from "vitest/config";
 // The stress tier is excluded for the same reason `npm test` excludes it: those
 // tests run for tens of seconds each, and a mutation run re-executes the suite
 // once per mutant.
+
+/**
+ * Widens a test-name filter written with space-joined names to also match
+ * vitest's `>`-joined full names.
+ *
+ * Stryker's vitest runner selects the tests for each mutant by setting
+ * `testNamePattern` to its recorded test names, a `describe` title and the
+ * test title joined by a space. Vitest 5 matches the pattern against the
+ * full name joined by " > ", so without this every `describe`-nested test is
+ * filtered out of every mutant run and kills nothing. Every space is
+ * widened, since the pattern does not mark which one joins two titles; a
+ * space inside a title can then over-select, never under-select.
+ * scripts/stryker-security.test.mjs checks the vitest half against the real
+ * vitest.
+ */
+export function widenTestNamePattern(pattern: RegExp): RegExp {
+  return new RegExp(pattern.source.replaceAll(" ", "(?: > | )"), pattern.flags);
+}
+
+// Stryker assigns the pattern to the resolved config before each mutant run,
+// so the widening happens on assignment rather than once at startup.
+const widenStrykerTestNamePattern = {
+  name: "psilink-stryker-test-name-pattern",
+  configureVitest({
+    vitest,
+  }: {
+    vitest: { config: { testNamePattern?: RegExp } };
+  }) {
+    let pattern = vitest.config.testNamePattern;
+    Object.defineProperty(vitest.config, "testNamePattern", {
+      configurable: true,
+      enumerable: true,
+      get: () => pattern,
+      set: (value: RegExp | undefined) => {
+        pattern = value === undefined ? value : widenTestNamePattern(value);
+      },
+    });
+  },
+};
+
 export default defineConfig({
+  plugins: [widenStrykerTestNamePattern],
   test: {
     include: ["packages/core/test/**/*.{test,spec}.?(c|m)[jt]s?(x)"],
     exclude: [...configDefaults.exclude, "packages/core/test/stress/**"],

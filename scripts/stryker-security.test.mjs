@@ -1,13 +1,21 @@
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { describe, expect, it } from "vitest";
 
+import { widenTestNamePattern } from "../packages/core/vitest.stryker.config.ts";
 import { evaluateFloors, scoreOf } from "./stryker-security.mjs";
 
-// These cover the pure gating decision only -- the tally, the score ratio, the
-// floor comparison, the missing-mutants and zero-denominator failure branches,
-// and the raised-floor suggestion -- against hand-built report fixtures shaped
-// like the real Stryker JSON report this script reads at runtime
-// (`files[<path>].mutants[].status`). They do NOT drive Stryker itself or the
-// toolchain install; that live half is `npm run test:mutation`.
+// The scoreOf and evaluateFloors tests cover the pure gating decision only --
+// the tally, the score ratio, the floor comparison, the missing-mutants and
+// zero-denominator failure branches, and the raised-floor suggestion --
+// against hand-built report fixtures shaped like the real Stryker JSON report
+// this script reads at runtime (`files[<path>].mutants[].status`). They do
+// NOT drive Stryker itself or the toolchain install; that live half is `npm
+// run test:mutation`.
 
 function mutants(statuses) {
   return statuses.map((status) => ({ status }));
@@ -164,4 +172,82 @@ describe("evaluateFloors", () => {
     ]);
     expect(rows.map((row) => row.file)).toEqual([FILE, other]);
   });
+});
+
+describe("widenTestNamePattern", () => {
+  const vitestBin = fileURLToPath(
+    new URL("../node_modules/vitest/vitest.mjs", import.meta.url),
+  );
+
+  // Runs the repository's vitest over a two-test fixture, one test nested in
+  // a describe and one at the top level, and returns the titles of the tests
+  // the name pattern selected.
+  function selectedTests(pattern) {
+    const dir = mkdtempSync(join(tmpdir(), "stryker-name-pattern-"));
+    try {
+      writeFileSync(
+        join(dir, "fixture.test.js"),
+        [
+          'describe("outer", () => {',
+          '  test("nested case", () => {});',
+          "});",
+          'test("top case", () => {});',
+          "",
+        ].join("\n"),
+      );
+      writeFileSync(
+        join(dir, "vitest.config.mjs"),
+        "export default { test: { globals: true } };\n",
+      );
+      const outputFile = join(dir, "result.json");
+      execFileSync(
+        process.execPath,
+        [
+          vitestBin,
+          "run",
+          "--root",
+          dir,
+          "--reporter=json",
+          `--outputFile=${outputFile}`,
+          "--testNamePattern",
+          pattern.source,
+        ],
+        { cwd: dir, stdio: "ignore" },
+      );
+      const result = JSON.parse(readFileSync(outputFile, "utf8"));
+      return result.testResults
+        .flatMap((file) => file.assertionResults)
+        .filter((test) => test.status === "passed")
+        .map((test) => test.title)
+        .sort();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  // The pattern Stryker's runner sends: its recorded names, space-joined.
+  const strykerPattern = /outer nested case|top case/;
+
+  it(
+    "is needed: vitest does not match a space-joined name to a nested test",
+    {
+      timeout: 60_000,
+    },
+    () => {
+      expect(selectedTests(strykerPattern)).toEqual(["top case"]);
+    },
+  );
+
+  it(
+    "selects the nested test and still selects the top-level one",
+    {
+      timeout: 60_000,
+    },
+    () => {
+      expect(selectedTests(widenTestNamePattern(strykerPattern))).toEqual([
+        "nested case",
+        "top case",
+      ]);
+    },
+  );
 });
