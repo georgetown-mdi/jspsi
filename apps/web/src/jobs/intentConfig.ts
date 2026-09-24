@@ -73,9 +73,10 @@ function outboundPayloadConsentFor(
  * own rules are core's.
  *
  * The connection is built as a credential-free filedrop locator, so by
- * core's {@link ExchangeFileInput} typing no credential is representable;
- * `mintExchangeSpec` never assembles an `authentication` block (the shared
- * secret rides the key file). The client's `linkageTerms`, `metadata`, and
+ * core's {@link ExchangeFileInput} typing no credential is representable. The
+ * shared secret rides the key file; the one `authentication` key composed is
+ * the intent's max-age policy ({@link composedAuthentication}). The client's
+ * `linkageTerms`, `metadata`, and
  * `standardization` reach the file only after core's schema validation; the
  * one path field (`path`) is set by the server, not the client.
  *
@@ -166,6 +167,7 @@ export function composeFiledropConfigSpec(
   } = intent;
   const outboundPayloadConsent = outboundPayloadConsentFor(intent);
   const signing = composedSigning(intent, signingPaths);
+  const authentication = composedAuthentication(intent);
   const fileInput: ExchangeFileInput = {
     connection: {
       channel: "filedrop",
@@ -193,7 +195,10 @@ export function composeFiledropConfigSpec(
     ...(includeOwnColumns !== undefined ? { includeOwnColumns } : {}),
     ...(csvDelimiter !== undefined ? { csvDelimiter } : {}),
   };
-  return mintExchangeSpec(fileInput);
+  const minted = mintExchangeSpec(fileInput);
+  return authentication === undefined
+    ? minted
+    : ExchangeSpecSchema.parse({ ...minted, authentication });
 }
 
 /**
@@ -221,8 +226,9 @@ export function composeFiledropConfigSpec(
  * typing makes credentials unrepresentable, an invariant shared with the
  * browser minting flow that must not admit the console's credential-reference
  * entries. Instead the exchange spec is assembled directly and validated
- * through core's {@link ExchangeSpecSchema}. No `authentication` block is ever
- * assembled; the shared secret rides the key file.
+ * through core's {@link ExchangeSpecSchema}. The shared secret rides the key
+ * file; the one `authentication` key composed is the intent's max-age policy
+ * ({@link composedAuthentication}).
  */
 export function composeSftpConfigSpec(
   intent: JobSftpExchangeIntent,
@@ -242,6 +248,7 @@ export function composeSftpConfigSpec(
   } = intent;
   const outboundPayloadConsent = outboundPayloadConsentFor(intent);
   const signing = composedSigning(intent, signingPaths);
+  const authentication = composedAuthentication(intent);
   const assembled: ExchangeSpec = {
     connection: {
       channel: "sftp",
@@ -259,6 +266,7 @@ export function composeSftpConfigSpec(
     ...(disclosedPayloadColumns !== undefined
       ? { disclosedPayloadColumns }
       : {}),
+    ...(authentication !== undefined ? { authentication } : {}),
     ...(signing !== undefined ? { signing } : {}),
     ...(retentionDisposition !== undefined ? { retentionDisposition } : {}),
     ...(includeOwnColumns !== undefined ? { includeOwnColumns } : {}),
@@ -279,6 +287,22 @@ export function composeSftpConfigDocument(
   return stringifyYaml(
     snakeizeKeys(composeSftpConfigSpec(intent, serverEntry, signingPaths)),
   );
+}
+
+/**
+ * The `authentication` block a run's configuration states: the intent's
+ * max-age policy alone, or no block at all. The shared secret and its
+ * `expires` belong to the key file, so neither is representable here. The
+ * run's CLI reads the policy as a command-line run does: it stamps the rotated
+ * secret's `expires` from it, and a later run refuses that secret once the
+ * instant has passed.
+ */
+function composedAuthentication(
+  intent: JobExchangeIntent,
+): ExchangeSpec["authentication"] {
+  return intent.tokenMaxAgeDays === undefined
+    ? undefined
+    : { tokenMaxAgeDays: intent.tokenMaxAgeDays };
 }
 
 /**

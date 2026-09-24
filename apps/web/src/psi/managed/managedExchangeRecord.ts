@@ -21,7 +21,6 @@
 
 import {
   ExchangeSpecSchema,
-  MAX_TOKEN_MAX_AGE_DAYS,
   SHARED_SECRET_REGEX,
   assembleExchangeSpec,
   connectionFromLocator,
@@ -29,6 +28,8 @@ import {
 } from "@psilink/core";
 
 import { z } from "zod";
+
+import { tokenMaxAgeDaysSchema } from "../tokenMaxAge";
 
 import { deriveEditedExpiry } from "./managedTokenAgeEdit";
 
@@ -474,13 +475,9 @@ export const standingConditionFieldSchema: ZodType<ManagedStandingConditionField
     z.object({ kind: z.literal("none") }).strict(),
   ]);
 
-/** The canonical `tokenMaxAgeDays` validator (a positive integer bounded by
- * {@link MAX_TOKEN_MAX_AGE_DAYS}). Exported so the export/import artifact reuses it
- * rather than re-declaring a laxer copy. */
-export const tokenMaxAgeDaysSchema = z
-  .int()
-  .positive()
-  .max(MAX_TOKEN_MAX_AGE_DAYS);
+/** The canonical `tokenMaxAgeDays` validator, re-exported for the
+ * export/import artifact ({@link ../tokenMaxAge}). */
+export { tokenMaxAgeDaysSchema };
 
 /**
  * The persisted exchange-file document, validated when a record is read back: a

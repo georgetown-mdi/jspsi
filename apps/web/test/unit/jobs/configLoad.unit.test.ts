@@ -584,13 +584,12 @@ describe("what the load reads and does not adopt", () => {
 });
 
 describe("the settings the console holds without an editor", () => {
-  test("a max-age policy is carried through, named as the file spells it", () => {
+  test("a max-age policy is opened into the console's control, not held", () => {
     const response = loadDocument(
       savedSftpDocument({ authentication: { token_max_age_days: 30 } }),
     );
-    expect(response.carriedThrough).toContain(
-      "authentication.token_max_age_days",
-    );
+    expect(response.carriedThrough).toEqual([]);
+    expect(response.document?.tokenMaxAgeDays).toBe(30);
   });
 
   test("the signing paths the console pins itself are not held", () => {
@@ -635,13 +634,15 @@ describe("the settings the console holds without an editor", () => {
   });
 
   test("names only: no value of a held setting is reported", () => {
-    const response = loadDocument(
-      savedSftpDocument({ authentication: { token_max_age_days: 30 } }),
-    );
-    expect(response.carriedThrough).toEqual([
+    const spec = {
+      connection: { channel: "webrtc", server: { host: "broker.example" } },
+      linkageTerms: terms(),
+      authentication: { tokenMaxAgeDays: 30 },
+    } as unknown as ExchangeSpec;
+    expect(carriedThroughFields(spec)).toEqual([
       "authentication.token_max_age_days",
     ]);
-    expect(JSON.stringify(response.carriedThrough)).not.toContain("30");
+    expect(JSON.stringify(carriedThroughFields(spec))).not.toContain("30");
   });
 });
 
@@ -693,15 +694,15 @@ describe("a setting inside a block the composition writes", () => {
     expect(refusal(document)).not.toContain("proxy.partner.example");
   });
 
-  test("a block the composition never writes is kept, not refused", () => {
-    // The counter-case the refusal above is measured against: `authentication`
-    // is no composition's block here, so its setting rides the export.
+  test("a setting a composition writes key by key is adopted, not refused", () => {
+    // The counter-case the refusal above is measured against: a run composes
+    // `authentication.token_max_age_days` from the console's own control, so
+    // the file's value opens into that control and the run states it.
     const response = loadDocument(
       savedSftpDocument({ authentication: { token_max_age_days: 30 } }),
     );
-    expect(response.carriedThrough).toEqual([
-      "authentication.token_max_age_days",
-    ]);
+    expect(response.carriedThrough).toEqual([]);
+    expect(response.document?.tokenMaxAgeDays).toBe(30);
   });
 });
 

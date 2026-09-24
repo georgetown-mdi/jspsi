@@ -31,6 +31,7 @@ import {
 } from "@psilink/core";
 
 import { MAX_CSV_FILE_BYTES } from "@components/csvIntake";
+import { tokenMaxAgeDaysSchema } from "@psi/tokenMaxAge";
 
 import { isAdmissibleInputName } from "./workInputName";
 
@@ -593,6 +594,10 @@ export type JobExchangeSide = "inviter" | "acceptor";
  *   file nor the receipt output is representable -- the server supplies both
  *   paths. Under `certificate`, this intent's own `linkageTerms.identity` is
  *   required too (see {@link jobExchangeIntentSchema}).
+ * - `tokenMaxAgeDays` is this party's maximum-age policy for the shared
+ *   secret: a bounded positive integer ({@link tokenMaxAgeDaysSchema}) composed
+ *   as `authentication.token_max_age_days`, the one `authentication` key a
+ *   configuration states. It names no path, host, or credential, and no secret.
  * - `retentionDisposition` is this party's own free-text retention note,
  *   written into the composed config as a YAML value and from there into
  *   this party's exchange record. Bounded by core's `MAX_TEXT_LENGTH` and a
@@ -738,6 +743,15 @@ export interface JobExchangeIntentBase {
   sweepExchangeFiles?: boolean;
   signing?: JobSigningChoice;
   retentionDisposition?: string;
+  /**
+   * The number of days the secret this run rotates stays usable -- core's
+   * `authentication.token_max_age_days`. The run's CLI stamps the rotated
+   * secret's `expires` from it, and a later run refuses that secret once the
+   * instant has passed, as a command-line run of the same configuration does.
+   * Absent composes no `authentication` block, so the rotated secret has no
+   * expiry.
+   */
+  tokenMaxAgeDays?: number;
 }
 
 /**
@@ -1140,6 +1154,7 @@ const jobExchangeIntentCommonFields = {
       message: "retentionDisposition must not contain control characters",
     })
     .optional(),
+  tokenMaxAgeDays: tokenMaxAgeDaysSchema.optional(),
 };
 
 // Not annotated z.ZodType: z.discriminatedUnion requires concrete ZodObject

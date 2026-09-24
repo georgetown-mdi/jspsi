@@ -451,6 +451,8 @@ describe("the create gate and the two sentences that state it", () => {
       mode: "certificate",
       partnerFingerprint: "",
       retentionDisposition: "",
+      maxAgeEnabled: false,
+      maxAgeDays: 90,
       ownFingerprint: `${"B".repeat(42)}A`,
       boundIdentity: "County Registrar",
     },

@@ -54,6 +54,7 @@ import {
 import {
   mountedConfigurationUnchanged,
   openMountedConfiguration,
+  runHandoffMergeBase,
   signingPathSettings,
 } from "./configLoad";
 import {
@@ -1042,7 +1043,10 @@ export class JobManager {
     // changed since the open is reported rather than exported.
     const runsOpenedConfiguration =
       intent.mode !== "zeroSetup" && intent.mountedConfigurationOpened === true;
-    const mountedDocument = opened?.document;
+    const mountedDocument =
+      opened?.document === undefined
+        ? undefined
+        : runHandoffMergeBase(opened.document);
     const openedConfigurationNotice = runsOpenedConfiguration
       ? openedConfigurationWarning(this.dataRoot, opened)
       : undefined;

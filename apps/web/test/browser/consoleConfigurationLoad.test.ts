@@ -214,7 +214,7 @@ describe("the load offer on the file step", () => {
         configured: true,
         present: true,
         document: CONFIG_DOCUMENT,
-        carriedThrough: ["authentication.token_max_age_days"],
+        carriedThrough: ["added_setting"],
         warnings: ["connection.server.password"],
         signingPathSettings: [],
         folderPathSettings: [],
@@ -225,9 +225,7 @@ describe("the load offer on the file step", () => {
     await expect
       .element(page.getByText("Configuration opened").first())
       .toBeInTheDocument();
-    await expect
-      .element(page.getByText(/authentication\.token_max_age_days/))
-      .toBeInTheDocument();
+    await expect.element(page.getByText(/added_setting/)).toBeInTheDocument();
     await expect
       .element(page.getByText(/connection\.server\.password/))
       .toBeInTheDocument();
@@ -563,11 +561,15 @@ describe("the divergence warning on the step that resolves it", () => {
 // them here is warned of before the run; the run makes no invitation, so the
 // review step offers no duration for one.
 describe("the review step of an opened configuration's run", () => {
-  async function goToReview(): Promise<void> {
+  async function goToReview(stated: object = {}): Promise<void> {
     stubConfigRoute(
       {
         status: 200,
-        body: openedBody({ ...CONFIG_DOCUMENT, metadata: STATED_COLUMNS }),
+        body: openedBody({
+          ...CONFIG_DOCUMENT,
+          metadata: STATED_COLUMNS,
+          ...stated,
+        }),
       },
       {
         files: [CLIENTS_FILE],
@@ -598,6 +600,22 @@ describe("the review step of an opened configuration's run", () => {
     await goToReview();
     expect(page.getByLabelText("Invitation duration").query()).toBeNull();
     expect(app.container.textContent).not.toContain(EDITED_TERMS_TITLE);
+  });
+
+  test("the shared secret's maximum age starts from the file's", async () => {
+    await goToReview({ tokenMaxAgeDays: 30 });
+    await expect
+      .element(page.getByText(/secret expires 30 days after each exchange/))
+      .toBeInTheDocument();
+    await page
+      .getByRole("button", { name: /Receipts and record keeping/ })
+      .click();
+    await expect
+      .element(page.getByLabelText("Set a maximum age for the shared secret"))
+      .toBeChecked();
+    await expect
+      .element(page.getByLabelText("Maximum age in days"))
+      .toHaveValue("30");
   });
 
   test("a changed term is warned of until it is undone", async () => {

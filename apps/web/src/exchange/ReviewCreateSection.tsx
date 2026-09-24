@@ -484,6 +484,7 @@ export function ReviewCreateSection({
             draft={receipts}
             identity={termsIdentity}
             rendezvous={rendezvous}
+            maxAgeOffered={connectionSettingsEditable}
             onChange={onReceipts}
           />
         </>

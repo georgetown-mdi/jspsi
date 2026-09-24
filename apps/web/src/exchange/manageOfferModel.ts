@@ -31,6 +31,7 @@ import {
 
 import { NOTE_CONTROL_CHAR_PATTERN } from "@jobs/intentSchemas";
 import { RETENTION_NOTE_PROBLEM } from "@psi/receiptsModel";
+import { maxAgeDaysError } from "@psi/tokenMaxAge";
 
 import {
   MAX_LABEL_LENGTH,
@@ -341,24 +342,9 @@ export function labelWithinCap(label: string): boolean {
   return label.length <= MAX_LABEL_LENGTH;
 }
 
-/**
- * Validate an opted-in max-age day count as the operator typed it (a number, or
- * the string a cleared/partial number input reports), returning the field error
- * to show, or `undefined` when the value is a usable policy. An enabled-but-
- * invalid count must never resolve to "no bound": a cleared field silently
- * converting opt-in to no-bound would deposit an unbounded secret the operator
- * believes is bounded, so an invalid value blocks the deposit instead. The
- * bounds are the record schema's (a positive integer at most
- * {@link MAX_TOKEN_MAX_AGE_DAYS}), checked here so an out-of-range value fails
- * at the field rather than as a generic store-write failure.
- */
-export function maxAgeDaysError(value: number | string): string | undefined {
-  if (typeof value !== "number" || !Number.isInteger(value) || value < 1)
-    return "Enter a whole number of days.";
-  if (value > MAX_TOKEN_MAX_AGE_DAYS)
-    return `Enter at most ${MAX_TOKEN_MAX_AGE_DAYS} days.`;
-  return undefined;
-}
+/** The opted-in max-age field's validation, re-exported at the offer boundary
+ * beside the cap it enforces ({@link MAX_TOKEN_MAX_AGE_DAYS}). */
+export { maxAgeDaysError };
 
 /**
  * The cadence line shown when the operator sets a max-age policy, naming the

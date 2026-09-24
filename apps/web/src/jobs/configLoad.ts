@@ -189,6 +189,10 @@ export interface DisclosedExchangeDocument {
   csvDelimiter?: string;
   retentionDisposition?: string;
   signing?: DisclosedSigning;
+  /** The file's `authentication.token_max_age_days`, the one setting of that
+   * block a configuration states; the shared secret and its expiry are refused
+   * at the load ({@link assertNoStatedSecret}). */
+  tokenMaxAgeDays?: number;
 }
 
 /** The body `GET /api/jobs/config` answers with. `present: false` is a console
@@ -238,6 +242,7 @@ function probeIntentFields(): JobExchangeIntentBase {
     includeOwnColumns: "all",
     csvDelimiter: "|",
     retentionDisposition: "composition probe",
+    tokenMaxAgeDays: 1,
     side: "acceptor",
     signing: { mode: "certificate", partnerFingerprint: PROBE_FINGERPRINT },
     options: {
@@ -402,34 +407,65 @@ const COMPOSED_FIELD_PATHS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * The top-level blocks a composition here writes, from the same measure.
- * Exported for the hand-off's own merge ({@link ./handoff}): the export holds
- * a mounted top-level key only outside this set, since a key inside it is the
- * composition's alone, present or absent as the run composed it -- a setting
- * INSIDE one of these cannot be held, the composition's block replaces it,
- * key for key.
+ * The block a run composes from its own control but a hand-back into a
+ * configuration on a channel the console does not conduct has no control for:
+ * that hand-back keeps it as the file states it ({@link ./handoff},
+ * `handBackConfigDocument`). It is therefore left out of
+ * {@link COMPOSED_BLOCKS}, and a run's hand-off drops it from its merge base
+ * instead ({@link runHandoffMergeBase}), so the run's composition decides it
+ * there, absent included.
+ */
+const RUN_COMPOSED_HAND_BACK_HELD_BLOCK =
+  "authentication" as const satisfies keyof ExchangeSpec;
+
+/**
+ * The top-level blocks a composition here writes, from the same measure, less
+ * {@link RUN_COMPOSED_HAND_BACK_HELD_BLOCK}. Exported for the hand-off's own
+ * merge ({@link ./handoff}): the export holds a mounted top-level key only
+ * outside this set, since a key inside it is the composition's alone, present
+ * or absent as the run composed it -- a setting INSIDE one of these cannot be
+ * held, the composition's block replaces it, key for key.
  */
 export const COMPOSED_BLOCKS: ReadonlySet<string> = new Set(
-  [...COMPOSED_FIELD_PATHS].map((field) => field.split(".")[0]),
+  [...COMPOSED_FIELD_PATHS]
+    .map((field) => field.split(".")[0])
+    .filter((block) => block !== RUN_COMPOSED_HAND_BACK_HELD_BLOCK),
 );
+
+/**
+ * The opened document as a run's hand-off merges its composition over it: the
+ * document less {@link RUN_COMPOSED_HAND_BACK_HELD_BLOCK}, which the run
+ * composes from the console's own control. A run whose operator turned the
+ * max-age policy off therefore hands off no `authentication` block, rather than
+ * the one the file stated.
+ */
+export function runHandoffMergeBase(document: ExchangeSpec): ExchangeSpec {
+  const { [RUN_COMPOSED_HAND_BACK_HELD_BLOCK]: _composedByTheRun, ...merged } =
+    document;
+  return merged;
+}
 
 /**
  * The document's settings no composition here writes, credential fields
  * excepted: the hand-off replaces each of those with a placeholder, and the
  * response names them in its warnings ({@link credentialFieldsNotAdopted})
  * rather than as settings it keeps. A `connection` on a channel the console
- * does not conduct is left out whole: no run here composes one over it.
+ * does not conduct is left out whole: no run here composes one over it. On
+ * that channel {@link RUN_COMPOSED_HAND_BACK_HELD_BLOCK} is held rather than
+ * composed, since only a run composes it.
  */
 function unadoptedFields(document: ExchangeSpec): Array<string> {
   const credentials = new Set(credentialFieldsNotAdopted(document));
   const conducted = isJobChannel(document.connection.channel);
   return documentKeyPaths(document)
-    .filter(
-      (field) =>
-        !COMPOSED_FIELD_PATHS.has(field) &&
-        !credentials.has(field) &&
-        (conducted || field.split(".")[0] !== "connection"),
-    )
+    .filter((field) => {
+      const block = field.split(".")[0];
+      if (!conducted && block === "connection") return false;
+      const composed =
+        COMPOSED_FIELD_PATHS.has(field) &&
+        (conducted || block !== RUN_COMPOSED_HAND_BACK_HELD_BLOCK);
+      return !composed && !credentials.has(field);
+    })
     .sort();
 }
 
@@ -572,8 +608,9 @@ function openedChannel(document: ExchangeSpec): OpenedChannel {
  * Refuse an `authentication` block holding the secret or its expiry. A run of
  * the opened configuration uses the `.psilink.key` beside it, whose secret the
  * CLI rotates at each run, so a secret in the document is a value the run
- * would neither use nor be able to keep. `token_max_age_days` is held
- * unchanged, which {@link carriedThroughFields} names.
+ * would neither use nor be able to keep. `token_max_age_days` is not
+ * refused: the console's max-age control starts from it, and a run composes
+ * what that control holds.
  */
 function assertNoStatedSecret(document: ExchangeSpec): void {
   const authentication = document.authentication;
@@ -783,6 +820,9 @@ export function disclosedDocument(
               : {}),
           },
         }
+      : {}),
+    ...(document.authentication?.tokenMaxAgeDays !== undefined
+      ? { tokenMaxAgeDays: document.authentication.tokenMaxAgeDays }
       : {}),
   };
 }

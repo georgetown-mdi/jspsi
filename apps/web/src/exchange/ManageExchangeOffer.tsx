@@ -17,6 +17,7 @@ import {
   RETENTION_NOTE_NOTICE_WEB,
   RETENTION_NOTE_PLACEHOLDER,
 } from "@psi/receiptsModel";
+import { OPT_IN_TOKEN_MAX_AGE_DAYS } from "@psi/tokenMaxAge";
 import { probeManagedStoreOpen } from "@psi/managed/managedExchangeStore";
 
 import styles from "@styles/app.module.css";
@@ -88,7 +89,9 @@ export function ManageExchangeOffer({
   // Held as the NumberInput reports it (a string when cleared or mid-edit), so
   // an invalid state is representable and can block the deposit rather than
   // being coerced to a sentinel that silently drops the opted-in bound.
-  const [maxAgeDays, setMaxAgeDays] = useState<number | string>(90);
+  const [maxAgeDays, setMaxAgeDays] = useState<number | string>(
+    OPT_IN_TOKEN_MAX_AGE_DAYS,
+  );
   const [retentionNote, setRetentionNote] = useState("");
   const storeAvailable = useManagedStoreAvailability();
 
