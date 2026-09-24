@@ -71,7 +71,7 @@ source for every binary an image ships is the distribution's own, unmodified.
 
 ### The default image: Alpine
 
-The pinned base digest resolves to Alpine 3.24.1, which the list's
+The pinned base digest resolves to Alpine 3.24.2, which the list's
 `alpine-release` row states.
 
 - **Build recipes and Alpine's own patches**: the aports repository,
