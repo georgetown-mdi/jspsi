@@ -9,6 +9,8 @@ import {
 } from "@psilink/core";
 
 import {
+  HANDOFF_CREDENTIAL_PATH_PLACEHOLDER,
+  HANDOFF_PASSPHRASE_PATH_PLACEHOLDER,
   HANDOFF_SHARED_DIRECTORY_PLACEHOLDER,
   HANDOFF_SIGNING_IDENTITY_PLACEHOLDER,
   buildJobHandoff,
@@ -20,11 +22,18 @@ import {
   runHandoffMergeBase,
 } from "@jobs/configLoad";
 
-import { validIntent, validLinkageTerms } from "../../utils/jobFixtures";
+import {
+  TEST_HOST_KEY_FINGERPRINT,
+  composedServer,
+  validIntent,
+  validLinkageTerms,
+  validSftpIntent,
+} from "../../utils/jobFixtures";
 
 import type { ExchangeSpec } from "@psilink/core";
 import type { JobFiledropExchangeIntent } from "@jobs/intentSchemas";
 import type { JobHandoff } from "@jobs/handoff";
+import type { JobSftpServerEntry } from "@jobs/sftpServer";
 
 /**
  * What a console run's hand-off makes of the configuration it was opened from:
@@ -379,6 +388,120 @@ describe("the settings a loaded configuration keeps in the export", () => {
 
   test("a console that opened no configuration exports its composition", () => {
     expect(exportOver(undefined)).not.toContain("authentication");
+  });
+});
+
+describe("the sftp credential paths a loaded configuration keeps in the export", () => {
+  /** The credential files the console run was pointed at, which are container
+   * paths and reach no template. */
+  const RUN_PASSWORD_PATH = "@/run/secrets/password";
+  const RUN_KEY_PATH = "@/run/secrets/id_ed25519";
+  const RUN_PASSPHRASE_PATH = "@/run/secrets/passphrase";
+
+  /** A mounted sftp document whose server states `credential`. */
+  function sftpDocument(credential: Record<string, string>): ExchangeSpec {
+    return parseExchangeSpec({
+      connection: {
+        channel: "sftp",
+        server: {
+          host: "sftp.example.org",
+          hostKeyFingerprint: TEST_HOST_KEY_FINGERPRINT,
+          ...credential,
+        },
+      },
+      linkageTerms: validLinkageTerms(),
+    });
+  }
+
+  /** The exported `connection.server` of a run over `document` with the run's
+   * own credential `runCredential`. */
+  function exportedServer(
+    document: ExchangeSpec,
+    runCredential: Partial<JobSftpServerEntry>,
+    converted: boolean,
+  ): Record<string, unknown> {
+    const handoff = buildJobHandoff(
+      validSftpIntent({ linkageTerms: validLinkageTerms() }),
+      {
+        host: "sftp.example.org",
+        hostKeyFingerprint: TEST_HOST_KEY_FINGERPRINT,
+        ...runCredential,
+      },
+      {
+        credentialPasted: false,
+        filedropSplit: false,
+        mountedDocument: document,
+        mountedDocumentConverted: converted,
+      },
+    );
+    if (handoff.template.kind !== "config")
+      throw new Error("an exchange hand-off composed no template");
+    return composedServer(handoff.template.yaml);
+  }
+
+  test("an unconverted export states the password path as read", () => {
+    const server = exportedServer(
+      sftpDocument({ password: "@/home/operator/.psilink/password" }),
+      { password: RUN_PASSWORD_PATH },
+      false,
+    );
+    expect(server.password).toBe("@/home/operator/.psilink/password");
+  });
+
+  test("an unconverted export states the private key and passphrase paths as read", () => {
+    const server = exportedServer(
+      sftpDocument({
+        privateKey: "@/home/operator/.ssh/id_ed25519",
+        privateKeyPassphrase: "@/home/operator/.ssh/passphrase",
+      }),
+      { privateKey: RUN_KEY_PATH, privateKeyPassphrase: RUN_PASSPHRASE_PATH },
+      false,
+    );
+    expect(server.private_key).toBe("@/home/operator/.ssh/id_ed25519");
+    expect(server.private_key_passphrase).toBe(
+      "@/home/operator/.ssh/passphrase",
+    );
+  });
+
+  test("a converted export states the placeholders for all three credential paths", () => {
+    const password = exportedServer(
+      sftpDocument({ password: "@/home/operator/.psilink/password" }),
+      { password: RUN_PASSWORD_PATH },
+      true,
+    );
+    expect(password.password).toBe(HANDOFF_CREDENTIAL_PATH_PLACEHOLDER);
+    const key = exportedServer(
+      sftpDocument({
+        privateKey: "@/home/operator/.ssh/id_ed25519",
+        privateKeyPassphrase: "@/home/operator/.ssh/passphrase",
+      }),
+      { privateKey: RUN_KEY_PATH, privateKeyPassphrase: RUN_PASSPHRASE_PATH },
+      true,
+    );
+    expect(key.private_key).toBe(HANDOFF_CREDENTIAL_PATH_PLACEHOLDER);
+    expect(key.private_key_passphrase).toBe(
+      HANDOFF_PASSPHRASE_PATH_PLACEHOLDER,
+    );
+  });
+
+  test("an inline credential in the document reaches no export", () => {
+    const inlinePassword = "an-inline-password-value";
+    const server = exportedServer(
+      sftpDocument({ password: inlinePassword }),
+      { password: RUN_PASSWORD_PATH },
+      false,
+    );
+    expect(server.password).toBe(HANDOFF_CREDENTIAL_PATH_PLACEHOLDER);
+  });
+
+  test("a sign-in method the run changed keeps the run's placeholder", () => {
+    const server = exportedServer(
+      sftpDocument({ password: "@/home/operator/.psilink/password" }),
+      { privateKey: RUN_KEY_PATH },
+      false,
+    );
+    expect(server.password).toBeUndefined();
+    expect(server.private_key).toBe(HANDOFF_CREDENTIAL_PATH_PLACEHOLDER);
   });
 });
 
