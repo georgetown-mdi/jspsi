@@ -53,7 +53,7 @@ import type { JobSftpServerEntry } from "./sftpServer";
  *   every filedrop rendezvous mount, and the signing identity file are
  *   replaced with fixed placeholder tokens before the template is composed.
  *   A configuration opened from the mount and not converted states its own
- *   shared-folder and signing paths instead, as it read them
+ *   shared-folder, sftp credential, and signing paths instead, as it read them
  *   ({@link withPathsAsRead}): paths of the operator's machine, never the
  *   console's.
  */
@@ -307,7 +307,8 @@ type FiledropConnection = Extract<
 /**
  * The composition with the paths an unconverted opened document read put back:
  * the shared folder or folder pair, where the run kept the document's filedrop
- * channel, and the document's signing block exactly as read for a run that
+ * channel, each sftp credential `@path` ({@link withCredentialPathsAsRead}),
+ * and the document's signing block exactly as read for a run that
  * signs nothing. The run's receipt mode is the run's choice; the hand-off is
  * the operator's file, so a path and a mode of theirs stay theirs until they
  * convert it. A signed run reaches here only for a document stating no signing
@@ -336,12 +337,50 @@ function withPathsAsRead(
   const connection =
     composed.connection.channel === "filedrop" && read.channel === "filedrop"
       ? { ...withoutFolderPaths(composed.connection), ...folderPathsOf(read) }
-      : composed.connection;
+      : composed.connection.channel === "sftp" && read.channel === "sftp"
+        ? {
+            ...composed.connection,
+            server: withCredentialPathsAsRead(
+              composed.connection.server,
+              read.server,
+            ),
+          }
+        : composed.connection;
   return {
     ...rest,
     connection,
     ...(signing !== undefined ? { signing } : {}),
   };
+}
+
+/** An sftp server, as core's spec types it. */
+type SftpServer = Extract<
+  ExchangeSpec["connection"],
+  { channel: "sftp" }
+>["server"];
+
+/**
+ * The composed server with each credential field it states set to the
+ * `@path` the read server states for that field. A field the read server
+ * leaves out, or states as an inline value, keeps its placeholder: an inline
+ * value is the credential itself, which no template holds, and carrying only
+ * fields the composition states keeps the sign-in method the run used.
+ */
+function withCredentialPathsAsRead(
+  composed: SftpServer,
+  read: SftpServer,
+): SftpServer {
+  const server = { ...composed };
+  for (const field of [
+    "password",
+    "privateKey",
+    "privateKeyPassphrase",
+  ] as const) {
+    const readValue = read[field];
+    if (server[field] !== undefined && readValue?.startsWith("@") === true)
+      server[field] = readValue;
+  }
+  return server;
 }
 
 /** A filedrop connection with neither folder form, for a read one to fill. */
@@ -414,8 +453,8 @@ function composedHandoffSpec(
  * operator who converted a mounted `signing` block and turned signing off in
  * the console -- is therefore absent from the export rather than surviving
  * from the mount: the composition's absence is itself the operator's edit. So no
- * container path and no credential from the opened file reaches the template,
- * and no held setting outlives a run that replaced it. What survives is the
+ * container path and no credential value from the opened file reaches the
+ * template, and no held setting outlives a run that replaced it. What survives is the
  * settings the console has no control for and never composes, which the load
  * names for the operator ({@link ./configLoad}).
  *

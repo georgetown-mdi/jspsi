@@ -1583,9 +1583,9 @@ The cells:
 | `connection.server.inbound_path` (sftp) | authored | authored | not applicable |
 | `connection.server.outbound_path` (sftp) | authored | authored | not applicable |
 | `connection.server.username` (sftp) | authored | authored | not applicable |
-| `connection.server.password` | authored | authored (entered again; a warning names it) | not applicable |
-| `connection.server.private_key` | authored | authored (entered again; a warning names it) | not applicable |
-| `connection.server.private_key_passphrase` | authored | authored (entered again; a warning names it) | not applicable |
+| `connection.server.password` | authored | authored (entered again; a warning names it; the recurring-run hand-off states a file reference as read until you convert the configuration) | not applicable |
+| `connection.server.private_key` | authored | authored (entered again; a warning names it; the recurring-run hand-off states a file reference as read until you convert the configuration) | not applicable |
+| `connection.server.private_key_passphrase` | authored | authored (entered again; a warning names it; the recurring-run hand-off states a file reference as read until you convert the configuration) | not applicable |
 | `connection.server.keyboard_interactive` | authored | authored | not applicable |
 | `connection.server.host_key_fingerprint` | authored | authored (a rotation list is entered separated by commas; a direct exchange takes one value) | not applicable |
 | `connection.server.certificate` | refused | refused | refused |
