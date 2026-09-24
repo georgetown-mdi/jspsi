@@ -157,12 +157,12 @@ rem Pulled here rather than left to the first docker run: an image that cannot
 rem be fetched exits 125, which is indistinguishable from the checks deciding
 rem something about the share, and would be reported as a share problem with no
 rem diagnosis printed above it.
-docker image inspect "vdorie/psi-link:latest" >nul 2>&1
+docker image inspect "ghcr.io/georgetown-mdi/alcove:latest" >nul 2>&1
 if errorlevel 1 (
   echo Fetching the psilink image ^(first run only^). It is a few hundred
   echo megabytes -- the same image the exchange itself runs -- so this can
   echo take several minutes with nothing on screen.
-  docker pull --quiet "vdorie/psi-link:latest" >"%WORK%" 2>&1
+  docker pull --quiet "ghcr.io/georgetown-mdi/alcove:latest" >"%WORK%" 2>&1
   if errorlevel 1 goto no_image
 )
 
@@ -282,7 +282,7 @@ echo(
 set "VERDICT="
 set "PWWARN="
 set "TOKEN="
-docker run --rm -i --env SMB_PASS --entrypoint sh "vdorie/psi-link:latest" -c "tr -d '\r' | sh" <"%SCRIPT_DIR%cmd_psilink-credcheck.sh" >"%WORK%" 2>nul
+docker run --rm -i --env SMB_PASS --entrypoint sh "ghcr.io/georgetown-mdi/alcove:latest" -c "tr -d '\r' | sh" <"%SCRIPT_DIR%cmd_psilink-credcheck.sh" >"%WORK%" 2>nul
 if errorlevel 1 goto credcheck_failed
 for /f "usebackq tokens=1,* delims==" %%a in ("%WORK%") do (
   if "%%a"=="VERDICT" set "VERDICT=%%b"
@@ -320,7 +320,7 @@ rem reads. It is fed on standard input through "tr -d '\r'" so that a checkout
 rem with core.autocrlf on cannot break it -- sh does not treat a carriage
 rem return as whitespace, and a CRLF copy reaching sh directly dies with an
 rem unterminated if.
-docker run --rm -i --env SMB_SERVER --env SMB_SHARE --env SMB_PATH --env SMB_USER --env SMB_DOMAIN --env SMB_PASS --env SMB_DIALECT --env SMB_MARKER --env SMB_TOKEN --entrypoint sh "vdorie/psi-link:latest" -c "tr -d '\r' | sh" <"%SCRIPT_DIR%cmd_psilink-probe.sh"
+docker run --rm -i --env SMB_SERVER --env SMB_SHARE --env SMB_PATH --env SMB_USER --env SMB_DOMAIN --env SMB_PASS --env SMB_DIALECT --env SMB_MARKER --env SMB_TOKEN --entrypoint sh "ghcr.io/georgetown-mdi/alcove:latest" -c "tr -d '\r' | sh" <"%SCRIPT_DIR%cmd_psilink-probe.sh"
 set "PROBE_RC=%errorlevel%"
 
 set "SMB_SERVER="
@@ -400,7 +400,7 @@ call :good "Volume created. Docker mounts it the first time it is used."
 
 echo Mounting it and testing what psilink needs...
 set "MARKER=%MARKER_NAME%"
-docker run --rm -i -v "%VOLUME_NAME%:/rz" --env MARKER --env TOKEN --entrypoint sh "vdorie/psi-link:latest" -c "tr -d '\r' | sh" <"%SCRIPT_DIR%cmd_psilink-volcheck.sh" >"%WORK%" 2>&1
+docker run --rm -i -v "%VOLUME_NAME%:/rz" --env MARKER --env TOKEN --entrypoint sh "ghcr.io/georgetown-mdi/alcove:latest" -c "tr -d '\r' | sh" <"%SCRIPT_DIR%cmd_psilink-volcheck.sh" >"%WORK%" 2>&1
 set "VOL_RC=%errorlevel%"
 set "MARKER="
 
@@ -480,7 +480,7 @@ echo need to run this script again unless the password changes.
 echo(
 echo Run your exchange like this, on one line:
 echo(
-echo   docker run --rm -v "C:\path\to\your\work:/work" -v "%VOLUME_NAME%:/sync" vdorie/psi-link:latest file:///sync input.csv matches.csv
+echo   docker run --rm -v "C:\path\to\your\work:/work" -v "%VOLUME_NAME%:/sync" ghcr.io/georgetown-mdi/alcove:latest file:///sync input.csv matches.csv
 echo(
 call :info "C:\path\to\your\work is a LOCAL folder on this PC holding your input"
 call :info "CSV; results are written back there. It must not be a network path."
@@ -504,7 +504,7 @@ echo(
 call :folder_name
 echo There is also a browser console, on one line:
 echo(
-echo   docker run --rm -p 127.0.0.1:3000:3000 --env JOB_DATA_ROOT=/data --env JOB_RENDEZVOUS_DIR=/sync --env "JOB_RENDEZVOUS_NAME=%FOLDER_NAME%" -v "C:\path\to\your\work:/data" -v "%VOLUME_NAME%:/sync" vdorie/psi-link:latest serve
+echo   docker run --rm -p 127.0.0.1:3000:3000 --env JOB_DATA_ROOT=/data --env JOB_RENDEZVOUS_DIR=/sync --env "JOB_RENDEZVOUS_NAME=%FOLDER_NAME%" -v "C:\path\to\your\work:/data" -v "%VOLUME_NAME%:/sync" ghcr.io/georgetown-mdi/alcove:latest serve
 echo(
 call :info "then open http://127.0.0.1:3000"
 call :info ""
@@ -585,7 +585,7 @@ echo(
 echo That means you do not need a Docker volume at all -- you can mount
 echo the folder directly. Run your exchange like this, on one line:
 echo(
-echo   docker run --rm -v "C:\path\to\your\work:/work" -v "%RESOLVE_LOCAL%:/sync" vdorie/psi-link:latest file:///sync input.csv matches.csv
+echo   docker run --rm -v "C:\path\to\your\work:/work" -v "%RESOLVE_LOCAL%:/sync" ghcr.io/georgetown-mdi/alcove:latest file:///sync input.csv matches.csv
 echo(
 call :warn "If this folder is kept in step with your partner by a sync client"
 call :note "(OneDrive, Dropbox, Egnyte, ShareFile), both sides must also pass"

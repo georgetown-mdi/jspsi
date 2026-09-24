@@ -62,6 +62,9 @@ jobs:
       # actions/attest-build-provenance's write to this repository's
       # attestation store.
       attestations: write
+      # The image push: the login step below authenticates to ghcr.io with
+      # this job's own token, so no long-lived registry credential is held.
+      packages: write
     outputs:
       # The manifest-list digest, carried to the launcher job so the reference it
       # stamps and the reference cosign signs below are the same value. The
@@ -112,7 +115,7 @@ jobs:
 
       # The scan gate, ahead of every registry step below on purpose: a release
       # whose image carries a fixable HIGH or CRITICAL vulnerability in an OS or
-      # language package never reaches Docker Hub at all, rather than being pushed
+      # language package never reaches the registry at all, rather than being pushed
       # under `latest` and then withheld from signing. Nothing in this job has
       # authenticated to the registry yet when it runs. The publish sequence below
       # holds the same property once the gate is past: each image is signed and
@@ -285,7 +288,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: vdorie/psi-link
+          images: ghcr.io/georgetown-mdi/alcove
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
@@ -307,9 +310,9 @@ jobs:
           version="${PSILINK_TAG#v}"
           {
             echo "tags<<PSILINK_FIPS_TAGS"
-            echo "vdorie/psi-link:${version}-fips"
-            echo "vdorie/psi-link:${version%.*}-fips"
-            echo "vdorie/psi-link:latest-fips"
+            echo "ghcr.io/georgetown-mdi/alcove:${version}-fips"
+            echo "ghcr.io/georgetown-mdi/alcove:${version%.*}-fips"
+            echo "ghcr.io/georgetown-mdi/alcove:latest-fips"
             echo "PSILINK_FIPS_TAGS"
           } >>"$GITHUB_OUTPUT"
 
@@ -321,11 +324,12 @@ jobs:
       - name: Install Cosign
         uses: sigstore/cosign-installer@v4.1.2
 
-      - name: Log in to Docker Hub
+      - name: Log in to the GitHub Container Registry
         uses: docker/login-action@v4
         with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_TOKEN }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       # Each image is pushed, signed, verified and attested as a unit before the
       # next one is built, so a failure in the variant's build cannot leave the
@@ -361,7 +365,7 @@ jobs:
         run: |
           set -euo pipefail
           cosign sign --yes \
-            vdorie/psi-link@${{ steps.build.outputs.digest }}
+            ghcr.io/georgetown-mdi/alcove@${{ steps.build.outputs.digest }}
 
       # The command docs/RELEASES.md publishes, run against the digest just
       # signed: a signature that command cannot verify fails the release here
@@ -376,7 +380,7 @@ jobs:
           cosign verify \
             --certificate-identity-regexp '^https://github\.com/georgetown-mdi/jspsi/\.github/workflows/release\.yaml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$' \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-            vdorie/psi-link@${{ steps.build.outputs.digest }}
+            ghcr.io/georgetown-mdi/alcove@${{ steps.build.outputs.digest }}
 
       # Answers a different question from the signature above -- what the build
       # consumed, not that this manifest is what the release published -- and is
@@ -385,13 +389,13 @@ jobs:
       # and the default image's is the one the launchers job stamps, so one
       # manifest carries both claims.
       # The attestation is left in this repository's store rather than
-      # pushed to Docker Hub as an OCI referrer (push-to-registry defaults to
+      # pushed to the registry as an OCI referrer (push-to-registry defaults to
       # false), so verifying it does not depend on what the registry can hold;
       # docs/RELEASES.md carries the matching verification command.
       - name: Attest build provenance
         uses: actions/attest-build-provenance@v4
         with:
-          subject-name: docker.io/vdorie/psi-link
+          subject-name: ghcr.io/georgetown-mdi/alcove
           subject-digest: ${{ steps.build.outputs.digest }}
 
       - name: Build and push the FIPS variant
@@ -414,7 +418,7 @@ jobs:
         run: |
           set -euo pipefail
           cosign sign --yes \
-            vdorie/psi-link@${{ steps.build_fips.outputs.digest }}
+            ghcr.io/georgetown-mdi/alcove@${{ steps.build_fips.outputs.digest }}
 
       - name: Verify the FIPS variant's signature
         run: |
@@ -422,12 +426,12 @@ jobs:
           cosign verify \
             --certificate-identity-regexp '^https://github\.com/georgetown-mdi/jspsi/\.github/workflows/release\.yaml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$' \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-            vdorie/psi-link@${{ steps.build_fips.outputs.digest }}
+            ghcr.io/georgetown-mdi/alcove@${{ steps.build_fips.outputs.digest }}
 
       - name: Attest the FIPS variant's build provenance
         uses: actions/attest-build-provenance@v4
         with:
-          subject-name: docker.io/vdorie/psi-link
+          subject-name: ghcr.io/georgetown-mdi/alcove
           subject-digest: ${{ steps.build_fips.outputs.digest }}
 
   # The host-side launchers are handed to an operator as plaintext and pin the

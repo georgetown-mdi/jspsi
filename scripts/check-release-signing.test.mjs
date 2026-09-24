@@ -65,7 +65,7 @@ const signStep = (id) =>
     `      - name: Sign ${id}`,
     "        run: |",
     "          cosign sign --yes \\",
-    `            vdorie/psi-link@\${{ steps.${id}.outputs.digest }}`,
+    `            ghcr.io/georgetown-mdi/alcove@\${{ steps.${id}.outputs.digest }}`,
   ].join("\n");
 
 const verifyStep = (
@@ -78,7 +78,7 @@ const verifyStep = (
     "          cosign verify \\",
     `            --certificate-identity-regexp '${identity}' \\`,
     `            --certificate-oidc-issuer ${issuer} \\`,
-    `            vdorie/psi-link@\${{ steps.${id}.outputs.digest }}`,
+    `            ghcr.io/georgetown-mdi/alcove@\${{ steps.${id}.outputs.digest }}`,
   ].join("\n");
 
 const verifyStepWithoutArguments = (id) =>
@@ -139,13 +139,13 @@ const doc = ({
     "cosign verify \\",
     `  --certificate-identity-regexp '${identity}' \\`,
     `  --certificate-oidc-issuer ${issuer} \\`,
-    "  vdorie/psi-link:X.Y.Z",
+    "  ghcr.io/georgetown-mdi/alcove:X.Y.Z",
     "```",
     "",
     "### Build provenance",
     "",
     "```sh",
-    "gh attestation verify oci://docker.io/vdorie/psi-link@sha256:... \\",
+    "gh attestation verify oci://ghcr.io/georgetown-mdi/alcove@sha256:... \\",
     "  --repo georgetown-mdi/jspsi \\",
     `  --signer-workflow ${signerWorkflow}`,
     "```",

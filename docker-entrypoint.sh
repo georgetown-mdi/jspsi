@@ -2,7 +2,7 @@
 # Dispatch between the two roles this image serves. `serve` (as the first
 # argument) starts the web console appliance's Nitro server; any other argument
 # vector runs the headless CLI, byte-for-byte as the CLI-only image did, so
-# existing `docker run vdorie/psi-link <cli-args>` callers are unaffected.
+# existing `docker run ghcr.io/georgetown-mdi/alcove <cli-args>` callers are unaffected.
 #
 # `exec` replaces this shell with node so node becomes PID 1 and receives
 # container signals (SIGTERM/SIGINT) directly -- the server's graceful shutdown

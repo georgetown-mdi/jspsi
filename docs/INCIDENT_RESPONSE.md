@@ -29,7 +29,7 @@ gh api repos/georgetown-mdi/jspsi/private-vulnerability-reporting
 
 `{"enabled":true}` is the answer this runbook depends on. Enable it in the repository's security settings if the check answers otherwise; the API answer is the check that stays true as setting names move.
 
-**Release credentials are reachable.** Shipping a hotfix needs the maintainer's SSH signing key ([RELEASES.md#source-integrity](RELEASES.md#source-integrity)) and the `DOCKER_USERNAME` and `DOCKER_TOKEN` repository secrets ([RELEASES.md](RELEASES.md#8-build-and-publish-the-container-image-ci)). Both are single-custody, which is why the maintainer-unavailable path below is a communication playbook rather than a release one.
+**Release credentials are reachable.** Shipping a hotfix needs the maintainer's SSH signing key ([RELEASES.md#source-integrity](RELEASES.md#source-integrity)); the image push authenticates with the release workflow's own token, so no registry credential is held ([RELEASES.md](RELEASES.md#8-build-and-publish-the-container-image-ci)). The signing key is single-custody, which is why the maintainer-unavailable path below is a communication playbook rather than a release one.
 
 **Someone besides the maintainer sees a report arrive.** Confirm the co-owner holds an account with admin access to the repository and that its security notifications reach them.
 

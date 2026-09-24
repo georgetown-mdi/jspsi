@@ -14,7 +14,7 @@ This document does not cover the CLI's own commands and configuration files (see
 
 ## The image and the console build
 
-The published `vdorie/psi-link` image is the console: it is built with `VITE_DEPLOYMENT_PROFILE=console` so its web assets and its server-side job driver are the console halves, and it runs them with `docker run --rm -p 127.0.0.1:3000:3000 vdorie/psi-link serve` (see [Running the container](#running-the-container)). You do not build web assets yourself, set the profile, or build an image of your own; the image's profile drives which transports run server-side, and the `-fips` variant has the same profile and serves the same two roles. Under `console` the operator's input CSV is read in place from a mounted work-input directory (see [Mounted work-input directory](#mounted-work-input-directory)), and the transport chooser offers to run a shared-directory (`filedrop`) exchange on the console over a mounted rendezvous directory -- and, when the operator authors an SFTP connection in the console (see [Authoring the SFTP connection](#authoring-the-sftp-connection)), to run an SFTP exchange against it; it drops the browser-only file-handling assurance from the UI accordingly. The separate `hosted` web deployment (the continuously deployed `apps/web`, not this image) never offers to run an exchange server-side: a shared-directory or SFTP exchange there only saves an exchange file for the command-line tool, so the operator's file stays in the browser even if the API were reachable.
+The published `ghcr.io/georgetown-mdi/alcove` image is the console: it is built with `VITE_DEPLOYMENT_PROFILE=console` so its web assets and its server-side job driver are the console halves, and it runs them with `docker run --rm -p 127.0.0.1:3000:3000 ghcr.io/georgetown-mdi/alcove serve` (see [Running the container](#running-the-container)). You do not build web assets yourself, set the profile, or build an image of your own; the image's profile drives which transports run server-side, and the `-fips` variant has the same profile and serves the same two roles. Under `console` the operator's input CSV is read in place from a mounted work-input directory (see [Mounted work-input directory](#mounted-work-input-directory)), and the transport chooser offers to run a shared-directory (`filedrop`) exchange on the console over a mounted rendezvous directory -- and, when the operator authors an SFTP connection in the console (see [Authoring the SFTP connection](#authoring-the-sftp-connection)), to run an SFTP exchange against it; it drops the browser-only file-handling assurance from the UI accordingly. The separate `hosted` web deployment (the continuously deployed `apps/web`, not this image) never offers to run an exchange server-side: a shared-directory or SFTP exchange there only saves an exchange file for the command-line tool, so the operator's file stays in the browser even if the API were reachable.
 
 ## Running the container
 
@@ -24,7 +24,7 @@ Pass `serve` as the first argument to run the single-party console instead of th
 docker run --rm -p 127.0.0.1:3000:3000 \
   --env JOB_DATA_ROOT=/data \
   -v /host/work:/data \
-  vdorie/psi-link:latest serve
+  ghcr.io/georgetown-mdi/alcove:latest serve
 ```
 
 The operator drops their input CSVs into `/host/work`, and a shared-directory exchange rendezvouses there too. Splitting those into separate mounts is recommended for the rendezvous directory, because it is partner-synced (see [Mounted work-input directory](#mounted-work-input-directory)):
@@ -39,7 +39,7 @@ docker run --rm \
   -v /host/jobs:/data/jobs \
   -v /host/input:/data/input \
   -v /host/agency-a-agency-b:/data/rendezvous \
-  vdorie/psi-link:latest serve
+  ghcr.io/georgetown-mdi/alcove:latest serve
 ```
 
 `JOB_RENDEZVOUS_NAME` is what a shared-directory invitation tells the partner to look for. The mount point above is named for the container's layout, so without it the invitation and the accept kit would call the shared folder `rendezvous`; name the mount point after the folder instead and it can be left unset.
@@ -59,7 +59,7 @@ docker run --rm \
   -v /host/input:/data/input \
   -v /host/from-agency-b:/data/rendezvous-in \
   -v /host/to-agency-b:/data/rendezvous-out \
-  vdorie/psi-link:latest serve
+  ghcr.io/georgetown-mdi/alcove:latest serve
 ```
 
 `JOB_CLI_BINARY` is pre-set in the image and needs no operator value. Setting `JOB_DATA_ROOT` turns the job API on; leave it unset and `serve` runs the web UI and peer-coordination server only. The `-p 127.0.0.1:3000:3000` publish binding is what keeps the unauthenticated API reachable only from the operator's own machine, and what widening it costs is in [Reachable only where you publish it](#reachable-only-where-you-publish-it).

@@ -145,7 +145,7 @@
   <line class="edge" x1="1004" y1="643" x2="1046" y2="643" marker-start="url(#arr)" marker-end="url(#arr)"></line>
   <line class="edge" x1="1004" y1="709" x2="1046" y2="709" marker-start="url(#arr)" marker-end="url(#arr)"></line>
 
-  <text class="e-label" x="600" y="766" text-anchor="middle">both apps ship in one Docker image: vdorie/psi-link</text>
+  <text class="e-label" x="600" y="766" text-anchor="middle">both apps ship in one Docker image: ghcr.io/georgetown-mdi/alcove</text>
 
   <!-- connection setup -->
   <polyline class="edge setup" points="740,180 795,180 795,135 836,135"></polyline>

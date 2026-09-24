@@ -26,7 +26,7 @@ set -u
 # from a release and refuses to run: an unpinned launcher would run whatever is
 # behind a floating tag today, which is the one thing an operator reading this
 # file cannot check for themselves.
-PSILINK_IMAGE_REPOSITORY='docker.io/vdorie/psi-link'
+PSILINK_IMAGE_REPOSITORY='ghcr.io/georgetown-mdi/alcove'
 PSILINK_IMAGE_DIGEST='@@PSILINK_IMAGE_DIGEST@@'
 
 PSILINK_RELEASES_URL='https://github.com/georgetown-mdi/jspsi/releases'

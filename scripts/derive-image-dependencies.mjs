@@ -15,7 +15,7 @@
 //
 //   - A psilink subcommand is a run of literal argument tokens beginning with a
 //     name the image answers to, on a logical line that also names the image (a
-//     `vdorie/psi-link` reference, or one of the helpers the launchers resolve
+//     `ghcr.io/georgetown-mdi/alcove` reference, or one of the helpers the launchers resolve
 //     it through) or an argument-vector parameter (`-Args`, `_ARGUMENTS`) before
 //     it. The names come from the image's own two dispatchers -- the words
 //     docker-entrypoint.sh routes on, and the commands apps/cli/src/cliParser.ts
@@ -208,7 +208,7 @@ export function tokenize(text) {
 /** Whether a token names the image, or the helper a launcher resolves it with. */
 export function namesImage(token) {
   return (
-    /psi-link/i.test(token) ||
+    /georgetown-mdi\/alcove/i.test(token) ||
     token === "Image" ||
     token === "psilink_image" ||
     token === "Get-PsilinkImage"

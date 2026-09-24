@@ -1289,7 +1289,7 @@ jobs:
           sudo rm -f "/var/run/netns/$ENDPOINT_NETNS"
           exit 0
 
-  # What `vdorie/psi-link:latest` -- the image an operator's launcher pulls --
+  # What `ghcr.io/georgetown-mdi/alcove:latest` -- the image an operator's launcher pulls --
   # answers, and what it ships. Setup-PsilinkFileDrop.ps1 is fetched off the
   # default branch on its own and runs that floating tag, which is published only
   # from a version tag: nothing locks the script to any image, so a capability can
@@ -1325,11 +1325,11 @@ jobs:
       # after it prints the digest the tag resolved to, which is the only thing a
       # green run here may be read as a claim about: the tag moves.
       - name: Pull the published image
-        run: docker pull vdorie/psi-link:latest
+        run: docker pull ghcr.io/georgetown-mdi/alcove:latest
 
       - name: Assert the published image answers what the setup scripts invoke
         id: published_capabilities
-        run: node scripts/assert-image-capabilities.mjs vdorie/psi-link:latest
+        run: node scripts/assert-image-capabilities.mjs ghcr.io/georgetown-mdi/alcove:latest
 
       - name: Say what an unanswered dependency here means
         if: failure() && steps.published_capabilities.outcome == 'failure'
@@ -1337,7 +1337,7 @@ jobs:
           {
             echo "## The published image did not answer every dependency"
             echo
-            echo "The step above ran against \`vdorie/psi-link:latest\`, which is"
+            echo "The step above ran against \`ghcr.io/georgetown-mdi/alcove:latest\`, which is"
             echo "published only from a version tag. A gap has two readings and the"
             echo "log does not distinguish them:"
             echo
@@ -1363,7 +1363,7 @@ jobs:
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: image
-          image-ref: vdorie/psi-link:latest
+          image-ref: ghcr.io/georgetown-mdi/alcove:latest
           scanners: vuln
           vuln-type: os,library
           severity: HIGH,CRITICAL
@@ -1385,7 +1385,7 @@ jobs:
           {
             echo "## Published image vulnerability scan"
             echo
-            echo "Gate outcome: **$SCAN_OUTCOME**. Fixable HIGH and CRITICAL vulnerabilities in the OS and language packages of \`vdorie/psi-link:latest\`, with the exceptions in \`.github/trivyignore.yaml\` applied."
+            echo "Gate outcome: **$SCAN_OUTCOME**. Fixable HIGH and CRITICAL vulnerabilities in the OS and language packages of \`ghcr.io/georgetown-mdi/alcove:latest\`, with the exceptions in \`.github/trivyignore.yaml\` applied."
             echo
             if [ -s trivy-published-image.txt ]; then
               echo '```'

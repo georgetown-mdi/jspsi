@@ -57,9 +57,12 @@ const NPM_NAMED = /\b(?:npm|npx)\b/;
 // `ADD --chown=node:node ... /app/x` in either stage would hand the runtime
 // account a path under /app -- and pull in something the lockfile does not
 // pin -- while every assertion in this file, all of which read COPY and RUN,
-// still passed. Neither Dockerfile uses anything outside this list; a build that
-// needs another class extends it, where the review reads the instruction rather
-// than a verdict about it.
+// still passed. LABEL is on the list because it is metadata only: it takes no
+// flag, names no path, fetches nothing, and changes nothing the image runs, so
+// none of the ownership and content assertions below has anything to read off
+// it. Neither Dockerfile uses anything outside this list; a build that needs
+// another class extends it, where the review reads the instruction rather than
+// a verdict about it.
 const REVIEWED_INSTRUCTIONS = [
   "ARG",
   "COPY",
@@ -67,6 +70,7 @@ const REVIEWED_INSTRUCTIONS = [
   "ENV",
   "EXPOSE",
   "FROM",
+  "LABEL",
   "RUN",
   "USER",
   "WORKDIR",

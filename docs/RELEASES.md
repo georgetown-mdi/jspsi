@@ -26,11 +26,11 @@ Each release produces:
 
 | Artifact       | Published to                   | Tag / name                                                               |
 | -------------- | ------------------------------ | ------------------------------------------------------------------------ |
-| Docker image   | Docker Hub (`vdorie/psi-link`) | `vdorie/psi-link:X.Y.Z`, `vdorie/psi-link:X.Y`, `vdorie/psi-link:latest` |
-| FIPS variant image | Docker Hub (`vdorie/psi-link`) | `vdorie/psi-link:X.Y.Z-fips`, `vdorie/psi-link:X.Y-fips`, `vdorie/psi-link:latest-fips` |
+| Docker image   | GitHub Container Registry (`ghcr.io/georgetown-mdi/alcove`) | `ghcr.io/georgetown-mdi/alcove:X.Y.Z`, `ghcr.io/georgetown-mdi/alcove:X.Y`, `ghcr.io/georgetown-mdi/alcove:latest` |
+| FIPS variant image | GitHub Container Registry (`ghcr.io/georgetown-mdi/alcove`) | `ghcr.io/georgetown-mdi/alcove:X.Y.Z-fips`, `ghcr.io/georgetown-mdi/alcove:X.Y-fips`, `ghcr.io/georgetown-mdi/alcove:latest-fips` |
 | GitHub Release | GitHub Releases                | Tag `vX.Y.Z`                                                             |
 | Launchers      | GitHub Release assets          | `start-psilink.sh`, `Start-Psilink.ps1`, `Setup-PsilinkFileDrop.ps1`     |
-| Build provenance | GitHub attestation store     | Subject `docker.io/vdorie/psi-link`, one attestation per released manifest digest |
+| Build provenance | GitHub attestation store     | Subject `ghcr.io/georgetown-mdi/alcove`, one attestation per released manifest digest |
 
 Each image contains both the CLI and the console; which role it runs is decided by its first argument (see [DEPLOYMENT.md](DEPLOYMENT.md#docker-deployment)). Both run unprivileged as uid 1000, take the same arguments, and speak the same protocol, so a partner on one can exchange with a partner on the other.
 
@@ -40,8 +40,8 @@ The hosted web deployment (`apps/web`) is a separate deployment to its hosting e
 
 The two tags differ in one thing: what serves the cryptography underneath `crypto.subtle`.
 
-- **`vdorie/psi-link:X.Y.Z`** -- the default artifact, built on `node:26-alpine`. It embeds no validated cryptographic module and the project claims none for it. Take this one unless a FIPS obligation says otherwise: it is smaller, its SFTP support is unrestricted, and it is the image the launchers and the Windows file-drop setup scripts pull.
-- **`vdorie/psi-link:X.Y.Z-fips`** -- built on Amazon Linux 2023 and containing the CMVP-validated OpenSSL FIPS provider AWS publishes for that distribution, so psilink's `crypto.subtle` calls dispatch into that module. It costs roughly 1.8x the size, and by default it cannot reach an SFTP server that offers only `curve25519` key exchange, only the `chacha20-poly1305@openssh.com` cipher, or only an Ed25519 host key.
+- **`ghcr.io/georgetown-mdi/alcove:X.Y.Z`** -- the default artifact, built on `node:26-alpine`. It embeds no validated cryptographic module and the project claims none for it. Take this one unless a FIPS obligation says otherwise: it is smaller, its SFTP support is unrestricted, and it is the image the launchers and the Windows file-drop setup scripts pull.
+- **`ghcr.io/georgetown-mdi/alcove:X.Y.Z-fips`** -- built on Amazon Linux 2023 and containing the CMVP-validated OpenSSL FIPS provider AWS publishes for that distribution, so psilink's `crypto.subtle` calls dispatch into that module. It costs roughly 1.8x the size, and by default it cannot reach an SFTP server that offers only `curve25519` key exchange, only the `chacha20-poly1305@openssh.com` cipher, or only an Ed25519 host key.
 
 **What the FIPS variant does and does not support a claim of** is in [COMPLIANCE.md](COMPLIANCE.md#fips-140), which is the single place this project states it: the certificate, the module version, the environments that certificate covers, and what stays outside the module either way. Two bounds matter here as well, because they decide whether pulling this tag is worth anything to a given deployment:
 
@@ -53,12 +53,12 @@ The variant reports both facts it can observe -- whether its own crypto is being
 **Pulling and verifying it.** The variant is signed by the same release workflow, under the same Sigstore identity, so verification differs only in the reference:
 
 ```sh
-docker pull vdorie/psi-link:X.Y.Z-fips
-docker inspect --format '{{index .RepoDigests 0}}' vdorie/psi-link:X.Y.Z-fips
+docker pull ghcr.io/georgetown-mdi/alcove:X.Y.Z-fips
+docker inspect --format '{{index .RepoDigests 0}}' ghcr.io/georgetown-mdi/alcove:X.Y.Z-fips
 cosign verify \
   --certificate-identity-regexp '^https://github\.com/georgetown-mdi/jspsi/\.github/workflows/release\.yaml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  vdorie/psi-link:X.Y.Z-fips
+  ghcr.io/georgetown-mdi/alcove:X.Y.Z-fips
 ```
 
 Both `--certificate-` arguments are required and each does its own work; [Verifying a Release](#verifying-a-release) explains what they pin and how to verify the build provenance attestation, which the variant also gets.
@@ -66,7 +66,7 @@ Both `--certificate-` arguments are required and each does its own work; [Verify
 **Confirming the module inside it.** A signature says which build this is, not what is running in it. Run the image and read its first two stderr lines:
 
 ```sh
-docker run --rm vdorie/psi-link:X.Y.Z-fips --help
+docker run --rm ghcr.io/georgetown-mdi/alcove:X.Y.Z-fips --help
 ```
 
 A run whose crypto is being served by the module reports `FIPS provider active`, naming the baked-in module version when `FIPS_MODULE_VERSION` is intact in the container's environment and saying plainly that it cannot name one when that variable was cleared or overridden at start; anything else is a warning naming what the startup probe found instead. The host kernel's FIPS-mode line is separate and is reported the same way. Neither line is parsed from `openssl list`: the probe is a Node process making psilink's own call shapes under the image's configuration, and its exit status is the whole verdict.
@@ -88,7 +88,7 @@ A launcher is plaintext an operator reads before running, and it names the image
 | `start-psilink.sh` | `PSILINK_IMAGE_DIGEST='@@PSILINK_IMAGE_DIGEST@@'` |
 | `Start-Psilink.ps1` | `$PsilinkImageDigest = '@@PSILINK_IMAGE_DIGEST@@'` |
 
-The value substituted is `steps.build.outputs.digest` from the image build -- the manifest-list digest, the same value [step 8](#8-build-and-publish-the-container-image-ci) signs with Cosign. Each launcher also names the repository in full, `docker.io/vdorie/psi-link`, because podman requires the registry prefix and docker accepts it.
+The value substituted is `steps.build.outputs.digest` from the image build -- the manifest-list digest, the same value [step 8](#8-build-and-publish-the-container-image-ci) signs with Cosign. Each launcher also names the repository in full, `ghcr.io/georgetown-mdi/alcove`, because podman requires the registry prefix and docker accepts it.
 
 **What keeps the launcher and the workflow in step.** The workflow refuses the release if a launcher does not contain its placeholder line exactly once, and again if a placeholder survives the substitution, so a reworded line cannot make the stamp silently no-op. `npm run test:scripts` pins the same two lines from the repository side, in both the launchers and the workflow. A copy that reaches an operator unstamped refuses to run and says where a release copy comes from, rather than falling back to a tag.
 
@@ -101,14 +101,14 @@ grep PSILINK_IMAGE_DIGEST start-psilink.sh
 cosign verify \
   --certificate-identity-regexp '^https://github\.com/georgetown-mdi/jspsi/\.github/workflows/release\.yaml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  docker.io/vdorie/psi-link@sha256:...
+  ghcr.io/georgetown-mdi/alcove@sha256:...
 ```
 
 A digest that verifies is the image the official release workflow published. The two `--certificate-` arguments are what make that specific, and both are required; [Verifying a Release](#verifying-a-release) explains what they pin. Verify by digest when the reference comes from a launcher, as here; verify by tag when it comes from the release notes.
 
 ## Image vulnerability scan
 
-Every release image is scanned for vulnerable packages before it is published. The release workflow builds each image single-arch, scans it, and only then authenticates to Docker Hub and pushes, so an image the workflow published is an image that passed the scan. Both gates sit ahead of the login, so a finding against either image stops the whole release rather than publishing one artifact and withholding the other. The hand-built push in [step 8](#8-build-and-publish-the-container-image-ci) is the one path around that.
+Every release image is scanned for vulnerable packages before it is published. The release workflow builds each image single-arch, scans it, and only then authenticates to the registry and pushes, so an image the workflow published is an image that passed the scan. Both gates sit ahead of the login, so a finding against either image stops the whole release rather than publishing one artifact and withholding the other. The hand-built push in [step 8](#8-build-and-publish-the-container-image-ci) is the one path around that.
 
 **What the gate is.** Trivy, over the image's OS packages and the language packages inside it, failing the release on a vulnerability that is HIGH or CRITICAL _and_ has a fix available. Those language packages are the production npm tree the build installs and nothing else: both runtime images take the base image's npm CLI and corepack shim out, and the default image's bundled Yarn classic install with them, so a shipped psilink image holds no package manager (see [DEPENDENCY_PINS.md](spec/DEPENDENCY_PINS.md#the-shipped-images-hold-no-package-manager)). An unfixable finding does not block a release: a gate that fires on something no bump can resolve is unactionable and ends up switched off. Dependabot, the [dependency review workflow](../.github/workflows/dependency_review.yaml), and [step 4](#4-review-and-audit-dependencies) below read the dependencies this repository declares; this gate reads the image as built, which is what an operator runs. The Node binary itself is not a component Trivy catalogs, so a CVE in the Node runtime is outside this gate and moves only when the pinned base image's Node version does.
 
@@ -116,7 +116,7 @@ Every release image is scanned for vulnerable packages before it is published. T
 
 **What a finding means.** The report names the package and where it sits, and there are two places it can sit. A system package is a prompt to bump the base pin, which is a digest by design (see [DEPENDENCY_PINS.md](spec/DEPENDENCY_PINS.md)) and so is not something a dependency update resolves: edit the digest in `Dockerfile` or `Dockerfile.fips` -- on the variant, its Amazon Linux release snapshot moves with the digest, the two being one release rather than two compatible ones -- let the pre-merge scan confirm the new base on that pull request, then tag. A package under `/app` is in this repository's own production tree, and the lockfile is what moves it. There is no third case, because the image holds no package manager to bring a tree of its own.
 
-**When it runs.** On every pull request that can change either image, on a weekly schedule against a refreshed vulnerability database, and again in the release workflow ahead of the push. The pull-request run reads both images, each leg failing the run on a finding of its own ([DEPENDENCY_PINS.md](spec/DEPENDENCY_PINS.md#bumping-the-fips-base-image) records what would take the variant's leg back off that path). The weekly schedule reads three subjects: both images built from the default branch, and the published `vdorie/psi-link:latest` tag, which is what an operator's launcher pulls. Between them they catch a vulnerability published against pins nothing in this repository has touched, and a finding the default branch has already bumped past that no release has shipped yet -- cutting a release is that one's remedy. Pull-request and branch-build findings appear as code-scanning alerts in the repository Security tab, one category per image; the published-tag scan and the release gate report on the run's summary page.
+**When it runs.** On every pull request that can change either image, on a weekly schedule against a refreshed vulnerability database, and again in the release workflow ahead of the push. The pull-request run reads both images, each leg failing the run on a finding of its own ([DEPENDENCY_PINS.md](spec/DEPENDENCY_PINS.md#bumping-the-fips-base-image) records what would take the variant's leg back off that path). The weekly schedule reads three subjects: both images built from the default branch, and the published `ghcr.io/georgetown-mdi/alcove:latest` tag, which is what an operator's launcher pulls. Between them they catch a vulnerability published against pins nothing in this repository has touched, and a finding the default branch has already bumped past that no release has shipped yet -- cutting a release is that one's remedy. Pull-request and branch-build findings appear as code-scanning alerts in the repository Security tab, one category per image; the published-tag scan and the release gate report on the run's summary page.
 
 **What it does not cover.** It reads the amd64 build, while a release publishes amd64 and arm64 for both images; each comes from the same digest-pinned base and the same committed lockfile, so the package set it reads is the one that ships, but a vulnerability in an architecture-specific binary alone is outside it.
 
@@ -212,9 +212,9 @@ git push origin vX.Y.Z
 
 ### 8. Build and publish the container image `[CI]`
 
-The `vX.Y.Z` tag push in step 7 triggers `.github/workflows/release.yaml`, which builds both multi-platform images and pushes them to Docker Hub, signs each with Cosign, attests each one's build provenance (see [Build provenance](#build-provenance)), and then stamps and attaches the launchers (see [Stamped launchers](#stamped-launchers)). The FIPS variant's three tags are the default image's three with `-fips` appended, derived from the pushed tag in the workflow itself. Ensure the `DOCKER_USERNAME` and `DOCKER_TOKEN` repository secrets are set before tagging.
+The `vX.Y.Z` tag push in step 7 triggers `.github/workflows/release.yaml`, which builds both multi-platform images and pushes them to the GitHub Container Registry, signs each with Cosign, attests each one's build provenance (see [Build provenance](#build-provenance)), and then stamps and attaches the launchers (see [Stamped launchers](#stamped-launchers)). The FIPS variant's three tags are the default image's three with `-fips` appended, derived from the pushed tag in the workflow itself. The push authenticates with the workflow's own `GITHUB_TOKEN` under `packages: write`, so no registry secret is configured; the package's settings must grant this repository write access, which the first push from a checkout carrying the Dockerfile's `org.opencontainers.image.source` label establishes.
 
-**What has to pass before anything is pushed.** Each gate below runs before the workflow authenticates to Docker Hub, so a release that fails one publishes nothing at all:
+**What has to pass before anything is pushed.** Each gate below runs before the workflow authenticates to the registry, so a release that fails one publishes nothing at all:
 
 - **The version check**, comparing the pushed tag against the version step 2 set in `apps/cli/package.json` and failing the release when the two disagree: the image build bakes that version into the console's partner accept kit, so a tag pushed ahead of the bump would publish an image telling the partner to run the release before it.
 - **The vulnerability scans.** Each image is built single-arch, loaded, and scanned; neither is pushed if either scan fails (see [Image vulnerability scan](#image-vulnerability-scan)).
@@ -274,11 +274,11 @@ For a hotfix answering a privately reported vulnerability, this section is the m
 Both container image digests for each release are recorded in the GitHub Release notes. Verify with:
 
 ```sh
-docker pull vdorie/psi-link:X.Y.Z
-docker inspect --format '{{index .RepoDigests 0}}' vdorie/psi-link:X.Y.Z
+docker pull ghcr.io/georgetown-mdi/alcove:X.Y.Z
+docker inspect --format '{{index .RepoDigests 0}}' ghcr.io/georgetown-mdi/alcove:X.Y.Z
 ```
 
-Compare the digest against the value in the release notes. The FIPS variant is verified the same way, at `vdorie/psi-link:X.Y.Z-fips`; every command in this section takes either reference.
+Compare the digest against the value in the release notes. The FIPS variant is verified the same way, at `ghcr.io/georgetown-mdi/alcove:X.Y.Z-fips`; every command in this section takes either reference.
 
 Each release image is also signed with Cosign, keylessly through Sigstore. The signature includes a short-lived certificate Fulcio issued against the release workflow's OIDC identity, and it is recorded in Rekor's public transparency log. There is no project-held signing key and no public key to fetch: what a verifier pins is the workflow that produced the signature. Why the signature is arranged that way, and what it does not decide, are in [cosign-keyless-signing.md](notes/cosign-keyless-signing.md).
 
@@ -288,7 +288,7 @@ This verifies by tag, which is the right form when the reference comes from the 
 cosign verify \
   --certificate-identity-regexp '^https://github\.com/georgetown-mdi/jspsi/\.github/workflows/release\.yaml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  vdorie/psi-link:X.Y.Z
+  ghcr.io/georgetown-mdi/alcove:X.Y.Z
 ```
 
 Both `--certificate-` arguments are required, and each does its own work:
@@ -309,18 +309,18 @@ The Cosign signature and the SLSA build provenance attestation are complementary
 The release workflow attests each manifest-list digest, the same digests Cosign signs and, for the default image, the one the launchers name, and stores both attestations against this repository. Verify by digest:
 
 ```sh
-docker pull vdorie/psi-link:X.Y.Z
-docker inspect --format '{{index .RepoDigests 0}}' vdorie/psi-link:X.Y.Z
-gh attestation verify oci://docker.io/vdorie/psi-link@sha256:... \
+docker pull ghcr.io/georgetown-mdi/alcove:X.Y.Z
+docker inspect --format '{{index .RepoDigests 0}}' ghcr.io/georgetown-mdi/alcove:X.Y.Z
+gh attestation verify oci://ghcr.io/georgetown-mdi/alcove@sha256:... \
   --repo georgetown-mdi/jspsi \
   --signer-workflow georgetown-mdi/jspsi/.github/workflows/release.yaml
 ```
 
-Both subjects are recorded as `docker.io/vdorie/psi-link`, the same reference the Cosign step signs under; the two attestations are told apart by their digests, not by their subject names. Neither the attest step nor this verify command has been driven against a published release yet, and reference canonicalization is the untested edge: if verification reports no matching attestation for an image that is certainly attested, check the reference host first -- Docker Hub's OCI-canonical name is `index.docker.io`, and the first real release is what decides whether the alias matches.
+Both subjects are recorded as `ghcr.io/georgetown-mdi/alcove`, the same reference the Cosign step signs under; the two attestations are told apart by their digests, not by their subject names. Neither the attest step nor this verify command has been driven against a published release yet, and reference canonicalization is the untested edge: if verification reports no matching attestation for an image that is certainly attested, check the reference spelling first -- `ghcr.io` is the registry's canonical host, so the subject recorded and the reference verified should match byte for byte, and the first real release is what establishes that.
 
 Notes on the command:
 
-- It needs the [GitHub CLI](https://cli.github.com/) (`gh`), not Cosign. `cosign verify-attestation` reads attestations Cosign attached to the image in the registry; this one is held by GitHub, and `gh` fetches it from there rather than from Docker Hub.
+- It needs the [GitHub CLI](https://cli.github.com/) (`gh`), not Cosign. `cosign verify-attestation` reads attestations Cosign attached to the image in the registry; this one is held by GitHub, and `gh` fetches it from there rather than from the registry.
 - `--signer-workflow` is what makes the check specific: `--repo` alone is satisfied by any attestation this repository produced, from any workflow in it. Its value is the release workflow's own path, so a rename would otherwise leave this command reporting no matching attestation for an image the release did attest; `npm run check:release-signing` holds the path published here to that workflow on every pull request, as it does the signature identity above.
 - The attested subject is the multi-platform manifest list, which is what the release publishes and what the digest above resolves to. A per-architecture digest read out of that index is not itself an attested subject.
 

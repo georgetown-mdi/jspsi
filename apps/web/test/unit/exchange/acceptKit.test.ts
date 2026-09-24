@@ -95,15 +95,15 @@ function plainExchangeCommand(endpoint: AcceptKitEndpoint): string {
   if (endpoint.channel !== "filedrop")
     return (
       '     docker run --rm -it -v "$PWD":/work -v "/your/secrets":' +
-      "/run/secrets:ro docker.io/vdorie/psi-link:1.4.2 exchange " +
+      "/run/secrets:ro ghcr.io/georgetown-mdi/alcove:1.4.2 exchange " +
       "your-file.csv results.csv"
     );
   return endpoint.split === true
     ? '     docker run --rm -v "$PWD":/work -v "/path/to/the/folder/you/read":' +
         '/sync-in -v "/path/to/the/folder/you/write":/sync-out ' +
-        "docker.io/vdorie/psi-link:1.4.2 exchange your-file.csv results.csv"
+        "ghcr.io/georgetown-mdi/alcove:1.4.2 exchange your-file.csv results.csv"
     : '     docker run --rm -v "$PWD":/work -v "/path/to/your/shared/folder":' +
-        "/sync docker.io/vdorie/psi-link:1.4.2 exchange your-file.csv " +
+        "/sync ghcr.io/georgetown-mdi/alcove:1.4.2 exchange your-file.csv " +
         "results.csv";
 }
 
@@ -351,12 +351,12 @@ describe("accept kit, filedrop routing", () => {
     const text = sheet(FILEDROP);
     expect(text).toContain("B. A folder that syncs on this PC");
     expect(text).toContain(
-      `docker run --rm -it -v "$PWD":/work docker.io/vdorie/psi-link:1.4.2 ` +
+      `docker run --rm -it -v "$PWD":/work ghcr.io/georgetown-mdi/alcove:1.4.2 ` +
         `accept ${INVITATION_PLACEHOLDER} your-file.csv`,
     );
     expect(text).toContain(
       'docker run --rm -v "$PWD":/work -v "/path/to/your/shared/folder":' +
-        "/sync docker.io/vdorie/psi-link:1.4.2 exchange your-file.csv " +
+        "/sync ghcr.io/georgetown-mdi/alcove:1.4.2 exchange your-file.csv " +
         "results.csv",
     );
   });
@@ -366,14 +366,14 @@ describe("accept kit, sftp configuration section", () => {
   test("names the placeholder field, the credential, and the @ convention", () => {
     const text = sheet(SFTP);
     expect(text).toContain(
-      `docker run --rm -it -v "$PWD":/work docker.io/vdorie/psi-link:1.4.2 ` +
+      `docker run --rm -it -v "$PWD":/work ghcr.io/georgetown-mdi/alcove:1.4.2 ` +
         `accept ${INVITATION_PLACEHOLDER} your-file.csv`,
     );
     // The exchange command has the read-only secrets mount, and the
     // credential fill-in section precedes it: the sheet is read top to bottom.
     expect(text).toContain(
       'docker run --rm -it -v "$PWD":/work -v "/your/secrets":/run/secrets:ro ' +
-        "docker.io/vdorie/psi-link:1.4.2 exchange your-file.csv results.csv",
+        "ghcr.io/georgetown-mdi/alcove:1.4.2 exchange your-file.csv results.csv",
     );
     expect(text.indexOf("username: REPLACE_WITH_SSH_USERNAME")).toBeLessThan(
       text.indexOf("exchange your-file.csv"),
@@ -404,7 +404,7 @@ describe("accept kit, sftp configuration section", () => {
 describe("accept kit, release version", () => {
   /** Every image the sheet's commands name, in order. */
   function imageReferences(text: string): Array<string> {
-    return text.match(/docker\.io\/vdorie\/psi-link\S*/g) ?? [];
+    return text.match(/ghcr\.io\/georgetown-mdi\/alcove\S*/g) ?? [];
   }
 
   test("a build with a version names it in every image reference", () => {
@@ -414,7 +414,7 @@ describe("accept kit, release version", () => {
       const references = imageReferences(text);
       expect(references.length).toBeGreaterThan(0);
       for (const reference of references)
-        expect(reference).toBe("docker.io/vdorie/psi-link:0.9.1");
+        expect(reference).toBe("ghcr.io/georgetown-mdi/alcove:0.9.1");
     }
   });
 
@@ -429,7 +429,7 @@ describe("accept kit, release version", () => {
       );
       expect(references.length).toBeGreaterThan(0);
       for (const reference of references)
-        expect(reference).toBe("docker.io/vdorie/psi-link:latest");
+        expect(reference).toBe("ghcr.io/georgetown-mdi/alcove:latest");
     }
   });
 
@@ -451,7 +451,7 @@ describe("accept kit, release version", () => {
       const references = imageReferences(sheet(FILEDROP, version));
       expect(references.length).toBeGreaterThan(0);
       for (const reference of references)
-        expect(reference).toBe("docker.io/vdorie/psi-link:latest");
+        expect(reference).toBe("ghcr.io/georgetown-mdi/alcove:latest");
     }
   });
 
@@ -491,7 +491,7 @@ describe("accept kit, printable-ASCII enforcement", () => {
       { channel: "filedrop", path: "psilink" },
       "1.0.0-é\nX",
     );
-    expect(hostileVersion).toContain("docker.io/vdorie/psi-link:latest");
+    expect(hostileVersion).toContain("ghcr.io/georgetown-mdi/alcove:latest");
     expect(hostileVersion).toMatch(/^[\x20-\x7e\n]*$/);
     for (const ch of text) {
       const code = ch.charCodeAt(0);
@@ -742,7 +742,7 @@ describe("accept kit, retain mode", () => {
     // the image reference on the rewritten command line, and nowhere else.
     const other = retainDelta(SFTP, "0.9.1");
     const withoutImage = (lines: Array<string>): Array<string> =>
-      lines.filter((line) => !line.includes("docker.io/vdorie/psi-link"));
+      lines.filter((line) => !line.includes("ghcr.io/georgetown-mdi/alcove"));
     expect(withoutImage(other)).toEqual(withoutImage(benign));
     expect(benign.filter((line) => line.includes("1.4.2"))).toHaveLength(1);
     // And nothing the delta adds has either dynamic value.
@@ -869,7 +869,7 @@ describe("accept kit, lockless rendezvous", () => {
     // the image reference on the rewritten command line, and nowhere else.
     const other = locklessDelta(SFTP, "0.9.1");
     const withoutImage = (lines: Array<string>): Array<string> =>
-      lines.filter((line) => !line.includes("docker.io/vdorie/psi-link"));
+      lines.filter((line) => !line.includes("ghcr.io/georgetown-mdi/alcove"));
     expect(withoutImage(other)).toEqual(withoutImage(benign));
     expect(benign.filter((line) => line.includes("1.4.2"))).toHaveLength(1);
     for (const line of withoutImage(benign)) {

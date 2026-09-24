@@ -54,10 +54,10 @@ To link a file:
 1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/).
 2. Within the Docker terminal (or in a Windows/Mac/Linux terminal window), run:  
 ```sh
-docker pull vdorie/psi-link:latest
+docker pull ghcr.io/georgetown-mdi/alcove:latest
 docker run \
   --rm --mount type=bind,src=WORK_PATH,dst=/work \
-  vdorie/psi-link:latest \
+  ghcr.io/georgetown-mdi/alcove:latest \
   sftp://SFTP_USER:SFTP_PASSWORD@SFTP_HOST:SFTP_PORT/SFTP_PATH \
   INPUT_FILE OUTPUT_FILE
 ```  
@@ -73,7 +73,7 @@ A complete example, run from `/Users/me/psi-exchange` containing `clients.csv`:
 ```sh
 docker run \
   --rm --mount type=bind,src=/Users/me/psi-exchange,dst=/work \
-  vdorie/psi-link:latest \
+  ghcr.io/georgetown-mdi/alcove:latest \
   'sftp://exchange_user:password123@sftp.example.org/exchanges/county-a-county-b' \
   clients.csv matches.csv
 ```
@@ -97,11 +97,11 @@ The same Docker image serves the guided web experience from your own machine, wi
 ```sh
 docker run --rm -p 127.0.0.1:3000:3000 \
   --env JOB_DATA_ROOT=/work -v "$PWD":/work \
-  vdorie/psi-link:latest serve
+  ghcr.io/georgetown-mdi/alcove:latest serve
 ```
    On Windows, navigate to that directory in the Docker console and run:
 ```sh
-docker run --rm -p 127.0.0.1:3000:3000 --env JOB_DATA_ROOT=/work -v "${PWD}:/work" vdorie/psi-link:latest serve
+docker run --rm -p 127.0.0.1:3000:3000 --env JOB_DATA_ROOT=/work -v "${PWD}:/work" ghcr.io/georgetown-mdi/alcove:latest serve
 ```
 3. Visit [http://127.0.0.1:3000](http://127.0.0.1:3000) on that machine; press Ctrl-C when done.
 
@@ -122,14 +122,14 @@ The `serve` role is the one that cannot instead be run as your own account with 
 Special characters in passwords can be interpreted incorrectly by your shell. To avoid this, encase the whole connection string in single-quotation marks or escape the problematic characters. As an example of an exchange running from the current directory (indicated by mounting `$PWD`, or **p**rinting the **w**orking **d**irectory):
 
 ```sh
-docker run --rm --mount type=bind,src=$PWD,dst=/work vdorie/psi-link:latest \ 
+docker run --rm --mount type=bind,src=$PWD,dst=/work ghcr.io/georgetown-mdi/alcove:latest \ 
    'sftp://user:passw!rd@example.org/psi' input.csv output.csv
 ```
 
 or
 
 ```sh
-docker run --rm --mount type=bind,src=$PWD,dst=/work vdorie/psi-link:latest \ 
+docker run --rm --mount type=bind,src=$PWD,dst=/work ghcr.io/georgetown-mdi/alcove:latest \ 
    sftp://user:passw\!rd@example.org/psi input.csv output.csv
 ```
 
@@ -145,7 +145,7 @@ Connection parameters can also be specified individually as command line flags t
 Using `@path`s specifies that the value should be read from a file. For example, to have the script read a password from the file `passwd` in the working directory, run:
 
 ```sh
-docker run --rm --mount type=bind,src=$PWD,dst=/work vdorie/psi-link:latest \
+docker run --rm --mount type=bind,src=$PWD,dst=/work ghcr.io/georgetown-mdi/alcove:latest \
   sftp://user@example.org/psi \
   --server-password=@passwd \
   input.csv output.csv
@@ -170,7 +170,7 @@ Paths can be given to Docker using standard Windows-style back-slashes. One exce
 Additionally, the line-continuation markers given in the examples (the `\` at the end of each line) above do not parse correctly. Put commands all on one line instead. For example:
 
 ```sh
-docker run --rm --mount type=bind,src='C:\Users\me\Documents\psi-link',dst=/work vdorie/psi-link:latest sftp://user:password@example.org/psi input.csv output.csv
+docker run --rm --mount type=bind,src='C:\Users\me\Documents\psi-link',dst=/work ghcr.io/georgetown-mdi/alcove:latest sftp://user:password@example.org/psi input.csv output.csv
 ```
 
 ### Docker run background
@@ -178,7 +178,7 @@ docker run --rm --mount type=bind,src='C:\Users\me\Documents\psi-link',dst=/work
 The `docker run` command has two parts. The first is the Docker invocation, which mounts `WORK_PATH` at `/work` so the container can read your input and write the output there (see Docker's own docs for [`--rm`](https://docs.docker.com/reference/cli/docker/container/run/#rm) and [`--mount`](https://docs.docker.com/reference/cli/docker/container/run/#mount)):
 
 ```sh
-docker run --rm --mount type=bind,src=WORK_PATH,dst=/work vdorie/psi-link:latest
+docker run --rm --mount type=bind,src=WORK_PATH,dst=/work ghcr.io/georgetown-mdi/alcove:latest
 ```
 
 The second part is the invocation of the psilink script and includes any command line options you wish to use. In the first example above it is:
@@ -190,7 +190,7 @@ sftp://SFTP_USER:SFTP_PASSWORD@SFTP_HOST:SFTP_PORT/SFTP_PATH INPUT_FILE OUTPUT_F
 However, you can place anything here you wish to pass on to the program. For example, to have it print all of its options, execute:
 
 ```sh
-docker run --rm vdorie/psi-link:latest --help
+docker run --rm ghcr.io/georgetown-mdi/alcove:latest --help
 ```
 
 ## Documentation

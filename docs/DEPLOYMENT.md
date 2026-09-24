@@ -378,9 +378,9 @@ For local development and integration testing, the project's test suite stands u
 
 ## Docker deployment
 
-The published image `vdorie/psi-link` runs in either of two roles depending on its first argument; there is no separate console image.
+The published image `ghcr.io/georgetown-mdi/alcove` runs in either of two roles depending on its first argument; there is no separate console image.
 
-`vdorie/psi-link` publishes two variants of that one image, differing only in what serves the cryptography beneath them. The unsuffixed tags (`X.Y.Z`, `X.Y`, `latest`) are the default artifact and the one every command in this document names. The `-fips` tags (`X.Y.Z-fips`, `X.Y-fips`, `latest-fips`) include a CMVP-validated OpenSSL FIPS provider instead, at roughly 1.8x the size and with the SFTP restrictions in [FIPS_SFTP_PROFILE.md](FIPS_SFTP_PROFILE.md); take one only under a FIPS obligation. Which artifact has which posture is in [RELEASES.md](RELEASES.md#which-image-has-which-posture), and what may be claimed of the variant is in [COMPLIANCE.md](COMPLIANCE.md#fips-140). Everything below holds for both.
+`ghcr.io/georgetown-mdi/alcove` publishes two variants of that one image, differing only in what serves the cryptography beneath them. The unsuffixed tags (`X.Y.Z`, `X.Y`, `latest`) are the default artifact and the one every command in this document names. The `-fips` tags (`X.Y.Z-fips`, `X.Y-fips`, `latest-fips`) include a CMVP-validated OpenSSL FIPS provider instead, at roughly 1.8x the size and with the SFTP restrictions in [FIPS_SFTP_PROFILE.md](FIPS_SFTP_PROFILE.md); take one only under a FIPS obligation. Which artifact has which posture is in [RELEASES.md](RELEASES.md#which-image-has-which-posture), and what may be claimed of the variant is in [COMPLIANCE.md](COMPLIANCE.md#fips-140). Everything below holds for both.
 
 ### The user the image runs as
 
@@ -410,7 +410,7 @@ What the default account asks of you is bind-mount ownership. A bind mount keeps
 **Running as your own account instead.** Where changing the directory's ownership is not an option, run the container as yourself:
 
 ```sh
-docker run --rm --user "$(id -u):$(id -g)" -v "$PWD":/work vdorie/psi-link exchange input.csv
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD":/work ghcr.io/georgetown-mdi/alcove exchange input.csv
 ```
 
 The container then runs as an account the image knows nothing about, and `HOME` is not a question that arises. psilink chooses no path under the home directory for anything: it reaches for the home directory only to expand a `~` you wrote yourself, so an ephemeral or unset `HOME` changes no path psilink picks. It still resolves the ones you spell with a `~` against whatever home the container has, which in an ephemeral one is a different directory on every run -- so write those paths out in full. The signing identity, the one long-lived credential the CLI holds, is written and read only where you name it (see [Mounting the signing identity](#mounting-the-signing-identity)).
@@ -423,7 +423,7 @@ docker run --rm -p 127.0.0.1:3000:3000 \
   --env JOB_SFTP_CREDENTIAL_DIR=/tmp/psilink-sftp-credentials \
   --env JOB_DATA_ROOT=/data \
   -v /host/work:/data \
-  vdorie/psi-link:latest serve
+  ghcr.io/georgetown-mdi/alcove:latest serve
 ```
 
 The path must sit outside every folder you mounted -- the data root, the input directory, the rendezvous directories, and the secrets directory -- or the console refuses to start rather than put a pasted secret where your results or your partner's sync are. It is container-internal and goes with the container, which is what `--rm` is doing above. The variable is not optional once you name an account: the default directory is one only the image's own account can create, and a console that cannot create the directory it is given refuses to start, naming this variable in the refusal.
@@ -447,7 +447,7 @@ In all three the remedy is ownership, not mode: a `chmod` on a directory or file
 By default the image runs the headless CLI. Mount a working directory and pass CLI arguments:
 
 ```sh
-docker run --rm -v "$PWD":/work vdorie/psi-link exchange input.csv
+docker run --rm -v "$PWD":/work ghcr.io/georgetown-mdi/alcove exchange input.csv
 ```
 
 What the container needs to reach while it runs, and how to hold it to that, is in [Restricting the container's outbound network access](#restricting-the-containers-outbound-network-access).
@@ -471,7 +471,7 @@ An exchange gives the container one reason to reach the network: the SFTP connec
 For a shared-directory exchange on the CLI, take the network away outright:
 
 ```sh
-docker run --rm --network none -v "$PWD":/work vdorie/psi-link exchange input.csv
+docker run --rm --network none -v "$PWD":/work ghcr.io/georgetown-mdi/alcove exchange input.csv
 ```
 
 This is the strongest option here and the only portable one -- a `docker run` flag with no host configuration behind it. It is not an option for the console, whose browser traffic has to reach the published port; a console that will only ever run shared-directory exchanges takes the allowlist below with no SFTP entry in it, which denies the same traffic outbound.
@@ -518,14 +518,14 @@ The explicit rule numbers are critical. `-I` inserts at the position you give it
 ```sh
 # Headless CLI
 docker run --rm --network psilink-egress --dns 192.0.2.53 \
-  -v "$PWD":/work vdorie/psi-link exchange input.csv
+  -v "$PWD":/work ghcr.io/georgetown-mdi/alcove exchange input.csv
 
 # Console
 docker run --rm --network psilink-egress --dns 192.0.2.53 \
   -p 127.0.0.1:3000:3000 \
   --env JOB_DATA_ROOT=/data \
   -v /host/work:/data \
-  vdorie/psi-link:latest serve
+  ghcr.io/georgetown-mdi/alcove:latest serve
 ```
 
 `--dns` names the resolver the container uses, so the address the rules permit is one you chose rather than whatever the host's `/etc/resolv.conf` happens to hold. Drop the flag along with the two resolver rules if you pin the server by address.
@@ -548,17 +548,17 @@ An allowlist that silently drops name resolution, and one whose `DROP` sits abov
 ```sh
 # Permitted: the endpoint you allowed. Prints a fingerprint, exits 0.
 docker run --rm --network psilink-egress --dns 192.0.2.53 \
-  vdorie/psi-link probe-host-key sftp://sftp.partner.example --connect-timeout 10s
+  ghcr.io/georgetown-mdi/alcove probe-host-key sftp://sftp.partner.example --connect-timeout 10s
 
 # Blocked: the same host on a port you did not allow. Exits 69.
 docker run --rm --network psilink-egress --dns 192.0.2.53 \
-  vdorie/psi-link probe-host-key sftp://sftp.partner.example:2222 --connect-timeout 10s
+  ghcr.io/georgetown-mdi/alcove probe-host-key sftp://sftp.partner.example:2222 --connect-timeout 10s
 
 # Blocked: a host you did not allow. Run it a second time without
 # `--network psilink-egress`: a probe that fails for its own reasons proves
 # nothing, so it has to succeed off the restricted network to count.
 docker run --rm --network psilink-egress --dns 192.0.2.53 \
-  vdorie/psi-link probe-host-key sftp://some.other.host --connect-timeout 10s
+  ghcr.io/georgetown-mdi/alcove probe-host-key sftp://some.other.host --connect-timeout 10s
 ```
 
 A blocked endpoint answers nothing rather than refusing, so each blocked row takes about its `--connect-timeout` to exit: the probe dials once, and that value is the whole wait.
@@ -596,7 +596,7 @@ Owner-only and the container's identity are one question here, not two: a `0600`
 docker run \
   --mount type=bind,src=/data/config,dst=/work,readonly \
   --mount type=bind,src=/data/secrets,dst=/run/secrets \
-  vdorie/psi-link exchange input.csv --key-file /run/secrets/.psilink.key
+  ghcr.io/georgetown-mdi/alcove exchange input.csv --key-file /run/secrets/.psilink.key
 ```
 
 ```yaml
@@ -650,7 +650,7 @@ Provision it once, against a directory writable for that one command:
 ```sh
 docker run --rm \
   --mount type=bind,src=/data/signing,dst=/run/signing \
-  vdorie/psi-link fingerprint \
+  ghcr.io/georgetown-mdi/alcove fingerprint \
   --identity-file /run/signing/psilink-signing-identity.json \
   --identity "Agency A, a@agency-a.gov"
 ```
@@ -662,7 +662,7 @@ docker run \
   --mount type=bind,src=/data/config,dst=/work,readonly \
   --mount type=bind,src=/data/secrets,dst=/run/secrets \
   --mount type=bind,src=/data/signing,dst=/run/signing,readonly \
-  vdorie/psi-link exchange input.csv --key-file /run/secrets/.psilink.key \
+  ghcr.io/georgetown-mdi/alcove exchange input.csv --key-file /run/secrets/.psilink.key \
   --record-file /run/secrets/psilink-record.json
 ```
 

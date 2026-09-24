@@ -730,7 +730,7 @@ image the job just built. That is the right subject for `Start-Psilink.ps1` and
 therefore locked to the commit they were built from, and it catches a support
 script that outran the source tree in the same pull request. It is the wrong
 subject for `Setup-PsilinkFileDrop.ps1`, which is fetched on its own and runs the
-floating tag, so a second leg runs against `vdorie/psi-link:latest` on the weekly
+floating tag, so a second leg runs against `ghcr.io/georgetown-mdi/alcove:latest` on the weekly
 schedule and on demand. That leg is not a merge gate: the commonest
 reading of a gap there is that the capability is on the default branch and no
 release has been cut since, whose remedy is a release rather than a held merge.
@@ -738,7 +738,7 @@ Both legs print the digest the reference resolved to rather than the reference
 they asked for, because the floating tag moves.
 
 Both legs are scoped to the default image. It is the one published as
-`vdorie/psi-link`, the only one the scripts name, and the only one whose package
+`ghcr.io/georgetown-mdi/alcove`, the only one the scripts name, and the only one whose package
 closure their helper scripts were written against.
 
 ## Measured inventories
@@ -890,7 +890,7 @@ request, are in
 
 ### The helper image the setup scripts run the probe in is a mutable tag
 
-It is `vdorie/psi-link:latest` in both scripts, and floating it is deliberate:
+It is `ghcr.io/georgetown-mdi/alcove:latest` in both scripts, and floating it is deliberate:
 the scripts are downloaded on their own rather than shipped with a release, so
 they cannot name the digest of a release they do not know they belong to, and a
 diagnostic pinned tighter than the thing it diagnoses would test an image the

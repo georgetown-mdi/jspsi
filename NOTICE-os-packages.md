@@ -19,9 +19,9 @@ derived, and what they do and do not measure, is in
 It covers both images this repository builds, on the same terms:
 
 - The default image, built from `Dockerfile` and published as
-  `vdorie/psi-link:X.Y.Z` and the floating tags beside it.
+  `ghcr.io/georgetown-mdi/alcove:X.Y.Z` and the floating tags beside it.
 - The FIPS variant, built from `Dockerfile.fips` and published as
-  `vdorie/psi-link:X.Y.Z-fips` and the floating tags beside it.
+  `ghcr.io/georgetown-mdi/alcove:X.Y.Z-fips` and the floating tags beside it.
 
 Coverage of the variant is not conditional on a tag: this statement holds for
 any image built from either Dockerfile at the pins its list records, whether or

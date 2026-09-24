@@ -977,7 +977,9 @@ describe("the doctor loop", () => {
     expect(doctorRuns[1]).toContain(`--volume ${inputDir}:/rz`);
     expect(doctorRuns[2]).toContain(`--volume ${rendezvous}:/rz`);
     expect(doctorRuns[0]).toContain("doctor mount /rz --json");
-    expect(doctorRuns[0]).toContain(`vdorie/psi-link@${TEST_DIGEST}`);
+    expect(doctorRuns[0]).toContain(
+      `ghcr.io/georgetown-mdi/alcove@${TEST_DIGEST}`,
+    );
     expect(engineCalls(workspace)).not.toMatch(/serve/);
   });
 

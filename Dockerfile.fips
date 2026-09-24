@@ -149,6 +149,13 @@ RUN --mount=type=cache,target=/root/.npm \
 
 FROM nodebase
 
+# The source label is what links the package on ghcr.io to this repository, so
+# a hand-pushed tag inherits the repository's package visibility and access;
+# the release workflow adds the same labels through docker/metadata-action.
+LABEL org.opencontainers.image.source="https://github.com/georgetown-mdi/jspsi" \
+      org.opencontainers.image.description="psilink: privacy-preserving record linkage over SFTP, a shared folder, or WebRTC" \
+      org.opencontainers.image.licenses="Apache-2.0"
+
 ARG AL2023_RELEASEVER
 ARG FIPS_PROVIDER_PACKAGE
 ARG FIPS_PROVIDER_VERSION

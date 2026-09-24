@@ -94,7 +94,14 @@ turn.cloudflare.com
 acme-v02.api.letsencrypt.org
 acme-staging-v02.api.letsencrypt.org
 
-# --- Docker Hub (manifest inspection, e.g. `docker buildx imagetools inspect`)
+# --- GitHub Container Registry (the published image; manifest inspection) ---
+#
+# Pulls and `docker buildx imagetools inspect` of ghcr.io/georgetown-mdi/alcove.
+# The registry redirects blob fetches to pkg-containers.githubusercontent.com,
+# which the `*.githubusercontent.com` pattern at the bottom already admits.
+ghcr.io
+
+# --- Docker Hub (the base images: node, alpine, amazonlinux, coturn) ---------
 registry-1.docker.io
 auth.docker.io
 index.docker.io

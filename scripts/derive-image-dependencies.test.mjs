@@ -67,7 +67,7 @@ describe("the argument-vector reader", () => {
   it("reads a PowerShell vector out of an array literal", () => {
     expect(
       argvOnLine(
-        "@('run', '--rm', '--env', 'SMB_TOKEN', 'vdorie/psi-link:latest', 'doctor', 'mount', '/rz')",
+        "@('run', '--rm', '--env', 'SMB_TOKEN', 'ghcr.io/georgetown-mdi/alcove:latest', 'doctor', 'mount', '/rz')",
         COMMANDS,
       ),
     ).toEqual([["doctor", "mount", "/rz"]]);
@@ -109,7 +109,7 @@ describe("the argument-vector reader", () => {
   it("reads nothing when the tokens after the image name no command", () => {
     expect(
       argvOnLine(
-        "docker run --rm vdorie/psi-link:latest file:///sync input.csv out.csv",
+        "docker run --rm ghcr.io/georgetown-mdi/alcove:latest file:///sync input.csv out.csv",
         COMMANDS,
       ),
     ).toEqual([]);
@@ -125,8 +125,8 @@ describe("the argument-vector reader", () => {
 describe("folding a script into logical lines", () => {
   it("drops a PowerShell comment that names a command in prose", () => {
     const source = [
-      "# runs vdorie/psi-link:latest doctor probe against the share",
-      "<# vdorie/psi-link:latest doctor probe again #>",
+      "# runs ghcr.io/georgetown-mdi/alcove:latest doctor probe against the share",
+      "<# ghcr.io/georgetown-mdi/alcove:latest doctor probe again #>",
       "$x = 1",
     ].join("\n");
     expect(deriveCliCapabilities({ "a.ps1": source }, COMMANDS)).toEqual([]);
@@ -136,7 +136,7 @@ describe("folding a script into logical lines", () => {
     const source = [
       "$probe = Invoke-Docker -DockerArgs @(",
       "    'run', '--rm',",
-      "    'vdorie/psi-link:latest',",
+      "    'ghcr.io/georgetown-mdi/alcove:latest',",
       "    'doctor', 'probe')",
     ].join("\n");
     expect(deriveCliCapabilities({ "a.ps1": source }, COMMANDS)).toEqual([
@@ -168,7 +168,8 @@ describe("folding a script into logical lines", () => {
   });
 
   it("drops a batch rem line", () => {
-    const source = "rem vdorie/psi-link:latest serve is what to run\n";
+    const source =
+      "rem ghcr.io/georgetown-mdi/alcove:latest serve is what to run\n";
     expect(deriveCliCapabilities({ "a.cmd": source }, COMMANDS)).toEqual([]);
   });
 
@@ -182,8 +183,8 @@ describe("folding a script into logical lines", () => {
 
 describe("the helper-script reader", () => {
   const cmd = [
-    'docker run --rm -i --env SMB_PASS --entrypoint sh "vdorie/psi-link:latest" -c "tr -d \'\\r\' | sh" <"%SCRIPT_DIR%cmd_psilink-credcheck.sh" >"%WORK%" 2>nul',
-    'docker run --rm -i -v "%VOLUME_NAME%:/rz" --env MARKER --env TOKEN --entrypoint sh "vdorie/psi-link:latest" -c "tr -d \'\\r\' | sh" <"%SCRIPT_DIR%cmd_psilink-volcheck.sh"',
+    'docker run --rm -i --env SMB_PASS --entrypoint sh "ghcr.io/georgetown-mdi/alcove:latest" -c "tr -d \'\\r\' | sh" <"%SCRIPT_DIR%cmd_psilink-credcheck.sh" >"%WORK%" 2>nul',
+    'docker run --rm -i -v "%VOLUME_NAME%:/rz" --env MARKER --env TOKEN --entrypoint sh "ghcr.io/georgetown-mdi/alcove:latest" -c "tr -d \'\\r\' | sh" <"%SCRIPT_DIR%cmd_psilink-volcheck.sh"',
   ].join("\n");
 
   it("reads the script, its environment and its mount from the call site", () => {
@@ -213,7 +214,7 @@ describe("the helper-script reader", () => {
   it("reads nothing from a run that leaves the entrypoint alone", () => {
     expect(
       deriveHelperInvocations(
-        'docker run --rm "vdorie/psi-link:latest" doctor probe',
+        'docker run --rm "ghcr.io/georgetown-mdi/alcove:latest" doctor probe',
       ),
     ).toEqual([]);
   });
