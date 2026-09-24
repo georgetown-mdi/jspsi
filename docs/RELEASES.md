@@ -212,7 +212,9 @@ git push origin vX.Y.Z
 
 ### 8. Build and publish the container image `[CI]`
 
-The `vX.Y.Z` tag push in step 7 triggers `.github/workflows/release.yaml`, which builds both multi-platform images and pushes them to the GitHub Container Registry, signs each with Cosign, attests each one's build provenance (see [Build provenance](#build-provenance)), and then stamps and attaches the launchers (see [Stamped launchers](#stamped-launchers)). The FIPS variant's three tags are the default image's three with `-fips` appended, derived from the pushed tag in the workflow itself. The push authenticates with the workflow's own `GITHUB_TOKEN` under `packages: write`, so no registry secret is configured; the package's settings must grant this repository write access, which the first push from a checkout carrying the Dockerfile's `org.opencontainers.image.source` label establishes.
+The `vX.Y.Z` tag push in step 7 triggers `.github/workflows/release.yaml`, which builds both multi-platform images and pushes them to the GitHub Container Registry, signs each with Cosign, attests each one's build provenance (see [Build provenance](#build-provenance)), and then stamps and attaches the launchers (see [Stamped launchers](#stamped-launchers)). The FIPS variant's three tags are the default image's three with `-fips` appended, derived from the pushed tag in the workflow itself. The push authenticates with the workflow's own `GITHUB_TOKEN` under `packages: write`, so no registry secret is configured; the package's settings on ghcr.io must grant this repository the Write role under "Manage Actions access", which the maintainer sets once.
+
+The Dockerfile's `org.opencontainers.image.source` label does not do this: for an organization package it is metadata the package page shows, and it neither links the package to the repository nor grants the repository any access (a hand push carrying the label, 2026-09-24, left the package unlinked).
 
 **What has to pass before anything is pushed.** Each gate below runs before the workflow authenticates to the registry, so a release that fails one publishes nothing at all:
 

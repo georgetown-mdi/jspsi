@@ -1,5 +1,7 @@
 # Alcove
 
+Alcove: Open Source Encrypted Matching and Sharing
+
 Alcove is an open-source tool that lets two organizations find the records (individuals) they have in common with the option of exchanging data about those shared records, without either organization revealing anything about the records they do not share. It performs privacy-preserving record linkage (PPRL) using a cryptographic protocol called private set intersection (PSI).
 
 ## Key features

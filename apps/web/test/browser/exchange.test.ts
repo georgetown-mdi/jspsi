@@ -367,7 +367,7 @@ describe("quick path", () => {
 
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toMatchTextContent("Alcove - private record linkage");
+      .toMatchTextContent("Alcove - encrypted matching and sharing");
 
     expect(document.querySelectorAll("main").length).toBe(1);
     expect(document.querySelectorAll("h1").length).toBe(1);

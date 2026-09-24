@@ -30,7 +30,7 @@ export const Route = createFileRoute("/")({
   component: IndexHome,
   head: () => ({
     meta: seo({
-      title: "Alcove - private record linkage",
+      title: "Alcove - encrypted matching and sharing",
       description:
         "Find the records you both hold - without either of you seeing the other's data.",
     }),

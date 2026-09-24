@@ -42,7 +42,7 @@ export const Route = createRootRoute({
         content: "#f6f5f1",
       },
       ...seo({
-        title: "Alcove - private record linkage",
+        title: "Alcove - encrypted matching and sharing",
         description:
           "Find the records you both hold - without either of you seeing the other's data.",
       }),

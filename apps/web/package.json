@@ -1,7 +1,7 @@
 {
   "name": "alcove-web",
   "version": "0.0.0",
-  "description": "JavaScript implementation of private set intersection for record linkage using peer-to-peer connections.",
+  "description": "Alcove web app: private set intersection for record linkage over peer-to-peer connections.",
   "license": "Apache-2.0",
   "author": "Vincent Dorie <vdorie@gmail.com>",
   "type": "module",

@@ -1,7 +1,7 @@
 {
   "name": "@alcove/testkit",
   "version": "0.1.0",
-  "description": "Test-only material shared by more than one workspace's test tree, consumed as raw TypeScript",
+  "description": "Alcove test-only material shared by more than one workspace's test tree, consumed as raw TypeScript",
   "license": "Apache-2.0",
   "author": "Vincent Dorie <vdorie@gmail.com>",
   "private": true,

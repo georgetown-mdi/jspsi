@@ -1,6 +1,7 @@
 {
   "name": "alcove",
   "version": "0.1.0",
+  "description": "Alcove command line app: private set intersection for record linkage over SFTP, a shared folder, or WebRTC",
   "private": true,
   "bin": {
     "alcove": "./dist/index.js"

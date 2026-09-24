@@ -1675,7 +1675,7 @@ describe("console lobby recurring-exchange surface", () => {
     await expect
       .element(
         page.getByRole("heading", {
-          name: "Alcove - private record linkage",
+          name: "Alcove - encrypted matching and sharing",
         }),
       )
       .toBeInTheDocument();

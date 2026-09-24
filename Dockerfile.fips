@@ -149,11 +149,12 @@ RUN --mount=type=cache,target=/root/.npm \
 
 FROM nodebase
 
-# The source label is what links the package on ghcr.io to this repository, so
-# a hand-pushed tag inherits the repository's package visibility and access;
-# the release workflow adds the same labels through docker/metadata-action.
+# Metadata the package page on ghcr.io shows. For an organization package the
+# source label links and grants nothing: repository write access is set under
+# the package's Manage Actions access (docs/RELEASES.md, step 8). The release
+# workflow adds the same labels through docker/metadata-action.
 LABEL org.opencontainers.image.source="https://github.com/georgetown-mdi/alcove" \
-      org.opencontainers.image.description="alcove: privacy-preserving record linkage over SFTP, a shared folder, or WebRTC" \
+      org.opencontainers.image.description="Alcove: privacy-preserving record linkage over SFTP, a shared folder, or WebRTC" \
       org.opencontainers.image.licenses="Apache-2.0"
 
 ARG AL2023_RELEASEVER

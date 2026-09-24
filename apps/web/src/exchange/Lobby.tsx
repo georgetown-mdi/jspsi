@@ -97,7 +97,7 @@ export function Lobby() {
   return (
     <AppPage>
       <main className={styles.lobby}>
-        <h1>Alcove - private record linkage</h1>
+        <h1>Alcove - encrypted matching and sharing</h1>
         <p className={styles.tagline}>
           Find the records you both hold - without either of you seeing the
           other&apos;s data.
