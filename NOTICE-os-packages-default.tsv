@@ -7,7 +7,7 @@
 # which covers this repository's npm tree and no OS package.
 #
 # image: the default image, built from Dockerfile
-# base pin: node:26-alpine@sha256:ef24c5053d50fdc3e4e56eb4e7ddb7861874ab0fdc797046ba897581deb8e868
+# base pin: node:26-alpine@sha256:0b36e8c136b94cd4fcf02188228e76c31ad5872eef3fec8cbd2eee500cfd9e80
 # query: apk list --installed
 # architectures:
 #   linux/amd64 and linux/arm64 were built and queried on 2026-09-11 and
@@ -24,12 +24,12 @@ acl-libs	2.3.2-r1	LGPL-2.1-or-later AND GPL-2.0-or-later
 alpine-baselayout	3.7.2-r1	GPL-2.0-only
 alpine-baselayout-data	3.7.2-r1	GPL-2.0-only
 alpine-keys	2.6-r0	MIT
-alpine-release	3.24.1-r0	MIT
-apk-tools	3.0.6-r0	GPL-2.0-only
+alpine-release	3.24.2-r0	MIT
+apk-tools	3.0.8-r0	GPL-2.0-only
 brotli-libs	1.2.0-r1	MIT
 busybox	1.37.0-r31	GPL-2.0-only
 busybox-binsh	1.37.0-r31	GPL-2.0-only
-ca-certificates-bundle	20260611-r0	MPL-2.0 AND MIT
+ca-certificates-bundle	20260909-r0	MPL-2.0 AND MIT
 gdbm	1.26-r0	GPL-3.0-or-later
 gmp	6.3.0-r4	LGPL-3.0-or-later OR GPL-2.0-or-later
 gnutls	3.8.13-r0	LGPL-2.1-or-later
@@ -37,13 +37,13 @@ icu-data-en	78.1-r0	ICU
 icu-libs	78.1-r0	ICU
 jansson	2.15.0-r0	MIT
 ldb	4.23.8-r0	GPL-3.0-or-later AND LGPL-3.0-or-later
-libapk	3.0.6-r0	GPL-2.0-only
+libapk	3.0.8-r0	GPL-2.0-only
 libarchive	3.8.7-r0	BSD-2-Clause AND BSD-3-Clause AND Public-Domain
 libauth-samba	4.23.8-r0	GPL-3.0-or-later AND LGPL-3.0-or-later
 libbz2	1.0.8-r6	bzip2-1.0.6
 libcap2	2.78-r0	BSD-3-Clause OR GPL-2.0-only
-libcrypto3	3.5.7-r0	Apache-2.0
-libexpat	2.8.4-r0	MIT
+libcrypto3	3.5.8-r0	Apache-2.0
+libexpat	2.8.5-r0	MIT
 libffi	3.5.2-r1	MIT
 libformw	6.6_p20260516-r0	X11
 libgcc	15.2.0-r5	GPL-2.0-or-later AND LGPL-2.1-or-later
@@ -53,7 +53,7 @@ libncursesw	6.6_p20260516-r0	X11
 libpanelw	6.6_p20260516-r0	X11
 libsasl	2.1.28-r9	BSD-3-Clause-Attribution AND BSD-4-Clause
 libsmbclient	4.23.8-r0	GPL-3.0-or-later AND LGPL-3.0-or-later
-libssl3	3.5.7-r0	Apache-2.0
+libssl3	3.5.8-r0	Apache-2.0
 libstdc++	15.2.0-r5	GPL-2.0-or-later AND LGPL-2.1-or-later
 libtasn1	4.21.0-r0	LGPL-2.1-or-later
 libunistring	1.4.2-r0	GPL-2.0-or-later OR LGPL-3.0-or-later
