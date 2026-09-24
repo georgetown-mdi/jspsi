@@ -1723,7 +1723,7 @@ describe("console inviter partner accept kit", () => {
 
       // The console's absolute rendezvous path stays off the sheet exactly as
       // it stays off the token: the shared folder's name is the whole locator.
-      expect(sheet.text).toContain("Shared folder:  Alcove");
+      expect(sheet.text).toContain("Shared folder:  alcove");
       expect(sheet.text).not.toContain("/srv/exchanges");
     } finally {
       downloads.restore();

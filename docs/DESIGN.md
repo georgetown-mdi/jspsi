@@ -1,5 +1,5 @@
 ---
-title: "alcove"
+title: "Alcove"
 author: "Vincent Dorie"
 ---
 

@@ -159,7 +159,7 @@ This runbook is walked once a year against a simulated report, and again after a
 
 ### 2026-08-15
 
-**Scenario (simulated).** A researcher privately reports that on Windows the CLI writes the result CSV with an inherited ACL granting a second local account read access, so any user of that machine can read the linked records. This scenario is invented for the exercise and describes no defect in alcove: the owner-only write path it imagines failing is specified in [CREDENTIAL_STORAGE.md](spec/CREDENTIAL_STORAGE.md). It was chosen because it is confirmable, platform-scoped, and severe enough to reach publication, so the walk covers every step rather than ending at a decline.
+**Scenario (simulated).** A researcher privately reports that on Windows the CLI writes the result CSV with an inherited ACL granting a second local account read access, so any user of that machine can read the linked records. This scenario is invented for the exercise and describes no defect in Alcove: the owner-only write path it imagines failing is specified in [CREDENTIAL_STORAGE.md](spec/CREDENTIAL_STORAGE.md). It was chosen because it is confirmable, platform-scoped, and severe enough to reach publication, so the walk covers every step rather than ending at a decline.
 
 **Walked.** Steps 1 through 7 in order, against the repository as it stood on the exercise date: intake and acknowledgement, the severity call (High -- record data readable by a non-owner on the same host), affected versions (`v0.1.0`, the only signed release tag; no previous major exists on a `0.x` line), the hotfix path (branch from `v0.1.0`, fix, `v0.1.1`), advisory drafting and CVE request, and the reporter messages at each milestone.
 

@@ -206,7 +206,7 @@ function ConfigSteps({
             picked in your secrets folder. Copy that file to the scheduling
             machine, readable only by you (chmod 600 on Linux/macOS), and set
             signing.identity_file to where you put it -- the path in the
-            configuration above is a placeholder. Copy it; do not run Alcove
+            configuration above is a placeholder. Copy it; do not run alcove
             fingerprint there to make a new one. That mints a different key with
             a different fingerprint, and your partner has pinned the old one.
           </p>
