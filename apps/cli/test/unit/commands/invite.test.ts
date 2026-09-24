@@ -1310,11 +1310,11 @@ test("validateInvite: a retain-mode config declares it on the token", async () =
   expect(token.inviterRetainsFiles).toBe(true);
 });
 
-test("validateInvite: a config-as-source invite emits no connection endpoint", async () => {
+test("validateInvite: a file-sync config-as-source invite emits no connection endpoint", async () => {
   // This mint declares the retention from the config's options block alone and
-  // puts no locator on the token, so it needs no declaration derived from the
-  // endpoint's shape and no endpoint can contradict the one it states -- a
-  // split inbound/outbound connection, the shape that settles the mode by
+  // puts no file-sync locator on the token, so it needs no declaration derived
+  // from the endpoint's shape and no endpoint can contradict the one it states
+  // -- a split inbound/outbound connection, the shape that settles the mode by
   // itself, included.
   const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-split-"));
   tmpDirs.push(dir);

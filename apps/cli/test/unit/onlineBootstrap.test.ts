@@ -1872,8 +1872,9 @@ test("endpointFromConnection: a webrtc connection emits the signaling locator", 
 test("endpointFromConnection: nothing but the webrtc locator survives the emit", () => {
   // The producer side of the no-credentials invariant on this channel: a
   // hand-authored connection holding the broker API key, a TURN relay's
-  // credential, and the plaintext scheme emits the locator alone -- the
-  // relay's url, never its username or credential.
+  // credential, and the plaintext scheme emits the locator alone -- the url of
+  // the turn entry whose credential is minted from the shared secret, and
+  // nothing of the entry holding a static one.
   // `secure` is dropped with them -- the endpoint schema has no field for it --
   // which is why an acceptor seeded from one resolves TLS.
   const endpoint = endpointFromConnection({
@@ -1893,6 +1894,7 @@ test("endpointFromConnection: nothing but the webrtc locator survives the emit",
         username: "psilink",
         credential: "relaysecret",
       },
+      { url: "turns:minted.example.org:443" },
     ],
   });
   expect(Object.keys(endpoint).sort()).toEqual([
@@ -1903,7 +1905,7 @@ test("endpointFromConnection: nothing but the webrtc locator survives the emit",
     "relay",
   ]);
   expect(endpoint).toMatchObject({
-    relay: { turn: ["turns:relay.example.org:443"] },
+    relay: { turn: ["turns:minted.example.org:443"] },
   });
   const serialized = JSON.stringify(endpoint);
   for (const leak of [
@@ -1911,6 +1913,7 @@ test("endpointFromConnection: nothing but the webrtc locator survives the emit",
     "broker-api-key",
     "topsecret",
     "relaysecret",
+    "relay.example.org",
     "psilink",
     "secure",
     "role",

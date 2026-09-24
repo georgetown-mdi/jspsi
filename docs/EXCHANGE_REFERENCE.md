@@ -785,7 +785,11 @@ A run prefers it to your own settings, one kind at a time: its `turn` urls repla
 
 The relay's operator learns your network address on every run that contacts it, whether or not any traffic is relayed, which is why an acceptance names the relay before you consent. To stop using it, delete the block. The format and the credential derivation: [PROTOCOL.md](spec/PROTOCOL.md#the-invitations-relay-locator).
 
-An inviter names its relay from its own settings -- each `turn` entry's `url` and its `stun` list, never a username or credential. A `psilink invite` over a `ws://` or `wss://` URL builds its connection from the URL alone, which holds no `turn` or `stun`, so its invitation names no relay.
+An inviter names its relay from its own settings: the `url` of each `turn` entry that sets no `username` or `credential`, and its `stun` list. The invitation never holds a username, a credential, or anything derived from the shared secret.
+
+- **A `turn` entry with a static `username` and `credential` is left out.** Your partner cannot authenticate to it, so naming it would only disclose their network address to that relay's operator. Your own runs still use it.
+- **`psilink invite` over a `ws://` or `wss://` URL** takes the relay from `--turn` and `--stun` ([CLI.md](CLI.md#inviting-over-webrtc)), and the configuration it writes holds them as url-only `turn` entries and a `stun` list.
+- **An offline `psilink invite` from a configuration whose connection is `webrtc`** names that connection's coordination server and its relay, from `turn` and `stun` as above. A configuration with neither names no relay.
 
 The web app follows the same rules with the browser's own relay setting (the Relay server page, `/relay`) in place of `turn` and `stun`: an acceptance and each re-run of a saved exchange relay through the invitation's relay, and a web inviter names its own relay setting's urls in the invitation.
 

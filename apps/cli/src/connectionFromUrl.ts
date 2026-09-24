@@ -33,6 +33,16 @@ export type InviterConnectionConfig =
   RunnableConnectionConfig | WebRTCConnectionConfig;
 
 /**
+ * The relay an online inviter names for itself on the command line
+ * (`--turn` / `--stun`): TURN urls whose credential is minted from the shared
+ * secret on each run, and STUN urls. Urls only; a flag has no credential form.
+ */
+export interface InviterOwnRelay {
+  turn?: ReadonlyArray<string>;
+  stun?: ReadonlyArray<string>;
+}
+
+/**
  * The refusal a `ws:`/`wss:` URL gets on the acceptance and zero-setup paths.
  *
  * The channel runs -- `psilink exchange` dispatches it -- but on these paths
@@ -205,6 +215,12 @@ export function connectionFromURL(
  * mount point; both are asserted in the unit suite against the parser itself,
  * not a reading of it.
  *
+ * `ownRelay` becomes the connection's `turn` entries (url only, so each run
+ * mints their credential from the shared secret) and its `stun` list, which
+ * the written configuration keeps and the invitation names through
+ * `endpointFromConnection`. It applies to a webrtc URL alone; the caller
+ * reports it ignored on the file-sync channels.
+ *
  * `brokerLocationFromConnection` resolves the connection before it is
  * returned, so a shape the dial would refuse is a usage error HERE, at the
  * mint boundary, not raised later inside the exchange. The warn callback is a
@@ -216,6 +232,7 @@ export function connectionFromURL(
 export function inviterConnectionFromURL(
   url: URL,
   overrides: ConnectionOverrides,
+  ownRelay: InviterOwnRelay = {},
 ): InviterConnectionConfig {
   if (channelFromURL(url) !== "webrtc")
     return connectionFromURL(url, overrides);
@@ -239,6 +256,12 @@ export function inviterConnectionFromURL(
       // omitted, rather than restating it.
       ...(url.protocol === "ws:" ? { secure: false } : {}),
     },
+    ...(ownRelay.turn !== undefined && ownRelay.turn.length > 0
+      ? { turn: ownRelay.turn.map((turnUrl) => ({ url: turnUrl })) }
+      : {}),
+    ...(ownRelay.stun !== undefined && ownRelay.stun.length > 0
+      ? { stun: [...ownRelay.stun] }
+      : {}),
   };
   // applyConnectionOverrides applies the shared timeouts on every channel and
   // ignores the file-sync-only ones here; --outbound-path, which has no
