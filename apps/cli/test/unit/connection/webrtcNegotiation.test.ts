@@ -224,11 +224,19 @@ class FakeChannel {
 }
 
 const sessions: Array<WebRtcPeerSession> = [];
+/**
+ * One per rendezvous a test started. A test that fails before its rendezvous
+ * settles leaves it running -- renewing, and logging into the next test's
+ * capture -- so each is ended once its test is over.
+ */
+const teardowns: Array<AbortController> = [];
 
 snapshotDiagnosticSinkAndLevel();
 
 afterEach(async () => {
   for (const session of sessions.splice(0)) await session.close();
+  for (const teardown of teardowns.splice(0)) teardown.abort();
+  vi.useRealTimers();
 });
 
 /** Start a rendezvous with scripted transports; resolve once both are wired. */
@@ -270,6 +278,8 @@ async function startRendezvous(options: {
   peer.candidatesDuringSetLocal = options.candidatesDuringSetLocal ?? [];
   const peers: Array<ScriptedPeer> = [];
   const configurations: Array<WeriftPeerConfiguration> = [];
+  const teardown = new AbortController();
+  teardowns.push(teardown);
   const session = openWebRtcPeerSession({
     location: {
       host: "127.0.0.1",
@@ -286,7 +296,10 @@ async function startRendezvous(options: {
     channelOpenTimeoutMs: options.channelOpenTimeoutMs ?? 10_000,
     renewalOverlapMs: options.renewalOverlapMs,
     iceTransportPolicy: options.iceTransportPolicy,
-    signal: options.signal,
+    signal:
+      options.signal === undefined
+        ? teardown.signal
+        : AbortSignal.any([options.signal, teardown.signal]),
     iceServerRenewal: options.iceServerRenewal,
     peerConnectionFactory: (configuration) => {
       const built = peers.length === 0 ? peer : new ScriptedPeer();
@@ -1217,6 +1230,18 @@ async function until(condition: () => boolean): Promise<void> {
   expect(condition()).toBe(true);
 }
 
+/**
+ * Put the renewal interval, the offer retries and the wait a renewal reports on
+ * one clock the test advances, called before the rendezvous starts. A renewal
+ * then fires only when the test moves time on, so a slow runner cannot land a
+ * second one while the test works through the first, and the reported wait is
+ * exact rather than a wall-clock reading a real timer can fire ahead of.
+ * `setTimeout` stays real for the polling helpers and the overlap.
+ */
+function holdRenewalClock(): void {
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+}
+
 function offeredConnectionIds(socket: ScriptedSocket): Array<string> {
   return socket
     .ofType(BROKER_MESSAGE.offer)
@@ -1230,15 +1255,19 @@ test("an acceptor whose partner stays away past the renewal offers again from a 
     waits.push(waitedMs);
     return renewedServers();
   });
+  holdRenewalClock();
   const { socket, peers, configurations, session, inviterId } =
     await startRendezvous({
       role: "acceptor",
       iceServerRenewal: { afterMs: 60, resolve },
     });
+  await vi.advanceTimersByTimeAsync(59);
+  expect(resolve).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(1);
   await until(() => peers.length === 2);
   const [first, second] = peers;
   expect(configurations[1].iceServers).toEqual(RENEWED_SERVERS);
-  expect(waits[0]).toBeGreaterThanOrEqual(60);
+  expect(waits).toEqual([60]);
   await until(() => new Set(offeredConnectionIds(socket)).size === 2);
   const [staleId, freshId] = [...new Set(offeredConnectionIds(socket))];
   expect(second.channels.map((channel) => channel.label)).toEqual([freshId]);
@@ -1272,7 +1301,7 @@ test("an acceptor whose partner stays away past the renewal offers again from a 
   expect(first.remoteDescriptions).toEqual([]);
 
   // Once answered, the connection is kept however long it takes to open.
-  await new Promise((resolve) => setTimeout(resolve, 150));
+  await vi.advanceTimersByTimeAsync(150);
   expect(peers).toHaveLength(2);
   second.channels[0].open();
   const opened = await session;
@@ -1283,11 +1312,13 @@ test("an acceptor whose partner stays away past the renewal offers again from a 
 
 test("an inviter whose partner stays away past the renewal answers from the rebuilt connection", async () => {
   const resolve = vi.fn(renewedServers);
+  holdRenewalClock();
   const { socket, peers, configurations, session, acceptorId } =
     await startRendezvous({
       role: "inviter",
       iceServerRenewal: { afterMs: 60, resolve },
     });
+  await vi.advanceTimersByTimeAsync(60);
   await until(() => peers.length === 2);
   const [first, second] = peers;
   expect(configurations[1].iceServers).toEqual(RENEWED_SERVERS);
@@ -1357,10 +1388,12 @@ test("a renewal abandoned because the partner answered mid-build logs no notice"
           done({ iceServers: RENEWED_SERVERS, notice: RENEWAL_NOTICE });
       }),
   );
+  holdRenewalClock();
   const { socket, peer, peers, session, inviterId } = await startRendezvous({
     role: "acceptor",
     iceServerRenewal: { afterMs: 30, resolve },
   });
+  await vi.advanceTimersByTimeAsync(30);
   await until(() => release !== undefined);
   socket.deliver({
     type: BROKER_MESSAGE.answer,
@@ -1376,10 +1409,12 @@ test("a renewal abandoned because the partner answered mid-build logs no notice"
 });
 
 test("a candidate naming a connection a renewal discarded is dropped", async () => {
+  holdRenewalClock();
   const { socket, peers, inviterId } = await startRendezvous({
     role: "acceptor",
     iceServerRenewal: { afterMs: 60, resolve: renewedServers },
   });
+  await vi.advanceTimersByTimeAsync(60);
   await until(() => new Set(offeredConnectionIds(socket)).size === 2);
   const [staleId, freshId] = [...new Set(offeredConnectionIds(socket))];
   const second = peers[1];
@@ -1411,6 +1446,7 @@ test("a candidate naming a connection a renewal discarded is dropped", async () 
 });
 
 test("an inviter's renewal drops the candidates queued for the discarded connection", async () => {
+  holdRenewalClock();
   const { socket, peers, session, acceptorId } = await startRendezvous({
     role: "inviter",
     iceServerRenewal: { afterMs: 60, resolve: renewedServers },
@@ -1420,6 +1456,7 @@ test("an inviter's renewal drops the candidates queued for the discarded connect
     src: acceptorId,
     payload: { candidate: CANDIDATE_A, connectionId: "dc_early" },
   });
+  await vi.advanceTimersByTimeAsync(60);
   await until(() => peers.length === 2);
   socket.deliver({
     type: BROKER_MESSAGE.offer,
@@ -1455,6 +1492,7 @@ test("an acceptor that renews while its first answer is in flight still connects
       : new Promise<RenewedIceServers>(() => {}),
   );
   const inviterResolve = vi.fn(renewedServers);
+  holdRenewalClock();
   const acceptor = await startRendezvous({
     role: "acceptor",
     sharedSecret,
@@ -1493,9 +1531,12 @@ test("an acceptor that renews while its first answer is in flight still connects
     (frame) => holdAnswers && frame.type === BROKER_MESSAGE.answer,
   );
 
+  // The first retry reaches the inviter through the relay; the renewal after.
+  await vi.advanceTimersByTimeAsync(20);
   await until(() => heldAnswers.length > 0);
   const [staleId] = offeredConnectionIds(acceptor.socket);
   expect(answeredConnectionIds(inviter.socket)[0]).toBe(staleId);
+  await vi.advanceTimersByTimeAsync(60);
   await until(() => new Set(offeredConnectionIds(acceptor.socket)).size === 2);
   const freshId = [...new Set(offeredConnectionIds(acceptor.socket))][1];
 
@@ -1627,11 +1668,13 @@ async function renewedAcceptor(renewalOverlapMs?: number): Promise<
       ? renewedServers()
       : new Promise<RenewedIceServers>(() => {}),
   );
+  holdRenewalClock();
   const started = await startRendezvous({
     role: "acceptor",
     renewalOverlapMs,
     iceServerRenewal: { afterMs: 60, resolve },
   });
+  await vi.advanceTimersByTimeAsync(60);
   await until(() => new Set(offeredConnectionIds(started.socket)).size === 2);
   const [staleId, freshId] = [...new Set(offeredConnectionIds(started.socket))];
   return { ...started, staleId, freshId };
