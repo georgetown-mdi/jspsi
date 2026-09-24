@@ -13,6 +13,10 @@ import {
   draftFromTerms,
 } from "@psi/authoring/advancedInvite";
 
+import {
+  EDITED_TERMS_TITLE,
+  START_OPENED_EXCHANGE_LABEL,
+} from "@console/mountedConfiguration";
 import { CONNECTION_TUNING_DEFAULT } from "@console/connectionTuningModel";
 import { EXCHANGE_FILES_DEFAULT } from "@console/exchangeFilesModel";
 import { RECEIPTS_DEFAULT } from "@psi/receiptsModel";
@@ -51,9 +55,16 @@ const csv: AcquiredCsv = {
 
 const app = createAppMount();
 
-function render(editor: InviterEditor) {
+function render(
+  editor: InviterEditor,
+  opened: {
+    continuesOpenedExchange?: boolean;
+    editedTermsWarning?: string;
+  } = {},
+) {
   app.render(
     createElement(ReviewCreateSection, {
+      ...opened,
       editor,
       csv,
       problems: [],
@@ -176,5 +187,61 @@ describe("ReviewCreateSection: the inert-coalesce notice", () => {
     await expect
       .element(page.getByRole("button", { name: "Create the invitation" }))
       .toBeEnabled();
+  });
+});
+
+describe("ReviewCreateSection: a run of an opened configuration", () => {
+  const WARNING = "The terms changed here are not the ones your partner holds.";
+
+  test("a new invitation offers its duration", async () => {
+    render(editorFromCsv("Dana Okafor", csv));
+
+    await expect
+      .element(page.getByLabelText("Invitation duration"))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByRole("rowheader", { name: "Invitation duration" }))
+      .toBeInTheDocument();
+  });
+
+  test("a run that makes no invitation offers no duration", async () => {
+    render(editorFromCsv("Dana Okafor", csv), {
+      continuesOpenedExchange: true,
+    });
+
+    await expect
+      .element(page.getByRole("button", { name: START_OPENED_EXCHANGE_LABEL }))
+      .toBeInTheDocument();
+    expect(page.getByLabelText("Invitation duration").query()).toBeNull();
+    expect(
+      page.getByRole("rowheader", { name: "Invitation duration" }).query(),
+    ).toBeNull();
+    expect(app.container.textContent).not.toContain("Shared now, it expires");
+  });
+
+  test("changed terms are warned of, and the run can still start", async () => {
+    render(editorFromCsv("Dana Okafor", csv), {
+      continuesOpenedExchange: true,
+      editedTermsWarning: WARNING,
+    });
+
+    await expect.element(page.getByText(WARNING)).toBeInTheDocument();
+    await expect
+      .element(page.getByText(EDITED_TERMS_TITLE).first())
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByRole("button", { name: START_OPENED_EXCHANGE_LABEL }))
+      .toBeEnabled();
+  });
+
+  test("unchanged terms draw no warning", async () => {
+    render(editorFromCsv("Dana Okafor", csv), {
+      continuesOpenedExchange: true,
+    });
+
+    await expect
+      .element(page.getByRole("button", { name: START_OPENED_EXCHANGE_LABEL }))
+      .toBeInTheDocument();
+    expect(app.container.textContent).not.toContain(EDITED_TERMS_TITLE);
   });
 });

@@ -25,6 +25,7 @@ import { isJobChannel } from "@jobs/intentSchemas";
 import { CONNECTION_TUNING_DEFAULT } from "@console/connectionTuningModel";
 import { EXCHANGE_FILES_DEFAULT } from "@console/exchangeFilesModel";
 import { INITIAL_CSV_DELIMITER_CHOICE } from "@components/csvDelimiterChoice";
+import { canonicalDraftTerms } from "@console/loadedConfig";
 
 import { EMPTY_SAVE_FIELDS } from "./saveExchangeModel";
 import { MANAGE_OFFER_IDLE } from "./manageOfferModel";
@@ -216,6 +217,11 @@ export interface InviterScreenState {
    * identity: a file the terms have not reached is one the screen applies them
    * to. Undefined before they reach a file, and while none is open. */
   loadedTermsFile: AcquiredCsv | undefined;
+  /** The terms the open configuration built when they reached
+   * {@link loadedTermsFile}, in canonical form (`canonicalDraftTerms`), which
+   * the draft's own terms are compared against to warn of an edit the partner
+   * does not hold. Set with that file and dropped with the configuration. */
+  loadedTermsBaseline: string | undefined;
   /** The enforcement records a loaded configuration states and this flow has no
    * control for, held so the run's composed configuration states each as the
    * file did (docs/spec/EXCHANGE_FILE.md, "The records that must survive").
@@ -282,6 +288,7 @@ export const INVITER_SCREEN_INITIAL: InviterScreenState = {
   loadedSftpForm: undefined,
   loadedConfiguration: undefined,
   loadedTermsFile: undefined,
+  loadedTermsBaseline: undefined,
   loadedEnforcementRecords: {},
 };
 
@@ -718,6 +725,7 @@ export function inviterScreenReducer(
             : {}),
         },
         loadedTermsFile: undefined,
+        loadedTermsBaseline: undefined,
         loadedEnforcementRecords: loaded.records,
       };
     }
@@ -728,18 +736,20 @@ export function inviterScreenReducer(
       // seat -- the next file carries the terms instead.
       if (action.file !== state.acquired) return state;
       const transport = state.loadedConfiguration?.transport;
+      const seated =
+        transport === undefined
+          ? action.editor
+          : editorWithTransport(action.editor, transport);
       return {
         ...state,
-        editor:
-          transport === undefined
-            ? action.editor
-            : editorWithTransport(action.editor, transport),
+        editor: seated,
         mountedConfiguration: withTermsNotApplied(
           state.mountedConfiguration,
           action.notApplied ?? [],
           action.notCovered ?? [],
         ),
         loadedTermsFile: action.file,
+        loadedTermsBaseline: canonicalDraftTerms(seated),
         editorAnnouncement:
           "Loaded the configuration's matching terms. Review them before creating.",
       };
@@ -763,6 +773,7 @@ export function inviterScreenReducer(
         mountedConfiguration: MOUNTED_CONFIGURATION_UNREAD,
         loadedConfiguration: undefined,
         loadedTermsFile: undefined,
+        loadedTermsBaseline: undefined,
         loadedSftpForm: undefined,
         loadedEnforcementRecords: {},
         connectionTuning: CONNECTION_TUNING_DEFAULT,

@@ -403,10 +403,12 @@ interface AnswersRow {
 
 /** The check-your-answers table: the full proposal restated before the point
  * of no return, each row's Change link navigating to the spine step or
- * Customize tab that owns the term. */
+ * Customize tab that owns the term. `makesInvitation` false is a run that
+ * makes no invitation, which has no duration to restate. */
 export function answersRows(
   editor: InviterEditor,
   csv: AcquiredCsv,
+  { makesInvitation = true }: { makesInvitation?: boolean } = {},
 ): Array<AnswersRow> {
   const sent = disclosedColumnNames(editor.draft.metadata);
   return [
@@ -443,11 +445,15 @@ export function answersRows(
       mono: editor.draft.legalAgreement?.reference !== undefined,
       changeTarget: "agreement",
     },
-    {
-      label: "Invitation duration",
-      value: lifetimeNoun(editor.draft.lifetimeSeconds),
-      setAbove: true,
-    },
+    ...(makesInvitation
+      ? [
+          {
+            label: "Invitation duration",
+            value: lifetimeNoun(editor.draft.lifetimeSeconds),
+            setAbove: true,
+          },
+        ]
+      : []),
     {
       label: "Results go to",
       value: RESULTS_DIRECTION_LABELS[editor.draft.outputDirection],

@@ -131,11 +131,13 @@ import {
   configurationSaveState,
   connectionSettingsHeldNotice,
   conversionStatement,
+  editedTermsWarning,
   runWithheldReason,
   unconvertedSigningWithheldReason,
 } from "@console/mountedConfiguration";
 import {
   editorWithLoadedTerms,
+  termsEditedSinceOpened,
   termsSettingsStatedBy,
 } from "@console/loadedConfig";
 import {
@@ -358,6 +360,7 @@ export function InviterScreen() {
     loadedConfiguration,
     loadedEnforcementRecords,
     loadedSftpForm,
+    loadedTermsBaseline,
     loadedTermsFile,
     manageOffer,
     minting,
@@ -546,6 +549,14 @@ export function InviterScreen() {
     mountedConfiguration.status === "opened" &&
     runWithheldReason(mountedConfiguration) === undefined &&
     chosenRunMode === "server-job";
+  // Whether the terms this draft builds are still the ones the opened
+  // configuration built when they reached the file the step holds, compared
+  // rather than tracked through edits, so an undone change clears it.
+  const openedTermsEdited =
+    editor !== undefined &&
+    loadedTermsFile !== undefined &&
+    loadedTermsFile === acquired &&
+    termsEditedSinceOpened(loadedTermsBaseline, editor);
   // A signed console run of an opened configuration naming signing paths of
   // its own waits for the operator to convert it to the console's.
   const signingWithheld =
@@ -1587,6 +1598,10 @@ export function InviterScreen() {
                   runWithheldReason(mountedConfiguration) ?? signingWithheld
                 }
                 continuesOpenedExchange={continuesOpenedExchange}
+                editedTermsWarning={editedTermsWarning(mountedConfiguration, {
+                  termsEdited: openedTermsEdited,
+                  continuesOpenedExchange,
+                })}
                 connectionSettingsHeld={connectionSettingsHeldNotice(
                   mountedConfiguration,
                 )}

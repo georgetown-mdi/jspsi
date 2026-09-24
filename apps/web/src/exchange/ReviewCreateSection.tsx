@@ -52,6 +52,7 @@ import {
   connectionTuningProblems,
 } from "@console/connectionTuningModel";
 import { ConnectionTuningCard } from "@console/ConnectionTuningCard";
+import { EditedTermsNotice } from "@console/MountedConfigurationCard";
 import { ExchangeFilesCard } from "@console/ExchangeFilesCard";
 import { ReceiptsCard } from "@console/ReceiptsCard";
 import { RunDiagnosticsCard } from "@console/RunDiagnosticsCard";
@@ -108,6 +109,7 @@ export function ReviewCreateSection({
   sftpSaveFilePreferred,
   runWithheld,
   continuesOpenedExchange = false,
+  editedTermsWarning,
   connectionSettingsHeld,
   rendezvous,
   exchangeFiles,
@@ -152,6 +154,10 @@ export function ReviewCreateSection({
   /** Whether the run continues the exchange the opened configuration set up,
    * under the key file beside it, so the start action makes no invitation. */
   continuesOpenedExchange?: boolean;
+  /** The warning that the opened configuration's terms were changed here,
+   * which the partner does not hold (`editedTermsWarning`). Undefined where
+   * there is nothing to warn of. */
+  editedTermsWarning?: string;
   /** Why the file-handling and connection-tuning cards take no edits, standing
    * in for them: the opened configuration's connection block is saved as the
    * file states it (`connectionSettingsHeldNotice`). Undefined where the
@@ -349,23 +355,29 @@ export function ReviewCreateSection({
     <>
       <p className={styles.eyebrow}>Step 3 of 3</p>
       <h1 tabIndex={-1}>Review &amp; create</h1>
-      <NativeSelect
-        label="Invitation duration"
-        description="How long this invitation can be accepted before it expires."
-        value={String(editor.draft.lifetimeSeconds)}
-        data={LIFETIME_CHOICES.map((choice) => ({
-          value: String(choice.seconds),
-          label: choice.label,
-        }))}
-        onChange={(event) => onLifetime(Number(event.currentTarget.value))}
-      />
-      <p className={`${styles.small} ${styles.sub}`}>
-        Shared now, it expires{" "}
-        <span className={styles.mono}>
-          {expiryLabel(editor.draft.lifetimeSeconds, new Date())}
-        </span>
-        .
-      </p>
+      {/* A run of the opened configuration makes no invitation, so it has no
+        duration to set. */}
+      {!continuesOpenedExchange && (
+        <>
+          <NativeSelect
+            label="Invitation duration"
+            description="How long this invitation can be accepted before it expires."
+            value={String(editor.draft.lifetimeSeconds)}
+            data={LIFETIME_CHOICES.map((choice) => ({
+              value: String(choice.seconds),
+              label: choice.label,
+            }))}
+            onChange={(event) => onLifetime(Number(event.currentTarget.value))}
+          />
+          <p className={`${styles.small} ${styles.sub}`}>
+            Shared now, it expires{" "}
+            <span className={styles.mono}>
+              {expiryLabel(editor.draft.lifetimeSeconds, new Date())}
+            </span>
+            .
+          </p>
+        </>
+      )}
       <NativeSelect
         label="Who receives the matched results"
         description="The party who receives no results still contributes records to the match."
@@ -510,7 +522,9 @@ export function ReviewCreateSection({
             Check your answers before creating the invitation
           </caption>
           <tbody>
-            {answersRows(editor, csv).map((row) => (
+            {answersRows(editor, csv, {
+              makesInvitation: !continuesOpenedExchange,
+            }).map((row) => (
               <tr key={row.label}>
                 <th scope="row">{row.label}</th>
                 <td className={row.mono === true ? styles.mono : undefined}>
@@ -580,6 +594,7 @@ export function ReviewCreateSection({
           </Button>
         </div>
       )}
+      <EditedTermsNotice warning={editedTermsWarning} />
       {continuesOpenedExchange && (
         <p className={styles.small}>{OPENED_EXCHANGE_CONTINUES}</p>
       )}

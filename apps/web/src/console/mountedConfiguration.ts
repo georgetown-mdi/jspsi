@@ -192,6 +192,50 @@ export function runWithheldReason(
   );
 }
 
+/** The title of the warning an edit of an opened configuration's terms draws
+ * ({@link editedTermsWarning}). */
+export const EDITED_TERMS_TITLE = "Your partner holds the terms you opened";
+
+/**
+ * What the review step says when the terms the draft builds are not the terms
+ * the opened configuration built (`termsEditedSinceOpened`): the partner holds
+ * the file's terms and refuses an exchange wherever the two differ, and
+ * `psilink update` with `psilink apply` is how both sides change them. The
+ * operator can still start the run.
+ *
+ * Undefined where no edit reaches the partner that way: nothing is open, the
+ * terms are unchanged, or the run makes a new invitation, which states the
+ * edited terms itself. A configuration the console only saves back takes the
+ * variant for the command-line run of the saved file.
+ */
+export function editedTermsWarning(
+  state: MountedConfigurationState,
+  {
+    termsEdited,
+    continuesOpenedExchange,
+  }: { termsEdited: boolean; continuesOpenedExchange: boolean },
+): string | undefined {
+  if (state.status !== "opened" || !termsEdited) return undefined;
+  const changed =
+    "You changed the matching terms of the configuration you opened, and " +
+    "your partner still holds its terms as they were. ";
+  if (state.notConducted !== undefined)
+    return (
+      changed +
+      "An exchange run from the file you save is refused until they apply " +
+      "yours: after you save, run psilink update and send what it prints to " +
+      "your partner to apply with psilink apply."
+    );
+  if (!continuesOpenedExchange) return undefined;
+  return (
+    changed +
+    "This run is refused wherever the two differ. To run the terms your " +
+    "partner holds, undo the change, or close the configuration and open it " +
+    "again. To change the terms, edit psilink.yaml, run psilink update, and " +
+    "send what it prints to your partner to apply with psilink apply."
+  );
+}
+
 /** The label of the control that converts an opened configuration to the
  * console's own paths. */
 export const CONVERT_CONFIGURATION_LABEL = "Use the console's paths";

@@ -14,6 +14,7 @@ import {
   CLOSE_CONFIGURATION_LABEL,
   CONFIGURATION_SAVED,
   CONVERT_CONFIGURATION_LABEL,
+  EDITED_TERMS_TITLE,
   NO_CONFIGURATION_IN_FOLDER,
   OPENED_EXCHANGE_CONTINUES,
   OPEN_CONFIGURATION_LABEL,
@@ -555,5 +556,71 @@ describe("the divergence warning on the step that resolves it", () => {
   test("a configuration whose commitment holds says nothing here", async () => {
     await goToColumns({ ...CONFIG_DOCUMENT, metadata: STATED_COLUMNS });
     expect(page.getByText(/a run started here is refused/).query()).toBeNull();
+  });
+});
+
+// The partner holds the terms the opened configuration states, so a change to
+// them here is warned of before the run; the run makes no invitation, so the
+// review step offers no duration for one.
+describe("the review step of an opened configuration's run", () => {
+  async function goToReview(): Promise<void> {
+    stubConfigRoute(
+      {
+        status: 200,
+        body: openedBody({ ...CONFIG_DOCUMENT, metadata: STATED_COLUMNS }),
+      },
+      {
+        files: [CLIENTS_FILE],
+        sftp: {
+          configured: true,
+          host: "sftp.partner.example",
+          port: 22,
+          path: "/exchange",
+        },
+      },
+    );
+    app.render(createElement(InviterScreen));
+    await userEvent.fill(page.getByLabelText("Your name"), "Dana Okafor");
+    await openConfiguration();
+    await commitFile();
+    await page
+      .getByRole("button", { name: "Continue to matching & sharing" })
+      .click();
+    await page
+      .getByRole("button", { name: "Continue to review & create" })
+      .click();
+    await expect
+      .element(page.getByRole("button", { name: START_OPENED_EXCHANGE_LABEL }))
+      .toBeInTheDocument();
+  }
+
+  test("offers no invitation duration, and warns of nothing unchanged", async () => {
+    await goToReview();
+    expect(page.getByLabelText("Invitation duration").query()).toBeNull();
+    expect(app.container.textContent).not.toContain(EDITED_TERMS_TITLE);
+  });
+
+  test("a changed term is warned of until it is undone", async () => {
+    await goToReview();
+    const direction = page.getByLabelText("Who receives the matched results");
+    const opened = (direction.element() as HTMLSelectElement).value;
+    await userEvent.selectOptions(
+      direction,
+      opened === "inviter" ? "partner" : "inviter",
+    );
+    await expect
+      .element(page.getByText(/psilink update/).first())
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText(EDITED_TERMS_TITLE).first())
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByRole("button", { name: START_OPENED_EXCHANGE_LABEL }))
+      .toBeEnabled();
+
+    await userEvent.selectOptions(direction, opened);
+    await expect
+      .element(page.getByText(/psilink update/).first())
+      .not.toBeInTheDocument();
   });
 });
