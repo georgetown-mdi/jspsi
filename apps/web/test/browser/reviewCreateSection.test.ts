@@ -59,6 +59,7 @@ function render(
   editor: InviterEditor,
   opened: {
     continuesOpenedExchange?: boolean;
+    runWithheld?: string;
     editedTermsWarning?: string;
   } = {},
 ) {
@@ -202,6 +203,13 @@ describe("ReviewCreateSection: a run of an opened configuration", () => {
     await expect
       .element(page.getByRole("rowheader", { name: "Invitation duration" }))
       .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByRole("table", {
+          name: "Check your answers before creating the invitation",
+        }),
+      )
+      .toBeInTheDocument();
   });
 
   test("a run that makes no invitation offers no duration", async () => {
@@ -211,6 +219,32 @@ describe("ReviewCreateSection: a run of an opened configuration", () => {
 
     await expect
       .element(page.getByRole("button", { name: START_OPENED_EXCHANGE_LABEL }))
+      .toBeInTheDocument();
+    expect(page.getByLabelText("Invitation duration").query()).toBeNull();
+    expect(
+      page.getByRole("rowheader", { name: "Invitation duration" }).query(),
+    ).toBeNull();
+    expect(app.container.textContent).not.toContain("Shared now, it expires");
+    await expect
+      .element(
+        page.getByRole("table", {
+          name: "Check your answers before starting the exchange",
+        }),
+      )
+      .toBeInTheDocument();
+  });
+
+  test("a configuration saved back rather than run offers no duration", async () => {
+    render(editorFromCsv("Dana Okafor", csv), {
+      runWithheld: "The console cannot run this webrtc configuration.",
+    });
+
+    await expect
+      .element(
+        page.getByRole("table", {
+          name: "Check your answers before saving your changes",
+        }),
+      )
       .toBeInTheDocument();
     expect(page.getByLabelText("Invitation duration").query()).toBeNull();
     expect(

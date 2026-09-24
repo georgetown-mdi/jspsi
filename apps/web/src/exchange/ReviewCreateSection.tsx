@@ -351,13 +351,14 @@ export function ReviewCreateSection({
   const saveOffered =
     runWithheld !== undefined && onSaveConfiguration !== undefined;
   const configurationSaving = configurationSave?.status === "saving";
+  // An opened configuration makes no invitation, whether this step runs it or
+  // withholds the run, so the step offers no invitation duration.
+  const makesInvitation = !continuesOpenedExchange && runWithheld === undefined;
   return (
     <>
       <p className={styles.eyebrow}>Step 3 of 3</p>
       <h1 tabIndex={-1}>Review &amp; create</h1>
-      {/* A run of the opened configuration makes no invitation, so it has no
-        duration to set. */}
-      {!continuesOpenedExchange && (
+      {makesInvitation && (
         <>
           <NativeSelect
             label="Invitation duration"
@@ -519,12 +520,14 @@ export function ReviewCreateSection({
       <div className={styles.tableScroll}>
         <table className={`${styles.dataTable} ${styles.answers}`}>
           <caption className={styles.visuallyHidden}>
-            Check your answers before creating the invitation
+            {continuesOpenedExchange
+              ? "Check your answers before starting the exchange"
+              : makesInvitation
+                ? "Check your answers before creating the invitation"
+                : "Check your answers before saving your changes"}
           </caption>
           <tbody>
-            {answersRows(editor, csv, {
-              makesInvitation: !continuesOpenedExchange,
-            }).map((row) => (
+            {answersRows(editor, csv, { makesInvitation }).map((row) => (
               <tr key={row.label}>
                 <th scope="row">{row.label}</th>
                 <td className={row.mono === true ? styles.mono : undefined}>

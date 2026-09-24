@@ -352,8 +352,10 @@ export {
 } from "./config/transformParamDisplay";
 export {
   deriveAcceptedLinkageTerms,
+  partnerBoundTerms,
   validateCompatibility,
 } from "./linkageTermsNegotiation";
+export type { PartnerBoundTerms } from "./linkageTermsNegotiation";
 export type {
   CountOnlyShapeViolation,
   ResolvedMatching,

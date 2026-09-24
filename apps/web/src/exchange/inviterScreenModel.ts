@@ -25,7 +25,7 @@ import { isJobChannel } from "@jobs/intentSchemas";
 import { CONNECTION_TUNING_DEFAULT } from "@console/connectionTuningModel";
 import { EXCHANGE_FILES_DEFAULT } from "@console/exchangeFilesModel";
 import { INITIAL_CSV_DELIMITER_CHOICE } from "@components/csvDelimiterChoice";
-import { canonicalDraftTerms } from "@console/loadedConfig";
+import { canonicalPartnerBoundTerms } from "@console/loadedConfig";
 
 import { EMPTY_SAVE_FIELDS } from "./saveExchangeModel";
 import { MANAGE_OFFER_IDLE } from "./manageOfferModel";
@@ -218,9 +218,10 @@ export interface InviterScreenState {
    * to. Undefined before they reach a file, and while none is open. */
   loadedTermsFile: AcquiredCsv | undefined;
   /** The terms the open configuration built when they reached
-   * {@link loadedTermsFile}, in canonical form (`canonicalDraftTerms`), which
-   * the draft's own terms are compared against to warn of an edit the partner
-   * does not hold. Set with that file and dropped with the configuration. */
+   * {@link loadedTermsFile}, the part the partner binds, in canonical form
+   * (`canonicalPartnerBoundTerms`): the draft's own terms are compared against
+   * it to warn of an edit the partner does not hold. Set with that file and
+   * dropped with the configuration. */
   loadedTermsBaseline: string | undefined;
   /** The enforcement records a loaded configuration states and this flow has no
    * control for, held so the run's composed configuration states each as the
@@ -749,7 +750,7 @@ export function inviterScreenReducer(
           action.notCovered ?? [],
         ),
         loadedTermsFile: action.file,
-        loadedTermsBaseline: canonicalDraftTerms(seated),
+        loadedTermsBaseline: canonicalPartnerBoundTerms(seated),
         editorAnnouncement:
           "Loaded the configuration's matching terms. Review them before creating.",
       };
