@@ -158,8 +158,9 @@ revoke-exchange.sh <exchange-id>
 ```
 
 - **The arguments.** The exchange id is 1 to 128 of `[A-Za-z0-9._-]`, not
-  starting with `-`, and not 64 lowercase hex characters, so a key given in the
-  id's place is refused; the key is 64 lowercase hex characters, the form coturn
+  starting with `-`. An id containing a run of 64 hex characters of either
+  case is refused, so a key passed in the id's place is never registered or
+  journaled. The key is 64 lowercase hex characters, the form coturn
   keys its HMAC with. max-age-days, optional, is a whole number of days from 1
   to 36500 -- see Lifetime below. Either script refuses a malformed argument
   and names it, without printing the value.

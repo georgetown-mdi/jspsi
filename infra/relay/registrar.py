@@ -40,8 +40,9 @@ MIN_TOKEN_LENGTH = 32
 # exchange-keys.sh, applied before a script runs; the scripts keep their own.
 EXCHANGE_ID = re.compile(r"[A-Za-z0-9._][A-Za-z0-9._-]{0,127}")
 KEY = re.compile(r"[0-9a-f]{64}")
+HEX_RUN = re.compile(r"[0-9A-Fa-f]{64}")
 MAX_AGE_DAYS_CEILING = 36500
-ID_REFUSAL = "exchange-id must be 1 to 128 of [A-Za-z0-9._-], not starting with '-' and not 64 lowercase hex characters"
+ID_REFUSAL = "exchange-id must be 1 to 128 of [A-Za-z0-9._-], not starting with '-' and not containing a run of 64 hex characters"
 KEY_REFUSAL = "key must be 64 lowercase hex characters [0-9a-f]"
 MAX_AGE_REFUSAL = "maxAgeDays must be a whole number of days from 1 to %d" % MAX_AGE_DAYS_CEILING
 # The journal names a request's method only from this list.
@@ -68,7 +69,7 @@ def read_token():
 
 
 def valid_exchange_id(exchange_id):
-    return EXCHANGE_ID.fullmatch(exchange_id) is not None and KEY.fullmatch(exchange_id) is None
+    return EXCHANGE_ID.fullmatch(exchange_id) is not None and HEX_RUN.search(exchange_id) is None
 
 
 def valid_key(key):

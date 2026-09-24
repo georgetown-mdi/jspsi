@@ -30,8 +30,9 @@ case "$RUNTIME" in
 esac
 
 # No leading '-', so the id cannot be read as a flag, and no whitespace, so it
-# stays one field of the mapping file. An id shaped like a key is refused, so a
-# key passed in the id's place is never registered as an id or printed back.
+# stays one field of the mapping file. An id containing a run of 64 hex
+# characters is refused, so a key passed in the id's place, alone or inside a
+# longer id, is never registered as an id or printed back.
 # The refusals do not print the value.
 check_exchange_id() {
   case "$1" in
@@ -39,11 +40,9 @@ check_exchange_id() {
       die "exchange-id must be 1 to 128 of [A-Za-z0-9._-], not starting with '-'" ;;
   esac
   [ "${#1}" -le 128 ] || die "exchange-id is ${#1} characters; the limit is 128"
-  case "$1" in
-    *[!0-9a-f]*) ;;
-    *) [ "${#1}" -ne 64 ] ||
-      die "exchange-id is 64 lowercase hex characters, the shape of a relay key; give the exchange's id there, and its key only as register-exchange.sh's second argument" ;;
-  esac
+  if printf '%s\n' "$1" | LC_ALL=C grep -Eq '[0-9A-Fa-f]{64}'; then
+    die "exchange-id contains a run of 64 hex characters, the shape of a relay key; give the exchange's id there, and its key only as register-exchange.sh's second argument"
+  fi
 }
 
 # The form coturn HMACs as ASCII (docs/spec/PROTOCOL.md, Relay credential

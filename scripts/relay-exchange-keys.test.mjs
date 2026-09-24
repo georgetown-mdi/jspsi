@@ -456,6 +456,15 @@ describe("register-exchange.sh", () => {
     ["a 63-character key", "exchange-1", KEY_A.slice(1), "key-hex64"],
     ["a base64 key", "exchange-1", "q".repeat(43) + "=", "key-hex64"],
     ["a key given as the id", KEY_B, KEY_A, "exchange-id"],
+    [
+      "an id of a key with a leading character",
+      `x${KEY_B}`,
+      KEY_A,
+      "exchange-id",
+    ],
+    ["an id of a key with a trailing dot", `${KEY_B}.`, KEY_A, "exchange-id"],
+    ["an id of a name and a key", `name-${KEY_B}`, KEY_A, "exchange-id"],
+    ["an id of an uppercase key", KEY_B.toUpperCase(), KEY_A, "exchange-id"],
   ])("refuses %s, naming the argument", (_, id, key, argument) => {
     const host = fixtureHost();
     const result = host.register(id, key);
@@ -468,10 +477,12 @@ describe("register-exchange.sh", () => {
     expect(result.listings).toBe(0);
   });
 
-  it("registers an id of 64 hex characters that is not all lowercase", () => {
+  it("registers an id holding a run of 63 hex characters", () => {
     const host = fixtureHost();
-    const result = host.register(KEY_B.toUpperCase(), KEY_A);
+    const id = `x${KEY_B.slice(1)}.${KEY_C.slice(1).toUpperCase()}`;
+    const result = host.register(id, KEY_A);
     expect(result.status, result.stderr).toBe(0);
+    expect(host.mapping()).toBe(`${id} ${KEY_A} ${NOW} -\n`);
   });
 
   it.each([[["exchange-1"]], [["exchange-1", KEY_A, "30", "extra"]]])(
@@ -578,6 +589,26 @@ describe("sweep-exchanges.sh", () => {
     const due = host.sweep();
     expect(due.turnadmin.map((line) => line.split(" ").slice(1, 3))).toEqual([
       ["-X", KEY_B],
+    ]);
+    expect(host.mapping()).toBe("");
+  });
+
+  it("counts a same-key renewal from its own stamp and max age", () => {
+    const host = fixtureHost();
+    host.register("exchange-1", KEY_A, "1");
+    const renewed = NOW + 86000;
+    host.setClock(renewed);
+    host.register("exchange-1", KEY_A, "2");
+    host.setClock(NOW + DAY);
+    expect(host.sweep().turnadmin).toEqual([]);
+    host.setClock(renewed + 2 * DAY - 1);
+    expect(host.sweep().turnadmin).toEqual([]);
+    expect(host.mapping()).toBe(`exchange-1 ${KEY_A} ${renewed} 2\n`);
+    host.setClock(renewed + 2 * DAY);
+    const due = host.sweep();
+    expect(due.status, due.stderr).toBe(0);
+    expect(due.turnadmin.map((line) => line.split(" ").slice(1, 3))).toEqual([
+      ["-X", KEY_A],
     ]);
     expect(host.mapping()).toBe("");
   });
@@ -911,7 +942,7 @@ describe("registrar.py", { timeout: 60000 }, () => {
   const keyBody = (key, maxAgeDays = "") =>
     `{"key": ${JSON.stringify(key)}${maxAgeDays === "" ? "" : `, "maxAgeDays": ${maxAgeDays}`}}`;
   const idRefusal =
-    "exchange-id must be 1 to 128 of [A-Za-z0-9._-], not starting with '-' and not 64 lowercase hex characters";
+    "exchange-id must be 1 to 128 of [A-Za-z0-9._-], not starting with '-' and not containing a run of 64 hex characters";
 
   it.each([
     ["an id of $(id)", "PUT", "/exchanges/$(id)", keyBody(KEY_A), idRefusal],
@@ -943,6 +974,34 @@ describe("registrar.py", { timeout: 60000 }, () => {
       "an id shaped like a key",
       "PUT",
       `/exchanges/${KEY_B}`,
+      keyBody(KEY_A),
+      idRefusal,
+    ],
+    [
+      "an id of a key with a leading character",
+      "PUT",
+      `/exchanges/x${KEY_B}`,
+      keyBody(KEY_A),
+      idRefusal,
+    ],
+    [
+      "an id of a key with a trailing dot",
+      "PUT",
+      `/exchanges/${KEY_B}.`,
+      keyBody(KEY_A),
+      idRefusal,
+    ],
+    [
+      "an id of a name and a key",
+      "PUT",
+      `/exchanges/name-${KEY_B}`,
+      keyBody(KEY_A),
+      idRefusal,
+    ],
+    [
+      "an id of an uppercase key",
+      "PUT",
+      `/exchanges/${KEY_B.toUpperCase()}`,
       keyBody(KEY_A),
       idRefusal,
     ],
@@ -1028,6 +1087,23 @@ describe("registrar.py", { timeout: 60000 }, () => {
       );
       expect(response.status, response.text).toBe(200);
       expect(stubbed.launches()).toBe("revoke-exchange.sh\n");
+    } finally {
+      stubbed.remove();
+    }
+  });
+
+  it("launches the script for an id holding a run of 63 hex characters", async () => {
+    const host = fixtureHost();
+    const stubbed = await startStubbedRegistrar(host);
+    try {
+      const response = await call(
+        stubbed.port,
+        "PUT",
+        `/exchanges/x${KEY_B.slice(1)}.${KEY_C.slice(1).toUpperCase()}`,
+        { token: REGISTRAR_TOKEN, body: keyBody(KEY_A) },
+      );
+      expect(response.status, response.text).toBe(200);
+      expect(stubbed.launches()).toBe("register-exchange.sh\n");
     } finally {
       stubbed.remove();
     }
