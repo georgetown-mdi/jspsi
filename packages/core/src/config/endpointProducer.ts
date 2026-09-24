@@ -40,7 +40,7 @@ export const PLACEHOLDER_SFTP_HOST = "REPLACE_WITH_SFTP_HOST";
 export const PLACEHOLDER_SSH_USERNAME = "REPLACE_WITH_SSH_USERNAME";
 
 /**
- * Build the credential-free {@link ConnectionEndpoint} an online invitation
+ * Build the credential-free {@link ConnectionEndpoint} an invitation
  * carries, from the connection the inviter is actually using. The producer
  * inverse of the CLI's `connectionFromEndpoint`: it copies only the public
  * locator (host/port/path, or the split inbound/outbound pair) and never a
@@ -56,9 +56,13 @@ export const PLACEHOLDER_SSH_USERNAME = "REPLACE_WITH_SSH_USERNAME";
  *
  * On `webrtc` the locator is the peer-coordination server's own
  * host/port/path -- where the acceptor's signaling socket goes -- and the
- * connection's own relay as urls: each `turn` entry's `url` and the `stun`
- * list, composed by {@link relayLocatorFromOwnRelay}. Everything else (`key`,
- * `username`, a `turn` entry's username and credential, `secure`) is left
+ * connection's own relay as urls: the `url` of each `turn` entry whose
+ * credential is minted from the shared secret (no `username` or
+ * `credential`), and the `stun` list, composed by
+ * {@link relayLocatorFromOwnRelay}. A `turn` entry with a static username and
+ * credential is left out whole: the partner cannot authenticate to it, so
+ * naming it would only show the partner's address to that relay's operator.
+ * Everything else (`key`, `username`, `secure`, `invitationRelay`) is left
  * behind: those are either not a public locator or have no endpoint-schema
  * field, so a plaintext-broker locator is unreachable here by construction.
  *
@@ -66,11 +70,11 @@ export const PLACEHOLDER_SSH_USERNAME = "REPLACE_WITH_SSH_USERNAME";
  * OS-assigned ephemeral port) is dropped rather than emitted as an
  * undialable locator. An empty `path`, which the webrtc server schema
  * permits and the endpoint schema rejects, is dropped for the same reason
- * -- a dead branch for today's only caller (asserted in the CLI's
- * `inviterConnectionFromURL` suite); a future caller reaching this with an
- * empty path must resolve the mount point itself, since the CLI and
- * browser resolve an absent path differently
- * (docs/spec/WEBRTC_TRANSPORT.md).
+ * -- a dead branch for the CLI's invite paths, which resolve the mount
+ * point first and refuse an empty one (asserted in the CLI's
+ * `inviterConnectionFromURL` and offline invite suites); another caller reaching this with an empty path
+ * must resolve the mount point itself, since the CLI and browser resolve an
+ * absent path differently (docs/spec/WEBRTC_TRANSPORT.md).
  *
  * A host or path longer than the endpoint schema allows
  * ({@link MAX_ENDPOINT_HOST_LENGTH} / {@link MAX_ENDPOINT_PATH_LENGTH}) is
@@ -134,7 +138,12 @@ export function endpointFromConnection(
     requireFits("connection host", server.host, MAX_ENDPOINT_HOST_LENGTH);
     requireFits("connection path", server.path, MAX_ENDPOINT_PATH_LENGTH);
     const relay = relayLocatorFromOwnRelay({
-      turn: connection.turn?.map((entry) => entry.url),
+      turn: connection.turn
+        ?.filter(
+          (entry) =>
+            entry.username === undefined && entry.credential === undefined,
+        )
+        .map((entry) => entry.url),
       stun: connection.stun,
     });
     return {
@@ -142,7 +151,7 @@ export function endpointFromConnection(
       host: server.host,
       port: reachablePort(server.port),
       // The signaling mount point, dropped when blank (see the doc comment); a
-      // dead branch for today's only caller, which never mints an empty one.
+      // dead branch for the CLI's callers, which never mint an empty one.
       path:
         server.path !== undefined && server.path !== ""
           ? server.path

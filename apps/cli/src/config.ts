@@ -14,6 +14,7 @@ import type {
   RelayLocator,
   SigningConfig,
   Standardization,
+  WebRTCConnectionConfig,
 } from "@psilink/core";
 import {
   bareTermsValue,
@@ -2375,6 +2376,55 @@ function readRetainFilesDeclaration(config: Record<string, unknown>): boolean {
   if (options === null || typeof options !== "object") return false;
   const entry = options as Record<string, unknown>;
   return entry["retain_files"] === true || entry["retainFiles"] === true;
+}
+
+/**
+ * The connection block of the config at `configPath` when it declares
+ * `channel: webrtc`, validated through the connection schema, or `undefined`
+ * for any other channel or no block: an offline `invite` names that
+ * connection's coordination server and relay in its invitation. Every other
+ * channel's block stays unread, so a placeholder one still mints (see
+ * {@link ConfigLinkageSource.retainsFiles}). No `@path` reference is
+ * resolved; the invitation takes no credential.
+ *
+ * A webrtc block that fails the schema is a {@link UsageError}: an invitation
+ * minted without it would name no coordination server or relay while the
+ * operator's file names both.
+ */
+export function loadConfigWebRTCConnection(
+  configPath: string,
+): WebRTCConnectionConfig | undefined {
+  let source: string;
+  try {
+    source = fs.readFileSync(configPath, "utf8");
+  } catch (err: unknown) {
+    throw configFileRefusal(
+      configPath,
+      "could not be read: " +
+        (err instanceof Error ? err.message : String(err)),
+    );
+  }
+  const raw = parseSensitiveYaml(source, configFileLabel(configPath));
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw))
+    return undefined;
+  const connection = (raw as Record<string, unknown>)["connection"];
+  if (connection === null || typeof connection !== "object") return undefined;
+  if ((connection as Record<string, unknown>)["channel"] !== "webrtc")
+    return undefined;
+  const result = safeParseConnectionConfig(connection);
+  if (!result.success)
+    throw configFileRefusal(
+      configPath,
+      "has an invalid webrtc connection block: " +
+        describeSchemaIssues(
+          result.error.issues.map((issue) => ({
+            ...issue,
+            path: ["connection", ...issue.path],
+          })),
+          "camelized",
+        ),
+    );
+  return result.data.channel === "webrtc" ? result.data : undefined;
 }
 
 /**

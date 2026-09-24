@@ -13,20 +13,25 @@ import {
   operatorSuppliedText,
   redactAndRenderOperatorSuppliedText,
   redactAndSanitizeForDisplay,
+  StunUrlSchema,
+  TurnUrlSchema,
   UsageError,
 } from "@psilink/core";
 import type {
   ConnectionConfig,
+  ConnectionEndpoint,
   ExchangeSpec,
   LinkageStrategy,
   LinkageTerms,
   Metadata,
   PreparedExchange,
+  WebRTCConnectionConfig,
 } from "@psilink/core";
 
 import {
   csvDelimiterForRun,
   loadConfigLinkageSource,
+  loadConfigWebRTCConnection,
   persistOutboundPayloadConsent,
   warnOnLinkageRuleSetCitationDrift,
 } from "../config";
@@ -55,10 +60,12 @@ import { assertNoProvisionConflicts, provisionConfigAndKey } from "./provision";
 import {
   inviterConnectionFromURL,
   type InviterConnectionConfig,
+  type InviterOwnRelay,
 } from "../connectionFromUrl";
 import { withWebRTCPeerRole } from "../webrtcPeerRole";
 import { DEFAULT_WEBRTC_INACTIVITY_TIMEOUT_MS } from "../connection/webrtc/webrtcMessageConnection";
 import {
+  brokerLocationFromConnection,
   DEFAULT_CHANNEL_OPEN_TIMEOUT_MS,
   DEFAULT_RENDEZVOUS_TIMEOUT_MS,
 } from "../connection/webrtc/weriftPeer";
@@ -155,7 +162,94 @@ export function builder(cmd: Argv): Argv {
         "(set linkage_strategy there). See " +
         "https://github.com/georgetown-mdi/jspsi/blob/main/docs/" +
         "EXCHANGE_REFERENCE.md (linkage_terms.linkage_strategy).",
+    })
+    .option("turn", {
+      type: "string",
+      describe:
+        "online, ws:// or wss:// URL only: a TURN relay url (turn: or turns:) " +
+        "named in the invitation for your partner and saved as a " +
+        "connection.turn entry. Each run signs in with a credential minted " +
+        "from the shared secret, so the relay must accept those and the url " +
+        "takes no username or credential. Repeat the flag to name more than " +
+        "one.",
+    })
+    .option("stun", {
+      type: "string",
+      describe:
+        "online, ws:// or wss:// URL only: a STUN server url (stun: or " +
+        "stuns:) named in the invitation for your partner and saved in " +
+        "connection.stun, in place of the built-in default. Repeat the flag " +
+        "to name more than one.",
     });
+}
+
+/**
+ * Read a repeatable relay url flag (`--turn` / `--stun`) off parsed args:
+ * `undefined` when absent, else every occurrence in order, each checked
+ * against the connection block's own url grammar. A refusal names the flag
+ * and which occurrence, never the value, which may hold a pasted credential.
+ *
+ * @internal exported for testing
+ */
+export function relayUrlFlag(
+  argv: Arguments,
+  name: "turn" | "stun",
+): string[] | undefined {
+  const raw = argv[name];
+  if (raw === undefined) return undefined;
+  const values = (Array.isArray(raw) ? raw : [raw]).map(String);
+  const schema = name === "turn" ? TurnUrlSchema : StunUrlSchema;
+  return values.map((value, index) => {
+    const result = schema.safeParse(value);
+    if (!result.success)
+      throw new UsageError(
+        `--${name}` +
+          (values.length > 1 ? ` (occurrence ${index + 1})` : "") +
+          `: ${result.error.issues.map((issue) => issue.message).join("; ")}`,
+      );
+    return result.data;
+  });
+}
+
+/** The `--turn` / `--stun` flags an invocation gave, by name. */
+function relayFlagsGiven(ownRelay: InviterOwnRelay | undefined): string[] {
+  return (["turn", "stun"] as const)
+    .filter((name) => ownRelay?.[name] !== undefined)
+    .map((name) => `--${name}`);
+}
+
+/**
+ * The invitation endpoint an offline invite names for the webrtc connection
+ * in its configuration: the coordination server and the relay from
+ * `connection.turn` / `connection.stun`, through the same
+ * {@link endpointFromConnection} the online path uses. The mount point is
+ * resolved as this CLI dials it first, since a partner running another client
+ * resolves an absent one to its own default; a shape the dial would refuse is
+ * a usage error here, before the token exists.
+ */
+function offlineWebRTCEndpoint(
+  connection: WebRTCConnectionConfig,
+): ConnectionEndpoint {
+  const { path } = brokerLocationFromConnection(connection.server, () => {});
+  return endpointFromConnection({
+    ...connection,
+    server: { ...connection.server, path },
+  });
+}
+
+/**
+ * The warning for an invitation whose webrtc endpoint names a plaintext
+ * (ws://) coordination server: an endpoint has no scheme field, so the
+ * acceptor seeded from it dials TLS and would meet nobody.
+ */
+function plaintextEndpointWarning(remedy: string): string {
+  return (
+    "this invitation's connection endpoint names the coordination server " +
+    "but not the plaintext (ws://) scheme, which an endpoint has no " +
+    "field for; your partner's configuration will be seeded to dial it " +
+    "over TLS (wss://). Have them set `secure: false` on the connection " +
+    `block before running 'psilink exchange', or ${remedy}.`
+  );
 }
 
 // --- Positional parsing ------------------------------------------------------
@@ -335,6 +429,8 @@ export async function validateInvite(params: {
    * writes its result with; recorded in the configuration this command writes
    * so the recurring exchange it governs needs no flag. */
   csvDelimiter?: string;
+  /** The relay `--turn` / `--stun` name, applied on a ws:// or wss:// URL. */
+  ownRelay?: InviterOwnRelay;
   log: ReturnType<typeof getLogger>;
 }): Promise<InviteReady> {
   const {
@@ -344,6 +440,7 @@ export async function validateInvite(params: {
     expiresIn,
     linkageStrategy,
     csvDelimiter,
+    ownRelay,
     log,
   } = params;
   const delimiterSection = csvDelimiter !== undefined ? { csvDelimiter } : {};
@@ -416,7 +513,7 @@ export async function validateInvite(params: {
     // would silently become the budget of every later recurring run. It reaches
     // this run alone, through runOnlineBootstrap's runOnlyPeerTimeoutSeconds.
     const connection = withWebRTCPeerRole(
-      inviterConnectionFromURL(url, connectionOverridesFrom(options)),
+      inviterConnectionFromURL(url, connectionOverridesFrom(options), ownRelay),
       "inviter",
     );
     // The file-sync half of this connection's options, absent on webrtc (whose
@@ -477,12 +574,16 @@ export async function validateInvite(params: {
     // act, beside the disclosure warning the dial itself raises.
     if (connection.channel === "webrtc" && connection.server.secure === false)
       log.warn(
-        "this invitation's connection endpoint names the coordination server " +
-          "but not the plaintext (ws://) scheme, which an endpoint has no " +
-          "field for; your partner's configuration will be seeded to dial it " +
-          "over TLS (wss://). Have them set `secure: false` on the connection " +
-          "block before running 'psilink exchange', or invite over a wss:// " +
-          "coordination server.",
+        plaintextEndpointWarning("invite over a wss:// coordination server"),
+      );
+    // The relay flags describe a webrtc connection's own relay; a file-sync
+    // connection has none to name or save.
+    const ignoredRelayFlags = relayFlagsGiven(ownRelay);
+    if (connection.channel !== "webrtc" && ignoredRelayFlags.length > 0)
+      log.warn(
+        `${ignoredRelayFlags.join(" and ")} apply only to a ws:// or wss:// ` +
+          `URL; this ${connection.channel} invitation names no relay and ` +
+          "saves none, so they were ignored.",
       );
     // Warn when --connection-per-poll is paired with a short poll interval. Built
     // from the URL with no loaded config, so `connection` holds the effective
@@ -634,6 +735,14 @@ export async function validateInvite(params: {
   // and the connection.options block have distinct remedies.
   warnServerOverridesIgnoredOffline(options, log);
   warnOptionsOverridesIgnoredOffline(options, log);
+  const ignoredOfflineRelayFlags = relayFlagsGiven(ownRelay);
+  if (ignoredOfflineRelayFlags.length > 0)
+    log.warn(
+      `${ignoredOfflineRelayFlags.join(" and ")} apply only to an online ` +
+        "invitation over a ws:// or wss:// URL, so they were ignored. An " +
+        "offline invitation names the relay in connection.turn and " +
+        "connection.stun of a webrtc configuration; set them there.",
+    );
 
   // Offline. Linkage terms come from a pre-existing config when one is present
   // at the config path, and are inferred from the input file otherwise.
@@ -769,6 +878,22 @@ export async function validateInvite(params: {
     // the commitment; undefined here means the field is removed, never left stale.
     const disclosedPayloadColumns = disclosedColumnsFor(configSource.metadata);
 
+    // A webrtc config names the coordination server and relay this invitation's
+    // exchange runs on, so the acceptor is seeded from them as the online path's
+    // acceptor is. The file-sync channels keep a placeholder-tolerant block and
+    // name no endpoint.
+    const webrtcConnection = loadConfigWebRTCConnection(options.configFile);
+    const connectionEndpoint =
+      webrtcConnection !== undefined
+        ? offlineWebRTCEndpoint(webrtcConnection)
+        : undefined;
+    if (webrtcConnection?.server.secure === false)
+      log.warn(
+        plaintextEndpointWarning(
+          "reach the coordination server over TLS by removing `secure: false`",
+        ),
+      );
+
     const expires = expiresFromNow(lifetimeSeconds);
     const sharedSecret = generateSharedSecret();
     const invitation = await encodeInvitation({
@@ -777,6 +902,7 @@ export async function validateInvite(params: {
       sharedSecret,
       expires,
       disclosedPayloadColumns,
+      ...(connectionEndpoint !== undefined ? { connectionEndpoint } : {}),
       // The config is the connection this invitation's exchange runs on, so its
       // retain mode is the one to declare. Taken as the single boolean the reader
       // lifts out (the block itself stays unvalidated here, so an unfinished one
@@ -909,6 +1035,10 @@ export async function handler(argv: Arguments): Promise<void> {
       // repeat first.
       const linkageStrategy = parseLinkageStrategyFlag(argv);
       const csvDelimiter = csvDelimiterFlag(argv);
+      const ownRelay: InviterOwnRelay = {
+        turn: relayUrlFlag(argv, "turn"),
+        stun: relayUrlFlag(argv, "stun"),
+      };
       const positionals = (argv["args"] as Array<string> | undefined) ?? [];
       // This command sets unknown-options-as-args, so a mistyped `--flag` lands
       // in the positionals rather than being rejected by the top-level
@@ -923,6 +1053,7 @@ export async function handler(argv: Arguments): Promise<void> {
         expiresIn,
         linkageStrategy,
         csvDelimiter,
+        ownRelay,
         log,
       });
 

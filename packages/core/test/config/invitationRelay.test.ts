@@ -259,16 +259,32 @@ describe("the inviter's endpoint", () => {
     server: { host: "signal.example", path: "/" },
   };
 
-  test("composes the relay from the connection's own turn and stun urls, with no credential", () => {
+  test("composes the relay from url-only turn entries and the stun list", () => {
+    const endpoint = endpointFromConnection({
+      ...base,
+      stun: RELAY.stun,
+      turn: [{ url: RELAY.turn[0] }],
+    });
+    expect(endpoint).toEqual({
+      channel: "webrtc",
+      host: "signal.example",
+      path: "/",
+      relay: RELAY,
+    });
+  });
+
+  test("leaves out a turn entry with a static credential, keeping its url-only sibling and the stun list", () => {
     const endpoint = endpointFromConnection({
       ...base,
       stun: RELAY.stun,
       turn: [
         {
-          url: RELAY.turn[0],
+          url: "turns:static.example.org:443?transport=tcp",
           username: "operator",
           credential: "turn-secret",
+          credentialType: "password",
         },
+        { url: RELAY.turn[0] },
       ],
     });
     expect(endpoint).toEqual({
@@ -277,7 +293,36 @@ describe("the inviter's endpoint", () => {
       path: "/",
       relay: RELAY,
     });
-    expect(JSON.stringify(endpoint)).not.toMatch(/operator|turn-secret/);
+    expect(JSON.stringify(endpoint)).not.toMatch(
+      /operator|turn-secret|static\.example\.org|password/,
+    );
+  });
+
+  test("names no turn url when every turn entry has a static credential", () => {
+    const endpoint = endpointFromConnection({
+      ...base,
+      turn: [
+        {
+          url: RELAY.turn[0],
+          username: "operator",
+          credential: "turn-secret",
+        },
+      ],
+    });
+    expect(endpoint).not.toHaveProperty("relay");
+    expect(
+      endpointFromConnection({
+        ...base,
+        stun: RELAY.stun,
+        turn: [
+          {
+            url: RELAY.turn[0],
+            username: "operator",
+            credential: "turn-secret",
+          },
+        ],
+      }),
+    ).toHaveProperty("relay", { stun: RELAY.stun });
   });
 
   test("names no relay for a connection with none", () => {
