@@ -21,6 +21,7 @@ import {
 
 import type {
   IceServerRenewal,
+  RenewedIceServers,
   WebRtcPeerSession,
   WeriftPeerConfiguration,
 } from "../../../src/connection/webrtc/weriftPeer";
@@ -244,6 +245,8 @@ async function startRendezvous(options: {
    */
   confirmRegistration?: boolean;
   iceServerRenewal?: IceServerRenewal;
+  /** Shared with another rendezvous so the two derive the same pair of ids. */
+  sharedSecret?: string;
 }): Promise<{
   socket: ScriptedSocket;
   peer: ScriptedPeer;
@@ -255,7 +258,7 @@ async function startRendezvous(options: {
   inviterId: string;
   acceptorId: string;
 }> {
-  const sharedSecret = generateSharedSecret();
+  const sharedSecret = options.sharedSecret ?? generateSharedSecret();
   const [inviterId, acceptorId] = await Promise.all([
     deriveRendezvousPeerId(sharedSecret, "inviter"),
     deriveRendezvousPeerId(sharedSecret, "acceptor"),
@@ -1194,6 +1197,14 @@ test("a channel-open ceiling whose statistics never arrive still reports", async
 const RENEWED_SERVERS = [
   { urls: "turn:relay.example:3478", username: "renewed", credential: "c2" },
 ];
+const RENEWAL_NOTICE = "the connection attempt restarts with a new relay";
+
+function renewedServers(): Promise<RenewedIceServers> {
+  return Promise.resolve({
+    iceServers: RENEWED_SERVERS,
+    notice: RENEWAL_NOTICE,
+  });
+}
 
 /** Resolve once `condition` holds, or fail after about a second. */
 async function until(condition: () => boolean): Promise<void> {
@@ -1210,7 +1221,8 @@ function offeredConnectionIds(socket: ScriptedSocket): Array<string> {
 }
 
 test("an acceptor whose partner stays away past the renewal offers again from a rebuilt connection", async () => {
-  const resolve = vi.fn(() => Promise.resolve(RENEWED_SERVERS));
+  const lines = captureDiagnostics();
+  const resolve = vi.fn(renewedServers);
   const { socket, peers, configurations, session, inviterId } =
     await startRendezvous({
       role: "acceptor",
@@ -1223,6 +1235,7 @@ test("an acceptor whose partner stays away past the renewal offers again from a 
   await until(() => new Set(offeredConnectionIds(socket)).size === 2);
   const [staleId, freshId] = [...new Set(offeredConnectionIds(socket))];
   expect(second.channels.map((channel) => channel.label)).toEqual([freshId]);
+  expect(lines.filter((line) => line.includes(RENEWAL_NOTICE))).toHaveLength(1);
 
   // An answer to the discarded offer is not applied to the rebuilt connection.
   socket.deliver({
@@ -1258,7 +1271,7 @@ test("an acceptor whose partner stays away past the renewal offers again from a 
 });
 
 test("an inviter whose partner stays away past the renewal answers from the rebuilt connection", async () => {
-  const resolve = vi.fn(() => Promise.resolve(RENEWED_SERVERS));
+  const resolve = vi.fn(renewedServers);
   const { socket, peers, configurations, session, acceptorId } =
     await startRendezvous({
       role: "inviter",
@@ -1288,7 +1301,7 @@ test("an inviter whose partner stays away past the renewal answers from the rebu
 });
 
 test("a partner who arrives before the renewal is due keeps the first connection", async () => {
-  const resolve = vi.fn(() => Promise.resolve(RENEWED_SERVERS));
+  const resolve = vi.fn(renewedServers);
   const { socket, peer, peers, session, inviterId } = await startRendezvous({
     role: "acceptor",
     iceServerRenewal: { afterMs: 60_000, resolve },
@@ -1321,4 +1334,224 @@ test("a renewal that cannot resolve its servers fails the rendezvous", async () 
   expect(sanitizeErrorForDisplay(error)).toMatch(
     /could not be restarted with fresh relay servers/,
   );
+});
+
+test("a renewal abandoned because the partner answered mid-build logs no notice", async () => {
+  const lines = captureDiagnostics();
+  let release: (() => void) | undefined;
+  const resolve = vi.fn(
+    () =>
+      new Promise<RenewedIceServers>((done) => {
+        release = () =>
+          done({ iceServers: RENEWED_SERVERS, notice: RENEWAL_NOTICE });
+      }),
+  );
+  const { socket, peer, peers, session, inviterId } = await startRendezvous({
+    role: "acceptor",
+    iceServerRenewal: { afterMs: 30, resolve },
+  });
+  await until(() => release !== undefined);
+  socket.deliver({
+    type: BROKER_MESSAGE.answer,
+    src: inviterId,
+    payload: { sdp: { type: "answer", sdp: "v=0\r\nanswer\r\n" } },
+  });
+  await until(() => peer.remoteDescriptions.length === 1);
+  release?.();
+  await until(() => peers.length === 2 && peers[1].closeCalls === 1);
+  expect(lines.filter((line) => line.includes(RENEWAL_NOTICE))).toEqual([]);
+  peer.channels[0].open();
+  expect((await session).channel).toBe(peer.channels[0]);
+});
+
+test("a candidate naming a connection a renewal discarded is dropped", async () => {
+  const { socket, peers, inviterId } = await startRendezvous({
+    role: "acceptor",
+    iceServerRenewal: { afterMs: 60, resolve: renewedServers },
+  });
+  await until(() => new Set(offeredConnectionIds(socket)).size === 2);
+  const [staleId, freshId] = [...new Set(offeredConnectionIds(socket))];
+  const second = peers[1];
+  for (const [candidate, connectionId] of [
+    [CANDIDATE_A, staleId],
+    [CANDIDATE_B, freshId],
+  ] as const)
+    socket.deliver({
+      type: BROKER_MESSAGE.candidate,
+      src: inviterId,
+      payload: { candidate, connectionId },
+    });
+  socket.deliver({
+    type: BROKER_MESSAGE.answer,
+    src: inviterId,
+    payload: {
+      sdp: { type: "answer", sdp: "v=0\r\nanswer\r\n" },
+      connectionId: freshId,
+    },
+  });
+  await until(() => second.remoteCandidates.length === 1);
+  socket.deliver({
+    type: BROKER_MESSAGE.candidate,
+    src: inviterId,
+    payload: { candidate: CANDIDATE_A, connectionId: staleId },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(second.remoteCandidates).toEqual([CANDIDATE_B]);
+});
+
+test("an inviter's renewal drops the candidates queued for the discarded connection", async () => {
+  const { socket, peers, session, acceptorId } = await startRendezvous({
+    role: "inviter",
+    iceServerRenewal: { afterMs: 60, resolve: renewedServers },
+  });
+  socket.deliver({
+    type: BROKER_MESSAGE.candidate,
+    src: acceptorId,
+    payload: { candidate: CANDIDATE_A, connectionId: "dc_early" },
+  });
+  await until(() => peers.length === 2);
+  socket.deliver({
+    type: BROKER_MESSAGE.offer,
+    src: acceptorId,
+    payload: {
+      sdp: { type: "offer", sdp: "v=0\r\noffer\r\n" },
+      connectionId: "dc_partner",
+    },
+  });
+  await until(() => socket.ofType(BROKER_MESSAGE.answer).length === 1);
+  const [first, second] = peers;
+  expect(second.remoteCandidates).toEqual([]);
+  expect(first.remoteCandidates).toEqual([]);
+  const channel = new FakeChannel("dc_partner");
+  second.ondatachannel?.({ channel });
+  channel.open();
+  await session;
+});
+
+/** The connection id each ANSWER the inviter sent names, in order. */
+function answeredConnectionIds(socket: ScriptedSocket): Array<string> {
+  return socket
+    .ofType(BROKER_MESSAGE.answer)
+    .map((frame) => (frame.payload as { connectionId: string }).connectionId);
+}
+
+test("an acceptor that renews while its first answer is in flight still connects to the inviter", async () => {
+  const sharedSecret = generateSharedSecret();
+  // Only the first renewal completes, so the acceptor offers two ids.
+  const acceptorResolve = vi.fn(() =>
+    acceptorResolve.mock.calls.length === 1
+      ? renewedServers()
+      : new Promise<RenewedIceServers>(() => {}),
+  );
+  const inviterResolve = vi.fn(renewedServers);
+  const acceptor = await startRendezvous({
+    role: "acceptor",
+    sharedSecret,
+    offerRetryIntervalMs: 20,
+    iceServerRenewal: { afterMs: 80, resolve: acceptorResolve },
+  });
+  const inviter = await startRendezvous({
+    role: "inviter",
+    sharedSecret,
+    iceServerRenewal: { afterMs: 60_000, resolve: inviterResolve },
+  });
+  const { acceptorId, inviterId } = acceptor;
+
+  // A broker between the two, holding the inviter's answers until released.
+  const heldAnswers: Array<Record<string, unknown>> = [];
+  let holdAnswers = true;
+  const relay = (
+    from: ScriptedSocket,
+    to: ScriptedSocket,
+    src: string,
+    hold: (frame: Record<string, unknown>) => boolean,
+  ): void => {
+    const send = from.send.bind(from);
+    from.send = (data: string) => {
+      send(data);
+      const frame = { ...(JSON.parse(data) as Record<string, unknown>), src };
+      if (hold(frame)) heldAnswers.push(frame);
+      else to.deliver(frame);
+    };
+  };
+  relay(acceptor.socket, inviter.socket, acceptorId, () => false);
+  relay(
+    inviter.socket,
+    acceptor.socket,
+    inviterId,
+    (frame) => holdAnswers && frame.type === BROKER_MESSAGE.answer,
+  );
+
+  await until(() => heldAnswers.length > 0);
+  const [staleId] = offeredConnectionIds(acceptor.socket);
+  expect(answeredConnectionIds(inviter.socket)[0]).toBe(staleId);
+  await until(() => new Set(offeredConnectionIds(acceptor.socket)).size === 2);
+  const freshId = [...new Set(offeredConnectionIds(acceptor.socket))][1];
+
+  // The answer to the discarded offer lands after the renewal.
+  holdAnswers = false;
+  for (const frame of heldAnswers.splice(0)) acceptor.socket.deliver(frame);
+
+  await until(() => acceptor.peers[1].remoteDescriptions.length === 1);
+  const [oldInviterPeer, newInviterPeer] = inviter.peers;
+  expect(oldInviterPeer.closeCalls).toBe(1);
+  expect(inviter.peers).toHaveLength(2);
+  expect(inviterResolve).toHaveBeenCalledTimes(1);
+  expect(inviter.configurations[1].iceServers).toEqual(RENEWED_SERVERS);
+  expect(oldInviterPeer.remoteDescriptions).toHaveLength(1);
+  expect(newInviterPeer.remoteDescriptions).toHaveLength(1);
+  expect(answeredConnectionIds(inviter.socket).at(-1)).toBe(freshId);
+  expect(acceptor.peers[0].remoteDescriptions).toEqual([]);
+
+  // A stale-id candidate reaching the inviter is not applied to the new peer.
+  inviter.socket.deliver({
+    type: BROKER_MESSAGE.candidate,
+    src: acceptorId,
+    payload: { candidate: CANDIDATE_A, connectionId: staleId },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(newInviterPeer.remoteCandidates).toEqual([]);
+
+  const [acceptorChannel] = acceptor.peers[1].channels;
+  expect(acceptorChannel.label).toBe(freshId);
+  const inviterChannel = new FakeChannel(freshId);
+  newInviterPeer.ondatachannel?.({ channel: inviterChannel });
+  acceptorChannel.open();
+  inviterChannel.open();
+  expect((await acceptor.session).channel).toBe(acceptorChannel);
+  expect((await inviter.session).channel).toBe(inviterChannel);
+});
+
+test("an inviter follows one new offer id and drops a further one inside the interval", async () => {
+  const { socket, peers, session, acceptorId } = await startRendezvous({
+    role: "inviter",
+  });
+  const offer = (connectionId: string): void =>
+    socket.deliver({
+      type: BROKER_MESSAGE.offer,
+      src: acceptorId,
+      payload: {
+        sdp: { type: "offer", sdp: "v=0\r\noffer\r\n" },
+        connectionId,
+      },
+    });
+  offer("dc_first");
+  await until(() => answeredConnectionIds(socket).length === 1);
+  offer("dc_second");
+  await until(() => answeredConnectionIds(socket).length === 2);
+  offer("dc_third");
+  offer("dc_second");
+  await until(() => answeredConnectionIds(socket).length === 3);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(answeredConnectionIds(socket)).toEqual([
+    "dc_first",
+    "dc_second",
+    "dc_second",
+  ]);
+  expect(peers).toHaveLength(2);
+  expect(peers[0].closeCalls).toBe(1);
+  const channel = new FakeChannel("dc_second");
+  peers[1].ondatachannel?.({ channel });
+  channel.open();
+  expect((await session).channel).toBe(channel);
 });

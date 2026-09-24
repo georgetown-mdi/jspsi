@@ -803,23 +803,29 @@ test("a minting run whose peer_timeout_ms outlasts the relay credential dials wi
   );
   const renewedAt = startedAt + RELAY_CREDENTIAL_RENEWAL_MS;
   vi.useFakeTimers({ toFake: ["Date"], now: renewedAt });
-  let servers: Awaited<ReturnType<NonNullable<typeof renewal>["resolve"]>>;
+  let renewed: Awaited<ReturnType<NonNullable<typeof renewal>["resolve"]>>;
   try {
-    servers = (await renewal?.resolve()) ?? [];
+    renewed = (await renewal?.resolve()) ?? { iceServers: [], notice: "" };
   } finally {
     vi.useRealTimers();
   }
+  const servers = renewed.iceServers;
   expect(mintedExpirySeconds(servers)).toBe(
     Math.floor(renewedAt / 1000) + RELAY_CREDENTIAL_MAX_TTL_SECONDS,
   );
   expect(mintedExpirySeconds(servers) * 1000).toBeGreaterThan(
     credential.expiresAt.getTime(),
   );
+  expect(renewed.notice).toContain(
+    `expires at ${new Date(mintedExpirySeconds(servers) * 1000).toISOString()}`,
+  );
+  // Minting logs nothing: the notice is the negotiation's to log once the
+  // rebuilt connection replaces the old one.
   expect(
     mockState.logLines.some((line) =>
       line.includes("restarts with a new relay credential"),
     ),
-  ).toBe(true);
+  ).toBe(false);
 });
 
 test("a minting run whose peer_timeout_ms is under the credential lifetime ends its wait before a renewal", () => {

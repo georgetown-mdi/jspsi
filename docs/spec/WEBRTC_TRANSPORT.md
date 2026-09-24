@@ -162,11 +162,14 @@ A CLI run presenting a TURN credential it minted replaces its peer connection
 each relay-credential renewal interval (table below) the partner has not yet
 sent its session description, building the new one with a freshly minted
 credential, so a rendezvous longer than the credential's lifetime still
-gathers a relay candidate. The acceptor's rebuilt connection offers under a new
-`connectionId`, and an `ANSWER` naming another `connectionId` is dropped; the
-inviter has sent nothing before the partner's `OFFER`, so its replacement is
-not visible on the wire. A partner that has sent its description keeps the
+gathers a relay candidate. A partner that has sent its description keeps the
 connection it was negotiating with.
+
+- The acceptor's rebuilt connection offers under a new `connectionId`.
+- The inviter has sent nothing before the partner's `OFFER`, so its replacement is not visible on the wire.
+- Each side holds one current `connectionId` -- the acceptor the one it offered last, the inviter the one of the `OFFER` it answered -- and drops an `ANSWER` or `CANDIDATE` naming another; one naming none, or reaching an inviter that has not answered yet, is taken as current. Every replacement drops the candidates queued for the discarded connection.
+- An inviter that has answered and receives an `OFFER` naming a new `connectionId` treats it as the acceptor's rebuilt connection, since its answer can cross that rebuild in flight: it closes its peer connection, builds a new one (with a freshly minted credential when the run mints one), and answers the new offer. It follows one new `connectionId` at any time and one more per renewal interval, and drops a surplus `OFFER`. An `OFFER` repeating the current `connectionId` is re-answered.
+- The renewal line an operator sees is printed once the rebuilt connection replaces the old one, and not for a rebuild abandoned because the partner sent its description meanwhile.
 
 Message types acted on: `OPEN`, `OFFER`, `ANSWER`, `CANDIDATE`, `LEAVE`,
 `EXPIRE`, `ERROR`, `ID-TAKEN`, `INVALID-KEY`. Two of them hold operator
