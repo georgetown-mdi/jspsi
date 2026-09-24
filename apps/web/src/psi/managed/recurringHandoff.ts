@@ -3,7 +3,11 @@ import {
   readBoundedJson,
 } from "@psi/jobClient/jobApiBody";
 
-import type { JobHandoff, JobHandoffTemplate } from "@jobs/handoff";
+import type {
+  HandoffSigningSetting,
+  JobHandoff,
+  JobHandoffTemplate,
+} from "@jobs/handoff";
 
 /**
  * The browser-side reader for `GET /api/jobs/:jobId/handoff`: the recurring-run
@@ -51,6 +55,7 @@ export function parseHandoff(body: unknown): JobHandoff | null {
     keyFileBesideConfiguration,
     credentialPasted,
     usedSigningIdentity,
+    signingSettingsToSet,
     template,
   } = body as Record<string, unknown>;
   if (mode !== "exchange" && mode !== "zeroSetup") return null;
@@ -59,6 +64,8 @@ export function parseHandoff(body: unknown): JobHandoff | null {
   if (typeof keyFileBesideConfiguration !== "boolean") return null;
   if (typeof credentialPasted !== "boolean") return null;
   if (typeof usedSigningIdentity !== "boolean") return null;
+  const parsedSigningSettings = parseSigningSettings(signingSettingsToSet);
+  if (parsedSigningSettings === null) return null;
   const parsedTemplate = parseTemplate(template);
   if (parsedTemplate === null) return null;
   return {
@@ -68,8 +75,53 @@ export function parseHandoff(body: unknown): JobHandoff | null {
     keyFileBesideConfiguration,
     credentialPasted,
     usedSigningIdentity,
+    ...(parsedSigningSettings.length > 0
+      ? { signingSettingsToSet: parsedSigningSettings }
+      : {}),
     template: parsedTemplate,
   };
+}
+
+/** What the panel asks the operator to set each missing signing setting to. */
+const SIGNING_SETTING_REMEDY: Record<HandoffSigningSetting, string> = {
+  "linkage_terms.identity": "linkage_terms.identity to this party's name",
+  "signing.identity_file":
+    "signing.identity_file to the path of your signing identity file",
+};
+
+/** The settings list a hand-off may state, with absent read as none and
+ * anything else as a malformed body (null). */
+function parseSigningSettings(
+  value: unknown,
+): Array<HandoffSigningSetting> | null {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) return null;
+  const settings: Array<HandoffSigningSetting> = [];
+  for (const setting of value) {
+    if (
+      typeof setting !== "string" ||
+      !Object.hasOwn(SIGNING_SETTING_REMEDY, setting)
+    )
+      return null;
+    settings.push(setting as HandoffSigningSetting);
+  }
+  return settings;
+}
+
+/**
+ * The caveat for a `certificate`-mode configuration missing settings psilink
+ * refuses to run it without, naming each setting and what to set it to.
+ */
+export function unsetSigningSettingsCaveat(
+  settings: ReadonlyArray<HandoffSigningSetting>,
+): string {
+  return (
+    "This configuration signs receipts with a certificate (signing.mode: " +
+    `certificate) but does not set ${settings.join(" or ")}, so psilink ` +
+    "refuses to run it. Set " +
+    settings.map((setting) => SIGNING_SETTING_REMEDY[setting]).join(" and ") +
+    ", or set signing.mode to none to run unsigned."
+  );
 }
 
 function parseTemplate(value: unknown): JobHandoffTemplate | null {

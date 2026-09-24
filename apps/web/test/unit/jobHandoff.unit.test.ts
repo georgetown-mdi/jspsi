@@ -19,6 +19,7 @@ import {
 import {
   parseHandoff,
   shellJoinCommand,
+  unsetSigningSettingsCaveat,
   windowsJoinCommand,
 } from "@psi/managed/recurringHandoff";
 import { JobManager } from "@jobs/jobManager";
@@ -517,6 +518,61 @@ describe("parseHandoff and shellJoinCommand (browser reader)", () => {
         template: { kind: "config", yaml: "connection:\n" },
       }),
     ).toBeNull();
+  });
+
+  test("the signing settings to set round-trip, and anything else is a malformed body", () => {
+    const body = {
+      mode: "exchange",
+      channel: "filedrop",
+      usedKeyFile: true,
+      keyFileBesideConfiguration: true,
+      credentialPasted: false,
+      usedSigningIdentity: false,
+      template: {
+        kind: "config",
+        yaml: "connection:\n  channel: filedrop\n",
+        argv: ["psilink", "exchange", "input.csv", "results.csv"],
+      },
+    };
+    expect(
+      parseHandoff({
+        ...body,
+        signingSettingsToSet: [
+          "linkage_terms.identity",
+          "signing.identity_file",
+        ],
+      })?.signingSettingsToSet,
+    ).toEqual(["linkage_terms.identity", "signing.identity_file"]);
+    expect(parseHandoff(body)?.signingSettingsToSet).toBeUndefined();
+    expect(
+      parseHandoff({ ...body, signingSettingsToSet: [] })?.signingSettingsToSet,
+    ).toBeUndefined();
+    expect(
+      parseHandoff({ ...body, signingSettingsToSet: ["signing.mode"] }),
+    ).toBeNull();
+    expect(
+      parseHandoff({ ...body, signingSettingsToSet: "linkage_terms.identity" }),
+    ).toBeNull();
+  });
+
+  test("the unset-signing caveat names each setting and what to set it to", () => {
+    expect(unsetSigningSettingsCaveat(["linkage_terms.identity"])).toBe(
+      "This configuration signs receipts with a certificate (signing.mode: " +
+        "certificate) but does not set linkage_terms.identity, so psilink " +
+        "refuses to run it. Set linkage_terms.identity to this party's name, " +
+        "or set signing.mode to none to run unsigned.",
+    );
+    const both = unsetSigningSettingsCaveat([
+      "linkage_terms.identity",
+      "signing.identity_file",
+    ]);
+    expect(both).toContain(
+      "does not set linkage_terms.identity or signing.identity_file",
+    );
+    expect(both).toContain(
+      "Set linkage_terms.identity to this party's name and " +
+        "signing.identity_file to the path of your signing identity file",
+    );
   });
 
   test("shellJoinCommand quotes a token with spaces and leaves safe tokens bare", () => {
