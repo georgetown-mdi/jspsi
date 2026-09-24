@@ -94,10 +94,11 @@ export const DEFAULT_OFFER_RETRY_INTERVAL_MS = 1_000;
 /**
  * How long a connection replaced by a renewal, or by an inviter following a new
  * offer, stays open and negotiable after its replacement is offered or built.
- * A browser inviter answers the first offer it receives and ignores later ones,
- * and the vendored broker replays frames it held for a late registrant (about
- * 5 s), so an answer to the old offer can arrive after the new one is sent. The
- * window covers that replay plus one offer retry, with margin.
+ * A browser inviter adopts the first offer it receives; its client still
+ * answers later ones, but the app never uses those connections. The vendored
+ * broker replays frames it held for a late registrant (about 5 s), so an
+ * answer to the old offer can arrive after the new one is sent. The window
+ * covers that replay plus one offer retry, with margin.
  */
 export const RENEWAL_OVERLAP_MS = 15_000;
 
