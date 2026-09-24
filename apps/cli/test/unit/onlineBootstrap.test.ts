@@ -1872,8 +1872,8 @@ test("endpointFromConnection: a webrtc connection emits the signaling locator", 
 test("endpointFromConnection: nothing but the webrtc locator survives the emit", () => {
   // The producer side of the no-credentials invariant on this channel: a
   // hand-authored connection holding the broker API key, a TURN relay's
-  // credential, an ICE provisioning secret, and the plaintext scheme emits the
-  // locator alone -- the relay's url, never its username or credential.
+  // credential, and the plaintext scheme emits the locator alone -- the
+  // relay's url, never its username or credential.
   // `secure` is dropped with them -- the endpoint schema has no field for it --
   // which is why an acceptor seeded from one resolves TLS.
   const endpoint = endpointFromConnection({
@@ -1885,10 +1885,6 @@ test("endpointFromConnection: nothing but the webrtc locator survives the emit",
       username: "alice",
       key: "broker-api-key",
       secure: false,
-      provision: {
-        host: "provision.example.org",
-        auth: { bearer: "topsecret" },
-      },
     },
     role: "inviter",
     turn: [

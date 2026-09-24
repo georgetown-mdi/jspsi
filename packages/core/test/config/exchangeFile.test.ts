@@ -320,7 +320,6 @@ const forbiddenWebrtcKeys = [
   "turn",
   "iceProvision",
   "providerOptions",
-  "provision",
 ];
 
 test("connectionFromLocator: a webrtc locator expands to a valid webrtc connection block", () => {

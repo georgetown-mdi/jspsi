@@ -645,6 +645,23 @@ describe("the settings the console holds without an editor", () => {
   });
 });
 
+describe("a setting the exchange-file schema does not read", () => {
+  test("server.provision refuses by name", () => {
+    const document = savedSftpDocument();
+    const connection = document.connection as Record<string, unknown>;
+    document.connection = {
+      ...connection,
+      server: {
+        ...(connection.server as object),
+        provision: { host: "wake.partner.example", port: 8080 },
+      },
+    };
+    const message = refusal(document);
+    expect(message).toContain("connection.server.provision");
+    expect(message).not.toContain("wake.partner.example");
+  });
+});
+
 describe("a setting inside a block the composition writes", () => {
   // The export writes a composed block over the opened document's whole
   // (apps/web/src/jobs/handoff.ts), so a setting inside one cannot be kept.
@@ -653,10 +670,6 @@ describe("a setting inside a block the composition writes", () => {
   // over it is what the rule does not allow.
   const CONNECTION_SETTINGS: ReadonlyArray<[string, Record<string, unknown>]> =
     [
-      [
-        "connection.server.provision",
-        { provision: { host: "wake.partner.example", port: 8080 } },
-      ],
       ["connection.provider_options", { provider_options: {} }],
       ["connection.proxy", { proxy: { host: "proxy.partner.example" } }],
     ];
@@ -664,13 +677,7 @@ describe("a setting inside a block the composition writes", () => {
   test.each(CONNECTION_SETTINGS)("%s refuses by name", (field, stated) => {
     const document = savedSftpDocument();
     const connection = document.connection as Record<string, unknown>;
-    const inServer = field.startsWith("connection.server.");
-    document.connection = inServer
-      ? {
-          ...connection,
-          server: { ...(connection.server as object), ...stated },
-        }
-      : { ...connection, ...stated };
+    document.connection = { ...connection, ...stated };
     const message = refusal(document);
     expect(message).toContain(field);
     expect(message).toContain("psilink on the command line");

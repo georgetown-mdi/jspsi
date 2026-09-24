@@ -58,10 +58,9 @@ export const PLACEHOLDER_SSH_USERNAME = "REPLACE_WITH_SSH_USERNAME";
  * host/port/path -- where the acceptor's signaling socket goes -- and the
  * connection's own relay as urls: each `turn` entry's `url` and the `stun`
  * list, composed by {@link relayLocatorFromOwnRelay}. Everything else (`key`,
- * `username`, a `turn` entry's username and credential, `provision`,
- * `secure`) is left behind: those are either not a public locator or have no
- * endpoint-schema field, so a plaintext-broker locator is unreachable here by
- * construction.
+ * `username`, a `turn` entry's username and credential, `secure`) is left
+ * behind: those are either not a public locator or have no endpoint-schema
+ * field, so a plaintext-broker locator is unreachable here by construction.
  *
  * `port` is carried only when it is a reachable 1-65535 value: port 0 (an
  * OS-assigned ephemeral port) is dropped rather than emitted as an

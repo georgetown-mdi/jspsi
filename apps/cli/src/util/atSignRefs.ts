@@ -84,10 +84,9 @@ export function resolveAtSignRefs(obj: unknown): unknown {
  * Resolution is scoped to the fields the file-reference convention supports --
  * those documented "`@`-file recommended" in docs/EXCHANGE_REFERENCE.md, all of which
  * live under `connection`: the SFTP `server.password`, `server.privateKey`, and
- * `server.privateKeyPassphrase`, the HTTP-auth `bearer` / `password` on every
- * provisioning endpoint (`server.provision`, `proxy`, `iceProvision`), each
- * WebRTC `turn[].credential`,
- * and the opaque `providerOptions` map. Every other field is left verbatim, so a
+ * `server.privateKeyPassphrase`, the HTTP-auth `bearer` / `password` on the
+ * `proxy` and `iceProvision` endpoints, each WebRTC `turn[].credential`, and the
+ * opaque `providerOptions` map. Every other field is left verbatim, so a
  * free-text value with a literal leading `@` (`linkageTerms.identity`,
  * `retentionDisposition`, ...) passes through unread rather than exfiltrating
  * a local file into the self-attested exchange record. A local-path field such as
@@ -129,14 +128,12 @@ function resolveConnectionAtSignRefs(
       resolved.server.hostKeyFingerprint = resolveHostKeyFingerprintRefs(
         resolved.server.hostKeyFingerprint,
       );
-      resolveHttpAuthAtSignRefs(resolved.server.provision?.auth);
       resolveHttpAuthAtSignRefs(resolved.proxy?.auth);
       resolveProviderOptionsAtSignRefs(resolved);
       break;
     case "webrtc":
-      // A WebRTC server has no password/privateKey -- only the provisioning
-      // endpoints' HTTP auth, the TURN credentials, and providerOptions.
-      resolveHttpAuthAtSignRefs(resolved.server.provision?.auth);
+      // A WebRTC server has no password/privateKey -- only the ICE provisioning
+      // endpoint's HTTP auth, the TURN credentials, and providerOptions.
       resolveHttpAuthAtSignRefs(resolved.iceProvision?.auth);
       if (resolved.turn !== undefined)
         for (const turn of resolved.turn)
