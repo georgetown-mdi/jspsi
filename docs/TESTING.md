@@ -888,12 +888,15 @@ there too, so nothing lands in the working tree; the nightly workflow
 ([`.github/workflows/nightly_mutation.yaml`](../.github/workflows/nightly_mutation.yaml))
 checks out `staging` explicitly and uploads both as a run artifact.
 
-A test nested in a `describe` block is counted by this runner as covering a
-mutant but not as killing it. Measured 2026-09-23 on `abortMarker.ts`: the
-same 21 tests scored 55% while nested and 91% once moved to the top level of
-the file, with no other change. Until the cause is settled, write a
-mutation-targeted test at the top level of its file, and read a file's score
-knowing that its `describe`-nested tests contribute nothing to it.
+A test nested in a `describe` block kills mutants the same as one at the top
+level of its file. That takes a plugin in
+`packages/core/vitest.stryker.config.ts`: Stryker's vitest runner selects the
+tests for each mutant by name, joining a `describe` title and a test title with
+a space, while Vitest 5 matches the name filter against the titles joined with
+` > `. Without the plugin every nested test is filtered out of every mutant
+run: on `abortMarker.ts` the same 21 tests score 55% nested and 91% at the top
+level. A surviving mutant whose report entry shows no tests completed is the
+sign that this selection has broken.
 
 ### The floors
 
