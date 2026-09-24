@@ -16,9 +16,10 @@ import { afterEach, describe, expect, it } from "vitest";
 
 // The relay's per-exchange key scripts and the configuration render, driven
 // against a fixture host. The container runtime is a stub on PATH that records
-// the turnadmin arguments it is handed, so the test needs no image and no
-// sqlite3; what coturn does with those arguments is verify.sh's to drive
-// against a running relay.
+// the turnadmin arguments it is handed and keeps the secrets table as one
+// "<key>[<realm>]" line per row, the form turnadmin -S lists, so the test needs
+// no image and no sqlite3; what coturn does with those arguments is verify.sh's
+// to drive against a running relay.
 
 const here = dirname(fileURLToPath(import.meta.url));
 const relay = resolve(here, "..", "infra/relay");
@@ -27,6 +28,12 @@ const BASH = existsSync("/bin/bash") ? "/bin/bash" : "bash";
 const KEY_A = "a".repeat(64);
 const KEY_B = "0123456789abcdef".repeat(4);
 const KEY_C = "fedcba9876543210".repeat(4);
+// A row every fixture table starts with, and a line only a listing prints: the
+// scripts must print neither.
+const KEY_LISTED = "5".repeat(64);
+const LISTING_MARKER = "listing-marker";
+const UNOPENABLE_ERROR =
+  "ERROR Cannot open SQLite DB connection: <relay.example>: unable to open database file";
 
 const tmpDirs = [];
 
@@ -41,7 +48,15 @@ const fixtureHost = () => {
   tmpDirs.push(root);
   const calls = join(root, "calls.log");
   const failOn = join(root, "fail-on");
+  // turnadmin's measured failure modes: a read-only table takes no write and
+  // says nothing, an unopenable one prints its error to stdout, and both exit 0.
+  // The ignored-writes file names the write flags a read-only table ignores.
+  const ignoredWrites = join(root, "ignored-writes");
+  const unopenable = join(root, "table-unopenable");
+  const echoValue = join(root, "echo-value");
+  const table = join(root, "turndb");
   writeFileSync(calls, "");
+  writeFileSync(table, `${KEY_LISTED}[relay.example]\n`);
   const stub = join(root, "docker");
   writeFileSync(
     stub,
@@ -49,6 +64,22 @@ const fixtureHost = () => {
       "#!/bin/bash",
       `printf '%s\\n' "$*" >> '${calls}'`,
       `if [ -f '${failOn}' ] && [[ " $* " == *" $(cat '${failOn}') "* ]]; then exit 1; fi`,
+      'op=; value=; realm=; args=("$@")',
+      "for ((i = 0; i < $#; i++)); do",
+      '  case "${args[i]}" in',
+      '    -s|-X) op="${args[i]}"; value="${args[i+1]}" ;;',
+      "    -S) op=-S ;;",
+      '    -r) realm="${args[i+1]}" ;;',
+      "  esac",
+      "done",
+      `[ -f '${echoValue}' ] && echo "ERROR could not write $value"`,
+      `if [ -f '${unopenable}' ]; then echo '${UNOPENABLE_ERROR}'; exit 0; fi`,
+      'case "$op" in',
+      `  -S) echo 'INFO ${LISTING_MARKER}'; cat '${table}' ;;`,
+      `  -s) grep -qxF -- -s '${ignoredWrites}' 2>/dev/null || echo "$value[$realm]" >> '${table}' ;;`,
+      `  -X) grep -qxF -- -X '${ignoredWrites}' 2>/dev/null || { rows="$(grep -vxF -- "$value[$realm]" '${table}')"; printf '%s' "\${rows:+$rows$'\\n'}" > '${table}'; } ;;`,
+      "esac",
+      "exit 0",
     ].join("\n"),
   );
   chmodSync(stub, 0o755);
@@ -106,14 +137,21 @@ const fixtureHost = () => {
       encoding: "utf8",
       env,
     });
+    const invocations = readFileSync(calls, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => line.slice(line.indexOf("turnadmin") + 10));
+    for (const stream of [result.stdout, result.stderr]) {
+      expect(stream).not.toContain(KEY_LISTED);
+      expect(stream).not.toContain(LISTING_MARKER);
+    }
     return {
       status: result.status,
       stdout: result.stdout,
       stderr: result.stderr,
-      turnadmin: readFileSync(calls, "utf8")
-        .split("\n")
-        .filter(Boolean)
-        .map((line) => line.slice(line.indexOf("turnadmin") + 10)),
+      turnadmin: invocations.filter((line) => line.split(" ")[1] !== "-S"),
+      listings: invocations.filter((line) => line.split(" ")[1] === "-S")
+        .length,
     };
   };
   return {
@@ -124,7 +162,12 @@ const fixtureHost = () => {
     mapping: () => (existsSync(mapFile) ? readFileSync(mapFile, "utf8") : ""),
     mapMode: () => statSync(mapFile).mode & 0o777,
     conf: () => readFileSync(conf, "utf8"),
+    table: () => readFileSync(table, "utf8"),
     failTurnadminOn: (flag) => writeFileSync(failOn, flag),
+    makeTableReadOnly: () => writeFileSync(ignoredWrites, "-s\n-X\n"),
+    ignoreTableWrites: (flag) => writeFileSync(ignoredWrites, `${flag}\n`),
+    makeTableUnopenable: () => writeFileSync(unopenable, ""),
+    echoValueInErrors: () => writeFileSync(echoValue, ""),
     failMappingWriteAt: (tool) =>
       writeFileSync(tool === "mv" ? failMv : failAwk, ""),
     mappingTemporaries: () =>
@@ -259,6 +302,74 @@ describe("register-exchange.sh", () => {
     expect(host.mapping()).toBe("");
   });
 
+  it("keeps the table and mapping in step on the happy paths", () => {
+    const host = fixtureHost();
+    const first = host.register("exchange-1", KEY_A);
+    expect(first.status, first.stderr).toBe(0);
+    expect(first.listings).toBe(1);
+    const rotated = host.register("exchange-1", KEY_B);
+    expect(rotated.status, rotated.stderr).toBe(0);
+    expect(rotated.listings).toBe(2);
+    expect(host.table()).toBe(
+      `${KEY_LISTED}[relay.example]\n${KEY_B}[relay.example]\n`,
+    );
+    expect(host.mapping()).toBe(`exchange-1 ${KEY_B}\n`);
+  });
+
+  it("aborts before the mapping when the table silently takes no row", () => {
+    const host = fixtureHost();
+    host.makeTableReadOnly();
+    const result = host.register("exchange-1", KEY_A);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("the secrets table was not updated");
+    expect(result.stderr).toContain(`${host.mapFile} is unchanged`);
+    expect(result.stdout).not.toContain(KEY_A);
+    expect(result.stderr).not.toContain(KEY_A);
+    expect(host.mapping()).toBe("");
+  });
+
+  it("passes coturn's error through when the table cannot be opened", () => {
+    const host = fixtureHost();
+    host.makeTableUnopenable();
+    const result = host.register("exchange-1", KEY_A);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(UNOPENABLE_ERROR);
+    expect(result.stderr).toContain("could not read the secrets table");
+    expect(result.stderr).not.toContain(KEY_A);
+    expect(host.mapping()).toBe("");
+  });
+
+  it("keeps the prior key mapped when a rotation's add silently fails", () => {
+    const host = fixtureHost();
+    host.register("exchange-1", KEY_A);
+    host.makeTableReadOnly();
+    const result = host.register("exchange-1", KEY_C);
+    expect(result.status).toBe(1);
+    expect(result.turnadmin.map((line) => line.split(" ")[1])).toEqual(["-s"]);
+    expect(host.mapping()).toBe(`exchange-1 ${KEY_A}\n`);
+  });
+
+  it("maps the new key and aborts when the prior key's delete silently fails", () => {
+    const host = fixtureHost();
+    host.register("exchange-1", KEY_A);
+    host.ignoreTableWrites("-X");
+    const result = host.register("exchange-1", KEY_C);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("could not remove its prior key");
+    expect(host.mapping()).toBe(`exchange-1 ${KEY_C}\n`);
+    expect(host.table()).toContain(`${KEY_A}[relay.example]`);
+  });
+
+  it("replaces the key wherever a table error echoes it", () => {
+    const host = fixtureHost();
+    host.makeTableReadOnly();
+    host.echoValueInErrors();
+    const result = host.register("exchange-1", KEY_A);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("ERROR could not write <key>");
+    expect(result.stderr).not.toContain(KEY_A);
+  });
+
   it.each([
     ["an id starting with '-'", "-s", KEY_A, "exchange-id"],
     ["an id with a space", "a b", KEY_A, "exchange-id"],
@@ -332,6 +443,32 @@ describe("revoke-exchange.sh", () => {
     host.register("exchange-1", KEY_A);
     host.failTurnadminOn("-X");
     expect(host.revoke("exchange-1").status).toBe(1);
+    expect(host.mapping()).toBe(`exchange-1 ${KEY_A}\n`);
+  });
+
+  it("keeps the mapping when the table silently keeps the key", () => {
+    const host = fixtureHost();
+    host.register("exchange-1", KEY_A);
+    host.makeTableReadOnly();
+    const result = host.revoke("exchange-1");
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("still authenticates");
+    expect(result.stderr).toContain("revoke-exchange.sh exchange-1 again");
+    expect(result.stdout).not.toContain(KEY_A);
+    expect(result.stderr).not.toContain(KEY_A);
+    expect(host.mapping()).toBe(`exchange-1 ${KEY_A}\n`);
+    expect(host.table()).toContain(`${KEY_A}[relay.example]`);
+  });
+
+  it("keeps the mapping when the table cannot be read back", () => {
+    const host = fixtureHost();
+    host.register("exchange-1", KEY_A);
+    host.makeTableUnopenable();
+    const result = host.revoke("exchange-1");
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(UNOPENABLE_ERROR);
+    expect(result.stderr).toContain("treat the key as still authenticating");
+    expect(result.stderr).not.toContain(KEY_A);
     expect(host.mapping()).toBe(`exchange-1 ${KEY_A}\n`);
   });
 

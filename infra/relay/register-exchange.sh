@@ -33,7 +33,16 @@ if [ "$PRIOR" = "$KEY" ]; then
   exit 0
 fi
 
-turnadmin -s "$KEY" >/dev/null || die "could not add exchange $ID's key to the secrets table"
+OUT="$(turnadmin -s "$KEY" 2>&1)" || true
+LISTED=0
+table_lists_key "$KEY" || LISTED=$?
+if [ "$LISTED" -ne 0 ]; then
+  show_turnadmin_output "$OUT" "$KEY"
+  if [ "$LISTED" -eq 2 ]; then
+    die "could not read the secrets table to confirm exchange $ID's key was added, and $MAP_FILE is unchanged; if the key was added it authenticates until removed: $(list_table_hint) and remove with turnadmin -X, the same way, the one key no line of $MAP_FILE holds"
+  fi
+  die "the secrets table was not updated with exchange $ID's key, and $MAP_FILE is unchanged; check that $DATA_DIR/turndb is writable by the relay image's account, then run register-exchange.sh again"
+fi
 write_mapping "$ID" "$KEY" ||
   die "added exchange $ID's new key to the secrets table, but could not record it in $MAP_FILE, which is unchanged; the new key authenticates until removed: $(list_table_hint) and remove with turnadmin -X, the same way, the one key no line of $MAP_FILE holds"
 
@@ -41,6 +50,11 @@ if [ -z "$PRIOR" ]; then
   printf 'registered exchange %s (realm %s)\n' "$ID" "$REALM"
   exit 0
 fi
-turnadmin -X "$PRIOR" >/dev/null ||
+OUT="$(turnadmin -X "$PRIOR" 2>&1)" || true
+LISTED=0
+table_lists_key "$PRIOR" || LISTED=$?
+if [ "$LISTED" -ne 1 ]; then
+  show_turnadmin_output "$OUT" "$PRIOR"
   die "registered exchange $ID's new key and pointed $MAP_FILE at it, but could not remove its prior key from the secrets table, where it still authenticates: $(list_table_hint) and remove with turnadmin -X, the same way, the one key no line of $MAP_FILE holds"
+fi
 printf 'registered exchange %s (realm %s), replacing its prior key\n' "$ID" "$REALM"

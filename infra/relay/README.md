@@ -192,6 +192,12 @@ revoke-exchange.sh <exchange-id>
   directory, so the SQLite file `turnadmin` creates on the first registration
   is one the server can read. A host with coturn's `turnadmin` installed could
   run the same commands against `/var/lib/psilink-relay/turndb` as that account.
+  `turnadmin` exits 0 when a write fails -- a read-only or unopenable `turndb`
+  -- so each script lists the table after its write and judges the write by
+  whether the key is there, without printing the listing. A register whose key
+  did not reach the table, or a revoke whose key is still there, exits non-zero
+  with any error line coturn printed and leaves the mapping as it was, so the same
+  command can be run again once `turndb` is writable by the image's account.
 
 **The static secret is optional.** A host holding
 `/etc/psilink-relay/static-auth-secret` renders it beside the table, and coturn

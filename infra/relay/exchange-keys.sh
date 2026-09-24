@@ -54,6 +54,26 @@ turnadmin() {
     --entrypoint turnadmin "$IMAGE" "$@" -r "$REALM" -b /var/lib/coturn/turndb
 }
 
+# turnadmin exits 0 when a write fails, printing its error to stdout, so a write
+# is judged by listing the table afterwards. The listing is one "<key>[<realm>]"
+# line per row and holds every key, so it stays in a variable and is never
+# printed. Returns 0 when the key is listed, 1 when it is not, and 2 when the
+# table could not be read.
+table_lists_key() {
+  local listing errors rows
+  listing="$(turnadmin -S 2>&1)" || return 2
+  errors="$(printf '%s\n' "$listing" | grep -vF -- "[$REALM]" | grep -c ERROR || true)"
+  [ "$errors" -eq 0 ] || return 2
+  rows="$(printf '%s\n' "$listing" | grep -cxF -- "$1[$REALM]" || true)"
+  [ "$rows" -gt 0 ]
+}
+
+# Prints a table write's captured output, which holds coturn's own error line,
+# to stderr with every occurrence of the key replaced.
+show_turnadmin_output() {
+  [ -z "$1" ] || printf '%s\n' "${1//"$2"/<key>}" >&2
+}
+
 # Every comparison is between concatenations, which awk compares as strings: a
 # bare field or -v value that looks numeric compares numerically, so "1.0"
 # would match "1" and "01" would match "1e0".

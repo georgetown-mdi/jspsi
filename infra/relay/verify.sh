@@ -288,8 +288,9 @@ fi
 
 # --- the secrets table ---------------------------------------------------------
 # Measured 2026-09-23 against coturn 4.18.0: a credential under no registered
-# secret is answered 401 on every retry, and turnutils_uclient gives up after
-# about 15 s with "Cannot complete Allocation" and a nonzero exit.
+# secret is answered 401 on every retry, and over TURNS turnutils_uclient gives
+# up after about 0.6 s (30 retries) with "Cannot complete Allocation" and exit
+# status 255.
 expect_allocates() {
   local label="$1" out
   out="$(uclient 203.0.113.9 "$2" "$3")"
