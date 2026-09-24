@@ -6,6 +6,7 @@ import {
   MAX_NAME_LENGTH,
   MAX_RECONNECT_ATTEMPTS,
   MAX_TIMEOUT_SECONDS,
+  MAX_TOKEN_MAX_AGE_DAYS,
   assessOutboundPayloadConsent,
   disclosedColumnNames,
   safeParseExchangeSpec,
@@ -618,6 +619,57 @@ describe("the composers state the party's own field delimiter", () => {
       composeConfigDocument(validIntent(), "/srv/jobs/abc/exchange"),
     ) as Record<string, unknown>;
     expect(doc.csv_delimiter).toBeUndefined();
+  });
+});
+
+describe("the composers state the party's max-age policy", () => {
+  // The run's CLI reads the policy off the composed document, as a
+  // command-line run of the same file does, so it must reach the YAML on both
+  // channels: the filedrop composer mints its spec, the sftp one assembles it.
+  test("forwards tokenMaxAgeDays as authentication.token_max_age_days", () => {
+    const doc = parseYaml(
+      composeConfigDocument(
+        validIntent({ tokenMaxAgeDays: 30 }),
+        "/srv/jobs/abc/exchange",
+      ),
+    ) as Record<string, unknown>;
+    expect(doc.authentication).toEqual({ token_max_age_days: 30 });
+  });
+
+  test("the sftp composer forwards it too", () => {
+    const doc = parseYaml(
+      composeSftpConfigDocument(
+        validSftpIntent({ tokenMaxAgeDays: 7 }),
+        testSftpServerEntry(),
+      ),
+    ) as Record<string, unknown>;
+    expect(doc.authentication).toEqual({ token_max_age_days: 7 });
+  });
+
+  test("composes no authentication block when the intent states no policy", () => {
+    const doc = parseYaml(
+      composeConfigDocument(validIntent(), "/srv/jobs/abc/exchange"),
+    ) as Record<string, unknown>;
+    expect(doc.authentication).toBeUndefined();
+  });
+
+  test.each([0, -1, 1.5, MAX_TOKEN_MAX_AGE_DAYS + 1])(
+    "the intent schema refuses %s days",
+    (days) => {
+      expect(
+        jobExchangeIntentSchema.safeParse(
+          validIntent({ tokenMaxAgeDays: days }),
+        ).success,
+      ).toBe(false);
+    },
+  );
+
+  test("the intent schema admits the bound itself", () => {
+    expect(
+      jobExchangeIntentSchema.safeParse(
+        validIntent({ tokenMaxAgeDays: MAX_TOKEN_MAX_AGE_DAYS }),
+      ).success,
+    ).toBe(true);
   });
 });
 

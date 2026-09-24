@@ -160,6 +160,7 @@ function maximalExchangeIntent(): JobSftpExchangeIntent {
     retentionDisposition: "Filed with the 2026 intake, kept seven years.",
     includeOwnColumns: "all",
     csvDelimiter: "|",
+    tokenMaxAgeDays: 30,
   });
 }
 
@@ -267,6 +268,7 @@ const EXCHANGE_INTENT_ROUTES: Record<
   retentionDisposition: { carries: "configKey", key: "retention_disposition" },
   includeOwnColumns: { carries: "configKey", key: "include_own_columns" },
   csvDelimiter: { carries: "configKey", key: "csv_delimiter" },
+  tokenMaxAgeDays: { carries: "configKey", key: "authentication" },
 };
 
 /** Every field of an sftp zero-setup intent, and where it graduates. */

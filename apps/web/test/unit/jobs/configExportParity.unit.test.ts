@@ -14,7 +14,11 @@ import {
   buildJobHandoff,
 } from "@jobs/handoff";
 
-import { COMPOSED_BLOCKS, carriedThroughFields } from "@jobs/configLoad";
+import {
+  COMPOSED_BLOCKS,
+  carriedThroughFields,
+  runHandoffMergeBase,
+} from "@jobs/configLoad";
 
 import { validIntent, validLinkageTerms } from "../../utils/jobFixtures";
 
@@ -129,13 +133,22 @@ describe("the settings a loaded configuration keeps in the export", () => {
       );
   }
 
-  test("every setting named as kept is in the export unchanged", () => {
+  test("a run's export states the max-age policy the run composed", () => {
     const document = mountedDocument({ tokenMaxAgeDays: 30 });
-    const exported = exportOver(document);
-    const named = carriedThroughFields(document);
-    expect(named).toEqual(["authentication.token_max_age_days"]);
-    for (const field of named)
-      expect(exportedValue(exported, field)).toEqual(30);
+    const exported = exportOver(runHandoffMergeBase(document), {
+      tokenMaxAgeDays: 7,
+    });
+    expect(carriedThroughFields(document)).toEqual([]);
+    expect(
+      exportedValue(exported, "authentication.token_max_age_days"),
+    ).toEqual(7);
+  });
+
+  test("a max-age policy turned off for the run is off in its export", () => {
+    const exported = exportOver(
+      runHandoffMergeBase(mountedDocument({ tokenMaxAgeDays: 30 })),
+    );
+    expect(exported).not.toContain("authentication");
   });
 
   test("an unconverted export states the rendezvous folder as read", () => {
@@ -185,9 +198,7 @@ describe("the settings a loaded configuration keeps in the export", () => {
       identity_file: MOUNTED_SIGNING.identityFile,
       receipt_output: MOUNTED_SIGNING.receiptOutput,
     });
-    expect(carriedThroughFields(document)).toEqual([
-      "authentication.token_max_age_days",
-    ]);
+    expect(carriedThroughFields(document)).toEqual([]);
   });
 
   test("a certificate block handed off as read with the party name removed names linkage_terms.identity", () => {
@@ -332,7 +343,9 @@ describe("the settings a loaded configuration keeps in the export", () => {
     );
   });
 
-  test("a setting the console composes no key for is written back", () => {
+  test("a hand-off merged over the whole document keeps its authentication block", () => {
+    // The merge a hand-back into an unconducted configuration makes: the block
+    // sits outside COMPOSED_BLOCKS, so the document's own survives.
     expect(exportOver(mountedDocument({ tokenMaxAgeDays: 30 }))).toContain(
       "token_max_age_days: 30",
     );

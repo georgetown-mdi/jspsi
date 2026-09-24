@@ -1616,7 +1616,7 @@ The cells:
 | **[Authentication](#authentication)** | | | |
 | `authentication.shared_secret` | not applicable | refused | refused |
 | `authentication.expires` | not applicable | refused | refused |
-| `authentication.token_max_age_days` | carried | carried with a notice (not applied to the console's run) | authored |
+| `authentication.token_max_age_days` | carried | authored | authored |
 | **[Signing](#signing)** | | | |
 | `signing.mode` | carried | authored | opens and is carried with a notice, but refused at run |
 | `signing.identity_file` | carried | carried with a notice (a signed run waits for converting, which replaces it with a location you pick in the console) | opens and is carried with a notice, but refused at run |

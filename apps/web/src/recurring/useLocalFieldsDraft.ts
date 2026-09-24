@@ -5,6 +5,7 @@ import {
   maxAgeDaysError,
   retentionNoteError,
 } from "@exchange/manageOfferModel";
+import { OPT_IN_TOKEN_MAX_AGE_DAYS } from "@psi/tokenMaxAge";
 import { resolveCsvDelimiter } from "@components/csvDelimiterChoice";
 
 import {
@@ -23,10 +24,6 @@ import type {
 import type { CsvDelimiterChoice } from "@components/csvDelimiterChoice";
 import type { ExchangeSpec } from "@psilink/core";
 import type { OwnColumnsChoice } from "@psi/ownColumnsModel";
-
-/** Where the max-age field starts for an exchange that has no policy yet, so the
- * operator opting in edits a plausible bound rather than an empty field. */
-const OPT_IN_TOKEN_MAX_AGE_DAYS = 90;
 
 /** The record fields this draft edits: what a surface seeds it from. */
 interface LocalFieldsSource {

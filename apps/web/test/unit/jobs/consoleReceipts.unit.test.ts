@@ -7,6 +7,7 @@ import { parse as parseYaml } from "yaml";
 
 import {
   MAX_TEXT_LENGTH,
+  MAX_TOKEN_MAX_AGE_DAYS,
   certificateAuthorizesIdentity,
   generateSigningIdentity,
   safeParseExchangeSpec,
@@ -23,6 +24,7 @@ import {
   IDENTITY_PICKED_LOCATION_NOTICE,
   IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY,
   IDENTITY_SHARED_MOUNT_REFUSAL_ADVISORY,
+  MAX_AGE_PROBLEM,
   PARTNER_FINGERPRINT_PROBLEM,
   RECEIPTS_DEFAULT,
   RECEIPT_LOCATION_NOTICE,
@@ -33,6 +35,7 @@ import {
   UNNAMED_PARTY_PROBLEM,
   fingerprintRequestProblem,
   identityLocationLabel,
+  maxAgeCadenceNote,
   partnerPinStatement,
   receiptsAdvisories,
   receiptsIntentFields,
@@ -965,6 +968,38 @@ describe("the receipts card's model", () => {
     expect(problemsFor(authored)).toEqual([]);
     expect(receiptsSummary(authored)).toBe("Signed receipt, retention note");
   });
+
+  test("a maximum age that is on emits the policy and states it closed", () => {
+    const bounded = draft({ maxAgeEnabled: true, maxAgeDays: 30 });
+    expect(receiptsIntentFields(bounded)).toEqual({ tokenMaxAgeDays: 30 });
+    expect(problemsFor(bounded)).toEqual([]);
+    expect(receiptsSummary(bounded)).toBe(
+      "Unsigned record only; secret expires 30 days after each exchange",
+    );
+    expect(maxAgeCadenceNote(bounded)).toContain("within 30 days");
+  });
+
+  test("a maximum age that is off emits nothing, whatever the field holds", () => {
+    const off = draft({ maxAgeEnabled: false, maxAgeDays: "" });
+    expect(receiptsIntentFields(off)).toEqual({});
+    expect(problemsFor(off)).toEqual([]);
+    expect(maxAgeCadenceNote(off)).toBeUndefined();
+  });
+
+  test.each<[string, number | string]>([
+    ["a cleared field", ""],
+    ["zero", 0],
+    ["a fraction", 1.5],
+    ["more than the bound", MAX_TOKEN_MAX_AGE_DAYS + 1],
+  ])(
+    "a maximum age of %s blocks the run rather than running unbounded",
+    (_case, days) => {
+      const invalid = draft({ maxAgeEnabled: true, maxAgeDays: days });
+      expect(receiptsIntentFields(invalid)).toEqual({});
+      expect(problemsFor(invalid)).toEqual([MAX_AGE_PROBLEM]);
+      expect(maxAgeCadenceNote(invalid)).toBeUndefined();
+    },
+  );
 
   test("a note alone emits only the note", () => {
     const noted = draft({ retentionDisposition: RETENTION_NOTE });

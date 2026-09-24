@@ -30,6 +30,8 @@ import {
 import { INITIAL_CSV_DELIMITER_CHOICE } from "@components/csvDelimiterChoice";
 import { OWN_COLUMNS_DEFAULT } from "@psi/ownColumnsModel";
 
+import { RECEIPTS_DEFAULT, receiptsIntentFields } from "@psi/receiptsModel";
+
 import { tempDataRoot, validSftpIntent } from "../../utils/jobFixtures";
 
 import type { DisclosedExchangeDocument } from "@jobs/configLoad";
@@ -226,9 +228,11 @@ describe("the authoring state a loaded document seeds", () => {
     expect(state.csvDelimiter).toEqual(INITIAL_CSV_DELIMITER_CHOICE);
     expect(state.ownColumns).toBe(OWN_COLUMNS_DEFAULT);
     expect(state.receipts).toEqual({
-      mode: "none",
-      partnerFingerprint: "",
-      retentionDisposition: "",
+      mode: RECEIPTS_DEFAULT.mode,
+      partnerFingerprint: RECEIPTS_DEFAULT.partnerFingerprint,
+      retentionDisposition: RECEIPTS_DEFAULT.retentionDisposition,
+      maxAgeEnabled: RECEIPTS_DEFAULT.maxAgeEnabled,
+      maxAgeDays: RECEIPTS_DEFAULT.maxAgeDays,
     });
     expect(state.records).toEqual({});
   });
@@ -244,7 +248,21 @@ describe("the authoring state a loaded document seeds", () => {
       mode: "certificate",
       partnerFingerprint: "x".repeat(43),
       retentionDisposition: "Filed with the 2026 intake.",
+      maxAgeEnabled: false,
+      maxAgeDays: RECEIPTS_DEFAULT.maxAgeDays,
     });
+  });
+
+  test("the max-age control opens on the policy the file states", () => {
+    const state = authoringStateFromDocument(
+      disclosed({ tokenMaxAgeDays: 30 }),
+    );
+    expect(state.receipts.maxAgeEnabled).toBe(true);
+    expect(state.receipts.maxAgeDays).toBe(30);
+    expect(
+      receiptsIntentFields({ ...RECEIPTS_DEFAULT, ...state.receipts })
+        .tokenMaxAgeDays,
+    ).toBe(30);
   });
 
   test("a session-derived mode opens as stated rather than as unsigned", () => {

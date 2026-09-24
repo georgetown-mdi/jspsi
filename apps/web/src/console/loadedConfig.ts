@@ -37,6 +37,7 @@ import {
   partnerBoundTerms,
 } from "@psilink/core";
 
+import { OPT_IN_TOKEN_MAX_AGE_DAYS } from "@psi/tokenMaxAge";
 import { OWN_COLUMNS_DEFAULT } from "@psi/ownColumnsModel";
 import { buildAdvancedTerms } from "@psi/authoring/advancedInviteTerms";
 
@@ -95,6 +96,11 @@ export interface LoadedReceiptsChoices {
   mode: ReceiptsSigningMode;
   partnerFingerprint: string;
   retentionDisposition: string;
+  /** Whether the file states `authentication.token_max_age_days`. */
+  maxAgeEnabled: boolean;
+  /** The day count it states, or the control's own starting value where it
+   * states none. */
+  maxAgeDays: number;
 }
 
 /** The enforcement records a loaded configuration puts back on the job intent,
@@ -272,6 +278,8 @@ export function authoringStateFromDocument(
       mode: document.signing?.mode ?? "none",
       partnerFingerprint: document.signing?.partnerFingerprint ?? "",
       retentionDisposition: document.retentionDisposition ?? "",
+      maxAgeEnabled: document.tokenMaxAgeDays !== undefined,
+      maxAgeDays: document.tokenMaxAgeDays ?? OPT_IN_TOKEN_MAX_AGE_DAYS,
     },
     records: {
       ...(document.expectedPayloadColumns !== undefined

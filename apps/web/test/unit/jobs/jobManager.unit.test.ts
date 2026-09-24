@@ -10,6 +10,8 @@ import { stringify as stringifyYaml } from "yaml";
 import {
   DISPLAY_TRUNCATION_MARKER,
   PARTNER_LABELLED_VALUE_BUDGET,
+  parseExchangeSpec,
+  parseSensitiveYaml,
   renderedDisplayCost,
   snakeizeKeys,
 } from "@psilink/core";
@@ -2425,7 +2427,7 @@ describe("a filedrop run that would publish the signing identity", () => {
 // all, so an exchange authored in the console exports only what it composed.
 describe("the mounted configuration as the hand-off's merge base", () => {
   /** A manager whose mounted working folder holds a command-line configuration
-   * stating a setting the console composes no key for, and its key file. */
+   * naming its own shared folder and a max-age policy, and its key file. */
   function managerOverMountedConfiguration(): {
     manager: JobManager;
     root: string;
@@ -2481,11 +2483,27 @@ describe("the mounted configuration as the hand-off's merge base", () => {
     );
   });
 
-  test("an exchange composed from the opened file keeps its held settings", async () => {
+  test("an exchange composed from the opened file keeps the folder it names", async () => {
     const { manager } = managerOverMountedConfiguration();
     manager.openMountedConfiguration();
     expect(await handoffTemplate(manager, openedIntent())).toContain(
-      "token_max_age_days: 30",
+      "/srv/exchange",
+    );
+  });
+
+  test("the hand-off states the max-age policy the run composed", async () => {
+    const { manager } = managerOverMountedConfiguration();
+    manager.openMountedConfiguration();
+    expect(
+      await handoffTemplate(manager, { ...openedIntent(), tokenMaxAgeDays: 7 }),
+    ).toContain("token_max_age_days: 7");
+  });
+
+  test("a max-age policy turned off for the run is off in its hand-off", async () => {
+    const { manager } = managerOverMountedConfiguration();
+    manager.openMountedConfiguration();
+    expect(await handoffTemplate(manager, openedIntent())).not.toContain(
+      "authentication",
     );
   });
 
@@ -2497,13 +2515,13 @@ describe("the mounted configuration as the hand-off's merge base", () => {
       configPath,
       fs
         .readFileSync(configPath, "utf8")
-        .replace("token_max_age_days: 30", "token_max_age_days: 7"),
+        .replace("/srv/exchange", "/srv/changed"),
     );
     const id = await manager.createJob(openedIntent());
     const handoff = manager.getJobHandoff(id)!;
     expect(
       handoff.template.kind === "config" ? handoff.template.yaml : "",
-    ).toContain("token_max_age_days: 30");
+    ).toContain("/srv/exchange");
     const warnings = manager
       .getJob(id)!
       .events.map((entry) => entry.event)
@@ -2524,7 +2542,7 @@ describe("the mounted configuration as the hand-off's merge base", () => {
         configPath,
         fs
           .readFileSync(configPath, "utf8")
-          .replace("token_max_age_days: 30", "token_max_age_days: 7"),
+          .replace("/srv/exchange", "/srv/changed"),
       );
       manager.openMountedConfiguration();
       return actual.writeJobFile(...args);
@@ -2532,8 +2550,8 @@ describe("the mounted configuration as the hand-off's merge base", () => {
     const id = await manager.createJob(openedIntent());
     expect(vi.mocked(writeJobFile)).toHaveBeenCalled();
     const yaml = handoffTemplateOf(manager, id);
-    expect(yaml).toContain("token_max_age_days: 30");
-    expect(yaml).not.toContain("token_max_age_days: 7");
+    expect(yaml).toContain("/srv/exchange");
+    expect(yaml).not.toContain("/srv/changed");
   });
 
   test("an unchanged file raises no notice", async () => {
@@ -2555,7 +2573,7 @@ describe("the mounted configuration as the hand-off's merge base", () => {
     const handoff = manager.getJobHandoff(id)!;
     expect(
       handoff.template.kind === "config" ? handoff.template.yaml : "",
-    ).not.toContain("token_max_age_days");
+    ).not.toContain("/srv/exchange");
     expect(
       manager
         .getJob(id)!
@@ -2735,6 +2753,26 @@ describe("the key file beside the opened configuration", () => {
       JSON.parse(fs.readFileSync(path.join(root, ".psilink.key"), "utf8")),
     ).toEqual({ sharedSecret: MOUNTED_SHARED_SECRET });
     expect(manager.getJobHandoff(id)?.keyFileBesideConfiguration).toBe(true);
+  });
+
+  test("the configuration the run loads states its max-age policy", async () => {
+    // The run's CLI holds the key file beside the configuration to this
+    // policy as a command-line run does: it stamps the rotated secret's expiry
+    // from it, and a later run past that expiry is refused.
+    const root = mountWith(
+      JSON.stringify({ sharedSecret: MOUNTED_SHARED_SECRET }),
+    );
+    const { manager, spawned } = capturingManager(root);
+    manager.openMountedConfiguration();
+    await manager.createJob({ ...openedIntent(), tokenMaxAgeDays: 30 });
+    expect(spawned[0].keyPath).toBe(path.join(root, ".psilink.key"));
+    const composed = parseExchangeSpec(
+      parseSensitiveYaml(
+        fs.readFileSync(spawned[0].configPath, "utf8"),
+        "composed configuration",
+      ),
+    );
+    expect(composed.authentication).toEqual({ tokenMaxAgeDays: 30 });
   });
 
   test("a key file stating an expiry and an unknown key is one the run accepts", async () => {

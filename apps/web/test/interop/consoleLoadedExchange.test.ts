@@ -3,6 +3,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -12,11 +13,15 @@ import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
 import {
+  getDefaultLinkageTerms,
   parseExchangeSpec,
   parseSensitiveJson,
   parseSensitiveYaml,
+  snakeizeKeys,
 } from "@psilink/core";
+import { stringify as stringifyYaml } from "yaml";
 
+import { RECEIPTS_DEFAULT, receiptsIntentFields } from "@psi/receiptsModel";
 import { JobManager } from "@jobs/jobManager";
 import { authoringStateFromDocument } from "@console/loadedConfig";
 import { connectionTuningOptions } from "@console/connectionTuningModel";
@@ -258,7 +263,11 @@ describe.skipIf(!cliIsBuilt)(
       managers.push(manager);
 
       const secretBeforeRun = mountedSharedSecret(workspace.mount);
-      const id = await manager.createJob(intentFromOpen(manager));
+      const id = await manager.createJob({
+        ...intentFromOpen(manager),
+        tokenMaxAgeDays: 30,
+      });
+      const createdAt = Date.now();
       const partner = startCli({
         args: ["exchange", "input.csv", "out.csv"],
         cwd: workspace.partnerDir,
@@ -285,6 +294,20 @@ describe.skipIf(!cliIsBuilt)(
       ).toBe(true);
       expect(existsSync(path.join(record.workdir, ".psilink.key"))).toBe(false);
 
+      // The max-age policy the console composed is the one the CLI stamped the
+      // rotated secret with, as a command-line run under the same policy does.
+      const { expires } = parseSensitiveJson(
+        readFileSync(path.join(workspace.mount, ".psilink.key"), "utf8"),
+        "mounted key file",
+      ) as { expires?: string };
+      const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
+      expect(Date.parse(expires ?? "")).toBeGreaterThanOrEqual(
+        createdAt + thirtyDaysMs - 60_000,
+      );
+      expect(Date.parse(expires ?? "")).toBeLessThanOrEqual(
+        Date.now() + thirtyDaysMs,
+      );
+
       // The hand-off the same run composed is the configuration the operator
       // takes to cron: the terms the file stated, and the rendezvous folder as a
       // placeholder rather than the console's own mount.
@@ -298,6 +321,82 @@ describe.skipIf(!cliIsBuilt)(
         mountedDocumentOf(workspace.mount).linkageTerms,
       );
       expect(handoff.template.yaml).not.toContain(workspace.dropDir);
+    });
+  },
+);
+
+describe.skipIf(!cliIsBuilt)(
+  "an opened configuration's maximum age, held by the real psilink",
+  () => {
+    test("a run whose shared secret is past its expiry is refused", async () => {
+      // The mount an operator has once a max-age policy stamped the key file
+      // and the exchange then went unrun past that stamp. No partner is needed:
+      // the run is refused before it reaches the shared folder.
+      writeFileSync(
+        workspace.mountedConfig,
+        stringifyYaml(
+          snakeizeKeys({
+            connection: { channel: "filedrop", path: workspace.dropDir },
+            linkageTerms: getDefaultLinkageTerms(CONSOLE_IDENTITY),
+            authentication: { tokenMaxAgeDays: 30 },
+          }),
+        ),
+      );
+      writeFileSync(
+        path.join(workspace.mount, ".psilink.key"),
+        JSON.stringify({
+          sharedSecret: "c".repeat(42) + "A",
+          expires: "2020-01-01T00:00:00.000Z",
+        }),
+        { mode: 0o600 },
+      );
+
+      const manager = new JobManager({
+        dataRoot: workspace.mount,
+        binaryPath: cliEntry,
+        jobInputDir: workspace.mount,
+        jobRendezvousDir: workspace.dropDir,
+      });
+      managers.push(manager);
+      const response = manager.openMountedConfiguration();
+      if (response.document === undefined)
+        throw new Error("the mount holds no configuration to open");
+      const loaded = authoringStateFromDocument(response.document);
+      const receipts = receiptsIntentFields({
+        ...RECEIPTS_DEFAULT,
+        ...loaded.receipts,
+      });
+      expect(receipts.tokenMaxAgeDays).toBe(30);
+
+      const id = await manager.createJob({
+        channel: "filedrop",
+        side: "acceptor",
+        linkageTerms: loaded.linkageTerms,
+        inputFile: { name: "input.csv" },
+        mountedConfigurationOpened: true,
+        ...receipts,
+      });
+
+      const deadline = Date.now() + JOB_DEADLINE_MS;
+      let record = manager.getJob(id);
+      while (record?.terminal === null && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        record = manager.getJob(id);
+      }
+      if (record === undefined || record.terminal === null)
+        throw new Error("the console run reached no terminal state");
+      // The CLI's load-time refusal: a usage fault, before any exchange file.
+      expect(record.terminal.outcome).not.toBe("succeeded");
+      expect(record.terminal.exitCode).toBe(64);
+      expect(JSON.stringify(record.events)).toContain(
+        "remove the expired key file on both sides",
+      );
+      expect(readdirSync(workspace.dropDir)).toEqual([]);
+      expect(
+        JSON.parse(
+          readFileSync(path.join(workspace.mount, ".psilink.key"), "utf8"),
+        ),
+      ).toMatchObject({ expires: "2020-01-01T00:00:00.000Z" });
     });
   },
 );

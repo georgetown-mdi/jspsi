@@ -1,12 +1,15 @@
 import {
   FINGERPRINT_REGEX,
   MAX_TEXT_LENGTH,
+  MAX_TOKEN_MAX_AGE_DAYS,
   reasonTermsCannotStateIdentity,
   redactAndDisplayPartyIdentity,
   sanitizeForDisplay,
 } from "@psilink/core";
 
 import { NOTE_CONTROL_CHAR_PATTERN } from "@jobs/intentSchemas";
+
+import { OPT_IN_TOKEN_MAX_AGE_DAYS, maxAgeDaysError } from "./tokenMaxAge";
 
 import type {
   JobSigningChoice,
@@ -17,8 +20,9 @@ import type { JobRendezvousConfig } from "./jobClient/workInputClient";
 /**
  * The pure model behind the console's "Receipts and record keeping" card:
  * whether this exchange signs a certificate receipt, whose fingerprint it
- * pins, and the retention note filed with the exchange record. No React and
- * no I/O.
+ * pins, the retention note filed with the exchange record, and how long the
+ * shared secret the run keeps in its key file stays usable. No React and no
+ * I/O.
  *
  * The fingerprint shape and note length ceiling are core's own constants; the
  * note's control-character refusal is the console's own job-intent rule
@@ -78,6 +82,13 @@ export interface ReceiptsDraft {
   partnerFingerprint: string;
   /** The retention/disposition note as raw field text; blank means no note. */
   retentionDisposition: string;
+  /** Whether the operator set a maximum age for the shared secret. */
+  maxAgeEnabled: boolean;
+  /** The maximum age in days as the number input reports it: a string when
+   * cleared or mid-edit, so an invalid entry blocks the run rather than
+   * turning into no bound ({@link maxAgeDaysError}). Read only while
+   * {@link maxAgeEnabled} is on. */
+  maxAgeDays: number | string;
   /**
    * Where this party's signing identity is kept, as a locator picked in the
    * console's secrets browse. Absent is the console's default: the fixed name
@@ -88,14 +99,16 @@ export interface ReceiptsDraft {
 }
 
 /**
- * The card's starting state: no receipt signed, no retention note -- the
- * behaviour an exchange has without the card. An untouched draft composes the
- * same config as an exchange that never used it.
+ * The card's starting state: no receipt signed, no retention note, no maximum
+ * age -- the behaviour an exchange has without the card. An untouched draft
+ * composes the same config as an exchange that never used it.
  */
 export const RECEIPTS_DEFAULT: ReceiptsDraft = {
   mode: "none",
   partnerFingerprint: "",
   retentionDisposition: "",
+  maxAgeEnabled: false,
+  maxAgeDays: OPT_IN_TOKEN_MAX_AGE_DAYS,
 };
 
 /**
@@ -174,12 +187,13 @@ export function identityLocationLabel(
     .join(" / ");
 }
 
-/** The subset of a job intent this card contributes. Both fields are present
- * only when the operator authored them, so an untouched draft emits the same
+/** The subset of a job intent this card contributes. Each field is present
+ * only when the operator authored it, so an untouched draft emits the same
  * fields as an exchange that never used the card. */
 export interface ReceiptsIntentFields {
   signing?: JobSigningChoice;
   retentionDisposition?: string;
+  tokenMaxAgeDays?: number;
 }
 
 /**
@@ -190,13 +204,16 @@ export interface ReceiptsIntentFields {
  * never reaches here -- {@link receiptsProblems} blocks the run on it first.
  *
  * The partner pin and the retention note are trimmed and dropped when blank,
- * so a field the operator left alone contributes no key.
+ * so a field the operator left alone contributes no key. The maximum age is
+ * emitted only while it is on and valid; an invalid one is a problem that
+ * blocks the run ({@link receiptsProblems}), never a run with no bound.
  */
 export function receiptsIntentFields(
   draft: ReceiptsDraft,
 ): ReceiptsIntentFields {
   const note = draft.retentionDisposition.trim();
   const pin = draft.partnerFingerprint.trim();
+  const maxAgeDays = draftMaxAgeDays(draft);
   return {
     ...(draft.mode === "certificate"
       ? {
@@ -210,7 +227,17 @@ export function receiptsIntentFields(
         }
       : {}),
     ...(note !== "" ? { retentionDisposition: note } : {}),
+    ...(maxAgeDays !== undefined ? { tokenMaxAgeDays: maxAgeDays } : {}),
   };
+}
+
+/** The draft's maximum age in days, or undefined when it is off or invalid. */
+function draftMaxAgeDays(draft: ReceiptsDraft): number | undefined {
+  if (!draft.maxAgeEnabled || typeof draft.maxAgeDays !== "number")
+    return undefined;
+  return maxAgeDaysError(draft.maxAgeDays) === undefined
+    ? draft.maxAgeDays
+    : undefined;
 }
 
 /** The problem a partner fingerprint that is not a canonical digest reports. */
@@ -491,6 +518,13 @@ export const RETENTION_NOTE_CONTROL_CHAR_PROBLEM =
   "for instance). A tab, a line break, or a carriage return is fine -- the " +
   "console refuses any other one before the run starts.";
 
+/** The problem a maximum age that is on but not a usable day count reports.
+ * The composed configuration's schema refuses the same value
+ * (`authentication.token_max_age_days`). */
+export const MAX_AGE_PROBLEM =
+  "The shared secret's maximum age must be a whole number of days from 1 to " +
+  `${MAX_TOKEN_MAX_AGE_DAYS}. Correct it, or turn the maximum age off.`;
+
 /**
  * Everything wrong with the draft, as messages to show beside the card --
  * empty when the draft is admissible. The run is blocked while this is
@@ -528,6 +562,8 @@ export function receiptsProblems(
   if (note.length > MAX_TEXT_LENGTH) problems.push(RETENTION_NOTE_PROBLEM);
   if (NOTE_CONTROL_CHAR_PATTERN.test(note))
     problems.push(RETENTION_NOTE_CONTROL_CHAR_PROBLEM);
+  if (draft.maxAgeEnabled && maxAgeDaysError(draft.maxAgeDays) !== undefined)
+    problems.push(MAX_AGE_PROBLEM);
   return problems;
 }
 
@@ -728,6 +764,28 @@ export const RETENTION_NOTE_NOTICE_WEB =
   "where this result is filed and how long it is kept -- never a name, an " +
   "identifier, or any value from the data.";
 
+/** The maximum-age control's label. */
+export const MAX_AGE_LABEL = "Set a maximum age for the shared secret";
+
+/** The line under the maximum-age control: what turning it on does. */
+export const MAX_AGE_DESCRIPTION =
+  "Off by default. When set, each exchange writes its new shared secret to " +
+  "the key file with an expiry this many days out, and a run after that " +
+  "expiry is refused.";
+
+/**
+ * What a maximum age commits the operator to, shown under the control while
+ * it holds a usable value, or undefined when there is no bound to state.
+ */
+export function maxAgeCadenceNote(draft: ReceiptsDraft): string | undefined {
+  const days = draftMaxAgeDays(draft);
+  if (days === undefined) return undefined;
+  return (
+    `Run this exchange again within ${dayCount(days)} of each exchange, or its shared ` +
+    "secret expires and you invite your partner again."
+  );
+}
+
 /**
  * The weight the card shows one advisory at. Both are warn-and-guide and
  * neither blocks the run: a `warning` is what this run costs the operator
@@ -845,6 +903,21 @@ export function receiptsAdvisories(
  */
 export function receiptsSummary(draft: ReceiptsDraft): string {
   const fields = receiptsIntentFields(draft);
+  const days = fields.tokenMaxAgeDays;
+  const maxAge =
+    days === undefined
+      ? ""
+      : `; secret expires ${dayCount(days)} after each exchange`;
+  return `${receiptsRecordSummary(fields)}${maxAge}`;
+}
+
+/** A day count as the card's sentences state it. */
+function dayCount(days: number): string {
+  return days === 1 ? "1 day" : `${days} days`;
+}
+
+/** The part of {@link receiptsSummary} about the receipt and the note. */
+function receiptsRecordSummary(fields: ReceiptsIntentFields): string {
   const signed = fields.signing !== undefined;
   const noted = fields.retentionDisposition !== undefined;
   const unpinned =

@@ -60,6 +60,10 @@ const HAND_BACK: JobConfigurationHandBack = {
 
 const FINGERPRINT = "SHA256:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBA";
 
+/** A setting outside every block a run here composes, as a later schema
+ * version could add one: the load names it as held, and no run applies it. */
+const UNCOMPOSED_SETTING = "added_setting";
+
 function document(
   overrides: Partial<DisclosedExchangeDocument> = {},
 ): DisclosedExchangeDocument {
@@ -113,15 +117,11 @@ describe("each answer lands the control in one state", () => {
 
   test("an opened configuration reports both lists and the authoring state", () => {
     const read = mountedConfigurationRead(
-      opened(
-        {},
-        ["authentication.token_max_age_days"],
-        ["connection.server.password"],
-      ),
+      opened({}, [UNCOMPOSED_SETTING], ["connection.server.password"]),
     );
     expect(read.state).toEqual({
       status: "opened",
-      carriedThrough: ["authentication.token_max_age_days"],
+      carriedThrough: [UNCOMPOSED_SETTING],
       warnings: ["connection.server.password"],
     });
     expect(read.loaded?.channel).toBe("sftp");
@@ -474,13 +474,13 @@ describe("a record this flow has no control for opens and is named", () => {
           disclosedPayloadColumns: [],
           outboundPayloadConsent: { status: "pending" },
         },
-        ["authentication.token_max_age_days"],
+        [UNCOMPOSED_SETTING],
       ),
     );
     if (read.state.status !== "opened")
       throw new Error("expected an open configuration");
     expect(read.state.carriedThrough).toEqual([
-      "authentication.token_max_age_days",
+      UNCOMPOSED_SETTING,
       "disclosed_payload_columns",
       "expected_partner_deduplicate",
       "expected_payload_columns",
@@ -491,14 +491,14 @@ describe("a record this flow has no control for opens and is named", () => {
 
 describe("the notices name the settings and say what happens to them", () => {
   test("one held setting is named, with where it is edited", () => {
-    const notice = carriedThroughNotice(["authentication.token_max_age_days"]);
-    expect(notice).toContain("authentication.token_max_age_days");
+    const notice = carriedThroughNotice([UNCOMPOSED_SETTING]);
+    expect(notice).toContain(UNCOMPOSED_SETTING);
     expect(notice).toContain("keeps it unchanged");
     expect(notice).toMatch(/psilink on the command line/);
   });
 
   test("a held setting the run does not apply says so", () => {
-    const notice = carriedThroughNotice(["authentication.token_max_age_days"]);
+    const notice = carriedThroughNotice([UNCOMPOSED_SETTING]);
     expect(notice).toContain("The run started here does not apply it");
     expect(notice).toContain("hands back states it as your file does");
   });
@@ -514,15 +514,13 @@ describe("the notices name the settings and say what happens to them", () => {
 
   test("several held settings are all named", () => {
     const notice = carriedThroughNotice([
-      "authentication.token_max_age_days",
+      UNCOMPOSED_SETTING,
       "expected_payload_columns",
     ]);
-    expect(notice).toContain("authentication.token_max_age_days");
+    expect(notice).toContain(UNCOMPOSED_SETTING);
     expect(notice).toContain("expected_payload_columns");
     expect(notice).toContain("keeps each unchanged");
-    expect(notice).toContain(
-      "does not apply authentication.token_max_age_days",
-    );
+    expect(notice).toContain(`does not apply ${UNCOMPOSED_SETTING}`);
   });
 
   test("no held setting draws no notice", () => {
@@ -552,15 +550,11 @@ describe("the notices name the settings and say what happens to them", () => {
 
   test("the held settings are stated before the credential to supply", () => {
     const read = mountedConfigurationRead(
-      opened(
-        {},
-        ["authentication.token_max_age_days"],
-        ["connection.server.password"],
-      ),
+      opened({}, [UNCOMPOSED_SETTING], ["connection.server.password"]),
     );
     const notices = mountedConfigurationNotices(read.state);
     expect(notices).toHaveLength(2);
-    expect(notices[0]).toContain("authentication.token_max_age_days");
+    expect(notices[0]).toContain(UNCOMPOSED_SETTING);
     expect(notices[1]).toContain("connection.server.password");
   });
 
@@ -646,7 +640,7 @@ describe("no value of the document reaches a notice", () => {
           retentionDisposition: `note-${secret}`,
           signing: { mode: "certificate", partnerFingerprint: FINGERPRINT },
         },
-        ["authentication.token_max_age_days"],
+        [UNCOMPOSED_SETTING],
         ["connection.server.password"],
       ),
     );

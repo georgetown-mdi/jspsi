@@ -7,6 +7,7 @@ import {
   CopyButton,
   Group,
   NativeSelect,
+  NumberInput,
   Stack,
   Text,
   TextInput,
@@ -14,18 +15,21 @@ import {
 } from "@mantine/core";
 import { IconAlertTriangle, IconInfoCircle } from "@tabler/icons-react";
 
-import { sanitizeForDisplay } from "@psilink/core";
+import { MAX_TOKEN_MAX_AGE_DAYS, sanitizeForDisplay } from "@psilink/core";
 
 import { resolveSigningFingerprint } from "@psi/jobClient/signingIdentityClient";
 
 import {
   CERTIFICATE_EXPORT_NOTICE,
   IDENTITY_REGENERATION_NOTICE,
+  MAX_AGE_DESCRIPTION,
+  MAX_AGE_LABEL,
   RETENTION_NOTE_LABEL,
   RETENTION_NOTE_NOTICE,
   RETENTION_NOTE_PLACEHOLDER,
   SIGNING_IDENTITY_DIVERGENCE_POINTER,
   fingerprintRequestProblem,
+  maxAgeCadenceNote,
   partnerPinStatement,
   receiptsAdvisories,
   receiptsProblems,
@@ -34,6 +38,7 @@ import {
   receiptsWithResolvedIdentity,
   signingIdentityDivergence,
 } from "@psi/receiptsModel";
+import { maxAgeDaysError } from "@psi/tokenMaxAge";
 import styles from "@styles/app.module.css";
 
 import { DisclosureSection } from "../components/DisclosureSection";
@@ -162,6 +167,7 @@ export function ReceiptsCard({
   draft,
   identity,
   rendezvous,
+  maxAgeOffered = true,
   onChange,
 }: {
   draft: ReceiptsDraft;
@@ -177,6 +183,11 @@ export function ReceiptsCard({
    * console build). It decides whether the identity-location advisory applies to
    * this deployment: see {@link receiptsAdvisories}. */
   rendezvous: JobRendezvousConfig | undefined;
+  /** Whether the card offers the shared secret's maximum age: only where this
+   * console runs the exchange, since only its run composes the setting. An
+   * opened configuration the console saves back rather than runs keeps the one
+   * its file states. */
+  maxAgeOffered?: boolean;
   onChange: (draft: ReceiptsDraft) => void;
 }) {
   const requestProblemId = useId();
@@ -220,6 +231,7 @@ export function ReceiptsCard({
   const notices = advisories.filter((advisory) => advisory.severity === "info");
   const requestProblem = fingerprintRequestProblem(identity);
   const pinStatement = partnerPinStatement(draft);
+  const cadenceNote = maxAgeCadenceNote(draft);
   const divergent = signingIdentityDivergence(draft, identity) !== undefined;
   const set = <TField extends keyof ReceiptsDraft>(
     field: TField,
@@ -443,6 +455,36 @@ export function ReceiptsCard({
             set("retentionDisposition", event.currentTarget.value)
           }
         />
+
+        {maxAgeOffered && (
+          <Stack gap={4}>
+            <Checkbox
+              label={MAX_AGE_LABEL}
+              description={MAX_AGE_DESCRIPTION}
+              checked={draft.maxAgeEnabled}
+              onChange={(event) =>
+                set("maxAgeEnabled", event.currentTarget.checked)
+              }
+            />
+            {draft.maxAgeEnabled && (
+              <NumberInput
+                label="Maximum age in days"
+                value={draft.maxAgeDays}
+                min={1}
+                max={MAX_TOKEN_MAX_AGE_DAYS}
+                step={1}
+                allowDecimal={false}
+                error={maxAgeDaysError(draft.maxAgeDays)}
+                onChange={(value) => set("maxAgeDays", value)}
+              />
+            )}
+            {cadenceNote !== undefined && (
+              <Text size="sm" c="dimmed">
+                {cadenceNote}
+              </Text>
+            )}
+          </Stack>
+        )}
 
         {warnings.length > 0 && (
           <Alert
