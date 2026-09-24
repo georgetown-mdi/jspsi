@@ -186,7 +186,7 @@ const STUB_ENGINE = `#!/bin/sh
 printf '%s\\n' "$*" >>"$STUB_LOG"
 case "$*" in
   "image inspect"*)
-    printf 'sha256:1111 ["vdorie/psi-link@sha256:2222"]\\n' ;;
+    printf 'sha256:1111 ["ghcr.io/georgetown-mdi/alcove@sha256:2222"]\\n' ;;
   "network create"*|"network rm"*|"rm --force"*|"logs "*)
     printf 'ok\\n' ;;
   *"--entrypoint node"*)
@@ -290,7 +290,9 @@ describe("the gate driven against a stub engine", () => {
 
   it("reports the digest the reference resolved to, not the reference", () => {
     const { result } = drive();
-    expect(result.stdout).toContain("vdorie/psi-link@sha256:2222");
+    expect(result.stdout).toContain(
+      "ghcr.io/georgetown-mdi/alcove@sha256:2222",
+    );
   });
 
   it("hands the credential by name, never as an argument", () => {

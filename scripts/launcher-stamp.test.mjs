@@ -32,7 +32,7 @@ const PLACEHOLDER = "@@PSILINK_IMAGE_DIGEST@@";
 // The fully qualified reference: podman requires the registry prefix and docker
 // accepts it, so both launchers name it in full rather than relying on a
 // default.
-const IMAGE_REPOSITORY = "docker.io/vdorie/psi-link";
+const IMAGE_REPOSITORY = "ghcr.io/georgetown-mdi/alcove";
 
 const LAUNCHERS = [
   {
@@ -86,7 +86,7 @@ describe("the launcher digest stamp", () => {
         // unstamped copy would run whatever a floating tag resolves to today.
         // Held here as the absence of any floating tag in the file: a `:latest`
         // reference is the shape that regression takes.
-        expect(source).not.toMatch(/vdorie\/psi-link:[A-Za-z0-9._-]+/);
+        expect(source).not.toMatch(/georgetown-mdi\/alcove:[A-Za-z0-9._-]+/);
       });
     });
   }

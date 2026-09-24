@@ -150,7 +150,7 @@ Describe 'The release stamp' {
     It 'names the registry in the reference it builds' {
         # podman requires the registry prefix and docker accepts it, so the
         # reference is fully qualified rather than relying on a default.
-        Get-PsilinkImage | Should -BeLike 'docker.io/vdorie/psi-link@*'
+        Get-PsilinkImage | Should -BeLike 'ghcr.io/georgetown-mdi/alcove@*'
     }
 }
 

@@ -111,7 +111,7 @@ Then fetch the image the checks run in, so that a failure to download it does
 not get mistaken later for a problem with your share:
 
 ```text
-docker pull vdorie/psi-link:latest
+docker pull ghcr.io/georgetown-mdi/alcove:latest
 ```
 
 Now the account. The username and password you are about to use are the ones
@@ -135,7 +135,7 @@ below. If you just type a username, you have no domain and you can leave every
 Everything in this part happens inside one throwaway container. Start it:
 
 ```text
-docker run --rm -it --entrypoint sh vdorie/psi-link:latest
+docker run --rm -it --entrypoint sh ghcr.io/georgetown-mdi/alcove:latest
 ```
 
 The prompt changes to `/work #`. You are now typing inside Linux, not Windows.
@@ -369,7 +369,7 @@ establish anything.
 ### Check it mounts, and opens the right folder
 
 ```text
-docker run --rm -v psilink-sync:/rz --entrypoint sh vdorie/psi-link:latest -c "ls -la /rz"
+docker run --rm -v psilink-sync:/rz --entrypoint sh ghcr.io/georgetown-mdi/alcove:latest -c "ls -la /rz"
 ```
 
 You are looking for **`psilink-setup-check.tmp`**, the marker you left at the
@@ -401,7 +401,7 @@ over the volume rather than through smbclient, which refuses some of these
 whatever the server would have allowed.
 
 ```text
-docker run --rm -it -v psilink-sync:/rz --entrypoint sh vdorie/psi-link:latest
+docker run --rm -it -v psilink-sync:/rz --entrypoint sh ghcr.io/georgetown-mdi/alcove:latest
 ```
 
 You are inside a container again, with your file drop mounted at `/rz`. Move
@@ -459,14 +459,14 @@ and you do not need to do any of this again unless the password changes.
 docker run --rm `
   -v 'C:\path\to\your\work:/work' `
   -v 'psilink-sync:/sync' `
-  vdorie/psi-link:latest `
+  ghcr.io/georgetown-mdi/alcove:latest `
   file:///sync input.csv matches.csv
 ```
 
 **Command Prompt:**
 
 ```text
-docker run --rm -v "C:\path\to\your\work:/work" -v "psilink-sync:/sync" vdorie/psi-link:latest file:///sync input.csv matches.csv
+docker run --rm -v "C:\path\to\your\work:/work" -v "psilink-sync:/sync" ghcr.io/georgetown-mdi/alcove:latest file:///sync input.csv matches.csv
 ```
 
 `C:\path\to\your\work` is a folder **on this PC** holding your input CSV;

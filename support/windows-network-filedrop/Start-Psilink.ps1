@@ -61,7 +61,7 @@ $ErrorActionPreference = 'Stop'
 # from a release and refuses to run: an unpinned launcher would run whatever is
 # behind a floating tag today, which is the one thing an operator reading this
 # file cannot check for themselves.
-$PsilinkImageRepository = 'docker.io/vdorie/psi-link'
+$PsilinkImageRepository = 'ghcr.io/georgetown-mdi/alcove'
 $PsilinkImageDigest = '@@PSILINK_IMAGE_DIGEST@@'
 
 $PsilinkReleasesUrl = 'https://github.com/georgetown-mdi/jspsi/releases'

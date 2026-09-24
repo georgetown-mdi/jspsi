@@ -299,12 +299,12 @@ catch is the real one.
 
 **What every stub above cannot reach is the image, and that is measured
 separately.** Each of these scripts delegates its checks to a capability of
-`vdorie/psi-link`, and a stub engine answers for the image whatever the image
+`ghcr.io/georgetown-mdi/alcove`, and a stub engine answers for the image whatever the image
 would really have said. `image_smoke.yaml`'s capability gate closes that: it
 derives the set from the scripts -- the psilink argument vectors they hand a
 container, and the helper scripts the `.cmd` pipes into a shell in it -- and runs
 each against a real image, once against the one the job just built and once a
-week against the published `vdorie/psi-link:latest` the setup script actually
+week against the published `ghcr.io/georgetown-mdi/alcove:latest` the setup script actually
 pulls. A helper's in-image tools are resolved by its own run rather than listed,
 and a call site added to any of these scripts fails
 `npm run check:image-capabilities` until something exercises it. What that leaves
@@ -412,7 +412,7 @@ password. Each reached a mounted CIFS volume and reported the same four
 results -- the volume mounts and is writable, the volume and the checks agree
 on the folder, exclusive create and rename behave, and all six checks passed.
 
-**The image change works.** `vdorie/psi-link:latest` pulled (575 MB) and step 3
+**The image change works.** `ghcr.io/georgetown-mdi/alcove:latest` pulled (575 MB) and step 3
 authenticated with the `smbclient` now shipped in it; no `apk add` remains in
 either probe. The section that used to cover a failed package install is gone
 from the troubleshooting page, and nothing still cites it -- checked across both
@@ -498,7 +498,7 @@ denied.
   below mean anything: Samba can be made to serve the Unix extensions a Windows
   server never does, and a rig that does masks the case the mount options exist
   for.
-- **Published image**, which the setup scripts pull: `vdorie/psi-link:latest` =
+- **Published image**, which the setup scripts pull: `ghcr.io/georgetown-mdi/alcove:latest` =
   `sha256:1ac76a1f3db719e9e1b35985ee8f6c817a8147da0ae1a82e6ac79c008566fb90`,
   built 2026-08-16, `User: node`, `id` inside it `uid=1000(node) gid=1000(node)`.
 - **Staging image**, which the launcher ran:
@@ -906,7 +906,7 @@ Everything else runs on one machine with Docker and no special rights:
   `-SkipConfirm` suppresses the confirmation prompt but not the credential
   ones.
 - **The container checks on their own.** `docker run --rm --env SMB_SERVER ...
-  vdorie/psi-link:latest doctor probe`, with `SMB_SERVER`, `SMB_SHARE`,
+  ghcr.io/georgetown-mdi/alcove:latest doctor probe`, with `SMB_SERVER`, `SMB_SHARE`,
   `SMB_PATH`, `SMB_USER`, `SMB_PASS`, `SMB_DOMAIN`, `SMB_DIALECT`, `SMB_MARKER`
   and `SMB_TOKEN` set: the same environment the script exports, and the same
   command it runs. `doctor mount /rz` over the volume is the other half. The

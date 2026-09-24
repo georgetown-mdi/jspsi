@@ -776,7 +776,7 @@ A daily run at 02:00, from the directory holding this exchange's files:
 The container form mounts that directory at the image's working directory (`/work`) and so needs no `cd` (see [Running the CLI](DEPLOYMENT.md#running-the-cli)):
 
 ```text
-0 2 * * * /usr/bin/docker run --rm -v /srv/psilink/agency-b:/work vdorie/psi-link exchange input.csv results.csv --log-file exchange.log
+0 2 * * * /usr/bin/docker run --rm -v /srv/psilink/agency-b:/work ghcr.io/georgetown-mdi/alcove exchange input.csv results.csv --log-file exchange.log
 ```
 
 Both lines name the program by absolute path. A scheduled job runs under the scheduler's environment rather than your shell's, so a bare `psilink` or `docker` may not resolve there -- under cron's minimal `PATH`, or a Task Scheduler service account's -- and the job then fails without ever reaching psilink. Give the full path, or put the program on the scheduling account's `PATH`.

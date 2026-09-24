@@ -109,7 +109,7 @@ interface AcceptKitInput extends AcceptKitExchange {
 /** The published image the sheet's commands run. Named with its registry in
  * full, as the release launchers are, because podman requires the registry
  * prefix and docker accepts it (see `docs/RELEASES.md`). */
-const PSILINK_IMAGE_REPOSITORY = "docker.io/vdorie/psi-link";
+const PSILINK_IMAGE_REPOSITORY = "ghcr.io/georgetown-mdi/alcove";
 
 /**
  * The image tag the sheet names when the build holds no release version -- a

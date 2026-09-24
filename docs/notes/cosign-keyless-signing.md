@@ -124,13 +124,13 @@ which are not indexed here.
 
 ## What this does not settle
 
-**Docker Hub.** The image leg ran against `registry:2`. The signature's storage
-scheme is the conventional tag, which Docker Hub already holds for any image, so
+**The GitHub Container Registry.** The image leg ran against `registry:2`. The signature's storage
+scheme is the conventional tag, which ghcr.io already holds for any image, so
 nothing here is expected to differ -- but the first real release is what
 establishes that, alongside the attestation-reference question RELEASES.md
 already flags in the same position. What that release does with the answer is
 settled: it verifies each signature it produces before building the next image,
-so a storage scheme Docker Hub does not hold fails the release rather than
+so a storage scheme ghcr.io does not hold fails the release rather than
 reaching a partner as an image the published command calls untrusted.
 
 **A verifier with no route to the internet.** `cosign verify` reported the

@@ -185,7 +185,7 @@ if ! command -v smbclient >/dev/null 2>&1; then
   emit "         is fetched only when it is missing, never to refresh one"
   emit "         already on the PC."
   emit ""
-  emit "ACTION:  run 'docker pull vdorie/psi-link:latest' and try again."
+  emit "ACTION:  run 'docker pull ghcr.io/georgetown-mdi/alcove:latest' and try again."
   emit ""
   emit "         If that says the image is already up to date, or this message"
   emit "         comes back after it, the published image does not carry the"

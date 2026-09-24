@@ -673,9 +673,9 @@ Describe 'The image fetch both call sites make' {
         $previous = $env:PSILINK_STUB_ARGS
         try {
             $env:PSILINK_STUB_ARGS = $argsFile
-            $first = Invoke-ImageFetch -Image 'vdorie/psi-link:latest' -Engine $script:PullEngine
+            $first = Invoke-ImageFetch -Image 'ghcr.io/georgetown-mdi/alcove:latest' -Engine $script:PullEngine
             $firstCall = ([string] (Get-Content -LiteralPath $argsFile -Raw)).Trim()
-            $refresh = Invoke-ImageFetch -Image 'vdorie/psi-link:latest' -Engine $script:PullEngine -Refresh
+            $refresh = Invoke-ImageFetch -Image 'ghcr.io/georgetown-mdi/alcove:latest' -Engine $script:PullEngine -Refresh
             $refreshCall = ([string] (Get-Content -LiteralPath $argsFile -Raw)).Trim()
         } finally {
             if ($null -eq $previous) { Remove-Item env:PSILINK_STUB_ARGS -ErrorAction SilentlyContinue }
@@ -686,12 +686,12 @@ Describe 'The image fetch both call sites make' {
         $refresh.ExitCode | Should -Be 0
         $firstCall | Should -Match 'pull' -Because $firstCall
         $firstCall | Should -Match '--quiet' -Because $firstCall
-        $firstCall | Should -Match 'vdorie/psi-link:latest' -Because $firstCall
+        $firstCall | Should -Match 'ghcr.io/georgetown-mdi/alcove:latest' -Because $firstCall
         $refreshCall | Should -Be $firstCall -Because $refreshCall
     }
 
     It 'carries back what an engine that could not fetch anything said' {
-        $result = Invoke-ImageFetch -Image 'vdorie/psi-link:latest' -Engine $script:UnreachableRegistryEngine -Refresh
+        $result = Invoke-ImageFetch -Image 'ghcr.io/georgetown-mdi/alcove:latest' -Engine $script:UnreachableRegistryEngine -Refresh
 
         $result.ExitCode | Should -Be 1
         $result.Output | Should -Match 'proxy refused the connection'
@@ -752,13 +752,13 @@ Describe 'The image capability check' {
     }
 
     It 'calls an image whose doctor answers for itself capable' {
-        $result = Test-DoctorCapableImage -Image 'vdorie/psi-link:latest' -Engine $script:DoctorEngine
+        $result = Test-DoctorCapableImage -Image 'ghcr.io/georgetown-mdi/alcove:latest' -Engine $script:DoctorEngine
 
         $result.Capable | Should -BeTrue
     }
 
     It 'calls an image whose help names no doctor too old, though it exits 0' {
-        $result = Test-DoctorCapableImage -Image 'vdorie/psi-link:latest' -Engine $script:PreDoctorEngine
+        $result = Test-DoctorCapableImage -Image 'ghcr.io/georgetown-mdi/alcove:latest' -Engine $script:PreDoctorEngine
 
         $result.Capable | Should -BeFalse
         $result.Reason | Should -Be 'NoDoctor'
@@ -774,7 +774,7 @@ Describe 'The image capability check' {
         # The two remedies point opposite ways -- refresh the image, versus read
         # what the engine said -- so merging them would send an operator whose
         # Docker is down off pulling an image they already have.
-        $result = Test-DoctorCapableImage -Image 'vdorie/psi-link:latest' -Engine $script:UnstartableEngine
+        $result = Test-DoctorCapableImage -Image 'ghcr.io/georgetown-mdi/alcove:latest' -Engine $script:UnstartableEngine
 
         $result.Capable | Should -BeFalse
         $result.Reason | Should -Be 'EngineFailed'
@@ -788,7 +788,7 @@ Describe 'The image capability check' {
         $previous = $env:PSILINK_STUB_ARGS
         try {
             $env:PSILINK_STUB_ARGS = $argsFile
-            $result = Test-DoctorCapableImage -Image 'vdorie/psi-link:latest' -Engine $script:RecordingEngine
+            $result = Test-DoctorCapableImage -Image 'ghcr.io/georgetown-mdi/alcove:latest' -Engine $script:RecordingEngine
             $result.Capable | Should -BeTrue
         } finally {
             if ($null -eq $previous) { Remove-Item env:PSILINK_STUB_ARGS -ErrorAction SilentlyContinue }
@@ -801,7 +801,7 @@ Describe 'The image capability check' {
         if (Test-Path -LiteralPath $argsFile) {
             $recorded = ([string] (Get-Content -LiteralPath $argsFile -Raw)).Trim()
         }
-        $recorded | Should -Match 'vdorie/psi-link:latest' -Because $recorded
+        $recorded | Should -Match 'ghcr.io/georgetown-mdi/alcove:latest' -Because $recorded
         $recorded | Should -Match 'doctor' -Because $recorded
         $recorded | Should -Match '--help' -Because $recorded
         $recorded | Should -Not -Match 'probe' -Because $recorded
@@ -1001,7 +1001,7 @@ Describe 'The setup flow, driven against a stub engine' {
         # them after an image they already have.
         $run.Output | Should -Match 'fetched just now' -Because $shape
         $run.Output | Should -Match 'Doing it by hand' -Because $shape
-        $run.Output | Should -Not -Match 'docker pull vdorie/psi-link:latest' -Because $shape
+        $run.Output | Should -Not -Match 'docker pull ghcr.io/georgetown-mdi/alcove:latest' -Because $shape
         # The notice the fetch runs under. `pull --quiet` prints nothing until
         # it is done, so a refresh on a failure path that said nothing would
         # read as a hang.

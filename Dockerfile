@@ -106,6 +106,13 @@ RUN --mount=type=cache,target=/root/.npm \
 
 FROM node:26-alpine@sha256:0b36e8c136b94cd4fcf02188228e76c31ad5872eef3fec8cbd2eee500cfd9e80
 
+# The source label is what links the package on ghcr.io to this repository, so
+# a hand-pushed tag inherits the repository's package visibility and access;
+# the release workflow adds the same labels through docker/metadata-action.
+LABEL org.opencontainers.image.source="https://github.com/georgetown-mdi/jspsi" \
+      org.opencontainers.image.description="psilink: privacy-preserving record linkage over SFTP, a shared folder, or WebRTC" \
+      org.opencontainers.image.licenses="Apache-2.0"
+
 # The runtime stage resolves no npm dependency: it copies the builder's
 # production node_modules and mirrors the workspace layout around it so the
 # node_modules/@psilink/core and node_modules/psilink workspace links resolve.
@@ -197,7 +204,7 @@ EXPOSE 3000
 
 # One script switches between the two roles: `serve` runs the web console server,
 # every other argv vector runs the CLI byte-for-byte (backwards compatible with
-# existing `docker run vdorie/psi-link <cli-args>` callers). `exec` in the script
+# existing `docker run ghcr.io/georgetown-mdi/alcove <cli-args>` callers). `exec` in the script
 # makes node PID 1 so it receives signals directly.
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 RUN chmod +x /app/docker-entrypoint.sh

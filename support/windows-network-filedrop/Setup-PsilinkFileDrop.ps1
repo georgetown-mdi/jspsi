@@ -742,7 +742,7 @@ function Get-ConsoleCommandLines {
         "    --env 'JOB_RENDEZVOUS_NAME=$RendezvousName' ``",
         "    -v 'C:\path\to\your\work:/data' ``",
         "    -v '${VolumeName}:/sync' ``",
-        "    vdorie/psi-link:latest serve")
+        "    ghcr.io/georgetown-mdi/alcove:latest serve")
 }
 
 # Everything above defines something; everything below runs the setup. A
@@ -802,9 +802,9 @@ Write-Good "Docker engine $(($dockerInfo.Output -split '\s+')[1]) is running."
 # fetched exits 125, which is indistinguishable from the checks deciding
 # something about the share, and would be reported as a share problem with no
 # diagnosis printed above it.
-$imagePresent = Invoke-Docker -DockerArgs @('image', 'inspect', 'vdorie/psi-link:latest')
+$imagePresent = Invoke-Docker -DockerArgs @('image', 'inspect', 'ghcr.io/georgetown-mdi/alcove:latest')
 if ($imagePresent.ExitCode -ne 0) {
-    $pull = Invoke-ImageFetch -Image 'vdorie/psi-link:latest'
+    $pull = Invoke-ImageFetch -Image 'ghcr.io/georgetown-mdi/alcove:latest'
     if ($pull.ExitCode -ne 0) {
         Write-Bad 'Could not fetch the psilink image the checks run in.'
         Write-Host ''
@@ -854,7 +854,7 @@ if (-not $explicitTarget) {
             Write-Host "  docker run --rm ``"
             Write-Host "    -v 'C:\path\to\your\work:/work' ``"
             Write-Host "    -v '$($resolved.LocalPath):/sync' ``"
-            Write-Host "    vdorie/psi-link:latest ``"
+            Write-Host "    ghcr.io/georgetown-mdi/alcove:latest ``"
             Write-Host "    file:///sync input.csv matches.csv"
             Write-Host ''
             Write-Warn 'If this folder is kept in step with your partner by a sync client'
@@ -934,7 +934,7 @@ if (-not $explicitTarget -and -not $SkipConfirm) {
 # earlier would make a local folder wait on a container it never runs. Below it,
 # part 2 asks for the share password, and an image that cannot produce a verdict
 # has to be turned away before the operator types one.
-$doctorImage = Test-DoctorCapableImage -Image 'vdorie/psi-link:latest'
+$doctorImage = Test-DoctorCapableImage -Image 'ghcr.io/georgetown-mdi/alcove:latest'
 
 # One pull, on the failure path and nowhere else. The guard above fetches an
 # image that is absent and never a newer one, so a copy from before the checks
@@ -955,9 +955,9 @@ if (-not $doctorImage.Capable -and $doctorImage.Reason -eq 'NoDoctor') {
     Write-Note 'before the checks existed stays until something asks the'
     Write-Note 'registry for a newer one.'
     Write-Host ''
-    $refresh = Invoke-ImageFetch -Image 'vdorie/psi-link:latest' -Refresh
+    $refresh = Invoke-ImageFetch -Image 'ghcr.io/georgetown-mdi/alcove:latest' -Refresh
     if ($refresh.ExitCode -eq 0) {
-        $doctorImage = Test-DoctorCapableImage -Image 'vdorie/psi-link:latest'
+        $doctorImage = Test-DoctorCapableImage -Image 'ghcr.io/georgetown-mdi/alcove:latest'
     } else {
         # What the pull said is also whether it failed at all, as the refusal
         # below reads it, so a pull that failed saying nothing has to leave
@@ -1072,7 +1072,7 @@ try {
         '--env', 'SMB_SERVER', '--env', 'SMB_SHARE', '--env', 'SMB_PATH',
         '--env', 'SMB_USER', '--env', 'SMB_DOMAIN', '--env', 'SMB_PASS',
         '--env', 'SMB_DIALECT', '--env', 'SMB_MARKER', '--env', 'SMB_TOKEN',
-        'vdorie/psi-link:latest', 'doctor', 'probe')
+        'ghcr.io/georgetown-mdi/alcove:latest', 'doctor', 'probe')
     $probeExit = $probe.ExitCode
     Write-Host ''
     Write-Host (Hide-Secret -Text $probe.Output -Secret $plainPass)
@@ -1175,7 +1175,7 @@ try {
     $test = Invoke-Docker -DockerArgs @(
         'run', '--rm', '--env', 'SMB_MARKER', '--env', 'SMB_TOKEN',
         '-v', "${VolumeName}:/rz",
-        'vdorie/psi-link:latest', 'doctor', 'mount', '/rz')
+        'ghcr.io/georgetown-mdi/alcove:latest', 'doctor', 'mount', '/rz')
     $testOut = Hide-Secret -Text $test.Output -Secret $plainPass
     Write-Host ''
     Write-Host $testOut
@@ -1281,7 +1281,7 @@ Write-Host ''
 Write-Host "  docker run --rm ``"
 Write-Host "    -v 'C:\path\to\your\work:/work' ``"
 Write-Host "    -v '${VolumeName}:/sync' ``"
-Write-Host "    vdorie/psi-link:latest ``"
+Write-Host "    ghcr.io/georgetown-mdi/alcove:latest ``"
 Write-Host "    file:///sync input.csv matches.csv"
 Write-Host ''
 Write-Info 'C:\path\to\your\work is a LOCAL folder on this PC holding your input'

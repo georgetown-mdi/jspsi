@@ -474,13 +474,13 @@ Check that it mounts and that the folder is the one you meant:
 **PowerShell:**
 
 ```powershell
-docker run --rm -v 'psilink-sync:/rz' --entrypoint sh vdorie/psi-link:latest -c "ls -la /rz"
+docker run --rm -v 'psilink-sync:/rz' --entrypoint sh ghcr.io/georgetown-mdi/alcove:latest -c "ls -la /rz"
 ```
 
 **Command Prompt:**
 
 ```text
-docker run --rm -v "psilink-sync:/rz" --entrypoint sh vdorie/psi-link:latest -c "ls -la /rz"
+docker run --rm -v "psilink-sync:/rz" --entrypoint sh ghcr.io/georgetown-mdi/alcove:latest -c "ls -la /rz"
 ```
 
 This route puts the password on a command line -- in PowerShell, that means your
@@ -520,14 +520,14 @@ bind-mount directly:
 docker run --rm `
   -v 'C:\path\to\your\work:/work' `
   -v 'C:\Users\you\Egnyte\exchange:/sync' `
-  vdorie/psi-link:latest `
+  ghcr.io/georgetown-mdi/alcove:latest `
   file:///sync input.csv matches.csv --lockless-rendezvous
 ```
 
 **Command Prompt:**
 
 ```text
-docker run --rm -v "C:\path\to\your\work:/work" -v "C:\Users\you\Egnyte\exchange:/sync" vdorie/psi-link:latest file:///sync input.csv matches.csv --lockless-rendezvous
+docker run --rm -v "C:\path\to\your\work:/work" -v "C:\Users\you\Egnyte\exchange:/sync" ghcr.io/georgetown-mdi/alcove:latest file:///sync input.csv matches.csv --lockless-rendezvous
 ```
 
 `--lockless-rendezvous` is not optional there and **both parties** must pass it.

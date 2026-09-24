@@ -26,7 +26,7 @@ Similarly, to use a private key:
 npm run dev -w apps/cli --server-private-key=@PEM_FILE sftp://USER@HOST/PATH INPUT_FILE 
 ```
 
-## To build for Docker Hub
+## To build for the GitHub Container Registry
 
 Multi-platform images require a `docker-container`-driver buildx builder. Create
 it once, but do NOT make it your default (no `--use`): a global default
@@ -45,11 +45,13 @@ docker buildx create --name multiarch-builder
 docker buildx inspect --bootstrap multiarch-builder
 ```
 
-Do every time:
+Do every time (the login needs a classic personal access token holding
+`write:packages`; GitHub Packages accepts no other token kind):
 ```sh
+docker login ghcr.io -u <github-user> --password-stdin < <token-file>
 docker buildx build --builder multiarch-builder \
   --platform linux/amd64,linux/arm64 \
-  -t vdorie/psi-link:latest \
+  -t ghcr.io/georgetown-mdi/alcove:latest \
   --push .
 
 docker buildx stop multiarch-builder
@@ -57,11 +59,11 @@ docker buildx stop multiarch-builder
 
 ## To build for testing
 
-Before pushing to Docker hub, from the repository root:
+Before pushing to the registry, from the repository root:
 
 ```sh
-docker image rm -f vdorie/psi-link:latest
-docker build -t vdorie/psi-link:latest .
+docker image rm -f ghcr.io/georgetown-mdi/alcove:latest
+docker build -t ghcr.io/georgetown-mdi/alcove:latest .
 ```
 
 ## Running tests
