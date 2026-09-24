@@ -77,6 +77,13 @@ user-quota=__USER_QUOTA__
 total-quota=__TOTAL_QUOTA__
 max-bps=__MAX_BPS__
 
+# How long an allocation lives without a refresh. Revoking or sweeping a key
+# refuses new allocations but does not end an open one, so this bounds how long
+# an allocation outlives its key once its client stops refreshing (README.md,
+# Per-exchange keys, Revoking). 600 s is RFC 8656's default lifetime, so a
+# standard client that refreshes is not cut short.
+max-allocate-lifetime=600
+
 # coturn's telnet CLI listens on the host with a default password. The web admin
 # interface is off unless it is asked for, and nothing here asks for it.
 no-cli

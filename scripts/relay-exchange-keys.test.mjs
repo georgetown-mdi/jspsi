@@ -1,6 +1,7 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
+  copyFileSync,
   existsSync,
   mkdtempSync,
   readdirSync,
@@ -9,17 +10,27 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
+import { request } from "node:https";
+import { connect } from "node:tls";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
-// The relay's per-exchange key scripts and the configuration render, driven
-// against a fixture host. The container runtime is a stub on PATH that records
-// the turnadmin arguments it is handed and keeps the secrets table as one
-// "<key>[<realm>]" line per row, the form turnadmin -S lists, so the test needs
-// no image and no sqlite3; what coturn does with those arguments is verify.sh's
-// to drive against a running relay.
+// The relay's per-exchange key scripts, the lapse sweep, the registrar service,
+// and the configuration render, driven against a fixture host. The container
+// runtime is a stub on PATH that records the turnadmin arguments it is handed
+// and keeps the secrets table as one "<key>[<realm>]" line per row, the form
+// turnadmin -S lists, so the test needs no image and no sqlite3; what coturn
+// does with those arguments is verify.sh's to drive against a running relay.
 
 const here = dirname(fileURLToPath(import.meta.url));
 const relay = resolve(here, "..", "infra/relay");
@@ -32,6 +43,9 @@ const KEY_C = "fedcba9876543210".repeat(4);
 // scripts must print neither.
 const KEY_LISTED = "5".repeat(64);
 const LISTING_MARKER = "listing-marker";
+// The Unix time the fixture's clock reads until a test moves it.
+const NOW = 1790000000;
+const DAY = 86400;
 const UNOPENABLE_ERROR =
   "ERROR Cannot open SQLite DB connection: <relay.example>: unable to open database file";
 
@@ -111,6 +125,20 @@ const fixtureHost = () => {
       .find(existsSync)} "$@"\n`,
   );
   chmodSync(awkStub, 0o755);
+  // The scripts read the clock as `date -u +%s`; the stub answers that from a
+  // file a test can move, and passes every other use to the real date.
+  const clock = join(root, "now");
+  writeFileSync(clock, `${NOW}\n`);
+  const dateStub = join(root, "date");
+  writeFileSync(
+    dateStub,
+    `#!/bin/bash\nif [ "$*" = '-u +%s' ]; then cat '${clock}'; exit 0; fi\nexec ${process.env.PATH.split(
+      ":",
+    )
+      .map((dir) => join(dir, "date"))
+      .find(existsSync)} "$@"\n`,
+  );
+  chmodSync(dateStub, 0o755);
   const ipHelper = join(root, "external-ip");
   writeFileSync(ipHelper, "#!/bin/bash\necho 192.0.2.10/10.0.0.5\n");
   chmodSync(ipHelper, 0o755);
@@ -134,6 +162,7 @@ const fixtureHost = () => {
     PSILINK_RELAY_EXCHANGE_KEYS: mapFile,
     PSILINK_RELAY_SECRET_FILE: secretFile,
     PSILINK_RELAY_CONF: conf,
+    PSILINK_RELAY_REGISTRAR_TOKEN_FILE: join(root, "registrar-token"),
   };
   const runWith = (extraEnv, script, ...args) => {
     writeFileSync(calls, "");
@@ -172,7 +201,14 @@ const fixtureHost = () => {
         "verify.sh",
       ),
     revoke: (...args) => run("revoke-exchange.sh", ...args),
+    sweep: () => run("sweep-exchanges.sh"),
     render: () => run("render-config.sh"),
+    setClock: (seconds) => writeFileSync(clock, `${seconds}\n`),
+    writeMapping: (text) => writeFileSync(mapFile, text, { mode: 0o600 }),
+    env,
+    root,
+    calls: () => readFileSync(calls, "utf8"),
+    clearCalls: () => writeFileSync(calls, ""),
     mapFile,
     mapping: () => (existsSync(mapFile) ? readFileSync(mapFile, "utf8") : ""),
     mapMode: () => statSync(mapFile).mode & 0o777,
@@ -203,7 +239,7 @@ describe("register-exchange.sh", () => {
     expect(result.turnadmin).toEqual([
       `localhost/psilink-relay:installed -s ${KEY_A} -r relay.example -b /var/lib/coturn/turndb`,
     ]);
-    expect(host.mapping()).toBe(`exchange-1 ${KEY_A}\n`);
+    expect(host.mapping()).toBe(`exchange-1 ${KEY_A} ${NOW} -\n`);
     expect(host.mapMode()).toBe(0o600);
   });
 
@@ -219,7 +255,9 @@ describe("register-exchange.sh", () => {
         ["-X", KEY_A],
       ],
     );
-    expect(host.mapping()).toBe(`exchange-2 ${KEY_B}\nexchange-1 ${KEY_C}\n`);
+    expect(host.mapping()).toBe(
+      `exchange-2 ${KEY_B} ${NOW} -\nexchange-1 ${KEY_C} ${NOW} -\n`,
+    );
   });
 
   it("keeps the prior key and mapping when the new key's add fails", () => {
@@ -229,7 +267,7 @@ describe("register-exchange.sh", () => {
     const result = host.register("exchange-1", KEY_C);
     expect(result.status).toBe(1);
     expect(result.turnadmin.map((line) => line.split(" ")[1])).toEqual(["-s"]);
-    expect(host.mapping()).toBe(`exchange-1 ${KEY_A}\n`);
+    expect(host.mapping()).toBe(`exchange-1 ${KEY_A} ${NOW} -\n`);
   });
 
   it("maps the new key and does not print the prior one when its delete fails", () => {
@@ -245,7 +283,7 @@ describe("register-exchange.sh", () => {
       expect(result.stdout).not.toContain(key);
       expect(result.stderr).not.toContain(key);
     }
-    expect(host.mapping()).toBe(`exchange-1 ${KEY_C}\n`);
+    expect(host.mapping()).toBe(`exchange-1 ${KEY_C} ${NOW} -\n`);
   });
 
   it.each(["mv", "awk"])(
@@ -258,7 +296,7 @@ describe("register-exchange.sh", () => {
       expect(result.status).toBe(1);
       expect(result.stderr).toContain(`could not record it in ${host.mapFile}`);
       expect(result.stderr).not.toContain(KEY_C);
-      expect(host.mapping()).toBe(`exchange-1 ${KEY_A}\n`);
+      expect(host.mapping()).toBe(`exchange-1 ${KEY_A} ${NOW} -\n`);
       expect(host.mappingTemporaries()).toEqual([]);
     },
   );
@@ -277,7 +315,9 @@ describe("register-exchange.sh", () => {
     expect(result.turnadmin.map((line) => line.split(" ").slice(1, 3))).toEqual(
       [["-s", KEY_B]],
     );
-    expect(host.mapping()).toBe(`${registered} ${KEY_A}\n${id} ${KEY_B}\n`);
+    expect(host.mapping()).toBe(
+      `${registered} ${KEY_A} ${NOW} -\n${id} ${KEY_B} ${NOW} -\n`,
+    );
   });
 
   it("tells apart all-digit keys that are equal as floating-point numbers", () => {
@@ -287,16 +327,37 @@ describe("register-exchange.sh", () => {
     host.register("exchange-1", key1);
     const result = host.register("exchange-2", key2);
     expect(result.status, result.stderr).toBe(0);
-    expect(host.mapping()).toBe(`exchange-1 ${key1}\nexchange-2 ${key2}\n`);
+    expect(host.mapping()).toBe(
+      `exchange-1 ${key1} ${NOW} -\nexchange-2 ${key2} ${NOW} -\n`,
+    );
   });
 
-  it("changes nothing when the exchange already holds the key", () => {
+  it("renews the row, not the table, when the exchange already holds the key", () => {
     const host = fixtureHost();
-    host.register("exchange-1", KEY_A);
-    const result = host.register("exchange-1", KEY_A);
-    expect(result.status, result.stderr).toBe(0);
-    expect(result.turnadmin).toEqual([]);
-    expect(host.mapping()).toBe(`exchange-1 ${KEY_A}\n`);
+    host.register("exchange-1", KEY_A, "30");
+    host.setClock(NOW + 100);
+    const renewed = host.register("exchange-1", KEY_A, "7");
+    expect(renewed.status, renewed.stderr).toBe(0);
+    expect(renewed.stdout).toContain("renewed exchange exchange-1");
+    expect(renewed.stdout).not.toContain(KEY_A);
+    expect(renewed.turnadmin).toEqual([]);
+    expect(host.mapping()).toBe(`exchange-1 ${KEY_A} ${NOW + 100} 7\n`);
+    host.setClock(NOW + 200);
+    expect(host.register("exchange-1", KEY_A).status).toBe(0);
+    expect(host.mapping()).toBe(`exchange-1 ${KEY_A} ${NOW + 200} -\n`);
+  });
+
+  it("keeps the row and aborts when a renewal cannot rewrite the mapping", () => {
+    const host = fixtureHost();
+    host.register("exchange-1", KEY_A, "30");
+    host.setClock(NOW + 100);
+    host.failMappingWriteAt("mv");
+    const result = host.register("exchange-1", KEY_A, "7");
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("could not renew exchange exchange-1");
+    expect(result.stderr).not.toContain(KEY_A);
+    expect(host.mapping()).toBe(`exchange-1 ${KEY_A} ${NOW} 30\n`);
+    expect(host.mappingTemporaries()).toEqual([]);
   });
 
   it("refuses a key another exchange holds", () => {
@@ -329,7 +390,7 @@ describe("register-exchange.sh", () => {
     expect(host.table()).toBe(
       `${KEY_LISTED}[relay.example]\n${KEY_B}[relay.example]\n`,
     );
-    expect(host.mapping()).toBe(`exchange-1 ${KEY_B}\n`);
+    expect(host.mapping()).toBe(`exchange-1 ${KEY_B} ${NOW} -\n`);
   });
 
   it("aborts before the mapping when the table silently takes no row", () => {
@@ -362,7 +423,7 @@ describe("register-exchange.sh", () => {
     const result = host.register("exchange-1", KEY_C);
     expect(result.status).toBe(1);
     expect(result.turnadmin.map((line) => line.split(" ")[1])).toEqual(["-s"]);
-    expect(host.mapping()).toBe(`exchange-1 ${KEY_A}\n`);
+    expect(host.mapping()).toBe(`exchange-1 ${KEY_A} ${NOW} -\n`);
   });
 
   it("maps the new key and aborts when the prior key's delete silently fails", () => {
@@ -372,7 +433,7 @@ describe("register-exchange.sh", () => {
     const result = host.register("exchange-1", KEY_C);
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("could not remove its prior key");
-    expect(host.mapping()).toBe(`exchange-1 ${KEY_C}\n`);
+    expect(host.mapping()).toBe(`exchange-1 ${KEY_C} ${NOW} -\n`);
     expect(host.table()).toContain(`${KEY_A}[relay.example]`);
   });
 
@@ -395,6 +456,15 @@ describe("register-exchange.sh", () => {
     ["a 63-character key", "exchange-1", KEY_A.slice(1), "key-hex64"],
     ["a base64 key", "exchange-1", "q".repeat(43) + "=", "key-hex64"],
     ["a key given as the id", KEY_B, KEY_A, "exchange-id"],
+    [
+      "an id of a key with a leading character",
+      `x${KEY_B}`,
+      KEY_A,
+      "exchange-id",
+    ],
+    ["an id of a key with a trailing dot", `${KEY_B}.`, KEY_A, "exchange-id"],
+    ["an id of a name and a key", `name-${KEY_B}`, KEY_A, "exchange-id"],
+    ["an id of an uppercase key", KEY_B.toUpperCase(), KEY_A, "exchange-id"],
   ])("refuses %s, naming the argument", (_, id, key, argument) => {
     const host = fixtureHost();
     const result = host.register(id, key);
@@ -407,16 +477,839 @@ describe("register-exchange.sh", () => {
     expect(result.listings).toBe(0);
   });
 
-  it("registers an id of 64 hex characters that is not all lowercase", () => {
+  it("registers an id holding a run of 63 hex characters", () => {
     const host = fixtureHost();
-    const result = host.register(KEY_B.toUpperCase(), KEY_A);
+    const id = `x${KEY_B.slice(1)}.${KEY_C.slice(1).toUpperCase()}`;
+    const result = host.register(id, KEY_A);
     expect(result.status, result.stderr).toBe(0);
+    expect(host.mapping()).toBe(`${id} ${KEY_A} ${NOW} -\n`);
   });
 
-  it("prints usage on the wrong argument count", () => {
-    const result = fixtureHost().register("exchange-1");
-    expect(result.status).toBe(2);
-    expect(result.stderr).toContain("usage: register-exchange.sh");
+  it.each([[["exchange-1"]], [["exchange-1", KEY_A, "30", "extra"]]])(
+    "prints usage on the wrong argument count (%j)",
+    (args) => {
+      const result = fixtureHost().register(...args);
+      expect(result.status).toBe(2);
+      expect(result.stderr).toContain("usage: register-exchange.sh");
+    },
+  );
+});
+
+// The managed-exchange record's max-age ceiling, read from core rather than
+// restated, so the shell's bound cannot drift from the record's.
+const MAX_TOKEN_MAX_AGE_DAYS = Number(
+  /export const MAX_TOKEN_MAX_AGE_DAYS = (\d+);/.exec(
+    readFileSync(
+      resolve(here, "..", "packages/core/src/config/connection.ts"),
+      "utf8",
+    ),
+  )[1],
+);
+
+describe("register-exchange.sh max-age-days", () => {
+  it("stamps the row with the registration time and its lapse", () => {
+    const host = fixtureHost();
+    const result = host.register("exchange-1", KEY_A, "30");
+    expect(result.status, result.stderr).toBe(0);
+    expect(host.mapping()).toBe(`exchange-1 ${KEY_A} ${NOW} 30\n`);
+  });
+
+  it("accepts the managed-exchange record's largest max age and refuses one day more", () => {
+    const host = fixtureHost();
+    const most = host.register(
+      "exchange-1",
+      KEY_A,
+      `${MAX_TOKEN_MAX_AGE_DAYS}`,
+    );
+    expect(most.status, most.stderr).toBe(0);
+    const over = host.register(
+      "exchange-2",
+      KEY_B,
+      `${MAX_TOKEN_MAX_AGE_DAYS + 1}`,
+    );
+    expect(over.status).toBe(1);
+    expect(over.stderr).toContain("max-age-days");
+    expect(over.turnadmin).toEqual([]);
+  });
+
+  it.each(["", "0", "007", "1.5", "-1", "1e3", "99999999999999999999"])(
+    "refuses max-age-days %j before touching the table",
+    (days) => {
+      const host = fixtureHost();
+      const result = host.register("exchange-1", KEY_A, days);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("max-age-days");
+      expect(result.turnadmin).toEqual([]);
+      expect(result.listings).toBe(0);
+    },
+  );
+});
+
+describe("sweep-exchanges.sh", () => {
+  it("revokes a row once it is max-age-days old, and not a second before", () => {
+    const host = fixtureHost();
+    host.register("exchange-1", KEY_A, "1");
+    host.setClock(NOW + DAY - 1);
+    const early = host.sweep();
+    expect(early.status, early.stderr).toBe(0);
+    expect(early.turnadmin).toEqual([]);
+    expect(host.mapping()).toBe(`exchange-1 ${KEY_A} ${NOW} 1\n`);
+    host.setClock(NOW + DAY);
+    const due = host.sweep();
+    expect(due.status, due.stderr).toBe(0);
+    expect(due.turnadmin.map((line) => line.split(" ").slice(1, 3))).toEqual([
+      ["-X", KEY_A],
+    ]);
+    expect(due.stdout).toContain("revoked exchange exchange-1");
+    expect(host.mapping()).toBe("");
+    expect(host.table()).toBe(`${KEY_LISTED}[relay.example]\n`);
+  });
+
+  it("never sweeps a row registered without a lapse, or one with no stamp", () => {
+    const host = fixtureHost();
+    host.register("exchange-1", KEY_A);
+    host.writeMapping(`${host.mapping()}exchange-2 ${KEY_B}\n`);
+    host.setClock(NOW + 100 * 365 * DAY);
+    const result = host.sweep();
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.turnadmin).toEqual([]);
+    expect(host.mapping()).toBe(
+      `exchange-1 ${KEY_A} ${NOW} -\nexchange-2 ${KEY_B}\n`,
+    );
+  });
+
+  it("restarts the count at each registration of a new key", () => {
+    const host = fixtureHost();
+    host.register("exchange-1", KEY_A, "1");
+    host.setClock(NOW + DAY - 10);
+    host.register("exchange-1", KEY_B, "1");
+    host.setClock(NOW + DAY);
+    expect(host.sweep().turnadmin).toEqual([]);
+    host.setClock(NOW + 2 * DAY - 10);
+    const due = host.sweep();
+    expect(due.turnadmin.map((line) => line.split(" ").slice(1, 3))).toEqual([
+      ["-X", KEY_B],
+    ]);
+    expect(host.mapping()).toBe("");
+  });
+
+  it("counts a same-key renewal from its own stamp and max age", () => {
+    const host = fixtureHost();
+    host.register("exchange-1", KEY_A, "1");
+    const renewed = NOW + 86000;
+    host.setClock(renewed);
+    host.register("exchange-1", KEY_A, "2");
+    host.setClock(NOW + DAY);
+    expect(host.sweep().turnadmin).toEqual([]);
+    host.setClock(renewed + 2 * DAY - 1);
+    expect(host.sweep().turnadmin).toEqual([]);
+    expect(host.mapping()).toBe(`exchange-1 ${KEY_A} ${renewed} 2\n`);
+    host.setClock(renewed + 2 * DAY);
+    const due = host.sweep();
+    expect(due.status, due.stderr).toBe(0);
+    expect(due.turnadmin.map((line) => line.split(" ").slice(1, 3))).toEqual([
+      ["-X", KEY_A],
+    ]);
+    expect(host.mapping()).toBe("");
+  });
+
+  it("sweeps only the lapsed id among ids equal as numbers", () => {
+    const host = fixtureHost();
+    host.register("1", KEY_A, "1");
+    host.setClock(NOW + DAY / 2);
+    host.register("1.0", KEY_B, "1");
+    host.register("01", KEY_C);
+    host.setClock(NOW + DAY);
+    const result = host.sweep();
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.turnadmin.map((line) => line.split(" ").slice(1, 3))).toEqual(
+      [["-X", KEY_A]],
+    );
+    expect(host.mapping()).toBe(
+      `1.0 ${KEY_B} ${NOW + DAY / 2} 1\n01 ${KEY_C} ${NOW + DAY / 2} -\n`,
+    );
+  });
+
+  it("revokes the rest past a failed revoke, keeps its line, and exits non-zero", () => {
+    const host = fixtureHost();
+    host.register("exchange-1", KEY_A, "1");
+    host.register("exchange-2", KEY_B, "1");
+    host.failTurnadminOn(KEY_A);
+    host.setClock(NOW + DAY);
+    const result = host.sweep();
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      "could not revoke lapsed exchange exchange-1",
+    );
+    expect(result.stdout).toContain("revoked exchange exchange-2");
+    for (const stream of [result.stdout, result.stderr]) {
+      expect(stream).not.toContain(KEY_A);
+      expect(stream).not.toContain(KEY_B);
+    }
+    expect(host.mapping()).toBe(`exchange-1 ${KEY_A} ${NOW} 1\n`);
+  });
+});
+
+const REGISTRAR_TOKEN = "7".repeat(64);
+let certDir;
+
+beforeAll(() => {
+  certDir = mkdtempSync(join(tmpdir(), "relay-registrar-cert-"));
+  const made = spawnSync(
+    "openssl",
+    [
+      "req",
+      "-x509",
+      "-newkey",
+      "ec",
+      "-pkeyopt",
+      "ec_paramgen_curve:P-256",
+      "-nodes",
+      "-days",
+      "2",
+      "-subj",
+      "/CN=relay.example",
+      "-addext",
+      "subjectAltName=DNS:relay.example",
+      "-keyout",
+      join(certDir, "privkey.pem"),
+      "-out",
+      join(certDir, "fullchain.pem"),
+    ],
+    { encoding: "utf8" },
+  );
+  expect(made.status, made.stderr).toBe(0);
+});
+
+afterAll(() => {
+  rmSync(certDir, { recursive: true, force: true });
+});
+
+const registrars = [];
+
+afterEach(() => {
+  while (registrars.length > 0) registrars.pop().kill();
+});
+
+const registrarEnv = (host, token = REGISTRAR_TOKEN) => {
+  const tokenFile = join(host.root, "registrar-token");
+  writeFileSync(tokenFile, `${token}\n`, { mode: 0o600 });
+  return {
+    ...host.env,
+    PSILINK_RELAY_REGISTRAR_TOKEN_FILE: tokenFile,
+    PSILINK_RELAY_CERT_DIR: certDir,
+  };
+};
+
+// Starts the registrar on a free port and resolves once it is listening.
+const startRegistrar = (host, script = join(relay, "registrar.py")) =>
+  new Promise((resolvePort, reject) => {
+    const child = spawn("python3", [script], {
+      env: { ...registrarEnv(host), PSILINK_RELAY_REGISTRAR_PORT: "0" },
+    });
+    registrars.push(child);
+    const log = { stderr: "" };
+    child.stderr.on("data", (chunk) => {
+      log.stderr += chunk;
+    });
+    child.stdout.on("data", (chunk) => {
+      const match = /listening on port (\d+)/.exec(String(chunk));
+      if (match) resolvePort({ port: Number(match[1]), log });
+    });
+    child.on("exit", (code) =>
+      reject(new Error(`registrar exited ${code}: ${log.stderr}`)),
+    );
+  });
+
+// Starts a copy of the registrar beside stub register and revoke scripts that
+// record each launch by name and exit 0.
+const startStubbedRegistrar = async (host) => {
+  const dir = mkdtempSync(join(tmpdir(), "relay-registrar-stubs-"));
+  const launches = join(dir, "launches");
+  writeFileSync(launches, "");
+  const script = join(dir, "registrar.py");
+  copyFileSync(join(relay, "registrar.py"), script);
+  for (const name of ["register-exchange.sh", "revoke-exchange.sh"]) {
+    writeFileSync(
+      join(dir, name),
+      `#!/bin/bash\nprintf '%s\\n' '${name}' >> '${launches}'\necho done\n`,
+    );
+    chmodSync(join(dir, name), 0o755);
+  }
+  const started = await startRegistrar(host, script);
+  return {
+    ...started,
+    launches: () => readFileSync(launches, "utf8"),
+    remove: () => rmSync(dir, { recursive: true, force: true }),
+  };
+};
+
+const call = (port, method, path, { token, body, headers = {} } = {}) =>
+  new Promise((resolveResponse, reject) => {
+    const payload = body === undefined ? undefined : Buffer.from(body);
+    const req = request(
+      {
+        host: "127.0.0.1",
+        port,
+        method,
+        path,
+        servername: "relay.example",
+        ca: readFileSync(join(certDir, "fullchain.pem")),
+        headers: {
+          ...(token === undefined ? {} : { Authorization: `Bearer ${token}` }),
+          ...(payload === undefined
+            ? {}
+            : { "Content-Length": String(payload.length) }),
+          ...headers,
+        },
+      },
+      (res) => {
+        let text = "";
+        res.on("data", (chunk) => {
+          text += chunk;
+        });
+        res.on("end", () =>
+          resolveResponse({
+            status: res.statusCode,
+            headers: res.headers,
+            text,
+          }),
+        );
+      },
+    );
+    req.on("error", reject);
+    req.end(payload);
+  });
+
+// Writes raw requests on one connection and resolves with everything the
+// registrar sends back once it closes the connection.
+const callRaw = (port, requests) =>
+  new Promise((resolveText, reject) => {
+    const socket = connect(
+      {
+        host: "127.0.0.1",
+        port,
+        servername: "relay.example",
+        ca: readFileSync(join(certDir, "fullchain.pem")),
+      },
+      () => socket.write(requests.join("")),
+    );
+    let text = "";
+    socket.on("data", (chunk) => {
+      text += chunk;
+    });
+    socket.on("end", () => resolveText(text));
+    socket.on("error", reject);
+  });
+
+const rawRequest = (method, path, headers, body = "") =>
+  [
+    `${method} ${path} HTTP/1.1`,
+    "Host: relay.example",
+    ...Object.entries(headers).map(([name, value]) => `${name}: ${value}`),
+    `Content-Length: ${Buffer.byteLength(body)}`,
+    "",
+    body,
+  ].join("\r\n");
+
+// Each test starts a Python process and runs the key scripts; a loaded host
+// takes longer than the default five seconds.
+describe("registrar.py", { timeout: 60000 }, () => {
+  it.each([
+    ["PUT", undefined, {}],
+    ["PUT", "8".repeat(64), {}],
+    ["PUT", undefined, { Authorization: `Basic ${REGISTRAR_TOKEN}` }],
+    ["PUT", undefined, { Authorization: REGISTRAR_TOKEN }],
+    ["DELETE", undefined, {}],
+    ["DELETE", REGISTRAR_TOKEN.slice(1), {}],
+    ["GET", undefined, {}],
+    ["POST", undefined, {}],
+  ])(
+    "refuses %s without the token (%j, %j) and runs nothing",
+    async (method, token, headers) => {
+      const host = fixtureHost();
+      host.register("exchange-1", KEY_A);
+      const { port } = await startRegistrar(host);
+      const before = host.mapping();
+      host.clearCalls();
+      const response = await call(port, method, "/exchanges/exchange-1", {
+        token,
+        headers,
+        body: JSON.stringify({ key: KEY_B }),
+      });
+      expect(response.status).toBe(401);
+      expect(response.headers["www-authenticate"]).toContain("Bearer");
+      expect(host.calls()).toBe("");
+      expect(host.mapping()).toBe(before);
+    },
+  );
+
+  it("answers a CORS preflight without the token and runs nothing", async () => {
+    const host = fixtureHost();
+    const { port } = await startRegistrar(host);
+    const response = await call(port, "OPTIONS", "/exchanges/exchange-1");
+    expect(response.status).toBe(204);
+    expect(response.headers["access-control-allow-methods"]).toBe(
+      "PUT, DELETE",
+    );
+    expect(response.headers["access-control-allow-headers"]).toContain(
+      "Authorization",
+    );
+    expect(host.calls()).toBe("");
+  });
+
+  it("registers, replaces the prior row, and revokes", async () => {
+    const host = fixtureHost();
+    const { port, log } = await startRegistrar(host);
+    const first = await call(port, "PUT", "/exchanges/exchange-1", {
+      token: REGISTRAR_TOKEN,
+      body: JSON.stringify({ key: KEY_A, maxAgeDays: 30 }),
+    });
+    expect(first.status, first.text).toBe(200);
+    expect(JSON.parse(first.text).message).toContain(
+      "registered exchange exchange-1",
+    );
+    expect(host.mapping()).toBe(`exchange-1 ${KEY_A} ${NOW} 30\n`);
+    expect(host.table()).toContain(`${KEY_A}[relay.example]`);
+
+    const second = await call(port, "PUT", "/exchanges/exchange-1", {
+      token: REGISTRAR_TOKEN,
+      body: JSON.stringify({ key: KEY_B }),
+    });
+    expect(second.status, second.text).toBe(200);
+    expect(host.mapping()).toBe(`exchange-1 ${KEY_B} ${NOW} -\n`);
+    expect(host.table()).not.toContain(KEY_A);
+    expect(host.table()).toContain(`${KEY_B}[relay.example]`);
+
+    const revoked = await call(port, "DELETE", "/exchanges/exchange-1", {
+      token: REGISTRAR_TOKEN,
+    });
+    expect(revoked.status, revoked.text).toBe(200);
+    expect(host.mapping()).toBe("");
+    expect(host.table()).toBe(`${KEY_LISTED}[relay.example]\n`);
+
+    await vi.waitFor(() => {
+      expect(log.stderr).toMatch(
+        /register-exchange\.sh: registered exchange exchange-1/,
+      );
+      expect(log.stderr).toMatch(/revoke-exchange\.sh: .*exchange-1/);
+    });
+    for (const text of [first.text, second.text, revoked.text, log.stderr]) {
+      expect(text).not.toContain(KEY_A);
+      expect(text).not.toContain(KEY_B);
+      expect(text).not.toContain(REGISTRAR_TOKEN);
+    }
+  });
+
+  it("answers a script's refusal 409 with its reason and never the key", async () => {
+    const host = fixtureHost();
+    host.register("exchange-1", KEY_A);
+    const { port, log } = await startRegistrar(host);
+    const held = await call(port, "PUT", "/exchanges/exchange-2", {
+      token: REGISTRAR_TOKEN,
+      body: JSON.stringify({ key: KEY_A }),
+    });
+    expect(held.status).toBe(409);
+    expect(JSON.parse(held.text).error).toContain(
+      "already registered for exchange exchange-1",
+    );
+    const unregistered = await call(port, "DELETE", "/exchanges/exchange-9", {
+      token: REGISTRAR_TOKEN,
+    });
+    expect(unregistered.status).toBe(409);
+    expect(JSON.parse(unregistered.text).error).toContain(
+      "exchange-id exchange-9 is not registered",
+    );
+    for (const text of [held.text, log.stderr]) {
+      expect(text).not.toContain(KEY_A);
+    }
+    expect(host.mapping()).toBe(`exchange-1 ${KEY_A} ${NOW} -\n`);
+  });
+
+  it("accepts the managed-exchange record's largest max age", async () => {
+    const host = fixtureHost();
+    const { port } = await startRegistrar(host);
+    const response = await call(port, "PUT", "/exchanges/exchange-1", {
+      token: REGISTRAR_TOKEN,
+      body: JSON.stringify({ key: KEY_A, maxAgeDays: MAX_TOKEN_MAX_AGE_DAYS }),
+    });
+    expect(response.status, response.text).toBe(200);
+    expect(host.mapping()).toBe(
+      `exchange-1 ${KEY_A} ${NOW} ${MAX_TOKEN_MAX_AGE_DAYS}\n`,
+    );
+  });
+
+  const keyBody = (key, maxAgeDays = "") =>
+    `{"key": ${JSON.stringify(key)}${maxAgeDays === "" ? "" : `, "maxAgeDays": ${maxAgeDays}`}}`;
+  const idRefusal =
+    "exchange-id must be 1 to 128 of [A-Za-z0-9._-], not starting with '-' and not containing a run of 64 hex characters";
+
+  it.each([
+    ["an id of $(id)", "PUT", "/exchanges/$(id)", keyBody(KEY_A), idRefusal],
+    ["an id of $(id)", "DELETE", "/exchanges/$(id)", "", idRefusal],
+    [
+      "an id with a semicolon",
+      "PUT",
+      "/exchanges/a;b",
+      keyBody(KEY_A),
+      idRefusal,
+    ],
+    ["an id with a semicolon", "DELETE", "/exchanges/a;b", "", idRefusal],
+    [
+      "a 3000-character id",
+      "PUT",
+      `/exchanges/${"a".repeat(3000)}`,
+      keyBody(KEY_A),
+      idRefusal,
+    ],
+    [
+      "a 3000-character id",
+      "DELETE",
+      `/exchanges/${"a".repeat(3000)}`,
+      "",
+      idRefusal,
+    ],
+    ["an id starting with '-'", "DELETE", "/exchanges/-rf", "", idRefusal],
+    [
+      "an id shaped like a key",
+      "PUT",
+      `/exchanges/${KEY_B}`,
+      keyBody(KEY_A),
+      idRefusal,
+    ],
+    [
+      "an id of a key with a leading character",
+      "PUT",
+      `/exchanges/x${KEY_B}`,
+      keyBody(KEY_A),
+      idRefusal,
+    ],
+    [
+      "an id of a key with a trailing dot",
+      "PUT",
+      `/exchanges/${KEY_B}.`,
+      keyBody(KEY_A),
+      idRefusal,
+    ],
+    [
+      "an id of a name and a key",
+      "PUT",
+      `/exchanges/name-${KEY_B}`,
+      keyBody(KEY_A),
+      idRefusal,
+    ],
+    [
+      "an id of an uppercase key",
+      "PUT",
+      `/exchanges/${KEY_B.toUpperCase()}`,
+      keyBody(KEY_A),
+      idRefusal,
+    ],
+    [
+      "a key with a space",
+      "PUT",
+      "/exchanges/exchange-1",
+      keyBody(`${KEY_A.slice(1)} `),
+      "key must be 64 lowercase hex characters [0-9a-f]",
+    ],
+    [
+      "a key with a newline",
+      "PUT",
+      "/exchanges/exchange-1",
+      keyBody(`${KEY_A.slice(1)}\n`),
+      "key must be 64 lowercase hex characters [0-9a-f]",
+    ],
+    [
+      "an uppercase key",
+      "PUT",
+      "/exchanges/exchange-1",
+      keyBody(KEY_A.toUpperCase()),
+      "key must be 64 lowercase hex characters [0-9a-f]",
+    ],
+    [
+      "maxAgeDays -1",
+      "PUT",
+      "/exchanges/exchange-1",
+      keyBody(KEY_A, "-1"),
+      "maxAgeDays must be a whole number of days from 1 to 36500",
+    ],
+    [
+      "maxAgeDays 0",
+      "PUT",
+      "/exchanges/exchange-1",
+      keyBody(KEY_A, "0"),
+      "maxAgeDays must be a whole number of days from 1 to 36500",
+    ],
+    [
+      "maxAgeDays 99999999999999999999",
+      "PUT",
+      "/exchanges/exchange-1",
+      keyBody(KEY_A, "99999999999999999999"),
+      "maxAgeDays must be a whole number of days from 1 to 36500",
+    ],
+    [
+      "one day over the largest maxAgeDays",
+      "PUT",
+      "/exchanges/exchange-1",
+      keyBody(KEY_A, `${MAX_TOKEN_MAX_AGE_DAYS + 1}`),
+      "maxAgeDays must be a whole number of days from 1 to 36500",
+    ],
+  ])(
+    "refuses %s (%s) 400 naming the field and launches no script",
+    async (_, method, path, body, refusal) => {
+      const host = fixtureHost();
+      const stubbed = await startStubbedRegistrar(host);
+      try {
+        const response = await call(stubbed.port, method, path, {
+          token: REGISTRAR_TOKEN,
+          body: body === "" ? undefined : body,
+        });
+        expect(response.status).toBe(400);
+        expect(JSON.parse(response.text).error).toBe(refusal);
+        expect(stubbed.launches()).toBe("");
+      } finally {
+        stubbed.remove();
+      }
+    },
+  );
+
+  it("launches the script for a well-formed request", async () => {
+    const host = fixtureHost();
+    const stubbed = await startStubbedRegistrar(host);
+    try {
+      const response = await call(
+        stubbed.port,
+        "DELETE",
+        "/exchanges/exchange-1",
+        {
+          token: REGISTRAR_TOKEN,
+        },
+      );
+      expect(response.status, response.text).toBe(200);
+      expect(stubbed.launches()).toBe("revoke-exchange.sh\n");
+    } finally {
+      stubbed.remove();
+    }
+  });
+
+  it("launches the script for an id holding a run of 63 hex characters", async () => {
+    const host = fixtureHost();
+    const stubbed = await startStubbedRegistrar(host);
+    try {
+      const response = await call(
+        stubbed.port,
+        "PUT",
+        `/exchanges/x${KEY_B.slice(1)}.${KEY_C.slice(1).toUpperCase()}`,
+        { token: REGISTRAR_TOKEN, body: keyBody(KEY_A) },
+      );
+      expect(response.status, response.text).toBe(200);
+      expect(stubbed.launches()).toBe("register-exchange.sh\n");
+    } finally {
+      stubbed.remove();
+    }
+  });
+
+  it("journals no path that can carry a key", async () => {
+    const host = fixtureHost();
+    const { port, log } = await startRegistrar(host);
+    const put = await call(port, "PUT", `/exchanges/${KEY_A}`, {
+      token: REGISTRAR_TOKEN,
+      body: JSON.stringify({ key: KEY_B }),
+    });
+    expect(put.status).toBe(400);
+    const deleted = await call(port, "DELETE", `/exchanges/${KEY_A}`, {
+      token: REGISTRAR_TOKEN,
+    });
+    expect(deleted.status).toBe(400);
+    const unauthorized = await call(port, "DELETE", `/exchanges/${KEY_A}`);
+    expect(unauthorized.status).toBe(401);
+    const malformed = await Promise.all(
+      [
+        `PUT /exchanges/${KEY_A} HTTP/1.1 extra\r\n\r\n`,
+        `${KEY_A} /exchanges/exchange-1 HTTP/1.1\r\nConnection: close\r\n\r\n`,
+        `PUT ${KEY_A}\r\n\r\n`,
+        `PUT /exchanges/exchange-1 HTTP/${KEY_A}\r\n\r\n`,
+      ].map((line) => callRaw(port, [line])),
+    );
+    for (const text of malformed) {
+      expect(text).not.toContain(KEY_A);
+    }
+    await vi.waitFor(() => {
+      expect(
+        log.stderr.split("\n").filter((line) => / 40\d$/.test(line)),
+      ).toHaveLength(7);
+    });
+    expect(log.stderr).toContain("(path withheld) 400");
+    expect(log.stderr).not.toMatch(/[0-9a-f]{64}/);
+    const registered = await call(port, "DELETE", "/exchanges/exchange-1", {
+      token: REGISTRAR_TOKEN,
+    });
+    expect(registered.status).toBe(409);
+    await vi.waitFor(() =>
+      expect(log.stderr).toContain("DELETE /exchanges/exchange-1 409"),
+    );
+  });
+
+  it.each(["TRACE", "PROPFIND", "CONNECT", "GET"])(
+    "refuses %s in JSON, 401 without the token and 405 with it",
+    async (method) => {
+      const host = fixtureHost();
+      host.register("exchange-1", KEY_A);
+      const { port } = await startRegistrar(host);
+      host.clearCalls();
+      for (const [headers, status] of [
+        [{}, "401"],
+        [{ Authorization: `Bearer ${REGISTRAR_TOKEN}` }, "405"],
+      ]) {
+        const text = await callRaw(port, [
+          rawRequest(method, "/exchanges/exchange-1", {
+            ...headers,
+            Connection: "close",
+          }),
+        ]);
+        expect(text).toMatch(new RegExp(`^HTTP/1\\.1 ${status} `));
+        expect(text).toMatch(/^Content-Type: application\/json\r$/im);
+        expect(
+          JSON.parse(text.slice(text.indexOf("\r\n\r\n") + 4)),
+        ).toHaveProperty("error");
+      }
+      expect(host.calls()).toBe("");
+      expect(host.mapping()).toBe(`exchange-1 ${KEY_A} ${NOW} -\n`);
+    },
+  );
+
+  it.each([
+    ["not JSON", "{"],
+    ["an array", JSON.stringify([KEY_A])],
+    ["no key", JSON.stringify({ maxAgeDays: 3 })],
+    ["an unknown field", JSON.stringify({ key: KEY_A, label: "x" })],
+    ["a numeric key", JSON.stringify({ key: 7 })],
+    ["maxAgeDays as a string", JSON.stringify({ key: KEY_A, maxAgeDays: "3" })],
+    [
+      "maxAgeDays as a boolean",
+      JSON.stringify({ key: KEY_A, maxAgeDays: true }),
+    ],
+    [
+      "a fractional maxAgeDays",
+      JSON.stringify({ key: KEY_A, maxAgeDays: 1.5 }),
+    ],
+  ])("refuses a body with %s 400 before running a script", async (_, body) => {
+    const host = fixtureHost();
+    const { port } = await startRegistrar(host);
+    const response = await call(port, "PUT", "/exchanges/exchange-1", {
+      token: REGISTRAR_TOKEN,
+      body,
+    });
+    expect(response.status).toBe(400);
+    expect(response.text).not.toContain(KEY_A);
+    expect(host.calls()).toBe("");
+  });
+
+  it("refuses an oversized or unsized body before reading it", async () => {
+    const host = fixtureHost();
+    const { port } = await startRegistrar(host);
+    const oversized = await call(port, "PUT", "/exchanges/exchange-1", {
+      token: REGISTRAR_TOKEN,
+      body: JSON.stringify({ key: KEY_A, pad: "x".repeat(2000) }),
+    });
+    expect(oversized.status).toBe(413);
+    const chunked = await call(port, "PUT", "/exchanges/exchange-1", {
+      token: REGISTRAR_TOKEN,
+      headers: { "Transfer-Encoding": "chunked" },
+    });
+    expect(chunked.status).toBe(411);
+    expect(host.calls()).toBe("");
+  });
+
+  it.each(["/exchanges/", "/exchanges/a/b", "/exchanges/a?b=c", "/other"])(
+    "answers %s 404 with the token and runs nothing",
+    async (path) => {
+      const host = fixtureHost();
+      const { port } = await startRegistrar(host);
+      const response = await call(port, "DELETE", path, {
+        token: REGISTRAR_TOKEN,
+      });
+      expect(response.status).toBe(404);
+      expect(host.calls()).toBe("");
+    },
+  );
+
+  it("reads a DELETE's and a preflight's body so the next request parses", async () => {
+    const host = fixtureHost();
+    host.register("exchange-1", KEY_A);
+    const { port } = await startRegistrar(host);
+    const auth = { Authorization: `Bearer ${REGISTRAR_TOKEN}` };
+    const text = await callRaw(port, [
+      rawRequest("DELETE", "/exchanges/exchange-1", auth, '{"ignored": 1}'),
+      rawRequest("OPTIONS", "/exchanges/exchange-2", {}, '{"ignored": 2}'),
+      rawRequest(
+        "PUT",
+        "/exchanges/exchange-2",
+        { ...auth, Connection: "close" },
+        JSON.stringify({ key: KEY_B }),
+      ),
+    ]);
+    expect(
+      [...text.matchAll(/^HTTP\/1\.1 (\d{3})/gm)].map((match) => match[1]),
+    ).toEqual(["200", "204", "200"]);
+    expect(host.mapping()).toBe(`exchange-2 ${KEY_B} ${NOW} -\n`);
+  });
+
+  it("ends the connection after a DELETE whose body it does not read", async () => {
+    const host = fixtureHost();
+    host.register("exchange-1", KEY_A);
+    const { port } = await startRegistrar(host);
+    const text = await callRaw(port, [
+      rawRequest(
+        "DELETE",
+        "/exchanges/exchange-1",
+        { Authorization: `Bearer ${REGISTRAR_TOKEN}` },
+        "x".repeat(2000),
+      ),
+    ]);
+    expect(text).toMatch(/^HTTP\/1\.1 200/);
+    expect(text).toMatch(/^Connection: close\r$/im);
+    expect(host.mapping()).toBe("");
+  });
+
+  it("answers a script that cannot start 500 without the error text", async () => {
+    const host = fixtureHost();
+    const alone = mkdtempSync(join(tmpdir(), "relay-registrar-alone-"));
+    try {
+      const script = join(alone, "registrar.py");
+      copyFileSync(join(relay, "registrar.py"), script);
+      const { port, log } = await startRegistrar(host, script);
+      const response = await call(port, "PUT", "/exchanges/exchange-1", {
+        token: REGISTRAR_TOKEN,
+        body: JSON.stringify({ key: KEY_A }),
+      });
+      expect(response.status).toBe(500);
+      expect(JSON.parse(response.text).error).toBe(
+        "the relay could not start register-exchange.sh; the registrar's journal names the cause",
+      );
+      expect(response.text).not.toContain(alone);
+      await vi.waitFor(() =>
+        expect(log.stderr).toContain("could not start register-exchange.sh"),
+      );
+      expect(log.stderr).not.toContain(KEY_A);
+    } finally {
+      rmSync(alone, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ["a short token", "a".repeat(31)],
+    ["a token with punctuation", `${"a".repeat(40)}!`],
+    ["an empty token", ""],
+  ])("refuses to start with %s", (_, token) => {
+    const host = fixtureHost();
+    const result = spawnSync("python3", [join(relay, "registrar.py")], {
+      encoding: "utf8",
+      env: { ...registrarEnv(host, token), PSILINK_RELAY_REGISTRAR_PORT: "0" },
+      timeout: 10000,
+    });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("registrar-token");
   });
 });
 
@@ -430,7 +1323,7 @@ describe("revoke-exchange.sh", () => {
     expect(result.turnadmin).toEqual([
       `localhost/psilink-relay:installed -X ${KEY_A} -r relay.example -b /var/lib/coturn/turndb`,
     ]);
-    expect(host.mapping()).toBe(`exchange-2 ${KEY_B}\n`);
+    expect(host.mapping()).toBe(`exchange-2 ${KEY_B} ${NOW} -\n`);
   });
 
   it("refuses an id equal as a number to a registered one", () => {
@@ -441,7 +1334,7 @@ describe("revoke-exchange.sh", () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("exchange-id 01 is not registered");
     expect(result.turnadmin).toEqual([]);
-    expect(host.mapping()).toBe(`1 ${KEY_A}\n1.0 ${KEY_B}\n`);
+    expect(host.mapping()).toBe(`1 ${KEY_A} ${NOW} -\n1.0 ${KEY_B} ${NOW} -\n`);
   });
 
   it("revokes only the exact id among ids equal as numbers", () => {
@@ -454,7 +1347,7 @@ describe("revoke-exchange.sh", () => {
     expect(result.turnadmin.map((line) => line.split(" ").slice(1, 3))).toEqual(
       [["-X", KEY_C]],
     );
-    expect(host.mapping()).toBe(`1 ${KEY_A}\n1e0 ${KEY_B}\n`);
+    expect(host.mapping()).toBe(`1 ${KEY_A} ${NOW} -\n1e0 ${KEY_B} ${NOW} -\n`);
   });
 
   it("refuses an exchange that is not registered", () => {
@@ -470,7 +1363,7 @@ describe("revoke-exchange.sh", () => {
     host.register("exchange-1", KEY_A);
     host.failTurnadminOn("-X");
     expect(host.revoke("exchange-1").status).toBe(1);
-    expect(host.mapping()).toBe(`exchange-1 ${KEY_A}\n`);
+    expect(host.mapping()).toBe(`exchange-1 ${KEY_A} ${NOW} -\n`);
   });
 
   it("keeps the mapping when the table silently keeps the key", () => {
@@ -483,7 +1376,7 @@ describe("revoke-exchange.sh", () => {
     expect(result.stderr).toContain("revoke-exchange.sh exchange-1 again");
     expect(result.stdout).not.toContain(KEY_A);
     expect(result.stderr).not.toContain(KEY_A);
-    expect(host.mapping()).toBe(`exchange-1 ${KEY_A}\n`);
+    expect(host.mapping()).toBe(`exchange-1 ${KEY_A} ${NOW} -\n`);
     expect(host.table()).toContain(`${KEY_A}[relay.example]`);
   });
 
@@ -496,7 +1389,7 @@ describe("revoke-exchange.sh", () => {
     expect(result.stderr).toContain(UNOPENABLE_ERROR);
     expect(result.stderr).toContain("treat the key as still authenticating");
     expect(result.stderr).not.toContain(KEY_A);
-    expect(host.mapping()).toBe(`exchange-1 ${KEY_A}\n`);
+    expect(host.mapping()).toBe(`exchange-1 ${KEY_A} ${NOW} -\n`);
   });
 
   it("refuses a malformed id, naming the argument", () => {
@@ -516,11 +1409,87 @@ describe("revoke-exchange.sh", () => {
     expect(result.stderr).not.toContain(KEY_A);
     expect(result.turnadmin).toEqual([]);
     expect(result.listings).toBe(0);
-    expect(host.mapping()).toBe(`exchange-1 ${KEY_A}\n`);
+    expect(host.mapping()).toBe(`exchange-1 ${KEY_A} ${NOW} -\n`);
   });
 });
 
 const HEX64 = /[0-9a-f]{64}/;
+
+describe("verify.sh registrar probe", { timeout: 60000 }, () => {
+  it("says it skipped the registrar on a host with no token", () => {
+    const result = fixtureHost().verify();
+    expect(result.stdout).toContain(
+      "SKIP     the registrar is not configured on this host",
+    );
+  });
+
+  it("passes against a registrar that refuses without the token and writes with it", async () => {
+    const host = fixtureHost();
+    const { port } = await startRegistrar(host);
+    const result = spawnSync(BASH, [join(relay, "verify.sh")], {
+      encoding: "utf8",
+      env: {
+        ...registrarEnv(host),
+        PSILINK_RELAY_REGISTRAR_PORT: String(port),
+        PSILINK_RELAY_VERIFY_CONNECT: "127.0.0.1",
+        PSILINK_RELAY_VERIFY_WAIT: "0",
+        CURL_CA_BUNDLE: join(certDir, "fullchain.pem"),
+      },
+    });
+    const registrarLines = result.stdout.slice(
+      result.stdout.indexOf("a registration with no token"),
+    );
+    expect(result.stdout).toContain(
+      "PASS     a registration with no token was answered 401",
+    );
+    expect(result.stdout).toContain(
+      "PASS     a registration with a wrong token was answered 401",
+    );
+    expect(result.stdout).toContain(
+      "PASS     a revocation with no token was answered 401",
+    );
+    expect(result.stdout).toContain(
+      "PASS     the refused registration left no row",
+    );
+    expect(result.stdout).toContain(
+      "PASS     a registration with the token was answered 200",
+    );
+    expect(result.stdout).toContain(
+      "PASS     the registration is in the mapping and the secrets table",
+    );
+    expect(result.stdout).toContain(
+      "PASS     a revocation with the token was answered 200",
+    );
+    expect(result.stdout).toContain(
+      "PASS     the revocation removed the key from the mapping and the secrets table",
+    );
+    expect(registrarLines).not.toMatch(/FAIL|UNCLEAR/);
+    for (const stream of [result.stdout, result.stderr]) {
+      expect(stream).not.toMatch(HEX64);
+      expect(stream).not.toContain(REGISTRAR_TOKEN);
+    }
+    expect(host.mapping()).toBe("");
+    expect(host.table()).toBe(`${KEY_LISTED}[relay.example]\n`);
+  });
+
+  it("reports a registrar that does not answer as unclear", () => {
+    const host = fixtureHost();
+    const result = spawnSync(BASH, [join(relay, "verify.sh")], {
+      encoding: "utf8",
+      env: {
+        ...registrarEnv(host),
+        PSILINK_RELAY_REGISTRAR_PORT: "1",
+        PSILINK_RELAY_VERIFY_CONNECT: "127.0.0.1",
+        PSILINK_RELAY_VERIFY_WAIT: "0",
+      },
+    });
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain(
+      "UNCLEAR  a registration with no token got no answer",
+    );
+    expect(result.stdout).not.toContain("SKIP     the registrar");
+  });
+});
 
 describe("verify.sh cleanup", () => {
   it("removes every key the run registered from the table", () => {

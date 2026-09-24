@@ -1,6 +1,7 @@
 #!/bin/bash
 # Put the ACME client's certificate where the relay reads it, hand the key to the
-# account inside the container, and restart the relay when either changed.
+# account inside the container, and restart the relay and the registrar when
+# either changed.
 #
 # The chown is load-bearing, not tidiness. The relay measurement recorded coturn
 # silently falling back to its defaults on a private key it could not read --
@@ -67,3 +68,7 @@ if systemctl is-active --quiet psilink-relay.service; then
   systemctl restart psilink-relay.service
   log "psilink-relay.service restarted onto the new certificate"
 fi
+# The registrar reads the same certificate at start; try-restart leaves a
+# registrar that is not running stopped.
+systemctl try-restart psilink-relay-registrar.service ||
+  log "psilink-relay-registrar.service did not restart onto the new certificate; journalctl -u psilink-relay-registrar.service"

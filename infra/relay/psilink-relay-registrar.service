@@ -1,0 +1,24 @@
+# The relay's registrar: registers and revokes exchange keys over HTTPS for a
+# caller holding the relay-owner token (README.md, The registrar). install.sh
+# puts this at /etc/systemd/system/ and enables it only on a host holding
+# /etc/psilink-relay/registrar-token.
+#
+# It runs as root because register-exchange.sh and revoke-exchange.sh do: they
+# write the root-only mapping under /etc/psilink-relay and start the relay image
+# on the container runtime.
+
+[Unit]
+Description=psilink relay registrar (HTTPS)
+Documentation=https://github.com/georgetown-mdi/jspsi/blob/main/infra/relay/README.md
+After=network-online.target psilink-relay.service
+Wants=network-online.target
+ConditionPathExists=/etc/psilink-relay/registrar-token
+
+[Service]
+EnvironmentFile=/etc/psilink-relay/relay.env
+ExecStart=/usr/bin/python3 /opt/psilink-relay/registrar.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,7 @@
+[Unit]
+Description=Revoke the psilink relay's lapsed exchange keys
+Documentation=https://github.com/georgetown-mdi/jspsi/blob/main/infra/relay/README.md
+
+[Service]
+Type=oneshot
+ExecStart=/opt/psilink-relay/sweep-exchanges.sh

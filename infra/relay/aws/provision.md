@@ -57,6 +57,7 @@ Inbound, in the instance's security group:
 | 443 | TCP | 0.0.0.0/0, ::/0 | TURNS. The whole client-facing surface, and the one port a restrictive network leaves open |
 | 49152-49200 | UDP | 0.0.0.0/0, ::/0 | The relay range. A peer's traffic leaves here whatever transport the client arrived on |
 | 22 | TCP | the owner's address only | Administration. Not open to the internet |
+| 8443 | TCP | the operator's addresses | The registrar, only where the host runs one ([README.md, The registrar](../README.md#the-registrar)). Every call needs the relay-owner token |
 
 Outbound: unrestricted, or at minimum UDP to the relay range and TCP/443 to the
 ACME authority and the DNS provider's API.

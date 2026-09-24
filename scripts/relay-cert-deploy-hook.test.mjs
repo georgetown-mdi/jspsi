@@ -90,10 +90,12 @@ const fixtureHost = ({ imageUid = OWN_UID } = {}) => {
         },
       });
       expect(result.status, `the hook failed with:\n${result.stderr}`).toBe(0);
+      const lines = readFileSync(calls, "utf8").split("\n");
       return {
-        restarted: readFileSync(calls, "utf8")
-          .split("\n")
-          .includes("systemctl restart psilink-relay.service"),
+        restarted: lines.includes("systemctl restart psilink-relay.service"),
+        registrarRestarted: lines.includes(
+          "systemctl try-restart psilink-relay-registrar.service",
+        ),
         stderr: result.stderr,
       };
     },
@@ -141,6 +143,15 @@ describe("the relay certificate deploy hook", () => {
     host.issue(2);
     expect(host.run().restarted).toBe(true);
     expect(host.run().restarted).toBe(false);
+  });
+
+  it("restarts a running registrar onto a renewed certificate, and only then", () => {
+    const host = fixtureHost();
+    host.issue(1);
+    host.run();
+    host.issue(2);
+    expect(host.run().registrarRestarted).toBe(true);
+    expect(host.run().registrarRestarted).toBe(false);
   });
 
   it("restarts the relay when only the key changed", () => {
