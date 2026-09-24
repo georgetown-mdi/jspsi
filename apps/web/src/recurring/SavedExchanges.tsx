@@ -15,9 +15,11 @@ import {
   ManagedImportAlreadyHeldError,
   ManagedImportCustodyUnreadableError,
   ManagedImportHandedOffError,
+  ManagedImportLiveCopyError,
+  ManagedImportOtherExchangeError,
   importManagedCommandLinePair,
-  importManagedConfigurationFile,
   importManagedExchangeFile,
+  restoreManagedExchangeFromBackup,
 } from "@psi/managed/managedExchangeImport";
 import {
   deleteManagedExchange,
@@ -26,7 +28,6 @@ import {
   openManagedExchangeDatabase,
   requestPersistentStorage,
 } from "@psi/managed/managedExchangeStore";
-import { MAX_CONFIGURATION_IMPORT_BYTES } from "@psi/managed/managedCommandLineImport";
 import { MAX_KEY_FILE_IMPORT_BYTES } from "@psi/managed/managedRetake";
 import { listManagedLocalState } from "@psi/managed/managedLocalState";
 
@@ -38,12 +39,16 @@ import styles from "@styles/app.module.css";
 import {
   ALREADY_HELD_IMPORT_TITLE,
   IMPORT_FAILURE_TITLE,
+  LIVE_COPY_IMPORT_CONFIRM,
+  LIVE_COPY_IMPORT_TITLE,
+  OTHER_EXCHANGE_RESTORE_TITLE,
   OVERSIZE_KEY_FILE_REASON,
-  UNREADABLE_CONFIGURATION_REASON,
   UNREADABLE_IMPORT_REASON,
+  alreadyHeldBackupImportReason,
   alreadyHeldImportReason,
-  configurationImportFailureReason,
   importFailureReason,
+  liveCopyImportReason,
+  otherExchangeRestoreReason,
   pairImportFailureReason,
 } from "./managedImportFailure";
 import {
@@ -208,8 +213,9 @@ function SavedExchangesSurface({
 /** The populated run list: a row per stored exchange with a run/open action and the
  * always-available delete, above a primary create entry into the invite/configure
  * flow (where saving as recurring happens at share time), the one-off quick-path
- * alternative, and the command-line configuration import. Deleting a row calls
- * `reload`, so the list reflects the removal without a page navigation. */
+ * alternative, and the import every list state offers. A row moved to another
+ * device also offers its own restore from backup. Deleting a row calls `reload`,
+ * so the list reflects the removal without a page navigation. */
 function SavedExchangesList({
   rows,
   reload,
@@ -233,6 +239,10 @@ function SavedExchangesList({
               </span>
               <ScheduleLines row={row} />
               <BackupLine row={row} />
+              {row.spentAsOf !== undefined &&
+                row.spentHandoff === undefined && (
+                  <RestoreFromBackup id={row.id} label={row.label} />
+                )}
             </div>
             <div className={styles.savedRowActions}>
               <Button
@@ -278,7 +288,7 @@ function SavedExchangesList({
         </Anchor>{" "}
         sets a TURN relay your side connects through.
       </p>
-      <ImportConfigurationFile />
+      <ImportExchangeFile />
     </>
   );
 }
@@ -356,7 +366,7 @@ function BackupLine({ row }: { row: SavedExchangeRow }) {
       <span className={`${styles.small} ${styles.sub}`}>
         {row.spentHandoff === "command-line"
           ? `Handed off to the command line ${row.spentAsOf}. It runs from the files you saved.`
-          : `Handed off ${row.spentAsOf}. Import the backup to run it here again.`}
+          : `Handed off ${row.spentAsOf}. To run it here again, restore it from the backup you downloaded then.`}
       </span>
     );
   if (row.backup.kind === "backed-up")
@@ -651,6 +661,12 @@ function importFailureAlert(error: unknown): ImportFailureAlert {
       title: CUSTODY_UNREADABLE_IMPORT_TITLE,
       reason: custodyUnreadableImportReason(error.label),
     };
+  if (error instanceof ManagedImportAlreadyHeldError)
+    return {
+      color: "yellow",
+      title: ALREADY_HELD_IMPORT_TITLE,
+      reason: alreadyHeldBackupImportReason(error.label),
+    };
   return {
     color: "red",
     title: IMPORT_FAILURE_TITLE,
@@ -688,26 +704,28 @@ function pairImportFailureAlert(error: unknown): ImportFailureAlert {
   };
 }
 
-/** The file types both import controls offer in the file chooser beside their
+/** The file type the import control offers in the file chooser beside its
  * own: the `.psilink.key` a configuration is imported with. */
 const KEY_FILE_ACCEPT = ".key";
 
-/** The note both controls give on choosing the key file: the name psilink
+/** The note the import gives on choosing the key file: the name psilink
  * writes it under starts with a dot, which file choosers hide by default. */
 const KEY_FILE_CHOOSER_NOTE =
   "Choose both files at once. The key file's name starts with a dot, so the " +
   "file chooser may hide it until you show hidden files.";
 
-/** The standing import affordance, shared by the empty state and the read-failed
- * surface so both render one markup. It takes either file the operator may hold:
+/** The standing import affordance, shared by every list state -- empty,
+ * populated, and read-failed -- so all render one markup. It takes either file
+ * the operator may hold:
  * the backup this app exports, and the `psilink.yaml` the command line runs,
  * which lands as a configuration-only exchange -- or, chosen with the
  * `.psilink.key` beside it, as one that runs here. The file decides which, not
  * the control ({@link importManagedExchangeFile}). A successful import puts the
  * operator on the imported exchange's own surface, so it is a way forward even
- * when the list read itself cannot be mended. A populated list offers the
- * configuration leg alone ({@link ImportConfigurationFile}): a backup installs
- * a runnable record, and is imported only beside an empty or unreadable list.
+ * when the list read itself cannot be mended. A backup is reconciled against
+ * the one exchange it holds, not against the list: one already running here
+ * refuses, and one that may be it -- the same agreed terms and side -- is named
+ * and added beside only on the operator's confirm ({@link liveCopyImportReason}).
  *
  * A file the import will not take is refused with the reason its failure has
  * ({@link importFailureReason}): a configuration this app cannot hold says what
@@ -730,12 +748,14 @@ const KEY_FILE_CHOOSER_NOTE =
  * the same way to say the exchange now runs here ({@link PAIR_IMPORTED_NOTICE}). An
  * import with nothing to say goes straight through. */
 function ImportExchangeFile() {
-  const { onFiles, outcome, importing } = useImportFile({
-    maxBytes: MAX_IMPORT_FILE_BYTES,
-    oversizeReason: UNREADABLE_IMPORT_REASON,
-    importFile: importManagedExchangeFile,
-    failureAlert: importFailureAlert,
-  });
+  const { onFiles, outcome, importing, confirmLiveCopy, dismiss } =
+    useImportFile({
+      maxBytes: MAX_IMPORT_FILE_BYTES,
+      oversizeReason: UNREADABLE_IMPORT_REASON,
+      importFile: (source, besideId) =>
+        importManagedExchangeFile(source, undefined, besideOption(besideId)),
+      failureAlert: importFailureAlert,
+    });
 
   return (
     <div className={styles.callout}>
@@ -748,7 +768,11 @@ function ImportExchangeFile() {
         .psilink.key beside it to run it in this browser.
       </p>
       <p className={`${styles.small} ${styles.sub}`}>{KEY_FILE_CHOOSER_NOTE}</p>
-      <ImportOutcomeAlerts outcome={outcome} />
+      <ImportOutcomeAlerts
+        outcome={outcome}
+        onConfirmLiveCopy={confirmLiveCopy}
+        onDismiss={dismiss}
+      />
       <FileButton
         accept={`application/json,.json,application/yaml,.yaml,.yml,${KEY_FILE_ACCEPT}`}
         multiple
@@ -765,48 +789,65 @@ function ImportExchangeFile() {
   );
 }
 
-/** The configuration import beside a populated list: a command-line
- * `psilink.yaml` lands as a configuration-only exchange, the same record the
- * shared control installs from one ({@link importManagedConfigurationFile}), on
- * any channel, and chosen with its `.psilink.key` as one that runs here
- * ({@link importManagedCommandLinePair}). A backup file is refused here by name
- * ({@link configurationImportFailureReason}) rather than restored. */
-function ImportConfigurationFile() {
-  const { onFiles, outcome, importing } = useImportFile({
-    maxBytes: MAX_CONFIGURATION_IMPORT_BYTES,
-    oversizeReason: UNREADABLE_CONFIGURATION_REASON,
-    importFile: importManagedConfigurationFile,
-    failureAlert: (error) => ({
-      color: "red",
-      title: IMPORT_FAILURE_TITLE,
-      reason: configurationImportFailureReason(error),
-    }),
-  });
+/** The scoped restore on a row moved to another device: the same import,
+ * taking only the backup that holds this record's secret
+ * ({@link restoreManagedExchangeFromBackup}), which revives the row in place.
+ * Any other file is refused, naming the list's import for it. */
+function RestoreFromBackup({ id, label }: { id: string; label: string }) {
+  const { onFiles, outcome, importing, confirmLiveCopy, dismiss } =
+    useImportFile({
+      maxBytes: MAX_IMPORT_FILE_BYTES,
+      oversizeReason: UNREADABLE_IMPORT_REASON,
+      importFile: (source, besideId) =>
+        restoreManagedExchangeFromBackup(
+          id,
+          source,
+          undefined,
+          besideOption(besideId),
+        ),
+      failureAlert: (error) =>
+        error instanceof ManagedImportOtherExchangeError
+          ? {
+              color: "red",
+              title: OTHER_EXCHANGE_RESTORE_TITLE,
+              reason: otherExchangeRestoreReason(label),
+            }
+          : importFailureAlert(error),
+    });
 
   return (
-    <div className={styles.callout}>
-      <p className={styles.calloutLead}>Import a command-line configuration.</p>
-      <p className={styles.small}>
-        Import a psilink.yaml on its own to edit its settings here; the exchange
-        keeps running from the command line. To run it in this browser instead,
-        choose the .psilink.key beside it too.
-      </p>
-      <p className={`${styles.small} ${styles.sub}`}>{KEY_FILE_CHOOSER_NOTE}</p>
-      <ImportOutcomeAlerts outcome={outcome} />
+    <>
       <FileButton
-        accept={`application/yaml,.yaml,.yml,${KEY_FILE_ACCEPT}`}
-        multiple
-        onChange={onFiles}
+        accept="application/json,.json"
+        onChange={(file) => {
+          if (file !== null) onFiles([file]);
+        }}
         disabled={importing}
       >
         {(props) => (
-          <Button mt="sm" variant="default" loading={importing} {...props}>
-            Import a psilink.yaml
+          <Button
+            size="xs"
+            variant="default"
+            loading={importing}
+            style={{ alignSelf: "flex-start" }}
+            {...props}
+          >
+            Restore from backup
           </Button>
         )}
       </FileButton>
-    </div>
+      <ImportOutcomeAlerts
+        outcome={outcome}
+        onConfirmLiveCopy={confirmLiveCopy}
+        onDismiss={dismiss}
+      />
+    </>
   );
+}
+
+/** The option naming the listed exchange a confirmed import goes beside. */
+function besideOption(besideId: string | undefined): { besideId?: string } {
+  return besideId === undefined ? {} : { besideId };
 }
 
 /** What an import control shows once a file has been tried: a notice with the
@@ -814,6 +855,9 @@ function ImportConfigurationFile() {
 interface ImportOutcome {
   grantNotice?: { id: string; notice: ManagedImportGrantNotice };
   failure?: ImportFailureAlert;
+  /** The listed exchange a backup may be a copy of, and the file to import
+   * beside it on the operator's confirm. */
+  liveCopy?: { id: string; label: string; file: File };
 }
 
 /** A refusal under the heading every file refusal takes. */
@@ -824,7 +868,10 @@ function fileRefusal(reason: string): ImportOutcome {
 }
 
 /** Read the chosen files and go to the imported exchange, or hold the notice or
- * refusal the control shows instead. One file goes through `importFile`; a
+ * refusal the control shows instead. A backup that may be a copy of a listed
+ * exchange is held with that exchange's name until the operator confirms it,
+ * which imports the file again beside that one, or dismisses it, which imports
+ * nothing. One file goes through `importFile`; a
  * configuration with its key file through {@link importManagedCommandLinePair},
  * whichever control took them. A file over its cap -- `maxBytes` for the one
  * file or the configuration, the key file's own for the key -- is refused with
@@ -839,12 +886,17 @@ function useImportFile({
 }: {
   maxBytes: number;
   oversizeReason: string;
-  importFile: (source: string) => Promise<ManagedImportResult>;
+  importFile: (
+    source: string,
+    besideId?: string,
+  ) => Promise<ManagedImportResult>;
   failureAlert: (error: unknown) => ImportFailureAlert;
 }): {
   onFiles: (files: Array<File>) => void;
   outcome: ImportOutcome;
   importing: boolean;
+  confirmLiveCopy: () => void;
+  dismiss: () => void;
 } {
   const navigate = useNavigate();
   const [outcome, setOutcome] = useState<ImportOutcome>({});
@@ -876,6 +928,14 @@ function useImportFile({
       setOutcome(fileRefusal(OVERSIZE_KEY_FILE_REASON));
       return;
     }
+    runImport(primaryFile, keyFile);
+  }
+
+  function runImport(
+    primaryFile: File,
+    keyFile: File | undefined,
+    besideId?: string,
+  ) {
     const refused =
       keyFile === undefined ? failureAlert : pairImportFailureAlert;
     inFlight.current = true;
@@ -890,7 +950,7 @@ function useImportFile({
         void requestPersistentStorage();
         const { record, missingGrants } =
           keySource === undefined
-            ? await importFile(source)
+            ? await importFile(source, besideId)
             : await importManagedCommandLinePair(source, keySource);
         const notice =
           keySource === undefined
@@ -902,7 +962,17 @@ function useImportFile({
         }
         await navigate({ to: "/saved/$id", params: { id: record.id } });
       } catch (error) {
-        setOutcome({ failure: refused(error) });
+        setOutcome(
+          error instanceof ManagedImportLiveCopyError
+            ? {
+                liveCopy: {
+                  id: error.id,
+                  label: error.label,
+                  file: primaryFile,
+                },
+              }
+            : { failure: refused(error) },
+        );
       } finally {
         inFlight.current = false;
         setImporting(false);
@@ -910,16 +980,62 @@ function useImportFile({
     })();
   }
 
-  return { onFiles, outcome, importing };
+  function confirmLiveCopy() {
+    const { liveCopy } = outcome;
+    if (liveCopy === undefined || inFlight.current) return;
+    setOutcome({});
+    runImport(liveCopy.file, undefined, liveCopy.id);
+  }
+
+  return {
+    onFiles,
+    outcome,
+    importing,
+    confirmLiveCopy,
+    dismiss: () => setOutcome({}),
+  };
 }
 
 /** The alerts an import control shows under its lead: the grant notice with its
- * button onward, and the refusal. */
-function ImportOutcomeAlerts({ outcome }: { outcome: ImportOutcome }) {
+ * button onward, the question a possible copy of a listed exchange asks, and the
+ * refusal. */
+function ImportOutcomeAlerts({
+  outcome,
+  onConfirmLiveCopy,
+  onDismiss,
+}: {
+  outcome: ImportOutcome;
+  onConfirmLiveCopy: () => void;
+  onDismiss: () => void;
+}) {
   const navigate = useNavigate();
-  const { grantNotice, failure } = outcome;
+  const { grantNotice, failure, liveCopy } = outcome;
   return (
     <>
+      {liveCopy !== undefined && (
+        <Alert color="yellow" title={LIVE_COPY_IMPORT_TITLE} mb="sm">
+          <p className={styles.small}>{liveCopyImportReason(liveCopy.label)}</p>
+          <div className={styles.savedRowActions}>
+            <Button
+              variant="default"
+              onClick={() =>
+                void navigate({
+                  to: "/saved/$id",
+                  params: { id: liveCopy.id },
+                })
+              }
+            >
+              Open the listed exchange
+            </Button>
+            <Button variant="default" onClick={onConfirmLiveCopy}>
+              {LIVE_COPY_IMPORT_CONFIRM}
+            </Button>
+            <Button variant="subtle" onClick={onDismiss}>
+              Cancel
+            </Button>
+          </div>
+        </Alert>
+      )}
       {grantNotice !== undefined && (
         <Alert color="yellow" title={grantNotice.notice.title} mb="sm">
           <p className={styles.small}>{grantNotice.notice.lead}</p>

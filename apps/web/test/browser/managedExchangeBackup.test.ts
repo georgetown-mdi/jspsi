@@ -21,6 +21,11 @@ import {
   spendManagedExchangeIfCurrent,
 } from "@psi/managed/managedExchangeStore";
 import {
+  ManagedImportOtherExchangeError,
+  importManagedExchange,
+  restoreManagedExchangeFromBackup,
+} from "@psi/managed/managedExchangeImport";
+import {
   composeManagedExchangeFile,
   runnableManagedExchangeOrRefuse,
 } from "@psi/managed/managedExchangeRecord";
@@ -41,7 +46,6 @@ import {
 } from "@psi/managed/managedLocalState";
 import { deriveManagedFailureTier } from "@psi/managed/managedFailureTiers";
 import { failedRun } from "@psi/managed/managedRunRotate";
-import { importManagedExchange } from "@psi/managed/managedExchangeImport";
 import { managedRunFailureFromRecord } from "@recurring/managedRunLaunchModel";
 import { savedExchangeRows } from "@recurring/savedExchangesModel";
 import { withManagedExchangeLock } from "@psi/managed/managedExchangeLock";
@@ -704,16 +708,140 @@ describe("importing a spent secret-match revives in place", () => {
     expect(local?.imported?.importedAt).toBe(local?.backup?.backedUpAt);
   });
 
-  test("importing over a LIVE secret-match installs fresh (never forks a live owner)", async () => {
+  test("importing over a LIVE secret-match refuses, writing nothing", async () => {
     const source = await createRunnableExchange(newExchange());
     const bytes = serializeManagedExchangeArtifact(
       encodeManagedExchangeArtifact(source),
     );
-    // The source is live (not spent): an import is a second owner, installed fresh.
-    const { record: installed } = await importManagedExchange(bytes);
-    expect(installed.id).not.toBe(source.id);
-    const all = await listManagedExchanges();
-    expect(all).toHaveLength(2);
+
+    await expect(importManagedExchange(bytes)).rejects.toMatchObject({
+      name: "ManagedImportAlreadyHeldError",
+      label: source.label,
+    });
+    expect(await listManagedExchanges()).toEqual([source]);
+    expect(await getManagedLocalState(source.id)).toBeUndefined();
+  });
+});
+
+describe("a backup reconciles per exchange, whatever else is listed", () => {
+  /** A backup of `record` taken now, before any later rotation. */
+  function backupOf(record: RunnableManagedExchangeRecord): string {
+    return serializeManagedExchangeArtifact(
+      encodeManagedExchangeArtifact(record),
+    );
+  }
+
+  test("an exchange this browser does not hold is added as new beside the others", async () => {
+    const listed = await createRunnableExchange(newExchange());
+    const other = runnableManagedExchangeOrRefuse({
+      ...listed,
+      side: "acceptor",
+      sharedSecret: generateSharedSecret(),
+    });
+
+    const { record } = await importManagedExchange(backupOf(other));
+
+    expect(record.id).not.toBe(listed.id);
+    expect((await listManagedExchanges()).map((r) => r.id).sort()).toEqual(
+      [listed.id, record.id].sort(),
+    );
+  });
+
+  test("a live copy rotated past the backup is named, and nothing is written", async () => {
+    const live = await createRunnableExchange(newExchange());
+    const bytes = backupOf(live);
+    await persistManagedExchangeRotation(live.id, {
+      sharedSecret: generateSharedSecret(),
+      expires: null,
+    });
+    const before = await listManagedExchanges();
+
+    await expect(importManagedExchange(bytes)).rejects.toMatchObject({
+      name: "ManagedImportLiveCopyError",
+      id: live.id,
+      label: live.label,
+    });
+    expect(await listManagedExchanges()).toEqual(before);
+    expect(await getManagedLocalState(live.id)).toBeUndefined();
+  });
+
+  test("confirmed, the backup installs beside the copy it named", async () => {
+    const live = await createRunnableExchange(newExchange());
+    const bytes = backupOf(live);
+    await persistManagedExchangeRotation(live.id, {
+      sharedSecret: generateSharedSecret(),
+      expires: null,
+    });
+    const before = await getManagedExchange(live.id);
+
+    const { record } = await importManagedExchange(bytes, undefined, {
+      besideId: live.id,
+    });
+
+    expect(record.id).not.toBe(live.id);
+    expect(await getManagedExchange(live.id)).toEqual(before);
+    expect(await listManagedExchanges()).toHaveLength(2);
+  });
+
+  test("a confirm for one copy does not pass over a second", async () => {
+    const live = await createRunnableExchange(newExchange());
+    const second = await createRunnableExchange(
+      newExchange({ label: "Riverbend again" }),
+    );
+    const bytes = serializeManagedExchangeArtifact(
+      encodeManagedExchangeArtifact(
+        runnableManagedExchangeOrRefuse({
+          ...live,
+          sharedSecret: generateSharedSecret(),
+        }),
+      ),
+    );
+
+    await expect(
+      importManagedExchange(bytes, undefined, { besideId: live.id }),
+    ).rejects.toMatchObject({
+      name: "ManagedImportLiveCopyError",
+      id: second.id,
+    });
+    expect(await listManagedExchanges()).toHaveLength(2);
+  });
+
+  test("a scoped restore revives its own migration-spent record", async () => {
+    const source = await createRunnableExchange(newExchange());
+    const bytes = backupOf(source);
+    await spendManagedExchangeIfCurrent(
+      source.id,
+      source.sharedSecret,
+      "2026-07-14T13:00:00.000Z",
+    );
+
+    const { record } = await restoreManagedExchangeFromBackup(source.id, bytes);
+
+    expect(record.id).toBe(source.id);
+    expect((await getManagedLocalState(source.id))?.spent).toBeUndefined();
+  });
+
+  test("a scoped restore refuses another exchange's backup, writing nothing", async () => {
+    const source = await createRunnableExchange(newExchange());
+    await spendManagedExchangeIfCurrent(
+      source.id,
+      source.sharedSecret,
+      "2026-07-14T13:00:00.000Z",
+    );
+    const other = await createRunnableExchange(
+      newExchange({ label: "Another partnership", side: "acceptor" }),
+    );
+    const otherBytes = backupOf(other);
+    await deleteManagedExchange(other.id);
+    const before = await listManagedExchanges();
+
+    await expect(
+      restoreManagedExchangeFromBackup(source.id, otherBytes),
+    ).rejects.toBeInstanceOf(ManagedImportOtherExchangeError);
+    expect(await listManagedExchanges()).toEqual(before);
+    expect(await getManagedLocalState(source.id)).toEqual({
+      spent: { spentAt: "2026-07-14T13:00:00.000Z" },
+    });
   });
 });
 

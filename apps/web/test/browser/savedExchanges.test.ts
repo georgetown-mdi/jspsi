@@ -13,7 +13,9 @@ import { SavedExchanges, SavedExchangesHome } from "@recurring/SavedExchanges";
 import {
   clearManagedExchanges,
   createManagedExchange,
+  getManagedExchange,
   listManagedExchanges,
+  persistManagedExchangeRotation,
   spendManagedExchangeIfCurrent,
 } from "@psi/managed/managedExchangeStore";
 
@@ -34,7 +36,9 @@ import {
 
 import {
   ALREADY_HELD_IMPORT_TITLE,
-  BACKUP_NOT_CONFIGURATION_REASON,
+  LIVE_COPY_IMPORT_CONFIRM,
+  LIVE_COPY_IMPORT_TITLE,
+  OTHER_EXCHANGE_RESTORE_TITLE,
 } from "@recurring/managedImportFailure";
 import {
   KEY_FILE_ALONE_REASON,
@@ -94,8 +98,9 @@ vi.mock("@psi/managed/managedExchangeStore", async (importOriginal) => {
 let importOverride: (() => Promise<never>) | undefined;
 vi.mock("@psi/managed/managedExchangeImport", async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
-  const realConfiguration = actual.importManagedConfigurationFile as (
+  const realFile = actual.importManagedExchangeFile as (
     source: string,
+    ...rest: Array<unknown>
   ) => Promise<unknown>;
   const realPair = actual.importManagedCommandLinePair as (
     source: string,
@@ -103,8 +108,8 @@ vi.mock("@psi/managed/managedExchangeImport", async (importOriginal) => {
   ) => Promise<unknown>;
   return {
     ...actual,
-    importManagedConfigurationFile: (source: string) =>
-      importOverride ? importOverride() : realConfiguration(source),
+    importManagedExchangeFile: (source: string, ...rest: Array<unknown>) =>
+      importOverride ? importOverride() : realFile(source, ...rest),
     importManagedCommandLinePair: (source: string, keySource: string) =>
       importOverride ? importOverride() : realPair(source, keySource),
   };
@@ -635,9 +640,12 @@ describe("saved list route: delete is a fully supported, always-available action
       .toBeInTheDocument();
     // A spent row does not offer Run.
     expect(page.getByRole("button", { name: "Run" }).query()).toBeNull();
-    // A migration spend is the one an import brings back.
+    // A migration spend is the one a backup brings back, from its own row.
     await expect
-      .element(page.getByText("Import the backup", { exact: false }))
+      .element(page.getByText("restore it from the backup", { exact: false }))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByRole("button", { name: "Restore from backup" }))
       .toBeInTheDocument();
   });
 
@@ -661,9 +669,12 @@ describe("saved list route: delete is a fully supported, always-available action
       .toBeInTheDocument();
     // The exported psilink.yaml and .psilink.key are not the artifact the import
     // flow accepts, so this row must not point the operator at one.
-    expect(page.getByText("Import the backup", { exact: false }).query()).toBe(
-      null,
-    );
+    expect(
+      page.getByText("restore it from the backup", { exact: false }).query(),
+    ).toBeNull();
+    expect(
+      page.getByRole("button", { name: "Restore from backup" }).query(),
+    ).toBeNull();
   });
 
   test("a rejected delete shows an error and leaves the row standing", async () => {
@@ -759,17 +770,15 @@ describe("saved list route: a populated list imports a command-line configuratio
     );
   }
 
-  test("offers the configuration import, and not the shared backup import", async () => {
+  test("offers the one import control every list state offers", async () => {
     await createRunnableExchange(newExchange());
 
     app.render(createElement(SavedExchanges));
 
     await expect
-      .element(page.getByRole("button", { name: "Import a psilink.yaml" }))
+      .element(page.getByRole("button", { name: "Import a file" }))
       .toBeInTheDocument();
-    expect(page.getByRole("button", { name: "Import a file" }).query()).toBe(
-      null,
-    );
+    expect(document.querySelectorAll('input[type="file"]')).toHaveLength(1);
   });
 
   test("a psilink.yaml lands beside the listed exchanges as a configuration only", async () => {
@@ -781,7 +790,7 @@ describe("saved list route: a populated list imports a command-line configuratio
     ).config.text;
     app.render(createElement(SavedExchanges));
     await expect
-      .element(page.getByRole("button", { name: "Import a psilink.yaml" }))
+      .element(page.getByRole("button", { name: "Import a file" }))
       .toBeInTheDocument();
 
     await chooseFile(configuration, "psilink.yaml");
@@ -797,10 +806,7 @@ describe("saved list route: a populated list imports a command-line configuratio
     expect(imported[0].id).not.toBe(listed.id);
   });
 
-  test("a backup is refused as a backup there, and the handed-off refusal stays with the shared import", async () => {
-    // The shared import meets this backup with the handed-off refusal beside an
-    // unreadable list (savedExchangesFailed.test.ts). Beside a readable one, the
-    // configuration import refuses any backup before the reconciliation runs.
+  test("a backup of a handed-off exchange meets the handed-off refusal there", async () => {
     const record = await createRunnableExchange(
       newExchange({ label: "Riverbend quarterly" }),
     );
@@ -815,19 +821,154 @@ describe("saved list route: a populated list imports a command-line configuratio
     );
     app.render(createElement(SavedExchanges));
     await expect
-      .element(page.getByRole("button", { name: "Import a psilink.yaml" }))
+      .element(page.getByRole("button", { name: "Import a file" }))
       .toBeInTheDocument();
 
     await chooseFile(backup, "psilink-managed-backup-2026-07-11.json");
 
     await expect
-      .element(page.getByText(BACKUP_NOT_CONFIGURATION_REASON))
+      .element(page.getByText("That exchange was handed off"))
       .toBeInTheDocument();
-    expect(page.getByText("That exchange was handed off").query()).toBeNull();
+    await expect
+      .element(page.getByText("Take this exchange back", { exact: false }))
+      .toBeInTheDocument();
     const stored = await listManagedExchanges();
     expect(stored.map((entry) => entry.id)).toEqual([record.id]);
     const local = await listManagedLocalState();
     expect(local.get(record.id)?.spent?.handoff).toBe("command-line");
+  });
+});
+
+describe("saved list route: a backup reconciles against the exchange it holds", () => {
+  /** Choose `bytes` in the file input whose `accept` is `accept`. */
+  async function chooseIn(accept: string, bytes: string): Promise<void> {
+    const input = [
+      ...document.querySelectorAll<HTMLInputElement>('input[type="file"]'),
+    ].find((element) => element.accept === accept);
+    if (input === undefined) throw new Error(`no file input for ${accept}`);
+    await userEvent.upload(
+      page.elementLocator(input),
+      new File([bytes], "psilink-managed-backup.json"),
+    );
+  }
+
+  const LIST_IMPORT = "application/json,.json,application/yaml,.yaml,.yml,.key";
+  const ROW_RESTORE = "application/json,.json";
+
+  function backupOf(record: RunnableManagedExchangeRecord): string {
+    return serializeManagedExchangeArtifact(
+      encodeManagedExchangeArtifact(record),
+    );
+  }
+
+  test("an exchange held here already is refused, naming it", async () => {
+    const listed = await createRunnableExchange(newExchange());
+    app.render(createElement(SavedExchanges));
+    await expect
+      .element(page.getByRole("button", { name: "Import a file" }))
+      .toBeInTheDocument();
+
+    await chooseIn(LIST_IMPORT, backupOf(listed));
+
+    await expect
+      .element(page.getByText(ALREADY_HELD_IMPORT_TITLE))
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText('"Riverbend quarterly" already runs', { exact: false }),
+      )
+      .toBeInTheDocument();
+    expect(await listManagedExchanges()).toEqual([listed]);
+  });
+
+  test("a copy rotated past the backup is named; cancel imports nothing, confirm adds it beside", async () => {
+    const listed = await createRunnableExchange(newExchange());
+    const bytes = backupOf(listed);
+    await persistManagedExchangeRotation(listed.id, {
+      sharedSecret: generateSharedSecret(),
+      expires: null,
+    });
+    const rotated = await getManagedExchange(listed.id);
+    app.render(createElement(SavedExchanges));
+    await expect
+      .element(page.getByRole("button", { name: "Import a file" }))
+      .toBeInTheDocument();
+
+    await chooseIn(LIST_IMPORT, bytes);
+    await expect
+      .element(page.getByText(LIVE_COPY_IMPORT_TITLE))
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText('"Riverbend quarterly" has the same terms', {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+    expect(await listManagedExchanges()).toEqual([rotated]);
+
+    await page.getByRole("button", { name: "Cancel" }).click();
+    expect(page.getByText(LIVE_COPY_IMPORT_TITLE).query()).toBeNull();
+    expect(await listManagedExchanges()).toEqual([rotated]);
+
+    await chooseIn(LIST_IMPORT, bytes);
+    await page.getByRole("button", { name: LIVE_COPY_IMPORT_CONFIRM }).click();
+    await expect
+      .poll(async () => (await listManagedExchanges()).length)
+      .toBe(2);
+    expect(await getManagedExchange(listed.id)).toEqual(rotated);
+  });
+
+  test("a moved row restores from its own backup in place", async () => {
+    const moved = await createRunnableExchange(newExchange());
+    const bytes = backupOf(moved);
+    await spendManagedExchangeIfCurrent(
+      moved.id,
+      moved.sharedSecret,
+      "2026-07-12T09:00:00.000Z",
+    );
+    await createRunnableExchange(
+      newExchange({ label: "Another partnership", side: "acceptor" }),
+    );
+    app.render(createElement(SavedExchanges));
+    await expect
+      .element(page.getByRole("button", { name: "Restore from backup" }))
+      .toBeInTheDocument();
+
+    await chooseIn(ROW_RESTORE, bytes);
+
+    await expect
+      .poll(async () => (await listManagedLocalState()).get(moved.id)?.spent)
+      .toBeUndefined();
+    expect(await listManagedExchanges()).toHaveLength(2);
+  });
+
+  test("a moved row's restore refuses another exchange's backup", async () => {
+    const moved = await createRunnableExchange(newExchange());
+    await spendManagedExchangeIfCurrent(
+      moved.id,
+      moved.sharedSecret,
+      "2026-07-12T09:00:00.000Z",
+    );
+    const other = runnableManagedExchangeOrRefuse(
+      buildManagedExchangeRecord(
+        newExchange({ label: "Another partnership", side: "acceptor" }),
+      ),
+    );
+    app.render(createElement(SavedExchanges));
+    await expect
+      .element(page.getByRole("button", { name: "Restore from backup" }))
+      .toBeInTheDocument();
+
+    await chooseIn(ROW_RESTORE, backupOf(other));
+
+    await expect
+      .element(page.getByText(OTHER_EXCHANGE_RESTORE_TITLE))
+      .toBeInTheDocument();
+    expect((await listManagedExchanges()).map((r) => r.id)).toEqual([moved.id]);
+    expect((await listManagedLocalState()).get(moved.id)?.spent).toEqual({
+      spentAt: "2026-07-12T09:00:00.000Z",
+    });
   });
 });
 
@@ -893,7 +1034,7 @@ describe("saved list route: a psilink.yaml imports with the .psilink.key beside 
     const { configuration, key, sharedSecret } = exportedPair();
     app.render(createElement(SavedExchanges));
     await expect
-      .element(page.getByRole("button", { name: "Import a psilink.yaml" }))
+      .element(page.getByRole("button", { name: "Import a file" }))
       .toBeInTheDocument();
 
     await chooseFiles([
@@ -936,7 +1077,7 @@ describe("saved list route: a psilink.yaml imports with the .psilink.key beside 
       ];
       app.render(createElement(SavedExchanges));
       const control = page.getByRole("button", {
-        name: "Import a psilink.yaml",
+        name: "Import a file",
       });
       await expect.element(control).toBeEnabled();
 
@@ -958,7 +1099,7 @@ describe("saved list route: a psilink.yaml imports with the .psilink.key beside 
     const { configuration } = exportedPair();
     app.render(createElement(SavedExchanges));
     await expect
-      .element(page.getByRole("button", { name: "Import a psilink.yaml" }))
+      .element(page.getByRole("button", { name: "Import a file" }))
       .toBeInTheDocument();
 
     await chooseFiles([{ bytes: configuration, name: "psilink.yaml" }]);
@@ -978,7 +1119,7 @@ describe("saved list route: a psilink.yaml imports with the .psilink.key beside 
     const { configuration, sharedSecret } = exportedPair();
     app.render(createElement(SavedExchanges));
     await expect
-      .element(page.getByRole("button", { name: "Import a psilink.yaml" }))
+      .element(page.getByRole("button", { name: "Import a file" }))
       .toBeInTheDocument();
 
     await chooseFiles([
@@ -1008,7 +1149,7 @@ describe("saved list route: a psilink.yaml imports with the .psilink.key beside 
     const { key, sharedSecret } = exportedPair();
     app.render(createElement(SavedExchanges));
     await expect
-      .element(page.getByRole("button", { name: "Import a psilink.yaml" }))
+      .element(page.getByRole("button", { name: "Import a file" }))
       .toBeInTheDocument();
 
     await chooseFiles([{ bytes: key, name: ".psilink.key" }]);
@@ -1029,7 +1170,7 @@ describe("saved list route: a psilink.yaml imports with the .psilink.key beside 
     const exported = composeManagedCronExport(listed);
     app.render(createElement(SavedExchanges));
     await expect
-      .element(page.getByRole("button", { name: "Import a psilink.yaml" }))
+      .element(page.getByRole("button", { name: "Import a file" }))
       .toBeInTheDocument();
 
     await chooseFiles([

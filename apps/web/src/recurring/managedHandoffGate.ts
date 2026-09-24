@@ -116,8 +116,8 @@ export const HANDED_OFF_IMPORT_TITLE = "That exchange was handed off";
  *
  * The command-line route's recovery is the re-take on the handed-off exchange's own
  * surface ({@link ./managedRetakeModel.ts}), named by the words of its control: the
- * import affordance renders only beside an empty or unreadable listing, so an
- * operator meeting this refusal is not on the screen that offers it.
+ * import is on the list, so an operator meeting this refusal is not on the screen
+ * that offers the re-take.
  */
 const HANDED_OFF_IMPORT_REASON: Record<
   ManagedSpentHandoff,

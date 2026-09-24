@@ -183,34 +183,27 @@ fail-closed outcome the version bump exists to produce -- while every record suc
 a build wrote stays readable here. The same holds for an absent `side`, which a
 build that predates it also requires.
 
-**Its import is offered beside any listing.** Two controls import a file, and
-they are bound to different listings:
+**One import is offered beside every listing.** The list offers one import
+control whether it is empty, populated, or unreadable. It takes the backup
+artifact or a command-line `psilink.yaml` and routes by what the file holds, not
+by which listing it stands beside:
 
-- **The shared import** takes either the backup artifact or a command-line
-  `psilink.yaml` and routes by what the file holds. It renders only beside an
-  empty or unreadable listing, because its backup leg installs a runnable
-  record: one holding a secret, reconciled against the spent records and
-  refused where a hand-off holds that secret (see [the handed-off
-  refusal](#the-backup-marker-the-spent-state-and-the-import-marker-local-siblings-never-in-the-artifact)).
-- **The configuration import** beside a populated listing takes a
-  `psilink.yaml` alone, on any channel: a `webrtc` file lands as a record with
-  no key, and an `sftp` or `filedrop` file as a record on a channel this app
-  does not run. A file tagged as the backup artifact is refused before it is
-  reconciled or installed, and nothing is written.
-
-What either control installs from a `psilink.yaml` chosen alone is the same
-configuration-only record. It holds no secret, reconciles against no stored
-record, and runs nowhere here, so it installs nothing runnable, and the rule
-binding the shared import to an empty or unreadable listing has nothing to
-guard for it. Both controls also take a `psilink.yaml` chosen together with the
-`.psilink.key` beside it, which installs a runnable record ([Importing the key
-file beside a configuration](#importing-the-key-file-beside-a-configuration)):
-its reconciliation and refusals are its own and are met wherever it is
-imported, so it is bound to no listing.
+- **A backup** installs or revives a runnable record, reconciled against the
+  one exchange it holds ([Reconciling a backup
+  import](#reconciling-a-backup-import)).
+- **A `psilink.yaml` chosen alone**, on any channel, installs a
+  configuration-only record: a `webrtc` file lands as a record with no key, and
+  an `sftp` or `filedrop` file as a record on a channel this app does not run.
+  It holds no secret, reconciles against no stored record, and runs nowhere
+  here, so nothing it installs can be a second live copy of anything.
+- **A `psilink.yaml` chosen together with its `.psilink.key`** installs a
+  runnable record ([Importing the key file beside a
+  configuration](#importing-the-key-file-beside-a-configuration)), with a
+  reconciliation and refusals of its own.
 
 #### Importing the key file beside a configuration
 
-A `psilink.yaml` chosen together with its `.psilink.key`, in one pick of either
+A `psilink.yaml` chosen together with its `.psilink.key`, in one pick of the
 import control, installs a **runnable** record: the configuration-only record
 the `psilink.yaml` alone would install, holding the key file's secret. Which
 file is the key file is read off the names -- the one whose name ends in
@@ -278,10 +271,10 @@ memory:
   `lastRun`, standing condition, and platform grants -- none of which the pair
   has a field for -- are kept (`applyManagedExchangeCommandLinePair`). The spent
   state is cleared and the import marker stamped.
-- **A live match refuses**, naming the record, where the backup import installs
-  a fresh record beside it: the pair holds nothing the live record lacks, so a
-  second live copy of one secret is all installing it could add. It decides
-  ahead of a migration-spent match for the same reason.
+- **A live match refuses**, naming the record, as it does for a backup: the
+  pair holds nothing the live record lacks, so a second live copy of one secret
+  is all installing it could add. It decides ahead of a migration-spent match
+  for the same reason.
 - **No match installs fresh**, with a new `id`.
 
 A secret the command line has rotated past the stored one matches nothing, so a
@@ -1500,12 +1493,7 @@ record, in a separate origin-local store keyed by the record `id`, and are
   hand-off saved, and bringing it back to this browser is the re-take on that
   record's own surface, which the refusal names by the words on its control. The
   guard binds at the store's import path, and the surface an operator meets it at
-  is not the surface offering the re-take: the backup import renders only
-  beside an empty or unreadable listing, and a handed-off record keeps the listing
-  non-empty, so a store whose records all read offers no backup import for the
-  refusal to be met at. The configuration import that listing offers refuses a
-  backup file before any reconciliation ([The configuration-only
-  record](#the-configuration-only-record)).
+  -- the list's import -- is not the surface offering the re-take.
 
   **The reconciliation parses each stored record on its own.** An entry this
   build cannot parse is **skipped** rather than failing the import: an invalid
@@ -1540,10 +1528,9 @@ record, in a separate origin-local store keyed by the record `id`, and are
   handed-off refusal that did read its sibling determines the import ahead of
   this one, naming the route it read.
 
-  This refusal has a surface to be met at for the reason the one above is
-  bounded away from it: the attended list read joins the sibling state and
-  rejects wholesale on the same unreadable entry, so the store showing the
-  import affordance is the read-failed one. The refusal names the store rather
+  The attended list read joins the sibling state and rejects wholesale on the
+  same unreadable entry, so the list an operator meets this refusal beside is
+  the read-failed one. The refusal names the store rather
   than the file, the file being intact, and the discard it offers is the
   delete-by-key that surface's recovery listing already provides.
 
@@ -1608,6 +1595,74 @@ exporter reads
 only the record. Deleting a managed exchange removes the record and its sibling
 state together (see [Deleting a managed
 exchange](../MANAGED_EXCHANGE.md#deleting-a-managed-exchange)).
+
+### Reconciling a backup import
+
+A backup artifact holds one exchange, so the guard on importing it is a lookup
+against that exchange, not a condition on the rest of the store: the import is
+offered beside every listing ([The configuration-only
+record](#the-configuration-only-record)), and what else the store holds decides
+nothing. The reconciliation runs in one transaction over the record and sibling
+stores (`reviveSpentManagedExchange`, `managedExchangeStore.ts`), comparing
+secrets in memory, and nothing is written on any outcome but a revive or a fresh
+install.
+
+**The outcomes**, each named to the operator:
+
+- **Restored this device's spent copy.** A migration-spent record holding the
+  artifact's secret is revived in place ([the spent
+  state](#the-backup-marker-the-spent-state-and-the-import-marker-local-siblings-never-in-the-artifact)).
+- **Added as new.** No record holds the artifact's secret and no live copy is
+  recognized: a fresh record installs with a new `id`.
+- **Refused, a live copy is already here.** A live record holds the artifact's
+  secret: it is this exchange, and a second live copy of one secret splits from
+  it at the first rotation either side makes. The refusal names that record and
+  says to open it.
+- **Refused, handed off to the command line.** A handed-off record holds the
+  artifact's secret; the refusal names the record and the take-back on that
+  record's own surface ([Taking a command-line hand-off
+  back](#taking-a-command-line-hand-off-back)).
+
+A record whose sibling entry cannot be read refuses as that section states. The
+refusals decide in this order: hand-off, unreadable sibling, a scoped
+restore's other file (below), live copy by secret. A live copy recognized
+without a secret match (below) is asked about after them and before a revive or
+a fresh install.
+
+No refusal sends the operator to delete other exchanges: each names the one
+record it is about and what to do with that record.
+
+#### Recognizing a live copy without a secret match
+
+A live copy's secret rotates at every run, so a backup taken before a run holds
+a secret its own live record has moved past, and the secret alone no longer
+finds it. The rule that recognizes it, stated once here for every import that
+installs a runnable record to call; the backup import applies it, and the
+command-line pair import matches on the secret alone:
+
+**A live record whose agreed terms and `side` equal the imported record's names
+that record, and the import installs nothing unless the operator confirms
+installing beside it.** A live record is one no hand-off and no migration has
+spent. The agreed terms are the part of the linkage terms a partner refuses an
+exchange over when its copy differs -- every field but this party's own
+`identity` and the terms' `date` (`partnerBoundTerms`, `@psilink/core`) --
+compared in canonical form. A record with no `side` matches nothing. The code:
+`findLiveCopyByTermsAndSide` (`apps/web/src/psi/managed/managedLiveCopyMatch.ts`).
+
+Equal terms and side is a heuristic: two separate exchanges with one partner
+can share both. So the match is a question, never a refusal. The operator is
+shown the record's name and chooses to open it, to cancel (nothing is written),
+or to install the backup beside it. A confirmed import names the record it goes
+beside, and a second record matching the rule is asked about in turn.
+
+#### Restoring a migration-spent record from its backup
+
+A migration-spent row offers "Restore from backup", which opens the same import
+scoped to that record (`restoreManagedExchangeFromBackup`,
+`managedExchangeImport.ts`). It revives the record only from an artifact holding
+the secret that record holds; any other file -- another exchange's backup, a
+backup taken after the exchange rotated on the other device, or a command-line
+file -- is refused, naming the list's import for it, and nothing is written.
 
 ### Taking a command-line hand-off back
 

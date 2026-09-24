@@ -1,7 +1,6 @@
 import { describe, expect, test, vi } from "vitest";
 
 import {
-  UsageError,
   assembleExchangeSpec,
   connectionFromLocator,
   generateSharedSecret,
@@ -12,12 +11,14 @@ import {
 import { stringify as stringifyYaml } from "yaml";
 
 import {
-  ManagedImportBackupNotConfigurationError,
+  ManagedImportAlreadyHeldError,
   ManagedImportCustodyUnreadableError,
   ManagedImportHandedOffError,
-  importManagedConfigurationFile,
+  ManagedImportLiveCopyError,
+  ManagedImportOtherExchangeError,
   importManagedExchange,
   importManagedExchangeFile,
+  restoreManagedExchangeFromBackup,
 } from "@psi/managed/managedExchangeImport";
 import {
   buildManagedExchangeRecord,
@@ -390,96 +391,136 @@ describe("importManagedExchangeFile routes by what the file is", () => {
   });
 });
 
-describe("importManagedConfigurationFile takes a configuration and no backup", () => {
-  function configurationBytes(): string {
-    return composeManagedCronExport(
-      runnableRecord({
-        label: "Riverbend quarterly",
-        exchangeFile: composeManagedExchangeFile({
-          connection: { channel: "webrtc", host: "signaling.example.org" },
-          linkageTerms,
-        }),
-        side: "acceptor",
-        sharedSecret: generateSharedSecret(),
-      }),
-    ).config.text;
-  }
+describe("a backup reconciles against the exchange it holds", () => {
+  test("a live copy holding its secret refuses, installing nothing", async () => {
+    const deps = recordingDeps({ kind: "held", label: "Riverbend quarterly" });
 
-  /** A hand-written filedrop configuration, in the snake_case the CLI reads. */
-  function filedropConfigurationBytes(): string {
-    return stringifyYaml(
-      snakeizeKeys(
-        assembleExchangeSpec({
-          connection: connectionFromLocator({
-            channel: "filedrop",
-            inboundPath: "/srv/exchange/inbound",
-            outboundPath: "/srv/exchange/outbound",
-            options: {
-              retainFiles: true,
-              timestampInFilename: true,
-              locklessRendezvous: true,
-            },
-          }),
-          linkageTerms,
-        }),
-      ),
-    );
-  }
-
-  test("a webrtc configuration installs the record the shared import installs", async () => {
-    const shared = recordingDeps();
-    const alone = recordingDeps();
-    const bytes = configurationBytes();
-
-    await importManagedExchangeFile(bytes, shared);
-    const { record, missingGrants } = await importManagedConfigurationFile(
-      bytes,
-      alone,
-    );
-
-    expect(record.sharedSecret).toBeUndefined();
-    expect(missingGrants).toEqual([]);
-    const { id: _aloneId, ...aloneFields } = alone.installed[0];
-    const { id: _sharedId, ...sharedFields } = shared.installed[0];
-    expect(aloneFields).toEqual(sharedFields);
-    expect(alone.reviveSpent).not.toHaveBeenCalled();
-    expect(alone.markImported).not.toHaveBeenCalled();
+    await expect(
+      importManagedExchange(goodBytes(), deps),
+    ).rejects.toBeInstanceOf(ManagedImportAlreadyHeldError);
+    await expect(
+      importManagedExchange(goodBytes(), deps),
+    ).rejects.toMatchObject({ label: "Riverbend quarterly" });
+    expect(deps.installed).toHaveLength(0);
+    expect(deps.markImported).not.toHaveBeenCalled();
   });
 
-  test("a configuration on a channel this app does not run installs one too", async () => {
+  test("a live copy by terms and side names that record, installing nothing", async () => {
+    const deps = recordingDeps({
+      kind: "live-copy",
+      id: "listed-id",
+      label: "Riverbend quarterly",
+    });
+
+    await expect(
+      importManagedExchangeFile(goodBytes(), deps),
+    ).rejects.toBeInstanceOf(ManagedImportLiveCopyError);
+    await expect(
+      importManagedExchangeFile(goodBytes(), deps),
+    ).rejects.toMatchObject({ id: "listed-id", label: "Riverbend quarterly" });
+    expect(deps.installed).toHaveLength(0);
+    expect(deps.markImported).not.toHaveBeenCalled();
+  });
+
+  test("a confirmed import passes the named record on as the one to go beside", async () => {
     const deps = recordingDeps();
 
-    const { record } = await importManagedConfigurationFile(
-      filedropConfigurationBytes(),
+    await importManagedExchangeFile(goodBytes(), deps, {
+      besideId: "listed-id",
+    });
+
+    expect(deps.reviveSpent).toHaveBeenCalledWith(
+      expect.anything(),
+      "2026-07-14T12:00:00.000Z",
+      { besideId: "listed-id" },
+    );
+    expect(deps.installed).toHaveLength(1);
+  });
+
+  test("a configuration on a channel this app does not run installs, reconciling nothing", async () => {
+    const deps = recordingDeps();
+
+    const { record } = await importManagedExchangeFile(
+      stringifyYaml(
+        snakeizeKeys(
+          assembleExchangeSpec({
+            connection: connectionFromLocator({
+              channel: "filedrop",
+              inboundPath: "/srv/exchange/inbound",
+              outboundPath: "/srv/exchange/outbound",
+              options: {
+                retainFiles: true,
+                timestampInFilename: true,
+                locklessRendezvous: true,
+              },
+            }),
+            linkageTerms,
+          }),
+        ),
+      ),
       deps,
     );
 
     expect(record.exchangeFile.connection.channel).toBe("filedrop");
     expect(record.sharedSecret).toBeUndefined();
-    expect(deps.installed).toHaveLength(1);
+    expect(deps.reviveSpent).not.toHaveBeenCalled();
+  });
+});
+
+describe("restoreManagedExchangeFromBackup takes that exchange's backup alone", () => {
+  test("scopes the reconciliation to the record being restored", async () => {
+    const existing = recordHolding({});
+    const deps = recordingDeps({ kind: "revived", record: existing });
+
+    const { record } = await restoreManagedExchangeFromBackup(
+      existing.id,
+      goodBytes(),
+      deps,
+    );
+
+    expect(record).toBe(existing);
+    expect(deps.reviveSpent).toHaveBeenCalledWith(
+      expect.anything(),
+      "2026-07-14T12:00:00.000Z",
+      { restoreInto: existing.id },
+    );
+    expect(deps.installed).toHaveLength(0);
   });
 
-  test("a backup is refused and nothing is reconciled or installed", async () => {
-    const deps = recordingDeps({
-      kind: "handed-off",
-      handoff: "command-line",
-      label: "Riverbend quarterly",
-    });
+  test("another exchange's backup is refused, installing nothing", async () => {
+    const deps = recordingDeps({ kind: "other-exchange" });
 
     await expect(
-      importManagedConfigurationFile(goodBytes(), deps),
-    ).rejects.toBeInstanceOf(ManagedImportBackupNotConfigurationError);
-    expect(deps.reviveSpent).not.toHaveBeenCalled();
+      restoreManagedExchangeFromBackup("spent-id", goodBytes(), deps),
+    ).rejects.toBeInstanceOf(ManagedImportOtherExchangeError);
     expect(deps.installed).toHaveLength(0);
     expect(deps.markImported).not.toHaveBeenCalled();
   });
 
-  test("bytes that parse as neither file are a configuration refusal, not a backup one", async () => {
+  test("a command-line configuration is refused before any reconciliation", async () => {
     const deps = recordingDeps();
+    const configuration = composeManagedCronExport(recordHolding({})).config
+      .text;
 
     await expect(
-      importManagedConfigurationFile("\tnot: [yaml", deps),
-    ).rejects.toBeInstanceOf(UsageError);
+      restoreManagedExchangeFromBackup("spent-id", configuration, deps),
+    ).rejects.toBeInstanceOf(ManagedImportOtherExchangeError);
+    expect(deps.reviveSpent).not.toHaveBeenCalled();
     expect(deps.installed).toHaveLength(0);
+  });
+
+  test("a confirmed live copy is passed on beside the scope", async () => {
+    const deps = recordingDeps({ kind: "other-exchange" });
+
+    await expect(
+      restoreManagedExchangeFromBackup("spent-id", goodBytes(), deps, {
+        besideId: "listed-id",
+      }),
+    ).rejects.toThrow();
+    expect(deps.reviveSpent).toHaveBeenCalledWith(
+      expect.anything(),
+      "2026-07-14T12:00:00.000Z",
+      { besideId: "listed-id", restoreInto: "spent-id" },
+    );
   });
 });

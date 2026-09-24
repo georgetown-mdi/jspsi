@@ -17,10 +17,6 @@
  *   the store on the backup leg's own rule: the same secret is the same
  *   exchange.
  *
- * The configuration leg also has an entry of its own
- * ({@link importManagedConfigurationFile}) that refuses a backup, for a
- * control offered where the backup leg is not.
- *
  * What follows is the backup leg: a take-over that installs the artifact as the
  * one owner on this device (see docs/MANAGED_EXCHANGE.md, "Eviction recovery is the
  * import flow" and "Export/import is migration, not sync"). Restoring after eviction
@@ -35,8 +31,13 @@
  * malformed or tampered file is rejected before any write and the store is left
  * untouched.
  *
- * Import reconciles against a spent husk before installing fresh. When the artifact
- * matches a record spent by the DEVICE MIGRATION -- same `sharedSecret`, the correct
+ * Import reconciles per exchange before installing fresh, whatever else the store
+ * holds (docs/spec/MANAGED_EXCHANGE_RECORD.md, "Reconciling a backup import"). A
+ * backup holds one exchange, so the guard is a lookup: a live record holding the
+ * artifact's secret refuses ({@link ManagedImportAlreadyHeldError}), and a live
+ * record with the artifact's agreed terms and side is named and installed beside
+ * only on the operator's word ({@link ManagedImportLiveCopyError}). When the
+ * artifact matches a record spent by the DEVICE MIGRATION -- same `sharedSecret`, the correct
  * match, since a spent-and-unrun-since record's artifact holds exactly its secret
  * (compared in memory, never persisted) -- the import REVIVES that record in place: it
  * updates the record's fields from the artifact, keeps its `id` and any persisted
@@ -105,6 +106,7 @@ import type {
 } from "./managedExchangeRecord";
 import type {
   ManagedPairReconcileOutcome,
+  ManagedReviveOptions,
   ManagedReviveOutcome,
 } from "./managedExchangeStore";
 import type { ManagedPlatformGrant } from "./managedExchangeArtifact";
@@ -155,16 +157,73 @@ export class ManagedImportCustodyUnreadableError extends Error {
   }
 }
 
+/**
+ * Raised when an import is refused because a record this browser runs already
+ * holds the file's secret: the same exchange, live here, so nothing is revived
+ * and nothing is installed beside it. Holds that record's operator label (which
+ * may be empty) so the surface can name it.
+ */
+export class ManagedImportAlreadyHeldError extends Error {
+  /** The stored record's operator label; empty when the operator named nothing. */
+  readonly label: string;
+
+  constructor(label: string) {
+    super(
+      "this file's managed exchange already runs in this browser, so importing it is refused",
+    );
+    this.name = "ManagedImportAlreadyHeldError";
+    this.label = label;
+  }
+}
+
+/**
+ * Raised when a backup import stops to ask: no record holds the artifact's
+ * secret, but a live one has its agreed terms and side, so it may be the same
+ * exchange run past the backup. Nothing is written. Holds that record's `id`,
+ * which an import the operator confirms passes back as `besideId`, and its
+ * label (which may be empty) so the surface can name it.
+ */
+export class ManagedImportLiveCopyError extends Error {
+  /** The live record the backup may be an older copy of. */
+  readonly id: string;
+  /** Its operator label; empty when the operator named nothing. */
+  readonly label: string;
+
+  constructor(id: string, label: string) {
+    super(
+      "a managed exchange with this backup's terms and side already runs in this browser, so the import waits for confirmation",
+    );
+    this.name = "ManagedImportLiveCopyError";
+    this.id = id;
+    this.label = label;
+  }
+}
+
+/**
+ * Raised when a restore scoped to one migration-spent record is given any file
+ * but that record's backup: another exchange's backup, one that no longer
+ * holds its secret, or a file that is no backup at all. Nothing is written.
+ */
+export class ManagedImportOtherExchangeError extends Error {
+  constructor() {
+    super(
+      "this file is not the backup of the managed exchange being restored, so nothing is restored",
+    );
+    this.name = "ManagedImportOtherExchangeError";
+  }
+}
+
 /** The platform boundaries the import drives, injected so the flow is testable. */
 export interface ManagedImportDeps {
-  /** Reconcile the reconstructed artifact against the spent records: revive a
-   * migration-spent secret-match in place (keeping its id and input handle, clearing
-   * spent, marking imported and backed-up as of the same instant), report the
-   * hand-off that refuses the import, report a sibling state it could not read
-   * (which refuses on its own terms), or report no match at all. */
+  /** Reconcile the reconstructed artifact against the store
+   * ({@link reviveSpentManagedExchange}): revive a migration-spent secret-match
+   * in place (keeping its id and input handle, clearing spent, marking imported
+   * and backed-up as of the same instant), or report the outcome that refuses,
+   * asks, or installs fresh. */
   reviveSpent: (
     reconstructed: ManagedExchangeRecord,
     at: string,
+    options?: ManagedReviveOptions,
   ) => Promise<ManagedReviveOutcome>;
   /** Install a reconstructed record as a new managed exchange (the one owner). */
   install: (record: ManagedExchangeRecord) => Promise<ManagedExchangeRecord>;
@@ -223,12 +282,17 @@ function grantsMissingHere(
 /**
  * Import an artifact's bytes as a managed exchange. Parses and reconstructs through
  * the artifact module's trust boundary (throwing on a malformed or tampered file
- * before any write). If the artifact matches a migration-spent record, revives that
- * record in place (already marked imported and backed-up in the same transaction);
- * if it matches a record handed off by a route of its own, refuses; otherwise
- * installs a fresh record and marks it imported and backed-up as of the import
- * instant. Returns the revived or installed record, with the grants it does not
- * hold that its source did.
+ * before any write), then reconciles it per exchange: revives a migration-spent
+ * match in place (already marked imported and backed-up in the same transaction);
+ * refuses a match handed off by a route of its own, one whose saved state cannot
+ * be read, and a live match; stops to ask where a live record has the artifact's
+ * agreed terms and side, unless `options.besideId` names it; otherwise installs
+ * a fresh record and marks it imported and backed-up as of the import instant.
+ * Returns the revived or installed record, with the grants it does not hold that
+ * its source did.
+ *
+ * `options.restoreInto` scopes the import to one migration-spent record: any
+ * artifact not holding its secret is refused.
  *
  * The import mark on a fresh install is best-effort after the install succeeds: a
  * valid record is already durable, so a failed marker write must not report the
@@ -243,17 +307,24 @@ function grantsMissingHere(
  * @throws {ManagedImportCustodyUnreadableError} if the artifact's secret matches a
  *   record whose sibling state could not be read, leaving a hand-off unreadable;
  *   nothing is written.
+ * @throws {ManagedImportAlreadyHeldError} if a live record holds the artifact's
+ *   secret; nothing is written.
+ * @throws {ManagedImportLiveCopyError} if a live record other than `besideId`
+ *   has the artifact's agreed terms and side; nothing is written.
+ * @throws {ManagedImportOtherExchangeError} if `restoreInto` is set and the
+ *   artifact is not that record's backup; nothing is written.
  * @throws {ZodError} if the artifact or the reconstructed record is invalid, or the
  *   install itself fails.
  */
 export async function importManagedExchange(
   source: string,
   deps: ManagedImportDeps = defaultDeps,
+  options: ManagedReviveOptions = {},
 ): Promise<ManagedImportResult> {
   const { record: reconstructed, heldGrants } =
     importManagedExchangeArtifact(source);
   const at = deps.now().toISOString();
-  const reconciled = await deps.reviveSpent(reconstructed, at);
+  const reconciled = await deps.reviveSpent(reconstructed, at, options);
   if (reconciled.kind === "revived")
     return {
       record: reconciled.record,
@@ -263,6 +334,12 @@ export async function importManagedExchange(
     throw new ManagedImportHandedOffError(reconciled.handoff, reconciled.label);
   if (reconciled.kind === "custody-unreadable")
     throw new ManagedImportCustodyUnreadableError(reconciled.label);
+  if (reconciled.kind === "held")
+    throw new ManagedImportAlreadyHeldError(reconciled.label);
+  if (reconciled.kind === "live-copy")
+    throw new ManagedImportLiveCopyError(reconciled.id, reconciled.label);
+  if (reconciled.kind === "other-exchange")
+    throw new ManagedImportOtherExchangeError();
   const installed = await deps.install(reconstructed);
   try {
     await deps.markImported(installed.id, at);
@@ -307,8 +384,8 @@ export function managedImportFileKind(
 }
 
 /** What the bytes hold, keeping apart the bytes that parse as neither file:
- * the shared control hands those to the backup leg, and the configuration-only
- * control to its own. */
+ * the import control hands those to the backup leg, and the pair import to the
+ * configuration's own refusal. */
 function probeImportFile(
   source: string,
 ): "backup" | "command-line-configuration" | "unparseable" {
@@ -326,14 +403,14 @@ function probeImportFile(
 }
 
 /**
- * Raised when the configuration-only import is given the app's own backup
- * file. That import installs configuration-only records alone, so a file
- * tagged as a backup is refused on that tag and nothing is written.
+ * Raised when the pair import is given the app's own backup file as its
+ * configuration. A backup is imported on its own, so a file tagged as one is
+ * refused on that tag and nothing is written.
  */
 export class ManagedImportBackupNotConfigurationError extends Error {
   constructor() {
     super(
-      "this file is a managed-exchange backup, which the configuration import does not take",
+      "this file is a managed-exchange backup, which the pair import does not take as its configuration",
     );
     this.name = "ManagedImportBackupNotConfigurationError";
   }
@@ -353,39 +430,43 @@ export class ManagedImportBackupNotConfigurationError extends Error {
  * @throws {UsageError} if the bytes parse as neither file.
  * @throws {ManagedConfigurationRefusedError} if a configuration fails the
  *   exchange-file schema, or is one this app cannot hold.
- * @throws {ManagedImportHandedOffError} or
- *   {@link ManagedImportCustodyUnreadableError} on the backup leg's refusals.
+ * @throws Every refusal {@link importManagedExchange} raises, on the backup leg;
+ *   `options.besideId` reaches that leg alone.
  * @throws {ZodError} if the backup file fails its schema, or the install does.
  */
 export async function importManagedExchangeFile(
   source: string,
   deps: ManagedImportDeps = defaultDeps,
+  options: Pick<ManagedReviveOptions, "besideId"> = {},
 ): Promise<ManagedImportResult> {
   if (managedImportFileKind(source) === "backup")
-    return importManagedExchange(source, deps);
+    return importManagedExchange(source, deps, options);
   return installConfiguration(source, deps);
 }
 
 /**
- * Import a command-line `psilink.yaml` as a configuration-only record, and
- * refuse the app's own backup file. The configuration leg of
- * {@link importManagedExchangeFile} alone: whatever it installs holds no
- * secret, so nothing it writes can run here.
+ * Restore the migration-spent record `id` from its backup: the import
+ * {@link importManagedExchange} runs, scoped so that only an artifact holding
+ * that record's secret revives it. A configuration file, another exchange's
+ * backup, and a backup of this exchange taken after it rotated elsewhere are
+ * all refused alike.
  *
- * @throws {ManagedImportBackupNotConfigurationError} if the file is a backup;
- *   nothing is written.
- * @throws {UsageError} if the bytes are not parseable YAML.
- * @throws {ManagedConfigurationRefusedError} if the configuration fails the
- *   exchange-file schema, or is one this app cannot hold.
- * @throws {ZodError} if the record built from it, or the install, fails.
+ * @throws {ManagedImportOtherExchangeError} if the file is not that record's
+ *   backup; nothing is written.
+ * @throws Every other refusal {@link importManagedExchange} raises.
  */
-export async function importManagedConfigurationFile(
+export async function restoreManagedExchangeFromBackup(
+  id: string,
   source: string,
-  deps: Pick<ManagedImportDeps, "install"> = defaultDeps,
+  deps: ManagedImportDeps = defaultDeps,
+  options: Pick<ManagedReviveOptions, "besideId"> = {},
 ): Promise<ManagedImportResult> {
-  if (probeImportFile(source) === "backup")
-    throw new ManagedImportBackupNotConfigurationError();
-  return installConfiguration(source, deps);
+  if (probeImportFile(source) === "command-line-configuration")
+    throw new ManagedImportOtherExchangeError();
+  return importManagedExchange(source, deps, {
+    ...options,
+    restoreInto: id,
+  });
 }
 
 /** Read a configuration and install it as a fresh configuration-only record. */
@@ -397,25 +478,6 @@ async function installConfiguration(
     readManagedCommandLineConfiguration(source),
   );
   return { record, missingGrants: [] };
-}
-
-/**
- * Raised when a command-line pair is refused because a record this browser
- * runs already holds its secret: the same exchange, live here, so nothing is
- * revived and nothing is installed beside it. Holds that record's operator
- * label (which may be empty) so the surface can name it.
- */
-export class ManagedImportAlreadyHeldError extends Error {
-  /** The stored record's operator label; empty when the operator named nothing. */
-  readonly label: string;
-
-  constructor(label: string) {
-    super(
-      "this key file's managed exchange already runs in this browser, so importing it is refused",
-    );
-    this.name = "ManagedImportAlreadyHeldError";
-    this.label = label;
-  }
 }
 
 /** The platform boundaries a command-line pair import drives, injected so the
