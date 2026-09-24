@@ -26,10 +26,10 @@ import { configDefaults, defineConfig } from "vitest/config";
  * filtered out of every mutant run and kills nothing. Every space is
  * widened, since the pattern does not mark which one joins two titles; a
  * space inside a title can then over-select, never under-select.
- * scripts/stryker-security.test.mjs checks the vitest half against the real
- * vitest.
+ * scripts/stryker-security.test.mjs drives the plugin below through vitest's
+ * Node API the way Stryker's runner does.
  */
-export function widenTestNamePattern(pattern: RegExp): RegExp {
+function widenTestNamePattern(pattern: RegExp): RegExp {
   return new RegExp(pattern.source.replaceAll(" ", "(?: > | )"), pattern.flags);
 }
 
