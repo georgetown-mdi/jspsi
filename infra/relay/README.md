@@ -243,7 +243,11 @@ revoke-exchange.sh <exchange-id>
   SQLite's own reason, having changed nothing. A row no exchange maps -- one
   added by hand -- is removed by value, the key on standard input:
   `printf '%s\n' "$KEY" | python3 /opt/psilink-relay/relay_table.py forget-key`,
-  with `relay.env`'s variables in the environment.
+  with `relay.env`'s variables in the environment. A `psilink-verify-` row
+  the import skips -- a verify run that died before cleaning up -- gets no
+  mapping, so if an earlier install already wrote its key into the table
+  that key stays until it is removed with `forget-key`, the key taken from
+  `exchange-keys.imported`.
 - **A replaced `turndb` needs a restart.** coturn holds the file open. A
   `turndb` deleted or replaced under a running coturn -- by hand, or a restore
   from backup -- leaves the server reading the file it opened while every write
