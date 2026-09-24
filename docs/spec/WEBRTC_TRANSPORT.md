@@ -158,6 +158,16 @@ payload) go up every 5 s. The broker neither queues nor reports an undeliverable
 `OFFER` for a peer that has not registered yet, so the dialer re-offers on a
 timer until it is answered rather than waiting for a signal that never comes.
 
+A CLI run presenting a TURN credential it minted replaces its peer connection
+each relay-credential renewal interval (table below) the partner has not yet
+sent its session description, building the new one with a freshly minted
+credential, so a rendezvous longer than the credential's lifetime still
+gathers a relay candidate. The acceptor's rebuilt connection offers under a new
+`connectionId`, and an `ANSWER` naming another `connectionId` is dropped; the
+inviter has sent nothing before the partner's `OFFER`, so its replacement is
+not visible on the wire. A partner that has sent its description keeps the
+connection it was negotiating with.
+
 Message types acted on: `OPEN`, `OFFER`, `ANSWER`, `CANDIDATE`, `LEAVE`,
 `EXPIRE`, `ERROR`, `ID-TAKEN`, `INVALID-KEY`. Two of them hold operator
 meaning: `ID-TAKEN` is the symmetric-role misconfiguration (both parties set the
@@ -534,6 +544,7 @@ condition holds.
 | Broker registration | 30 s | Opening the signaling socket and receiving `OPEN` |
 | Rendezvous | 10 min | Both parties finding each other; human-timescale, because one operator may start well before the other |
 | Offer retry interval | 1 s | How often the dialer re-offers while unanswered |
+| Relay credential renewal | 30 min | How long a CLI run presenting a minted TURN credential waits for the partner's session description before it rebuilds the peer connection with a new one; half the credential's one-hour lifetime |
 | Channel open | 30 s | The data channel opening once both descriptions are exchanged; reaching it means the peer is present but no candidate pair worked |
 | Parked receive | 1 h | Peer silence on an open channel; it bounds the peer's single-threaded PSI compute, which sends no keepalive while it runs |
 | Close drain | 5 min | The clean close's wait above -- the CLI's acknowledgement drain, the web's wait for the peer's close -- sized from the largest admissible frame and the measured send rate |

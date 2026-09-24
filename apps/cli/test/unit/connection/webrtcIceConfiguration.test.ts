@@ -11,6 +11,7 @@ import {
   iceServersFromConnection,
   relayCredentialForRun,
   relayCredentialNotice,
+  relayCredentialRenewalNotice,
   turnEntryNeedsSecretMessage,
 } from "../../../src/connection/webrtc/weriftPeer";
 
@@ -253,6 +254,14 @@ test("the minted credential's notice names the relay, its lifetime, and its expi
   );
   expect(mixed).toContain("turns:minted.example:443?transport=tcp");
   expect(mixed).not.toContain("own.example");
+});
+
+test("a renewed credential's notice names the wait and the new expiry", () => {
+  expect(relayCredentialRenewalNotice(RUN_CREDENTIAL)).toBe(
+    "the exchange partner has not connected within 30 minutes, so the " +
+      "connection attempt restarts with a new relay credential that " +
+      "expires at 2026-01-01T01:00:00.000Z",
+  );
 });
 
 test("a connection with neither STUN nor TURN resolves to no servers", () => {

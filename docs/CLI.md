@@ -625,7 +625,7 @@ connection:
 ```
 
 - Each run mints the credential from the shared secret in the key file when it starts. Because the key file's secret rotates on every successful exchange, the credential is different each run, and nothing derived from the secret is written to the configuration or the key file.
-- The credential is valid for one hour from the start of the run, and the run's output states when it expires. The relay refuses the credential once it expires, so plan for the wait for the partner and the exchange to finish within that hour: keep `peer_timeout_ms` well under it on a relayed run.
+- The credential is valid for one hour, and the run's output states when it expires. While the partner has not connected, the run mints a fresh credential every 30 minutes and restarts its connection attempt with it, stating the new expiry, so a `peer_timeout_ms` longer than an hour still reaches the relay with a credential it accepts. Once the partner connects the credential is not renewed, and the relay refuses it once it expires, so plan for the exchange itself to finish within the half hour or more it has left.
 - A run with no shared secret refuses the entry, naming its url, before anything is dialed.
 - An invitation that names a relay replaces these entries, as it replaces static ones ([`invitation_relay`](EXCHANGE_REFERENCE.md#connectioninvitation_relay)).
 

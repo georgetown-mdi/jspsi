@@ -280,6 +280,12 @@ export interface WebRtcPeerOptions {
    * Candidate types ICE may use. Absent leaves werift's own default (`all`).
    */
   iceTransportPolicy?: IceTransportPolicy;
+  /**
+   * Rebuild the peer connection from a fresh ICE server list while the partner
+   * has not arrived (see {@link IceServerRenewal}). Absent, the connection
+   * built from `iceServers` is kept for the whole wait.
+   */
+  iceServerRenewal?: IceServerRenewal;
   offerRetryIntervalMs?: number;
   rendezvousTimeoutMs?: number;
   channelOpenTimeoutMs?: number;
@@ -297,6 +303,18 @@ export interface WebRtcPeerOptions {
    * against a scripted broker.
    */
   socketFactory?: (url: string) => WebSocket;
+}
+
+/**
+ * How a rendezvous replaces an ICE server list that expires: each `afterMs`
+ * the partner has not yet sent a session description, the peer connection is
+ * discarded and a new one built from `resolve()`'s list. The acceptor offers
+ * again under a new connection id; the inviter, which has sent nothing yet,
+ * only swaps the connection it will answer from.
+ */
+export interface IceServerRenewal {
+  afterMs: number;
+  resolve: () => Promise<Array<RTCIceServer>>;
 }
 
 /**
@@ -494,6 +512,52 @@ export async function relayCredentialForRun(
 }
 
 /**
+ * How long a run waits for its partner before it mints a fresh TURN credential
+ * and rebuilds the peer connection with it: half the credential's lifetime, so
+ * a partner arriving at any point in the wait leaves at least that half for
+ * the connection to form.
+ */
+export const RELAY_CREDENTIAL_RENEWAL_MS =
+  (RELAY_CREDENTIAL_MAX_TTL_SECONDS * 1000) / 2;
+
+/**
+ * The renewal a run presenting a minted TURN credential dials with: each
+ * {@link RELAY_CREDENTIAL_RENEWAL_MS} the partner is absent, a credential is
+ * minted from `sharedSecret` at `now()` and the ICE servers resolved with it,
+ * so a wait longer than the credential's lifetime still reaches the relay with
+ * one it accepts.
+ */
+export function relayCredentialRenewal(
+  connection: Pick<
+    WebRTCConnectionConfig,
+    "stun" | "turn" | "iceProvision" | "invitationRelay"
+  >,
+  sharedSecret: string,
+  now: () => Date = () => new Date(),
+): IceServerRenewal {
+  return {
+    afterMs: RELAY_CREDENTIAL_RENEWAL_MS,
+    resolve: async () => {
+      const credential = await mintRunRelayCredential(sharedSecret, now());
+      log.info(relayCredentialRenewalNotice(credential));
+      return iceServersFromConnection(connection, credential);
+    },
+  };
+}
+
+/** The line a run prints when a long wait for its partner renews the credential. */
+export function relayCredentialRenewalNotice(
+  credential: RelayCredential,
+): string {
+  return (
+    "the exchange partner has not connected within " +
+    `${RELAY_CREDENTIAL_RENEWAL_MS / 60_000} minutes, so the connection ` +
+    "attempt restarts with a new relay credential that expires at " +
+    credential.expiresAt.toISOString()
+  );
+}
+
+/**
  * The line a run prints when it presents a minted TURN credential: which
  * relay it goes to, and the credential's lifetime and expiry.
  */
@@ -572,6 +636,15 @@ async function defaultPeerConnection(
   return new werift.RTCPeerConnection(configuration);
 }
 
+async function closePeer(peer: RTCPeerConnection): Promise<void> {
+  try {
+    await peer.close();
+  } catch {
+    // A peer connection already closed by a failure path throws on a second
+    // close; the caller is on a failure or replacement path either way.
+  }
+}
+
 /** A fresh PeerJS-shaped DataConnection id. */
 function newConnectionId(): string {
   return `${CONNECTION_ID_PREFIX}${Math.random().toString(36).slice(2)}`;
@@ -643,6 +716,7 @@ export async function openWebRtcPeerSession(
     sharedSecret,
     iceServers,
     iceTransportPolicy,
+    iceServerRenewal,
     offerRetryIntervalMs = DEFAULT_OFFER_RETRY_INTERVAL_MS,
     rendezvousTimeoutMs = DEFAULT_RENDEZVOUS_TIMEOUT_MS,
     channelOpenTimeoutMs = DEFAULT_CHANNEL_OPEN_TIMEOUT_MS,
@@ -658,36 +732,40 @@ export async function openWebRtcPeerSession(
   const localId = role === "inviter" ? inviterId : acceptorId;
   const remoteId = role === "inviter" ? acceptorId : inviterId;
 
-  const configuration = buildPeerConfiguration(iceServers, iceTransportPolicy);
-  const peer =
-    peerConnectionFactory === undefined
+  const buildPeer = async (
+    servers: Array<RTCIceServer> | undefined,
+  ): Promise<RTCPeerConnection> => {
+    const configuration = buildPeerConfiguration(servers, iceTransportPolicy);
+    return peerConnectionFactory === undefined
       ? await defaultPeerConnection(configuration)
       : peerConnectionFactory(configuration);
+  };
   let broker: BrokerClient | undefined;
   let torn = false;
 
-  const teardown = async (): Promise<void> => {
-    if (torn) return;
-    torn = true;
-    broker?.close();
-    try {
-      await peer.close();
-    } catch {
-      // A peer connection already closed by a failure path throws on a second
-      // close; the caller is on a failure path either way.
-    }
-  };
-
   const negotiation = new Negotiation({
-    peer,
+    peer: await buildPeer(iceServers),
     role,
     remoteId,
     offerRetryIntervalMs,
     rendezvousTimeoutMs,
     channelOpenTimeoutMs,
     iceTransportPolicy,
+    ...(iceServerRenewal !== undefined && {
+      renewal: {
+        afterMs: iceServerRenewal.afterMs,
+        buildPeer: async () => buildPeer(await iceServerRenewal.resolve()),
+      },
+    }),
     signal,
   });
+
+  const teardown = async (): Promise<void> => {
+    if (torn) return;
+    torn = true;
+    broker?.close();
+    await closePeer(negotiation.peer);
+  };
 
   try {
     broker = await connectToBroker({
@@ -701,6 +779,7 @@ export async function openWebRtcPeerSession(
       socketFactory,
     });
     const channel = await negotiation.run(broker);
+    const { peer } = negotiation;
     assertSctpDrainSupported(peer);
     await logSelectedCandidatePair(peer, signal);
     // Take the state hook back off the negotiation, whose interest in it ended
@@ -779,6 +858,11 @@ interface NegotiationOptions {
   channelOpenTimeoutMs: number;
   /** The policy the peer connection was built with; named in a failure. */
   iceTransportPolicy?: IceTransportPolicy;
+  /** Replaces `peer` each `afterMs` the partner has not engaged. */
+  renewal?: {
+    afterMs: number;
+    buildPeer: () => Promise<RTCPeerConnection>;
+  };
   signal?: AbortSignal;
 }
 
@@ -789,6 +873,9 @@ interface NegotiationOptions {
  */
 class Negotiation {
   private readonly options: NegotiationOptions;
+  private currentPeer: RTCPeerConnection;
+  private renewalTimer: ReturnType<typeof setInterval> | undefined;
+  private renewing = false;
   private broker: BrokerClient | undefined;
   private connectionId = newConnectionId();
   /** Local candidates gathered before this side's description reached the broker. */
@@ -815,6 +902,105 @@ class Negotiation {
 
   constructor(options: NegotiationOptions) {
     this.options = options;
+    this.currentPeer = options.peer;
+  }
+
+  /** The peer connection the negotiation runs on; replaced by a renewal. */
+  get peer(): RTCPeerConnection {
+    return this.currentPeer;
+  }
+
+  /** Whether the partner has sent the description this side must answer or apply. */
+  private partnerEngaged(): boolean {
+    return this.options.role === "inviter"
+      ? this.answered
+      : this.answerAccepted;
+  }
+
+  private attachPeer(peer: RTCPeerConnection): void {
+    peer.onicecandidate = ({ candidate }) => {
+      // An end-of-candidates event has no candidate and needs no frame: the
+      // remote learns gathering is done from the description it already has.
+      if (!candidate) return;
+      this.emitLocalCandidate(candidateToPayload(candidate));
+    };
+    peer.onconnectionstatechange = () => {
+      if (peer.connectionState === "failed") {
+        void this.failWithIceDiagnosis(
+          "the peer connection failed before the data channel opened; no " +
+            "network path between the two parties could be established",
+        );
+      }
+    };
+    if (this.options.role === "inviter")
+      peer.ondatachannel = ({ channel }) => this.watchChannel(channel);
+  }
+
+  /** Open this side's data channel and offer it; the acceptor's opening move. */
+  private async openAndOffer(): Promise<void> {
+    const channel = this.currentPeer.createDataChannel(this.connectionId, {
+      ordered: true,
+    });
+    this.watchChannel(channel);
+    await this.offer();
+  }
+
+  /**
+   * Replace the peer connection with one built from a fresh ICE server list,
+   * unless the partner engaged -- or the run settled -- while it was built.
+   * Everything the discarded connection produced is dropped with it: its
+   * gathered candidates, its channel, and the connection id its offer named.
+   */
+  private async renew(
+    buildPeer: () => Promise<RTCPeerConnection>,
+  ): Promise<void> {
+    if (this.renewing || this.partnerEngaged()) return;
+    this.renewing = true;
+    try {
+      const next = await buildPeer();
+      if (
+        this.finished ||
+        this.failure !== undefined ||
+        this.partnerEngaged()
+      ) {
+        await closePeer(next);
+        return;
+      }
+      const previous = this.currentPeer;
+      previous.onicecandidate = null;
+      previous.onconnectionstatechange = null;
+      previous.ondatachannel = null;
+      if (this.channel !== undefined) {
+        this.channel.onopen = undefined;
+        this.channel.onclose = undefined;
+        this.channel = undefined;
+      }
+      this.currentPeer = next;
+      this.attachPeer(next);
+      if (this.options.role === "acceptor") {
+        this.connectionId = newConnectionId();
+        this.localDescriptionSent = false;
+        this.pendingLocalCandidates.splice(0);
+        this.sentLocalCandidates.splice(0);
+        this.pendingRemoteCandidates.splice(0);
+        await Promise.all([this.openAndOffer(), closePeer(previous)]);
+      } else {
+        await closePeer(previous);
+      }
+    } catch (err) {
+      this.fail(
+        err instanceof ConnectionError
+          ? err
+          : new ConnectionError(
+              "the WebRTC connection attempt could not be restarted with " +
+                "fresh relay servers",
+              "transport",
+              { cause: err },
+            ),
+      );
+    } finally {
+      this.renewing = false;
+    }
   }
 
   /** Latch a terminal failure; the run rejects with the first one latched. */
@@ -837,7 +1023,7 @@ class Negotiation {
    */
   private async failWithIceDiagnosis(summary: string): Promise<void> {
     if (this.failure !== undefined) return;
-    const report = await readIceStats(this.options.peer, this.options.signal);
+    const report = await readIceStats(this.currentPeer, this.options.signal);
     this.fail(
       new ConnectionError(
         summary,
@@ -855,22 +1041,8 @@ class Negotiation {
 
   async run(broker: BrokerClient): Promise<RTCDataChannel> {
     this.broker = broker;
-    const { peer, role, signal } = this.options;
-
-    peer.onicecandidate = ({ candidate }) => {
-      // An end-of-candidates event has no candidate and needs no frame: the
-      // remote learns gathering is done from the description it already has.
-      if (!candidate) return;
-      this.emitLocalCandidate(candidateToPayload(candidate));
-    };
-    peer.onconnectionstatechange = () => {
-      if (peer.connectionState === "failed") {
-        void this.failWithIceDiagnosis(
-          "the peer connection failed before the data channel opened; no " +
-            "network path between the two parties could be established",
-        );
-      }
-    };
+    const { role, signal, renewal } = this.options;
+    this.attachPeer(this.currentPeer);
 
     const opened = new Promise<RTCDataChannel>((resolve, reject) => {
       this.settle = { resolve, reject };
@@ -886,15 +1058,14 @@ class Negotiation {
     opened.catch(() => {});
 
     if (role === "acceptor") {
-      const channel = peer.createDataChannel(this.connectionId, {
-        ordered: true,
-      });
-      this.watchChannel(channel);
-      await this.offer();
+      await this.openAndOffer();
       this.startOfferRetries();
-    } else {
-      peer.ondatachannel = ({ channel }) => this.watchChannel(channel);
     }
+    if (renewal !== undefined)
+      this.renewalTimer = setInterval(
+        () => void this.renew(renewal.buildPeer),
+        renewal.afterMs,
+      );
 
     // The rendezvous owns the signal from here: the broker client releases its
     // own abort listener the moment the registration is confirmed, so this is
@@ -929,6 +1100,7 @@ class Negotiation {
     } finally {
       this.finished = true;
       clearTimeout(rendezvousTimer);
+      clearInterval(this.renewalTimer);
       this.stopChannelOpenDeadline();
       this.stopOfferRetries();
       signal?.removeEventListener("abort", abort);
@@ -1003,7 +1175,7 @@ class Negotiation {
       (message.payload as { connectionId?: unknown }).connectionId,
     );
     if (offeredId !== undefined) this.connectionId = offeredId;
-    const { peer } = this.options;
+    const peer = this.currentPeer;
     await peer.setRemoteDescription({ type: "offer", sdp: description.sdp });
     this.markRemoteDescriptionSet();
     await this.applyPendingRemoteCandidates();
@@ -1021,6 +1193,11 @@ class Negotiation {
       return;
     const description = sessionDescriptionFrom(message.payload);
     if (description === undefined || description.type !== "answer") return;
+    // An answer naming another connection answers an offer a renewal discarded.
+    const answeredId = (message.payload as { connectionId?: unknown })
+      .connectionId;
+    if (typeof answeredId === "string" && answeredId !== this.connectionId)
+      return;
     // Latch synchronously before the first await, mirroring onOffer's
     // `answered`. `remoteDescriptionSet` is only set after setRemoteDescription
     // resolves, so without this latch two ANSWERs delivered in one tick both
@@ -1029,7 +1206,7 @@ class Negotiation {
     // acceptor's rendezvous by answering twice.
     this.answerAccepted = true;
     this.stopOfferRetries();
-    await this.options.peer.setRemoteDescription({
+    await this.currentPeer.setRemoteDescription({
       type: "answer",
       sdp: description.sdp,
     });
@@ -1080,7 +1257,7 @@ class Negotiation {
     candidate: Record<string, unknown>,
   ): Promise<void> {
     try {
-      await this.options.peer.addIceCandidate(candidate);
+      await this.currentPeer.addIceCandidate(candidate);
     } catch {
       // Silent by design: logging per candidate would let a peer that sprays
       // malformed candidates drive the operator's console.
@@ -1088,7 +1265,7 @@ class Negotiation {
   }
 
   private async offer(): Promise<void> {
-    const { peer } = this.options;
+    const peer = this.currentPeer;
     const description = await peer.createOffer();
     await peer.setLocalDescription(description);
     const local = peer.localDescription;
@@ -1115,7 +1292,7 @@ class Negotiation {
   }
 
   private sendAnswer(): void {
-    const local = this.options.peer.localDescription;
+    const local = this.currentPeer.localDescription;
     if (local === undefined || local === null) return;
     this.broker?.send({
       type: BROKER_MESSAGE.answer,
