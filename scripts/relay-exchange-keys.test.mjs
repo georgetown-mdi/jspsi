@@ -636,6 +636,24 @@ except relay_table.TableError as error:
     );
   });
 
+  it("skips a legacy row under verify.sh's prefix and reports the count", () => {
+    const host = fixtureHost();
+    const mapFile = join(host.root, "exchange-keys");
+    writeFileSync(mapFile, `old-1 ${KEY_A}\npsilink-verify-a ${KEY_B}\n`);
+    const result = spawnSync(
+      "python3",
+      [join(relay, "relay_table.py"), "import-mapping", mapFile],
+      { encoding: "utf8", env: { ...host.env, PSILINK_RELAY_REALM: REALM } },
+    );
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("imported 1 exchange(s)");
+    expect(result.stdout).toMatch(
+      /skipped 1 row\(s\) under verify\.sh's 'psilink-verify-' prefix/,
+    );
+    expect(host.mapping().map(({ id }) => id)).toEqual(["old-1"]);
+    expect(host.rows()).toEqual([listed(KEY_LISTED), listed(KEY_A)].sort());
+  });
+
   it("refuses a malformed mapping line without printing it", () => {
     const host = fixtureHost();
     const mapFile = join(host.root, "exchange-keys");
@@ -653,11 +671,6 @@ except relay_table.TableError as error:
 
   const nowSeconds = () => Math.floor(Date.now() / 1000);
   it.each([
-    [
-      "an id under verify.sh's prefix",
-      () => `psilink-verify-a ${KEY_B}`,
-      "may not start with 'psilink-verify-'",
-    ],
     [
       "a stamp later than now",
       () => `old-2 ${KEY_B} ${nowSeconds() + 86400} 30`,
@@ -683,6 +696,24 @@ except relay_table.TableError as error:
     expect(result.stderr).not.toMatch(HEX64);
     expect(host.mapping()).toEqual([]);
     expect(host.rows()).toEqual([listed(KEY_LISTED)]);
+  });
+
+  it("counts a line by its newline, not a form feed inside it", () => {
+    const host = fixtureHost();
+    const mapFile = join(host.root, "exchange-keys");
+    // The form feed splits "old-2"/KEY_B into two fields just like a space
+    // would, so this row still parses; str.splitlines() also treats it as a
+    // line break, which used to drift the refusal below to "line 4".
+    writeFileSync(mapFile, `old-1 ${KEY_A}\nold-2\f${KEY_B}\n${KEY_C}\n`);
+    const result = spawnSync(
+      "python3",
+      [join(relay, "relay_table.py"), "import-mapping", mapFile],
+      { encoding: "utf8", env: { ...host.env, PSILINK_RELAY_REALM: REALM } },
+    );
+    expect(result.status).toBe(3);
+    expect(result.stderr).toContain("line 3 of the mapping");
+    expect(result.stderr).not.toMatch(HEX64);
+    expect(host.mapping()).toEqual([]);
   });
 
   it("imports a mapping stamped a moment ago", () => {

@@ -309,10 +309,17 @@ def forget_key(conn, realm, key):
 def parse_mapping(text, now):
     """The rows of the text mapping the shell scripts kept before this module:
     "<id> <key> [<registered-at> <max-age-days|->]" per line. A row is held to
-    a fresh registration's rules, and its stamp to at most `now`."""
+    a fresh registration's rules, and its stamp to at most `now`, except a row
+    under verify.sh's reserved prefix (is_verify_id) is skipped rather than
+    refusing the whole file: a verify run that died before cleanup can leave
+    one behind. Every other refusal still refuses the whole file. Returns
+    (rows, skipped_verify_count)."""
     now = int(now)
     rows = []
-    for number, line in enumerate(text.splitlines(), 1):
+    skipped_verify = 0
+    for number, line in enumerate(text.split("\n"), 1):
+        if line.endswith("\r"):
+            line = line[:-1]
         fields = line.split()
         if not fields:
             continue
@@ -327,11 +334,14 @@ def parse_mapping(text, now):
             if registered_at > now:
                 raise Refused("line %d of the mapping has a registered-at stamp later than now" % number)
         try:
-            check_registration(fields[0], fields[1], max_age_days)
+            check_registration(fields[0], fields[1], max_age_days, allow_verify_id=True)
         except Refused as refusal:
             raise Refused("line %d of the mapping: %s" % (number, refusal))
+        if is_verify_id(fields[0]):
+            skipped_verify += 1
+            continue
         rows.append((fields[0], fields[1], registered_at, max_age_days))
-    return rows
+    return rows, skipped_verify
 
 
 def import_mapping(conn, realm, rows, now):
@@ -458,10 +468,15 @@ def run_command(command, args):
         except (OSError, UnicodeDecodeError) as error:
             raise TableError("could not read the mapping %s: %s" % (args[0], error))
         now = time.time()
-        rows = parse_mapping(text, now)
+        rows, skipped_verify = parse_mapping(text, now)
         run_as_table_owner(TURNDB)
         imported, skipped = import_mapping(open_table(), realm, rows, now)
         print("imported %d exchange(s) from %s; %d already registered here were left alone" % (imported, args[0], skipped))
+        if skipped_verify:
+            print(
+                "skipped %d row(s) under verify.sh's '%s' prefix, never inserted: a verify run that died before "
+                "cleanup can leave those behind" % (skipped_verify, VERIFY_ID_PREFIX)
+            )
         return 0
     raise AssertionError(command)
 
