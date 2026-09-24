@@ -88,6 +88,28 @@ vi.mock("@psi/managed/managedExchangeStore", async (importOriginal) => {
 // mocks the store open); the pure load ordering and its failure classification are
 // unit-tested without a database.
 
+// The import controls reach the store through this module. It is mocked so the
+// in-flight tests can hold one import pending; `importOverride`, when set,
+// replaces both the single-file and the pair import for one test.
+let importOverride: (() => Promise<never>) | undefined;
+vi.mock("@psi/managed/managedExchangeImport", async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  const realConfiguration = actual.importManagedConfigurationFile as (
+    source: string,
+  ) => Promise<unknown>;
+  const realPair = actual.importManagedCommandLinePair as (
+    source: string,
+    keySource: string,
+  ) => Promise<unknown>;
+  return {
+    ...actual,
+    importManagedConfigurationFile: (source: string) =>
+      importOverride ? importOverride() : realConfiguration(source),
+    importManagedCommandLinePair: (source: string, keySource: string) =>
+      importOverride ? importOverride() : realPair(source, keySource),
+  };
+});
+
 // Assert on hrefs rather than navigation: the router boundary is stubbed to a plain
 // anchor, so a rendered Link is an <a href> and useNavigate is a no-op.
 vi.mock("@tanstack/react-router", async () =>
@@ -850,6 +872,7 @@ describe("saved list route: a psilink.yaml imports with the .psilink.key beside 
 
   afterEach(() => {
     fetchSpy.mockRestore();
+    importOverride = undefined;
   });
 
   /** Whether any request this page made held `secret` in its address or body. */
@@ -890,6 +913,45 @@ describe("saved list route: a psilink.yaml imports with the .psilink.key beside 
     expect(document.body.innerHTML).not.toContain(sharedSecret);
     expect(anyRequestHeld(sharedSecret)).toBe(false);
   });
+
+  test.each([
+    { path: "the pair", withKey: true },
+    { path: "the configuration alone", withKey: false },
+  ])(
+    "while $path imports, the control is withheld and a second pick starts nothing",
+    async ({ withKey }) => {
+      await createRunnableExchange(newExchange());
+      const { configuration, key } = exportedPair();
+      let calls = 0;
+      let settle: (() => void) | undefined;
+      importOverride = () => {
+        calls += 1;
+        return new Promise<never>((_resolve, reject) => {
+          settle = () => reject(new Error("held"));
+        });
+      };
+      const files = [
+        { bytes: configuration, name: "psilink.yaml" },
+        ...(withKey ? [{ bytes: key, name: ".psilink.key" }] : []),
+      ];
+      app.render(createElement(SavedExchanges));
+      const control = page.getByRole("button", {
+        name: "Import a psilink.yaml",
+      });
+      await expect.element(control).toBeEnabled();
+
+      await chooseFiles(files);
+      await expect.poll(() => calls).toBe(1);
+      await expect.element(control).toBeDisabled();
+
+      await chooseFiles(files);
+      expect(calls).toBe(1);
+
+      settle?.();
+      await expect.element(control).toBeEnabled();
+      expect(calls).toBe(1);
+    },
+  );
 
   test("the configuration alone still lands as a configuration only", async () => {
     await createRunnableExchange(newExchange());

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   Alert,
@@ -730,7 +730,7 @@ const KEY_FILE_CHOOSER_NOTE =
  * the same way to say the exchange now runs here ({@link PAIR_IMPORTED_NOTICE}). An
  * import with nothing to say goes straight through. */
 function ImportExchangeFile() {
-  const { onFiles, outcome } = useImportFile({
+  const { onFiles, outcome, importing } = useImportFile({
     maxBytes: MAX_IMPORT_FILE_BYTES,
     oversizeReason: UNREADABLE_IMPORT_REASON,
     importFile: importManagedExchangeFile,
@@ -753,9 +753,10 @@ function ImportExchangeFile() {
         accept={`application/json,.json,application/yaml,.yaml,.yml,${KEY_FILE_ACCEPT}`}
         multiple
         onChange={onFiles}
+        disabled={importing}
       >
         {(props) => (
-          <Button mt="sm" variant="default" {...props}>
+          <Button mt="sm" variant="default" loading={importing} {...props}>
             Import a file
           </Button>
         )}
@@ -771,7 +772,7 @@ function ImportExchangeFile() {
  * ({@link importManagedCommandLinePair}). A backup file is refused here by name
  * ({@link configurationImportFailureReason}) rather than restored. */
 function ImportConfigurationFile() {
-  const { onFiles, outcome } = useImportFile({
+  const { onFiles, outcome, importing } = useImportFile({
     maxBytes: MAX_CONFIGURATION_IMPORT_BYTES,
     oversizeReason: UNREADABLE_CONFIGURATION_REASON,
     importFile: importManagedConfigurationFile,
@@ -796,9 +797,10 @@ function ImportConfigurationFile() {
         accept={`application/yaml,.yaml,.yml,${KEY_FILE_ACCEPT}`}
         multiple
         onChange={onFiles}
+        disabled={importing}
       >
         {(props) => (
-          <Button mt="sm" variant="default" {...props}>
+          <Button mt="sm" variant="default" loading={importing} {...props}>
             Import a psilink.yaml
           </Button>
         )}
@@ -826,7 +828,9 @@ function fileRefusal(reason: string): ImportOutcome {
  * configuration with its key file through {@link importManagedCommandLinePair},
  * whichever control took them. A file over its cap -- `maxBytes` for the one
  * file or the configuration, the key file's own for the key -- is refused with
- * its reason before any file is read. */
+ * its reason before any file is read. While one import is in flight the
+ * control is withheld and a further pick is ignored, so one pick of a pair
+ * cannot race a second into installing the same secret twice. */
 function useImportFile({
   maxBytes,
   oversizeReason,
@@ -837,11 +841,20 @@ function useImportFile({
   oversizeReason: string;
   importFile: (source: string) => Promise<ManagedImportResult>;
   failureAlert: (error: unknown) => ImportFailureAlert;
-}): { onFiles: (files: Array<File>) => void; outcome: ImportOutcome } {
+}): {
+  onFiles: (files: Array<File>) => void;
+  outcome: ImportOutcome;
+  importing: boolean;
+} {
   const navigate = useNavigate();
   const [outcome, setOutcome] = useState<ImportOutcome>({});
+  const [importing, setImporting] = useState(false);
+  // The state renders the withheld control; the ref refuses a pick that lands
+  // before that render does.
+  const inFlight = useRef(false);
 
   function onFiles(files: Array<File>) {
+    if (inFlight.current) return;
     const choice = managedImportFileChoice(files);
     if (choice === undefined) return;
     setOutcome({});
@@ -865,6 +878,8 @@ function useImportFile({
     }
     const refused =
       keyFile === undefined ? failureAlert : pairImportFailureAlert;
+    inFlight.current = true;
+    setImporting(true);
     void (async () => {
       try {
         const source = await primaryFile.text();
@@ -888,11 +903,14 @@ function useImportFile({
         await navigate({ to: "/saved/$id", params: { id: record.id } });
       } catch (error) {
         setOutcome({ failure: refused(error) });
+      } finally {
+        inFlight.current = false;
+        setImporting(false);
       }
     })();
   }
 
-  return { onFiles, outcome };
+  return { onFiles, outcome, importing };
 }
 
 /** The alerts an import control shows under its lead: the grant notice with its
