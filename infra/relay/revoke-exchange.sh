@@ -18,7 +18,7 @@ ID="$1"
 check_exchange_id "$ID"
 
 KEY="$(key_of "$ID")"
-[ -n "$KEY" ] || die "exchange-id $ID is not registered on this relay"
+[ -n "$KEY" ] || die "exchange-id is not registered on this relay"
 OUT="$(turnadmin -X "$KEY" 2>&1)" || true
 LISTED=0
 table_lists_key "$KEY" || LISTED=$?

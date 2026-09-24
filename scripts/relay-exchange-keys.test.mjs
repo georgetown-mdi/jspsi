@@ -54,6 +54,7 @@ const fixtureHost = () => {
   const ignoredWrites = join(root, "ignored-writes");
   const unopenable = join(root, "table-unopenable");
   const echoValue = join(root, "echo-value");
+  const failListingOnce = join(root, "fail-listing-once");
   const table = join(root, "turndb");
   writeFileSync(calls, "");
   writeFileSync(table, `${KEY_LISTED}[relay.example]\n`);
@@ -63,6 +64,8 @@ const fixtureHost = () => {
     [
       "#!/bin/bash",
       `printf '%s\\n' "$*" >> '${calls}'`,
+      // verify.sh's TURNS client runs through the same runtime; it gets no answer.
+      '[[ " $* " == *" --entrypoint turnadmin "* ]] || exit 0',
       `if [ -f '${failOn}' ] && [[ " $* " == *" $(cat '${failOn}') "* ]]; then exit 1; fi`,
       'op=; value=; realm=; args=("$@")',
       "for ((i = 0; i < $#; i++)); do",
@@ -73,6 +76,7 @@ const fixtureHost = () => {
       "  esac",
       "done",
       `[ -f '${echoValue}' ] && echo "ERROR could not write $value"`,
+      `if [ "$op" = -S ] && [ -f '${failListingOnce}' ]; then rm '${failListingOnce}'; exit 1; fi`,
       `if [ -f '${unopenable}' ]; then echo '${UNOPENABLE_ERROR}'; exit 0; fi`,
       'case "$op" in',
       `  -S) echo 'INFO ${LISTING_MARKER}'; cat '${table}' ;;`,
@@ -131,15 +135,15 @@ const fixtureHost = () => {
     PSILINK_RELAY_SECRET_FILE: secretFile,
     PSILINK_RELAY_CONF: conf,
   };
-  const run = (script, ...args) => {
+  const runWith = (extraEnv, script, ...args) => {
     writeFileSync(calls, "");
     const result = spawnSync(BASH, [join(relay, script), ...args], {
       encoding: "utf8",
-      env,
+      env: { ...env, ...extraEnv },
     });
     const invocations = readFileSync(calls, "utf8")
       .split("\n")
-      .filter(Boolean)
+      .filter((line) => line.includes("--entrypoint turnadmin"))
       .map((line) => line.slice(line.indexOf("turnadmin") + 10));
     for (const stream of [result.stdout, result.stderr]) {
       expect(stream).not.toContain(KEY_LISTED);
@@ -154,8 +158,19 @@ const fixtureHost = () => {
         .length,
     };
   };
+  const run = (script, ...args) => runWith({}, script, ...args);
   return {
     register: (...args) => run("register-exchange.sh", ...args),
+    // No listener answers on the connect target, so the network probes fail
+    // at once and the run reaches the secrets-table steps and its cleanup.
+    verify: () =>
+      runWith(
+        {
+          PSILINK_RELAY_VERIFY_CONNECT: "127.0.0.1",
+          PSILINK_RELAY_VERIFY_WAIT: "0",
+        },
+        "verify.sh",
+      ),
     revoke: (...args) => run("revoke-exchange.sh", ...args),
     render: () => run("render-config.sh"),
     mapFile,
@@ -168,6 +183,7 @@ const fixtureHost = () => {
     ignoreTableWrites: (flag) => writeFileSync(ignoredWrites, `${flag}\n`),
     makeTableUnopenable: () => writeFileSync(unopenable, ""),
     echoValueInErrors: () => writeFileSync(echoValue, ""),
+    failNextListing: () => writeFileSync(failListingOnce, ""),
     failMappingWriteAt: (tool) =>
       writeFileSync(tool === "mv" ? failMv : failAwk, ""),
     mappingTemporaries: () =>
@@ -378,12 +394,23 @@ describe("register-exchange.sh", () => {
     ["an uppercase key", "exchange-1", KEY_A.toUpperCase(), "key-hex64"],
     ["a 63-character key", "exchange-1", KEY_A.slice(1), "key-hex64"],
     ["a base64 key", "exchange-1", "q".repeat(43) + "=", "key-hex64"],
+    ["a key given as the id", KEY_B, KEY_A, "exchange-id"],
   ])("refuses %s, naming the argument", (_, id, key, argument) => {
     const host = fixtureHost();
     const result = host.register(id, key);
     expect(result.status).toBe(1);
     expect(result.stderr).toContain(argument);
+    const rejected = argument === "exchange-id" ? id : key;
+    expect(result.stdout).not.toContain(rejected);
+    expect(result.stderr).not.toContain(rejected);
     expect(result.turnadmin).toEqual([]);
+    expect(result.listings).toBe(0);
+  });
+
+  it("registers an id of 64 hex characters that is not all lowercase", () => {
+    const host = fixtureHost();
+    const result = host.register(KEY_B.toUpperCase(), KEY_A);
+    expect(result.status, result.stderr).toBe(0);
   });
 
   it("prints usage on the wrong argument count", () => {
@@ -412,7 +439,8 @@ describe("revoke-exchange.sh", () => {
     host.register("1.0", KEY_B);
     const result = host.revoke("01");
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain("exchange-id 01 is not registered");
+    expect(result.stderr).toContain("exchange-id is not registered");
+    expect(result.stderr).not.toContain("01");
     expect(result.turnadmin).toEqual([]);
     expect(host.mapping()).toBe(`1 ${KEY_A}\n1.0 ${KEY_B}\n`);
   });
@@ -434,7 +462,8 @@ describe("revoke-exchange.sh", () => {
     const host = fixtureHost();
     const result = host.revoke("exchange-1");
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain("exchange-id exchange-1 is not registered");
+    expect(result.stderr).toContain("exchange-id is not registered");
+    expect(result.stderr).not.toContain("exchange-1");
     expect(result.turnadmin).toEqual([]);
   });
 
@@ -476,6 +505,79 @@ describe("revoke-exchange.sh", () => {
     const result = fixtureHost().revoke("../x y");
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("exchange-id");
+    expect(result.stderr).not.toContain("../x y");
+  });
+
+  it("refuses a registered key given as the id, without printing it", () => {
+    const host = fixtureHost();
+    host.register("exchange-1", KEY_A);
+    const result = host.revoke(KEY_A);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("the shape of a relay key");
+    expect(result.stdout).not.toContain(KEY_A);
+    expect(result.stderr).not.toContain(KEY_A);
+    expect(result.turnadmin).toEqual([]);
+    expect(result.listings).toBe(0);
+    expect(host.mapping()).toBe(`exchange-1 ${KEY_A}\n`);
+  });
+});
+
+const HEX64 = /[0-9a-f]{64}/;
+
+describe("verify.sh cleanup", () => {
+  it("removes every key the run registered from the table", () => {
+    const host = fixtureHost();
+    const result = host.verify();
+    expect(result.status).toBe(1);
+    expect(result.stderr).not.toContain("WARNING");
+    expect(host.table()).toBe(`${KEY_LISTED}[relay.example]\n`);
+    expect(host.mapping()).toBe("");
+  });
+
+  it("removes a key whose register added the row and then failed", () => {
+    const host = fixtureHost();
+    host.failNextListing();
+    const result = host.verify();
+    expect(result.stdout).toContain(
+      "could not register psilink-verify-a for this run",
+    );
+    expect(result.stdout).toContain("remove each listed key no line of");
+    expect(result.stderr).not.toContain("WARNING");
+    for (const stream of [result.stdout, result.stderr]) {
+      expect(stream).not.toMatch(HEX64);
+    }
+    expect(host.table()).toBe(`${KEY_LISTED}[relay.example]\n`);
+    expect(host.mapping()).toBe("");
+  });
+
+  it("warns naming the exchange id, not the key, for a key still listed", () => {
+    const host = fixtureHost();
+    host.failNextListing();
+    host.ignoreTableWrites("-X");
+    const result = host.verify();
+    expect(result.stderr).toContain(
+      "WARNING: the key this run registered for psilink-verify-a is still in the secrets table",
+    );
+    expect(result.stderr).toContain(
+      "WARNING: the key this run registered for psilink-verify-b is still in the secrets table",
+    );
+    for (const stream of [result.stdout, result.stderr]) {
+      expect(stream).not.toMatch(HEX64);
+    }
+    expect(host.table().trim().split("\n")).toHaveLength(3);
+  });
+
+  it("warns naming the exchange id when the table cannot be read", () => {
+    const host = fixtureHost();
+    host.register("psilink-verify-a", KEY_A);
+    host.makeTableUnopenable();
+    const result = host.verify();
+    expect(result.stderr).toContain(
+      "WARNING: could not read the secrets table to confirm the key this run registered for psilink-verify-a left it",
+    );
+    for (const stream of [result.stdout, result.stderr]) {
+      expect(stream).not.toMatch(HEX64);
+    }
   });
 });
 

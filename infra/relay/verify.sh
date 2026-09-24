@@ -172,18 +172,30 @@ VERIFY_B=psilink-verify-b
 KEY_A="$(openssl rand -hex 32)"
 KEY_B="$(openssl rand -hex 32)"
 KEY_UNREGISTERED="$(openssl rand -hex 32)"
-# The ids this run registered and has not revoked; a failed revoke of one of
-# them leaves its row in the table, which the operator is told about.
-LIVE=()
+# Cleanup revokes each id, which drops its mapping line, then removes each key
+# from the table by value: a register can add the row and still fail, leaving a
+# key no mapping line holds.
 cleanup() {
   local id
   for id in "$VERIFY_A" "$VERIFY_B"; do
-    if "$HERE/revoke-exchange.sh" "$id" >/dev/null 2>&1; then continue; fi
-    case " ${LIVE[*]} " in
-      *" $id "*)
-        printf 'WARNING: could not revoke %s, so its key is left in the secrets table; run revoke-exchange.sh %s\n' "$id" "$id" >&2 ;;
-    esac
+    "$HERE/revoke-exchange.sh" "$id" > /dev/null 2>&1 || true
   done
+  (
+    # shellcheck source=exchange-keys.sh
+    . "$HERE/exchange-keys.sh"
+    set -- "$VERIFY_A" "$KEY_A" "$VERIFY_B" "$KEY_B"
+    while [ "$#" -gt 0 ]; do
+      if [ -n "$2" ]; then
+        remove_key_by_value "$2"
+        case "$?" in
+          1) ;;
+          0) printf 'WARNING: the key this run registered for %s is still in the secrets table; run revoke-exchange.sh %s if %s has a line for it, otherwise %s\n' "$1" "$1" "$MAP_FILE" "$(list_table_hint)" >&2 ;;
+          *) printf 'WARNING: could not read the secrets table to confirm the key this run registered for %s left it; %s\n' "$1" "$(list_table_hint)" >&2 ;;
+        esac
+      fi
+      shift 2
+    done
+  ) < /dev/null || printf 'WARNING: could not check the secrets table for the keys this run registered for %s and %s; see the message above\n' "$VERIFY_A" "$VERIFY_B" >&2
   return 0
 }
 trap cleanup EXIT
@@ -191,10 +203,8 @@ TABLE_READY=1
 register() {
   local out
   if ! out="$("$HERE/register-exchange.sh" "$1" "$2" 2>&1)"; then
-    report fail "could not register $1 for this run" "$(printf '%s' "$out" | tr '\n' ' ' | cut -c1-160)"
+    report fail "could not register $1 for this run" "$(printf '%s' "$out" | tr '\n' ' ')"
     TABLE_READY=0
-  else
-    LIVE+=("$1")
   fi
 }
 register "$VERIFY_A" "$KEY_A"
@@ -321,7 +331,6 @@ if [ "$TABLE_READY" = 1 ]; then
   expect_refused "a credential keyed with key B's 32 decoded bytes" "$U" "$(mint_over_decoded_bytes "$U" "$KEY_B")"
   expect_allocates "the same username's credential keyed with key B's 64 hex characters" "$U" "$(mint "$U" "$KEY_B")"
   if REV_OUT="$("$HERE/revoke-exchange.sh" "$VERIFY_A" 2>&1)"; then
-    LIVE=("$VERIFY_B")
     # Measured: a new allocation is refused within about 200 ms of the delete.
     sleep 1
     U="$(run_user verify-a-revoked)"

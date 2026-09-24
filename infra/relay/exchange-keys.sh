@@ -28,13 +28,20 @@ case "$RUNTIME" in
 esac
 
 # No leading '-', so the id cannot be read as a flag, and no whitespace, so it
-# stays one field of the mapping file.
+# stays one field of the mapping file. An id shaped like a key is refused, so a
+# key passed in the id's place is never registered as an id or printed back.
+# The refusals do not print the value.
 check_exchange_id() {
   case "$1" in
     ''|-*|*[!A-Za-z0-9._-]*)
-      die "exchange-id '$1' must be 1 to 128 of [A-Za-z0-9._-], not starting with '-'" ;;
+      die "exchange-id must be 1 to 128 of [A-Za-z0-9._-], not starting with '-'" ;;
   esac
   [ "${#1}" -le 128 ] || die "exchange-id is ${#1} characters; the limit is 128"
+  case "$1" in
+    *[!0-9a-f]*) ;;
+    *) [ "${#1}" -ne 64 ] ||
+      die "exchange-id is 64 lowercase hex characters, the shape of a relay key; give the exchange's id there, and its key only as register-exchange.sh's second argument" ;;
+  esac
 }
 
 # The form coturn HMACs as ASCII (docs/spec/PROTOCOL.md, Relay credential
@@ -104,10 +111,19 @@ write_mapping() {
   fi
 }
 
-# How to list the table by hand, for a message that leaves a row to remove.
+# Removes a key from the table by its value, whether or not a mapping line holds
+# it; turnadmin -X of a value the table does not hold exits 0 and changes
+# nothing. Prints nothing, and returns as table_lists_key does: 1 once the key
+# is gone, 0 while it is listed, 2 when the table could not be read.
+remove_key_by_value() {
+  turnadmin -X "$1" > /dev/null 2>&1 || true
+  table_lists_key "$1"
+}
+
+# How to find and remove by hand a row no mapping line accounts for.
 list_table_hint() {
-  printf "list the table with '%s run --rm --network none -v %s:/var/lib/coturn --entrypoint turnadmin %s -S -r %s -b /var/lib/coturn/turndb'" \
-    "$RUNTIME" "$DATA_DIR" "$IMAGE" "$REALM"
+  printf "list the table with '%s run --rm --network none -v %s:/var/lib/coturn --entrypoint turnadmin %s -S -r %s -b /var/lib/coturn/turndb', compare it against %s, and remove each listed key no line of %s holds with turnadmin -X, run the same way" \
+    "$RUNTIME" "$DATA_DIR" "$IMAGE" "$REALM" "$MAP_FILE" "$MAP_FILE"
 }
 
 # One register or revoke at a time, so two runs cannot interleave their table
