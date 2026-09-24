@@ -10,6 +10,7 @@ import {
   CONFIGURATION_LOAD_SEALED,
   CONFIGURATION_READ_UNAVAILABLE,
   CONVERT_CONFIGURATION_LABEL,
+  EDITED_TERMS_TITLE,
   NO_CONFIGURATION_IN_FOLDER,
   OPEN_CONFIGURATION_INVITATION,
   OPEN_CONFIGURATION_LABEL,
@@ -67,14 +68,20 @@ function announcementFor(state: MountedConfigurationState): string {
 
 /** The notices an open configuration puts beside a step, in one alert.
  * Renders nothing where there are none. */
-function NoticesAlert({ notices }: { notices: ReadonlyArray<string> }) {
+function NoticesAlert({
+  notices,
+  title = NOTICES_TITLE,
+}: {
+  notices: ReadonlyArray<string>;
+  title?: string;
+}) {
   if (notices.length === 0) return null;
   return (
     <Alert
       color="yellow"
       role="presentation"
       icon={<IconAlertTriangle aria-hidden />}
-      title={NOTICES_TITLE}
+      title={title}
     >
       <Stack gap={4}>
         {notices.map((notice, index) => (
@@ -104,6 +111,29 @@ export function DivergedCommitmentNotice({
 }) {
   const warning = divergedCommitmentNotice(state, disclosure);
   return <NoticesAlert notices={warning === undefined ? [] : [warning]} />;
+}
+
+/**
+ * The warning that the opened configuration's terms were changed here, for the
+ * review step the run starts from (`editedTermsWarning`). An edit made on
+ * that step itself can raise it, so the polite region announces its title when
+ * it appears; the visible Alert holds the warning.
+ */
+export function EditedTermsNotice({ warning }: { warning?: string }) {
+  const announcement = useDeferredAnnouncement(
+    warning === undefined ? "" : EDITED_TERMS_TITLE,
+  );
+  return (
+    <>
+      <VisuallyHidden role="status" aria-live="polite" aria-atomic="true">
+        {announcement}
+      </VisuallyHidden>
+      <NoticesAlert
+        notices={warning === undefined ? [] : [warning]}
+        title={EDITED_TERMS_TITLE}
+      />
+    </>
+  );
 }
 
 /** The console's load offer and the notices beside it. */

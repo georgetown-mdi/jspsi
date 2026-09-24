@@ -27,6 +27,7 @@ import {
   divergedCommitmentNotice,
   divergedCommitmentWarning,
   divergedCommitments,
+  editedTermsWarning,
   mountedConfigurationNotices,
   mountedConfigurationOfferable,
   mountedConfigurationRead,
@@ -865,5 +866,67 @@ describe("a disclosure commitment the run's own columns no longer match", () => 
       { disclosedColumns: [], sharesWithPartner: true, records },
     );
     expect(notices.at(-1)).toContain("a run started here is refused");
+  });
+});
+
+describe("the terms of an opened configuration changed here", () => {
+  const conducted = mountedConfigurationRead(opened()).state;
+  const saveBackOnly = mountedConfigurationRead({
+    kind: "opened",
+    document: {
+      channel: "webrtc",
+      linkageTerms: getDefaultLinkageTerms("County Health"),
+    },
+    carriedThrough: [],
+    warnings: [],
+  }).state;
+
+  test("a run of the opened configuration names update and apply", () => {
+    const warning = editedTermsWarning(conducted, {
+      termsEdited: true,
+      continuesOpenedExchange: true,
+    });
+    expect(warning).toMatch(/still holds its terms as they were/);
+    expect(warning).toMatch(/This run is refused/);
+    expect(warning).toContain("psilink update");
+    expect(warning).toContain("psilink apply");
+  });
+
+  test("a configuration saved back names update and apply after the save", () => {
+    const warning = editedTermsWarning(saveBackOnly, {
+      termsEdited: true,
+      continuesOpenedExchange: false,
+    });
+    expect(warning).toMatch(/after you save, run psilink update/);
+    expect(warning).toContain("psilink apply");
+    expect(warning).not.toMatch(/This run is refused/);
+  });
+
+  test("unchanged terms raise nothing", () => {
+    for (const state of [conducted, saveBackOnly])
+      expect(
+        editedTermsWarning(state, {
+          termsEdited: false,
+          continuesOpenedExchange: true,
+        }),
+      ).toBeUndefined();
+  });
+
+  test("a run that makes a new invitation raises nothing", () => {
+    expect(
+      editedTermsWarning(conducted, {
+        termsEdited: true,
+        continuesOpenedExchange: false,
+      }),
+    ).toBeUndefined();
+  });
+
+  test("nothing open raises nothing", () => {
+    expect(
+      editedTermsWarning(MOUNTED_CONFIGURATION_UNREAD, {
+        termsEdited: true,
+        continuesOpenedExchange: true,
+      }),
+    ).toBeUndefined();
   });
 });

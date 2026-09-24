@@ -1,9 +1,13 @@
 import { expect, test } from "vitest";
 
 import {
+  TERMS_FIELDS_PARTNER_DOES_NOT_BIND,
   deriveAcceptedLinkageTerms,
+  partnerBoundTerms,
   validateCompatibility,
 } from "../src/linkageTermsNegotiation";
+import type { PartnerBoundTerms } from "../src/linkageTermsNegotiation";
+import { canonicalString } from "../src/utils/canonical";
 import {
   MAX_TEXT_LENGTH,
   PRIVATE_KEY_IDENTITY_MESSAGE,
@@ -67,6 +71,124 @@ test("date mismatch produces a warning, not an error", () => {
   expect(errors).toHaveLength(0);
   expect(warnings).toHaveLength(1);
   expect(warnings[0]).toMatch(/date mismatch/);
+});
+
+// --- partnerBoundTerms ---------------------------------------------------------
+
+const everyFieldStated: LinkageTerms = {
+  ...termsA,
+  linkageFields: [
+    { name: "ssn", type: "ssn" },
+    { name: "dob", type: "date_of_birth" },
+  ],
+  linkageKeys: [
+    { name: "SSN", elements: [{ field: "ssn" }] },
+    { name: "DOB", elements: [{ field: "dob" }] },
+  ],
+  linkageRuleSet: {
+    fieldSet: { name: "baseline-pii", version: "1.0.0" },
+    keySet: { name: "baseline-keys", version: "1.0.0" },
+  },
+  payload: { send: [{ name: "a" }], receive: [{ name: "b" }] },
+  legalAgreement: {
+    reference: "MOU-001",
+    purpose: "Care coordination",
+    expirationDate: "2099-01-01",
+  },
+};
+
+const everyFieldStatedPartner: LinkageTerms = {
+  ...everyFieldStated,
+  identity: "Party B",
+  payload: { send: [{ name: "b" }], receive: [{ name: "a" }] },
+};
+
+// One edit per bound field. Keyed by the projection's own type, so a field
+// added to LinkageTerms fails to compile here until it is placed on one side.
+const boundFieldEdits: Record<
+  keyof PartnerBoundTerms,
+  (terms: LinkageTerms) => LinkageTerms
+> = {
+  version: (terms) => ({ ...terms, version: "2.0.0" }),
+  algorithm: (terms) => ({ ...terms, algorithm: "psi-c" }),
+  linkageStrategy: (terms) => ({ ...terms, linkageStrategy: "single-pass" }),
+  output: (terms) => ({
+    ...terms,
+    output: { ...terms.output, shareWithPartner: false },
+  }),
+  deduplicate: (terms) => ({ ...terms, deduplicate: !terms.deduplicate }),
+  linkageFields: (terms) => ({
+    ...terms,
+    linkageFields: [{ name: "ssn", type: "ssn" }],
+  }),
+  linkageKeys: (terms) => ({ ...terms, linkageKeys: sharedKeys }),
+  linkageRuleSet: (terms) => ({
+    ...terms,
+    linkageRuleSet: {
+      fieldSet: { name: "baseline-pii", version: "2.0.0" },
+      keySet: { name: "baseline-keys", version: "1.0.0" },
+    },
+  }),
+  payload: (terms) => ({
+    ...terms,
+    payload: { send: [{ name: "c" }], receive: [{ name: "b" }] },
+  }),
+  legalAgreement: (terms) => ({
+    ...terms,
+    legalAgreement: { ...terms.legalAgreement!, reference: "MOU-002" },
+  }),
+};
+
+test("the projection names every terms field but the ones a partner does not bind", () => {
+  expect(
+    new Set([
+      ...Object.keys(partnerBoundTerms(everyFieldStated)),
+      ...TERMS_FIELDS_PARTNER_DOES_NOT_BIND,
+    ]),
+  ).toEqual(new Set(Object.keys(everyFieldStated)));
+  expect(new Set(Object.keys(boundFieldEdits))).toEqual(
+    new Set(Object.keys(partnerBoundTerms(everyFieldStated))),
+  );
+});
+
+test("the partner refuses an edit to every bound field", () => {
+  expect(
+    validateCompatibility(everyFieldStated, everyFieldStatedPartner).errors,
+  ).toEqual([]);
+  for (const [field, edit] of Object.entries(boundFieldEdits)) {
+    const edited = edit(everyFieldStated);
+    expect(canonicalString(partnerBoundTerms(edited))).not.toBe(
+      canonicalString(partnerBoundTerms(everyFieldStated)),
+    );
+    if (field === "deduplicate") {
+      expect(() =>
+        assertPresentedDeduplicateMatchesInvitation(
+          everyFieldStated.deduplicate,
+          edited.deduplicate,
+        ),
+      ).toThrow(InvitationTermDivergenceError);
+      continue;
+    }
+    expect(
+      validateCompatibility(edited, everyFieldStatedPartner).errors,
+      field,
+    ).not.toEqual([]);
+  }
+});
+
+test("an edit the partner does not refuse leaves the projection unchanged", () => {
+  const edited: LinkageTerms = {
+    ...everyFieldStated,
+    identity: "Party A, renamed",
+    date: "2025-06-01",
+    linkageFields: [...everyFieldStated.linkageFields].reverse(),
+  };
+  expect(validateCompatibility(edited, everyFieldStatedPartner).errors).toEqual(
+    [],
+  );
+  expect(canonicalString(partnerBoundTerms(edited))).toBe(
+    canonicalString(partnerBoundTerms(everyFieldStated)),
+  );
 });
 
 test("every value a warning can hold is already escape-stable", () => {

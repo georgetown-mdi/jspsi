@@ -421,6 +421,15 @@ describe("review and create", () => {
     expect(byLabel.get("How it runs")?.value).toBe("Live, in this browser");
   });
 
+  test("a run that makes no invitation restates no duration", () => {
+    const editor = editorFromCsv("Dana Okafor", csv);
+    const labels = answersRows(editor, csv, { makesInvitation: false }).map(
+      (row) => row.label,
+    );
+    expect(labels).not.toContain("Invitation duration");
+    expect(labels).toContain("Results go to");
+  });
+
   test("a minted expiry replaces the relative lifetime in the ledger", () => {
     const editor = editorFromCsv("Dana", csv);
     const rows = inviterLedgerRows(editor, "2026-07-08T19:32:00.000Z");

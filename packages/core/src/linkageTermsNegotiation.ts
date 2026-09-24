@@ -251,6 +251,44 @@ export function describeRuleSet(
   return compatibilityMessage`${ruleSetCitation(reference.keySet.name, reference.keySet.version)} over ${ruleSetCitation(reference.fieldSet.name, reference.fieldSet.version)}`;
 }
 
+// Sort by UTF-16 code unit, not localeCompare: this comparator decides the
+// element order and therefore the canonical bytes (canonical encoding
+// preserves array order), and localeCompare is locale-dependent for non-ASCII
+// names -- two parties under different locales could otherwise derive
+// different bytes, and different receipt hashes, for the same terms. This is
+// the same code-unit ordering the canonical encoder applies to object keys.
+const linkageFieldsByName = (a: LinkageField, b: LinkageField): number =>
+  a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
+
+/** The fields of {@link LinkageTerms} a partner's copy may differ in without
+ * refusing the exchange: `identity` is each party's own name, and a `date`
+ * mismatch only warns ({@link validateCompatibility}). */
+export const TERMS_FIELDS_PARTNER_DOES_NOT_BIND = ["identity", "date"] as const;
+
+/** The part of a party's {@link LinkageTerms} its partner refuses an exchange
+ * over when its own copy differs ({@link partnerBoundTerms}). */
+export type PartnerBoundTerms = Omit<
+  LinkageTerms,
+  (typeof TERMS_FIELDS_PARTNER_DOES_NOT_BIND)[number]
+>;
+
+/**
+ * The part of `terms` a partner holding its own copy refuses an exchange over
+ * when the two differ, in the form {@link validateCompatibility} compares it:
+ * `linkageFields` in name order, since their array order is not significant.
+ * An edit that leaves the projection's canonical encoding unchanged changes
+ * nothing {@link validateCompatibility} compares, nor the `deduplicate` an
+ * accepted invitation binds (`assertPresentedDeduplicateMatchesInvitation`,
+ * exchange.ts).
+ */
+export function partnerBoundTerms(terms: LinkageTerms): PartnerBoundTerms {
+  const { identity: _identity, date: _date, ...bound } = terms;
+  return {
+    ...bound,
+    linkageFields: [...terms.linkageFields].sort(linkageFieldsByName),
+  };
+}
+
 interface CompatibilityResult {
   errors: string[];
   warnings: string[];
@@ -400,16 +438,8 @@ export function validateCompatibility(
     }
   };
 
-  // Sort by UTF-16 code unit, not localeCompare: this comparator decides the
-  // element order and therefore the canonical bytes (canonical encoding
-  // preserves array order), and localeCompare is locale-dependent for non-ASCII
-  // names -- two parties under different locales could otherwise derive
-  // different bytes, and different receipt hashes, for the same terms. This is
-  // the same code-unit ordering the canonical encoder applies to object keys.
-  const byName = (a: LinkageField, b: LinkageField): number =>
-    a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
-  const localFields = [...local.linkageFields].sort(byName);
-  const partnerFields = [...partner.linkageFields].sort(byName);
+  const localFields = [...local.linkageFields].sort(linkageFieldsByName);
+  const partnerFields = [...partner.linkageFields].sort(linkageFieldsByName);
   const localFieldsCanonical = canonicalOrError(
     localFields,
     compatibilityMessage`local linkage fields`,

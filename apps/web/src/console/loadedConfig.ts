@@ -30,9 +30,11 @@ import {
   INITIAL_CSV_DELIMITER_CHOICE,
 } from "@components/csvDelimiterChoice";
 import {
+  CanonicalEncodingError,
   DEFAULT_LINKAGE_RULE_SET,
   canonicalString,
   isDisclosedToPartner,
+  partnerBoundTerms,
 } from "@psilink/core";
 
 import { OWN_COLUMNS_DEFAULT } from "@psi/ownColumnsModel";
@@ -345,6 +347,36 @@ export function termsSettingsWithNoControl(terms: LinkageTerms): Array<string> {
  * takes no result. */
 export function termsSettingsStatedBy(editor: InviterEditor): Array<string> {
   return termsSettingsWithNoControl(buildAdvancedTerms(editor.draft));
+}
+
+/** The part of the terms `editor`'s draft builds that the partner refuses an
+ * exchange over when its copy differs (`partnerBoundTerms`), in the canonical
+ * form two builds are compared in ({@link termsEditedSinceOpened}). Undefined
+ * for a draft whose terms the encoding refuses, which the editor reports as a
+ * problem of its own. */
+export function canonicalPartnerBoundTerms(
+  editor: InviterEditor,
+): string | undefined {
+  try {
+    return canonicalString(partnerBoundTerms(buildAdvancedTerms(editor.draft)));
+  } catch (err) {
+    if (err instanceof CanonicalEncodingError) return undefined;
+    throw err;
+  }
+}
+
+/** Whether the terms `editor`'s draft builds differ from `baseline`, the terms
+ * the opened configuration built the moment they reached the input file, in a
+ * field the partner refuses an exchange over, which the party's own name is
+ * not. A change undone is no change, since the terms are compared rather than
+ * the edits. A baseline the encoding refused compares as unchanged: there is no
+ * opened state to hold the draft against. */
+export function termsEditedSinceOpened(
+  baseline: string | undefined,
+  editor: InviterEditor,
+): boolean {
+  if (baseline === undefined) return false;
+  return canonicalPartnerBoundTerms(editor) !== baseline;
 }
 
 /** The names {@link termsSettingsWithNoControl} gives, as the file spells

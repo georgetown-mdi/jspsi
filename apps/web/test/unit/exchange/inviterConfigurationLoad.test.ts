@@ -33,6 +33,7 @@ import {
 import {
   csvDelimiterFromDocument,
   editorWithLoadedTerms,
+  termsEditedSinceOpened,
   termsSettingsStatedBy,
   termsSettingsWithNoControl,
 } from "@console/loadedConfig";
@@ -1654,5 +1655,68 @@ describe("terms settings with no control reach the run and the hand-back", () =>
       ),
     );
     expect(noticesOf(state).join(" ")).not.toContain("linkage_terms");
+  });
+});
+
+// The warning that the partner holds the opened terms is read off a comparison
+// of the terms the draft builds against the ones the opened configuration built
+// when it reached the file, so it follows the terms rather than the edits.
+describe("the terms an opened configuration built are compared, not tracked", () => {
+  function edited(state: InviterScreenState): boolean {
+    if (state.editor === undefined) throw new Error("expected a seated editor");
+    return termsEditedSinceOpened(state.loadedTermsBaseline, state.editor);
+  }
+
+  const applied = withFileRead(
+    loadedInto(INVITER_SCREEN_INITIAL, sftpDocument()),
+  );
+  const direction = applied.editor?.draft.outputDirection;
+  const other: OutputDirection = direction === "both" ? "inviter" : "both";
+
+  test("the opened terms as they reached the file are unchanged", () => {
+    expect(applied.loadedTermsBaseline).toBeDefined();
+    expect(edited(applied)).toBe(false);
+  });
+
+  test("a changed term reads as changed, and undoing it as unchanged", () => {
+    const changed = withOutputDirection(applied, other);
+    expect(edited(changed)).toBe(true);
+    if (direction === undefined) throw new Error("expected a direction");
+    expect(edited(withOutputDirection(changed, direction))).toBe(false);
+  });
+
+  test("a changed name is unchanged terms, since the partner does not bind it", () => {
+    const renamed = inviterScreenReducer(applied, {
+      type: "name-changed",
+      name: "County Health, renamed",
+    });
+    expect(renamed.editor?.draft.identity).toBe("County Health, renamed");
+    expect(edited(renamed)).toBe(false);
+    expect(edited(withOutputDirection(renamed, other))).toBe(true);
+  });
+
+  test("the terms applied over the next file are the new comparison", () => {
+    const changed = withOutputDirection(applied, other);
+    const voided = inviterScreenReducer(changed, {
+      type: "console-file-voided",
+    });
+    expect(edited(withFileRead(voided))).toBe(false);
+  });
+
+  test("closing the configuration drops what is compared against", () => {
+    const closed = inviterScreenReducer(withOutputDirection(applied, other), {
+      type: "loaded-configuration-discarded",
+      editor: editorFromCsv("County Health", applied.acquired as AcquiredCsv),
+    });
+    expect(closed.loadedTermsBaseline).toBeUndefined();
+    expect(edited(closed)).toBe(false);
+  });
+
+  test("opening a configuration again drops the last one's", () => {
+    const reopened = loadedInto(
+      withOutputDirection(applied, other),
+      sftpDocument(),
+    );
+    expect(reopened.loadedTermsBaseline).toBeUndefined();
   });
 });
