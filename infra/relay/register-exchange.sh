@@ -10,6 +10,8 @@
 # both keys allocate for a moment and the exchange is never left without one.
 # With max-age-days, sweep-exchanges.sh revokes the row that many days after
 # this registration unless a later one replaces it (README.md, Per-exchange keys).
+# Registering the key the exchange already holds renews its row: the stamp and
+# max-age-days are rewritten, the table left alone.
 set -euo pipefail
 
 if [ "$#" -lt 2 ] || [ "$#" -gt 3 ]; then
@@ -33,7 +35,9 @@ fi
 
 PRIOR="$(key_of "$ID")"
 if [ "$PRIOR" = "$KEY" ]; then
-  printf 'exchange %s (realm %s) already has this key registered\n' "$ID" "$REALM"
+  write_mapping "$ID" "$KEY" "$MAX_AGE_DAYS" ||
+    die "could not renew exchange $ID's line in $MAP_FILE, which is unchanged; its key still authenticates"
+  printf 'renewed exchange %s (realm %s), which already had this key registered\n' "$ID" "$REALM"
   exit 0
 fi
 

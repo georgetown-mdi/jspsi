@@ -17,6 +17,7 @@ import hmac
 import http.server
 import json
 import os
+import re
 import ssl
 import subprocess
 import sys
@@ -35,6 +36,16 @@ CONNECTION_TIMEOUT_SECONDS = 15
 # Each script runs turnadmin in a throwaway container two to four times.
 SCRIPT_TIMEOUT_SECONDS = 120
 MIN_TOKEN_LENGTH = 32
+# The shape rules of check_exchange_id, check_key, and check_max_age_days in
+# exchange-keys.sh, applied before a script runs; the scripts keep their own.
+EXCHANGE_ID = re.compile(r"[A-Za-z0-9._][A-Za-z0-9._-]{0,127}")
+KEY = re.compile(r"[0-9a-f]{64}")
+MAX_AGE_DAYS_CEILING = 36500
+ID_REFUSAL = "exchange-id must be 1 to 128 of [A-Za-z0-9._-], not starting with '-' and not 64 lowercase hex characters"
+KEY_REFUSAL = "key must be 64 lowercase hex characters [0-9a-f]"
+MAX_AGE_REFUSAL = "maxAgeDays must be a whole number of days from 1 to %d" % MAX_AGE_DAYS_CEILING
+# The journal names a request's method only from this list.
+KNOWN_METHODS = frozenset(("GET", "HEAD", "POST", "PUT", "DELETE", "OPTIONS", "PATCH", "TRACE", "CONNECT"))
 
 
 def fail_start(message):
@@ -56,6 +67,18 @@ def read_token():
     return token.encode("ascii")
 
 
+def valid_exchange_id(exchange_id):
+    return EXCHANGE_ID.fullmatch(exchange_id) is not None and KEY.fullmatch(exchange_id) is None
+
+
+def valid_key(key):
+    return isinstance(key, str) and KEY.fullmatch(key) is not None
+
+
+def valid_max_age_days(days):
+    return isinstance(days, int) and not isinstance(days, bool) and 1 <= days <= MAX_AGE_DAYS_CEILING
+
+
 def last_line(text):
     lines = [line for line in text.strip().splitlines() if line.strip()]
     return lines[-1] if lines else ""
@@ -75,6 +98,30 @@ class RegistrarHandler(http.server.BaseHTTPRequestHandler):
 
     def log_message(self, format, *args):
         sys.stderr.write("%s %s\n" % (self.address_string(), format % args))
+
+    def log_request(self, code="-", size="-"):
+        # The request line can carry a key -- in the path, or anywhere in a
+        # malformed line -- so the journal gets the method and path only when
+        # they have a shape no key has.
+        command = self.command or ""
+        method = command if command in KNOWN_METHODS else "(other method)"
+        exchange_id = self.exchange_id() if command else None
+        path = self.path if exchange_id is not None and valid_exchange_id(exchange_id) else "(path withheld)"
+        self.log_message("%s %s %s", method, path, str(int(code)) if code != "-" else code)
+
+    def send_error(self, code, message=None, explain=None):
+        # Every error the standard library answers itself -- an unsupported
+        # method, a malformed request line or header block -- is answered here,
+        # in JSON, and with nothing from the request logged or echoed back.
+        if code == 501:
+            self.refuse_method()
+            return
+        self.close_connection = True
+        try:
+            reason = self.responses[code][0]
+        except KeyError:
+            reason = "error"
+        self.send_json(code, {"error": "the request is malformed: %s" % reason.lower()}, (("Connection", "close"),))
 
     def send_json(self, status, body, extra_headers=()):
         payload = (json.dumps(body) + "\n").encode("utf-8")
@@ -119,9 +166,10 @@ class RegistrarHandler(http.server.BaseHTTPRequestHandler):
         return False
 
     def exchange_id(self):
-        if not self.path.startswith(PREFIX):
+        path = getattr(self, "path", "")
+        if not path.startswith(PREFIX):
             return None
-        exchange_id = self.path[len(PREFIX) :]
+        exchange_id = path[len(PREFIX) :]
         if not exchange_id or "/" in exchange_id or "?" in exchange_id or "#" in exchange_id:
             return None
         return exchange_id
@@ -192,6 +240,9 @@ class RegistrarHandler(http.server.BaseHTTPRequestHandler):
         if exchange_id is None:
             self.refuse(404, "register at PUT %s<exchange-id>" % PREFIX)
             return
+        if not valid_exchange_id(exchange_id):
+            self.refuse(400, ID_REFUSAL)
+            return
         raw = self.read_body()
         if raw is None:
             return
@@ -205,11 +256,11 @@ class RegistrarHandler(http.server.BaseHTTPRequestHandler):
             return
         key = body["key"]
         max_age_days = body.get("maxAgeDays")
-        if not isinstance(key, str):
-            self.send_json(400, {"error": "key must be a string"})
+        if not valid_key(key):
+            self.send_json(400, {"error": KEY_REFUSAL})
             return
-        if max_age_days is not None and (isinstance(max_age_days, bool) or not isinstance(max_age_days, int)):
-            self.send_json(400, {"error": "maxAgeDays must be a whole number of days"})
+        if max_age_days is not None and not valid_max_age_days(max_age_days):
+            self.send_json(400, {"error": MAX_AGE_REFUSAL})
             return
         arguments = ["register-exchange.sh", exchange_id, key]
         if max_age_days is not None:
@@ -223,16 +274,15 @@ class RegistrarHandler(http.server.BaseHTTPRequestHandler):
         if exchange_id is None:
             self.refuse(404, "revoke at DELETE %s<exchange-id>" % PREFIX)
             return
+        if not valid_exchange_id(exchange_id):
+            self.refuse(400, ID_REFUSAL)
+            return
         self.run_script(["revoke-exchange.sh", exchange_id], self.discard_body())
 
     def refuse_method(self):
+        # Reached through send_error's 501 for every method with no do_ handler.
         if self.authorized():
             self.refuse(405, "use PUT or DELETE on %s<exchange-id>" % PREFIX, (("Allow", "PUT, DELETE"),))
-
-    do_GET = refuse_method
-    do_HEAD = refuse_method
-    do_POST = refuse_method
-    do_PATCH = refuse_method
 
 
 class RegistrarServer(http.server.ThreadingHTTPServer):

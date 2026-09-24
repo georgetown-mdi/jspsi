@@ -332,13 +332,32 @@ describe("register-exchange.sh", () => {
     );
   });
 
-  it("changes nothing when the exchange already holds the key", () => {
+  it("renews the row, not the table, when the exchange already holds the key", () => {
     const host = fixtureHost();
-    host.register("exchange-1", KEY_A);
-    const result = host.register("exchange-1", KEY_A);
-    expect(result.status, result.stderr).toBe(0);
-    expect(result.turnadmin).toEqual([]);
-    expect(host.mapping()).toBe(`exchange-1 ${KEY_A} ${NOW} -\n`);
+    host.register("exchange-1", KEY_A, "30");
+    host.setClock(NOW + 100);
+    const renewed = host.register("exchange-1", KEY_A, "7");
+    expect(renewed.status, renewed.stderr).toBe(0);
+    expect(renewed.stdout).toContain("renewed exchange exchange-1");
+    expect(renewed.stdout).not.toContain(KEY_A);
+    expect(renewed.turnadmin).toEqual([]);
+    expect(host.mapping()).toBe(`exchange-1 ${KEY_A} ${NOW + 100} 7\n`);
+    host.setClock(NOW + 200);
+    expect(host.register("exchange-1", KEY_A).status).toBe(0);
+    expect(host.mapping()).toBe(`exchange-1 ${KEY_A} ${NOW + 200} -\n`);
+  });
+
+  it("keeps the row and aborts when a renewal cannot rewrite the mapping", () => {
+    const host = fixtureHost();
+    host.register("exchange-1", KEY_A, "30");
+    host.setClock(NOW + 100);
+    host.failMappingWriteAt("mv");
+    const result = host.register("exchange-1", KEY_A, "7");
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("could not renew exchange exchange-1");
+    expect(result.stderr).not.toContain(KEY_A);
+    expect(host.mapping()).toBe(`exchange-1 ${KEY_A} ${NOW} 30\n`);
+    expect(host.mappingTemporaries()).toEqual([]);
   });
 
   it("refuses a key another exchange holds", () => {
@@ -671,6 +690,29 @@ const startRegistrar = (host, script = join(relay, "registrar.py")) =>
     );
   });
 
+// Starts a copy of the registrar beside stub register and revoke scripts that
+// record each launch by name and exit 0.
+const startStubbedRegistrar = async (host) => {
+  const dir = mkdtempSync(join(tmpdir(), "relay-registrar-stubs-"));
+  const launches = join(dir, "launches");
+  writeFileSync(launches, "");
+  const script = join(dir, "registrar.py");
+  copyFileSync(join(relay, "registrar.py"), script);
+  for (const name of ["register-exchange.sh", "revoke-exchange.sh"]) {
+    writeFileSync(
+      join(dir, name),
+      `#!/bin/bash\nprintf '%s\\n' '${name}' >> '${launches}'\necho done\n`,
+    );
+    chmodSync(join(dir, name), 0o755);
+  }
+  const started = await startRegistrar(host, script);
+  return {
+    ...started,
+    launches: () => readFileSync(launches, "utf8"),
+    remove: () => rmSync(dir, { recursive: true, force: true }),
+  };
+};
+
 const call = (port, method, path, { token, body, headers = {} } = {}) =>
   new Promise((resolveResponse, reject) => {
     const payload = body === undefined ? undefined : Buffer.from(body);
@@ -830,22 +872,16 @@ describe("registrar.py", { timeout: 60000 }, () => {
 
   it("answers a script's refusal 409 with its reason and never the key", async () => {
     const host = fixtureHost();
+    host.register("exchange-1", KEY_A);
     const { port, log } = await startRegistrar(host);
-    const malformed = await call(port, "PUT", "/exchanges/exchange-1", {
+    const held = await call(port, "PUT", "/exchanges/exchange-2", {
       token: REGISTRAR_TOKEN,
-      body: JSON.stringify({ key: KEY_A.toUpperCase() }),
+      body: JSON.stringify({ key: KEY_A }),
     });
-    expect(malformed.status).toBe(409);
-    expect(JSON.parse(malformed.text).error).toContain("key-hex64");
-    const tooOld = await call(port, "PUT", "/exchanges/exchange-1", {
-      token: REGISTRAR_TOKEN,
-      body: JSON.stringify({
-        key: KEY_A,
-        maxAgeDays: MAX_TOKEN_MAX_AGE_DAYS + 1,
-      }),
-    });
-    expect(tooOld.status).toBe(409);
-    expect(JSON.parse(tooOld.text).error).toContain("max-age-days");
+    expect(held.status).toBe(409);
+    expect(JSON.parse(held.text).error).toContain(
+      "already registered for exchange exchange-1",
+    );
     const unregistered = await call(port, "DELETE", "/exchanges/exchange-9", {
       token: REGISTRAR_TOKEN,
     });
@@ -853,12 +889,218 @@ describe("registrar.py", { timeout: 60000 }, () => {
     expect(JSON.parse(unregistered.text).error).toContain(
       "exchange-id exchange-9 is not registered",
     );
-    for (const text of [malformed.text, tooOld.text, log.stderr]) {
+    for (const text of [held.text, log.stderr]) {
       expect(text).not.toContain(KEY_A);
-      expect(text).not.toContain(KEY_A.toUpperCase());
     }
-    expect(host.mapping()).toBe("");
+    expect(host.mapping()).toBe(`exchange-1 ${KEY_A} ${NOW} -\n`);
   });
+
+  it("accepts the managed-exchange record's largest max age", async () => {
+    const host = fixtureHost();
+    const { port } = await startRegistrar(host);
+    const response = await call(port, "PUT", "/exchanges/exchange-1", {
+      token: REGISTRAR_TOKEN,
+      body: JSON.stringify({ key: KEY_A, maxAgeDays: MAX_TOKEN_MAX_AGE_DAYS }),
+    });
+    expect(response.status, response.text).toBe(200);
+    expect(host.mapping()).toBe(
+      `exchange-1 ${KEY_A} ${NOW} ${MAX_TOKEN_MAX_AGE_DAYS}\n`,
+    );
+  });
+
+  const keyBody = (key, maxAgeDays = "") =>
+    `{"key": ${JSON.stringify(key)}${maxAgeDays === "" ? "" : `, "maxAgeDays": ${maxAgeDays}`}}`;
+  const idRefusal =
+    "exchange-id must be 1 to 128 of [A-Za-z0-9._-], not starting with '-' and not 64 lowercase hex characters";
+
+  it.each([
+    ["an id of $(id)", "PUT", "/exchanges/$(id)", keyBody(KEY_A), idRefusal],
+    ["an id of $(id)", "DELETE", "/exchanges/$(id)", "", idRefusal],
+    [
+      "an id with a semicolon",
+      "PUT",
+      "/exchanges/a;b",
+      keyBody(KEY_A),
+      idRefusal,
+    ],
+    ["an id with a semicolon", "DELETE", "/exchanges/a;b", "", idRefusal],
+    [
+      "a 3000-character id",
+      "PUT",
+      `/exchanges/${"a".repeat(3000)}`,
+      keyBody(KEY_A),
+      idRefusal,
+    ],
+    [
+      "a 3000-character id",
+      "DELETE",
+      `/exchanges/${"a".repeat(3000)}`,
+      "",
+      idRefusal,
+    ],
+    ["an id starting with '-'", "DELETE", "/exchanges/-rf", "", idRefusal],
+    [
+      "an id shaped like a key",
+      "PUT",
+      `/exchanges/${KEY_B}`,
+      keyBody(KEY_A),
+      idRefusal,
+    ],
+    [
+      "a key with a space",
+      "PUT",
+      "/exchanges/exchange-1",
+      keyBody(`${KEY_A.slice(1)} `),
+      "key must be 64 lowercase hex characters [0-9a-f]",
+    ],
+    [
+      "a key with a newline",
+      "PUT",
+      "/exchanges/exchange-1",
+      keyBody(`${KEY_A.slice(1)}\n`),
+      "key must be 64 lowercase hex characters [0-9a-f]",
+    ],
+    [
+      "an uppercase key",
+      "PUT",
+      "/exchanges/exchange-1",
+      keyBody(KEY_A.toUpperCase()),
+      "key must be 64 lowercase hex characters [0-9a-f]",
+    ],
+    [
+      "maxAgeDays -1",
+      "PUT",
+      "/exchanges/exchange-1",
+      keyBody(KEY_A, "-1"),
+      "maxAgeDays must be a whole number of days from 1 to 36500",
+    ],
+    [
+      "maxAgeDays 0",
+      "PUT",
+      "/exchanges/exchange-1",
+      keyBody(KEY_A, "0"),
+      "maxAgeDays must be a whole number of days from 1 to 36500",
+    ],
+    [
+      "maxAgeDays 99999999999999999999",
+      "PUT",
+      "/exchanges/exchange-1",
+      keyBody(KEY_A, "99999999999999999999"),
+      "maxAgeDays must be a whole number of days from 1 to 36500",
+    ],
+    [
+      "one day over the largest maxAgeDays",
+      "PUT",
+      "/exchanges/exchange-1",
+      keyBody(KEY_A, `${MAX_TOKEN_MAX_AGE_DAYS + 1}`),
+      "maxAgeDays must be a whole number of days from 1 to 36500",
+    ],
+  ])(
+    "refuses %s (%s) 400 naming the field and launches no script",
+    async (_, method, path, body, refusal) => {
+      const host = fixtureHost();
+      const stubbed = await startStubbedRegistrar(host);
+      try {
+        const response = await call(stubbed.port, method, path, {
+          token: REGISTRAR_TOKEN,
+          body: body === "" ? undefined : body,
+        });
+        expect(response.status).toBe(400);
+        expect(JSON.parse(response.text).error).toBe(refusal);
+        expect(stubbed.launches()).toBe("");
+      } finally {
+        stubbed.remove();
+      }
+    },
+  );
+
+  it("launches the script for a well-formed request", async () => {
+    const host = fixtureHost();
+    const stubbed = await startStubbedRegistrar(host);
+    try {
+      const response = await call(
+        stubbed.port,
+        "DELETE",
+        "/exchanges/exchange-1",
+        {
+          token: REGISTRAR_TOKEN,
+        },
+      );
+      expect(response.status, response.text).toBe(200);
+      expect(stubbed.launches()).toBe("revoke-exchange.sh\n");
+    } finally {
+      stubbed.remove();
+    }
+  });
+
+  it("journals no path that can carry a key", async () => {
+    const host = fixtureHost();
+    const { port, log } = await startRegistrar(host);
+    const put = await call(port, "PUT", `/exchanges/${KEY_A}`, {
+      token: REGISTRAR_TOKEN,
+      body: JSON.stringify({ key: KEY_B }),
+    });
+    expect(put.status).toBe(400);
+    const deleted = await call(port, "DELETE", `/exchanges/${KEY_A}`, {
+      token: REGISTRAR_TOKEN,
+    });
+    expect(deleted.status).toBe(400);
+    const unauthorized = await call(port, "DELETE", `/exchanges/${KEY_A}`);
+    expect(unauthorized.status).toBe(401);
+    const malformed = await Promise.all(
+      [
+        `PUT /exchanges/${KEY_A} HTTP/1.1 extra\r\n\r\n`,
+        `${KEY_A} /exchanges/exchange-1 HTTP/1.1\r\nConnection: close\r\n\r\n`,
+        `PUT ${KEY_A}\r\n\r\n`,
+        `PUT /exchanges/exchange-1 HTTP/${KEY_A}\r\n\r\n`,
+      ].map((line) => callRaw(port, [line])),
+    );
+    for (const text of malformed) {
+      expect(text).not.toContain(KEY_A);
+    }
+    await vi.waitFor(() => {
+      expect(
+        log.stderr.split("\n").filter((line) => / 40\d$/.test(line)),
+      ).toHaveLength(7);
+    });
+    expect(log.stderr).toContain("(path withheld) 400");
+    expect(log.stderr).not.toMatch(/[0-9a-f]{64}/);
+    const registered = await call(port, "DELETE", "/exchanges/exchange-1", {
+      token: REGISTRAR_TOKEN,
+    });
+    expect(registered.status).toBe(409);
+    await vi.waitFor(() =>
+      expect(log.stderr).toContain("DELETE /exchanges/exchange-1 409"),
+    );
+  });
+
+  it.each(["TRACE", "PROPFIND", "CONNECT", "GET"])(
+    "refuses %s in JSON, 401 without the token and 405 with it",
+    async (method) => {
+      const host = fixtureHost();
+      host.register("exchange-1", KEY_A);
+      const { port } = await startRegistrar(host);
+      host.clearCalls();
+      for (const [headers, status] of [
+        [{}, "401"],
+        [{ Authorization: `Bearer ${REGISTRAR_TOKEN}` }, "405"],
+      ]) {
+        const text = await callRaw(port, [
+          rawRequest(method, "/exchanges/exchange-1", {
+            ...headers,
+            Connection: "close",
+          }),
+        ]);
+        expect(text).toMatch(new RegExp(`^HTTP/1\\.1 ${status} `));
+        expect(text).toMatch(/^Content-Type: application\/json\r$/im);
+        expect(
+          JSON.parse(text.slice(text.indexOf("\r\n\r\n") + 4)),
+        ).toHaveProperty("error");
+      }
+      expect(host.calls()).toBe("");
+      expect(host.mapping()).toBe(`exchange-1 ${KEY_A} ${NOW} -\n`);
+    },
+  );
 
   it.each([
     ["not JSON", "{"],

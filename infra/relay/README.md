@@ -183,7 +183,9 @@ revoke-exchange.sh <exchange-id>
     -X <key> -r <realm> -b /var/lib/coturn/turndb
   ```
 
-  Registering the key an exchange already holds changes nothing. A key another
+  Registering the key an exchange already holds leaves the table alone and
+  renews the row: its mapping line takes the new registration time and the
+  call's max-age-days, or none when the call gives none. A key another
   exchange holds is refused.
 - **The key on the command line.** The key is an argument to both the script
   and the container it starts, so it is visible in the host's process table
@@ -208,8 +210,8 @@ revoke-exchange.sh <exchange-id>
 - **Lifetime.** A row registered with max-age-days lapses that many days after
   its registration, and `sweep-exchanges.sh`, run hourly by
   `psilink-relay-sweep.timer`, revokes it within the hour. Registering the
-  exchange's next key replaces the row and restarts the count, so each run's
-  registration is the renewal and an exchange that keeps running is never
+  exchange's next key, or its current key again, replaces the row and restarts
+  the count, so each run's registration is the renewal and an exchange that keeps running is never
   swept. max-age-days is the managed-exchange record's `tokenMaxAgeDays`
   ([MANAGED_EXCHANGE_RECORD.md, Persisted across runs](../../docs/spec/MANAGED_EXCHANGE_RECORD.md#persisted-across-runs)): each successful run stamps the stored secret's
   `expires` that many days out and rotates the secret, and the relay forgets
@@ -272,15 +274,23 @@ settings, never in a served bundle. To turn it off, delete the file and run
 - **The calls.** Every request needs `Authorization: Bearer <token>`; without
   it, or with a wrong token, the answer is 401 and nothing runs. A CORS
   preflight (`OPTIONS`) is the one exception: a browser sends it with no
-  token, and it is answered 204 and does nothing.
+  token, and it is answered 204 and does nothing. Any other method -- `GET`,
+  `TRACE`, `PROPFIND`, anything but `PUT`, `DELETE`, and `OPTIONS` -- is
+  answered 401 without the token and 405 with it, in JSON, and runs nothing.
 
   | request | runs | answer |
   | --- | --- | --- |
   | `PUT /exchanges/<exchange-id>` with `{"key": "<key-hex64>", "maxAgeDays": <days>}`, `maxAgeDays` optional | `register-exchange.sh <exchange-id> <key-hex64> [<days>]` | 200 and `{"message": ...}` |
   | `DELETE /exchanges/<exchange-id>` | `revoke-exchange.sh <exchange-id>` | 200 and `{"message": ...}` |
 
-  A body that is not that JSON object is answered 400, one over 1024 bytes 413,
-  and one without a `Content-Length` 411, each before any script runs. A script
+  The registrar checks the exchange id, the key, and `maxAgeDays` against the
+  scripts' own rules (see [Per-exchange keys](#per-exchange-keys), The
+  arguments) and answers a value that fails them 400 with a fixed message
+  naming the field, never the value, before any script runs; the scripts
+  check again. A body that is not that JSON object is answered 400, one over
+  1024 bytes 413, and one without a `Content-Length` 411, each before any
+  script runs. A request line or header block the registrar cannot parse is
+  answered in JSON with the connection closed. A script
   that refuses or fails is answered 409 with `{"error": ...}` holding its last
   message, which never contains the key. Registering replaces the exchange's
   prior row, as the script does; `maxAgeDays` is the record's `tokenMaxAgeDays`
@@ -299,8 +309,12 @@ settings, never in a served bundle. To turn it off, delete the file and run
   standard library only), which Amazon Linux 2023 ships. The key reaches the
   scripts as an argument, with the process-table exposure described above.
 - **What it logs.** One line per request to the journal (`journalctl -u
-  psilink-relay-registrar.service`), naming the method, path, and status, and
-  any message a script printed. Neither the token nor a key is logged.
+  psilink-relay-registrar.service`), naming the method, the status, and the
+  path, and any message a script printed. The path is logged only when it is
+  `/exchanges/<exchange-id>` with a well-formed id, and the method only when
+  it is a standard one; any other path or method, and any part of a malformed
+  request line, is replaced by a fixed placeholder, since it could hold a key
+  sent in the wrong place. Neither the token nor a key is logged.
 
 ## Supervision and the container runtime
 
