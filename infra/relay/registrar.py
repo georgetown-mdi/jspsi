@@ -89,17 +89,20 @@ class RegistrarHandler(http.server.BaseHTTPRequestHandler):
         if self.command != "HEAD":
             self.wfile.write(payload)
 
-    def refuse(self, status, message, extra_headers=()):
-        # A small body is read and discarded, because closing a socket with
-        # unread data resets it and can lose the answer; any other body ends
-        # the connection unread.
+    def discard_body(self):
+        # A small body is read and discarded, so the next request on the
+        # connection starts where this one ends, and because closing a socket
+        # with unread data resets it and can lose the answer; any other body
+        # ends the connection unread. Returns the headers the answer carries.
         length = self.headers.get("Content-Length") or "0"
         if "Transfer-Encoding" not in self.headers and length.isdigit() and int(length) <= MAX_BODY_BYTES:
             self.rfile.read(int(length))
-        else:
-            self.close_connection = True
-            extra_headers = (("Connection", "close"),) + tuple(extra_headers)
-        self.send_json(status, {"error": message}, extra_headers)
+            return ()
+        self.close_connection = True
+        return (("Connection", "close"),)
+
+    def refuse(self, status, message, extra_headers=()):
+        self.send_json(status, {"error": message}, self.discard_body() + tuple(extra_headers))
 
     def authorized(self):
         header = self.headers.get("Authorization", "")
@@ -133,7 +136,7 @@ class RegistrarHandler(http.server.BaseHTTPRequestHandler):
             return None
         return self.rfile.read(int(length))
 
-    def run_script(self, arguments):
+    def run_script(self, arguments, extra_headers=()):
         # One registration or revocation at a time; the scripts also lock.
         with self.server.script_lock:
             try:
@@ -146,26 +149,40 @@ class RegistrarHandler(http.server.BaseHTTPRequestHandler):
                     timeout=SCRIPT_TIMEOUT_SECONDS,
                 )
             except subprocess.TimeoutExpired:
-                self.send_json(500, {"error": "%s did not finish within %d s" % (arguments[0], SCRIPT_TIMEOUT_SECONDS)})
+                self.send_json(
+                    500, {"error": "%s did not finish within %d s" % (arguments[0], SCRIPT_TIMEOUT_SECONDS)}, extra_headers
+                )
+                return
+            except OSError as error:
+                # The answer names only the script: the error can carry a path.
+                sys.stderr.write("could not start %s: %s\n" % (arguments[0], error))
+                self.send_json(
+                    500, {"error": "the relay could not start %s; the registrar's journal names the cause" % arguments[0]}, extra_headers
+                )
                 return
         if result.returncode == 0:
-            self.send_json(200, {"message": last_line(result.stdout)})
+            message = last_line(result.stdout)
+            sys.stderr.write("%s: %s\n" % (arguments[0], message))
+            self.send_json(200, {"message": message}, extra_headers)
         else:
             sys.stderr.write(result.stderr)
             message = last_line(result.stderr)
             if message.startswith("ABORTING: "):
                 message = message[len("ABORTING: ") :]
-            self.send_json(409, {"error": message or "%s exited %d" % (arguments[0], result.returncode)})
+            self.send_json(409, {"error": message or "%s exited %d" % (arguments[0], result.returncode)}, extra_headers)
 
     def do_OPTIONS(self):
         # A browser's CORS preflight carries no Authorization header, so it is
         # answered without one and does nothing.
+        closing = self.discard_body()
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "PUT, DELETE")
         self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type")
         self.send_header("Access-Control-Max-Age", "600")
         self.send_header("Content-Length", "0")
+        for name, value in closing:
+            self.send_header(name, value)
         self.end_headers()
 
     def do_PUT(self):
@@ -206,7 +223,7 @@ class RegistrarHandler(http.server.BaseHTTPRequestHandler):
         if exchange_id is None:
             self.refuse(404, "revoke at DELETE %s<exchange-id>" % PREFIX)
             return
-        self.run_script(["revoke-exchange.sh", exchange_id])
+        self.run_script(["revoke-exchange.sh", exchange_id], self.discard_body())
 
     def refuse_method(self):
         if self.authorized():

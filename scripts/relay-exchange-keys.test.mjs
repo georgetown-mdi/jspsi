@@ -1,6 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
+  copyFileSync,
   existsSync,
   mkdtempSync,
   readdirSync,
@@ -10,10 +11,19 @@ import {
   writeFileSync,
 } from "node:fs";
 import { request } from "node:https";
+import { connect } from "node:tls";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 // The relay's per-exchange key scripts, the lapse sweep, the registrar service,
 // and the configuration render, driven against a fixture host. The container
@@ -642,9 +652,9 @@ const registrarEnv = (host, token = REGISTRAR_TOKEN) => {
 };
 
 // Starts the registrar on a free port and resolves once it is listening.
-const startRegistrar = (host) =>
+const startRegistrar = (host, script = join(relay, "registrar.py")) =>
   new Promise((resolvePort, reject) => {
-    const child = spawn("python3", [join(relay, "registrar.py")], {
+    const child = spawn("python3", [script], {
       env: { ...registrarEnv(host), PSILINK_RELAY_REGISTRAR_PORT: "0" },
     });
     registrars.push(child);
@@ -697,6 +707,37 @@ const call = (port, method, path, { token, body, headers = {} } = {}) =>
     req.on("error", reject);
     req.end(payload);
   });
+
+// Writes raw requests on one connection and resolves with everything the
+// registrar sends back once it closes the connection.
+const callRaw = (port, requests) =>
+  new Promise((resolveText, reject) => {
+    const socket = connect(
+      {
+        host: "127.0.0.1",
+        port,
+        servername: "relay.example",
+        ca: readFileSync(join(certDir, "fullchain.pem")),
+      },
+      () => socket.write(requests.join("")),
+    );
+    let text = "";
+    socket.on("data", (chunk) => {
+      text += chunk;
+    });
+    socket.on("end", () => resolveText(text));
+    socket.on("error", reject);
+  });
+
+const rawRequest = (method, path, headers, body = "") =>
+  [
+    `${method} ${path} HTTP/1.1`,
+    "Host: relay.example",
+    ...Object.entries(headers).map(([name, value]) => `${name}: ${value}`),
+    `Content-Length: ${Buffer.byteLength(body)}`,
+    "",
+    body,
+  ].join("\r\n");
 
 // Each test starts a Python process and runs the key scripts; a loaded host
 // takes longer than the default five seconds.
@@ -774,6 +815,12 @@ describe("registrar.py", { timeout: 60000 }, () => {
     expect(host.mapping()).toBe("");
     expect(host.table()).toBe(`${KEY_LISTED}[relay.example]\n`);
 
+    await vi.waitFor(() => {
+      expect(log.stderr).toMatch(
+        /register-exchange\.sh: registered exchange exchange-1/,
+      );
+      expect(log.stderr).toMatch(/revoke-exchange\.sh: .*exchange-1/);
+    });
     for (const text of [first.text, second.text, revoked.text, log.stderr]) {
       expect(text).not.toContain(KEY_A);
       expect(text).not.toContain(KEY_B);
@@ -868,6 +915,69 @@ describe("registrar.py", { timeout: 60000 }, () => {
       expect(host.calls()).toBe("");
     },
   );
+
+  it("reads a DELETE's and a preflight's body so the next request parses", async () => {
+    const host = fixtureHost();
+    host.register("exchange-1", KEY_A);
+    const { port } = await startRegistrar(host);
+    const auth = { Authorization: `Bearer ${REGISTRAR_TOKEN}` };
+    const text = await callRaw(port, [
+      rawRequest("DELETE", "/exchanges/exchange-1", auth, '{"ignored": 1}'),
+      rawRequest("OPTIONS", "/exchanges/exchange-2", {}, '{"ignored": 2}'),
+      rawRequest(
+        "PUT",
+        "/exchanges/exchange-2",
+        { ...auth, Connection: "close" },
+        JSON.stringify({ key: KEY_B }),
+      ),
+    ]);
+    expect(
+      [...text.matchAll(/^HTTP\/1\.1 (\d{3})/gm)].map((match) => match[1]),
+    ).toEqual(["200", "204", "200"]);
+    expect(host.mapping()).toBe(`exchange-2 ${KEY_B} ${NOW} -\n`);
+  });
+
+  it("ends the connection after a DELETE whose body it does not read", async () => {
+    const host = fixtureHost();
+    host.register("exchange-1", KEY_A);
+    const { port } = await startRegistrar(host);
+    const text = await callRaw(port, [
+      rawRequest(
+        "DELETE",
+        "/exchanges/exchange-1",
+        { Authorization: `Bearer ${REGISTRAR_TOKEN}` },
+        "x".repeat(2000),
+      ),
+    ]);
+    expect(text).toMatch(/^HTTP\/1\.1 200/);
+    expect(text).toMatch(/^Connection: close\r$/im);
+    expect(host.mapping()).toBe("");
+  });
+
+  it("answers a script that cannot start 500 without the error text", async () => {
+    const host = fixtureHost();
+    const alone = mkdtempSync(join(tmpdir(), "relay-registrar-alone-"));
+    try {
+      const script = join(alone, "registrar.py");
+      copyFileSync(join(relay, "registrar.py"), script);
+      const { port, log } = await startRegistrar(host, script);
+      const response = await call(port, "PUT", "/exchanges/exchange-1", {
+        token: REGISTRAR_TOKEN,
+        body: JSON.stringify({ key: KEY_A }),
+      });
+      expect(response.status).toBe(500);
+      expect(JSON.parse(response.text).error).toBe(
+        "the relay could not start register-exchange.sh; the registrar's journal names the cause",
+      );
+      expect(response.text).not.toContain(alone);
+      await vi.waitFor(() =>
+        expect(log.stderr).toContain("could not start register-exchange.sh"),
+      );
+      expect(log.stderr).not.toContain(KEY_A);
+    } finally {
+      rmSync(alone, { recursive: true, force: true });
+    }
+  });
 
   it.each([
     ["a short token", "a".repeat(31)],
@@ -1033,7 +1143,7 @@ describe("verify.sh registrar probe", { timeout: 60000 }, () => {
       "PASS     a revocation with the token was answered 200",
     );
     expect(result.stdout).toContain(
-      "PASS     the revocation left the mapping and the secrets table",
+      "PASS     the revocation removed the key from the mapping and the secrets table",
     );
     expect(registrarLines).not.toMatch(/FAIL|UNCLEAR/);
     for (const stream of [result.stdout, result.stderr]) {

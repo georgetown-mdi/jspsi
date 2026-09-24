@@ -421,7 +421,7 @@ else
     expect_status "a revocation with the token" 200 "$STATUS"
     READ_BACK=0; registrar_read_back || READ_BACK=$?
     if [ "$READ_BACK" -eq 3 ]; then
-      report pass "the revocation left the mapping and the secrets table"
+      report pass "the revocation removed the key from the mapping and the secrets table"
     else
       report fail "after the revocation the mapping or the secrets table still holds the key"
     fi
