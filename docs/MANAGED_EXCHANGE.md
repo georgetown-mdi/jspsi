@@ -1085,11 +1085,10 @@ The two files have the current secret, but they are a backup for the command lin
 not for this browser: reconstituting a browser copy after an eviction is the artifact
 import ([Eviction recovery is the import
 flow](#eviction-recovery-is-the-import-flow)), which these two files are not. The
-`psilink.yaml` of the pair does come back, as settings to edit and export rather
-than as an exchange that runs here ([Bringing a command-line configuration
-back](#bringing-a-command-line-configuration-back)); the secret stays in the
-`.psilink.key`, which this browser does not read at an import. So --
-unlike the backup and migration exports -- taking this one **marks nothing**: the
+pair can be imported back ([Bringing a command-line configuration
+back](#bringing-a-command-line-configuration-back)), but it is the command line's
+working copy: every run there rewrites `.psilink.key` with the secret it rotated
+to. So -- unlike the backup and migration exports -- taking this one **marks nothing**: the
 exchange's backup state is exactly what it was before, whether the operator confirms
 the hand-off or declines it. A backup indicator reading green is a promise that a file
 this browser restores from exists, and these files are not that file. The panel says
@@ -1152,13 +1151,42 @@ scheduler are -- read the file in, edit what is editable, download it again, run
 it there.
 
 The import is offered wherever the list is. Beside exchanges already listed, a
-control of its own takes a `psilink.yaml` and nothing else: a backup file chosen
-there is refused, since a backup is imported only while the list is empty or
-cannot be read ([Eviction recovery is the import
+control of its own takes a `psilink.yaml`, with or without its key file: a backup
+file chosen there is refused, since a backup is imported only while the list is
+empty or cannot be read ([Eviction recovery is the import
 flow](#eviction-recovery-is-the-import-flow)). Beside an empty or unreadable
 list, the one import control takes either file.
 
-Such an exchange **does not run in this browser**. It sits in the same list as
+**To run the exchange in this browser, choose its `.psilink.key` too**, in the
+same pick as the `psilink.yaml`. Its name starts with a dot, so the file chooser
+may hide it until hidden files are shown. The pair lands as an exchange that runs
+here, and the import says so before you open it; a `psilink.yaml` chosen alone
+lands as the configuration only, and its page says that instead. Before the
+first run here, stop the scheduled command-line run of the same exchange: each
+run on either side changes the shared secret, and the copy that falls behind can
+no longer connect to your partner. What the pair import takes and refuses:
+
+- **The key file psilink wrote.** A file that is not JSON, holds no shared
+  secret or one psilink would not write, has an `expires` that is not a date and
+  time, or holds any other field is refused, saying which, and nothing is
+  imported. The refusal never shows what the file holds.
+- **Only an exchange this browser runs.** An sftp or filedrop configuration, or
+  one with a `signing` block, is refused with its key file; import the
+  `psilink.yaml` on its own to edit it here.
+- **One copy of an exchange.** An exchange is recognized by its shared secret. If
+  this browser already runs the exchange the key file belongs to, nothing is
+  imported and the refusal names it. If you handed it off to the command line
+  from here, the import refuses and names the way back: open it from the list and
+  choose "Take this exchange back", with this key file. An exchange moved to
+  another device from here comes back as the same entry in the list. A key file
+  the command line has rotated since it left matches nothing and lands as a new
+  entry.
+
+The secret is kept only in this browser's stored copy of the exchange, as for an
+exchange set up here; the import marks the exchange as restored, and it reads as
+needing a backup until you export one.
+
+A configuration imported alone **does not run in this browser**. It sits in the same list as
 the exchanges that do, with Open in place of Run, and its own page says why in
 place of the Run and schedule controls:
 
@@ -1206,8 +1234,9 @@ What the import accepts is what this app can hold:
   that file's path. Any other `provider_options` setting, such as a cipher
   list, is held as written.
 - **No shared secret.** A configuration naming one in its `authentication` block
-  is refused: the key file stays where the exchange runs. psilink reads the secret
-  from `.psilink.key` and refuses it in `psilink.yaml` for the same reason.
+  is refused: the secret comes in only from the `.psilink.key` chosen beside it.
+  psilink reads the secret from `.psilink.key` and refuses it in `psilink.yaml`
+  for the same reason.
 - **A `role` on a webrtc connection.** The configuration has to say which side of
   the partnership this party takes; the command line refuses a webrtc connection
   that names none, and so does this. An sftp or filedrop connection has no `role`.
@@ -1907,7 +1936,8 @@ a new device are the **same import operation** (consistent with
 migration-not-sync): an import re-establishes the one owner, wherever it
 runs. The one control takes either file the operator may hold and routes it by
 what the file is: the backup artifact restores the exchange, and a command-line
-`psilink.yaml` lands as a configuration-only exchange instead ([Bringing a
+`psilink.yaml` lands as a configuration-only exchange instead, or as one that
+runs here when its `.psilink.key` is chosen with it ([Bringing a
 command-line configuration
 back](#bringing-a-command-line-configuration-back)). One limit: a wholesale
 eviction erases the evidence that

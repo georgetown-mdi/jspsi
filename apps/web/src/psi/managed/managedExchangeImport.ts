@@ -12,6 +12,10 @@
  *   import marker is evidence of a restored secret, and the backup marker
  *   attests a file this browser restores a secret from. A file holding neither
  *   is that record's own backup, on the machine that runs it.
+ * - A command-line `psilink.yaml` WITH the `.psilink.key` beside it installs a
+ *   runnable record ({@link importManagedCommandLinePair}), reconciled against
+ *   the store on the backup leg's own rule: the same secret is the same
+ *   exchange.
  *
  * The configuration leg also has an entry of its own
  * ({@link importManagedConfigurationFile}) that refuses a backup, for a
@@ -43,12 +47,13 @@
  *
  * A match spent under a HAND-OFF of its own is refused instead
  * ({@link ManagedImportHandedOffError}). The exchange runs from what that hand-off
- * saved -- the command-line export's two files, whose `psilink.yaml` this import
- * reads back as a configuration only and whose key file it does not read at all --
- * so the artifact, taken before the hand-off, has no copy to bring back: reviving
- * would run a copy the hand-off gave away, and installing fresh would split one secret
- * across a spent husk and a live row beside it. The refusal names the record the store
- * still holds so the surface can say which exchange it is and what recovery it has.
+ * saved -- the command-line export's two files, which the re-take on that
+ * record's own surface reads back behind the operator's word that the command
+ * line has stopped -- so the artifact, taken before the hand-off, has no copy to
+ * bring back: reviving would run a copy the hand-off gave away, and installing
+ * fresh would split one secret across a spent husk and a live row beside it. The
+ * refusal names the record the store still holds so the surface can say which
+ * exchange it is and what recovery it has.
  *
  * A match whose sibling local-state entry this build cannot parse is refused on the
  * same reasoning ({@link ManagedImportCustodyUnreadableError}). The hand-off is recorded
@@ -82,16 +87,27 @@ import {
 import {
   MAX_CONFIGURATION_IMPORT_BYTES,
   readManagedCommandLineConfiguration,
+  readManagedCommandLinePair,
 } from "./managedCommandLineImport";
 import {
   createManagedExchange,
+  reconcileManagedCommandLinePair,
   reviveSpentManagedExchange,
 } from "./managedExchangeStore";
-import { markManagedExchangeImported } from "./managedLocalState";
+import {
+  markManagedExchangeImported,
+  markManagedExchangeKeyImported,
+} from "./managedLocalState";
 
-import type { ManagedExchangeRecord } from "./managedExchangeRecord";
+import type {
+  ManagedExchangeRecord,
+  RunnableManagedExchangeRecord,
+} from "./managedExchangeRecord";
+import type {
+  ManagedPairReconcileOutcome,
+  ManagedReviveOutcome,
+} from "./managedExchangeStore";
 import type { ManagedPlatformGrant } from "./managedExchangeArtifact";
-import type { ManagedReviveOutcome } from "./managedExchangeStore";
 import type { ManagedSpentHandoff } from "./managedLocalStateShape";
 
 /**
@@ -381,4 +397,108 @@ async function installConfiguration(
     readManagedCommandLineConfiguration(source),
   );
   return { record, missingGrants: [] };
+}
+
+/**
+ * Raised when a command-line pair is refused because a record this browser
+ * runs already holds its secret: the same exchange, live here, so nothing is
+ * revived and nothing is installed beside it. Holds that record's operator
+ * label (which may be empty) so the surface can name it.
+ */
+export class ManagedImportAlreadyHeldError extends Error {
+  /** The stored record's operator label; empty when the operator named nothing. */
+  readonly label: string;
+
+  constructor(label: string) {
+    super(
+      "this key file's managed exchange already runs in this browser, so importing it is refused",
+    );
+    this.name = "ManagedImportAlreadyHeldError";
+    this.label = label;
+  }
+}
+
+/** The platform boundaries a command-line pair import drives, injected so the
+ * flow is testable. */
+export interface ManagedPairImportDeps {
+  /** Reconcile the pair's record against the store on the backup import's
+   * rule ({@link reconcileManagedCommandLinePair}). */
+  reconcile: (
+    imported: RunnableManagedExchangeRecord,
+    at: string,
+  ) => Promise<ManagedPairReconcileOutcome>;
+  /** Install the pair's record as a new managed exchange. */
+  install: (record: ManagedExchangeRecord) => Promise<ManagedExchangeRecord>;
+  /** Stamp the installed record's import marker as of `at`, and no backup
+   * marker. */
+  markImported: (id: string, at: string) => Promise<void>;
+  /** The moment of the import. */
+  now: () => Date;
+}
+
+/** The default boundaries: reconcile and install through the store, mark
+ * through the sibling store, and read the wall clock. */
+const defaultPairDeps: ManagedPairImportDeps = {
+  reconcile: reconcileManagedCommandLinePair,
+  install: defaultDeps.install,
+  markImported: markManagedExchangeKeyImported,
+  now: () => new Date(),
+};
+
+/**
+ * Import a command-line `psilink.yaml` and the `.psilink.key` beside it as a
+ * runnable managed exchange. Both files are read in full before the store is
+ * reached ({@link readManagedCommandLinePair}), so a refusal of either writes
+ * nothing. The record is then reconciled on the backup import's rule -- a
+ * stored record holding the same secret is the same exchange -- and:
+ *
+ * - a migration-spent match is revived in place, the pair's fields laid over
+ *   it and its import marker stamped, in the reconciliation's transaction;
+ * - a match handed off from this browser, or whose sibling state cannot be
+ *   read, refuses with the backup import's own errors;
+ * - a live match refuses ({@link ManagedImportAlreadyHeldError});
+ * - otherwise the record installs fresh and its import marker is stamped,
+ *   best-effort after the durable install as on the backup leg. No backup
+ *   marker is stamped: the pair is not the app's backup file.
+ *
+ * The secret lands in the record's `sharedSecret` alone, the field every
+ * runnable record keeps it in; no refusal here states any byte of the key
+ * file.
+ *
+ * @throws {ManagedImportBackupNotConfigurationError} if the configuration file
+ *   is the app's backup; nothing is written.
+ * @throws {UsageError} if the configuration is not parseable YAML.
+ * @throws {ManagedConfigurationRefusedError} if the configuration is refused.
+ * @throws {ManagedKeyFileRefusedError} if the key file is refused.
+ * @throws {ManagedImportHandedOffError},
+ *   {@link ManagedImportCustodyUnreadableError}, or
+ *   {@link ManagedImportAlreadyHeldError} on a refusing match.
+ * @throws {ZodError} if the record, the revive, or the install is invalid.
+ */
+export async function importManagedCommandLinePair(
+  configurationSource: string,
+  keySource: string,
+  deps: ManagedPairImportDeps = defaultPairDeps,
+): Promise<ManagedImportResult> {
+  if (probeImportFile(configurationSource) === "backup")
+    throw new ManagedImportBackupNotConfigurationError();
+  const imported = readManagedCommandLinePair(configurationSource, keySource);
+  const at = deps.now().toISOString();
+  const reconciled = await deps.reconcile(imported, at);
+  if (reconciled.kind === "revived")
+    return { record: reconciled.record, missingGrants: [] };
+  if (reconciled.kind === "handed-off")
+    throw new ManagedImportHandedOffError(reconciled.handoff, reconciled.label);
+  if (reconciled.kind === "custody-unreadable")
+    throw new ManagedImportCustodyUnreadableError(reconciled.label);
+  if (reconciled.kind === "held")
+    throw new ManagedImportAlreadyHeldError(reconciled.label);
+  const installed = await deps.install(imported);
+  try {
+    await deps.markImported(installed.id, at);
+  } catch {
+    // Best-effort, as on the backup leg: the record is durable, and reporting
+    // failure here would install a duplicate on retry.
+  }
+  return { record: installed, missingGrants: [] };
 }

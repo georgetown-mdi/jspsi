@@ -173,3 +173,46 @@ export function custodyUnreadableImportReason(label: string): string {
     "again."
   );
 }
+
+/**
+ * The refusal a command-line `psilink.yaml` and `.psilink.key` meet when the key
+ * file's secret matches an exchange this browser handed off to the command line.
+ * Those files are what the hand-off saved, and the route that brings them back is
+ * the re-take on that exchange's own surface: it asks the operator to stop the
+ * command-line run first, which an import has no place to ask. Keyed by the
+ * hand-off, as {@link handedOffImportReason} is.
+ */
+const HANDED_OFF_PAIR_IMPORT_REASON: Record<
+  ManagedSpentHandoff,
+  (named: string) => string
+> = {
+  "command-line": (named) =>
+    `${named} is still here, handed off to the command line, and these are ` +
+    "the files it runs from there, so nothing was imported. To run it in " +
+    'this browser again, open it from the list, choose "Take this exchange ' +
+    'back", and choose this .psilink.key there.',
+};
+
+/** {@link handedOffImportReason} for a command-line pair's import. */
+export function handedOffPairImportReason(
+  handoff: ManagedSpentHandoff,
+  label: string,
+): string {
+  return HANDED_OFF_PAIR_IMPORT_REASON[handoff](
+    label === "" ? "That exchange" : `"${label}"`,
+  );
+}
+
+/** {@link custodyUnreadableImportReason} for a command-line pair's import: the
+ * same fault, with the files to import again named as the pair, and the
+ * command-line run to stop before this browser runs the exchange too. */
+export function custodyUnreadablePairImportReason(label: string): string {
+  const named = label === "" ? "that exchange" : `"${label}"`;
+  return (
+    `This browser could not read the note it keeps beside ${named} -- the one ` +
+    "recording whether this copy was handed off somewhere else -- so nothing " +
+    "was imported. Delete that exchange from the list on this page, then " +
+    "import the psilink.yaml and .psilink.key again. If you handed it off to " +
+    "the command line, stop the scheduled run there first."
+  );
+}

@@ -988,6 +988,34 @@ export function applyManagedExchangeReinviteRotation(
 }
 
 /**
+ * Lay a record read from a command-line `psilink.yaml` and its `.psilink.key`
+ * over the stored record it revives, producing a validated new record: the
+ * document, `side`, max-age policy, and key pair come from the pair, an absent
+ * `expires` or policy clearing the stored one, and everything the pair has no
+ * field for -- the `id`, label, schedule, `lastRun`, standing condition, and
+ * platform grants -- stays as stored, so the revive clears no condition only
+ * the operator, a re-invite, or a delete may clear. The inputs are not mutated.
+ *
+ * @throws {ZodError} if the result is not a valid record.
+ */
+export function applyManagedExchangeCommandLinePair(
+  stored: ManagedExchangeRecord,
+  imported: RunnableManagedExchangeRecord,
+): RunnableManagedExchangeRecord {
+  const next: ManagedExchangeRecord = {
+    ...stored,
+    exchangeFile: imported.exchangeFile,
+    side: imported.side,
+    sharedSecret: imported.sharedSecret,
+  };
+  if (imported.expires === undefined) delete next.expires;
+  else next.expires = imported.expires;
+  if (imported.tokenMaxAgeDays === undefined) delete next.tokenMaxAgeDays;
+  else next.tokenMaxAgeDays = imported.tokenMaxAgeDays;
+  return runnableManagedExchangeOrRefuse(parseManagedExchangeRecord(next));
+}
+
+/**
  * Drop a `lastRun` recording the `handed-off` refusal -- a run that found this
  * device's copy spent ({@link ./managedExchangeRun.ts}) -- producing a validated
  * new record. The entry records a state a take-back ends, and left in place it

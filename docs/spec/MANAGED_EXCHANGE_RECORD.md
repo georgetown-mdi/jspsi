@@ -198,11 +198,104 @@ they are bound to different listings:
   does not run. A file tagged as the backup artifact is refused before it is
   reconciled or installed, and nothing is written.
 
-What either control installs from a `psilink.yaml` is the same
+What either control installs from a `psilink.yaml` chosen alone is the same
 configuration-only record. It holds no secret, reconciles against no stored
 record, and runs nowhere here, so it installs nothing runnable, and the rule
 binding the shared import to an empty or unreadable listing has nothing to
-guard for it.
+guard for it. Both controls also take a `psilink.yaml` chosen together with the
+`.psilink.key` beside it, which installs a runnable record ([Importing the key
+file beside a configuration](#importing-the-key-file-beside-a-configuration)):
+its reconciliation and refusals are its own and are met wherever it is
+imported, so it is bound to no listing.
+
+#### Importing the key file beside a configuration
+
+A `psilink.yaml` chosen together with its `.psilink.key`, in one pick of either
+import control, installs a **runnable** record: the configuration-only record
+the `psilink.yaml` alone would install, holding the key file's secret. Which
+file is the key file is read off the names -- the one whose name ends in
+`.key`, the name psilink writes (`DEFAULT_KEY_PATH`, `apps/cli/src/keyFile.ts`)
+-- and two files that are not one of each, a key file chosen alone, and more
+than two files are refused before either is read. The code:
+`readManagedCommandLinePair` and `readManagedCommandLineKeyFile`
+(`apps/web/src/psi/managed/managedCommandLineImport.ts`),
+`importManagedCommandLinePair` (`managedExchangeImport.ts`).
+
+**What it accepts.** The configuration exactly as the configuration-only import
+accepts it, and a key file holding exactly what psilink writes there: a JSON
+object with a `sharedSecret` matching `SHARED_SECRET_REGEX` and an optional ISO
+8601 `expires`, and no other field. The key file is validated on its own -- the
+configuration's schema parse never sees it -- through the sensitive-JSON
+chokepoint and the strict key-pair schema the export artifact's key half and the
+[hand-off re-take](#taking-a-command-line-hand-off-back) read (`keyFileFieldsSchema`),
+under the re-take's size cap, applied before the file is read.
+
+**What it refuses**, with nothing written:
+
+- A key file over the cap, one that is not JSON, one that is not an object, and
+  one whose `sharedSecret` is absent or not a psilink shared secret, whose
+  `expires` is not an ISO 8601 date and time, or that holds any other field.
+  The refusal names each problem in fixed words and states no byte of the file:
+  no field value, no field name it did not expect, no parser message.
+- A configuration this app does not run -- on `sftp` or `filedrop`, or stating
+  a `signing` block -- with its key file. The record schema holds a secret only
+  where this app runs the exchange, and the operator chose the key file to run
+  it here, so the pair is refused, naming the reason and the configuration-only
+  import as the way to edit it here, rather than installed without the key.
+- Every configuration the configuration-only import refuses, and the app's
+  backup artifact chosen as the configuration.
+- A pair whose exchange a stored record already is, where the rule below
+  refuses it.
+
+**Where the secret lands.** In the installed or revived record's `sharedSecret`,
+with the key file's `expires` in `expires`: the record fields every runnable
+record keeps them in, written by `createManagedExchange` or inside the
+reconciliation's transaction, with the at-rest treatment the backup import's
+install gives the artifact's secret. It is written to no other store, field,
+or sibling entry; it is never rendered, logged, or stated in a refusal, and no
+request carries it (`apps/web/test/unit/psi/managedCommandLineKeyImport.test.ts`,
+`apps/web/test/browser/managedCommandLinePairImport.test.ts`, and the pair cases
+in `apps/web/test/browser/savedExchanges.test.ts` pin each).
+
+**One rule decides whether it is a stored exchange: the same secret.** A pair
+holds no record `id` and no other identity: the configuration names no exchange,
+and the key file holds the secret and its bound. The rendezvous ids both parties
+register under are derived from the secret, so the secret is the exchange's
+identity, and it is the one the backup import already matches on. The pair is
+reconciled in the backup import's transaction (`reconcileManagedCommandLinePair`,
+`reviveSpentManagedExchange`'s own, `managedExchangeStore.ts`), compared in
+memory:
+
+- **A match handed off to the command line refuses**, as it does for a backup,
+  naming the record: those files are what the hand-off saved, and the route
+  that brings them back is the [re-take](#taking-a-command-line-hand-off-back)
+  on that record's own surface, whose confirmation asks the operator to stop the
+  command-line run first. The refusal says to choose this key file there. **A
+  match whose sibling entry cannot be read refuses** on the backup's terms too.
+- **A migration-spent match is revived in place**: the pair's document, `side`,
+  max-age policy, and key pair are laid over the stored record, an absent
+  `expires` or policy clearing the stored one, and the `id`, label, schedule,
+  `lastRun`, standing condition, and platform grants -- none of which the pair
+  has a field for -- are kept (`applyManagedExchangeCommandLinePair`). The spent
+  state is cleared and the import marker stamped.
+- **A live match refuses**, naming the record, where the backup import installs
+  a fresh record beside it: the pair holds nothing the live record lacks, so a
+  second live copy of one secret is all installing it could add. It decides
+  ahead of a migration-spent match for the same reason.
+- **No match installs fresh**, with a new `id`.
+
+A secret the command line has rotated past the stored one matches nothing, so a
+pair from a hand-off that has run since installs fresh beside the spent husk;
+the re-take, given the same key file, is the route that keeps one record. A
+configuration-only record holds no secret and matches nothing either.
+
+**The markers.** Every pair import that writes stamps the [import
+marker](#the-backup-marker-the-spent-state-and-the-import-marker-local-siblings-never-in-the-artifact)
+as of the import: a key file obtained outside this browser can hold a secret the
+partnership has rotated past, the reading the desync tiering gives it until a
+run succeeds. It stamps **no backup marker** -- the pair is not the app's backup
+file (the command-line export's rule, below) -- and a revive keeps any backup
+marker the stored record held, the secret it attests being unchanged.
 
 #### The connection block: credential-free by composition
 
@@ -1278,12 +1371,16 @@ record, in a separate origin-local store keyed by the record `id`, and are
     the marker to bytes that exist: a step that resolved without serializing would leave
     a marker attesting bytes nothing produced, so it fails the export instead.
   - **The command-line export marks nothing.** What it writes is the CLI's own
-    `psilink.yaml` and `.psilink.key`. The import accepts that `psilink.yaml` -- as a
-    [configuration-only record](#the-configuration-only-record), holding no secret --
-    and never the key file, so neither file restores the secret a marker attests.
-    A marker stamped for the pair would present the record as restorable from files
-    nothing here restores a secret from. It takes a plain read of the record by `id`
-    and leaves the
+    `psilink.yaml` and `.psilink.key`. The import takes that pair back ([Importing
+    the key file beside a configuration](#importing-the-key-file-beside-a-configuration)),
+    so the files can restore the secret, and the export still stamps no marker: the
+    marker attests a file nothing rewrites, and the key file is the command line's
+    working copy, which every command-line run rewrites with the secret it rotated
+    to, on a machine this browser cannot see. A marker stamped for it would read
+    "backed up" about a copy the first run there replaces, and the backup surfaces
+    that read the marker send the operator to the backup file, not to it. The pair
+    import stamps no backup marker for the same reason. The export takes a plain
+    read of the record by `id` and leaves the
     marker -- present or absent -- exactly where it stood, whether the hand-off is
     confirmed or dismissed. The two exports are named apart where they are offered, so
     the operator chooses between "a file this browser restores from" and "the files
@@ -1378,12 +1475,12 @@ record, in a separate origin-local store keyed by the record `id`, and are
   that record's fields, keeps its `id` and its platform handles -- the input file
   and the granted output folder -- clears the spent state,
   and marks it imported and backed-up, rather than installing a duplicate). The
-  command-line export downloads the CLI's `psilink.yaml` and `.psilink.key`. The
-  import reads that `psilink.yaml` as a [configuration-only
-  record](#the-configuration-only-record) and never the key file, so it brings back
-  settings and no secret: that hand-off leaves nothing of its own to revive a spent
-  record with, and the two files stay the exchange's backup of record, on the machine
-  that runs it. That is why the surfaces reading the spent state branch on the
+  command-line export downloads the CLI's `psilink.yaml` and `.psilink.key`, which
+  the command line runs from and rewrites; the import refuses that pair against the
+  record the hand-off spent ([Importing the key file beside a
+  configuration](#importing-the-key-file-beside-a-configuration)), and the route
+  that takes it back is the [re-take](#taking-a-command-line-hand-off-back), behind
+  the operator's word that the command-line run has stopped. That is why the surfaces reading the spent state branch on the
   discriminator rather than naming one recovery for both -- a spent copy is told
   the recovery its hand-off actually has.
 
@@ -1469,8 +1566,9 @@ record, in a separate origin-local store keyed by the record `id`, and are
   response (see
   [SECURITY_DESIGN.md](../SECURITY_DESIGN.md#rollback-at-rest-copies-can-silently-resurrect)).
 - **The import marker** (`importedAt`, an ISO 8601 UTC instant) records that this
-  device installed or revived the record from a backup artifact, or took it back from
-  a command-line hand-off. It is the evidence the desync tiering reads to tell an
+  device installed or revived the record from a backup artifact or from a
+  command-line `psilink.yaml` and its `.psilink.key`, or took it back from a
+  command-line hand-off. It is the evidence the desync tiering reads to tell an
   **import/restore since the last successful run** apart from an unexplained
   handshake failure (Tier 1 versus
   Tier 2; see [Telling a desync from an
@@ -1485,7 +1583,9 @@ record, in a separate origin-local store keyed by the record `id`, and are
     restored record holds the evidence from the moment it lands. Every [take-back of
     a command-line hand-off](#taking-a-command-line-hand-off-back) stamps it too,
     with or without a key file, and the one that installs a key file's secret clears
-    the backup marker rather than stamping it.
+    the backup marker rather than stamping it. An import of a command-line
+    `psilink.yaml` with its `.psilink.key` stamps it and no backup marker ([Importing
+    the key file beside a configuration](#importing-the-key-file-beside-a-configuration)).
   - **Rotation clears it.** The persist-before-success rotation write clears the
     import marker in the **same** transaction that advances the secret. A rotation is
     driven by a completed handshake, which proves the two parties held the same
@@ -1513,7 +1613,10 @@ exchange](../MANAGED_EXCHANGE.md#deleting-a-managed-exchange)).
 
 A copy spent under `handoff: "command-line"` comes back to this browser through an
 explicit **re-take** on that record's own surface. It is the only route from that
-spent state to a running one: the import refuses the artifact (above), and the
+spent state to a running one: the import refuses the artifact (above) and a
+command-line pair holding the record's secret alike, and installs a pair whose
+secret has moved on as a separate record ([Importing the key file beside a
+configuration](#importing-the-key-file-beside-a-configuration)), and the
 surface showing the spent state is where the operator already is.
 
 **The operator attests; the browser checks what it can.** Two facts decide a

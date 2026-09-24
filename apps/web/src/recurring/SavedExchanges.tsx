@@ -12,8 +12,10 @@ import { Link, useNavigate } from "@tanstack/react-router";
 
 import {
   MAX_IMPORT_FILE_BYTES,
+  ManagedImportAlreadyHeldError,
   ManagedImportCustodyUnreadableError,
   ManagedImportHandedOffError,
+  importManagedCommandLinePair,
   importManagedConfigurationFile,
   importManagedExchangeFile,
 } from "@psi/managed/managedExchangeImport";
@@ -25,6 +27,7 @@ import {
   requestPersistentStorage,
 } from "@psi/managed/managedExchangeStore";
 import { MAX_CONFIGURATION_IMPORT_BYTES } from "@psi/managed/managedCommandLineImport";
+import { MAX_KEY_FILE_IMPORT_BYTES } from "@psi/managed/managedRetake";
 import { listManagedLocalState } from "@psi/managed/managedLocalState";
 
 import { Lobby } from "@exchange/Lobby";
@@ -33,18 +36,28 @@ import { AppPage } from "@components/AppPage";
 import styles from "@styles/app.module.css";
 
 import {
+  ALREADY_HELD_IMPORT_TITLE,
+  IMPORT_FAILURE_TITLE,
+  OVERSIZE_KEY_FILE_REASON,
+  UNREADABLE_CONFIGURATION_REASON,
+  UNREADABLE_IMPORT_REASON,
+  alreadyHeldImportReason,
+  configurationImportFailureReason,
+  importFailureReason,
+  pairImportFailureReason,
+} from "./managedImportFailure";
+import {
   CUSTODY_UNREADABLE_IMPORT_TITLE,
   HANDED_OFF_IMPORT_TITLE,
   custodyUnreadableImportReason,
+  custodyUnreadablePairImportReason,
   handedOffImportReason,
+  handedOffPairImportReason,
 } from "./managedHandoffGate";
 import {
-  IMPORT_FAILURE_TITLE,
-  UNREADABLE_CONFIGURATION_REASON,
-  UNREADABLE_IMPORT_REASON,
-  configurationImportFailureReason,
-  importFailureReason,
-} from "./managedImportFailure";
+  PAIR_IMPORTED_NOTICE,
+  managedImportFileChoice,
+} from "./managedImportFiles";
 import { BetweenVisitNotifications } from "./BetweenVisitNotifications";
 import { loadSavedExchanges } from "./savedExchangesLoad";
 import { managedImportGrantNotice } from "./managedImportGrantNotice";
@@ -645,11 +658,52 @@ function importFailureAlert(error: unknown): ImportFailureAlert {
   };
 }
 
+/** Which alert a psilink.yaml imported with its `.psilink.key` is refused with.
+ * The store's three refusals name an exchange this browser holds, each under its
+ * own heading, in words that speak of the two files rather than a backup;
+ * everything else is the files' own failure ({@link pairImportFailureReason}). */
+function pairImportFailureAlert(error: unknown): ImportFailureAlert {
+  if (error instanceof ManagedImportHandedOffError)
+    return {
+      color: "yellow",
+      title: HANDED_OFF_IMPORT_TITLE,
+      reason: handedOffPairImportReason(error.handoff, error.label),
+    };
+  if (error instanceof ManagedImportCustodyUnreadableError)
+    return {
+      color: "yellow",
+      title: CUSTODY_UNREADABLE_IMPORT_TITLE,
+      reason: custodyUnreadablePairImportReason(error.label),
+    };
+  if (error instanceof ManagedImportAlreadyHeldError)
+    return {
+      color: "yellow",
+      title: ALREADY_HELD_IMPORT_TITLE,
+      reason: alreadyHeldImportReason(error.label),
+    };
+  return {
+    color: "red",
+    title: IMPORT_FAILURE_TITLE,
+    reason: pairImportFailureReason(error),
+  };
+}
+
+/** The file types both import controls offer in the file chooser beside their
+ * own: the `.psilink.key` a configuration is imported with. */
+const KEY_FILE_ACCEPT = ".key";
+
+/** The note both controls give on choosing the key file: the name psilink
+ * writes it under starts with a dot, which file choosers hide by default. */
+const KEY_FILE_CHOOSER_NOTE =
+  "Choose both files at once. The key file's name starts with a dot, so the " +
+  "file chooser may hide it until you show hidden files.";
+
 /** The standing import affordance, shared by the empty state and the read-failed
  * surface so both render one markup. It takes either file the operator may hold:
  * the backup this app exports, and the `psilink.yaml` the command line runs,
- * which lands as a configuration-only exchange. The file decides which, not the
- * control ({@link importManagedExchangeFile}). A successful import puts the
+ * which lands as a configuration-only exchange -- or, chosen with the
+ * `.psilink.key` beside it, as one that runs here. The file decides which, not
+ * the control ({@link importManagedExchangeFile}). A successful import puts the
  * operator on the imported exchange's own surface, so it is a way forward even
  * when the list read itself cannot be mended. A populated list offers the
  * configuration leg alone ({@link ImportConfigurationFile}): a backup installs
@@ -672,10 +726,11 @@ function importFailureAlert(error: unknown): ImportFailureAlert {
  * An import that could not bring the source's input file or output folder stops here
  * with that notice and a button onward, rather than taking the operator straight to
  * the exchange ({@link managedImportGrantNotice}): the grants are what they have to
- * choose again, and the notice is only read where it is shown. An import with nothing
- * to say goes straight through. */
+ * choose again, and the notice is only read where it is shown. A pair import stops
+ * the same way to say the exchange now runs here ({@link PAIR_IMPORTED_NOTICE}). An
+ * import with nothing to say goes straight through. */
 function ImportExchangeFile() {
-  const { onFile, outcome } = useImportFile({
+  const { onFiles, outcome } = useImportFile({
     maxBytes: MAX_IMPORT_FILE_BYTES,
     oversizeReason: UNREADABLE_IMPORT_REASON,
     importFile: importManagedExchangeFile,
@@ -688,14 +743,16 @@ function ImportExchangeFile() {
       <p className={styles.small}>
         If this browser was cleared or you are moving to a new device, import
         the backup file you exported to bring the exchange back here. You can
-        also import a command-line psilink.yaml to edit its settings here: its
-        key file stays where it is, so that exchange keeps running from the
-        command line and not in this browser.
+        also import a command-line psilink.yaml: on its own to edit its settings
+        here while it keeps running from the command line, or with the
+        .psilink.key beside it to run it in this browser.
       </p>
+      <p className={`${styles.small} ${styles.sub}`}>{KEY_FILE_CHOOSER_NOTE}</p>
       <ImportOutcomeAlerts outcome={outcome} />
       <FileButton
-        accept="application/json,.json,application/yaml,.yaml,.yml"
-        onChange={onFile}
+        accept={`application/json,.json,application/yaml,.yaml,.yml,${KEY_FILE_ACCEPT}`}
+        multiple
+        onChange={onFiles}
       >
         {(props) => (
           <Button mt="sm" variant="default" {...props}>
@@ -710,10 +767,11 @@ function ImportExchangeFile() {
 /** The configuration import beside a populated list: a command-line
  * `psilink.yaml` lands as a configuration-only exchange, the same record the
  * shared control installs from one ({@link importManagedConfigurationFile}), on
- * any channel. A backup file is refused here by name
+ * any channel, and chosen with its `.psilink.key` as one that runs here
+ * ({@link importManagedCommandLinePair}). A backup file is refused here by name
  * ({@link configurationImportFailureReason}) rather than restored. */
 function ImportConfigurationFile() {
-  const { onFile, outcome } = useImportFile({
+  const { onFiles, outcome } = useImportFile({
     maxBytes: MAX_CONFIGURATION_IMPORT_BYTES,
     oversizeReason: UNREADABLE_CONFIGURATION_REASON,
     importFile: importManagedConfigurationFile,
@@ -728,12 +786,17 @@ function ImportConfigurationFile() {
     <div className={styles.callout}>
       <p className={styles.calloutLead}>Import a command-line configuration.</p>
       <p className={styles.small}>
-        Import a psilink.yaml to edit its settings here. Its key file stays
-        where it is, so that exchange keeps running from the command line and
-        not in this browser.
+        Import a psilink.yaml on its own to edit its settings here; the exchange
+        keeps running from the command line. To run it in this browser instead,
+        choose the .psilink.key beside it too.
       </p>
+      <p className={`${styles.small} ${styles.sub}`}>{KEY_FILE_CHOOSER_NOTE}</p>
       <ImportOutcomeAlerts outcome={outcome} />
-      <FileButton accept="application/yaml,.yaml,.yml" onChange={onFile}>
+      <FileButton
+        accept={`application/yaml,.yaml,.yml,${KEY_FILE_ACCEPT}`}
+        multiple
+        onChange={onFiles}
+      >
         {(props) => (
           <Button mt="sm" variant="default" {...props}>
             Import a psilink.yaml
@@ -744,16 +807,26 @@ function ImportConfigurationFile() {
   );
 }
 
-/** What an import control shows once a file has been tried: a grant notice
- * with the way onward, or the refusal. */
+/** What an import control shows once a file has been tried: a notice with the
+ * way onward, or the refusal. */
 interface ImportOutcome {
   grantNotice?: { id: string; notice: ManagedImportGrantNotice };
   failure?: ImportFailureAlert;
 }
 
-/** Read a chosen file through `importFile` and go to the imported exchange, or
- * hold the notice or refusal the control shows instead. A file over `maxBytes`
- * is refused with `oversizeReason` before it is read. */
+/** A refusal under the heading every file refusal takes. */
+function fileRefusal(reason: string): ImportOutcome {
+  return {
+    failure: { color: "red", title: IMPORT_FAILURE_TITLE, reason },
+  };
+}
+
+/** Read the chosen files and go to the imported exchange, or hold the notice or
+ * refusal the control shows instead. One file goes through `importFile`; a
+ * configuration with its key file through {@link importManagedCommandLinePair},
+ * whichever control took them. A file over its cap -- `maxBytes` for the one
+ * file or the configuration, the key file's own for the key -- is refused with
+ * its reason before any file is read. */
 function useImportFile({
   maxBytes,
   oversizeReason,
@@ -764,46 +837,62 @@ function useImportFile({
   oversizeReason: string;
   importFile: (source: string) => Promise<ManagedImportResult>;
   failureAlert: (error: unknown) => ImportFailureAlert;
-}): { onFile: (file: File | null) => void; outcome: ImportOutcome } {
+}): { onFiles: (files: Array<File>) => void; outcome: ImportOutcome } {
   const navigate = useNavigate();
   const [outcome, setOutcome] = useState<ImportOutcome>({});
 
-  function onFile(file: File | null) {
-    if (file === null) return;
+  function onFiles(files: Array<File>) {
+    const choice = managedImportFileChoice(files);
+    if (choice === undefined) return;
     setOutcome({});
-    // Cap the file size before reading it: both files are small operator-held
-    // documents, so an over-cap file is refused with the unreadable-file copy
-    // rather than read into memory ahead of the bounded parse.
-    if (file.size > maxBytes) {
-      setOutcome({
-        failure: {
-          color: "red",
-          title: IMPORT_FAILURE_TITLE,
-          reason: oversizeReason,
-        },
-      });
+    if (choice.kind === "refused") {
+      setOutcome(fileRefusal(choice.reason));
       return;
     }
+    const primaryFile =
+      choice.kind === "one" ? choice.file : choice.configurationFile;
+    const keyFile = choice.kind === "pair" ? choice.keyFile : undefined;
+    // Cap each file before reading it: every file here is a small operator-held
+    // document, so an over-cap one is refused rather than read into memory ahead
+    // of the bounded parse.
+    if (primaryFile.size > maxBytes) {
+      setOutcome(fileRefusal(oversizeReason));
+      return;
+    }
+    if (keyFile !== undefined && keyFile.size > MAX_KEY_FILE_IMPORT_BYTES) {
+      setOutcome(fileRefusal(OVERSIZE_KEY_FILE_REASON));
+      return;
+    }
+    const refused =
+      keyFile === undefined ? failureAlert : pairImportFailureAlert;
     void (async () => {
       try {
-        const source = await file.text();
+        const source = await primaryFile.text();
+        const keySource =
+          keyFile === undefined ? undefined : await keyFile.text();
         // Best-effort persistence on the imported record's origin, the same request
         // a create makes; a denied grant does not fail the import.
         void requestPersistentStorage();
-        const { record, missingGrants } = await importFile(source);
-        const notice = managedImportGrantNotice(missingGrants);
+        const { record, missingGrants } =
+          keySource === undefined
+            ? await importFile(source)
+            : await importManagedCommandLinePair(source, keySource);
+        const notice =
+          keySource === undefined
+            ? managedImportGrantNotice(missingGrants)
+            : PAIR_IMPORTED_NOTICE;
         if (notice !== undefined) {
           setOutcome({ grantNotice: { id: record.id, notice } });
           return;
         }
         await navigate({ to: "/saved/$id", params: { id: record.id } });
       } catch (error) {
-        setOutcome({ failure: failureAlert(error) });
+        setOutcome({ failure: refused(error) });
       }
     })();
   }
 
-  return { onFile, outcome };
+  return { onFiles, outcome };
 }
 
 /** The alerts an import control shows under its lead: the grant notice with its
