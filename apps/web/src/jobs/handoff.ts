@@ -94,11 +94,26 @@ export interface JobHandoff {
    * partner's pin would reject.
    */
   usedSigningIdentity: boolean;
+  /**
+   * The settings the template's `certificate`-mode signing block needs and
+   * does not have, as the file spells them, which the panel names for the
+   * operator to set before scheduling. Absent when there are none. They are
+   * the two the CLI refuses such a block without, before any exchange: a
+   * party name in `linkage_terms.identity` and a `signing.identity_file`.
+   * An unconverted opened configuration's block, handed off as read for a
+   * run that signed nothing, can lack either.
+   */
+  signingSettingsToSet?: Array<HandoffSigningSetting>;
   /** The portable template itself: the exchange config document and the command
    * that runs it (exchange mode), or the zero-setup command tokens (zeroSetup
    * mode). */
   template: JobHandoffTemplate;
 }
+
+/** A setting a `certificate`-mode signing block requires, as the file spells
+ * it. */
+export type HandoffSigningSetting =
+  "linkage_terms.identity" | "signing.identity_file";
 
 /**
  * The portable template, discriminated on which artifact the mode produces: the
@@ -223,35 +238,64 @@ const HANDOFF_SIGNING_PATHS: JobSigningPaths = {
 };
 
 /**
- * Compose the exchange mode's portable `psilink.yaml` template through the
+ * The exchange mode's portable template: the `psilink.yaml` text of
+ * `handoffSpec` ({@link exchangeHandoffSpec}), beside the command that runs
+ * it. The command ends on the same input/output positionals as the zero-setup
+ * command, and names no config or key file: the panel has both copied into the
+ * folder the command runs in.
+ */
+function buildExchangeHandoffTemplate(
+  handoffSpec: ExchangeSpec,
+  mountedDocument: ExchangeSpec | undefined,
+): JobHandoffTemplate {
+  return {
+    kind: "config",
+    yaml: handoffConfigDocument(handoffSpec, mountedDocument),
+    argv: ["psilink", "exchange", HANDOFF_INPUT_NAME, HANDOFF_OUTPUT_NAME],
+  };
+}
+
+/**
+ * The exchange mode's composed blocks as the template states them, through the
  * SAME compose functions the live run used, so linkage terms, metadata,
  * standardization, and connection fields are byte-for-byte what ran, with
  * only the container paths substituted first (a placeholder-credential
  * server entry on sftp, a placeholder rendezvous path on filedrop, and
  * {@link HANDOFF_SIGNING_PATHS} on both). Recomposing, rather than reading
  * and munging the on-disk file, keeps the container path out by
- * construction. The command that runs it ends on the same input/output
- * positionals as the zero-setup command, and names no config or key file: the
- * panel has both copied into the folder the command runs in.
+ * construction. An unconverted opened document's own paths are then put back
+ * ({@link withPathsAsRead}); the held settings outside these blocks are merged
+ * in by {@link handoffConfigDocument}.
  */
-function buildExchangeHandoffTemplate(
+function exchangeHandoffSpec(
   intent: JobExchangeIntent,
   serverEntry: JobSftpServerEntry | undefined,
   filedropSplit: boolean,
   mountedDocument: ExchangeSpec | undefined,
   mountedDocumentConverted: boolean,
-): JobHandoffTemplate {
+): ExchangeSpec {
   const composed = composedHandoffSpec(intent, serverEntry, filedropSplit);
-  return {
-    kind: "config",
-    yaml: handoffConfigDocument(
-      mountedDocument === undefined || mountedDocumentConverted
-        ? composed
-        : withPathsAsRead(composed, mountedDocument, intent),
-      mountedDocument,
-    ),
-    argv: ["psilink", "exchange", HANDOFF_INPUT_NAME, HANDOFF_OUTPUT_NAME],
-  };
+  return mountedDocument === undefined || mountedDocumentConverted
+    ? composed
+    : withPathsAsRead(composed, mountedDocument, intent);
+}
+
+/**
+ * The settings a `certificate`-mode signing block in `handoffSpec` lacks, of
+ * the two the CLI refuses the block without before it exchanges anything:
+ * `linkage_terms.identity` (core's `assertCertificateModeNamesLocalParty`)
+ * and `signing.identity_file` (the exchange command's
+ * `assertSigningIdentityNamed`). Each test is the one its refusal makes.
+ */
+function unsetCertificateSigningSettings(
+  handoffSpec: ExchangeSpec,
+): Array<HandoffSigningSetting> {
+  const { signing, linkageTerms } = handoffSpec;
+  if (signing?.mode !== "certificate") return [];
+  const unset: Array<HandoffSigningSetting> = [];
+  if (linkageTerms.identity === undefined) unset.push("linkage_terms.identity");
+  if (signing.identityFile === undefined) unset.push("signing.identity_file");
+  return unset;
 }
 
 /** A filedrop connection, as core's spec types it. */
@@ -625,24 +669,34 @@ export function buildJobHandoff(
     mountedDocumentConverted = false,
   }: JobHandoffRunFacts,
 ): JobHandoff {
-  const zeroSetup = intent.mode === "zeroSetup";
   const split = intent.channel === "filedrop" && filedropSplit;
+  const credentialPastedOnSftp = intent.channel === "sftp" && credentialPasted;
+  if (intent.mode === "zeroSetup")
+    return {
+      mode: "zeroSetup",
+      channel: intent.channel,
+      usedKeyFile: false,
+      keyFileBesideConfiguration: false,
+      credentialPasted: credentialPastedOnSftp,
+      usedSigningIdentity: false,
+      template: buildZeroSetupHandoffTemplate(intent, serverEntry, split),
+    };
+  const handoffSpec = exchangeHandoffSpec(
+    intent,
+    serverEntry,
+    split,
+    mountedDocument,
+    mountedDocumentConverted,
+  );
+  const signingSettingsToSet = unsetCertificateSigningSettings(handoffSpec);
   return {
-    mode: zeroSetup ? "zeroSetup" : "exchange",
+    mode: "exchange",
     channel: intent.channel,
-    usedKeyFile: !zeroSetup,
-    keyFileBesideConfiguration: !zeroSetup && keyFileBesideConfiguration,
-    credentialPasted: intent.channel === "sftp" && credentialPasted,
-    usedSigningIdentity:
-      intent.mode !== "zeroSetup" && intent.signing?.mode === "certificate",
-    template: zeroSetup
-      ? buildZeroSetupHandoffTemplate(intent, serverEntry, split)
-      : buildExchangeHandoffTemplate(
-          intent,
-          serverEntry,
-          split,
-          mountedDocument,
-          mountedDocumentConverted,
-        ),
+    usedKeyFile: true,
+    keyFileBesideConfiguration,
+    credentialPasted: credentialPastedOnSftp,
+    usedSigningIdentity: intent.signing?.mode === "certificate",
+    ...(signingSettingsToSet.length > 0 ? { signingSettingsToSet } : {}),
+    template: buildExchangeHandoffTemplate(handoffSpec, mountedDocument),
   };
 }

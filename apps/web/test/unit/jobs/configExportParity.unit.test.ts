@@ -20,6 +20,7 @@ import { validIntent, validLinkageTerms } from "../../utils/jobFixtures";
 
 import type { ExchangeSpec } from "@psilink/core";
 import type { JobFiledropExchangeIntent } from "@jobs/intentSchemas";
+import type { JobHandoff } from "@jobs/handoff";
 
 /**
  * What a console run's hand-off makes of the configuration it was opened from:
@@ -86,7 +87,19 @@ describe("the settings a loaded configuration keeps in the export", () => {
     intentOverrides: Partial<JobFiledropExchangeIntent> = {},
     converted = false,
   ): string {
-    const handoff = buildJobHandoff(
+    const handoff = handoffOver(document, intentOverrides, converted);
+    if (handoff.template.kind !== "config")
+      throw new Error("an exchange hand-off composed no template");
+    return handoff.template.yaml;
+  }
+
+  /** The whole hand-off {@link exportOver} reads the template of. */
+  function handoffOver(
+    document: ExchangeSpec | undefined,
+    intentOverrides: Partial<JobFiledropExchangeIntent> = {},
+    converted = false,
+  ): JobHandoff {
+    return buildJobHandoff(
       validIntent({ linkageTerms: validLinkageTerms(), ...intentOverrides }),
       undefined,
       {
@@ -97,9 +110,6 @@ describe("the settings a loaded configuration keeps in the export", () => {
           : {}),
       },
     );
-    if (handoff.template.kind !== "config")
-      throw new Error("an exchange hand-off composed no template");
-    return handoff.template.yaml;
   }
 
   /** One setting of an exported template, read by the name the load states it
@@ -178,6 +188,68 @@ describe("the settings a loaded configuration keeps in the export", () => {
     expect(carriedThroughFields(document)).toEqual([
       "authentication.token_max_age_days",
     ]);
+  });
+
+  test("a certificate block handed off as read with the party name removed names linkage_terms.identity", () => {
+    const document = mountedDocument(
+      { tokenMaxAgeDays: 30 },
+      { signing: MOUNTED_SIGNING },
+    );
+    const { identity: _removed, ...termsWithoutIdentity } = validLinkageTerms();
+    const handoff = handoffOver(document, {
+      linkageTerms: termsWithoutIdentity,
+      signing: { mode: "none" },
+    });
+    expect(handoff.signingSettingsToSet).toEqual(["linkage_terms.identity"]);
+    if (handoff.template.kind !== "config")
+      throw new Error("an exchange hand-off composed no template");
+    expect(exportedValue(handoff.template.yaml, "signing.mode")).toBe(
+      "certificate",
+    );
+    expect(
+      exportedValue(handoff.template.yaml, "linkage_terms.identity"),
+    ).toBeUndefined();
+  });
+
+  test("a certificate block handed off as read with no identity file names signing.identity_file", () => {
+    const { identityFile: _unset, ...signingWithoutIdentityFile } =
+      MOUNTED_SIGNING;
+    const document = mountedDocument(
+      { tokenMaxAgeDays: 30 },
+      { signing: signingWithoutIdentityFile },
+    );
+    const { identity: _removed, ...termsWithoutIdentity } = validLinkageTerms();
+    expect(
+      handoffOver(document, { signing: { mode: "none" } }).signingSettingsToSet,
+    ).toEqual(["signing.identity_file"]);
+    expect(
+      handoffOver(document, {
+        linkageTerms: termsWithoutIdentity,
+        signing: { mode: "none" },
+      }).signingSettingsToSet,
+    ).toEqual(["linkage_terms.identity", "signing.identity_file"]);
+  });
+
+  test("a pairable certificate block names no setting and hands off unchanged", () => {
+    const document = mountedDocument(
+      { tokenMaxAgeDays: 30 },
+      { signing: MOUNTED_SIGNING },
+    );
+    const handoff = handoffOver(document, { signing: { mode: "none" } });
+    expect(handoff.signingSettingsToSet).toBeUndefined();
+    if (handoff.template.kind !== "config")
+      throw new Error("an exchange hand-off composed no template");
+    expect(exportedValue(handoff.template.yaml, "signing")).toEqual({
+      mode: "certificate",
+      partner_fingerprint: PARTNER_FINGERPRINT,
+      identity_file: MOUNTED_SIGNING.identityFile,
+      receipt_output: MOUNTED_SIGNING.receiptOutput,
+    });
+    expect(
+      handoffOver(mountedDocument({ tokenMaxAgeDays: 30 }), {
+        signing: { mode: "certificate" },
+      }).signingSettingsToSet,
+    ).toBeUndefined();
   });
 
   test("a signed run over an unconverted file with no signing block names the placeholder identity", () => {

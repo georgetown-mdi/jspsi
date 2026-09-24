@@ -5,6 +5,7 @@ import { Anchor } from "@mantine/core";
 import {
   fetchRecurringHandoff,
   shellJoinCommand,
+  unsetSigningSettingsCaveat,
   windowsJoinCommand,
 } from "@psi/managed/recurringHandoff";
 
@@ -247,12 +248,16 @@ function CommandSteps({ command }: { command: string }) {
   );
 }
 
-/** The all-modes caveats, tailored to the channel and to a pasted credential. */
+/** The all-modes caveats, tailored to the channel, to a pasted credential, and
+ * to a signing block missing a setting psilink requires. */
 function Caveats({ handoff }: { handoff: JobHandoff }) {
   return (
     <>
       <h3 className={styles.handoffHeading}>Before you schedule it</h3>
       <ul className={styles.small}>
+        {handoff.signingSettingsToSet !== undefined && (
+          <li>{unsetSigningSettingsCaveat(handoff.signingSettingsToSet)}</li>
+        )}
         {handoff.channel === "sftp" ? (
           <li>
             The connection details and host-key fingerprint are filled in, but
