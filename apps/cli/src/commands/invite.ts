@@ -13,6 +13,8 @@ import {
   operatorSuppliedText,
   redactAndRenderOperatorSuppliedText,
   redactAndSanitizeForDisplay,
+  MAX_RELAY_LOCATOR_URL_LENGTH,
+  MAX_RELAY_LOCATOR_URLS,
   StunUrlSchema,
   TurnUrlSchema,
   UsageError,
@@ -211,11 +213,48 @@ export function relayUrlFlag(
   });
 }
 
-/** The `--turn` / `--stun` flags an invocation gave, by name. */
-function relayFlagsGiven(ownRelay: InviterOwnRelay | undefined): string[] {
-  return (["turn", "stun"] as const)
-    .filter((name) => ownRelay?.[name] !== undefined)
-    .map((name) => `--${name}`);
+/**
+ * The invitation endpoint for `connection`, refused as a {@link UsageError}
+ * before the token exists when its relay names more urls, or a longer url,
+ * than an invitation holds; the token schema would otherwise throw a raw
+ * ZodError. `relayFields` names where the operator set each list: the flags
+ * online, the configuration fields offline. The url itself is never echoed,
+ * since it may hold a pasted credential.
+ */
+function invitationEndpoint(
+  connection: Parameters<typeof endpointFromConnection>[0],
+  relayFields: { turn: string; stun: string },
+): ConnectionEndpoint {
+  const endpoint = endpointFromConnection(connection);
+  if (endpoint.channel !== "webrtc" || endpoint.relay === undefined)
+    return endpoint;
+  for (const name of ["turn", "stun"] as const) {
+    const urls = endpoint.relay[name] ?? [];
+    const field = relayFields[name];
+    if (urls.length > MAX_RELAY_LOCATOR_URLS)
+      throw new UsageError(
+        `${field} names too many urls to hold in an invitation ` +
+          `(${urls.length} > ${MAX_RELAY_LOCATOR_URLS}); name at most ` +
+          `${MAX_RELAY_LOCATOR_URLS}.`,
+      );
+    for (const url of urls)
+      if (url.length > MAX_RELAY_LOCATOR_URL_LENGTH)
+        throw new UsageError(
+          `a ${field} url is too long to hold in an invitation ` +
+            `(${url.length} > ${MAX_RELAY_LOCATOR_URL_LENGTH} characters); ` +
+            "shorten it.",
+        );
+  }
+  return endpoint;
+}
+
+/** The names of the `--turn` / `--stun` flags an invocation gave. */
+function relayFlagsGiven(
+  ownRelay: InviterOwnRelay | undefined,
+): Array<"turn" | "stun"> {
+  return (["turn", "stun"] as const).filter(
+    (name) => ownRelay?.[name] !== undefined,
+  );
 }
 
 /**
@@ -231,10 +270,10 @@ function offlineWebRTCEndpoint(
   connection: WebRTCConnectionConfig,
 ): ConnectionEndpoint {
   const { path } = brokerLocationFromConnection(connection.server, () => {});
-  return endpointFromConnection({
-    ...connection,
-    server: { ...connection.server, path },
-  });
+  return invitationEndpoint(
+    { ...connection, server: { ...connection.server, path } },
+    { turn: "connection.turn", stun: "connection.stun" },
+  );
 }
 
 /**
@@ -578,13 +617,13 @@ export async function validateInvite(params: {
       );
     // The relay flags describe a webrtc connection's own relay; a file-sync
     // connection has none to name or save.
-    const ignoredRelayFlags = relayFlagsGiven(ownRelay);
-    if (connection.channel !== "webrtc" && ignoredRelayFlags.length > 0)
-      log.warn(
-        `${ignoredRelayFlags.join(" and ")} apply only to a ws:// or wss:// ` +
-          `URL; this ${connection.channel} invitation names no relay and ` +
-          "saves none, so they were ignored.",
-      );
+    if (connection.channel !== "webrtc")
+      for (const name of relayFlagsGiven(ownRelay))
+        log.warn(
+          `--${name} applies only to a ws:// or wss:// URL; this ` +
+            `${connection.channel} invitation names no relay and saves ` +
+            "none, so it was ignored.",
+        );
     // Warn when --connection-per-poll is paired with a short poll interval. Built
     // from the URL with no loaded config, so `connection` holds the effective
     // mode and interval (the CLI overrides applied when it was built).
@@ -694,7 +733,10 @@ export async function validateInvite(params: {
       // `connection`, so a `--server-port` or `--outbound-path` override is
       // reflected; holds no credentials by construction (see
       // endpointFromConnection).
-      connectionEndpoint: endpointFromConnection(connection),
+      connectionEndpoint: invitationEndpoint(connection, {
+        turn: "--turn",
+        stun: "--stun",
+      }),
       // The same disclosed-columns subset persisted above: the acceptor's consent
       // screen and runtime enforcement derive from the wire's own disclosure
       // predicate.
@@ -735,13 +777,11 @@ export async function validateInvite(params: {
   // and the connection.options block have distinct remedies.
   warnServerOverridesIgnoredOffline(options, log);
   warnOptionsOverridesIgnoredOffline(options, log);
-  const ignoredOfflineRelayFlags = relayFlagsGiven(ownRelay);
-  if (ignoredOfflineRelayFlags.length > 0)
+  for (const name of relayFlagsGiven(ownRelay))
     log.warn(
-      `${ignoredOfflineRelayFlags.join(" and ")} apply only to an online ` +
-        "invitation over a ws:// or wss:// URL, so they were ignored. An " +
-        "offline invitation names the relay in connection.turn and " +
-        "connection.stun of a webrtc configuration; set them there.",
+      `--${name} applies only to an online invitation over a ws:// or ` +
+        "wss:// URL, so it was ignored. An offline invitation names the " +
+        `relay in connection.${name} of a webrtc configuration; set it there.`,
     );
 
   // Offline. Linkage terms come from a pre-existing config when one is present

@@ -14,6 +14,8 @@ import {
   getDefaultLinkageTerms,
   getLogger,
   inferMetadata,
+  MAX_RELAY_LOCATOR_URL_LENGTH,
+  MAX_RELAY_LOCATOR_URLS,
   mintRunRelayCredential,
   UsageError,
 } from "@psilink/core";
@@ -25,6 +27,7 @@ import {
   validateInvite,
 } from "../../../src/commands/invite";
 import { saveConfig } from "../../../src/config";
+import { exitCodeForError } from "../../../src/util/exit";
 import type { CommonBootstrapOptions } from "../../../src/optionDefinitions";
 
 const OWN_TURN = "turns:relay.example.org:443?transport=tcp";
@@ -34,6 +37,20 @@ const STATIC_USERNAME = "static-operator-name";
 const STATIC_CREDENTIAL = "static-turn-credential-value";
 const BROKER_KEY = "private-broker-api-key";
 const BROKER_USERNAME = "broker-user-name";
+
+// A turn: url of exactly `length` UTF-16 code units, padded with host labels.
+function turnUrlOfLength(length: number): string {
+  const prefix = "turn:";
+  const suffix = ".example.org:3478";
+  let host = "";
+  while (prefix.length + host.length + suffix.length < length) {
+    const room = length - prefix.length - host.length - suffix.length;
+    host += (host === "" ? "" : ".") + "a".repeat(Math.min(63, room - 1) || 1);
+  }
+  const url = `${prefix}${host}${suffix}`;
+  if (url.length !== length) throw new Error(`built ${url.length} units`);
+  return url;
+}
 
 const tmpDirs: string[] = [];
 afterEach(() => {
@@ -256,12 +273,92 @@ describe("online invite", () => {
       log,
     });
     if (ready.mode !== "online") throw new Error("expected online mode");
-    expect(warned(warn, "--turn apply only to a ws:// or wss:// URL")).toBe(
+    expect(warned(warn, "--turn applies only to a ws:// or wss:// URL")).toBe(
       true,
     );
     expect(ready.connection).not.toHaveProperty("turn");
     const token = await decodeInvitation(ready.invitation);
     expect(token.connectionEndpoint).not.toHaveProperty("relay");
+  });
+});
+
+describe("relay locator bounds", () => {
+  const onlineWithTurn = (dir: string, turn: string[]) =>
+    validateInvite({
+      resolved: {
+        mode: "online",
+        url: new URL("wss://peers.example.org/psi"),
+        input: writeInput(dir),
+      },
+      options: optionsIn(dir),
+      acceptTimeout: 900,
+      ownRelay: { turn },
+      log: quietLog("invite-relay-bounds-online").log,
+    });
+
+  const offlineWithTurn = (dir: string, turn: string[]) =>
+    validateInvite({
+      resolved: { mode: "offline" },
+      options: optionsIn(dir, {
+        configFile: writeWebRTCConfig(dir, {
+          turn: turn.map((url) => ({ url })),
+        }),
+      }),
+      acceptTimeout: 900,
+      log: quietLog("invite-relay-bounds-offline").log,
+    });
+
+  const turnUrls = (count: number) =>
+    Array.from(
+      { length: count },
+      (_, index) => `turn:relay${index}.example.org:3478`,
+    );
+
+  test("refuses one --turn url too many as a usage error naming the flag", async () => {
+    const dir = scratch();
+    const error = await onlineWithTurn(
+      dir,
+      turnUrls(MAX_RELAY_LOCATOR_URLS + 1),
+    ).catch((err: unknown) => err);
+    expect(error).toBeInstanceOf(UsageError);
+    expect(exitCodeForError(error)).toBe(64);
+    expect(String((error as Error).message)).toContain("--turn");
+    expect(String((error as Error).message)).toContain(
+      `${MAX_RELAY_LOCATOR_URLS + 1} > ${MAX_RELAY_LOCATOR_URLS}`,
+    );
+    expect(String((error as Error).message)).not.toContain("relay0");
+    expect(fs.existsSync(optionsIn(dir).keyFile)).toBe(false);
+  });
+
+  test("refuses a connection.turn url one unit too long, naming the field and not the url", async () => {
+    const dir = scratch();
+    const tooLong = turnUrlOfLength(MAX_RELAY_LOCATOR_URL_LENGTH + 1);
+    const error = await offlineWithTurn(dir, [tooLong]).catch(
+      (err: unknown) => err,
+    );
+    expect(error).toBeInstanceOf(UsageError);
+    expect(exitCodeForError(error)).toBe(64);
+    expect(String((error as Error).message)).toContain(
+      `a connection.turn url is too long to hold in an invitation (${MAX_RELAY_LOCATOR_URL_LENGTH + 1} > ${MAX_RELAY_LOCATOR_URL_LENGTH} characters)`,
+    );
+    expect(String((error as Error).message)).not.toContain(tooLong);
+  });
+
+  test("admits the most urls, and the longest url, an invitation holds", async () => {
+    const longest = turnUrlOfLength(MAX_RELAY_LOCATOR_URL_LENGTH);
+    const online = await onlineWithTurn(
+      scratch(),
+      turnUrls(MAX_RELAY_LOCATOR_URLS),
+    );
+    const onlineToken = await decodeInvitation(online.invitation);
+    expect(onlineToken.connectionEndpoint).toMatchObject({
+      relay: { turn: turnUrls(MAX_RELAY_LOCATOR_URLS) },
+    });
+    const offline = await offlineWithTurn(scratch(), [longest]);
+    const offlineToken = await decodeInvitation(offline.invitation);
+    expect(offlineToken.connectionEndpoint).toMatchObject({
+      relay: { turn: [longest] },
+    });
   });
 });
 
@@ -384,9 +481,11 @@ describe("offline invite from a webrtc configuration", () => {
       ownRelay: { turn: [OWN_TURN], stun: ["stun:elsewhere.example.org"] },
       log,
     });
-    expect(warned(warn, "--turn and --stun apply only to an online")).toBe(
-      true,
-    );
+    expect(warned(warn, "--turn applies only to an online")).toBe(true);
+    expect(warned(warn, "--stun applies only to an online")).toBe(true);
+    expect(
+      warn.mock.calls.some((call) => String(call[0]).includes(" and --")),
+    ).toBe(false);
     const token = await decodeInvitation(ready.invitation);
     expect(token.connectionEndpoint).toEqual({
       channel: "webrtc",

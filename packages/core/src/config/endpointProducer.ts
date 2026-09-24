@@ -72,9 +72,10 @@ export const PLACEHOLDER_SSH_USERNAME = "REPLACE_WITH_SSH_USERNAME";
  * permits and the endpoint schema rejects, is dropped for the same reason
  * -- a dead branch for the CLI's invite paths, which resolve the mount
  * point first and refuse an empty one (asserted in the CLI's
- * `inviterConnectionFromURL` and offline invite suites); another caller reaching this with an empty path
- * must resolve the mount point itself, since the CLI and browser resolve an
- * absent path differently (docs/spec/WEBRTC_TRANSPORT.md).
+ * `inviterConnectionFromURL` and offline invite suites); another caller
+ * reaching this with an empty path must resolve the mount point itself,
+ * since the CLI and browser resolve an absent path differently
+ * (docs/spec/WEBRTC_TRANSPORT.md).
  *
  * A host or path longer than the endpoint schema allows
  * ({@link MAX_ENDPOINT_HOST_LENGTH} / {@link MAX_ENDPOINT_PATH_LENGTH}) is
