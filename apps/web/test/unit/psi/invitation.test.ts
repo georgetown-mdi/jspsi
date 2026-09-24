@@ -15,8 +15,8 @@ import {
   inferMetadata,
   summarizeInvitation,
   validateCompatibility,
-} from "@psilink/core";
-import { MAX_RAW_INVITATION_LENGTH } from "@psilink/core/testing";
+} from "@alcove/core";
+import { MAX_RAW_INVITATION_LENGTH } from "@alcove/core/testing";
 
 import {
   ACCEPT_ROUTE_PATH,
@@ -30,7 +30,7 @@ import {
 import { prepareAcceptedInvitation } from "../../../src/psi/acceptInvitation.js";
 import { writeOwnRelaySetting } from "../../../src/psi/transport/ownRelaySetting.js";
 
-import type { LinkageTerms, Metadata } from "@psilink/core";
+import type { LinkageTerms, Metadata } from "@alcove/core";
 import type { InvitationLocation } from "../../../src/psi/invitation.js";
 
 const location: InvitationLocation = {

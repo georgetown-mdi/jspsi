@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { disclosedColumnNames } from "@psilink/core";
+import { disclosedColumnNames } from "@alcove/core";
 
 import {
   editorFromCsv,
@@ -276,7 +276,7 @@ describe("whether the mint may proceed", () => {
       editor: seeded.editor,
       invitation,
       acceptKitExchange: {
-        endpoint: { channel: "filedrop", path: "psilink" },
+        endpoint: { channel: "filedrop", path: "alcove" },
         retainFiles: false,
         locklessRendezvous: false,
       },
@@ -333,7 +333,7 @@ describe("whether the mint may proceed", () => {
       editor: seeded.editor,
       invitation: mintedFrom(seeded),
       acceptKitExchange: {
-        endpoint: { channel: "filedrop", path: "psilink" },
+        endpoint: { channel: "filedrop", path: "alcove" },
         retainFiles: true,
         locklessRendezvous: false,
       },

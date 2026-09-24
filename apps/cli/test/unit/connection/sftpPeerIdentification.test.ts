@@ -8,7 +8,7 @@ import {
   DISPLAY_TRUNCATION_MARKER,
   redactPrivateKeyMaterial,
   sanitizeErrorForDisplay,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   PEER_ANSWER_READ_MAX_BYTES,

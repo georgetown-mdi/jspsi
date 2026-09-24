@@ -5,7 +5,7 @@ implements this direction, and its `tokens.css` and `bench.module.css` name the
 mockup as the source of their design tokens and layout classes. This directory is
 a record, not a build input: no workflow, script, or package manifest reads it.
 
-A redesign direction for the psilink web app, presented as a non-functional HTML mockup
+A redesign direction for the Alcove web app, presented as a non-functional HTML mockup
 (`proposal-c.html`). It is a self-contained page (no build step, no external resources): open
 it in a browser, step through the 17 screens with the review bar at the bottom (arrow keys
 work), and toggle "Notes" to see which design pattern each decision comes from and why. The

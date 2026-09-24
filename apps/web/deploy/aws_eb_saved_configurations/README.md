@@ -92,8 +92,8 @@ What it reads comes from the committed files beside it rather than from a typed-
 
 | Value             | Recorded                                                                                                                                                                                            |
 | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Role name         | `psilink-origin-drift-check`                                                                                                                                                                        |
-| Trust condition   | `token.actions.githubusercontent.com:sub` equals `repo:georgetown-mdi/jspsi:ref:refs/heads/main` and `:aud` equals `sts.amazonaws.com`, on the account's GitHub OIDC provider                        |
+| Role name         | `alcove-origin-drift-check`                                                                                                                                                                        |
+| Trust condition   | `token.actions.githubusercontent.com:sub` equals `repo:georgetown-mdi/alcove:ref:refs/heads/main` and `:aud` equals `sts.amazonaws.com`, on the account's GitHub OIDC provider                        |
 | Permitted actions | `sts:GetCallerIdentity`; `s3:GetObject` on `arn:aws:s3:::elasticbeanstalk-<region>-<account-id>/cert/public.crt`, the one object the check reads; `ec2:DescribeSecurityGroups`. No write action, and no other read |
 | Role ARN          | The `AWS_ORIGIN_DRIFT_ROLE_ARN` repository secret. It is a secret rather than a variable because an ARN states the account id, which this repository keeps out of its files                          |
 

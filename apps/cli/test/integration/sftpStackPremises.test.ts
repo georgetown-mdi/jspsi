@@ -18,7 +18,7 @@ import {
 } from "../sftpServer";
 import { inProcessOnly } from "../sftpBackendGate";
 
-// Assumptions about the pinned ssh2 / ssh2-sftp-client stack that psilink's own
+// Assumptions about the pinned ssh2 / ssh2-sftp-client stack that Alcove's own
 // code is built on, driven at the layer each is asserted about: the raw
 // ssh2-sftp-client, not the adapter. A bump of either package fails red at the
 // assumption that moved, naming which one, where an adapter-level test would

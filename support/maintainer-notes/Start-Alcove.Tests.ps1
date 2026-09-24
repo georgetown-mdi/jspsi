@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Pester suite over the pure functions in Start-Psilink.ps1 -- the doctor
+    Pester suite over the pure functions in Start-Alcove.ps1 -- the doctor
     verdict reader, the release stamp, the DFS candidate selection, and the
     console's argument vector. Maintainer-facing: it lives outside the guide
     folder, and an operator following the setup page never receives it.
@@ -17,7 +17,7 @@
     folder picker are verified by running it, and by nothing else. The POSIX
     launcher's share of this ground -- the same verdict contract, driven end to
     end against a stub engine -- is covered by
-    scripts/start-psilink-launcher.test.mjs, which runs on Linux CI.
+    scripts/start-alcove-launcher.test.mjs, which runs on Linux CI.
 
     Run it through ci-resolution-tests.ps1 rather than Invoke-Pester directly:
     that script is what reports results as annotations, which is all the CI
@@ -25,14 +25,14 @@
 #>
 
 BeforeAll {
-    $launcherScript = (Resolve-Path (Join-Path $PSScriptRoot '..\windows-network-filedrop\Start-Psilink.ps1')).Path
+    $launcherScript = (Resolve-Path (Join-Path $PSScriptRoot '..\windows-network-filedrop\Start-Alcove.ps1')).Path
     . $launcherScript -LoadFunctionsOnly
 
     # The shape the launcher itself runs in: it reaches the setup script's path
     # resolution, and its rule for naming a folder within a share, through this
     # same dot-source rather than carrying a second copy of either. The two
     # scripts share no function name, so neither redefines the other's.
-    $setupScriptForLauncher = (Resolve-Path (Join-Path $PSScriptRoot '..\windows-network-filedrop\Setup-PsilinkFileDrop.ps1')).Path
+    $setupScriptForLauncher = (Resolve-Path (Join-Path $PSScriptRoot '..\windows-network-filedrop\Setup-AlcoveFileDrop.ps1')).Path
     . $setupScriptForLauncher -LoadFunctionsOnly
 
     # Its own name rather than the setup suite's Start-PowerShellChild: both
@@ -119,7 +119,7 @@ Describe 'The -LoadFunctionsOnly guard' {
             '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$launcherScript`"")
 
         $run.TimedOut | Should -BeFalse
-        $run.Output | Should -Match 'psilink console'
+        $run.Output | Should -Match 'Alcove console'
         # The copy in this repository carries the placeholder, so the flow must
         # stop before it reaches an engine at all.
         $run.Output | Should -Match 'did not come from a release'
@@ -132,25 +132,25 @@ Describe 'The -LoadFunctionsOnly guard' {
 
 Describe 'The release stamp' {
     It 'refuses the placeholder this repository carries' {
-        Test-PsilinkImageStamp | Should -BeFalse
-        Test-PsilinkImageStamp -Digest '@@PSILINK_IMAGE_DIGEST@@' | Should -BeFalse
+        Test-AlcoveImageStamp | Should -BeFalse
+        Test-AlcoveImageStamp -Digest '@@ALCOVE_IMAGE_DIGEST@@' | Should -BeFalse
     }
 
     It 'accepts a real digest' {
-        Test-PsilinkImageStamp -Digest $script:StampedDigest | Should -BeTrue
+        Test-AlcoveImageStamp -Digest $script:StampedDigest | Should -BeTrue
     }
 
     It 'refuses a digest that is the wrong length, algorithm, or case' {
-        Test-PsilinkImageStamp -Digest ('sha256:' + ('ab' * 31)) | Should -BeFalse
-        Test-PsilinkImageStamp -Digest ('sha512:' + ('ab' * 32)) | Should -BeFalse
-        Test-PsilinkImageStamp -Digest ('sha256:' + ('AB' * 32)) | Should -BeFalse
-        Test-PsilinkImageStamp -Digest '' | Should -BeFalse
+        Test-AlcoveImageStamp -Digest ('sha256:' + ('ab' * 31)) | Should -BeFalse
+        Test-AlcoveImageStamp -Digest ('sha512:' + ('ab' * 32)) | Should -BeFalse
+        Test-AlcoveImageStamp -Digest ('sha256:' + ('AB' * 32)) | Should -BeFalse
+        Test-AlcoveImageStamp -Digest '' | Should -BeFalse
     }
 
     It 'names the registry in the reference it builds' {
         # podman requires the registry prefix and docker accepts it, so the
         # reference is fully qualified rather than relying on a default.
-        Get-PsilinkImage | Should -BeLike 'ghcr.io/georgetown-mdi/alcove@*'
+        Get-AlcoveImage | Should -BeLike 'ghcr.io/georgetown-mdi/alcove@*'
     }
 }
 
@@ -450,7 +450,7 @@ Describe 'Get-ScriptParameterName' {
     It 'reads the parameter names out of the script beside this one' {
         # What the launcher protects itself with across the dot-source: the
         # names come from the two param() blocks rather than from a list.
-        $names = Get-ScriptParameterName -Path (Join-Path (Split-Path -Parent $launcherScript) 'Setup-PsilinkFileDrop.ps1')
+        $names = Get-ScriptParameterName -Path (Join-Path (Split-Path -Parent $launcherScript) 'Setup-AlcoveFileDrop.ps1')
 
         $names | Should -Contain 'VolumeName'
         $names | Should -Contain 'Server'
@@ -478,15 +478,15 @@ Describe 'The engine wrappers' {
         # script's suite.
         & cmd /c exit 0
 
-        $quiet = Invoke-EngineQuiet -Engine 'psilink-no-such-engine' -EngineArgs @('version')
-        $captured = Invoke-EngineCapture -Engine 'psilink-no-such-engine' -EngineArgs @('version')
+        $quiet = Invoke-EngineQuiet -Engine 'alcove-no-such-engine' -EngineArgs @('version')
+        $captured = Invoke-EngineCapture -Engine 'alcove-no-such-engine' -EngineArgs @('version')
 
         $quiet.Ran | Should -Be $false
         $quiet.ExitCode | Should -Not -Be 0
-        $quiet.Output | Should -Match 'psilink-no-such-engine'
+        $quiet.Output | Should -Match 'alcove-no-such-engine'
         $captured.Ran | Should -Be $false
         $captured.ExitCode | Should -Not -Be 0
-        $captured.Output | Should -Match 'psilink-no-such-engine'
+        $captured.Output | Should -Match 'alcove-no-such-engine'
     }
 
     It 'reports an empty engine name the same way' {
@@ -498,13 +498,13 @@ Describe 'The engine wrappers' {
     }
 
     It 'skips an engine that is not there rather than choosing it' {
-        Find-ContainerEngine -Candidates @('psilink-no-such-engine') | Should -BeNullOrEmpty
+        Find-ContainerEngine -Candidates @('alcove-no-such-engine') | Should -BeNullOrEmpty
     }
 }
 
 Describe 'The console argument vector' {
     It 'publishes to host loopback and keeps nothing' {
-        $engineArgs = Get-ConsoleEngineArgs -ContainerName 'psilink-console-1' -ConsolePort 3000 `
+        $engineArgs = Get-ConsoleEngineArgs -ContainerName 'alcove-console-1' -ConsolePort 3000 `
             -DataMount 'C:\work'
 
         # The publish binding is the console's whole reachability control: the
@@ -517,7 +517,7 @@ Describe 'The console argument vector' {
     }
 
     It 'leaves the input and rendezvous mounts out of a single-folder console' {
-        $engineArgs = Get-ConsoleEngineArgs -ContainerName 'psilink-console-1' -ConsolePort 3000 `
+        $engineArgs = Get-ConsoleEngineArgs -ContainerName 'alcove-console-1' -ConsolePort 3000 `
             -DataMount 'C:\work'
 
         ($engineArgs -join ' ') | Should -Not -Match 'JOB_INPUT_DIR'
@@ -525,20 +525,20 @@ Describe 'The console argument vector' {
     }
 
     It 'mounts the split folders when they are given' {
-        $engineArgs = Get-ConsoleEngineArgs -ContainerName 'psilink-console-1' -ConsolePort 8080 `
-            -DataMount 'C:\work' -InputMount 'C:\input' -RendezvousMount 'psilink-sync'
+        $engineArgs = Get-ConsoleEngineArgs -ContainerName 'alcove-console-1' -ConsolePort 8080 `
+            -DataMount 'C:\work' -InputMount 'C:\input' -RendezvousMount 'alcove-sync'
 
         $engineArgs | Should -Contain '127.0.0.1:8080:3000'
         $engineArgs | Should -Contain 'JOB_INPUT_DIR=/input'
         $engineArgs | Should -Contain 'C:\input:/input'
         $engineArgs | Should -Contain 'JOB_RENDEZVOUS_DIR=/rendezvous'
         # A named volume mounts by name exactly as a host path does.
-        $engineArgs | Should -Contain 'psilink-sync:/rendezvous'
+        $engineArgs | Should -Contain 'alcove-sync:/rendezvous'
     }
 
     It 'passes the shared folder name beside a rendezvous mount' {
-        $engineArgs = Get-ConsoleEngineArgs -ContainerName 'psilink-console-1' -ConsolePort 3000 `
-            -DataMount 'C:\work' -RendezvousMount 'psilink-sync' -RendezvousName 'agency-a-agency-b'
+        $engineArgs = Get-ConsoleEngineArgs -ContainerName 'alcove-console-1' -ConsolePort 3000 `
+            -DataMount 'C:\work' -RendezvousMount 'alcove-sync' -RendezvousName 'agency-a-agency-b'
 
         $engineArgs | Should -Contain 'JOB_RENDEZVOUS_NAME=agency-a-agency-b'
     }
@@ -546,7 +546,7 @@ Describe 'The console argument vector' {
     It 'passes the shared folder name with no rendezvous mount at all' {
         # A single-folder console rendezvouses out of the data mount, which the
         # container sees as /data: the operator's folder still has a name.
-        $engineArgs = Get-ConsoleEngineArgs -ContainerName 'psilink-console-1' -ConsolePort 3000 `
+        $engineArgs = Get-ConsoleEngineArgs -ContainerName 'alcove-console-1' -ConsolePort 3000 `
             -DataMount 'C:\work' -RendezvousName 'county-exchange'
 
         $engineArgs | Should -Contain 'JOB_RENDEZVOUS_NAME=county-exchange'
@@ -554,7 +554,7 @@ Describe 'The console argument vector' {
     }
 
     It 'passes an empty name when there is none to give' {
-        $engineArgs = Get-ConsoleEngineArgs -ContainerName 'psilink-console-1' -ConsolePort 3000 `
+        $engineArgs = Get-ConsoleEngineArgs -ContainerName 'alcove-console-1' -ConsolePort 3000 `
             -DataMount 'C:\work'
 
         # The variable travels empty rather than being left out: an omitted one
@@ -566,14 +566,14 @@ Describe 'The console argument vector' {
     It 'reaches a pair on one share through one mount and a path for each' {
         # The shape a pair on one share takes: one volume over the folder that
         # holds both, and each folder named as a path within it.
-        $engineArgs = Get-ConsoleEngineArgs -ContainerName 'psilink-console-1' -ConsolePort 3000 `
-            -DataMount 'C:\work' -RendezvousMount 'psilink-sync' `
+        $engineArgs = Get-ConsoleEngineArgs -ContainerName 'alcove-console-1' -ConsolePort 3000 `
+            -DataMount 'C:\work' -RendezvousMount 'alcove-sync' `
             -RendezvousName 'from-clinic' -InboundLeg 'from-clinic' `
             -OutboundLeg 'to-clinic' -OutboundName 'to-clinic'
 
         $engineArgs | Should -Contain 'JOB_RENDEZVOUS_DIR=/rendezvous/from-clinic'
         $engineArgs | Should -Contain 'JOB_RENDEZVOUS_OUTBOUND_DIR=/rendezvous/to-clinic'
-        $engineArgs | Should -Contain 'psilink-sync:/rendezvous'
+        $engineArgs | Should -Contain 'alcove-sync:/rendezvous'
         $engineArgs | Should -Contain 'JOB_RENDEZVOUS_NAME=from-clinic'
         $engineArgs | Should -Contain 'JOB_RENDEZVOUS_OUTBOUND_NAME=to-clinic'
         # One mount, so there is no second one to bind.
@@ -581,15 +581,15 @@ Describe 'The console argument vector' {
     }
 
     It 'reaches a pair that cannot share a mount through two mounts' {
-        $engineArgs = Get-ConsoleEngineArgs -ContainerName 'psilink-console-1' -ConsolePort 3000 `
+        $engineArgs = Get-ConsoleEngineArgs -ContainerName 'alcove-console-1' -ConsolePort 3000 `
             -DataMount 'C:\work' -RendezvousMount 'C:\drops\from-clinic' `
-            -RendezvousName 'from-clinic' -OutboundMount 'psilink-sync-outbound' `
+            -RendezvousName 'from-clinic' -OutboundMount 'alcove-sync-outbound' `
             -OutboundName 'to-clinic'
 
         $engineArgs | Should -Contain 'JOB_RENDEZVOUS_DIR=/rendezvous'
         $engineArgs | Should -Contain 'C:\drops\from-clinic:/rendezvous'
         $engineArgs | Should -Contain 'JOB_RENDEZVOUS_OUTBOUND_DIR=/rendezvous-out'
-        $engineArgs | Should -Contain 'psilink-sync-outbound:/rendezvous-out'
+        $engineArgs | Should -Contain 'alcove-sync-outbound:/rendezvous-out'
         $engineArgs | Should -Contain 'JOB_RENDEZVOUS_OUTBOUND_NAME=to-clinic'
     }
 
@@ -598,8 +598,8 @@ Describe 'The console argument vector' {
         # pair is provisioned, so -- unlike the name -- it never travels empty:
         # an empty one would have the console refuse every shared-folder
         # exchange rather than run the single-folder one this is.
-        $engineArgs = Get-ConsoleEngineArgs -ContainerName 'psilink-console-1' -ConsolePort 3000 `
-            -DataMount 'C:\work' -RendezvousMount 'psilink-sync' -RendezvousName 'from-clinic'
+        $engineArgs = Get-ConsoleEngineArgs -ContainerName 'alcove-console-1' -ConsolePort 3000 `
+            -DataMount 'C:\work' -RendezvousMount 'alcove-sync' -RendezvousName 'from-clinic'
 
         ($engineArgs -join ' ') | Should -Not -Match 'JOB_RENDEZVOUS_OUTBOUND_DIR'
         ($engineArgs -join ' ') | Should -Not -Match 'JOB_RENDEZVOUS_OUTBOUND_NAME'
@@ -609,7 +609,7 @@ Describe 'The console argument vector' {
         # The whole path the launcher takes for a folder it cannot name, driven
         # end to end: the drive root reduces to no name, and that is what reaches
         # the vector.
-        $engineArgs = Get-ConsoleEngineArgs -ContainerName 'psilink-console-1' -ConsolePort 3000 `
+        $engineArgs = Get-ConsoleEngineArgs -ContainerName 'alcove-console-1' -ConsolePort 3000 `
             -DataMount 'D:\' -RendezvousName (Get-RendezvousFolderName -Path 'D:\')
 
         $engineArgs | Should -Contain 'JOB_RENDEZVOUS_NAME='
@@ -705,12 +705,12 @@ Describe 'The credential a pair of folders on one server takes' {
     BeforeEach {
         # What a run starts from, so that no case here reads what another left:
         # the flow drops both once the volumes are made.
-        $script:PsilinkShareCredential = $null
-        $script:PsilinkShareCredentialServer = ''
+        $script:AlcoveShareCredential = $null
+        $script:AlcoveShareCredentialServer = ''
         $script:CredentialAsks = 0
         $script:ReusePrompts = @()
         $script:VolumeUsers = @()
-        $script:PsilinkEngine = 'docker'
+        $script:AlcoveEngine = 'docker'
     }
 
     It 'asks once for two shares of one server' {
@@ -721,7 +721,7 @@ Describe 'The credential a pair of folders on one server takes' {
         # bookkeeping around them is what the cases here are for.
         function Read-ShareCredential {
             $script:CredentialAsks++
-            return @{ Username = 'psilinkci'; Domain = ''; Password = 'hunter2' }
+            return @{ Username = 'alcoveci'; Domain = ''; Password = 'hunter2' }
         }
         # As an empty answer is read: the question the second share asks
         # defaults to the answer already given.
@@ -733,9 +733,9 @@ Describe 'The credential a pair of folders on one server takes' {
         function New-ShareVolume { return $true }
         function Invoke-DoctorLoop { return $true }
 
-        $inbound = New-RendezvousShareMount -VolumeName 'psilinkci-in' -Server 'fs-04' -Share 'exchange' `
+        $inbound = New-RendezvousShareMount -VolumeName 'alcoveci-in' -Server 'fs-04' -Share 'exchange' `
             -Legs @(@{ Label = 'the folder your partner writes into'; Path = 'from-clinic' }) 6>&1
-        $outbound = New-RendezvousShareMount -VolumeName 'psilinkci-out' -Server 'fs-04' -Share 'outbound' `
+        $outbound = New-RendezvousShareMount -VolumeName 'alcoveci-out' -Server 'fs-04' -Share 'outbound' `
             -Legs @(@{ Label = 'the folder you write into'; Path = 'to-clinic' }) 6>&1
         $said = @(@($inbound) + @($outbound) | ForEach-Object { [string] $_ }) -join ' '
 
@@ -745,7 +745,7 @@ Describe 'The credential a pair of folders on one server takes' {
         # operator can tell which one the answer would be used for.
         @($script:ReusePrompts).Count | Should -Be 1 -Because $said
         $script:ReusePrompts[0] | Should -Be 'Use the same credentials for \\fs-04\outbound? [Y/n]' -Because $said
-        $script:PsilinkShareCredentialServer | Should -Be 'fs-04' -Because $said
+        $script:AlcoveShareCredentialServer | Should -Be 'fs-04' -Because $said
     }
 
     It 'asks again when the operator declines reuse' {
@@ -754,7 +754,7 @@ Describe 'The credential a pair of folders on one server takes' {
         # volume is made from is the one just typed.
         function Read-ShareCredential {
             $script:CredentialAsks++
-            return @{ Username = ('psilinkci' + $script:CredentialAsks); Domain = ''; Password = 'hunter2' }
+            return @{ Username = ('alcoveci' + $script:CredentialAsks); Domain = ''; Password = 'hunter2' }
         }
         function Read-YesNo {
             param([string] $Prompt, [switch] $DefaultYes)
@@ -768,24 +768,24 @@ Describe 'The credential a pair of folders on one server takes' {
         }
         function Invoke-DoctorLoop { return $true }
 
-        $inbound = New-RendezvousShareMount -VolumeName 'psilinkci-in' -Server 'fs-04' -Share 'exchange' `
+        $inbound = New-RendezvousShareMount -VolumeName 'alcoveci-in' -Server 'fs-04' -Share 'exchange' `
             -Legs @(@{ Label = 'the folder your partner writes into'; Path = 'from-clinic' }) 6>&1
-        $outbound = New-RendezvousShareMount -VolumeName 'psilinkci-out' -Server 'fs-04' -Share 'outbound' `
+        $outbound = New-RendezvousShareMount -VolumeName 'alcoveci-out' -Server 'fs-04' -Share 'outbound' `
             -Legs @(@{ Label = 'the folder you write into'; Path = 'to-clinic' }) 6>&1
         $said = @(@($inbound) + @($outbound) | ForEach-Object { [string] $_ }) -join ' '
 
         $script:CredentialAsks | Should -Be 2 -Because $said
         @([regex]::Matches($said, 'Credentials for the file server')).Count | Should -Be 2 -Because $said
         @($script:ReusePrompts).Count | Should -Be 1 -Because $said
-        (@($script:VolumeUsers) -join ' ') | Should -Be 'psilinkci1 psilinkci2' -Because $said
-        $script:PsilinkShareCredential.Username | Should -Be 'psilinkci2' -Because $said
-        $script:PsilinkShareCredentialServer | Should -Be 'fs-04' -Because $said
+        (@($script:VolumeUsers) -join ' ') | Should -Be 'alcoveci1 alcoveci2' -Because $said
+        $script:AlcoveShareCredential.Username | Should -Be 'alcoveci2' -Because $said
+        $script:AlcoveShareCredentialServer | Should -Be 'fs-04' -Because $said
     }
 
     It 'asks for each of two servers' {
         function Read-ShareCredential {
             $script:CredentialAsks++
-            return @{ Username = 'psilinkci'; Domain = ''; Password = 'hunter2' }
+            return @{ Username = 'alcoveci'; Domain = ''; Password = 'hunter2' }
         }
         # Defined here as well as asserted below: a branch that reached it
         # would otherwise read the console, which this session has none of.
@@ -797,15 +797,15 @@ Describe 'The credential a pair of folders on one server takes' {
         function New-ShareVolume { return $true }
         function Invoke-DoctorLoop { return $true }
 
-        $inbound = New-RendezvousShareMount -VolumeName 'psilinkci-in' -Server 'fs-04' -Share 'exchange' `
+        $inbound = New-RendezvousShareMount -VolumeName 'alcoveci-in' -Server 'fs-04' -Share 'exchange' `
             -Legs @(@{ Label = 'the folder your partner writes into'; Path = 'from-clinic' }) 6>&1
-        $outbound = New-RendezvousShareMount -VolumeName 'psilinkci-out' -Server 'fs-09' -Share 'exchange' `
+        $outbound = New-RendezvousShareMount -VolumeName 'alcoveci-out' -Server 'fs-09' -Share 'exchange' `
             -Legs @(@{ Label = 'the folder you write into'; Path = 'to-clinic' }) 6>&1
         $said = @(@($inbound) + @($outbound) | ForEach-Object { [string] $_ }) -join ' '
 
         $script:CredentialAsks | Should -Be 2 -Because $said
         @($script:ReusePrompts).Count | Should -Be 0 -Because $said
-        $script:PsilinkShareCredentialServer | Should -Be 'fs-09' -Because $said
+        $script:AlcoveShareCredentialServer | Should -Be 'fs-09' -Because $said
     }
 
     It 'drops both halves of the answer' {
@@ -813,20 +813,20 @@ Describe 'The credential a pair of folders on one server takes' {
         # before each exit within it -- runs in a child process whose script
         # scope no case here can read, so what is held here is that the drop
         # clears both the credential and the server it was given for.
-        $script:PsilinkShareCredential = @{ Username = 'psilinkci'; Domain = ''; Password = 'hunter2' }
-        $script:PsilinkShareCredentialServer = 'fs-04'
+        $script:AlcoveShareCredential = @{ Username = 'alcoveci'; Domain = ''; Password = 'hunter2' }
+        $script:AlcoveShareCredentialServer = 'fs-04'
 
         Clear-ShareCredential
 
-        $script:PsilinkShareCredential | Should -BeNullOrEmpty
-        $script:PsilinkShareCredentialServer | Should -BeNullOrEmpty
+        $script:AlcoveShareCredential | Should -BeNullOrEmpty
+        $script:AlcoveShareCredentialServer | Should -BeNullOrEmpty
     }
 
     AfterAll {
         # Left as the session found it: no engine, and no answer held for one.
-        $script:PsilinkEngine = ''
-        $script:PsilinkShareCredential = $null
-        $script:PsilinkShareCredentialServer = ''
+        $script:AlcoveEngine = ''
+        $script:AlcoveShareCredential = $null
+        $script:AlcoveShareCredentialServer = ''
     }
 }
 
@@ -892,12 +892,12 @@ Describe 'The pair of folders an exchange over two folders needs' {
 
     It 'refuses two folders of the same name' {
         # The partner is given a name per folder and has to tell the two apart.
-        $verdict = Test-RendezvousPair -InboundPath '\\fileserver\in\psilink' `
-            -OutboundPath '\\fileserver\out\psilink' `
-            -InboundName 'psilink' -OutboundName 'psilink'
+        $verdict = Test-RendezvousPair -InboundPath '\\fileserver\in\alcove' `
+            -OutboundPath '\\fileserver\out\alcove' `
+            -InboundName 'alcove' -OutboundName 'alcove'
 
         $verdict.Usable | Should -BeFalse
-        $verdict.Reason | Should -Match 'psilink'
+        $verdict.Reason | Should -Match 'alcove'
     }
 
     It 'keeps a folder on this PC apart from one on a share' {
@@ -997,20 +997,20 @@ Describe 'A folder as the correction from the DFS tab leaves it' {
 
 Describe 'The volumes a run made, named on the way out' {
     It 'names every volume and the command that removes them' {
-        $records = Show-VolumeRemoval -VolumeNames @('psilink-sync', 'psilink-sync-outbound') 6>&1
+        $records = Show-VolumeRemoval -VolumeNames @('alcove-sync', 'alcove-sync-outbound') 6>&1
         $text = @($records | ForEach-Object { [string] $_ }) -join ' '
 
         $text | Should -Match 'cleartext in each volume''s'
-        $text | Should -Match 'volume inspect psilink-sync psilink-sync-outbound'
-        $text | Should -Match 'volume rm psilink-sync psilink-sync-outbound'
+        $text | Should -Match 'volume inspect alcove-sync alcove-sync-outbound'
+        $text | Should -Match 'volume rm alcove-sync alcove-sync-outbound'
     }
 
     It 'reads one volume in the singular' {
-        $records = Show-VolumeRemoval -VolumeNames @('psilink-sync') 6>&1
+        $records = Show-VolumeRemoval -VolumeNames @('alcove-sync') 6>&1
         $text = @($records | ForEach-Object { [string] $_ }) -join ' '
 
         $text | Should -Match 'cleartext in the volume''s'
-        $text | Should -Match 'volume rm psilink-sync'
+        $text | Should -Match 'volume rm alcove-sync'
     }
 
     It 'prints nothing for a run that made none' {
@@ -1085,7 +1085,7 @@ Describe 'The name the launcher gives a folder on this PC' {
 
 Describe 'The launcher flow, driven against a stub engine' {
     BeforeAll {
-        $script:FlowRoot = Join-Path $env:TEMP ('psilink-launcher-flow-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+        $script:FlowRoot = Join-Path $env:TEMP ('alcove-launcher-flow-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
         $script:FlowBin = Join-Path $script:FlowRoot 'bin'
         $script:FlowStub = Join-Path $script:FlowRoot 'stub'
         $script:FlowData = Join-Path $script:FlowRoot 'data'
@@ -1129,22 +1129,22 @@ Describe 'The launcher flow, driven against a stub engine' {
             if (-not $engineDir) { $engineDir = $script:FlowBin }
 
             $originalPath = $env:PATH
-            $originalStubDir = $env:PSILINK_STUB_DIR
+            $originalStubDir = $env:ALCOVE_STUB_DIR
             try {
                 $env:PATH = @($engineDir,
                     (Join-Path $env:SystemRoot 'System32'),
                     $env:SystemRoot,
                     (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0')) -join ';'
-                $env:PSILINK_STUB_DIR = $StubDir
+                $env:ALCOVE_STUB_DIR = $StubDir
                 $run = Start-LauncherChild -Arguments (@(
                         '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$Launcher`"") + $Arguments) `
                     -InputLines $InputLines -TimeoutSeconds $TimeoutSeconds
             } finally {
                 $env:PATH = $originalPath
                 if ($null -eq $originalStubDir) {
-                    Remove-Item 'env:PSILINK_STUB_DIR' -ErrorAction SilentlyContinue
+                    Remove-Item 'env:ALCOVE_STUB_DIR' -ErrorAction SilentlyContinue
                 } else {
-                    $env:PSILINK_STUB_DIR = $originalStubDir
+                    $env:ALCOVE_STUB_DIR = $originalStubDir
                 }
             }
 
@@ -1185,7 +1185,7 @@ Describe 'The launcher flow, driven against a stub engine' {
         # it reads back are properties of that.
         Set-Content -LiteralPath (Join-Path $script:FlowBin 'docker.cmd') -Encoding Ascii -Value @(
             '@echo off',
-            'echo %* >> "%PSILINK_STUB_DIR%\calls.log"',
+            'echo %* >> "%ALCOVE_STUB_DIR%\calls.log"',
             'echo %* | findstr /c:"doctor" >nul',
             'if not errorlevel 1 echo {"version":1,"mode":"mount","overall":"ok","checks":[]}',
             'exit /b 0')
@@ -1196,7 +1196,7 @@ Describe 'The launcher flow, driven against a stub engine' {
         # retry, so the run stops where it is rather than prompting.
         Set-Content -LiteralPath (Join-Path $script:MountFailBin 'docker.cmd') -Encoding Ascii -Value @(
             '@echo off',
-            'echo %* >> "%PSILINK_STUB_DIR%\calls.log"',
+            'echo %* >> "%ALCOVE_STUB_DIR%\calls.log"',
             'echo %* | findstr /c:"doctor mount" >nul',
             'if not errorlevel 1 goto :mount',
             'echo %* | findstr /c:"doctor" >nul',
@@ -1210,10 +1210,10 @@ Describe 'The launcher flow, driven against a stub engine' {
         # a digest. The setup script travels with it: the launcher requires one
         # beside itself, and the dot-source of it is what this drives.
         $source = Get-Content -Raw -LiteralPath $launcherScript
-        $placeholderLine = "`$PsilinkImageDigest = '@@PSILINK_IMAGE_DIGEST@@'"
-        $stamped = $source.Replace($placeholderLine, "`$PsilinkImageDigest = '$script:StampedDigest'")
+        $placeholderLine = "`$AlcoveImageDigest = '@@ALCOVE_IMAGE_DIGEST@@'"
+        $stamped = $source.Replace($placeholderLine, "`$AlcoveImageDigest = '$script:StampedDigest'")
         if ($stamped -eq $source) { throw 'the launcher no longer carries the digest line this suite stamps' }
-        $script:FlowLauncher = Join-Path $script:FlowRoot 'Start-Psilink.ps1'
+        $script:FlowLauncher = Join-Path $script:FlowRoot 'Start-Alcove.ps1'
         [IO.File]::WriteAllText($script:FlowLauncher, $stamped)
 
         # A second copy with nothing beside it, and a stub log of its own so
@@ -1228,7 +1228,7 @@ Describe 'The launcher flow, driven against a stub engine' {
             New-Item -ItemType Directory -Path $directory -Force | Out-Null
         }
         $script:AloneCalls = Join-Path $script:AloneStub 'calls.log'
-        $script:AloneLauncher = Join-Path $script:AloneRoot 'Start-Psilink.ps1'
+        $script:AloneLauncher = Join-Path $script:AloneRoot 'Start-Alcove.ps1'
         [IO.File]::WriteAllText($script:AloneLauncher, $stamped)
 
         # The credential prompt is the one part of the flow that cannot be
@@ -1237,17 +1237,17 @@ Describe 'The launcher flow, driven against a stub engine' {
         # answers it from a definition of its own and is otherwise the script
         # itself -- the param() block whose collision this drives is the real
         # one, and so are the resolution and volume sequences.
-        $setupScript = Join-Path (Split-Path -Parent $launcherScript) 'Setup-PsilinkFileDrop.ps1'
+        $setupScript = Join-Path (Split-Path -Parent $launcherScript) 'Setup-AlcoveFileDrop.ps1'
         $setupSource = Get-Content -Raw -LiteralPath $setupScript
         $guardLine = "if (`$LoadFunctionsOnly) { return }"
         $answeredCredential = @(
             'function Read-ShareCredential {',
-            "    return @{ Username = 'psilinkci'; Domain = ''; Password = 'hunter2' }",
+            "    return @{ Username = 'alcoveci'; Domain = ''; Password = 'hunter2' }",
             '}',
             '') -join [Environment]::NewLine
         $patched = $setupSource.Replace($guardLine, $answeredCredential + $guardLine)
         if ($patched -eq $setupSource) { throw 'the setup script no longer carries the guard line this suite patches' }
-        [IO.File]::WriteAllText((Join-Path $script:FlowRoot 'Setup-PsilinkFileDrop.ps1'), $patched)
+        [IO.File]::WriteAllText((Join-Path $script:FlowRoot 'Setup-AlcoveFileDrop.ps1'), $patched)
 
         # Something has to answer on the console's port for the flow to reach
         # its end: the stub engine exits rather than holding one open.
@@ -1273,10 +1273,10 @@ Describe 'The launcher flow, driven against a stub engine' {
 
         $run = Start-LauncherChild -Arguments @(
             '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$probe`"") `
-            -InputLines @('psilinkci') -TimeoutSeconds 60
+            -InputLines @('alcoveci') -TimeoutSeconds 60
 
         $run.TimedOut | Should -BeFalse
-        ([string] $run.Output) | Should -Match 'READ:psilinkci'
+        ([string] $run.Output) | Should -Match 'READ:alcoveci'
     }
 
     It 'cannot read a password prompt from a redirected standard input' {
@@ -1305,10 +1305,10 @@ Describe 'The launcher flow, driven against a stub engine' {
         # credential and volume sequences, and that runs the setup script's own
         # param() block in the launcher's scope. What the operator typed here
         # has to survive it.
-        $volumeName = 'psilinkci-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+        $volumeName = 'alcoveci-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
 
         $originalPath = $env:PATH
-        $originalStubDir = $env:PSILINK_STUB_DIR
+        $originalStubDir = $env:ALCOVE_STUB_DIR
         try {
             # The stub first and nothing else that could answer behind it: a
             # runner with a real engine installed must not be reached by this.
@@ -1316,11 +1316,11 @@ Describe 'The launcher flow, driven against a stub engine' {
                 (Join-Path $env:SystemRoot 'System32'),
                 $env:SystemRoot,
                 (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0')) -join ';'
-            $env:PSILINK_STUB_DIR = $script:FlowStub
+            $env:ALCOVE_STUB_DIR = $script:FlowStub
             $run = Start-LauncherChild -Arguments @(
                 '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$script:FlowLauncher`"",
                 '-DataRoot', "`"$script:FlowData`"",
-                '-RendezvousDir', '\\psilink-ci-server\exchange\drop',
+                '-RendezvousDir', '\\alcove-ci-server\exchange\drop',
                 '-VolumeName', $volumeName,
                 '-Port', $script:FlowPort,
                 '-NoBrowser') `
@@ -1328,9 +1328,9 @@ Describe 'The launcher flow, driven against a stub engine' {
         } finally {
             $env:PATH = $originalPath
             if ($null -eq $originalStubDir) {
-                Remove-Item 'env:PSILINK_STUB_DIR' -ErrorAction SilentlyContinue
+                Remove-Item 'env:ALCOVE_STUB_DIR' -ErrorAction SilentlyContinue
             } else {
-                $env:PSILINK_STUB_DIR = $originalStubDir
+                $env:ALCOVE_STUB_DIR = $originalStubDir
             }
         }
 
@@ -1358,20 +1358,20 @@ Describe 'The launcher flow, driven against a stub engine' {
 
         # The setup script's default for the same parameter name, which its
         # param() block puts in place of what the operator typed.
-        $calls | Should -Not -BeLike '*psilink-sync*' -Because $shape
-        $output | Should -Not -BeLike '*psilink-sync*' -Because $shape
+        $calls | Should -Not -BeLike '*alcove-sync*' -Because $shape
+        $output | Should -Not -BeLike '*alcove-sync*' -Because $shape
     }
 
     It 'reaches a pair on one share through one volume over the folder above them' {
         # The whole of the network pair, driven end to end: one volume for the
         # folder that holds both, a folder named for each leg within it, and
         # each leg checked through the volume it will be reached by.
-        $volumeName = 'psilinkci-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+        $volumeName = 'alcoveci-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
         $run = Invoke-LauncherFlow -Launcher $script:FlowLauncher -StubDir $script:SplitStub `
             -Arguments @(
                 '-DataRoot', "`"$script:FlowData`"",
-                '-RendezvousDir', '\\psilink-ci-server\exchange\clinic-study\from-clinic',
-                '-RendezvousOutboundDir', '\\psilink-ci-server\exchange\clinic-study\to-clinic',
+                '-RendezvousDir', '\\alcove-ci-server\exchange\clinic-study\from-clinic',
+                '-RendezvousOutboundDir', '\\alcove-ci-server\exchange\clinic-study\to-clinic',
                 '-VolumeName', $volumeName,
                 '-Port', $script:FlowPort,
                 '-NoBrowser') `
@@ -1392,7 +1392,7 @@ Describe 'The launcher flow, driven against a stub engine' {
         # One volume, over the folder that holds both rather than over either.
         @($calls -split '\r?\n' | Where-Object { $_ -like '*volume create*' }).Count |
             Should -Be 1 -Because $shape
-        $created | Should -BeLike '*device=//psilink-ci-server/exchange/clinic-study*' -Because $shape
+        $created | Should -BeLike '*device=//alcove-ci-server/exchange/clinic-study*' -Because $shape
         $created | Should -BeLike "*$volumeName*" -Because $shape
 
         # Each folder asked about over the share, then checked again through the
@@ -1451,7 +1451,7 @@ Describe 'The launcher flow, driven against a stub engine' {
         $run = Invoke-LauncherFlow -Launcher $script:FlowLauncher -StubDir $script:RefusalStub `
             -Arguments @(
                 '-DataRoot', "`"$script:FlowData`"",
-                '-RendezvousOutboundDir', '\\psilink-ci-server\exchange\to-clinic',
+                '-RendezvousOutboundDir', '\\alcove-ci-server\exchange\to-clinic',
                 '-Port', $script:FlowPort,
                 '-NoBrowser') `
             -TimeoutSeconds 60
@@ -1493,13 +1493,13 @@ Describe 'The launcher flow, driven against a stub engine' {
         # look for by the invitation the console mints, and a run that passed no
         # name would leave them nothing to match.
         $originalPath = $env:PATH
-        $originalStubDir = $env:PSILINK_STUB_DIR
+        $originalStubDir = $env:ALCOVE_STUB_DIR
         try {
             $env:PATH = @($script:FlowBin,
                 (Join-Path $env:SystemRoot 'System32'),
                 $env:SystemRoot,
                 (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0')) -join ';'
-            $env:PSILINK_STUB_DIR = $script:AloneStub
+            $env:ALCOVE_STUB_DIR = $script:AloneStub
             $run = Start-LauncherChild -Arguments @(
                 '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$script:AloneLauncher`"",
                 '-DataRoot', "`"$script:AloneData`"",
@@ -1509,9 +1509,9 @@ Describe 'The launcher flow, driven against a stub engine' {
         } finally {
             $env:PATH = $originalPath
             if ($null -eq $originalStubDir) {
-                Remove-Item 'env:PSILINK_STUB_DIR' -ErrorAction SilentlyContinue
+                Remove-Item 'env:ALCOVE_STUB_DIR' -ErrorAction SilentlyContinue
             } else {
-                $env:PSILINK_STUB_DIR = $originalStubDir
+                $env:ALCOVE_STUB_DIR = $originalStubDir
             }
         }
 
@@ -1526,7 +1526,7 @@ Describe 'The launcher flow, driven against a stub engine' {
         $run.TimedOut | Should -BeFalse -Because $shape
         # The branch this case is here to drive: without it the run resolved
         # paths after all, and the name it passed came from the other rule.
-        $output | Should -BeLike '*Setup-PsilinkFileDrop.ps1 is not in this folder*' -Because $shape
+        $output | Should -BeLike '*Setup-AlcoveFileDrop.ps1 is not in this folder*' -Because $shape
         $output | Should -Match 'The console is at' -Because $shape
 
         $served = @(Get-ConsoleCalls -Calls $calls) -join ' :: '
@@ -1561,12 +1561,12 @@ Describe 'The launcher flow, driven against a stub engine' {
         # before the second is confirmed. A run that stops at the second has
         # left a volume holding the share password, so what the closing screen
         # would have said is said on the way out instead.
-        $volumeName = 'psilinkci-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+        $volumeName = 'alcoveci-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
         $run = Invoke-LauncherFlow -Launcher $script:FlowLauncher -StubDir $script:TwoVolumeStub `
             -Arguments @(
                 '-DataRoot', "`"$script:FlowData`"",
-                '-RendezvousDir', '\\psilink-ci-fs\exchange\from-clinic',
-                '-RendezvousOutboundDir', '\\psilink-ci-fs\outbound\to-clinic',
+                '-RendezvousDir', '\\alcove-ci-fs\exchange\from-clinic',
+                '-RendezvousOutboundDir', '\\alcove-ci-fs\outbound\to-clinic',
                 '-VolumeName', $volumeName,
                 '-Port', $script:FlowPort,
                 '-NoBrowser') `
@@ -1595,13 +1595,13 @@ Describe 'The launcher flow, driven against a stub engine' {
         # failure there leaves one behind holding the share password. Nothing
         # here removes it, so the run names it on the way out rather than
         # leaving the operator a volume they were never told about.
-        $volumeName = 'psilinkci-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+        $volumeName = 'alcoveci-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
         $run = Invoke-LauncherFlow -Launcher $script:FlowLauncher -StubDir $script:MountFailStub `
             -BinDir $script:MountFailBin `
             -Arguments @(
                 '-DataRoot', "`"$script:FlowData`"",
-                '-RendezvousDir', '\\psilink-ci-server\exchange\clinic-study\from-clinic',
-                '-RendezvousOutboundDir', '\\psilink-ci-server\exchange\clinic-study\to-clinic',
+                '-RendezvousDir', '\\alcove-ci-server\exchange\clinic-study\from-clinic',
+                '-RendezvousOutboundDir', '\\alcove-ci-server\exchange\clinic-study\to-clinic',
                 '-VolumeName', $volumeName,
                 '-Port', $script:FlowPort,
                 '-NoBrowser') `

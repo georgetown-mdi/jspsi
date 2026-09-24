@@ -27,7 +27,7 @@ import {
 // is exploitable through the broker.
 //
 // Two halves, because either alone can be satisfied while the reach is wide. The
-// first holds the broker's own source to `@psilink/core/untrusted-text`; it
+// first holds the broker's own source to `@alcove/core/untrusted-text`; it
 // scans every file under packages/peerjs-broker/src, including the vendored ones
 // the repo-wide eslint ignores leave unlinted, so a root import added there
 // fails here rather than passing unnoticed. The second measures what that
@@ -46,13 +46,13 @@ const coreDir = join(repoRoot, "packages/core");
 const coreDist = join(coreDir, "dist");
 
 /** The core entry point this workspace reads, and the rebuild that produces it. */
-const CORE_SUBPATH = "@psilink/core/untrusted-text";
+const CORE_SUBPATH = "@alcove/core/untrusted-text";
 const CORE_BUILD_COMMAND = "npm run build -w packages/core";
 
 /**
  * Every package the broker's own source may name at run time. `ws` is the
  * WebSocket server it is built on; the core subpath holds the display,
- * redaction and bounded-parse chokepoints it shares with the rest of psilink
+ * redaction and bounded-parse chokepoints it shares with the rest of Alcove
  * (CONTRIBUTING.md, Untrusted-JSON parsing and Operator-facing escaping). A
  * `node:` builtin is neither installed nor advisory-bearing, so it is out of
  * scope rather than listed.
@@ -254,13 +254,13 @@ describe("the broker's own source", { timeout: 60_000 }, () => {
     expect(offenders).toEqual([]);
   });
 
-  it("never names the @psilink/core package root", () => {
+  it("never names the @alcove/core package root", () => {
     // Held apart from the set above because a type-only root import passes that
     // one -- it erases -- while still being the import a later edit turns into a
     // value import without touching this workspace's dependency list.
     const offenders = files.flatMap((path) =>
       specifiersOf(path)
-        .filter(({ text }) => text === "@psilink/core")
+        .filter(({ text }) => text === "@alcove/core")
         .map(() => path),
     );
     expect(offenders).toEqual([]);
@@ -268,7 +268,7 @@ describe("the broker's own source", { timeout: 60_000 }, () => {
 
   it("is refused by eslint when it imports the package root", async () => {
     const [result] = await eslint.lintText(
-      'import { getLogger } from "@psilink/core";\nexport const log = getLogger("x");\n',
+      'import { getLogger } from "@alcove/core";\nexport const log = getLogger("x");\n',
       { filePath: join(brokerSrc, "reachFixture.ts") },
     );
     const messages = result.messages.filter(
@@ -322,7 +322,7 @@ describe("what the scan reads of a workspace tree", () => {
   });
 });
 
-describe("the built @psilink/core/untrusted-text closure", () => {
+describe("the built @alcove/core/untrusted-text closure", () => {
   const coreDependencies = Object.keys(
     JSON.parse(readFileSync(join(coreDir, "package.json"), "utf8"))
       .dependencies,

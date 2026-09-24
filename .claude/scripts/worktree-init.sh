@@ -24,7 +24,7 @@
 # onto origin/staging. A tree that does hold work is reported and provisioned where
 # it stands, never moved -- a branch that fell behind while staging moved is the
 # ordinary state of one, so a refusal there would fire on correct branches daily and
-# teach agents to skip the script. Set PSILINK_WORKTREE_BASE_REF to work from
+# teach agents to skip the script. Set ALCOVE_WORKTREE_BASE_REF to work from
 # another base. The check binds only a tree that runs this script.
 #
 # Continuing across the re-point. `git reset --hard` replaces this file, and bash
@@ -34,7 +34,7 @@
 # the reset succeeds the run re-execs the base revision's own copy of this
 # script -- only shell builtins run in between, and bash has the whole function
 # body in memory, so no byte of the file is read between the two -- and
-# PSILINK_WORKTREE_INIT_REPOINTED tells the second pass to skip reconciliation.
+# ALCOVE_WORKTREE_INIT_REPOINTED tells the second pass to skip reconciliation.
 # Provisioning is then performed entirely by the revision the tree holds, so a
 # fix landed on the base ref binds the run that adopts it.
 #
@@ -49,7 +49,7 @@
 # elsewhere.
 #
 # The mirroring trick: external deps are shared from the primary by absolute
-# symlink, but a workspace package's own RELATIVE symlink (e.g. @psilink/core ->
+# symlink, but a workspace package's own RELATIVE symlink (e.g. @alcove/core ->
 # ../../packages/core) is copied verbatim, so it resolves to the worktree's own
 # packages/core -- the worktree builds and tests its own core while sharing every
 # external dep. npm does not hoist everything (apps/web keeps its own @mantine), so
@@ -77,7 +77,7 @@ SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]
 DRIFT_CHECK="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/check-node-modules-drift.mjs"
 WORKTREE="$(git rev-parse --show-toplevel)"
 PRIMARY="$(cd "$(dirname "$(git rev-parse --git-common-dir)")" && pwd)"
-BASE_REF="${PSILINK_WORKTREE_BASE_REF:-origin/staging}"
+BASE_REF="${ALCOVE_WORKTREE_BASE_REF:-origin/staging}"
 
 if [ "$WORKTREE" = "$PRIMARY" ]; then
   echo "worktree-init: this IS the primary tree ($PRIMARY); nothing to provision."
@@ -101,7 +101,7 @@ reconcile_base() {
     echo "worktree-init: 'git fetch origin' failed; reading the $BASE_REF this clone already has, which may be behind origin's." >&2
   fi
   if ! base="$(git_here rev-parse --verify --quiet "${BASE_REF}^{commit}")"; then
-    echo "worktree-init: $BASE_REF names no commit in this clone. Fetch it, or set PSILINK_WORKTREE_BASE_REF to a ref this clone has." >&2
+    echo "worktree-init: $BASE_REF names no commit in this clone. Fetch it, or set ALCOVE_WORKTREE_BASE_REF to a ref this clone has." >&2
     exit 1
   fi
 
@@ -120,7 +120,7 @@ reconcile_base() {
   if ! tree_holds_work "$base"; then
     short="$(git_here rev-parse --short "$base")"
     echo "worktree-init: this tree sits at $(git_here rev-parse --short HEAD), $behind commit(s) behind $BASE_REF -- the harness cuts a worktree from the default branch, and this repo branches from staging."
-    echo "worktree-init: it holds no commits or edits of its own, so re-pointing $ref onto $BASE_REF. Set PSILINK_WORKTREE_BASE_REF (e.g. to HEAD) to keep another base."
+    echo "worktree-init: it holds no commits or edits of its own, so re-pointing $ref onto $BASE_REF. Set ALCOVE_WORKTREE_BASE_REF (e.g. to HEAD) to keep another base."
     # Only builtins may stand between the reset and the exec: running an
     # external command sends bash back to a file the reset has replaced.
     git_here reset --hard --quiet "$base"
@@ -129,7 +129,7 @@ reconcile_base() {
       exit 1
     fi
     echo "worktree-init: $ref is at $short; handing the rest of the run to that revision's own copy of this script."
-    PSILINK_WORKTREE_INIT_REPOINTED=1 exec bash "$SELF" "$@"
+    ALCOVE_WORKTREE_INIT_REPOINTED=1 exec bash "$SELF" "$@"
   fi
 
   {
@@ -140,7 +140,7 @@ reconcile_base() {
     echo "  git stash --include-untracked   # only if the listing above shows uncommitted files"
     echo "  git rebase --onto $BASE_REF $(git_here rev-parse --short "$(git_here merge-base HEAD "$base")")"
     echo "  git stash pop"
-    echo "worktree-init: a base that is deliberate rather than stale is named by PSILINK_WORKTREE_BASE_REF, which silences this."
+    echo "worktree-init: a base that is deliberate rather than stale is named by ALCOVE_WORKTREE_BASE_REF, which silences this."
   } >&2
 }
 
@@ -206,7 +206,7 @@ install_from_lockfile() {
   echo "worktree-init: npm ci done; these deps are this branch's lockfile, not $PRIMARY's install."
 }
 
-if [ -n "${PSILINK_WORKTREE_INIT_REPOINTED:-}" ]; then
+if [ -n "${ALCOVE_WORKTREE_INIT_REPOINTED:-}" ]; then
   echo "worktree-init: this run is $BASE_REF's own copy of the script, taking over after the re-point; not reconciling again."
 else
   reconcile_base "$@"
@@ -234,6 +234,6 @@ elif [ "$check_status" -ne 0 ]; then
   install_from_lockfile
 fi
 
-echo "worktree-init: building @psilink/core ..."
+echo "worktree-init: building @alcove/core ..."
 npm run build -w packages/core >/dev/null
-echo "worktree-init: done. @psilink/core resolves to $WORKTREE/packages/core."
+echo "worktree-init: done. @alcove/core resolves to $WORKTREE/packages/core."

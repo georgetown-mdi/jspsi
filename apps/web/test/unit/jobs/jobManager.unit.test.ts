@@ -14,7 +14,7 @@ import {
   parseSensitiveYaml,
   renderedDisplayCost,
   snakeizeKeys,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { ERROR_MESSAGE_CHAIN_FIELD } from "@psi/relayErrorChain";
 
@@ -945,10 +945,7 @@ describe("sftp server resolution", () => {
     const record = manager.getJob(id)!;
     await waitForTerminal(record);
     expect(record.status).toBe("succeeded");
-    const configYaml = fs.readFileSync(
-      `${record.workdir}/psilink.yaml`,
-      "utf8",
-    );
+    const configYaml = fs.readFileSync(`${record.workdir}/alcove.yaml`, "utf8");
     const server = composedServer(configYaml);
     expect(configYaml).toContain("channel: sftp");
     expect(server.host).toBe("sftp.example.org");
@@ -1035,10 +1032,7 @@ describe("the in-app authored sftp connection", () => {
     const record = manager.getJob(id)!;
     await waitForTerminal(record);
     expect(record.status).toBe("succeeded");
-    const configYaml = fs.readFileSync(
-      `${record.workdir}/psilink.yaml`,
-      "utf8",
-    );
+    const configYaml = fs.readFileSync(`${record.workdir}/alcove.yaml`, "utf8");
     const server = composedServer(configYaml);
     expect(configYaml).toContain("channel: sftp");
     expect(server.host).toBe("authored.partner.example");
@@ -1078,7 +1072,7 @@ describe("the in-app authored sftp connection", () => {
     await waitForTerminal(record);
     expect(record.status).toBe("succeeded");
     const server = composedServer(
-      fs.readFileSync(`${record.workdir}/psilink.yaml`, "utf8"),
+      fs.readFileSync(`${record.workdir}/alcove.yaml`, "utf8"),
     );
     expect(server.inbound_path).toBe("/exchange/in");
     expect(server.outbound_path).toBe("/exchange/out");
@@ -1278,10 +1272,7 @@ describe("the in-app authored sftp connection", () => {
     const record = manager.getJob(id)!;
     await waitForTerminal(record);
     expect(record.status).toBe("succeeded");
-    const configYaml = fs.readFileSync(
-      `${record.workdir}/psilink.yaml`,
-      "utf8",
-    );
+    const configYaml = fs.readFileSync(`${record.workdir}/alcove.yaml`, "utf8");
     // The composed config holds the @path reference, never the pasted value.
     const server = composedServer(configYaml);
     expect(configYaml).toContain("channel: sftp");
@@ -1340,10 +1331,7 @@ describe("sftp job driven by a mounted work input", () => {
     expect(fs.existsSync(path.join(record.workdir, "input.csv"))).toBe(false);
     await waitForTerminal(record);
     expect(record.status).toBe("succeeded");
-    const configYaml = fs.readFileSync(
-      `${record.workdir}/psilink.yaml`,
-      "utf8",
-    );
+    const configYaml = fs.readFileSync(`${record.workdir}/alcove.yaml`, "utf8");
     expect(configYaml).toContain("channel: sftp");
   });
 });
@@ -1356,10 +1344,7 @@ describe("filedrop rendezvous facilitation", () => {
     const manager = makeManager({ jobRendezvousDir: rvz });
     const id = await manager.createJob(validIntent());
     const record = manager.getJob(id)!;
-    const configYaml = fs.readFileSync(
-      `${record.workdir}/psilink.yaml`,
-      "utf8",
-    );
+    const configYaml = fs.readFileSync(`${record.workdir}/alcove.yaml`, "utf8");
     expect(configYaml).toContain("channel: filedrop");
     expect(configYaml).toContain(`path: ${rvz}`);
   });
@@ -1477,7 +1462,7 @@ describe("a split-provisioned filedrop console", () => {
     );
     const record = manager.getJob(id)!;
     const connection = composedConnection(
-      fs.readFileSync(`${record.workdir}/psilink.yaml`, "utf8"),
+      fs.readFileSync(`${record.workdir}/alcove.yaml`, "utf8"),
     );
     expect(connection.channel).toBe("filedrop");
     expect(connection.inbound_path).toBe(inbound);
@@ -1613,12 +1598,8 @@ describe("zero-setup mode end-to-end via the stub CLI", () => {
     expect(record.status).toBe("succeeded");
     // The zero-setup workdir holds only input (inline), output, and the record
     // pair -- never a composed config document or a key file.
-    expect(fs.existsSync(path.join(record.workdir, "psilink.yaml"))).toBe(
-      false,
-    );
-    expect(fs.existsSync(path.join(record.workdir, ".psilink.key"))).toBe(
-      false,
-    );
+    expect(fs.existsSync(path.join(record.workdir, "alcove.yaml"))).toBe(false);
+    expect(fs.existsSync(path.join(record.workdir, ".alcove.key"))).toBe(false);
     expect(fs.existsSync(path.join(record.workdir, "input.csv"))).toBe(true);
   });
 
@@ -1632,12 +1613,8 @@ describe("zero-setup mode end-to-end via the stub CLI", () => {
     const record = manager.getJob(id)!;
     await waitForTerminal(record);
     expect(record.status).toBe("succeeded");
-    expect(fs.existsSync(path.join(record.workdir, "psilink.yaml"))).toBe(
-      false,
-    );
-    expect(fs.existsSync(path.join(record.workdir, ".psilink.key"))).toBe(
-      false,
-    );
+    expect(fs.existsSync(path.join(record.workdir, "alcove.yaml"))).toBe(false);
+    expect(fs.existsSync(path.join(record.workdir, ".alcove.key"))).toBe(false);
   });
 
   test("routes to spawnZeroSetupJob with the connection argv and selectors", async () => {
@@ -2423,7 +2400,7 @@ describe("a filedrop run that would publish the signing identity", () => {
 });
 
 // The hand-off's merge base is the configuration the operator opened, as the
-// open read it. A `psilink.yaml` in the mount that nobody opened is not read at
+// open read it. An `alcove.yaml` in the mount that nobody opened is not read at
 // all, so an exchange authored in the console exports only what it composed.
 describe("the mounted configuration as the hand-off's merge base", () => {
   /** A manager whose mounted working folder holds a command-line configuration
@@ -2437,7 +2414,7 @@ describe("the mounted configuration as the hand-off's merge base", () => {
     roots.push(root);
     fs.mkdirSync(root, { recursive: true });
     fs.writeFileSync(
-      path.join(root, "psilink.yaml"),
+      path.join(root, "alcove.yaml"),
       stringifyYaml(
         snakeizeKeys({
           connection: { channel: "filedrop", path: "/srv/exchange" },
@@ -2447,7 +2424,7 @@ describe("the mounted configuration as the hand-off's merge base", () => {
       ),
     );
     fs.writeFileSync(
-      path.join(root, ".psilink.key"),
+      path.join(root, ".alcove.key"),
       JSON.stringify({ sharedSecret: MOUNTED_SHARED_SECRET }),
       { mode: 0o600 },
     );
@@ -2510,7 +2487,7 @@ describe("the mounted configuration as the hand-off's merge base", () => {
   test("a file changed after the open is reported, and the opened one exported", async () => {
     const { manager, root } = managerOverMountedConfiguration();
     manager.openMountedConfiguration();
-    const configPath = path.join(root, "psilink.yaml");
+    const configPath = path.join(root, "alcove.yaml");
     fs.writeFileSync(
       configPath,
       fs
@@ -2528,14 +2505,14 @@ describe("the mounted configuration as the hand-off's merge base", () => {
       .filter((event) => event.source === "relayOpenedConfigurationChanged");
     expect(warnings).toHaveLength(1);
     expect(String(warnings[0].message)).toContain(
-      "The psilink.yaml in your working folder changed after you opened it.",
+      "The alcove.yaml in your working folder changed after you opened it.",
     );
   });
 
   test("an open landing while the run writes its documents leaves the run's merge base alone", async () => {
     const { manager, root } = managerOverMountedConfiguration();
     manager.openMountedConfiguration();
-    const configPath = path.join(root, "psilink.yaml");
+    const configPath = path.join(root, "alcove.yaml");
     const actual = await vi.importActual<typeof workdirModule>("@jobs/workdir");
     vi.mocked(writeJobFile).mockImplementationOnce(async (...args) => {
       fs.writeFileSync(
@@ -2585,7 +2562,7 @@ describe("the mounted configuration as the hand-off's merge base", () => {
 });
 
 describe("an opened configuration's own signing paths", () => {
-  const OPERATOR_IDENTITY = "/home/operator/.psilink/identity.json";
+  const OPERATOR_IDENTITY = "/home/operator/.alcove/identity.json";
   const OPERATOR_RECEIPT = "/home/operator/receipts/latest.json";
   const OPERATOR_FOLDER = "/srv/exchange";
 
@@ -2598,7 +2575,7 @@ describe("an opened configuration's own signing paths", () => {
     roots.push(root);
     fs.mkdirSync(root, { recursive: true });
     fs.writeFileSync(
-      path.join(root, "psilink.yaml"),
+      path.join(root, "alcove.yaml"),
       stringifyYaml(
         snakeizeKeys({
           connection: { channel: "filedrop", path: OPERATOR_FOLDER },
@@ -2612,7 +2589,7 @@ describe("an opened configuration's own signing paths", () => {
       ),
     );
     fs.writeFileSync(
-      path.join(root, ".psilink.key"),
+      path.join(root, ".alcove.key"),
       JSON.stringify({ sharedSecret: MOUNTED_SHARED_SECRET }),
       { mode: 0o600 },
     );
@@ -2702,7 +2679,7 @@ describe("the key file beside the opened configuration", () => {
     roots.push(root);
     fs.mkdirSync(root, { recursive: true });
     fs.writeFileSync(
-      path.join(root, "psilink.yaml"),
+      path.join(root, "alcove.yaml"),
       stringifyYaml(
         snakeizeKeys({
           connection: { channel: "filedrop", path: "/srv/exchange" },
@@ -2711,7 +2688,7 @@ describe("the key file beside the opened configuration", () => {
       ),
     );
     if (keyFile !== undefined)
-      fs.writeFileSync(path.join(root, ".psilink.key"), keyFile, {
+      fs.writeFileSync(path.join(root, ".alcove.key"), keyFile, {
         mode: 0o600,
       });
     return root;
@@ -2744,13 +2721,11 @@ describe("the key file beside the opened configuration", () => {
     manager.openMountedConfiguration();
     const id = await manager.createJob(openedIntent());
     expect(spawned).toHaveLength(1);
-    expect(spawned[0].keyPath).toBe(path.join(root, ".psilink.key"));
+    expect(spawned[0].keyPath).toBe(path.join(root, ".alcove.key"));
     const record = manager.getJob(id)!;
-    expect(fs.existsSync(path.join(record.workdir, ".psilink.key"))).toBe(
-      false,
-    );
+    expect(fs.existsSync(path.join(record.workdir, ".alcove.key"))).toBe(false);
     expect(
-      JSON.parse(fs.readFileSync(path.join(root, ".psilink.key"), "utf8")),
+      JSON.parse(fs.readFileSync(path.join(root, ".alcove.key"), "utf8")),
     ).toEqual({ sharedSecret: MOUNTED_SHARED_SECRET });
     expect(manager.getJobHandoff(id)?.keyFileBesideConfiguration).toBe(true);
   });
@@ -2765,7 +2740,7 @@ describe("the key file beside the opened configuration", () => {
     const { manager, spawned } = capturingManager(root);
     manager.openMountedConfiguration();
     await manager.createJob({ ...openedIntent(), tokenMaxAgeDays: 30 });
-    expect(spawned[0].keyPath).toBe(path.join(root, ".psilink.key"));
+    expect(spawned[0].keyPath).toBe(path.join(root, ".alcove.key"));
     const composed = parseExchangeSpec(
       parseSensitiveYaml(
         fs.readFileSync(spawned[0].configPath, "utf8"),
@@ -2787,7 +2762,7 @@ describe("the key file beside the opened configuration", () => {
     );
     const { manager, spawned } = capturingManager(root);
     await manager.createJob(openedIntent());
-    expect(spawned[0].keyPath).toBe(path.join(root, ".psilink.key"));
+    expect(spawned[0].keyPath).toBe(path.join(root, ".alcove.key"));
   });
 
   test("an exchange authored here still mints its own key file", async () => {
@@ -2798,7 +2773,7 @@ describe("the key file beside the opened configuration", () => {
     manager.openMountedConfiguration();
     const id = await manager.createJob(validIntent());
     const record = manager.getJob(id)!;
-    const workdirKey = path.join(record.workdir, ".psilink.key");
+    const workdirKey = path.join(record.workdir, ".alcove.key");
     expect(spawned[0].keyPath).toBe(workdirKey);
     expect(JSON.parse(fs.readFileSync(workdirKey, "utf8"))).toEqual({
       sharedSecret: VALID_SHARED_SECRET,
@@ -2834,25 +2809,25 @@ describe("the key file beside the opened configuration", () => {
       expect(
         fs
           .readdirSync(root)
-          .filter((name) => name !== "psilink.yaml" && name !== ".psilink.key"),
+          .filter((name) => name !== "alcove.yaml" && name !== ".alcove.key"),
       ).toEqual([]);
     },
   );
 
   test("a key file that is a directory is refused as invalid", async () => {
     const root = mountWith(undefined);
-    fs.mkdirSync(path.join(root, ".psilink.key"));
+    fs.mkdirSync(path.join(root, ".alcove.key"));
     const { manager } = capturingManager(root);
     await expect(manager.createJob(openedIntent())).rejects.toMatchObject({
       fault: "invalid",
     });
   });
 
-  test("a FIFO named .psilink.key is refused as invalid, without blocking", async () => {
+  test("a FIFO named .alcove.key is refused as invalid, without blocking", async () => {
     let mkfifoAvailable = true;
     const root = mountWith(undefined);
     try {
-      execFileSync("mkfifo", [path.join(root, ".psilink.key")]);
+      execFileSync("mkfifo", [path.join(root, ".alcove.key")]);
     } catch {
       mkfifoAvailable = false;
     }
@@ -2869,13 +2844,13 @@ describe("the key file beside the opened configuration", () => {
     expect(spawned).toHaveLength(0);
   });
 
-  test("a .psilink.key symlink to /dev/zero is refused as invalid, without blocking", async () => {
+  test("a .alcove.key symlink to /dev/zero is refused as invalid, without blocking", async () => {
     if (!fs.existsSync("/dev/zero")) {
       console.warn("skipping /dev/zero test: /dev/zero is not available");
       return;
     }
     const root = mountWith(undefined);
-    fs.symlinkSync("/dev/zero", path.join(root, ".psilink.key"));
+    fs.symlinkSync("/dev/zero", path.join(root, ".alcove.key"));
     const { manager, spawned } = capturingManager(root);
     const started = Date.now();
     await expect(manager.createJob(openedIntent())).rejects.toMatchObject({
@@ -2918,7 +2893,7 @@ describe("the key file beside the opened configuration", () => {
     });
     managers.push(manager);
     const opened = manager.openMountedConfiguration();
-    fs.appendFileSync(path.join(root, "psilink.yaml"), "# edited\n");
+    fs.appendFileSync(path.join(root, "alcove.yaml"), "# edited\n");
     const id = await manager.createJob(openedIntent());
     const record = manager.getJob(id)!;
     await waitForTerminal(record);

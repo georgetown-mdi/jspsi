@@ -4,7 +4,7 @@ import {
   disclosedColumnNames,
   getDefaultLinkageTerms,
   inferMetadata,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   CONFIG_EXCHANGE_FILES,
@@ -61,7 +61,7 @@ import { jobCreateIntentSchema } from "@jobs/intentSchemas";
 
 import { testSftpServerEntry } from "../../utils/jobFixtures";
 
-import type { ColumnMetadata, LinkageTerms, Metadata } from "@psilink/core";
+import type { ColumnMetadata, LinkageTerms, Metadata } from "@alcove/core";
 import type {
   JobInputSource,
   ServerJobExchangeTransport,
@@ -82,7 +82,7 @@ import type { ProfiledJobInput } from "@psi/jobClient/workInputClient";
 const FINGERPRINT = "SHA256:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBA";
 const PARTNER_FINGERPRINT = "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCA";
 
-/** A `psilink invite --save` sftp document: a host and pin, both cards' tuning,
+/** An `alcove invite --save` sftp document: a host and pin, both cards' tuning,
  * a non-default delimiter, own columns, a signed receipt and a retention note. */
 function sftpDocument(
   overrides: Partial<DisclosedExchangeDocument> = {},
@@ -431,7 +431,7 @@ describe("a load that does not proceed changes no step", () => {
 
   test("a refusal reaches the control in the route's own words", () => {
     const error =
-      "The psilink.yaml in your working folder is not a psilink exchange " +
+      "The alcove.yaml in your working folder is not an Alcove exchange " +
       "configuration. Check the file, then open it again.";
     const state = inviterScreenReducer(INVITER_SCREEN_INITIAL, {
       type: "mounted-configuration-read",

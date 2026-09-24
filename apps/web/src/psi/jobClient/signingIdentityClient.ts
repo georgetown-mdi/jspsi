@@ -1,4 +1,4 @@
-import { FINGERPRINT_REGEX, MAX_TEXT_LENGTH } from "@psilink/core";
+import { FINGERPRINT_REGEX, MAX_TEXT_LENGTH } from "@alcove/core";
 
 import {
   MAX_JOB_STATUS_RESPONSE_BYTES,
@@ -45,7 +45,7 @@ import type { JobSigningIdentityLocation } from "@jobs/intentSchemas";
  *   it. The console reads a picked location and never creates there, apart
  *   from a file removed between the check and the read (closed by a
  *   read-only mount), so this is an answer rather than a failure: the remedy
- *   is to create the identity with `psilink fingerprint` at that path, or to
+ *   is to create the identity with `alcove fingerprint` at that path, or to
  *   pick the file that holds one.
  * - `invalid`: a `400` -- the label was malformed; `message` is the server's
  *   field-path-only reason, safe to show.

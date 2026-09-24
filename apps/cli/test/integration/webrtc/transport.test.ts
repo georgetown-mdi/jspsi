@@ -5,7 +5,7 @@ import dns from "node:dns";
 import { RTCPeerConnection } from "werift";
 import { afterAll, afterEach, beforeAll, expect, test, vi } from "vitest";
 
-import { ConnectionError, generateSharedSecret } from "@psilink/core";
+import { ConnectionError, generateSharedSecret } from "@alcove/core";
 
 import { openWebRtcMessageConnection } from "../../../src/connection/webrtc/webrtcMessageConnection";
 import {
@@ -26,7 +26,7 @@ import { startBrokerProcess } from "../../signaling/brokerProcess";
 import type { BrokerLocation } from "../../../src/connection/webrtc/brokerClient";
 import type { RTCIceServer } from "werift";
 import type { BrokerProcess } from "../../signaling/brokerProcess";
-import type { MessageConnection } from "@psilink/core";
+import type { MessageConnection } from "@alcove/core";
 
 /**
  * The CLI WebRTC transport end to end: two real werift peers, real ICE, real
@@ -217,7 +217,7 @@ test("a configured iceServers list is the list the peer connection is built with
     { urls: ["stun:127.0.0.1:3478", "stun:127.0.0.1:3479"] },
     {
       urls: "turn:127.0.0.1:3480",
-      username: "psilink",
+      username: "alcove",
       credential: "not-a-real-credential",
     },
   ];

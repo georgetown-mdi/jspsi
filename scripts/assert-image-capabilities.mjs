@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Does a psilink image answer what the shipped file-drop support scripts ask of
+// Does an Alcove image answer what the shipped file-drop support scripts ask of
 // it? Run by image_smoke.yaml against the image that job just built, and on its
 // weekly schedule against the published tag the setup script really pulls.
 //
@@ -10,9 +10,9 @@
 // of being quietly left out.
 //
 // Every dependency is exercised, never matched against help text or a
-// Dockerfile: a psilink argument vector is handed to a container and its verdict
+// Dockerfile: an Alcove argument vector is handed to a container and its verdict
 // read back, and a helper script is piped into a shell in the image exactly as
-// cmd_Setup-PsilinkFileDrop.cmd pipes it, so the in-image tools it needs are
+// cmd_Setup-AlcoveFileDrop.cmd pipes it, so the in-image tools it needs are
 // resolved by the run rather than enumerated anywhere.
 //
 // Two fixture shapes decide whether a red result is about the image at all, and
@@ -23,7 +23,7 @@
 //     checks then fail their write with EACCES -- a verdict about the fixture.
 //     The bind mount below is world-writable, so the account the image runs as
 //     can write it whichever image is under test.
-//   - A TCP peer on port 445. `doctor probe` and cmd_psilink-probe.sh both stop
+//   - A TCP peer on port 445. `doctor probe` and cmd_alcove-probe.sh both stop
 //     at their reachability check when nothing answers, leaving smbclient
 //     unreached and unproven. A stub container accepts and immediately drops
 //     each connection, which is enough for both to run smbclient and report on
@@ -53,7 +53,7 @@ import {
 const RENDEZVOUS = "/rz";
 
 /** The marker filename the shipped launchers use for the cross-check. */
-const MARKER_NAME = "psilink-setup-check.tmp";
+const MARKER_NAME = "alcove-setup-check.tmp";
 
 /**
  * Values for the environment names the `.cmd` call sites pass through.
@@ -65,11 +65,11 @@ const MARKER_NAME = "psilink-setup-check.tmp";
  * own caller instead of anything about the image.
  */
 export const FIXTURE_ENVIRONMENT = {
-  SMB_SHARE: "psilink-gate",
+  SMB_SHARE: "alcove-gate",
   SMB_PATH: "",
-  SMB_USER: "psilink-gate",
+  SMB_USER: "alcove-gate",
   SMB_DOMAIN: "",
-  SMB_PASS: "psilink-gate-fixture-credential",
+  SMB_PASS: "alcove-gate-fixture-credential",
   SMB_DIALECT: "",
   SMB_MARKER: MARKER_NAME,
   MARKER: MARKER_NAME,
@@ -79,7 +79,7 @@ export const FIXTURE_ENVIRONMENT = {
 export const GENERATED_ENVIRONMENT = ["SMB_SERVER", "SMB_TOKEN", "TOKEN"];
 
 /**
- * How each derived psilink argument vector is exercised, by recipe key.
+ * How each derived Alcove argument vector is exercised, by recipe key.
  *
  * A key is the vector's first two tokens, so `doctor mount /rz` and
  * `doctor mount /rz --json` are one recipe run twice, once per derived vector.
@@ -100,16 +100,16 @@ export const CLI_RECIPES = {
  * which must not appear.
  */
 export const HELPER_EXPECTATIONS = {
-  "cmd_psilink-credcheck.sh": {
+  "cmd_alcove-credcheck.sh": {
     reaches: ["VERDICT=", "TOKEN="],
     refuses: [],
     pattern: /^TOKEN=[0-9a-f]{32}$/m,
   },
-  "cmd_psilink-probe.sh": {
+  "cmd_alcove-probe.sh": {
     reaches: ["-- 1.", "-- 2.", "-- 3. Authentication"],
     refuses: ["smbclient is not in the image"],
   },
-  "cmd_psilink-volcheck.sh": {
+  "cmd_alcove-volcheck.sh": {
     reaches: ["WRITE_OK", "EXCL_OK", "RENAME_OK"],
     refuses: ["NOMOUNT", "Permission denied"],
   },
@@ -457,9 +457,9 @@ function reportResolvedImage(image, docker) {
  */
 async function exerciseAll(image, derived) {
   const suffix = randomBytes(4).toString("hex");
-  const network = `psilink-image-gate-${suffix}`;
-  const stub = `psilink-smb-stub-${suffix}`;
-  const rendezvous = mkdtempSync(join(tmpdir(), "psilink-image-gate-"));
+  const network = `alcove-image-gate-${suffix}`;
+  const stub = `alcove-smb-stub-${suffix}`;
+  const rendezvous = mkdtempSync(join(tmpdir(), "alcove-image-gate-"));
   chmodSync(rendezvous, 0o777);
   const token = randomBytes(16).toString("hex");
   // Held in this process's environment and named on the command line, the
@@ -562,7 +562,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     process.exit(1);
   }
   console.log(
-    `${derived.cli.length} psilink argument vectors and ${derived.helpers.length} helper scripts are derived from ${SUPPORT_DIR}, and each has a recipe.`,
+    `${derived.cli.length} Alcove argument vectors and ${derived.helpers.length} helper scripts are derived from ${SUPPORT_DIR}, and each has a recipe.`,
   );
 
   if (target !== "--coverage") {

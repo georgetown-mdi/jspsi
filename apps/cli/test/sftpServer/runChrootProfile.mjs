@@ -9,7 +9,7 @@
 // The capability check is duplicated here (kept trivially in sync with
 // chrootCapability() in nativeSshdServer.ts) so the skip happens before vitest
 // and the native backend are ever loaded; the backend keeps its own check as a
-// fallback for a direct PSILINK_SFTP_NATIVE_PROFILE=chroot invocation.
+// fallback for a direct ALCOVE_SFTP_NATIVE_PROFILE=chroot invocation.
 import { spawn } from "node:child_process";
 
 function chrootCapability() {
@@ -33,10 +33,10 @@ const cap = chrootCapability();
 if (!cap.ok) {
   // A clean skip (exit 0) is right for local/dev where chroot cannot run -- but
   // in CI this leg is the ONLY coverage of the chroot path, so a silent skip
-  // there would go green having tested nothing. PSILINK_SFTP_CHROOT_REQUIRED=1
+  // there would go green having tested nothing. ALCOVE_SFTP_CHROOT_REQUIRED=1
   // (set by the CI leg) turns the skip into a loud failure, so a broken sudo
   // elevation or a runner change cannot mask the chroot tests never running.
-  const required = process.env.PSILINK_SFTP_CHROOT_REQUIRED === "1";
+  const required = process.env.ALCOVE_SFTP_CHROOT_REQUIRED === "1";
   const verb = required ? "FAIL" : "SKIP";
   console[required ? "error" : "log"](
     `[sftp-test-server] ${verb} native chroot profile: ${cap.reason}. ` +
@@ -51,8 +51,8 @@ const child = spawn("npm", ["run", "test:integration"], {
   stdio: "inherit",
   env: {
     ...process.env,
-    PSILINK_SFTP_BACKEND: "native",
-    PSILINK_SFTP_NATIVE_PROFILE: "chroot",
+    ALCOVE_SFTP_BACKEND: "native",
+    ALCOVE_SFTP_NATIVE_PROFILE: "chroot",
   },
 });
 child.on("exit", (code, signal) => {

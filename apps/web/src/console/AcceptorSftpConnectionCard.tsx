@@ -2,7 +2,7 @@ import { useState } from "react";
 
 import { Badge, Button, Group, Stack, Text } from "@mantine/core";
 
-import { sanitizeForDisplay } from "@psilink/core";
+import { sanitizeForDisplay } from "@alcove/core";
 
 import styles from "@styles/app.module.css";
 
@@ -75,7 +75,7 @@ export function AcceptorSftpConnectionCard({
           </Text>
         </Group>
         <Text size="sm" c="dimmed">
-          The connection is not verified until the exchange runs -- psilink
+          The connection is not verified until the exchange runs -- Alcove
           checks the server against the fingerprint you gave and signs in then.
           Credentials stay on this machine.
         </Text>

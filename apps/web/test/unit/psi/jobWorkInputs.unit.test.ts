@@ -10,8 +10,8 @@ import {
   columnValues,
   inferDateFormat,
   loadCSVFile,
-} from "@psilink/core";
-import { CSV_LINE_BYTE_CEILING } from "@psilink/core/testing";
+} from "@alcove/core";
+import { CSV_LINE_BYTE_CEILING } from "@alcove/core/testing";
 
 import {
   JobInputCoverageAbortedError,
@@ -28,12 +28,12 @@ import {
 import { PREVIEW_SAMPLE_SIZE, sampleInputValues } from "@psi/columnSamples";
 import { computeFieldCoverage } from "@psi/workers/nonEmptyAggregate";
 
-import type { Standardization } from "@psilink/core";
+import type { Standardization } from "@alcove/core";
 
 const dirs: Array<string> = [];
 
 function tempDir(label: string): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `psilink-${label}-`));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `alcove-${label}-`));
   dirs.push(dir);
   return dir;
 }
@@ -109,7 +109,7 @@ describe("listJobInputs", () => {
     writeFixture(dir, "b.csv");
     writeFixture(dir, "a.csv");
     fs.mkdirSync(path.join(dir, "nested"));
-    fs.writeFileSync(path.join(dir, ".psilink.key"), "secret");
+    fs.writeFileSync(path.join(dir, ".alcove.key"), "secret");
     const listing = listJobInputs(dir);
     expect(listing.configured).toBe(true);
     expect(listing.files.map((file) => file.name)).toEqual(["a.csv", "b.csv"]);
@@ -122,9 +122,9 @@ describe("listJobInputs", () => {
   test("reports the unreadable state for a directory that cannot be read", () => {
     // A configured-but-unreadable mount is distinct from an empty one: readable is
     // false, so the operator is told to check the mount rather than to place a file.
-    expect(
-      listJobInputs(path.join(os.tmpdir(), "psilink-missing-xyz")),
-    ).toEqual({ configured: true, readable: false, files: [] });
+    expect(listJobInputs(path.join(os.tmpdir(), "alcove-missing-xyz"))).toEqual(
+      { configured: true, readable: false, files: [] },
+    );
   });
 
   test("reports readable for an empty but present directory", () => {
@@ -404,7 +404,7 @@ describe("isAdmissibleInputName", () => {
     expect(isAdmissibleInputName("input.csv")).toBe(true);
     expect(isAdmissibleInputName("..")).toBe(false);
     expect(isAdmissibleInputName("a/b")).toBe(false);
-    expect(isAdmissibleInputName(".psilink.key")).toBe(false);
+    expect(isAdmissibleInputName(".alcove.key")).toBe(false);
     expect(isAdmissibleInputName("bad name")).toBe(true);
   });
 });

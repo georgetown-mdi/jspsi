@@ -77,7 +77,7 @@ describe("the CLI entry, driven against a fixture tree", () => {
    * export -- no nitropack import, so the fixture resolves with no dependency
    * on this repository's node_modules. */
   function fixtureTree(configBody) {
-    const root = mkdtempSync(join(tmpdir(), "psilink-nitro-websocket-unset-"));
+    const root = mkdtempSync(join(tmpdir(), "alcove-nitro-websocket-unset-"));
     roots.push(root);
     const serverDirectory = join(root, "apps", "web");
     mkdirSync(serverDirectory, { recursive: true });

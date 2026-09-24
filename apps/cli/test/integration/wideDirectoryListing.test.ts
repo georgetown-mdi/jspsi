@@ -6,8 +6,8 @@ import {
   DirectoryListingBoundsError,
   TransportOperationStalledError,
   sanitizeErrorForDisplay,
-} from "@psilink/core";
-import { withCapturedLogs } from "@psilink/core/testing";
+} from "@alcove/core";
+import { withCapturedLogs } from "@alcove/core/testing";
 
 import {
   MAX_DIRECTORY_ENTRIES,

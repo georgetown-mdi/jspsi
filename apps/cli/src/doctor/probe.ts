@@ -66,7 +66,7 @@ const PROBE_CHECK_NAMES: Record<(typeof PROBE_CHECK_IDS)[number], string> = {
   write: "creating a file",
   rename: "renaming a file",
   delete: "deleting a file",
-  marker: "leaving the cross-check file for `psilink doctor mount`",
+  marker: "leaving the cross-check file for `alcove doctor mount`",
 };
 
 /** The external effects the probe performs, injectable for unit tests. */
@@ -167,7 +167,7 @@ function entryCountCheck(summary: string, entries: number): DoctorCheckRecord {
   return warn(
     "subdirectory",
     summary,
-    `psilink will not read a rendezvous folder holding more than ` +
+    `Alcove will not read a rendezvous folder holding more than ` +
       `${MAX_DIRECTORY_ENTRIES} entries, so an exchange here will ` +
       "fail however the permissions come out.",
     "use a folder dedicated to the exchange.",
@@ -389,7 +389,7 @@ function shareOpenCheck(
     default:
       if (input.subdirectory !== "")
         // The ordinary shape of an agency grant is rights to your own folder
-        // and nothing above it. Listing the share root is not something psilink
+        // and nothing above it. Listing the share root is not something Alcove
         // needs, so a refusal here decides nothing.
         return ok("share_open", "the share root would not list.", {
           meaning:
@@ -542,10 +542,10 @@ export async function runProbe(
       fail(
         "smbclient_available",
         "smbclient is not in the image these checks are running in.",
-        "this copy of the psilink image predates the checks. Nothing has been " +
+        "this copy of the Alcove image predates the checks. Nothing has been " +
           "established about the credentials, the share, the folder, or write " +
           "access; the name and reachability checks above stand.",
-        "pull a current psilink image and run this again.",
+        "pull a current Alcove image and run this again.",
         { blocksRun: true },
       ),
     );
@@ -559,7 +559,7 @@ export async function runProbe(
   // the macOS extended-ACL strip on both the file and its mkdtemp directory --
   // is specified in docs/spec/CREDENTIAL_STORAGE.md, "macOS extended-ACL strip".
   // A refused strip or write takes the whole run with it.
-  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-doctor-"));
+  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-doctor-"));
   const authFile = path.join(workDir, "auth");
   const lines = [
     `username=${input.username}`,
@@ -731,7 +731,7 @@ export async function runProbe(
     // The marker file is not swept, by design. It is the one file another
     // operator may be relying on right now, and deleting it turns their mount
     // check into a "wrong folder" verdict that blames their server.
-    const stale = await smb("del psilink-probe-*.tmp*");
+    const stale = await smb("del alcove-probe-*.tmp*");
     const sweptStale = stale.code === 0 && statusOf(stale.output) === undefined;
 
     // Named from the caller's per-run token, or a random value when it supplied
@@ -741,9 +741,9 @@ export async function runProbe(
     // one who lost the race would be told the share is create-only.
     const suffix =
       input.token === "" ? randomBytes(6).toString("hex") : input.token;
-    const probeName = `psilink-probe-${suffix}.tmp`;
+    const probeName = `alcove-probe-${suffix}.tmp`;
     const renamedName = `${probeName}.renamed`;
-    fs.writeFileSync(path.join(workDir, probeName), "psilink write probe\n");
+    fs.writeFileSync(path.join(workDir, probeName), "Alcove write probe\n");
 
     litter.add(probeName);
     const put = await smb(`put ${probeName} ${probeName}`);
@@ -788,7 +788,7 @@ export async function runProbe(
         fail(
           "rename",
           `${renameStatus} -- created a file but could not rename it.`,
-          "creating files is allowed here and renaming them is not. psilink " +
+          "creating files is allowed here and renaming them is not. Alcove " +
             "renames every message into place, so this stops an exchange even " +
             "though the folder looks writable.",
           "ask for full change rights on this folder rather than create-only. " +
@@ -813,7 +813,7 @@ export async function runProbe(
         fail(
           "delete",
           `${deleteStatus} -- created and renamed a file but could not delete it.`,
-          "psilink removes each message once the other side has read it. " +
+          "Alcove removes each message once the other side has read it. " +
             "Without delete rights the folder fills up and a second exchange in " +
             "it will not start.",
           "ask for delete rights on this folder. If they cannot be granted, the " +
@@ -853,7 +853,7 @@ export async function runProbe(
         : skipped("marker", "could not leave the marker file.", {
             meaning:
               "the check was attempted and could not be completed: a later " +
-              "`psilink doctor mount` cannot confirm the mounted folder is " +
+              "`alcove doctor mount` cannot confirm the mounted folder is " +
               "this one.",
           }),
     );

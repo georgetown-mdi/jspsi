@@ -24,14 +24,14 @@ questions still appear on screen, because PowerShell writes them to the window
 rather than into the log, so you answer them exactly as usual:
 
 ```powershell
-cd "$env:USERPROFILE\psilink"
-powershell -ExecutionPolicy Bypass -File .\Setup-PsilinkFileDrop.ps1 6>&1 |
-  Tee-Object .\psilink-setup-log.txt
+cd "$env:USERPROFILE\alcove"
+powershell -ExecutionPolicy Bypass -File .\Setup-AlcoveFileDrop.ps1 6>&1 |
+  Tee-Object .\alcove-setup-log.txt
 ```
 
 The `6>&1` is not decoration: without it the file comes out empty, because the
 script writes its report to a stream a plain redirect does not carry. The log
-lands next to the script, in `C:\Users\<you>\psilink`. It holds the server,
+lands next to the script, in `C:\Users\<you>\alcove`. It holds the server,
 share and account names and what each check said. It does not hold your
 password.
 
@@ -41,7 +41,7 @@ leaving you typing at a blank screen with nothing to say what is being asked.
 Copy out of the window instead.
 
 Both scripts run in four numbered parts. What runs inside part 3 differs. The
-PowerShell script runs the checks that ship inside the psilink image, which name
+PowerShell script runs the checks that ship inside the Alcove image, which name
 what they looked at rather than numbering it: every line begins `OK:`, `WARN:`,
 `FAIL:` or `SKIP:`, and a `FAIL:` carries its own MEANING and ACTION. The
 Command Prompt script carries its own copy of those checks, numbered steps 1 to
@@ -56,8 +56,8 @@ same options as the PowerShell one, and accepts them in either form -- `-Server`
 or `/Server`. Run either script with `-?` for the list.
 
 Commands below that name the script assume your window is in the folder you
-downloaded it to: `cd "$env:USERPROFILE\psilink"` in PowerShell,
-`cd /d "%USERPROFILE%\psilink"` in the Command Prompt.
+downloaded it to: `cd "$env:USERPROFILE\alcove"` in PowerShell,
+`cd /d "%USERPROFILE%\alcove"` in the Command Prompt.
 
 ## The script will not run
 
@@ -116,12 +116,12 @@ second:
 
 ```powershell
 Resolve-DnsName fileserver
-.\Setup-PsilinkFileDrop.ps1 -Server fileserver.agency.gov -Share exchange -SubPath dropbox
+.\Setup-AlcoveFileDrop.ps1 -Server fileserver.agency.gov -Share exchange -SubPath dropbox
 ```
 
 ```text
 nslookup fileserver
-cmd_Setup-PsilinkFileDrop.cmd -Server fileserver.agency.gov -Share exchange -SubPath dropbox
+cmd_Setup-AlcoveFileDrop.cmd -Server fileserver.agency.gov -Share exchange -SubPath dropbox
 ```
 
 An IP address works too, and is the right answer when there is no DNS entry at
@@ -212,9 +212,9 @@ and they mean different things:
 
 - **Could not create a file.** The account has read but not write access.
 - **Created a file but could not rename it.** Create rights without the delete
-  right, which a rename needs. psilink renames every message into place, so
+  right, which a rename needs. Alcove renames every message into place, so
   this stops an exchange even though the folder looks writable.
-- **Created and renamed but could not delete.** psilink removes each message
+- **Created and renamed but could not delete.** Alcove removes each message
   once the other side has read it. Without delete rights the folder fills up
   and a second exchange will not start.
 
@@ -224,7 +224,7 @@ of the [IT request](#what-to-ask-your-it-department-for).
 When the volume is what refused, the operation is not named, and there are three
 things it can be:
 
-- **The volume was created without `uid=1000,gid=1000`.** psilink runs in the
+- **The volume was created without `uid=1000,gid=1000`.** Alcove runs in the
   container as an account numbered 1000, and a Windows file server serves no
   ownership the mount can read, so a volume made without those options presents
   the share as belonging to someone else and refuses every write. Re-run the
@@ -244,7 +244,7 @@ first cause: they decide which account the mount is presented to, which is a
 question the server does not answer. Neither does `-Dialect` fix any of this: if
 the share was reached, the dialect is not what is refusing you.
 
-**On macOS and Linux there is no volume.** `start-psilink.sh` mounts each folder
+**On macOS and Linux there is no volume.** `start-alcove.sh` mounts each folder
 as your machine already sees it and runs the container as your own account, so a
 refused write there is about what that account reaches. Two things to check, in
 this order:
@@ -291,11 +291,11 @@ file-sharing protocol, and the volume is the fussier of the two. Run it again,
 naming a version:
 
 ```powershell
-.\Setup-PsilinkFileDrop.ps1 -Dialect SMB3
+.\Setup-AlcoveFileDrop.ps1 -Dialect SMB3
 ```
 
 ```text
-cmd_Setup-PsilinkFileDrop.cmd -Dialect SMB3
+cmd_Setup-AlcoveFileDrop.cmd -Dialect SMB3
 ```
 
 and if that fails, `-Dialect SMB2`. If both fail, the server is too old for
@@ -347,7 +347,7 @@ edit the bracketed parts and paste the rest:
 ```text
 Subject: SMB share access for a container on my workstation
 
-I need to run a record-linkage tool (psilink, https://github.com/georgetown-mdi/jspsi)
+I need to run a record-linkage tool (alcove, https://github.com/georgetown-mdi/alcove)
 in Docker Desktop on my workstation [MACHINE NAME]. It exchanges files with
 [PARTNER ORGANIZATION] through the shared folder:
 
@@ -400,11 +400,11 @@ Windows will tell you:
 Then split that path into its three parts and pass them directly:
 
 ```powershell
-.\Setup-PsilinkFileDrop.ps1 -Server fs-04.agency.gov -Share 'exchange$' -SubPath dropbox
+.\Setup-AlcoveFileDrop.ps1 -Server fs-04.agency.gov -Share 'exchange$' -SubPath dropbox
 ```
 
 ```text
-cmd_Setup-PsilinkFileDrop.cmd -Server fs-04.agency.gov -Share exchange$ -SubPath dropbox
+cmd_Setup-AlcoveFileDrop.cmd -Server fs-04.agency.gov -Share exchange$ -SubPath dropbox
 ```
 
 `\\fs-04.agency.gov\exchange$\dropbox` splits into server `fs-04.agency.gov`,
@@ -439,18 +439,18 @@ docker volume create --driver local `
   --opt type=cifs `
   --opt 'device=//fs-04.agency.gov/exchange$/dropbox' `
   --opt 'o=username=USER,password=PASS,uid=1000,gid=1000,domain=AGENCY' `
-  psilink-sync
+  alcove-sync
 ```
 
 **Command Prompt:**
 
 ```text
-docker volume create --driver local --opt type=cifs --opt "device=//fs-04.agency.gov/exchange$/dropbox" --opt "o=username=USER,password=PASS,uid=1000,gid=1000,domain=AGENCY" psilink-sync
+docker volume create --driver local --opt type=cifs --opt "device=//fs-04.agency.gov/exchange$/dropbox" --opt "o=username=USER,password=PASS,uid=1000,gid=1000,domain=AGENCY" alcove-sync
 ```
 
 Note the forward slashes in `device`, and that `\\fs-04\exchange$\dropbox`
 becomes `//fs-04/exchange$/dropbox`. `uid=1000,gid=1000` is not optional:
-psilink runs in the container as an unprivileged account numbered 1000, and a
+Alcove runs in the container as an unprivileged account numbered 1000, and a
 Windows file server serves no ownership the mount can read, so a volume created
 without them mounts and then refuses every write.
 
@@ -474,13 +474,13 @@ Check that it mounts and that the folder is the one you meant:
 **PowerShell:**
 
 ```powershell
-docker run --rm -v 'psilink-sync:/rz' --entrypoint sh ghcr.io/georgetown-mdi/alcove:latest -c "ls -la /rz"
+docker run --rm -v 'alcove-sync:/rz' --entrypoint sh ghcr.io/georgetown-mdi/alcove:latest -c "ls -la /rz"
 ```
 
 **Command Prompt:**
 
 ```text
-docker run --rm -v "psilink-sync:/rz" --entrypoint sh ghcr.io/georgetown-mdi/alcove:latest -c "ls -la /rz"
+docker run --rm -v "alcove-sync:/rz" --entrypoint sh ghcr.io/georgetown-mdi/alcove:latest -c "ls -la /rz"
 ```
 
 This route puts the password on a command line -- in PowerShell, that means your
@@ -489,22 +489,22 @@ script. [The passwords page](passwords.md) covers everywhere else it ends up.
 
 ## Running the exchange
 
-**The folder must start clean.** psilink refuses to run in a drop folder that
+**The folder must start clean.** Alcove refuses to run in a drop folder that
 still holds files from a previous exchange, because a leftover message would
 corrupt or stall the run. Emptying it in File Explorer is the simplest fix.
 
 `--sweep-exchange-files`, added to the end of the command, empties it for you.
 **Only one of you may use it,** and that side must start first. It deletes every
-psilink file in the folder, including the first message the other side has just
+Alcove file in the folder, including the first message the other side has just
 written. If you both pass it, you will delete each other's first message and
 both runs will sit waiting for a partner that is no longer there. Agree who goes
 first. That person runs with the flag; the other waits until that run has
 started, then uses the ordinary command.
 
 **Setting up a second file drop replaces the first.** The volume name is
-`psilink-sync` unless you say otherwise, so running the script again for a
+`alcove-sync` unless you say otherwise, so running the script again for a
 different partner overwrites the first one's settings. Give each its own with
-`-VolumeName psilink-partner-b`, and pass that name to `-v` when you run that
+`-VolumeName alcove-partner-b`, and pass that name to `-v` when you run that
 exchange.
 
 ## Synced folders
@@ -533,7 +533,7 @@ docker run --rm -v "C:\path\to\your\work:/work" -v "C:\Users\you\Egnyte\exchange
 `--lockless-rendezvous` is not optional there and **both parties** must pass it.
 A synced folder is slower and less exact than a real one: deletions take time to
 reach the other side, and both sides can create the same file at the same
-moment. That breaks the way psilink normally decides who goes first. If only one
+moment. That breaks the way Alcove normally decides who goes first. If only one
 of you passes it, the run stops straight away and says so.
 
 If your sync client never propagates deletions -- some do not, by design or by

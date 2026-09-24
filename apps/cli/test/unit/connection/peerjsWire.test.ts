@@ -1,7 +1,7 @@
 import { pack, unpack } from "peerjs-js-binarypack";
 import { expect, test } from "vitest";
 
-import { ConnectionError } from "@psilink/core";
+import { ConnectionError } from "@alcove/core";
 
 import {
   PEERJS_CHUNK_MTU,

@@ -168,7 +168,7 @@ identical input under the same key differ; WebCrypto exposes no RFC 6979
 deterministic mode. What depends on determinism is the known-answer vector
 design: the checked-in signed-receipt and signing-certificate vectors pin exact
 signature bytes from a fixed seed, and the browser suite reproduces them against
-the web build of `@psilink/core` in real Chromium. That reproduction *is* this
+the web build of `@alcove/core` in real Chromium. That reproduction *is* this
 project's cross-implementation guarantee for the receipt format.
 
 The seed goes with the signature, and this is a second loss rather than a
@@ -247,7 +247,7 @@ name, and the service the call lands on is not established here.
   pin-before-signature check are an application composition above them that no
   certificate covers.
 - That signing is module-backed wherever the code runs. The browser build of
-  `@psilink/core` uses the same signing path, and there is no module beneath
+  `@alcove/core` uses the same signing path, and there is no module beneath
   it at all, whatever the algorithm.
 - That the shipped image is validated, or that it runs in a validated module's
   operational environment. No certificate covers the default image's base, and

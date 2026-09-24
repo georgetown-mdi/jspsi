@@ -14,7 +14,7 @@ import {
 // apps/cli/src/connection/webrtc/weriftPeer.ts), never through a static
 // import or a static re-export, because the CLI bundles to one CommonJS file
 // whose external requires all run at startup -- a static load would put
-// werift's cost on every invocation, `psilink --version` included, for a
+// werift's cost on every invocation, `alcove --version` included, for a
 // channel most runs never open. The ban is three esquery selectors sharing
 // one message (an ImportDeclaration, an ExportNamedDeclaration, and an
 // ExportAllDeclaration, each keyed on the werift specifier), and a selector

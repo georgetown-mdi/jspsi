@@ -8,8 +8,8 @@ import {
   keepFirstPartyLineBreaks,
   sanitizeErrorForDisplay,
   UsageError,
-} from "@psilink/core";
-import { withCapturedLogs } from "@psilink/core/testing";
+} from "@alcove/core";
+import { withCapturedLogs } from "@alcove/core/testing";
 
 import { EVENT_STREAM_FD, type ErrorEvent } from "../../../src/eventStream";
 import { openEventStreamWithFdWired } from "../../eventStreamTestSupport";

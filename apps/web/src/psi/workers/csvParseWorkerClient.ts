@@ -8,7 +8,7 @@ import type { CSVParseWorker } from "./csvParseController";
  * import.
  */
 export function defaultSpawnCSVParseWorker(): CSVParseWorker {
-  // `{ type: "module" }` lets the worker use ESM imports (`@psilink/core`). The real
+  // `{ type: "module" }` lets the worker use ESM imports (`@alcove/core`). The real
   // `Worker` is structurally wider than the narrow interface the controller drives,
   // so adapt it.
   return new Worker(new URL("./csvParse.worker.ts", import.meta.url), {

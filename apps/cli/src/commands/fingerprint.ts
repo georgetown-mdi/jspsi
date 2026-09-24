@@ -22,8 +22,8 @@ import {
   TEXT_CONTROL_CHAR_PATTERN,
   TEXT_DIRECTION_MESSAGE,
   UsageError,
-} from "@psilink/core";
-import type { SigningIdentity } from "@psilink/core";
+} from "@alcove/core";
+import type { SigningIdentity } from "@alcove/core";
 
 import { DEFAULT_CONFIG_PATH } from "../config";
 import { expandTilde, FileExistsError, writeFileAtomic } from "../fileUtils";
@@ -38,7 +38,7 @@ import { exitCodeForError, exitWithError } from "../util/exit";
 import { parseOrExit, singleValue } from "../util/flags";
 import { configureLogging, logLevelFlag } from "../util/logging";
 
-// `psilink fingerprint` is the front door to the signing identity: generation
+// `alcove fingerprint` is the front door to the signing identity: generation
 // is lazy and anchored here, not at exchange time, since a party must display
 // its fingerprint to share it before any signed exchange. Creation is
 // announced, never silent; regeneration is a gated action (`--force`) because
@@ -55,13 +55,13 @@ import { configureLogging, logLevelFlag } from "../util/logging";
  * A single line: it renders through the display-boundary sanitizer, which
  * escapes a newline and truncates past `COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH`.
  * Holds the whole remedy -- both spellings of the path, the directory's
- * requirements, and the reuse-vs-new-identity guidance -- because psilink has
+ * requirements, and the reuse-vs-new-identity guidance -- because Alcove has
  * no way to tell the operator whether an earlier identity exists elsewhere.
  */
 const NO_IDENTITY_PATH_REFUSAL =
   "no signing identity path is configured. Name the path and re-run -- " +
-  "'psilink fingerprint --identity-file " +
-  "/run/signing/psilink-signing-identity.json', or signing.identity_file in " +
+  "'alcove fingerprint --identity-file " +
+  "/run/signing/alcove-signing-identity.json', or signing.identity_file in " +
   "the configuration. Its directory must be writable for this creating run; " +
   "every run after it only reads the file, so a read-only mount of its own " +
   "is right from then on. Choose somewhere " +
@@ -87,7 +87,7 @@ export function builder(cmd: Argv): Argv {
         "path to the signing identity file, created there if absent; " +
         "overrides signing.identity_file in the config. Required unless the " +
         "config sets that field (example: " +
-        "/run/signing/psilink-signing-identity.json)",
+        "/run/signing/alcove-signing-identity.json)",
     })
     .option("config-file", {
       type: "string",
@@ -245,7 +245,7 @@ export interface ResolveSigningIdentityInput {
 }
 
 /**
- * The lazy load-or-create decision behind `psilink fingerprint`, factored out so
+ * The lazy load-or-create decision behind `alcove fingerprint`, factored out so
  * it is unit-testable without the CLI plumbing. Loads the identity at
  * `identityPath`; if absent (or `force`), generates and persists a new one. A
  * `--force` regeneration of an existing identity re-keys it under the same bound
@@ -386,7 +386,7 @@ export async function resolveSigningIdentity(
 }
 
 // The fingerprint value is the command's sole result, so it goes to stdout (via
-// console.log, regardless of log level) as a bare line so `FP=$(psilink
+// console.log, regardless of log level) as a bare line so `FP=$(alcove
 // fingerprint)` captures a clean value; all diagnostics route through the logger.
 function report(
   log: ReturnType<typeof getLogger>,

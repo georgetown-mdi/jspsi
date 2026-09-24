@@ -1,9 +1,9 @@
 @echo off
 rem ==========================================================================
-rem  Makes a network file-drop folder usable by psilink running in Docker.
+rem  Makes a network file-drop folder usable by Alcove running in Docker.
 rem  Run this once, from a Command Prompt window, before your first exchange.
 rem
-rem  This is the Command Prompt version of Setup-PsilinkFileDrop.ps1, for
+rem  This is the Command Prompt version of Setup-AlcoveFileDrop.ps1, for
 rem  machines where Windows PowerShell is absent or blocked. It does the same
 rem  four things: works out the real server behind the path you see in
 rem  Explorer, tests the share from inside a container, creates the Docker
@@ -15,8 +15,8 @@ rem  different -- Docker takes the credentials only as a mount option, which is
 rem  a command-line argument -- so it appears on one command line, and is then
 rem  stored in cleartext in the volume metadata. See the passwords page.
 rem
-rem  https://github.com/georgetown-mdi/jspsi/blob/main/support/windows-network-filedrop/troubleshooting.md
-rem  https://github.com/georgetown-mdi/jspsi/blob/main/support/windows-network-filedrop/passwords.md
+rem  https://github.com/georgetown-mdi/alcove/blob/main/support/windows-network-filedrop/troubleshooting.md
+rem  https://github.com/georgetown-mdi/alcove/blob/main/support/windows-network-filedrop/passwords.md
 rem ==========================================================================
 
 setlocal disabledelayedexpansion
@@ -26,9 +26,9 @@ rem containing "!" is silently emptied of it -- "Pa!ss" becomes "Pass", which
 rem reports as a wrong password with nothing on screen to explain why.
 
 set "SCRIPT_DIR=%~dp0"
-set "VOLUME_NAME=psilink-sync"
-set "MARKER_NAME=psilink-setup-check.tmp"
-set "WORK=%TEMP%\psilink-cmd-%RANDOM%%RANDOM%.txt"
+set "VOLUME_NAME=alcove-sync"
+set "MARKER_NAME=alcove-setup-check.tmp"
+set "WORK=%TEMP%\alcove-cmd-%RANDOM%%RANDOM%.txt"
 
 set "DROP_PATH="
 set "SERVER="
@@ -107,7 +107,7 @@ shift
 goto parse
 
 :usage
-echo Usage: cmd_Setup-PsilinkFileDrop.cmd [options]
+echo Usage: cmd_Setup-AlcoveFileDrop.cmd [options]
 echo(
 echo   -DropPath ^<path^>     the folder as you see it in Explorer (H:\Exchange)
 echo   -Server ^<name^>       the real file server, if you already know it
@@ -116,7 +116,7 @@ echo   -SubPath ^<folder^>    the folder inside the share
 echo   -Username ^<name^>     the account the container will use
 echo   -Domain ^<name^>       its domain, if it has one
 echo   -Dialect ^<d^>         pin the SMB dialect: SMB3, SMB2, or NT1
-echo   -VolumeName ^<name^>   the Docker volume to create (psilink-sync)
+echo   -VolumeName ^<name^>   the Docker volume to create (alcove-sync)
 echo   -SkipConfirm         do not ask you to confirm the server and share
 echo   -SkipVolumeTest      run the checks but do not create the volume
 echo(
@@ -127,7 +127,7 @@ exit /b 1
 :parsed
 
 rem ================================================================= preflight
-call :head "psilink file-drop setup"
+call :head "Alcove file-drop setup"
 
 echo Checking Docker...
 docker version --format "{{.Server.Os}} {{.Server.Version}}" >"%WORK%" 2>&1
@@ -150,7 +150,7 @@ rem -- this script is downloaded on its own rather than shipped with a release,
 rem so pinning the diagnostic tighter than the thing it diagnoses buys nothing.
 rem
 rem Every docker run below overrides the image entrypoint with sh, because that
-rem image's own entrypoint hands its argument vector to psilink and would read a
+rem image's own entrypoint hands its argument vector to Alcove and would read a
 rem helper script passed to it as exchange arguments.
 rem
 rem Pulled here rather than left to the first docker run: an image that cannot
@@ -159,7 +159,7 @@ rem something about the share, and would be reported as a share problem with no
 rem diagnosis printed above it.
 docker image inspect "ghcr.io/georgetown-mdi/alcove:latest" >nul 2>&1
 if errorlevel 1 (
-  echo Fetching the psilink image ^(first run only^). It is a few hundred
+  echo Fetching the Alcove image ^(first run only^). It is a few hundred
   echo megabytes -- the same image the exchange itself runs -- so this can
   echo take several minutes with nothing on screen.
   docker pull --quiet "ghcr.io/georgetown-mdi/alcove:latest" >"%WORK%" 2>&1
@@ -175,8 +175,8 @@ if defined EXPLICIT goto have_target
 
 if not defined DROP_PATH (
   echo Enter the file-drop folder exactly as you see it in File Explorer.
-  echo Examples:  H:\Exchange\psilink
-  echo            \\fileserver.agency.gov\exchange\psilink
+  echo Examples:  H:\Exchange\alcove
+  echo            \\fileserver.agency.gov\exchange\alcove
   echo(
   set /p "DROP_PATH=File-drop folder: "
 )
@@ -237,7 +237,7 @@ if /i "%CONFIRM%"=="yes" goto credentials
 echo(
 call :note "Run the script again with the real values:"
 echo(
-echo     cmd_Setup-PsilinkFileDrop.cmd -Server fs-04.agency.gov -Share exchange$ -SubPath dropbox
+echo     cmd_Setup-AlcoveFileDrop.cmd -Server fs-04.agency.gov -Share exchange$ -SubPath dropbox
 echo(
 call :info "See the troubleshooting page, 'Reading the real path from Windows'."
 goto done_ok
@@ -282,7 +282,7 @@ echo(
 set "VERDICT="
 set "PWWARN="
 set "TOKEN="
-docker run --rm -i --env SMB_PASS --entrypoint sh "ghcr.io/georgetown-mdi/alcove:latest" -c "tr -d '\r' | sh" <"%SCRIPT_DIR%cmd_psilink-credcheck.sh" >"%WORK%" 2>nul
+docker run --rm -i --env SMB_PASS --entrypoint sh "ghcr.io/georgetown-mdi/alcove:latest" -c "tr -d '\r' | sh" <"%SCRIPT_DIR%cmd_alcove-credcheck.sh" >"%WORK%" 2>nul
 if errorlevel 1 goto credcheck_failed
 for /f "usebackq tokens=1,* delims==" %%a in ("%WORK%") do (
   if "%%a"=="VERDICT" set "VERDICT=%%b"
@@ -320,7 +320,7 @@ rem reads. It is fed on standard input through "tr -d '\r'" so that a checkout
 rem with core.autocrlf on cannot break it -- sh does not treat a carriage
 rem return as whitespace, and a CRLF copy reaching sh directly dies with an
 rem unterminated if.
-docker run --rm -i --env SMB_SERVER --env SMB_SHARE --env SMB_PATH --env SMB_USER --env SMB_DOMAIN --env SMB_PASS --env SMB_DIALECT --env SMB_MARKER --env SMB_TOKEN --entrypoint sh "ghcr.io/georgetown-mdi/alcove:latest" -c "tr -d '\r' | sh" <"%SCRIPT_DIR%cmd_psilink-probe.sh"
+docker run --rm -i --env SMB_SERVER --env SMB_SHARE --env SMB_PATH --env SMB_USER --env SMB_DOMAIN --env SMB_PASS --env SMB_DIALECT --env SMB_MARKER --env SMB_TOKEN --entrypoint sh "ghcr.io/georgetown-mdi/alcove:latest" -c "tr -d '\r' | sh" <"%SCRIPT_DIR%cmd_alcove-probe.sh"
 set "PROBE_RC=%errorlevel%"
 
 set "SMB_SERVER="
@@ -383,7 +383,7 @@ rem carries "&", "|", ">", "%", "^", ";", "(" and a space through intact. A
 rem double quote is the one character that cannot be carried, which is why the
 rem check above refuses it -- unquoted, it ends the argument and docker creates
 rem an unnamed volume instead of the one asked for.
-rem uid/gid are what make the mount writable from the psilink image, which
+rem uid/gid are what make the mount writable from the Alcove image, which
 rem runs as an unprivileged account (uid 1000). A Windows SMB server serves no
 rem Unix ownership for the client to read, so without them the whole tree
 rem presents as owned by root and every write is refused inside the container.
@@ -398,9 +398,9 @@ if errorlevel 1 goto volume_create_failed
 set "VOL_OPTS="
 call :good "Volume created. Docker mounts it the first time it is used."
 
-echo Mounting it and testing what psilink needs...
+echo Mounting it and testing what Alcove needs...
 set "MARKER=%MARKER_NAME%"
-docker run --rm -i -v "%VOLUME_NAME%:/rz" --env MARKER --env TOKEN --entrypoint sh "ghcr.io/georgetown-mdi/alcove:latest" -c "tr -d '\r' | sh" <"%SCRIPT_DIR%cmd_psilink-volcheck.sh" >"%WORK%" 2>&1
+docker run --rm -i -v "%VOLUME_NAME%:/rz" --env MARKER --env TOKEN --entrypoint sh "ghcr.io/georgetown-mdi/alcove:latest" -c "tr -d '\r' | sh" <"%SCRIPT_DIR%cmd_alcove-volcheck.sh" >"%WORK%" 2>&1
 set "VOL_RC=%errorlevel%"
 set "MARKER="
 
@@ -418,7 +418,7 @@ goto volume_mount_failed
 :volume_write_ok
 if not "%VOL_RC%"=="0" goto volume_mount_failed
 
-call :good "The volume mounts and psilink can write to it."
+call :good "The volume mounts and Alcove can write to it."
 
 findstr /c:"MARKER_MISSING" "%WORK%" >nul 2>&1
 if not errorlevel 1 goto marker_missing
@@ -444,14 +444,14 @@ if not errorlevel 1 call :good "The volume and the checks agree on which folder 
 findstr /c:"RENAME_FAIL" "%WORK%" >nul 2>&1
 if not errorlevel 1 (
   call :warn "This share will not rename a file onto an existing one."
-  call :note "psilink does that when two sides meet at once. Pass"
+  call :note "Alcove does that when two sides meet at once. Pass"
   call :note "--lockless-rendezvous on BOTH sides of the exchange."
 )
 
 findstr /c:"EXCL_WEAK" "%WORK%" >nul 2>&1
 if not errorlevel 1 (
   call :warn "This share does not refuse to create a file that already exists."
-  call :note "psilink uses that refusal to decide which side goes first, so"
+  call :note "Alcove uses that refusal to decide which side goes first, so"
   call :note "without it both sides can believe they did. Pass"
   call :note "--lockless-rendezvous on BOTH sides of the exchange."
 )
@@ -470,7 +470,7 @@ rem rename result gates the message.
 findstr /c:"RENAME_FAIL" "%WORK%" >nul 2>&1
 if not errorlevel 1 goto skip_excl_ok
 findstr /c:"EXCL_OK" "%WORK%" >nul 2>&1
-if not errorlevel 1 call :good "Exclusive create and rename behave the way psilink needs."
+if not errorlevel 1 call :good "Exclusive create and rename behave the way Alcove needs."
 :skip_excl_ok
 
 rem ===================================================================== done
@@ -487,7 +487,7 @@ call :info "CSV; results are written back there. It must not be a network path."
 call :info "input.csv and matches.csv are named relative to that folder. Keep the"
 call :info "quotes -- a work folder under OneDrive has a space in its path."
 echo(
-call :warn "The exchange also writes a psilink-record-....keys.json file into that"
+call :warn "The exchange also writes an alcove-record-....keys.json file into that"
 call :note "folder. It is not a result: it holds the keys to the exchange and"
 call :note "should be treated like the input data, not sent on with the matches."
 echo(
@@ -553,7 +553,7 @@ goto fail_generic
 
 :windows_containers
 call :bad "Docker Desktop is in Windows containers mode."
-call :note "psilink and these checks are Linux containers. In this mode the"
+call :note "Alcove and these checks are Linux containers. In this mode the"
 call :note "engine answers normally and then every container fails to start."
 call :info ""
 call :info "Right-click the Docker whale icon in the notification area and"
@@ -561,7 +561,7 @@ call :info "choose 'Switch to Linux containers...', then run this again."
 goto fail_generic
 
 :no_image
-call :bad "Could not fetch the psilink image the checks run in."
+call :bad "Could not fetch the Alcove image the checks run in."
 echo(
 if exist "%WORK%" type "%WORK%"
 echo(
@@ -606,7 +606,7 @@ goto fail_generic
 :credcheck_failed
 call :bad "Could not check the password in a container."
 call :note "Nothing about your file drop has been tested. This is Docker failing"
-call :note "to run the psilink image, not a verdict about your share."
+call :note "to run the Alcove image, not a verdict about your share."
 echo(
 if exist "%WORK%" type "%WORK%"
 goto fail_generic
@@ -624,7 +624,7 @@ call :bad "That password contains a comma, and Docker cannot carry it."
 call :note "Mount options are separated by commas, so the password is cut off at"
 call :note "the first one and the mount fails with 'invalid argument'. There is"
 call :note "no way to quote or escape it -- this is a limit of Docker volumes,"
-call :note "not of psilink, and doing it by hand hits exactly the same wall."
+call :note "not of Alcove, and doing it by hand hits exactly the same wall."
 call :info ""
 call :info "Use an account whose password has no comma. The troubleshooting"
 call :info "page has a ready-made request for one, under 'What to ask your IT"
@@ -658,7 +658,7 @@ call :head "Not ready yet"
 call :bad "The file drop is not usable from Docker. Follow the ACTION above."
 call :info ""
 call :info "The troubleshooting page explains every one of these in detail:"
-call :info "https://github.com/georgetown-mdi/jspsi/blob/main/support/windows-network-filedrop/troubleshooting.md"
+call :info "https://github.com/georgetown-mdi/alcove/blob/main/support/windows-network-filedrop/troubleshooting.md"
 call :cleanup
 endlocal
 exit /b 1
@@ -701,7 +701,7 @@ call :show_safely
 goto fail_generic
 
 :volume_not_writable
-call :bad "The volume mounted, but psilink cannot write in that folder."
+call :bad "The volume mounted, but Alcove cannot write in that folder."
 echo(
 call :show_safely
 echo(

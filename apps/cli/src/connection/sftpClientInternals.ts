@@ -308,7 +308,7 @@ export function transportCloseSeamError(): Error {
   return new Error(
     `this exchange closes the SFTP connection from this side at every poll ` +
       `boundary, which the installed SFTP library does not support, so the ` +
-      `exchange cannot run. This build of psilink is not compatible with ` +
+      `exchange cannot run. This build of Alcove is not compatible with ` +
       `that library; ${REPORT_LIBRARY_INCOMPATIBILITY}`,
   );
 }

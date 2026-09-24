@@ -209,7 +209,7 @@ describe("transportCloseSeamError", () => {
       "closes the SFTP connection from this side at every poll boundary, " +
         "which the installed SFTP library does not support",
     );
-    expect(error.message).toContain("'psilink --version'");
+    expect(error.message).toContain("'alcove --version'");
     // The ssh2 internal that is missing is contributor-tier detail: the caller
     // logs it at debug rather than putting it on the operator's terminal, and no
     // operator message cites a docs path the shipped image does not contain.

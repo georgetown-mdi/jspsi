@@ -6,7 +6,7 @@ import {
   DEFAULT_MAX_DISPLAY_LENGTH,
   DISPLAY_TRUNCATION_MARKER,
   WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   JOB_CLI_BINARY_ENV,
@@ -258,7 +258,7 @@ describe("spawnZeroSetupJob drives the literal $0 form", () => {
       connectionArgs: [
         "sftp://sftp.example.org:2222/exchange",
         "--server-username=linkage",
-        "--server-password=@/etc/psilink/pw",
+        "--server-password=@/etc/alcove/pw",
         `--server-host-key-fingerprint=SHA256:${"A".repeat(43)}`,
       ],
       eventStream: true,

@@ -2,7 +2,7 @@ import net from "node:net";
 import type { AddressInfo, Socket } from "node:net";
 
 import { expect } from "vitest";
-import { sanitizeErrorForDisplay } from "@psilink/core";
+import { sanitizeErrorForDisplay } from "@alcove/core";
 
 // Shared material for the non-SSH-answer diagnosis, which is asserted from two
 // projects: dialPeerIdentification.test.ts drives the dial paths that run over

@@ -11,7 +11,7 @@ export const Route = createFileRoute("/accept")({
   component: AcceptorScreen,
   head: () => ({
     meta: seo({
-      title: "Accept an invitation - psilink",
+      title: "Accept an invitation - Alcove",
       description:
         "Review the terms your partner proposed, then run the exchange.",
     }),

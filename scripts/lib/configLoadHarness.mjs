@@ -24,7 +24,7 @@ export const CHILD_FLAG = "--load";
 
 /** The line a child prints when its load threw, with the error's `code` beside
  * it and the detail below it. */
-export const FAILURE_MARKER = "psilink-config-load-failed";
+export const FAILURE_MARKER = "alcove-config-load-failed";
 
 /**
  * The outcomes both checks report:

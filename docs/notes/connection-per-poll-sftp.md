@@ -500,7 +500,7 @@ snapshot nor resets the sequence shadow.
 
 ssh2 defers a `Client.connect()` issued on a socket that is still WRITABLE: the
 attempt is registered behind `once('close', ...)`, and no `readyTimeout` is armed
-for it, so nothing on psilink's side bounds it. No dial path this mode drives
+for it, so nothing on Alcove's side bounds it. No dial path this mode drives
 reaches that state, and that is a check rather than a claim:
 `apps/cli/test/integration/dialDeferral.test.ts` drives each path and censuses
 the socket beneath every dial the adapter issues, failing on a writable one, on

@@ -16,14 +16,14 @@ const FIXED_SECRET = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
 // Computed outside this code, by OpenSSL 3.0:
 //   openssl kdf -keylen 32 -kdfopt digest:SHA256 \
 //     -kdfopt hexkey:000102...1f -kdfopt hexsalt:<64 zeros> \
-//     -kdfopt info:psilink-relay-key-v1 HKDF
+//     -kdfopt info:alcove-relay-key-v2 HKDF
 const FIXED_RELAY_KEY =
-  "712c3a8a678ed344c663d2c99457553c06e76dbb0a464b68cd08bed36b338fab";
+  "1d970dcfd9f445a4c83c4ee3b03845209f891b2931e8b7bb2b41a17dd2249a9e";
 
 // Computed by the pipeline infra/relay/mint-credential.sh runs:
 //   printf '%s' 1767229200:exchange-1 \
 //     | openssl dgst -sha1 -hmac <FIXED_RELAY_KEY> -binary | openssl base64
-const FIXED_CREDENTIAL = "LzEyv5TTLqdm0AzvTKrvmPQY7YU=";
+const FIXED_CREDENTIAL = "FxFt2WeC7Fjrv9QbGtzfwVmZatI=";
 
 const NOW = new Date("2026-01-01T00:00:00Z");
 

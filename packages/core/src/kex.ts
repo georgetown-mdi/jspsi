@@ -54,16 +54,16 @@ const HASH_LEN = 32;
 // is bumped, docs/spec/PROTOCOL.md ("Protocol-version tag") is what governs:
 // it states what the tag covers, what a bump is reserved for, and what a
 // mismatch does.
-const PROTOCOL_NAME = "psilink-kex-v2:NNpsk0_P256_SHA256";
+const PROTOCOL_NAME = "alcove-kex-v3:NNpsk0_P256_SHA256";
 
 // Domain-separation labels for the derivations below, in the disjoint label
 // space docs/spec/PROTOCOL.md ("The domain-separation label space")
 // enumerates. Their namespace version does not track the suite tag above; the
 // two confirm labels are role-asymmetric.
-const SESSION_LABEL = "psilink-kex-v1:session";
-const CONFIRM_KEY_LABEL = "psilink-kex-v1:confirm";
-const INITIATOR_CONFIRM_LABEL = "psilink-kex-v1:initiator-confirm";
-const RESPONDER_CONFIRM_LABEL = "psilink-kex-v1:responder-confirm";
+const SESSION_LABEL = "alcove-kex-v2:session";
+const CONFIRM_KEY_LABEL = "alcove-kex-v2:confirm";
+const INITIATOR_CONFIRM_LABEL = "alcove-kex-v2:initiator-confirm";
+const RESPONDER_CONFIRM_LABEL = "alcove-kex-v2:responder-confirm";
 
 // The one message every authentication failure throws, and it must stay
 // non-oracular: no throw site may narrow it to the check that failed, and the

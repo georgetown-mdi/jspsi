@@ -16,8 +16,8 @@ import {
   StandardizedField,
   UnknownStandardizationFunctionError,
   UsageError,
-} from "@psilink/core";
-import type { ConnectionErrorKind } from "@psilink/core";
+} from "@alcove/core";
+import type { ConnectionErrorKind } from "@alcove/core";
 
 import {
   openInputSource,
@@ -50,7 +50,7 @@ import {
 import { captureProcessExit } from "../../exitCapture";
 
 function argv(extra: Record<string, unknown>): Arguments {
-  return { _: [], $0: "psilink", ...extra } as unknown as Arguments;
+  return { _: [], $0: "alcove", ...extra } as unknown as Arguments;
 }
 
 // --- assertNoUnknownOptions --------------------------------------------------
@@ -457,7 +457,7 @@ test("exitCodeForError: a core UsageError is EX_USAGE, a bare Error is not", () 
 test("exitCodeForError: a core InternalConsistencyError is EX_SOFTWARE", () => {
   // The class the single-pass send-time reply-cap safety check raises (that it
   // is the class a triggered safety check actually throws is pinned in core's
-  // psiLink.test.ts). Its exit code is neither of its neighbours: 64 would name an
+  // link.test.ts). Its exit code is neither of its neighbours: 64 would name an
   // operator input the run has already found within budget, and 69 would invite a
   // supervisor to retry a deterministic internal fault -- another whole exchange,
   // ending at the same refusal.
@@ -556,7 +556,7 @@ test("exitWithError: logs the sanitized error and exits with the given code", ()
 // --- openInputSource ---------------------------------------------------------
 
 test("openInputSource: a file path opens a readable stream of its contents", async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-cli-input-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-cli-input-"));
   try {
     const file = path.join(dir, "in.csv");
     fs.writeFileSync(file, "a,b\n1,2\n");
@@ -570,7 +570,7 @@ test("openInputSource: a file path opens a readable stream of its contents", asy
 test("openInputSource: a missing file throws exit 69 (not a stdin error)", () => {
   let caught: unknown;
   try {
-    openInputSource("/nonexistent/psilink-input.csv");
+    openInputSource("/nonexistent/alcove-input.csv");
   } catch (err) {
     caught = err;
   }
@@ -608,7 +608,7 @@ test("openInputSource: a piped CSV via `-` parses to the same rows as the file",
   // loadCSVFile(openInputSource(input, { allowStdin: true })); a CSV piped through
   // stdin must yield the same parsed rows as the equivalent file.
   const csv = "first_name,last_name\nAlice,Smith\nBob,Jones\n";
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-cli-stdin-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-cli-stdin-"));
   try {
     const file = path.join(dir, "in.csv");
     fs.writeFileSync(file, csv);
@@ -629,7 +629,7 @@ test("openInputSource: a piped CSV via `-` parses to the same rows as the file",
 });
 
 test("openInputSource: empty stdin parses like an empty file", async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-cli-empty-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-cli-empty-"));
   try {
     const empty = path.join(dir, "empty.csv");
     fs.writeFileSync(empty, "");
@@ -702,7 +702,7 @@ test.skipIf(process.platform === "win32")(
     // umask default (the prior unprotected createWriteStream left it 0644 here).
     // Awaiting the returned promise guarantees the rows are flushed, so the read
     // and stat are deterministic with no polling.
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-writeoutput-"));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-writeoutput-"));
     // 0o022 is the umask under which the old write produced a world-readable 0644.
     const prevUmask = process.umask(0o022);
     try {
@@ -734,7 +734,7 @@ test.skipIf(process.platform === "win32")(
     // process. Asserting the rejection is itself the proof it was handled: an
     // unguarded 'error' would tear the worker down instead.
     const dir = fs.mkdtempSync(
-      path.join(os.tmpdir(), "psilink-writeoutput-err-"),
+      path.join(os.tmpdir(), "alcove-writeoutput-err-"),
     );
     try {
       vi.spyOn(fs, "createWriteStream").mockImplementation((...args) => {
@@ -772,7 +772,7 @@ test.skipIf(process.platform === "win32")(
     // that follows end() fails, so 'finish' fires and then 'error'. The
     // rejection is the proof the promise waits for the close.
     const dir = fs.mkdtempSync(
-      path.join(os.tmpdir(), "psilink-writeoutput-close-"),
+      path.join(os.tmpdir(), "alcove-writeoutput-close-"),
     );
     try {
       let finished = false;
@@ -1011,7 +1011,7 @@ test("writeOutput: the drain failure says the exchange happened and how to recei
 });
 
 test("writeOutput: a write the reader refused fails the run rather than reporting delivery", async () => {
-  // `psilink ... | head -1`: the reader takes its line and closes the pipe, and
+  // `alcove ... | head -1`: the reader takes its line and closes the pipe, and
   // the last line's own callback reports the EPIPE. Reporting it as a flush
   // would tell the run a result nobody took was delivered.
   const refused = Object.assign(new Error("write EPIPE"), { code: "EPIPE" });
@@ -1128,7 +1128,7 @@ test("writeOutput: a drain that finished leaves no listener behind", async () =>
 });
 
 test("writeOutput: a redirected regular-file stdout warns at error level about umask exposure", async () => {
-  // `psilink exchange data.csv > results.csv`: fd 1 is a regular file the shell
+  // `alcove exchange data.csv > results.csv`: fd 1 is a regular file the shell
   // created under its umask, not the owner-only permissions an OUTPUT_FILE path
   // gets, so the operator is warned about the exposure and pointed at the
   // alternative.
@@ -1227,7 +1227,7 @@ test("promptFreeText: a stdin that ends answers nothing rather than hanging", as
 });
 
 test("promptFreeText then promptConfirm: two questions, one open stdin", async () => {
-  // What `psilink accept` at a terminal does: ask who this party is, then
+  // What `alcove accept` at a terminal does: ask who this party is, then
   // show the terms and ask the y/N. The two open a readline interface each, one
   // after the other, over the single-use stdin -- so the second must still read
   // its answer after the first has closed its own interface.

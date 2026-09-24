@@ -51,7 +51,7 @@
 import {
   INVITATION_LIFETIME_SECONDS,
   MAX_INVITATION_LIFETIME_SECONDS,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { deepLinkFor, invitationWebrtcEndpoint } from "../invitation";
 import { rotationWriteBack } from "./managedRunRotate";
@@ -61,7 +61,7 @@ import type {
   RunnableManagedExchangeRecord,
 } from "./managedExchangeRecord";
 import type { InvitationLocation } from "../invitation";
-import type { InvitationToken } from "@psilink/core";
+import type { InvitationToken } from "@alcove/core";
 import type { RelayUrls } from "../transport/ownRelaySetting";
 import type { RotationWriteBack } from "./managedRunRotate";
 

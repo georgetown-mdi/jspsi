@@ -41,7 +41,7 @@ export const RULESET_TAIL = RULESET_PATH.split("/").slice(-2).join("/");
  */
 export const READ_TTL_MS = 8 * 60 * 60 * 1000;
 
-const MARKER_DIR = join(tmpdir(), "psilink-orchestration-reads");
+const MARKER_DIR = join(tmpdir(), "alcove-orchestration-reads");
 
 // A session id is a UUID, so this bound is never reached by one; it holds for
 // whatever else a harness may put in the field.

@@ -2,7 +2,7 @@ import {
   parseExchangeSpec,
   serializeExchangeDocument,
   snakeizeKey,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { COMPOSED_BLOCKS } from "./configLoad";
 
@@ -15,7 +15,7 @@ import {
 
 import { isJobChannel } from "./intentSchemas";
 
-import type { ExchangeSpec, SigningConfig } from "@psilink/core";
+import type { ExchangeSpec, SigningConfig } from "@alcove/core";
 import type {
   JobConfigurationHandBack,
   JobCreateIntent,
@@ -28,20 +28,20 @@ import type { JobSftpServerEntry } from "./sftpServer";
 
 /**
  * The recurring-run hand-off: the portable, secret-free material an operator
- * needs to graduate a prototyped console exchange to a scheduled `psilink`
+ * needs to graduate a prototyped console exchange to a scheduled `alcove`
  * command-line run. The console composes every path it runs the CLI over as
  * a CONTAINER-internal path, and the shared secret lives only in the on-disk
- * `.psilink.key`, which never crosses the browser. The hand-off is a
+ * `.alcove.key`, which never crosses the browser. The hand-off is a
  * PORTABLE TEMPLATE, not a turnkey export: the machine-independent parts
  * (SFTP host/port/username, the host-key fingerprint pin, the linkage terms
  * exactly as they ran) are filled in, while machine-specific paths are shown
  * as labelled placeholders the operator sets for their own machine.
  *
  * The exchange mode's template is written through core's
- * {@link serializeExchangeDocument}, the writer psilink's own `saveConfig`
+ * {@link serializeExchangeDocument}, the writer Alcove's own `saveConfig`
  * uses, and over a document the schema has validated -- so an authored
  * exchange and one opened from the mount are written by one writer, in the
- * file psilink would write for those settings (docs/spec/EXCHANGE_FILE.md,
+ * file Alcove would write for those settings (docs/spec/EXCHANGE_FILE.md,
  * "Writing a configuration back").
  *
  * Two invariants, enforced by the compose helpers below and driven in
@@ -64,13 +64,13 @@ export interface JobHandoff {
   /** The channel the run used. */
   channel: "sftp" | "filedrop";
   /**
-   * Whether the run wrote a `.psilink.key` the operator must copy to their
+   * Whether the run wrote a `.alcove.key` the operator must copy to their
    * recurring folder. True for the exchange mode (which holds a shared secret
    * in the key file), false for the zero-setup mode (which holds none).
    */
   usedKeyFile: boolean;
   /**
-   * Whether the run used the `.psilink.key` beside the configuration opened in
+   * Whether the run used the `.alcove.key` beside the configuration opened in
    * the working folder, rather than one written into the run's own folder.
    * The panel then points at that file, which the run's handshake rotated in
    * place. Always false for a zero-setup run, which uses no key file.
@@ -89,7 +89,7 @@ export interface JobHandoff {
    * zero-setup run signs nothing).
    *
    * The panel shows the reuse-the-identity caveat when true: the recurring
-   * run must load the SAME signing key file, since a fresh `psilink
+   * run must load the SAME signing key file, since a fresh `alcove
    * fingerprint` on the scheduling machine mints a different key the
    * partner's pin would reject.
    */
@@ -117,8 +117,8 @@ export type HandoffSigningSetting =
 
 /**
  * The portable template, discriminated on which artifact the mode produces: the
- * `psilink.yaml` config text an exchange-mode recurring run loads, beside the
- * argv tokens of the `psilink exchange` command that loads it, or the argv
+ * `alcove.yaml` config text an exchange-mode recurring run loads, beside the
+ * argv tokens of the `alcove exchange` command that loads it, or the argv
  * tokens of the zero-setup command a Direct-mode recurring run invokes.
  */
 export type JobHandoffTemplate =
@@ -238,7 +238,7 @@ const HANDOFF_SIGNING_PATHS: JobSigningPaths = {
 };
 
 /**
- * The exchange mode's portable template: the `psilink.yaml` text of
+ * The exchange mode's portable template: the `alcove.yaml` text of
  * `handoffSpec` ({@link exchangeHandoffSpec}), beside the command that runs
  * it. The command ends on the same input/output positionals as the zero-setup
  * command, and names no config or key file: the panel has both copied into the
@@ -251,7 +251,7 @@ function buildExchangeHandoffTemplate(
   return {
     kind: "config",
     yaml: handoffConfigDocument(handoffSpec, mountedDocument),
-    argv: ["psilink", "exchange", HANDOFF_INPUT_NAME, HANDOFF_OUTPUT_NAME],
+    argv: ["alcove", "exchange", HANDOFF_INPUT_NAME, HANDOFF_OUTPUT_NAME],
   };
 }
 
@@ -437,10 +437,10 @@ function composedHandoffSpec(
 }
 
 /**
- * The template's `psilink.yaml` text: core's
+ * The template's `alcove.yaml` text: core's
  * {@link serializeExchangeDocument}, the writer the CLI's own `saveConfig`
  * uses, over the composition -- so the file an operator takes to the command
- * line is the file psilink itself would write for the same settings, guidance
+ * line is the file Alcove itself would write for the same settings, guidance
  * comments included.
  *
  * A run composed from a configuration the operator opened off the mount merges
@@ -466,7 +466,7 @@ function composedHandoffSpec(
  * The merged document is re-validated before it is written, so a pair of
  * settings that only conflicts once combined is refused here rather than at the
  * operator's first scheduled run. The parse is also what fixes the key order:
- * the schema's, which is the order psilink writes a configuration it loaded.
+ * the schema's, which is the order Alcove writes a configuration it loaded.
  *
  * The shared secret cannot reach the file: the load refuses a document stating
  * one, and core's serializer strips `authentication.shared_secret` and
@@ -590,7 +590,7 @@ function handBackSigning(
 }
 
 /**
- * Compose the zero-setup mode's portable command tokens: `psilink` plus the
+ * Compose the zero-setup mode's portable command tokens: `alcove` plus the
  * connection portion (sftp's `sftp://` URL and `--server-*` flags with the
  * credential `@path` placeholdered, or filedrop's placeholder `file://`
  * locator), the run's tuning flags, its identity, linkage-strategy,
@@ -627,7 +627,7 @@ function buildZeroSetupHandoffTemplate(
     connectionArgs = [HANDOFF_SHARED_DIRECTORY_URL_PLACEHOLDER];
   }
   const argv: Array<string> = [
-    "psilink",
+    "alcove",
     ...connectionArgs,
     ...zeroSetupOptionsArgv(intent.options),
     ...(intent.identity !== undefined ? [`--identity=${intent.identity}`] : []),

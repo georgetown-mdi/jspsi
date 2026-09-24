@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { decodeInvitation, encodeInvitation } from "@psilink/core";
+import { decodeInvitation, encodeInvitation } from "@alcove/core";
 
 import {
   SPLIT_RENDEZVOUS_RETAIN_REQUIREMENT,
@@ -9,7 +9,7 @@ import {
   splitRendezvousRetainProblem,
 } from "@console/filedropRendezvousChoice";
 
-import type { InvitationToken } from "@psilink/core";
+import type { InvitationToken } from "@alcove/core";
 import type { JobRendezvousConfig } from "@psi/jobClient/workInputClient";
 
 /** A schema-valid token to hang a minted endpoint off, so the endpoint is checked
@@ -32,8 +32,8 @@ const BASE_TOKEN: InvitationToken = {
 
 const SHARED: JobRendezvousConfig = {
   configured: true,
-  locator: "psilink",
-  folderName: "psilink",
+  locator: "alcove",
+  folderName: "alcove",
 };
 
 const SPLIT: JobRendezvousConfig = {
@@ -49,7 +49,7 @@ describe("the invitation endpoint a console filedrop mints", () => {
   test("a single mount has the one shared locator", () => {
     expect(filedropEndpointForRendezvous(SHARED)).toEqual({
       channel: "filedrop",
-      path: "psilink",
+      path: "alcove",
     });
   });
 
@@ -120,10 +120,10 @@ describe("what the partner's accept kit is told about the rendezvous", () => {
   test("a single mount names the folder only where the console has a name", () => {
     expect(acceptKitEndpointForRendezvous(SHARED)).toEqual({
       channel: "filedrop",
-      path: "psilink",
+      path: "alcove",
     });
     expect(
-      acceptKitEndpointForRendezvous({ configured: true, locator: "psilink" }),
+      acceptKitEndpointForRendezvous({ configured: true, locator: "alcove" }),
     ).toEqual({ channel: "filedrop" });
   });
 

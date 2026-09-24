@@ -75,7 +75,7 @@ describe("format-squash-message wrapping", () => {
   });
 
   it("leaves an indented block exactly as it was written", () => {
-    const block = "  psilink exchange --config a.yaml\n  psilink doctor";
+    const block = "  alcove exchange --config a.yaml\n  alcove doctor";
     expect(normalizeDraft(draft(block))).toBe(`${SUBJECT}\n\n${block}\n`);
   });
 
@@ -220,7 +220,7 @@ const CORPUS = [
   "Intro line.\n## A heading mid-block\n- one\n- two",
   "The points:\n1. one\n2) two\n\n> a quoted line\n\n```\na fenced line\n```",
   "See [the design](docs/DESIGN.md):\n- **first** point\n- `second` point",
-  "  psilink exchange --config a.yaml\n  psilink doctor",
+  "  alcove exchange --config a.yaml\n  alcove doctor",
   "## Heading\n\n    an indented block under it",
   "## Heading\n- item\n\n    an indented block after the list",
   `${"word ".repeat(40)}end`,

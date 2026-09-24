@@ -22,7 +22,7 @@ import type {
   LocalDocumentFieldValues,
 } from "./localDocumentFieldsModel";
 import type { CsvDelimiterChoice } from "@components/csvDelimiterChoice";
-import type { ExchangeSpec } from "@psilink/core";
+import type { ExchangeSpec } from "@alcove/core";
 import type { OwnColumnsChoice } from "@psi/ownColumnsModel";
 
 /** The record fields this draft edits: what a surface seeds it from. */

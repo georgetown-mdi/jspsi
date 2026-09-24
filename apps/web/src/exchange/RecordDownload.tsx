@@ -93,16 +93,16 @@ export const UNDESCRIBABLE_RECORD_LEAD =
  * than serving a pair it cannot vouch for, so the copy stands in place of a
  * download row: it says where the file is, why nothing is offered here, and that
  * every control on this surface removes it. It names the reasons the console can
- * have -- an outcome a differently-versioned psilink wrote, or a pair it cannot
+ * have -- an outcome a differently-versioned Alcove wrote, or a pair it cannot
  * read whole -- because that is what tells the operator which build to open it
  * with.
  */
 export const UNDESCRIBABLE_RECORD_NOTICE =
   "A record file sits in this run's folder in this console's working directory, " +
-  "and this psilink build cannot read it: it may state an outcome this build " +
+  "and this Alcove build cannot read it: it may state an outcome this build " +
   "does not know, or be missing the verification keys written beside it. No " +
   "download is offered here, because this page cannot say what the file " +
-  "records. The file itself is untouched where it sits, and a psilink build " +
+  "records. The file itself is untouched where it sits, and an Alcove build " +
   "that recognizes it can read it. Keep this run until you have it -- every way " +
   "on from here removes this run's files from this console, that one included.";
 

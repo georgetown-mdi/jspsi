@@ -49,20 +49,20 @@ import type { SigningCertificate, SigningIdentity } from "./signingIdentity.js";
  * any other value rather than migrating it. It moves with the certificate
  * format the record embeds and with the envelope beside the signed content
  * (docs/spec/EXCHANGE_RECORD.md, "Dual-signed record file"). */
-export const SIGNED_RECEIPT_VERSION = "psilink-signed-receipt/v3";
+export const SIGNED_RECEIPT_VERSION = "alcove-signed-receipt/v4";
 
 // The domain label folded into the signed receipt-content bytes. Its version
 // tracks the shape of those bytes, not the signature algorithm; the embedded
-// certificate's own version separates a v1 certificate from a v2 one inside
+// certificate's own version separates a v1 certificate from a v3 one inside
 // them. See docs/spec/EXCHANGE_RECORD.md ("Receipt signature").
-const RECEIPT_CONTENT_DOMAIN = "psilink-signed-receipt-content/v2";
+const RECEIPT_CONTENT_DOMAIN = "alcove-signed-receipt-content/v3";
 
 // The two HKDF info labels the session-derived receipt values are taken
 // under -- this one and RECEIPT_BINDER_LABEL below -- sit in the disjoint
 // space docs/spec/PROTOCOL.md ("The domain-separation label space")
 // enumerates. Each takes a suffix from a fixed, non-empty set, which is what
 // keeps it prefix-free; neither is given a variable or optional one.
-const RECEIPT_PAYLOAD_MAC_LABEL = "psilink-signed-receipt-payload-v1";
+const RECEIPT_PAYLOAD_MAC_LABEL = "alcove-signed-receipt-payload-v2";
 
 // The two directions the payload MAC keys are derived for. Fixed by the handshake
 // roles (not by local/partner), so both parties key the two directions identically.
@@ -71,7 +71,7 @@ const RECEIPT_PAYLOAD_MAC_DIRECTIONS = {
   responderToInitiator: "responder-to-initiator",
 } as const;
 
-const RECEIPT_BINDER_LABEL = "psilink-signed-receipt-binder-v1";
+const RECEIPT_BINDER_LABEL = "alcove-signed-receipt-binder-v2";
 
 const RECEIPT_PAYLOAD_MAC_BYTES = 32;
 

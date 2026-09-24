@@ -2,7 +2,7 @@ import { Readable } from "node:stream";
 
 import { describe, expect, test } from "vitest";
 
-import { decodeInvitation } from "@psilink/core";
+import { decodeInvitation } from "@alcove/core";
 
 import {
   INVITATION_PLACEHOLDER,
@@ -17,7 +17,7 @@ import {
 import type { AcceptKitEndpoint } from "@exchange/acceptKit";
 import type { InvitationLocation } from "@psi/invitation";
 
-const FILEDROP: AcceptKitEndpoint = { channel: "filedrop", path: "psilink" };
+const FILEDROP: AcceptKitEndpoint = { channel: "filedrop", path: "alcove" };
 const UNNAMED_FILEDROP: AcceptKitEndpoint = { channel: "filedrop" };
 const FILEDROP_SPLIT: AcceptKitEndpoint = {
   channel: "filedrop",
@@ -33,7 +33,7 @@ const SFTP: AcceptKitEndpoint = {
   channel: "sftp",
   host: "sftp.example.gov",
   port: 2222,
-  path: "/drops/psilink",
+  path: "/drops/alcove",
 };
 const SFTP_SPLIT: AcceptKitEndpoint = {
   channel: "sftp",
@@ -77,7 +77,7 @@ function locklessSheet(endpoint: AcceptKitEndpoint, version = "1.4.2"): string {
 }
 
 /** The launcher branch's tell: the release page the three files come from. */
-const RELEASES_URL = "https://github.com/georgetown-mdi/jspsi/releases";
+const RELEASES_URL = "https://github.com/georgetown-mdi/alcove/releases";
 
 /** Every channel shape the console can mint a kit for. */
 const ENDPOINTS = [
@@ -120,7 +120,7 @@ describe("accept kit, per-channel shape", () => {
     const text = sheet(FILEDROP);
     expect(text).toContain("HOW TO ACCEPT THIS EXCHANGE");
     expect(text).toContain("shared folder you and your partner can both");
-    expect(text).toContain("Shared folder:  psilink");
+    expect(text).toContain("Shared folder:  alcove");
     // The SFTP-only material stays off it.
     expect(text).not.toContain("REPLACE_WITH_SSH_USERNAME");
     expect(text).not.toContain("SFTP server:");
@@ -170,7 +170,7 @@ describe("accept kit, per-channel shape", () => {
     const text = sheet(SFTP);
     expect(text).toContain("This one runs over an SFTP server.");
     expect(text).toContain("SFTP server:    sftp.example.gov:2222");
-    expect(text).toContain("Directory:      /drops/psilink");
+    expect(text).toContain("Directory:      /drops/alcove");
     // The filedrop-only routing stays off it: an SFTP partner has no folder
     // question to answer, so the sheet goes straight to the commands.
     expect(text).not.toContain("WHICH KIND OF FOLDER IS YOURS?");
@@ -236,7 +236,7 @@ describe("accept kit, the account the container runs as", () => {
     for (const endpoint of [FILEDROP, SFTP]) {
       const text = sheet(endpoint);
       // The flag needs no privilege, covers every folder the commands mount,
-      // and leaves what psilink writes owned by the partner, so it leads; the
+      // and leaves what Alcove writes owned by the partner, so it leads; the
       // single-folder chown follows it as the fallback.
       expect(text.indexOf(USER_FLAG)).toBeLessThan(text.indexOf(CHOWN));
       // Giving a folder away to another uid is privileged: the unprivileged
@@ -245,7 +245,7 @@ describe("accept kit, the account the container runs as", () => {
       expect(text).toContain(`sudo ${CHOWN}`);
       expect(text).toContain("Operation not permitted");
       // 1000 is a uid, and on a shared machine it may be another person's:
-      // the fallback hands them the folder and everything psilink writes in
+      // the fallback hands them the folder and everything Alcove writes in
       // it, so the sheet says whose folder it becomes before the reader runs
       // the command.
       const consequence = text.split(`sudo ${CHOWN}`)[1];
@@ -255,7 +255,7 @@ describe("accept kit, the account the container runs as", () => {
   });
 
   test("the identity the accept command needs is outside the skippable section", () => {
-    // psilink names a party only from what the operator gives it, so every
+    // Alcove names a party only from what the operator gives it, so every
     // reader's accept stops without the flag -- not only the Docker Engine
     // reader who takes --user. The engine section below is one a whole reader
     // class is told to skip, so the guidance sits ahead of it and ahead of the
@@ -275,7 +275,7 @@ describe("accept kit, the account the container runs as", () => {
   });
 
   test("the identity is scoped to the accept command, not the exchange run", () => {
-    // The exchange steps take the label from the psilink.yaml the accept step
+    // The exchange steps take the label from the alcove.yaml the accept step
     // wrote, so an instruction to add the flag to every command on the sheet
     // would send the reader to type one where it is not needed -- and be treated
     // as a refusal the exchange run does not make.
@@ -284,9 +284,9 @@ describe("accept kit, the account the container runs as", () => {
         .split("THE NAME YOUR PARTNER SEES")[1]
         .split("WHICH DOCKER DO YOU HAVE?")[0];
       expect(section).toContain("the end of the accept");
-      expect(section).toContain("psilink.yaml");
+      expect(section).toContain("alcove.yaml");
       expect(section).toContain("needs no flag");
-      expect(section).not.toContain("every psilink");
+      expect(section).not.toContain("every Alcove");
     }
   });
 
@@ -318,7 +318,7 @@ describe("accept kit, the account the container runs as", () => {
   test("sends the chown reader to their own folder, not the shared one", () => {
     // A folder-relative command given before the sheet has named a folder is
     // how a filedrop partner ends up chowning the shared folder -- the one
-    // folder the sheet keeps their psilink files out of.
+    // folder the sheet keeps their Alcove files out of.
     const fallback = (endpoint: AcceptKitEndpoint): string =>
       sheet(endpoint)
         .split("If you cannot change the commands")[1]
@@ -336,11 +336,11 @@ describe("accept kit, filedrop routing", () => {
     const text = sheet(FILEDROP);
     expect(text).toContain("A. A Windows network drive or a DFS path");
     expect(text).toContain(RELEASES_URL);
-    expect(text).toContain("Start-Psilink.ps1");
-    expect(text).toContain("Setup-PsilinkFileDrop.ps1");
+    expect(text).toContain("Start-Alcove.ps1");
+    expect(text).toContain("Setup-AlcoveFileDrop.ps1");
     // The launcher branch is Windows-only: the shell launcher does no share
     // resolution, so a macOS/Linux partner is routed to mount-then-B instead.
-    expect(text).not.toContain("start-psilink.sh");
+    expect(text).not.toContain("start-alcove.sh");
     expect(text).toContain("it is situation B below");
     // Why the files are readable rather than opaque, for the partner's IT.
     expect(text).toContain("plaintext PowerShell scripts");
@@ -383,7 +383,7 @@ describe("accept kit, sftp configuration section", () => {
     expect(text).toContain("password: '@/run/secrets/sftp-password'");
     expect(text).toContain("A value beginning with @ is read from that file");
     // The credential is the partner's to supply; the sheet claims only what
-    // psilink enforces -- no transmission to the partner -- not what the
+    // Alcove enforces -- no transmission to the partner -- not what the
     // counterparty might separately know.
     expect(text).toContain("never carries credentials");
     expect(text).toContain("never sends either one to your partner");
@@ -396,7 +396,7 @@ describe("accept kit, sftp configuration section", () => {
       .trim();
     expect(keyFileNote).toContain("chmod 600");
     // One sentence: exactly one sentence-ending period (the dots inside
-    // .psilink.key are followed by a letter, not a break).
+    // .alcove.key are followed by a letter, not a break).
     expect(keyFileNote.match(/\.(\s|$)/g)).toHaveLength(1);
   });
 });
@@ -488,7 +488,7 @@ describe("accept kit, printable-ASCII enforcement", () => {
     // neither the image reference nor the release link, and the sheet it
     // produces is printable ASCII like any other.
     const hostileVersion = sheet(
-      { channel: "filedrop", path: "psilink" },
+      { channel: "filedrop", path: "alcove" },
       "1.0.0-é\nX",
     );
     expect(hostileVersion).toContain("ghcr.io/georgetown-mdi/alcove:latest");
@@ -550,7 +550,7 @@ describe("accept kit, a split filedrop rendezvous", () => {
     // The launcher provisions a pair, so route A hands the reader to it and
     // tells it which folder is which rather than sending them away.
     expect(text).toContain(RELEASES_URL);
-    expect(text).toContain("Start-Psilink.ps1");
+    expect(text).toContain("Start-Alcove.ps1");
     expect(text).toContain("Answer yes when it asks whether your");
     expect(text).toContain("inside one exchange folder");
     // The single-folder route's own mount never appears.
@@ -748,7 +748,7 @@ describe("accept kit, retain mode", () => {
     // And nothing the delta adds has either dynamic value.
     for (const line of withoutImage(benign)) {
       expect(line).not.toContain("sftp.example.gov");
-      expect(line).not.toContain("/drops/psilink");
+      expect(line).not.toContain("/drops/alcove");
       expect(line).not.toContain("1.4.2");
     }
   });
@@ -874,7 +874,7 @@ describe("accept kit, lockless rendezvous", () => {
     expect(benign.filter((line) => line.includes("1.4.2"))).toHaveLength(1);
     for (const line of withoutImage(benign)) {
       expect(line).not.toContain("sftp.example.gov");
-      expect(line).not.toContain("/drops/psilink");
+      expect(line).not.toContain("/drops/alcove");
       expect(line).not.toContain("1.4.2");
     }
   });
@@ -900,7 +900,7 @@ describe("accept kit invariants", () => {
   test("has the paste placeholder and no invitation token or secret", async () => {
     // Mint through the real invitation flow, then build the kit from the same
     // locator that mint held, exactly as the screen does.
-    const endpoint = { channel: "filedrop" as const, path: "psilink" };
+    const endpoint = { channel: "filedrop" as const, path: "alcove" };
     const minted = await generateInvitation({
       inviterName: "County Health Dept",
       file: Readable.from(CSV),
@@ -966,7 +966,7 @@ describe("accept kit invariants", () => {
       const text = sheet(endpoint);
       expect(text).not.toContain("/data");
       expect(text).not.toContain("/app");
-      expect(text).not.toContain("psilink.yaml.tmp");
+      expect(text).not.toContain("alcove.yaml.tmp");
       // The mount points the partner types are present and fixed.
       expect(text).toContain('-v "$PWD":/work');
     }
@@ -984,7 +984,7 @@ describe("accept kit invariants", () => {
 describe("accept kit filename", () => {
   test("stamps the local calendar day of the download click", () => {
     expect(acceptKitFileName(new Date(2026, 1, 3, 9, 30))).toBe(
-      "psilink-accept-instructions-2026-02-03.txt",
+      "alcove-accept-instructions-2026-02-03.txt",
     );
   });
 });

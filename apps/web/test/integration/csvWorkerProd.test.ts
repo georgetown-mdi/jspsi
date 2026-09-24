@@ -62,7 +62,7 @@ describe.skipIf(!hasBuild)(
     let port = 0;
 
     beforeAll(async () => {
-      tempDir = mkdtempSync(join(tmpdir(), "psilink-csv-worker-"));
+      tempDir = mkdtempSync(join(tmpdir(), "alcove-csv-worker-"));
       port = await getFreePort();
       const { child: proc, getLaunchError } = await spawnProdServer(port);
       child = proc;

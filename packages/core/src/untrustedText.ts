@@ -1,4 +1,4 @@
-// The `./untrusted-text` entry point of @psilink/core: the chokepoints for text
+// The `./untrusted-text` entry point of @alcove/core: the chokepoints for text
 // a party did not write -- parsing it as JSON under structural bounds, and
 // escaping it before an operator reads it.
 //

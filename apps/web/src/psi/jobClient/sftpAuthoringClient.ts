@@ -1,7 +1,7 @@
 import {
   DISPLAY_TRUNCATION_MARKER,
   HOST_KEY_FINGERPRINT_REGEX,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   MAX_JOB_LISTING_RESPONSE_BYTES,

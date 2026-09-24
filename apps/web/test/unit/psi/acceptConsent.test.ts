@@ -5,7 +5,7 @@ import {
   TRANSFORM_FUNCTION_GLOSSARY,
   generateSharedSecret,
   summarizeInvitation,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   RECEIPTS_DEFAULT,
@@ -18,7 +18,7 @@ import type {
   InvitationToken,
   LinkageKeyElement,
   LinkageTerms,
-} from "@psilink/core";
+} from "@alcove/core";
 
 // Untrusted, inviter-crafted control characters JSX escaping does not
 // neutralize, built from escapes so the source contains no raw control bytes: an

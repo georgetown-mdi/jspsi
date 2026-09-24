@@ -19,7 +19,7 @@ import { isPathWithin } from "./pathContainment";
  * a tmpfs there to keep pasted secrets off disk entirely, with the sweep as
  * the fallback when the container does not.
  */
-export const SFTP_CREDENTIAL_SCRATCH_DIR = "/run/psilink/sftp-credentials";
+export const SFTP_CREDENTIAL_SCRATCH_DIR = "/run/alcove/sftp-credentials";
 
 /**
  * A server-side override for the scratch directory, defaulting to

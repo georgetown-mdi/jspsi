@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 
-import { UsageError, mintRunRelayCredential } from "@psilink/core";
+import { UsageError, mintRunRelayCredential } from "@alcove/core";
 
 import {
   NO_ICE_SERVERS_WARNING,
@@ -31,12 +31,12 @@ test("each TURN server becomes its own credentialed entry", () => {
       turn: [
         {
           url: "turn:relay.example:3478",
-          username: "psilink",
+          username: "alcove",
           credential: "secret-one",
         },
         {
           url: "turns:relay.example:443?transport=tcp",
-          username: "psilink",
+          username: "alcove",
           credential: "secret-two",
           credentialType: "hmac-sha1",
         },
@@ -45,12 +45,12 @@ test("each TURN server becomes its own credentialed entry", () => {
   ).toEqual([
     {
       urls: "turn:relay.example:3478",
-      username: "psilink",
+      username: "alcove",
       credential: "secret-one",
     },
     {
       urls: "turns:relay.example:443?transport=tcp",
-      username: "psilink",
+      username: "alcove",
       credential: "secret-two",
     },
   ]);
@@ -73,7 +73,7 @@ const INVITATION_RELAY = {
   stun: ["stun:partner.example:3478"],
 };
 const RUN_CREDENTIAL = {
-  username: "1767229200:psilink",
+  username: "1767229200:alcove",
   credential: "bWludGVk",
   expiresAt: new Date("2026-01-01T01:00:00Z"),
 };
@@ -154,9 +154,9 @@ test("a run mints a credential only when it uses the invitation's TURN urls", as
 const FIXED_SECRET = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
 // Computed outside this code, by OpenSSL 3.0, under the relay key HKDF-derived
 // from FIXED_SECRET (packages/core/test/relayCredential.test.ts):
-//   printf '%s' 1767229200:psilink \
+//   printf '%s' 1767229200:alcove \
 //     | openssl dgst -sha1 -hmac <FIXED_RELAY_KEY> -binary | openssl base64
-const FIXED_RUN_CREDENTIAL = "nkjUDyQQCYrMnLaZzMzT6F0mwpY=";
+const FIXED_RUN_CREDENTIAL = "2G+e9Dny8I6qYzO6gHfnNmkIiYI=";
 const FIXED_NOW = new Date("2026-01-01T00:00:00Z");
 const URL_ONLY_TURN = [{ url: "turns:minted.example:443?transport=tcp" }];
 
@@ -167,7 +167,7 @@ test("an own turn entry with no username or credential is presented the credenti
     FIXED_NOW,
   );
   expect(minted).toEqual({
-    username: "1767229200:psilink",
+    username: "1767229200:alcove",
     credential: FIXED_RUN_CREDENTIAL,
     expiresAt: new Date("2026-01-01T01:00:00Z"),
   });
@@ -176,7 +176,7 @@ test("an own turn entry with no username or credential is presented the credenti
   ).toEqual([
     {
       urls: URL_ONLY_TURN[0].url,
-      username: "1767229200:psilink",
+      username: "1767229200:alcove",
       credential: FIXED_RUN_CREDENTIAL,
     },
     {

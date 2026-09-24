@@ -14,7 +14,7 @@
  *   without showing or editing them (docs/spec/EXCHANGE_FILE.md, "What a
  *   consumer does with a setting it cannot honor");
  * - which settings name a file by `@path`, which this browser does not read
- *   and psilink reads on the machine that runs the exported file;
+ *   and Alcove reads on the machine that runs the exported file;
  * - that the outbound payload consent it states is pending, which the command
  *   line meets at the first run that shares results with the partner.
  *
@@ -22,7 +22,7 @@
  * its value.
  */
 
-import { snakeizeKey } from "@psilink/core";
+import { snakeizeKey } from "@alcove/core";
 
 import {
   channelThisAppDoesNotRun,
@@ -57,19 +57,19 @@ const ELSEWHERE_CHANNEL_ROW_LABELS: Record<ManagedElsewhereChannel, string> = {
  * absent key file is the whole reason it does not run here. */
 const KEY_FILE_ELSEWHERE_LEAD =
   "This exchange was imported from a command-line configuration, without the " +
-  ".psilink.key file it runs under. Its settings are editable here and export " +
-  "back to a psilink.yaml you run with psilink; it does not run in this " +
+  ".alcove.key file it runs under. Its settings are editable here and export " +
+  "back to an alcove.yaml you run with Alcove; it does not run in this " +
   "browser.";
 
 /** The list row's status for a configuration-only exchange on this app's own
  * channel. */
 const KEY_FILE_ELSEWHERE_STATUS =
-  "Configuration only - edit it here, run it with psilink";
+  "Configuration only - edit it here, run it with Alcove";
 
 /** The list row's status for a configuration on a channel this app does not
  * run. */
 const CHANNEL_ELSEWHERE_STATUS =
-  "Configuration only - this app cannot run it, run it with psilink";
+  "Configuration only - this app cannot run it, run it with Alcove";
 
 /** Why this app cannot run each part {@link documentPartsThisAppDoesNotRun}
  * names. */
@@ -100,7 +100,7 @@ function unrunnablePartsSentences(
     `This configuration states ${unrunnablePartNames(record).join(", ")}, ` +
     "which this app cannot run: " +
     parts.map((part) => UNRUNNABLE_PART_REASONS[part]).join("; ") +
-    ". The psilink.yaml you download states " +
+    ". The alcove.yaml you download states " +
     (one ? "it" : "each") +
     " as your file does."
   );
@@ -133,12 +133,12 @@ export function configurationOnlyLead(record: ManagedExchangeRecord): string {
       ? KEY_FILE_ELSEWHERE_LEAD
       : "This exchange was imported from a command-line configuration. " +
           `${parts} Its other settings are editable here; run the exchange ` +
-          "with psilink.";
+          "with Alcove.";
   const channelLead =
     `This configuration runs over ${ELSEWHERE_CHANNEL_NAMES[channel]}. This ` +
     "app runs only live exchanges in the browser (channel: webrtc), so it " +
-    "cannot run this one: run it with psilink on the command line. Its " +
-    "settings are editable here, and the psilink.yaml you download below is " +
+    "cannot run this one: run it with Alcove on the command line. Its " +
+    "settings are editable here, and the alcove.yaml you download below is " +
     "the file to run.";
   return parts === undefined ? channelLead : `${channelLead} ${parts}`;
 }
@@ -153,7 +153,7 @@ export function configurationOnlyStatus(record: ManagedExchangeRecord): string {
   if (parts.length > 0)
     return (
       `Configuration only - this app cannot run its ${parts.join(", ")} ` +
-      "settings, run it with psilink"
+      "settings, run it with Alcove"
     );
   return KEY_FILE_ELSEWHERE_STATUS;
 }
@@ -212,7 +212,7 @@ export function heldSettingsNotice(
     (one ? "a setting" : "settings") +
     " this app keeps unchanged but does not show or edit: " +
     fields.join(", ") +
-    ". The psilink.yaml you download states " +
+    ". The alcove.yaml you download states " +
     (one ? "it" : "each") +
     " as your file does; edit " +
     (one ? "it" : "them") +
@@ -223,7 +223,7 @@ export function heldSettingsNotice(
 /**
  * What the operator is told where the document names a file by `@path`, or
  * undefined where it names none: this browser never opens the file, and the
- * exported configuration keeps the reference for psilink to read on the
+ * exported configuration keeps the reference for Alcove to read on the
  * machine that runs it.
  */
 export function fileReferenceNotice(
@@ -239,8 +239,8 @@ export function fileReferenceNotice(
     fields.join(", ") +
     ". This browser does not open " +
     (one ? "it" : "them") +
-    ". The psilink.yaml you download keeps each reference as your file wrote " +
-    "it, and psilink reads the file it names on the machine that runs the " +
+    ". The alcove.yaml you download keeps each reference as your file wrote " +
+    "it, and Alcove reads the file it names on the machine that runs the " +
     "exchange, so check that each path is right there before you run it."
   );
 }
@@ -260,7 +260,7 @@ export function fileReferenceExportNote(
     fields.join(", ") +
     " as " +
     (one ? "an @ reference" : "@ references") +
-    ", and psilink reads the file " +
+    ", and Alcove reads the file " +
     (one ? "it names" : "each names") +
     " on the machine that runs it."
   );
@@ -268,7 +268,7 @@ export function fileReferenceExportNote(
 
 /**
  * What the export tells the operator an SFTP configuration still needs before
- * psilink runs it, or undefined where it names both a credential and a host
+ * Alcove runs it, or undefined where it names both a credential and a host
  * key, and on any other channel.
  */
 export function sftpCredentialNote(
@@ -303,7 +303,7 @@ export function sftpCredentialNote(
 
 /**
  * What the operator is told about an `outbound_payload_consent` the document
- * states as pending, or undefined where it states none or a confirmed set. psilink
+ * states as pending, or undefined where it states none or a confirmed set. Alcove
  * asks for the confirmation at the first run that shares results with the
  * partner and refuses such a run with no terminal to ask on, so a scheduled run
  * is refused until the operator has confirmed the columns once at a terminal.
@@ -314,9 +314,9 @@ export function pendingOutboundConsentNotice(
   if (record.exchangeFile.outboundPayloadConsent?.status !== "pending")
     return undefined;
   return (
-    "This configuration's outbound_payload_consent is pending. A psilink run " +
+    "This configuration's outbound_payload_consent is pending. An Alcove run " +
     "that shares results with your partner stops to ask you to confirm the " +
     "columns it sends, and is refused when no one is at a terminal to answer, " +
-    "so run it once with psilink at a terminal before you schedule it."
+    "so run it once with Alcove at a terminal before you schedule it."
   );
 }

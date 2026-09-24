@@ -8,7 +8,7 @@ import {
   prepareForExchange,
   safeParseLinkageTerms,
   validateStandardizationAgainstTerms,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   addElement,
@@ -26,7 +26,7 @@ import {
 } from "../../../src/psi/authoring/advancedInvite.js";
 import { generateInvitation } from "../../../src/psi/invitation.js";
 
-import type { CSVRow, LinkageKeyElement } from "@psilink/core";
+import type { CSVRow, LinkageKeyElement } from "@alcove/core";
 
 import type { AdvancedInviteDraft } from "../../../src/psi/authoring/advancedInvite.js";
 import type { InvitationLocation } from "../../../src/psi/invitation.js";

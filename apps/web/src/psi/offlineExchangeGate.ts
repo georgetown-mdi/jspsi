@@ -9,7 +9,7 @@
  * says an interface exists, not that the partner or the coordination server is
  * reachable (see `apps/web/src/utils/networkStatus.ts`).
  *
- * Those surfaces span every channel psilink runs, so the sentence names the
+ * Those surfaces span every channel Alcove runs, so the sentence names the
  * network the run needs rather than a connection to the partner, which only one
  * of them makes, and states the simultaneity all of them share.
  */

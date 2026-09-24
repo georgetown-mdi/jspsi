@@ -2,7 +2,7 @@
 /// <reference types="vite/client" />
 
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { generateSharedSecret, getDefaultLinkageTerms } from "@psilink/core";
+import { generateSharedSecret, getDefaultLinkageTerms } from "@alcove/core";
 
 import {
   MANAGED_EXCHANGE_LOCAL_STORE_NAME,
@@ -56,7 +56,7 @@ import type {
   NewManagedExchange,
   RunnableManagedExchangeRecord,
 } from "@psi/managed/managedExchangeRecord";
-import type { WebRTCExchangeLocator } from "@psilink/core";
+import type { WebRTCExchangeLocator } from "@alcove/core";
 
 /** A stored record narrowed to the runnable shape these fixtures all have: every
  * record here is created with a shared secret, and the export, hand-off, and run
@@ -941,7 +941,7 @@ async function plantUnreadable(id: string, fields: object): Promise<void> {
       );
       transaction
         .objectStore(MANAGED_EXCHANGE_STORE_NAME)
-        .put({ ...fields, id, schemaVersion: "psilink-managed-exchange/v4" });
+        .put({ ...fields, id, schemaVersion: "alcove-managed-exchange/v5" });
       transaction.oncomplete = () => resolve();
       transaction.onerror = () => reject(transaction.error);
       transaction.onabort = () => reject(transaction.error);

@@ -8,7 +8,7 @@ import {
   parseExchangeSpec,
   parseSensitiveYaml,
   serializeExchangeDocument,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { ZodError } from "zod";
 
@@ -39,7 +39,7 @@ import type {
   ExchangeSpec,
   WebRTCConnectionConfig,
   WebRTCExchangeLocator,
-} from "@psilink/core";
+} from "@alcove/core";
 import type {
   ManagedExchangeSide,
   NewManagedExchange,
@@ -56,7 +56,7 @@ function runnableRecord(
 }
 
 // The command-line export composer, tested in Node without a store, a download,
-// or a spend: the two files it emits are the ones `psilink exchange` opens, the
+// or a spend: the two files it emits are the ones `alcove exchange` opens, the
 // document it composes is the stored one plus exactly the two fields the CLI
 // needs, the secret stays in the key half, the source record is untouched, and a
 // record the app could not have created is refused rather than exported.
@@ -97,7 +97,7 @@ function parseExportedConfig(record: RunnableManagedExchangeRecord) {
   return parseExchangeSpec(
     parseSensitiveYaml(
       composeManagedCronExport(record).config.text,
-      "exported psilink.yaml",
+      "exported alcove.yaml",
     ),
   );
 }
@@ -105,10 +105,10 @@ function parseExportedConfig(record: RunnableManagedExchangeRecord) {
 describe("the two files the CLI opens", () => {
   test("are named for the CLI's default config and key paths", () => {
     const exported = composeManagedCronExport(managedRecord());
-    expect(exported.config.fileName).toBe("psilink.yaml");
-    expect(exported.key.fileName).toBe(".psilink.key");
-    expect(CRON_EXPORT_CONFIG_FILE_NAME).toBe("psilink.yaml");
-    expect(CRON_EXPORT_KEY_FILE_NAME).toBe(".psilink.key");
+    expect(exported.config.fileName).toBe("alcove.yaml");
+    expect(exported.key.fileName).toBe(".alcove.key");
+    expect(CRON_EXPORT_CONFIG_FILE_NAME).toBe("alcove.yaml");
+    expect(CRON_EXPORT_KEY_FILE_NAME).toBe(".alcove.key");
   });
 
   test("the exported configuration parses through core's exchange-spec parser", () => {
@@ -132,10 +132,10 @@ describe("the two files the CLI opens", () => {
   });
 
   test("the emitted command is the CLI's own invocation, run beside the two files", () => {
-    // `psilink exchange [options] INPUT_FILE [OUTPUT_FILE]` with the config and
+    // `alcove exchange [options] INPUT_FILE [OUTPUT_FILE]` with the config and
     // key read at their defaults: no flag the CLI does not have, and no path.
     expect(composeManagedCronExport(managedRecord()).command).toBe(
-      `psilink exchange ${CRON_EXPORT_INPUT_FILE_NAME} ${CRON_EXPORT_OUTPUT_FILE_NAME}`,
+      `alcove exchange ${CRON_EXPORT_INPUT_FILE_NAME} ${CRON_EXPORT_OUTPUT_FILE_NAME}`,
     );
   });
 });
@@ -207,7 +207,7 @@ describe("the exported key file", () => {
     const record = managedRecord({ expires: "2026-04-06T14:00:00.000Z" });
     const exported = composeManagedCronExport(record);
     const parsed: unknown = JSON.parse(exported.key.text);
-    // The .psilink.key file the CLI reads is camelCase JSON, parsed without a
+    // The .alcove.key file the CLI reads is camelCase JSON, parsed without a
     // snake_case conversion, so the file's own key names must be exactly these.
     expect(Object.keys(parsed as object).sort()).toEqual([
       "expires",
@@ -308,7 +308,7 @@ describe("a record that is not a webrtc exchange", () => {
       const exported = parseExchangeSpec(
         parseSensitiveYaml(
           composeManagedCronExportConfig(record).config.text,
-          "exported psilink.yaml",
+          "exported alcove.yaml",
         ),
       );
 
@@ -344,7 +344,7 @@ describe("a record that is not a webrtc exchange", () => {
 
     expect(text).toContain('private_key: "@/keys/exchange_key"');
     expect(
-      parseExchangeSpec(parseSensitiveYaml(text, "exported psilink.yaml")),
+      parseExchangeSpec(parseSensitiveYaml(text, "exported alcove.yaml")),
     ).toEqual(record.exchangeFile);
   });
 
@@ -411,7 +411,7 @@ describe("a webrtc connection outside the credential-free locator subset", () =>
 
   // Each row is a field the shared webrtc connection schema can represent and
   // the locator expansion never writes: the export must name it and republish
-  // none of it. The value column is what the emitted psilink.yaml would have
+  // none of it. The value column is what the emitted alcove.yaml would have
   // handed the CLI to resolve, and is what the refusal must not echo back.
   const outsideLocatorSubset: Array<
     [string, WebRTCConnectionConfig, string, string]
@@ -624,7 +624,7 @@ describe("a signing block on the stored document", () => {
   // partner certificate is trusted against.
   const signing = {
     mode: "certificate",
-    identityFile: "@/home/other/psilink-signing.identity",
+    identityFile: "@/home/other/alcove-signing.identity",
     partnerFingerprint: "0123456789012345678901234567890123456789abA",
     receiptOutput: "/home/other/receipts/planted-receipt.json",
   } as const;
@@ -650,7 +650,7 @@ describe("a signing block on the stored document", () => {
     const exported = parseExchangeSpec(
       parseSensitiveYaml(
         composeManagedCronExportConfig(record).config.text,
-        "exported psilink.yaml",
+        "exported alcove.yaml",
       ),
     );
     expect(exported.signing).toEqual(signing);

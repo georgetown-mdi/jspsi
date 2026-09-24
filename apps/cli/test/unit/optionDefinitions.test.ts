@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { afterEach, beforeEach, expect, test } from "vitest";
 import type { Arguments } from "yargs";
-import { UsageError } from "@psilink/core";
+import { UsageError } from "@alcove/core";
 
 import {
   CONNECTION_PER_POLL_SHORT_INTERVAL_WARN_MS,
@@ -22,7 +22,7 @@ function warnCollector(): { warn: (m: string) => void; messages: string[] } {
 }
 
 function argv(extra: Record<string, unknown>): Arguments {
-  return { _: [], $0: "psilink", ...extra } as unknown as Arguments;
+  return { _: [], $0: "alcove", ...extra } as unknown as Arguments;
 }
 
 const FP = "SHA256:" + "A".repeat(43);
@@ -30,7 +30,7 @@ const FP = "SHA256:" + "A".repeat(43);
 let dir: string;
 
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-optdefs-"));
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-optdefs-"));
 });
 
 afterEach(() => {

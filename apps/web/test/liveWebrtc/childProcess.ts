@@ -2,11 +2,11 @@ import type { ChildProcess } from "node:child_process";
 
 /**
  * Stopping the two processes the live WebRTC leg spawns -- the standalone
- * broker and the `psilink` party -- and reaping one whose run died before its
+ * broker and the `alcove` party -- and reaping one whose run died before its
  * teardown could.
  *
  * The reaper matters because neither child ends on its own: a broker listens
- * until it is signalled, and a `psilink invite` waits out its accept budget. A
+ * until it is signalled, and an `alcove invite` waits out its accept budget. A
  * vitest run that crashes (a browser session lost, a worker killed) would
  * otherwise leave both behind on every such run.
  */

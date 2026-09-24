@@ -1,4 +1,4 @@
-import { getLogger, redactAndSanitizeForDisplay } from "@psilink/core";
+import { getLogger, redactAndSanitizeForDisplay } from "@alcove/core";
 
 import { readBoundedJsonBody } from "@utils/boundedJsonBody";
 

@@ -2,7 +2,7 @@
 // PreToolUse hook: refuse a `gh pr create` or `gh pr edit` call whose `--title`
 // is longer than the squash-merge subject budget, before it reaches GitHub.
 //
-// Why this exists: psilink squash-merges, so a pull request's title becomes the
+// Why this exists: Alcove squash-merges, so a pull request's title becomes the
 // commit subject with GitHub's " (#NNNN)" appended, and CONTRIBUTING.md's
 // subject limit counts that suffix. Every other reading of that budget comes
 // after the fact -- the PR Checklist workflow fails the open pull request, and

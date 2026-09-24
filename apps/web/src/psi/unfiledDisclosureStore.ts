@@ -26,7 +26,7 @@
  * transaction (see {@link ./managed/managedExchangeStore.ts}).
  */
 
-import { getLogger, parseExchangeRecord } from "@psilink/core";
+import { getLogger, parseExchangeRecord } from "@alcove/core";
 
 import {
   MANAGED_EXCHANGE_DISCLOSURE_STORE_NAME,
@@ -50,7 +50,7 @@ import type {
   UnfiledDisclosure,
 } from "./unfiledDisclosure";
 import type { DisclosureAccounting } from "./disclosureAccounting";
-import type { ExchangeRecord } from "@psilink/core";
+import type { ExchangeRecord } from "@alcove/core";
 
 const log = getLogger("unfiledDisclosureStore");
 

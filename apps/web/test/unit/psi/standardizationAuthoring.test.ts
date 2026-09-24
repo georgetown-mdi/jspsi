@@ -10,7 +10,7 @@ import {
   runPipeline,
   safeParseStandardization,
   stepCanEmptyRealizedValue,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   INERT_COALESCE_ADVICE,
@@ -36,7 +36,7 @@ import type {
   ColumnMetadata,
   LinkageTerms,
   Standardization,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import type { FieldStepOverride } from "../../../src/psi/standardizationAuthoring.js";
 

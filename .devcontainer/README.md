@@ -1,7 +1,7 @@
 # Development container
 
 A plain Node 26 container in which an agent (or a developer) can run the whole
-psilink workflow -- build, unit tests, lint, typecheck, the web dev server, and
+Alcove workflow -- build, unit tests, lint, typecheck, the web dev server, and
 both SFTP integration backends -- with no Docker inside it. It runs as the
 non-root `node` user behind an egress firewall, so Claude can run prompt-free
 with its writes confined to the container.
@@ -16,9 +16,9 @@ to both unless it says otherwise.
 
 - **Node 26** (`node:26-bookworm`), matching the shipped runtime and CI.
 - **OpenSSH server and client** plus the baked-in `/run/sshd` directory, so the
-  native `sshd` SFTP test backend (`PSILINK_SFTP_BACKEND=native`) spawns without
+  native `sshd` SFTP test backend (`ALCOVE_SFTP_BACKEND=native`) spawns without
   root. The in-process backend (the default) needs nothing extra. The hardened
-  native profiles (`PSILINK_SFTP_NATIVE_PROFILE`) run too, except `chroot`, which
+  native profiles (`ALCOVE_SFTP_NATIVE_PROFILE`) run too, except `chroot`, which
   needs a root `sshd` the unprivileged container does not provide -- its runner
   skips cleanly (exit 0) here rather than failing.
 - **git**, the **GitHub CLI**, and the build toolchain for native npm modules.
@@ -207,7 +207,7 @@ Open the repository in an editor with dev-container support and reopen in the
 container, or use the `devcontainer` CLI. On first creation `post-create.sh` runs
 `npm ci` into an isolated `node_modules` volume (kept separate from the
 bind-mounted host tree so Linux-built native modules do not collide with the
-host's macOS build), builds `@psilink/core` so the apps resolve it, and fetches
+host's macOS build), builds `@alcove/core` so the apps resolve it, and fetches
 the Chromium build the web app's browser suite drives. This runs *before* the
 egress firewall and the proxy lane (both start steps), so the initial install
 has full network access; they constrain subsequent sessions.
@@ -218,7 +218,7 @@ The proxy lane is what admits them, so point the download at it:
 
 ```sh
 HTTPS_PROXY=http://127.0.0.1:8888 npx playwright install chromium
-cat /etc/psilink-egress-proxy/filter    # the lane's assembled allowlist
+cat /etc/alcove-egress-proxy/filter    # the lane's assembled allowlist
 ```
 
 `post-create.sh` does the same on any re-run, testing whether the proxy is
@@ -232,7 +232,7 @@ npm run test                       # unit tests (core, cli, web)
 npm run lint
 npm run typecheck
 npm run test:integration -w apps/cli                          # in-process SFTP
-PSILINK_SFTP_BACKEND=native npm run test:integration -w apps/cli   # native sshd
+ALCOVE_SFTP_BACKEND=native npm run test:integration -w apps/cli   # native sshd
 npm run test:integration:webrtc -w apps/cli                   # loopback WebRTC transport
 npm run dev -w apps/web            # web dev server on localhost:3000
 ```
@@ -332,7 +332,7 @@ a hostname cannot hold are rejected, and a rejected pattern refuses the whole
 start rather than being skipped.
 
 For a host that should not be a repository change -- a zone name, a particular
-instance address -- set `PSILINK_EGRESS_EXTRA_HOSTS` in `.env` to a
+instance address -- set `ALCOVE_EGRESS_EXTRA_HOSTS` in `.env` to a
 comma-separated list. Every entry in it is probed at start and the start fails
 if the filter does not actually admit it, so a typo is loud rather than silent.
 
@@ -396,11 +396,11 @@ On top of the residuals listed for both profiles above:
   which is the same shared namespace rather than a wider one.
 - **DNS is still open**, exactly as in the default profile, and now resolves for
   the proxy as well.
-- **`PSILINK_EGRESS_EXTRA_HOSTS` is an environment variable**, so it is
+- **`ALCOVE_EGRESS_EXTRA_HOSTS` is an environment variable**, so it is
   operator convenience rather than a boundary: anything running as `node` can
   re-run the proxy script with a widened list. The container boundary is what
   confines a session; this lane, like the firewall, is a guardrail.
-- **The proxy logs refusals, not traffic.** `/var/log/psilink-egress-proxy.log`
+- **The proxy logs refusals, not traffic.** `/var/log/alcove-egress-proxy.log`
   is world-readable and records each filtered host at `Notice` level; a
   successful tunnel is not logged, so the file answers "what was refused", not
   "where did this container go".
@@ -410,7 +410,7 @@ On top of the residuals listed for both profiles above:
 Inside the container, after start:
 
 ```sh
-cat /etc/psilink-egress-proxy/filter    # the assembled allowlist
+cat /etc/alcove-egress-proxy/filter    # the assembled allowlist
 curl -x http://127.0.0.1:8888 -sS -o /dev/null -w '%{http_code}\n' \
   https://sts.us-west-2.amazonaws.com/                     # an HTTP status: reached
 curl -x http://127.0.0.1:8888 https://example.com/         # 403 from the proxy
@@ -421,7 +421,7 @@ curl -x http://127.0.0.1:8888 \
 aws sts get-caller-identity                                # an answer from AWS
 ssh -T git@github.com                                      # through the tunnel
 docker --version && test ! -e /var/run/docker.sock         # client, no socket
-tail /var/log/psilink-egress-proxy.log                     # what was refused
+tail /var/log/alcove-egress-proxy.log                     # what was refused
 ```
 
 The chain itself is not on that list: reading it needs root, and the `node`

@@ -42,7 +42,7 @@ function results(): ParkedResults {
       {
         kind: "results",
         runAt: EARLIER,
-        fileName: "psilink-results-earlier.csv",
+        fileName: "alcove-results-earlier.csv",
         csv: new Blob(["id\n1\n"], { type: "text/csv" }),
         matchedRecordCount: 42,
       },
@@ -94,7 +94,7 @@ describe("the rows a returning operator reads", () => {
         {
           kind: "results",
           runAt: EARLIER,
-          fileName: "psilink-results-earlier.csv",
+          fileName: "alcove-results-earlier.csv",
           csv: new Blob(["id\n1\n"]),
           matchedRecordCount: 1,
         },
@@ -113,14 +113,14 @@ describe("the row shown for a run written to the granted folder", () => {
           ? {
               kind: "written",
               runAt: EARLIER,
-              fileName: "psilink-results-earlier.csv",
+              fileName: "alcove-results-earlier.csv",
               directoryName: "Riverbend results",
               matchedRecordCount: 42,
             }
           : {
               kind: "results",
               runAt: EARLIER,
-              fileName: "psilink-results-earlier.csv",
+              fileName: "alcove-results-earlier.csv",
               csv: new Blob(["id\n1\n"], { type: "text/csv" }),
               matchedRecordCount: 42,
               fallback,
@@ -132,7 +132,7 @@ describe("the row shown for a run written to the granted folder", () => {
   test("says where the results went, and that none of them are kept here", () => {
     const row = parkedResultsRows(written())[0];
     expect(row.summary).toContain("42 matched records");
-    expect(row.summary).toContain("psilink-results-earlier.csv");
+    expect(row.summary).toContain("alcove-results-earlier.csv");
     expect(row.summary).toContain("Riverbend results");
     expect(row.summary).toContain("Nothing of them is kept in this browser");
   });
@@ -144,13 +144,13 @@ describe("the row shown for a run written to the granted folder", () => {
         {
           kind: "written",
           runAt: EARLIER,
-          fileName: "psilink-results-earlier.csv",
+          fileName: "alcove-results-earlier.csv",
           directoryName: "Riverbend results",
         },
       ],
     })[0];
     expect(row.summary).toBe(
-      "Results were written to psilink-results-earlier.csv in the folder you " +
+      "Results were written to alcove-results-earlier.csv in the folder you " +
         "granted (Riverbend results). Nothing of them is kept in this browser.",
     );
   });
@@ -244,7 +244,7 @@ describe("the warning a projected result size raises", () => {
         {
           kind: "results",
           runAt: EARLIER,
-          fileName: "psilink-results-earlier.csv",
+          fileName: "alcove-results-earlier.csv",
           csv: new Blob(["id\n1\n"], { type: "text/csv" }),
           pairTableFactors: { local, partner },
         },

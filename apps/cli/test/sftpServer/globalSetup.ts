@@ -40,7 +40,7 @@ export default async function setup({
   // NO file fired across the whole run -- the `forks` pool isolates files
   // per-process, so a per-file "unused" view would be misleading.
   const sentinelSinkDir = fs.mkdtempSync(
-    path.join(os.tmpdir(), "psilink-console-sentinel-"),
+    path.join(os.tmpdir(), "alcove-console-sentinel-"),
   );
   const sentinelSink = path.join(sentinelSinkDir, "matched-ids.log");
   fs.writeFileSync(sentinelSink, "");

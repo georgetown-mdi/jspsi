@@ -10,7 +10,7 @@ import {
   messageWithOperatorText,
   operatorSuppliedText,
   UsageError,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { createOwnerOnlyWriteStream } from "../fileUtils";
 import { settleWithinCeiling, type CeilingOutcome } from "./ceiling";
@@ -59,7 +59,7 @@ export function openInputSource(
     if (process.stdin.isTTY === true)
       throw new UsageError(
         "nothing is piped to stdin, so `-` would wait for input forever; pipe " +
-          "a CSV (e.g. `cat data.csv | psilink exchange - results.csv`) or pass " +
+          "a CSV (e.g. `cat data.csv | alcove exchange - results.csv`) or pass " +
           "a file path instead of `-`",
       );
     return process.stdin;
@@ -187,7 +187,7 @@ export function resetStdoutErrorGuard(): void {
  * resolved: resolving would hand back a flush and a give-up as the same
  * outcome, and the run would report a result it still holds as written.
  *
- * A reader that CLOSES the pipe -- `psilink ... | head -1` past the pipe's own
+ * A reader that CLOSES the pipe -- `alcove ... | head -1` past the pipe's own
  * buffer -- is the same loss and takes the same path, over two channels
  * because neither covers it alone. The last line's callback reports an EPIPE
  * that reaches that line, and an `'error'` listener held for the drain's
@@ -334,7 +334,7 @@ export function writeOutput(
           "under its umask, not the owner-only permissions an OUTPUT_FILE path " +
           "gets, so on a shared host the matched records may be " +
           "group/world-readable. Pass an OUTPUT_FILE path argument instead of " +
-          "redirecting stdout with `>` to have psilink create the result " +
+          "redirecting stdout with `>` to have Alcove create the result " +
           "owner-only.",
       );
     return writeResultToStdout(headers, rows, idleCeilingMs, delimiter);

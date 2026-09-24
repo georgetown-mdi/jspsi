@@ -7,7 +7,7 @@ import { postJobInputCoverage } from "@psi/jobClient/workInputClient";
 import type { FieldValueCoverage } from "@psi/workers/nonEmptyAggregate";
 import type { WorkInputRead } from "@psi/jobClient/workInputClient";
 
-import type { CSVRow, Standardization } from "@psilink/core";
+import type { CSVRow, Standardization } from "@alcove/core";
 
 /** Debounce (ms) before a standardization edit triggers a recompute, so a burst of
  * keystrokes recomputes the full-CSV coverage once rather than per edit. Distinct

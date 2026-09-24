@@ -2,9 +2,9 @@
 """The relay's one write path to its per-exchange secrets table.
 
 coturn reads its secrets from the turn_secret table of the SQLite file
-/var/lib/psilink-relay/turndb, one (realm, value) row per key, per request. This
+/var/lib/alcove-relay/turndb, one (realm, value) row per key, per request. This
 module writes that table directly, and keeps the exchange id -> key mapping as
-a second table, psilink_exchange, in the same file, so a register, revoke, or
+a second table, alcove_exchange, in the same file, so a register, revoke, or
 sweep is one transaction and its result is the write's own return.
 register-exchange.sh, revoke-exchange.sh, sweep-exchanges.sh, verify.sh, the
 sweep unit, and registrar.py all come through here. infra/relay/README.md,
@@ -34,7 +34,7 @@ import sys
 import time
 import urllib.parse
 
-TURNDB = os.environ.get("PSILINK_RELAY_TURNDB") or "/var/lib/psilink-relay/turndb"
+TURNDB = os.environ.get("ALCOVE_RELAY_TURNDB") or "/var/lib/alcove-relay/turndb"
 
 EXCHANGE_ID = re.compile(r"[A-Za-z0-9._][A-Za-z0-9._-]{0,127}")
 KEY = re.compile(r"[0-9a-f]{64}")
@@ -43,7 +43,7 @@ HEX_RUN = re.compile(r"[0-9A-Fa-f]{64}")
 # MAX_TOKEN_MAX_AGE_DAYS in packages/core/src/config/connection.ts.
 MAX_AGE_DAYS_CEILING = 36500
 # verify.sh registers, and on exit revokes, fixed ids under this prefix.
-VERIFY_ID_PREFIX = "psilink-verify-"
+VERIFY_ID_PREFIX = "alcove-verify-"
 ID_REFUSAL = (
     "exchange-id must be 1 to 128 of [A-Za-z0-9._-], not starting with '-' and "
     "not containing a run of 64 hex characters"
@@ -61,7 +61,7 @@ BUSY_TIMEOUT_SECONDS = 10
 # scripts/relay-turn-secret-schema.test.mjs holds them against the pinned image.
 TURN_SECRET_COLUMNS = ("realm", "value")
 MAPPING_SCHEMA = (
-    "CREATE TABLE IF NOT EXISTS psilink_exchange ("
+    "CREATE TABLE IF NOT EXISTS alcove_exchange ("
     "exchange_id TEXT PRIMARY KEY NOT NULL, "
     "realm TEXT NOT NULL, "
     "key TEXT NOT NULL UNIQUE, "
@@ -119,7 +119,7 @@ def open_table(path=None):
     path = path or TURNDB
     if not os.path.exists(path):
         raise TableError(
-            "no secrets table at %s; psilink-relay.service creates it at its first start, so start it and run again"
+            "no secrets table at %s; alcove-relay.service creates it at its first start, so start it and run again"
             % path
         )
     try:
@@ -183,21 +183,21 @@ def register(conn, realm, exchange_id, key, max_age_days, now, allow_verify_id=F
     holds renews its stamp and lapse. Returns the registration."""
     check_registration(exchange_id, key, max_age_days, allow_verify_id)
     if not realm:
-        raise Refused("PSILINK_RELAY_REALM is unset")
+        raise Refused("ALCOVE_RELAY_REALM is unset")
     now = int(now)
 
     def body():
-        holder = conn.execute("SELECT exchange_id FROM psilink_exchange WHERE key = ?", (key,)).fetchone()
+        holder = conn.execute("SELECT exchange_id FROM alcove_exchange WHERE key = ?", (key,)).fetchone()
         if holder is not None and holder[0] != exchange_id:
             raise Refused("the key is already registered for exchange %s; revoke that exchange first" % holder[0])
         prior = conn.execute(
-            "SELECT realm, key FROM psilink_exchange WHERE exchange_id = ?", (exchange_id,)
+            "SELECT realm, key FROM alcove_exchange WHERE exchange_id = ?", (exchange_id,)
         ).fetchone()
         conn.execute("INSERT OR IGNORE INTO turn_secret (realm, value) VALUES (?, ?)", (realm, key))
         if prior is not None and (prior[0], prior[1]) != (realm, key):
             conn.execute("DELETE FROM turn_secret WHERE realm = ? AND value = ?", prior)
         conn.execute(
-            "INSERT OR REPLACE INTO psilink_exchange (exchange_id, realm, key, registered_at, max_age_days) "
+            "INSERT OR REPLACE INTO alcove_exchange (exchange_id, realm, key, registered_at, max_age_days) "
             "VALUES (?, ?, ?, ?, ?)",
             (exchange_id, realm, key, now, max_age_days),
         )
@@ -237,12 +237,12 @@ def revoke(conn, exchange_id):
 
     def body():
         mapped = conn.execute(
-            "SELECT realm, key FROM psilink_exchange WHERE exchange_id = ?", (exchange_id,)
+            "SELECT realm, key FROM alcove_exchange WHERE exchange_id = ?", (exchange_id,)
         ).fetchone()
         if mapped is None:
             raise Refused("exchange-id %s is not registered on this relay" % exchange_id)
         deleted = conn.execute("DELETE FROM turn_secret WHERE realm = ? AND value = ?", mapped).rowcount
-        conn.execute("DELETE FROM psilink_exchange WHERE exchange_id = ?", (exchange_id,))
+        conn.execute("DELETE FROM alcove_exchange WHERE exchange_id = ?", (exchange_id,))
         return {"exchange_id": exchange_id, "realm": mapped[0], "key_was_listed": deleted > 0}
 
     return _transaction(conn, body)
@@ -262,7 +262,7 @@ def sweep(conn, now):
 
     def body():
         lapsed = conn.execute(
-            "SELECT exchange_id, realm, key FROM psilink_exchange "
+            "SELECT exchange_id, realm, key FROM alcove_exchange "
             "WHERE max_age_days IS NOT NULL AND ? - registered_at >= max_age_days * ? "
             "ORDER BY exchange_id",
             (now, DAY_SECONDS),
@@ -270,7 +270,7 @@ def sweep(conn, now):
         revoked = []
         for exchange_id, realm, key in lapsed:
             deleted = conn.execute("DELETE FROM turn_secret WHERE realm = ? AND value = ?", (realm, key)).rowcount
-            conn.execute("DELETE FROM psilink_exchange WHERE exchange_id = ?", (exchange_id,))
+            conn.execute("DELETE FROM alcove_exchange WHERE exchange_id = ?", (exchange_id,))
             revoked.append({"exchange_id": exchange_id, "realm": realm, "key_was_listed": deleted > 0})
         return revoked
 
@@ -281,7 +281,7 @@ def status(conn, realm, exchange_id, key):
     """"both" when the mapping points the exchange at the key and the table lists
     it, "neither" when neither holds it, and "disagree" otherwise."""
     mapped = conn.execute(
-        "SELECT 1 FROM psilink_exchange WHERE exchange_id = ? AND realm = ? AND key = ?",
+        "SELECT 1 FROM alcove_exchange WHERE exchange_id = ? AND realm = ? AND key = ?",
         (exchange_id, realm, key),
     ).fetchone()
     listed = conn.execute("SELECT 1 FROM turn_secret WHERE realm = ? AND value = ?", (realm, key)).fetchone()
@@ -300,7 +300,7 @@ def forget_key(conn, realm, key):
 
     def body():
         deleted = conn.execute("DELETE FROM turn_secret WHERE realm = ? AND value = ?", (realm, key)).rowcount
-        conn.execute("DELETE FROM psilink_exchange WHERE key = ?", (key,))
+        conn.execute("DELETE FROM alcove_exchange WHERE key = ?", (key,))
         return deleted > 0
 
     return _transaction(conn, body)
@@ -352,14 +352,14 @@ def import_mapping(conn, realm, rows, now):
         imported = skipped = 0
         for exchange_id, key, registered_at, max_age_days in rows:
             known = conn.execute(
-                "SELECT 1 FROM psilink_exchange WHERE exchange_id = ? OR key = ?", (exchange_id, key)
+                "SELECT 1 FROM alcove_exchange WHERE exchange_id = ? OR key = ?", (exchange_id, key)
             ).fetchone()
             if known is not None:
                 skipped += 1
                 continue
             conn.execute("INSERT OR IGNORE INTO turn_secret (realm, value) VALUES (?, ?)", (realm, key))
             conn.execute(
-                "INSERT INTO psilink_exchange (exchange_id, realm, key, registered_at, max_age_days) VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO alcove_exchange (exchange_id, realm, key, registered_at, max_age_days) VALUES (?, ?, ?, ?, ?)",
                 (exchange_id, realm, key, registered_at if registered_at is not None else int(now), max_age_days),
             )
             imported += 1
@@ -399,7 +399,7 @@ def run_as_table_owner(path):
         owner = os.stat(path)
     except OSError:
         return
-    recorded = os.environ.get("PSILINK_RELAY_IMAGE_UID") or ""
+    recorded = os.environ.get("ALCOVE_RELAY_IMAGE_UID") or ""
     if recorded.isdigit() and int(recorded) != owner.st_uid:
         raise TableError(
             "%s is owned by uid %d, but the relay image runs as uid %s; chown it to %s so coturn can read what is written"
@@ -416,14 +416,14 @@ def run_as_table_owner(path):
 
 
 def run_command(command, args):
-    realm = os.environ.get("PSILINK_RELAY_REALM") or ""
+    realm = os.environ.get("ALCOVE_RELAY_REALM") or ""
     if command == "register":
         exchange_id, days_text = args
         key = read_key()
         max_age_days = parse_max_age_days(days_text)
-        check_registration(exchange_id, key, max_age_days, os.environ.get("PSILINK_RELAY_VERIFY_RUN") == "1")
+        check_registration(exchange_id, key, max_age_days, os.environ.get("ALCOVE_RELAY_VERIFY_RUN") == "1")
         if not realm:
-            raise Refused("PSILINK_RELAY_REALM is unset in relay.env")
+            raise Refused("ALCOVE_RELAY_REALM is unset in relay.env")
         run_as_table_owner(TURNDB)
         conn = open_table()
         print(describe_registration(register(conn, realm, exchange_id, key, max_age_days, time.time(), True)))
@@ -461,7 +461,7 @@ def run_command(command, args):
         return 0
     if command == "import-mapping":
         if not realm:
-            raise Refused("PSILINK_RELAY_REALM is unset in relay.env")
+            raise Refused("ALCOVE_RELAY_REALM is unset in relay.env")
         try:
             with open(args[0], encoding="ascii") as handle:
                 text = handle.read()

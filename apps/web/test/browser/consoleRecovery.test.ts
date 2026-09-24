@@ -26,7 +26,7 @@ vi.mock("@tanstack/react-router", async () =>
 vi.mock("@utils/clientConfig", () => ({
   deploymentProfile: () => "console" as const,
   isConsoleBuild: () => true,
-  psilinkVersion: () => undefined,
+  alcoveVersion: () => undefined,
 }));
 
 // The console disables the browser transport; nothing here drives it.
@@ -34,7 +34,7 @@ vi.mock("@psi/transport/rendezvous", async () =>
   (await import("./moduleMocks")).rendezvousMock(),
 );
 
-const ATTACHMENT_KEY = "psilink-console-last-job";
+const ATTACHMENT_KEY = "alcove-console-last-job";
 
 interface CapturedRequest {
   url: string;
@@ -76,7 +76,7 @@ const RECOVERY_HANDOFF = {
   usedSigningIdentity: false,
   template: {
     kind: "config",
-    argv: ["psilink", "exchange", "input.csv", "results.csv"],
+    argv: ["alcove", "exchange", "input.csv", "results.csv"],
     yaml: "connection:\n  channel: sftp\n",
   },
 } satisfies JobHandoff;
@@ -602,7 +602,7 @@ describe("console strand recovery panel", () => {
     await expect
       .element(
         page.getByRole("link", {
-          name: "Download record (safe to share): psilink-record-2026-07-08T14-32-00-000Z.json",
+          name: "Download record (safe to share): alcove-record-2026-07-08T14-32-00-000Z.json",
         }),
       )
       .toBeInTheDocument();
@@ -628,7 +628,7 @@ describe("console strand recovery panel", () => {
     await expect
       .element(
         page.getByRole("link", {
-          name: "Download record (safe to share): psilink-record-2026-07-08T14-32-00-000Z.json",
+          name: "Download record (safe to share): alcove-record-2026-07-08T14-32-00-000Z.json",
         }),
       )
       .toBeInTheDocument();

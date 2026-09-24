@@ -2,7 +2,7 @@
 set -Eeuo pipefail # Exit on error (inherited by functions/subshells), undefined
 IFS=$'\n\t'        # vars, and pipeline failures; stricter word splitting.
 
-# Egress firewall for the psilink dev container. Default-deny outbound, with an
+# Egress firewall for the Alcove dev container. Default-deny outbound, with an
 # allowlist holding only what the workflow needs:
 #
 #   - registry.npmjs.org, nodejs.org -- the only two hosts a real `npm ci` trace

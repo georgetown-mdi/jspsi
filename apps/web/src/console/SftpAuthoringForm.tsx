@@ -17,7 +17,7 @@ import {
 } from "@mantine/core";
 import { IconAlertCircle } from "@tabler/icons-react";
 
-import { sanitizeForDisplay } from "@psilink/core";
+import { sanitizeForDisplay } from "@alcove/core";
 
 import { useDeferredAnnouncement } from "@components/useDeferredAnnouncement";
 
@@ -461,7 +461,7 @@ function CredentialField({
   return (
     <Stack gap="xs">
       <Radio.Group
-        label="How psilink signs in"
+        label="How Alcove signs in"
         value={values.method}
         onChange={(value) =>
           onChange({

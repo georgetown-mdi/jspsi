@@ -8,7 +8,7 @@ import {
 } from "@psi/jobClient/workInputClient";
 import { consoleCoverageProvider } from "@components/useNonEmptyRates";
 
-import type { Standardization } from "@psilink/core";
+import type { Standardization } from "@alcove/core";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {

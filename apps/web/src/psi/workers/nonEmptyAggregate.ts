@@ -1,8 +1,8 @@
-import { StandardizedField } from "@psilink/core";
+import { StandardizedField } from "@alcove/core";
 
 import { isStepValid } from "../standardizationAuthoring";
 
-import type { CSVRow, Standardization } from "@psilink/core";
+import type { CSVRow, Standardization } from "@alcove/core";
 
 /**
  * Whole-CSV per-field value coverage: the silent-empty defense.

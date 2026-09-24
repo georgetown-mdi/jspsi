@@ -10,9 +10,9 @@ import {
   sanitizeForDisplay,
   snakeizeKey,
   snakeizeKeys,
-} from "@psilink/core";
+} from "@alcove/core";
 
-import type { LinkageTerms } from "@psilink/core";
+import type { LinkageTerms } from "@alcove/core";
 import type { ZodError } from "zod";
 
 /**
@@ -21,7 +21,7 @@ import type { ZodError } from "zod";
  * React-free, so the round-trip is the tested boundary.
  *
  * Export emits the snake_case on-disk form ({@link snakeizeKeys}), the same
- * shape `psilink.yaml` uses, and re-imports cleanly through
+ * shape `alcove.yaml` uses, and re-imports cleanly through
  * {@link safeParseLinkageTerms}. Import is the only path by which
  * authored-elsewhere terms reach the editor, and it is the single validation
  * source; there is no verbatim-embed path, by design.
@@ -84,7 +84,7 @@ export function exportLinkageTerms(
  * The linkage-terms value inside a parsed document: the whole document when
  * it IS a terms document, or its `linkage_terms` block when it is an exchange
  * configuration wrapping one. Mirrors the CLI's `readConfigLinkageSource`
- * (both spellings), so a pasted `psilink.yaml` reads the same as
+ * (both spellings), so a pasted `alcove.yaml` reads the same as
  * `--config-file`; only that one key is read, so nothing else in the
  * configuration is parsed or validated here. A document holding no such key
  * passes through unchanged.

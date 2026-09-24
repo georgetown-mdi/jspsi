@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { authoredLinkageFields } from "@psilink/core";
+import { authoredLinkageFields } from "@alcove/core";
 
 import { buildAdvancedTerms } from "@psi/authoring/advancedInvite";
 
@@ -1026,7 +1026,7 @@ describe("transport chooser copy by deployment", () => {
     expect(copy.filedropDescription).toContain("Saves an exchange file");
     expect(copy.browserDescription).toContain("Your browsers connect directly");
     expect(copy.capabilityNote).toBe(
-      "This browser runs live exchanges only; SFTP and shared-directory exchanges run in the psilink command-line tool.",
+      "This browser runs live exchanges only; SFTP and shared-directory exchanges run in the Alcove command-line tool.",
     );
   });
 
@@ -1075,7 +1075,7 @@ describe("transport chooser copy by deployment", () => {
   test("a hosted build keeps SFTP a command-line save", () => {
     const copy = transportChooserCopy(false, false, false);
     expect(copy.sftpLabel).toBe(
-      "Over SFTP, run by the psilink command-line tool",
+      "Over SFTP, run by the Alcove command-line tool",
     );
     expect(copy.sftpDescription).toContain("Saves an exchange file");
   });
@@ -1090,7 +1090,7 @@ describe("transport chooser copy by deployment", () => {
   test("the explicit save-a-file choice returns SFTP to the CLI copy", () => {
     const copy = transportChooserCopy(true, false, false, true);
     expect(copy.sftpLabel).toBe(
-      "Over SFTP, run by the psilink command-line tool",
+      "Over SFTP, run by the Alcove command-line tool",
     );
     expect(copy.sftpDescription).toContain("Saves an exchange file");
   });

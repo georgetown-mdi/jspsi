@@ -2,7 +2,7 @@ import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 import path from "node:path";
 
-import { getDefaultLinkageTerms } from "@psilink/core";
+import { getDefaultLinkageTerms } from "@alcove/core";
 import { parse as parseYaml } from "yaml";
 
 import { spawnExchangeJob, spawnZeroSetupJob } from "@jobs/cliDriver";
@@ -16,7 +16,7 @@ import type {
   JobZeroSetupSftpIntent,
 } from "@jobs/intentSchemas";
 import type { JobSftpServerEntry } from "@jobs/sftpServer";
-import type { LinkageTerms } from "@psilink/core";
+import type { LinkageTerms } from "@alcove/core";
 
 /** The stub CLI the driver tests point JOB_CLI_BINARY at. */
 export const STUB_CLI_PATH = fileURLToPath(
@@ -105,7 +105,7 @@ export function testSftpServerEntry(): JobSftpServerEntry {
     port: 2222,
     username: "linkage",
     path: "/exchange",
-    password: "@/etc/psilink/prod-east-password",
+    password: "@/etc/alcove/prod-east-password",
     hostKeyFingerprint: TEST_HOST_KEY_FINGERPRINT,
   };
 }
@@ -151,12 +151,12 @@ export function validZeroSetupSftpIntent(
 export function tempDataRoot(label: string): string {
   return path.join(
     process.env.TMPDIR ?? "/tmp",
-    `psilink-jobs-${label}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    `alcove-jobs-${label}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
   );
 }
 
 /**
- * The composed psilink.yaml's `connection.server` block, read as data.
+ * The composed alcove.yaml's `connection.server` block, read as data.
  *
  * Parsed rather than string-matched because the emitter folds a long scalar
  * across lines: a credential ref rooted under a long TMPDIR -- macOS hands out
@@ -173,11 +173,11 @@ export function composedServer(composed: string): Record<string, unknown> {
   };
   const server = parsed.connection?.server;
   if (server === undefined)
-    throw new Error("composed psilink.yaml has no connection.server");
+    throw new Error("composed alcove.yaml has no connection.server");
   return server;
 }
 
-/** The `connection` block of a composed `psilink.yaml`, for the filedrop channel's
+/** The `connection` block of a composed `alcove.yaml`, for the filedrop channel's
  * assertions (which hold their directories at the top level rather than under a
  * `server` block). */
 export function composedConnection(composed: string): Record<string, unknown> {
@@ -186,7 +186,7 @@ export function composedConnection(composed: string): Record<string, unknown> {
   };
   const connection = parsed.connection;
   if (connection === undefined)
-    throw new Error("composed psilink.yaml has no connection");
+    throw new Error("composed alcove.yaml has no connection");
   return connection;
 }
 
@@ -276,8 +276,8 @@ export async function captureExchangeArgv(args: {
     (onTerminal) =>
       spawnExchangeJob({
         binaryPath: STUB_CLI_PATH,
-        configPath: path.join(workdir, "psilink.yaml"),
-        keyPath: path.join(workdir, ".psilink.key"),
+        configPath: path.join(workdir, "alcove.yaml"),
+        keyPath: path.join(workdir, ".alcove.key"),
         inputPath: path.join(workdir, "input.csv"),
         outputPath: path.join(workdir, "output.csv"),
         recordPath: path.join(workdir, "record.json"),

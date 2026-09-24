@@ -40,7 +40,7 @@ const CHILD_JSON_PREFIX = "CHILD_JSON:";
 // AES-GCM key and a 12-byte IV carrying the frame sequence number.
 const AES_KEY_BYTES = 32;
 const AES_IV_BYTES = 12;
-const AES_PLAINTEXT = "psilink fips probe frame";
+const AES_PLAINTEXT = "Alcove fips probe frame";
 
 const PREFIX = process.env.PROBE_PREFIX ?? "/opt/fips-probe/openssl";
 const PROVIDER_TAG = process.env.PROBE_OPENSSL_TAG ?? "unknown";

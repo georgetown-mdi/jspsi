@@ -32,23 +32,23 @@
 # refusal. A probe that could not be asked at all reports UNCLEAR and fails the
 # script, because an unanswered question is not a pass.
 #
-# Meant to run at install and on psilink-relay-verify.timer.
+# Meant to run at install and on alcove-relay-verify.timer.
 set -uo pipefail
 
-ETC=/etc/psilink-relay
-ENV_FILE="${PSILINK_RELAY_ENV_FILE:-$ETC/relay.env}"
+ETC=/etc/alcove-relay
+ENV_FILE="${ALCOVE_RELAY_ENV_FILE:-$ETC/relay.env}"
 # mint-credential.sh is a sibling of this script wherever it sits, which is what
-# install.sh and the unit files both mean by /opt/psilink-relay.
+# install.sh and the unit files both mean by /opt/alcove-relay.
 HERE="$(cd "$(dirname "$0")" && pwd)"
-IMAGE="${PSILINK_RELAY_IMAGE:-localhost/psilink-relay:installed}"
+IMAGE="${ALCOVE_RELAY_IMAGE:-localhost/alcove-relay:installed}"
 
 die() { printf 'ABORTING: %s\n' "$*" >&2; exit 1; }
 
 [ -f "$ENV_FILE" ] || die "no $ENV_FILE; this host has not been installed as a relay"
 # shellcheck disable=SC1090
 . "$ENV_FILE"
-REALM="${PSILINK_RELAY_REALM:-}"
-[ -n "$REALM" ] || die "PSILINK_RELAY_REALM is unset in $ENV_FILE"
+REALM="${ALCOVE_RELAY_REALM:-}"
+[ -n "$REALM" ] || die "ALCOVE_RELAY_REALM is unset in $ENV_FILE"
 
 # EC2 does not hairpin an instance's traffic back to its own Elastic IP: a probe
 # run ON the relay box against the public name gets connection-refused on every
@@ -61,13 +61,13 @@ REALM="${PSILINK_RELAY_REALM:-}"
 # to the instance's private address; the timer-driven run leaves it at the
 # default (REALM) because it should fail if the public path -- the one a partner
 # actually uses -- is what broke.
-CONNECT="${PSILINK_RELAY_VERIFY_CONNECT:-$REALM}"
+CONNECT="${ALCOVE_RELAY_VERIFY_CONNECT:-$REALM}"
 
 # The runtime install.sh chose and recorded. A host installed by hand may carry
 # no record of it, so fall back to whichever is on PATH rather than assuming one:
 # the probes below run the relay's own image, and the wrong binary is a run that
 # never happens rather than a question answered.
-RUNTIME="${PSILINK_RELAY_RUNTIME:-}"
+RUNTIME="${ALCOVE_RELAY_RUNTIME:-}"
 if [ -z "$RUNTIME" ]; then
   for candidate in podman docker; do
     if command -v "$candidate" >/dev/null 2>&1; then
@@ -76,8 +76,8 @@ if [ -z "$RUNTIME" ]; then
     fi
   done
 fi
-[ -n "$RUNTIME" ] || die "no container runtime on this host and PSILINK_RELAY_RUNTIME is unset in $ENV_FILE; the allocation probes run the relay's image"
-command -v "$RUNTIME" >/dev/null 2>&1 || die "PSILINK_RELAY_RUNTIME names $RUNTIME, which is not on PATH"
+[ -n "$RUNTIME" ] || die "no container runtime on this host and ALCOVE_RELAY_RUNTIME is unset in $ENV_FILE; the allocation probes run the relay's image"
+command -v "$RUNTIME" >/dev/null 2>&1 || die "ALCOVE_RELAY_RUNTIME names $RUNTIME, which is not on PATH"
 
 # The wait budget the listener retry below spends, validated up front and not
 # where it is read: under `set -uo pipefail` (no -e), a non-numeric value
@@ -85,10 +85,10 @@ command -v "$RUNTIME" >/dev/null 2>&1 || die "PSILINK_RELAY_RUNTIME names $RUNTI
 # iteration rather than halting the script, so the loop would retry forever
 # instead of reporting a bound failure. Measured 2026-09-03. Mirrors the
 # case-statement validation this reference already uses for its other knobs
-# (PSILINK_RELAY_RUNTIME in install.sh).
-WAIT="${PSILINK_RELAY_VERIFY_WAIT:-30}"
+# (ALCOVE_RELAY_RUNTIME in install.sh).
+WAIT="${ALCOVE_RELAY_VERIFY_WAIT:-30}"
 case "$WAIT" in
-  ''|*[!0-9]*) die "PSILINK_RELAY_VERIFY_WAIT is '$WAIT'; set it to a non-negative integer of seconds" ;;
+  ''|*[!0-9]*) die "ALCOVE_RELAY_VERIFY_WAIT is '$WAIT'; set it to a non-negative integer of seconds" ;;
 esac
 
 PASS=0; FAIL=0; UNCLEAR=0
@@ -102,7 +102,7 @@ report() {
   return 0
 }
 
-printf 'psilink relay verification: %s\n' "$REALM"
+printf 'Alcove relay verification: %s\n' "$REALM"
 [ "$CONNECT" = "$REALM" ] || printf '(connecting via %s)\n' "$CONNECT"
 printf '\n'
 
@@ -118,7 +118,7 @@ waited=0
 until timeout 1 bash -c "exec 3<>\"/dev/tcp/$CONNECT/443\"" 2>/dev/null; do
   waited=$((waited + 1))
   if [ "$waited" -ge "$WAIT" ]; then
-    report fail "no TCP listener at $CONNECT:443 after ${WAIT}s" "PSILINK_RELAY_VERIFY_WAIT to allow longer"
+    report fail "no TCP listener at $CONNECT:443 after ${WAIT}s" "ALCOVE_RELAY_VERIFY_WAIT to allow longer"
     break
   fi
   sleep 1
@@ -149,7 +149,7 @@ certificate_report() {
   if printf '%s' "$transcript" | openssl x509 -noout -checkend 604800 >/dev/null 2>&1; then
     report pass "the certificate is valid for at least another 7 days"
   else
-    report fail "the certificate expires within 7 days" "psilink-relay-cert.timer should have renewed it"
+    report fail "the certificate expires within 7 days" "alcove-relay-cert.timer should have renewed it"
   fi
 }
 
@@ -171,9 +171,9 @@ fi
 # --- keys for this run --------------------------------------------------------
 # Two exchanges registered under fixed ids, so a run that died before its cleanup
 # is replaced rather than accumulated by the next one.
-VERIFY_A=psilink-verify-a
-VERIFY_B=psilink-verify-b
-VERIFY_R=psilink-verify-registrar
+VERIFY_A=alcove-verify-a
+VERIFY_B=alcove-verify-b
+VERIFY_R=alcove-verify-registrar
 KEY_A="$(openssl rand -hex 32)"
 KEY_B="$(openssl rand -hex 32)"
 KEY_R="$(openssl rand -hex 32)"
@@ -198,7 +198,7 @@ TABLE_READY=1
 # refuses from any other caller.
 register() {
   local out
-  if ! out="$(printf '%s\n' "$2" | PSILINK_RELAY_VERIFY_RUN=1 "$HERE/register-exchange.sh" "$1" none 2>&1)"; then
+  if ! out="$(printf '%s\n' "$2" | ALCOVE_RELAY_VERIFY_RUN=1 "$HERE/register-exchange.sh" "$1" none 2>&1)"; then
     report fail "could not register $1 for this run" "$(printf '%s' "$out" | tr '\n' ' ')"
     TABLE_READY=0
   fi
@@ -227,7 +227,7 @@ run_user() { printf '%s:%s' "$(( $(date -u +%s) + 600 ))" "$1"; }
 # From the static secret where the host holds one, so that path stays driven;
 # from the first registered key where it does not.
 TURN_USER=""; TURN_CRED=""
-SECRET_FILE="${PSILINK_RELAY_SECRET_FILE:-$ETC/static-auth-secret}"
+SECRET_FILE="${ALCOVE_RELAY_SECRET_FILE:-$ETC/static-auth-secret}"
 if [ -f "$SECRET_FILE" ]; then
   if CRED_OUT="$("$HERE/mint-credential.sh" verify 600 2>&1)"; then
     TURN_USER="$(printf '%s' "$CRED_OUT" | sed -n 's/^username:  *//p' | head -1)"
@@ -265,7 +265,7 @@ allocated() {
 if [ -n "$TURN_USER" ] && [ -n "$TURN_CRED" ]; then
   # A peer this box can actually reach. Without one the probe covers the
   # allocation and not the data leg, which it says rather than implies.
-  PEER="${PSILINK_RELAY_VERIFY_PEER:-}"
+  PEER="${ALCOVE_RELAY_VERIFY_PEER:-}"
   if [ -n "$PEER" ]; then
     OUT="$(uclient "$PEER")"
     if printf '%s' "$OUT" | grep -qi 'success\|total transmit time'; then
@@ -276,7 +276,7 @@ if [ -n "$TURN_USER" ] && [ -n "$TURN_CRED" ]; then
   else
     OUT="$(uclient 203.0.113.9)"
     if allocated "$OUT"; then
-      report pass "the relay allocated (no PSILINK_RELAY_VERIFY_PEER set, so no data leg was exercised)"
+      report pass "the relay allocated (no ALCOVE_RELAY_VERIFY_PEER set, so no data leg was exercised)"
     else
       report fail "no allocation success or transmit-time close was observed" "$(printf '%s' "$OUT" | tr '\n' ' ' | cut -c1-200)"
     fi
@@ -350,14 +350,14 @@ fi
 # HTTPS to the realm's name, and the token and key reach curl on stdin, never
 # its command line. Judged by the status code and by reading the mapping and the
 # table back, never by the response text.
-REGISTRAR_TOKEN_FILE="${PSILINK_RELAY_REGISTRAR_TOKEN_FILE:-$ETC/registrar-token}"
-REGISTRAR_PORT="${PSILINK_RELAY_REGISTRAR_PORT:-8443}"
+REGISTRAR_TOKEN_FILE="${ALCOVE_RELAY_REGISTRAR_TOKEN_FILE:-$ETC/registrar-token}"
+REGISTRAR_PORT="${ALCOVE_RELAY_REGISTRAR_PORT:-8443}"
 registrar_status() {
   local method="$1" token="$2" body="$3"
   {
     printf 'url = "https://%s:%s/exchanges/%s"\n' "$REALM" "$REGISTRAR_PORT" "$VERIFY_R"
     printf 'request = "%s"\n' "$method"
-    printf 'header = "Psilink-Relay-Verify-Run: 1"\n'
+    printf 'header = "Alcove-Relay-Verify-Run: 1"\n'
     [ -z "$token" ] || printf 'header = "Authorization: Bearer %s"\n' "$token"
     if [ -n "$body" ]; then
       printf 'header = "Content-Type: application/json"\n'
@@ -381,7 +381,7 @@ expect_status() {
   if [ "$got" = "$want" ]; then
     report pass "$label was answered $want"
   elif [ -z "$got" ] || [ "$got" = 000 ]; then
-    report unclear "$label got no answer from $CONNECT:$REGISTRAR_PORT" "is psilink-relay-registrar.service running? journalctl -u psilink-relay-registrar.service"
+    report unclear "$label got no answer from $CONNECT:$REGISTRAR_PORT" "is alcove-relay-registrar.service running? journalctl -u alcove-relay-registrar.service"
   else
     report fail "$label was answered $got, not $want"
   fi

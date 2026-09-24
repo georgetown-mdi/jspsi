@@ -1,5 +1,5 @@
 /**
- * The two files `psilink update` and `psilink apply` read: the established
+ * The two files `alcove update` and `alcove apply` read: the established
  * partnership's configuration and the key file holding the shared secret a
  * terms update is authenticated under. Neither command writes the key file.
  */
@@ -12,8 +12,8 @@ import {
   operatorSuppliedText,
   parseExchangeSpec,
   UsageError,
-} from "@psilink/core";
-import type { ExchangeSpec } from "@psilink/core";
+} from "@alcove/core";
+import type { ExchangeSpec } from "@alcove/core";
 
 import {
   configWithNamedRuleSetRules,
@@ -41,8 +41,8 @@ function refusalAbout(
  * one of its two files is missing.
  */
 const ESTABLISHED_PARTNERSHIP_REMEDY =
-  " A terms update changes a partnership already set up with 'psilink " +
-  "invite' and 'psilink accept'; run it where that partnership's " +
+  " A terms update changes a partnership already set up with 'alcove " +
+  "invite' and 'alcove accept'; run it where that partnership's " +
   "configuration and key file are, or name them with --config-file and " +
   "--key-file.";
 
@@ -67,7 +67,7 @@ export function readPartnershipTermsSource(
 }
 
 /**
- * The partnership's configuration at `configPath`, read as `psilink exchange`
+ * The partnership's configuration at `configPath`, read as `alcove exchange`
  * reads it: through the sensitive-file parse, with a rule set it names taken
  * from that set, and validated against the exchange schema.
  *
@@ -128,8 +128,8 @@ export function readPartnershipSecret(keyPath: string): string {
       keyPath,
       ` expired at ${keyFile.expires ?? "(unknown)"}, so it cannot ` +
         "authenticate a terms update. Re-establish the partnership instead: " +
-        "remove the key file on both sides, then one party runs 'psilink " +
-        "invite' and the other 'psilink accept'.",
+        "remove the key file on both sides, then one party runs 'alcove " +
+        "invite' and the other 'alcove accept'.",
     );
   return keyFile.sharedSecret;
 }

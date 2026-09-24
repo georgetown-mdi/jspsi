@@ -1,7 +1,7 @@
 /// <reference types="@vitest/browser-playwright/context" />
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { generateSharedSecret, getDefaultLinkageTerms } from "@psilink/core";
+import { generateSharedSecret, getDefaultLinkageTerms } from "@alcove/core";
 
 import { page, userEvent } from "vitest/browser";
 
@@ -115,7 +115,7 @@ describe("store opens but the read fails", () => {
     // The shared import stands here in place of the configuration-only one a
     // readable list offers.
     expect(
-      page.getByRole("button", { name: "Import a psilink.yaml" }).query(),
+      page.getByRole("button", { name: "Import an alcove.yaml" }).query(),
     ).toBeNull();
   });
 });
@@ -168,7 +168,7 @@ describe("importing a backup of an exchange handed off from here", () => {
       page.elementLocator(
         document.querySelector('input[type="file"]') as HTMLElement,
       ),
-      new File([bytes], "psilink-managed-backup-2026-07-14.json", {
+      new File([bytes], "alcove-managed-backup-2026-07-14.json", {
         type: "application/json",
       }),
     );
@@ -261,7 +261,7 @@ describe("importing a backup whose stored copy cannot be read here", () => {
       page.elementLocator(
         document.querySelector('input[type="file"]') as HTMLElement,
       ),
-      new File([bytes], "psilink-managed-backup-2026-07-14.json", {
+      new File([bytes], "alcove-managed-backup-2026-07-14.json", {
         type: "application/json",
       }),
     );

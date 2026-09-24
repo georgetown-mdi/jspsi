@@ -13,13 +13,13 @@ describe("sftpEndpointForConnection", () => {
       sftpEndpointForConnection({
         host: "sftp.example.gov",
         port: 2222,
-        path: "/exchanges/psilink",
+        path: "/exchanges/alcove",
       }),
     ).toStrictEqual({
       channel: "sftp",
       host: "sftp.example.gov",
       port: 2222,
-      path: "/exchanges/psilink",
+      path: "/exchanges/alcove",
     });
   });
 

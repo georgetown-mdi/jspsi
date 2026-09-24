@@ -25,7 +25,7 @@ import {
   assembleExchangeSpec,
   connectionFromLocator,
   maxCodeUnits,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { z } from "zod";
 
@@ -39,11 +39,11 @@ import type {
   OutboundPayloadConsent,
   OwnColumnSelection,
   WebRTCExchangeLocator,
-} from "@psilink/core";
+} from "@alcove/core";
 import type { ZodType } from "zod";
 
 /**
- * The single recognized `schemaVersion` literal for the v3 record. A reader
+ * The single recognized `schemaVersion` literal for the v4 record. A reader
  * rejects any other value rather than migrating it (the reader-rejects-unknown
  * rule the exchange-record and verification-keys files follow), the earlier
  * literals among them: a v1 record has no
@@ -55,10 +55,10 @@ import type { ZodType } from "zod";
  * a new literal under a new version, never an existing version holding
  * speculative fields.
  */
-export const MANAGED_EXCHANGE_SCHEMA_VERSION = "psilink-managed-exchange/v3";
+export const MANAGED_EXCHANGE_SCHEMA_VERSION = "alcove-managed-exchange/v4";
 
 /**
- * The single recognized `artifactVersion` literal for the v2 export/import
+ * The single recognized `artifactVersion` literal for the v3 export/import
  * artifact (see {@link ./managedExchangeArtifact.ts}). Distinct from
  * {@link MANAGED_EXCHANGE_SCHEMA_VERSION}: the artifact is a separate on-disk
  * format (the embedded document plus the key pair plus the local block), so it
@@ -72,7 +72,7 @@ export const MANAGED_EXCHANGE_SCHEMA_VERSION = "psilink-managed-exchange/v3";
  * taken from a build that matches.
  */
 export const MANAGED_EXCHANGE_ARTIFACT_VERSION =
-  "psilink-managed-exchange-backup/v2";
+  "alcove-managed-exchange-backup/v3";
 
 /**
  * The `artifactVersion` literal of the artifact format this one replaced. Every
@@ -83,7 +83,7 @@ export const MANAGED_EXCHANGE_ARTIFACT_VERSION =
  * between.
  */
 export const MANAGED_EXCHANGE_PREVIOUS_ARTIFACT_VERSION =
-  "psilink-managed-exchange-backup/v1";
+  "alcove-managed-exchange-backup/v2";
 
 /**
  * Upper bound on the operator's {@link ManagedExchangeRecord.label}, in
@@ -309,7 +309,7 @@ export const NO_STANDING_CONDITION: ManagedStandingConditionNone = {
  * docs/spec/MANAGED_EXCHANGE_RECORD.md for the field-by-field shape.
  */
 export interface ManagedExchangeRecord {
-  /** The single recognized v3 literal; a reader rejects an unrecognized value
+  /** The single recognized v4 literal; a reader rejects an unrecognized value
    * rather than migrating (see {@link MANAGED_EXCHANGE_SCHEMA_VERSION}). */
   schemaVersion: typeof MANAGED_EXCHANGE_SCHEMA_VERSION;
   /** Locally-generated identifier for this managed exchange, distinct from any
@@ -355,7 +355,7 @@ export interface ManagedExchangeRecord {
    * {@link SHARED_SECRET_REGEX}. The one at-rest secret in the record.
    *
    * Absent in a CONFIGURATION-ONLY record -- one imported from a command-line
-   * `psilink.yaml` whose `.psilink.key` stayed on the machine that runs it. Such
+   * `alcove.yaml` whose `.alcove.key` stayed on the machine that runs it. Such
    * a record holds settings to edit and export, and its absent secret is what
    * withholds every run here: {@link runnableManagedExchange} is the one
    * narrowing to the record shape the run, rotation, re-invite, and backup paths
@@ -493,10 +493,10 @@ const persistedExchangeFileSchema = ExchangeSpecSchema.refine(
 );
 
 /**
- * The `.psilink.key` field pair: the current shared secret and, when a bound is in
+ * The `.alcove.key` field pair: the current shared secret and, when a bound is in
  * force, the `expires` instant it lapses at. The export/import artifact's key half
  * and the command-line export's key file are both this shape, so a record's secret
- * half maps onto a valid `.psilink.key` and one read back maps onto a record.
+ * half maps onto a valid `.alcove.key` and one read back maps onto a record.
  */
 export interface ManagedExchangeKeyFields {
   /** The current rotated shared secret (base64url, 43 chars / 32 bytes). */
@@ -611,7 +611,7 @@ const ManagedExchangeRecordSchema: ZodType<ManagedExchangeRecord> = z
  * secret, or a document holding an `authentication` block, rather than migrating
  * or silently accepting -- the reader-rejects-unknown rule.
  *
- * @throws {ZodError} if the value is not a valid v3 record.
+ * @throws {ZodError} if the value is not a valid v4 record.
  */
 export function parseManagedExchangeRecord(
   raw: unknown,
@@ -678,7 +678,7 @@ export function runnableManagedExchangeOrRefuse(
 }
 
 /**
- * A per-entry read of the stored list: the entries that parsed as v3 records, and
+ * A per-entry read of the stored list: the entries that parsed as v4 records, and
  * the stored keys of the entries that did not. The unreadable half is the STORED
  * KEY rather than the entry's own `id`, which a failed parse leaves untrusted --
  * the same reason the diagnostic read's unreadable marker holds the key (see
@@ -758,7 +758,7 @@ export interface ManagedExchangeDiagnosticEssentials {
  * {@link parseManagedExchangeRecord} throws here exactly as it would on the
  * strict read; the caller catches that to mark the entry unreadable.
  *
- * @throws {ZodError} if the value is not a valid v3 record.
+ * @throws {ZodError} if the value is not a valid v4 record.
  */
 export function diagnoseManagedExchangeRecord(
   raw: unknown,
@@ -878,7 +878,7 @@ export interface NewManagedExchange {
 
 /**
  * Build a complete {@link ManagedExchangeRecord} from the caller's fields: assign
- * a fresh `id` and the v3 `schemaVersion`, then validate the whole record through
+ * a fresh `id` and the v4 `schemaVersion`, then validate the whole record through
  * the schema so the label cap, the credential-free document, and the secret
  * format are enforced at write. The optional local fields are attached only when
  * present, so an absent policy is an omitted key rather than an explicit
@@ -985,7 +985,7 @@ export function applyManagedExchangeReinviteRotation(
 }
 
 /**
- * Lay a record read from a command-line `psilink.yaml` and its `.psilink.key`
+ * Lay a record read from a command-line `alcove.yaml` and its `.alcove.key`
  * over the stored record it revives, producing a validated new record: the
  * document, `side`, max-age policy, and key pair come from the pair, an absent
  * `expires` or policy clearing the stored one, and everything the pair has no

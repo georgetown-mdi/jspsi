@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import { OutgoingMessage } from "node:http";
 import { Socket } from "node:net";
 
-import { parseBoundedJson } from "@psilink/core/untrusted-text";
+import { parseBoundedJson } from "@alcove/core/untrusted-text";
 import { WebSocketServer as Server } from "ws";
 
 import { Errors, MessageType } from "../../enums.ts";
@@ -52,7 +52,7 @@ export const MAX_SIGNALING_PAYLOAD_BYTES = 256 * 1024;
 // id is capped only incidentally by Node's ~16 KiB HTTP header-size limit on the
 // upgrade URL, not by any application bound -- and the id is the one
 // attacker-controlled string the server both retains in the `clients` map and
-// writes onto every frame it relays. 256 is generous: psilink's rendezvous ids are
+// writes onto every frame it relays. 256 is generous: Alcove's rendezvous ids are
 // 32 hex chars (`deriveRendezvousPeerId`) and a PeerJS default id is a UUID (~36),
 // so the cap sits ~7x above any legitimate id and refuses no real peer, yet well
 // over an order of magnitude below the incidental header limit (~64x).

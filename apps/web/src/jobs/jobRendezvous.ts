@@ -5,7 +5,7 @@ import {
   DEFAULT_MAX_DISPLAY_LENGTH,
   pathsResolveToSameDir,
   renderedDisplayCost,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { JOB_DATA_ROOT_ENV } from "./gate";
 import { browseSegment } from "./workInputName";
@@ -54,7 +54,7 @@ const JOB_RENDEZVOUS_NAME_ENV = "JOB_RENDEZVOUS_NAME";
  *
  * Both legs need distinct names to mint an invitation: core refuses a filedrop
  * endpoint whose two halves resolve alike, so two mounts whose last segments
- * coincide (e.g. `/mnt/in/psilink` and `/mnt/out/psilink`) need this variable set.
+ * coincide (e.g. `/mnt/in/alcove` and `/mnt/out/alcove`) need this variable set.
  *
  * Server-side configuration; reaches the partner in the invitation's locator and
  * accept kit.

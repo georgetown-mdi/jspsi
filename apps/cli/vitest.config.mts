@@ -10,7 +10,7 @@ import { configDefaults, defineConfig } from "vitest/config";
 // The console sentinel and its captured-log prerequisite, shared by every
 // project that runs a file under test/integration. Order is load-bearing:
 // capturedLogs MUST precede consoleSentinel. consoleSentinel's import chain pulls
-// in @psilink/core, whose module-load loggers (e.g. getLogger("cleaning") in
+// in @alcove/core, whose module-load loggers (e.g. getLogger("cleaning") in
 // standardization.ts) are materialized on that first import; if the sentinel
 // setup ran first, those loggers would bind to the bare factory before the
 // interceptor exists and bypass capture for the rest of the run.
@@ -57,7 +57,7 @@ export default defineConfig({
     // than per project, so every project below -- and every project added later
     // -- is covered without registering anything of its own.
     //
-    // The dist guard fails the run when the built @psilink/core these suites
+    // The dist guard fails the run when the built @alcove/core these suites
     // import is older than its sources, instead of letting the run report
     // failures that belong to the build. The reporter names every skipped test
     // at the end of the run, so a leg that quietly stopped running is visible
@@ -109,7 +109,7 @@ export default defineConfig({
           // Scoped to this project so the unit project is unaffected.
           setupFiles: integrationSetupFiles,
           // Starts the SFTP test server (the in-process backend by default, or
-          // the native sshd backend when PSILINK_SFTP_BACKEND=native) before the
+          // the native sshd backend when ALCOVE_SFTP_BACKEND=native) before the
           // suite and stops it after, handing the conformance tests its
           // connection details and served directory. Scoped to this project, so
           // the unit project (and the default `test` script) starts no server.

@@ -16,7 +16,7 @@ import {
   AlgorithmSchema,
   LinkageStrategySchema,
   sanitizeForDisplay,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   LINKAGE_STRATEGY_LABEL,
@@ -48,7 +48,7 @@ import type {
   InviterEditor,
   KeyVerdict,
 } from "@psi/inviterEditor";
-import type { Algorithm, LinkageStrategy, LinkageTerms } from "@psilink/core";
+import type { Algorithm, LinkageStrategy, LinkageTerms } from "@alcove/core";
 import type { AdvancedInviteDraft } from "@psi/authoring/advancedInvite";
 
 /** The guided-list badge copy and CSS class for each per-key verdict

@@ -1,5 +1,5 @@
 {
-  "name": "@psilink/peerjs-broker",
+  "name": "@alcove/peerjs-broker",
   "version": "0.1.0",
   "description": "PeerJS-compatible WebSocket signaling broker for WebRTC rendezvous",
   "license": "SEE LICENSE IN LICENSE",
@@ -25,7 +25,7 @@
     "webrtc"
   ],
   "dependencies": {
-    "@psilink/core": "file:../../packages/core",
+    "@alcove/core": "file:../../packages/core",
     "ws": "^8.21.3"
   },
   "devDependencies": {

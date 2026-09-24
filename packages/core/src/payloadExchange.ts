@@ -334,7 +334,7 @@ export function preparePayload(
  * below compose through {@link compatibilityMessage}
  * (`config/compatibilityMessage.ts`), as `validateCompatibility`'s
  * payload-mismatch messages do: each name stands in its own delimited run, so
- * none can forge the bracketed list's partition or a clause of psilink's own,
+ * none can forge the bracketed list's partition or a clause of Alcove's own,
  * and the display escape still runs once where the error is rendered.
  *
  * @param output This party's own output declaration, from the same
@@ -481,7 +481,7 @@ export function assertDisclosedNamesCarriable(
  * `committed` is the payload column set (in this party's OWN namespace) that
  * it PROMISED to disclose to its partner when the exchange was established --
  * the invitation's `disclosedPayloadColumns`, persisted locally as the
- * exchange config's `disclosedPayloadColumns` by every `psilink invite` mint
+ * exchange config's `disclosedPayloadColumns` by every `alcove invite` mint
  * path that publishes it. The partner locked that exact set in as what it
  * will RECEIVE (its `expectedPayloadColumns`) and enforces it at runtime via
  * {@link reconcileReceivedPayload}. This check runs on the COMMITTING party

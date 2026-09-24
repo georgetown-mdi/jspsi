@@ -14,7 +14,7 @@ import {
   CanonicalEncodingError,
   canonicalString,
   partnerBoundTerms,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import type { ManagedExchangeRecord } from "./managedExchangeRecord";
 

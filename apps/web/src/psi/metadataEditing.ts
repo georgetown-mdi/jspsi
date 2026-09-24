@@ -1,11 +1,11 @@
-import { disclosedColumnNames, inferMetadata } from "@psilink/core";
+import { disclosedColumnNames, inferMetadata } from "@alcove/core";
 
 import type {
   ColumnMetadata,
   Metadata,
   Payload,
   SemanticType,
-} from "@psilink/core";
+} from "@alcove/core";
 
 /**
  * The pure model behind the web metadata grid: the collapsed disclosure control,

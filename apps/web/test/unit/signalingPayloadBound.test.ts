@@ -3,13 +3,13 @@ import { createServer } from "node:http";
 import { afterEach, describe, expect, test } from "vitest";
 import { WebSocketServer as WsServer } from "ws";
 
-import { JsonStructureBoundError } from "@psilink/core";
+import { JsonStructureBoundError } from "@alcove/core";
 
 import {
   MAX_SIGNALING_PAYLOAD_BYTES,
   WebSocketServer,
-} from "@psilink/peerjs-broker/services/webSocketServer/index";
-import { Realm } from "@psilink/peerjs-broker/models/realm";
+} from "@alcove/peerjs-broker/services/webSocketServer/index";
+import { Realm } from "@alcove/peerjs-broker/models/realm";
 
 import {
   KEY,

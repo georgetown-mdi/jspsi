@@ -4,14 +4,14 @@ import {
   WEBRTC_INBOUND_FRAME_FIXTURES,
   packValue as packWithTheLibrary,
   unpackFrame,
-} from "@psilink/testkit/webrtcInboundFrames";
+} from "@alcove/testkit/webrtcInboundFrames";
 
 import { packValue } from "../../../src/connection/webrtc/peerjsWire";
 
 // The outbound counterpart of webrtcInboundParity.test.ts: the shared frame set
 // is decoded and re-encoded, once by the pinned `peerjs-js-binarypack` packer a
 // partner decodes with and once by the CLI's own send path, and the two byte
-// strings must agree. The set is `@psilink/testkit/webrtcInboundFrames`, shared
+// strings must agree. The set is `@alcove/testkit/webrtcInboundFrames`, shared
 // with the web app's inbound suite, so one corpus covers both directions and
 // every marker it holds.
 //

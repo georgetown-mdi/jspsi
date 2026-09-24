@@ -1,6 +1,6 @@
 import fs from "node:fs";
 
-import { FINGERPRINT_REGEX, parseSensitiveYaml } from "@psilink/core";
+import { FINGERPRINT_REGEX, parseSensitiveYaml } from "@alcove/core";
 
 /**
  * What the console says about a first authenticated contact with a partner:
@@ -71,7 +71,7 @@ export function partnerCertificatePinnedNotice(
         "configuration, so compare the fingerprint your partner reports " +
         "with the one their receipt is signed under."
       : `Your partner's fingerprint is ${fingerprint}. Compare it with the ` +
-        "value their 'psilink fingerprint' prints, over a channel you trust " +
+        "value their 'alcove fingerprint' prints, over a channel you trust " +
         "-- a phone call, not the same email as the invitation.";
   return (
     "This exchange had no partner fingerprint on file, so it pinned the " +
@@ -99,7 +99,7 @@ export const PARTNER_PIN_UNRECORDABLE_FAILURE =
   "This exchange signs receipts and has no partner fingerprint on file, so it " +
   "has to record the certificate your partner presents -- and this run could " +
   "not record it, so it stopped and sent none of your data. Ask your partner " +
-  "to run 'psilink fingerprint' and send you the value over a channel you " +
+  "to run 'alcove fingerprint' and send you the value over a channel you " +
   "trust -- a phone call, not the same email as the invitation -- then enter " +
   "it under your partner's fingerprint and run the exchange again. If the run " +
   "stops here a second time, check that the folder you mounted is writable.";

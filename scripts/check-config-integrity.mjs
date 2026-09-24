@@ -96,9 +96,9 @@ export const GUARDED_VITEST_CONFIGS = [
   {
     directory: ".",
     projects: [
-      "@psilink/core (unit)",
-      "psilink (unit)",
-      "jspsi (unit)",
+      "@alcove/core (unit)",
+      "alcove (unit)",
+      "alcove-web (unit)",
       "harness",
       "scripts",
       "hooks",

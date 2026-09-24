@@ -2,8 +2,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { getDefaultLinkageTerms, UsageError } from "@psilink/core";
-import type { ExchangeSpec } from "@psilink/core";
+import { getDefaultLinkageTerms, UsageError } from "@alcove/core";
+import type { ExchangeSpec } from "@alcove/core";
 import {
   assertNoProvisionConflicts,
   provisionConfigAndKey,
@@ -26,9 +26,9 @@ let configPath: string;
 let keyPath: string;
 
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-provision-"));
-  configPath = path.join(dir, "psilink.yaml");
-  keyPath = path.join(dir, ".psilink.key");
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-provision-"));
+  configPath = path.join(dir, "alcove.yaml");
+  keyPath = path.join(dir, ".alcove.key");
 });
 
 afterEach(() => {
@@ -233,7 +233,7 @@ test.skipIf(process.platform === "win32")(
     fs.mkdirSync(ro);
     fs.chmodSync(ro, 0o500); // r-x: lstat sees children as absent, but writes EACCES
     try {
-      const badConfig = path.join(ro, "psilink.yaml");
+      const badConfig = path.join(ro, "alcove.yaml");
       // keyPath is in a writable directory; it must stay unwritten because the
       // config write fails first (saveConfig runs before saveKeyFile).
       expect(() =>

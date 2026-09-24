@@ -21,7 +21,7 @@ const RULESET = fileURLToPath(
   new URL("../orchestration/ruleset.md", import.meta.url),
 );
 
-const MARKER_SUBDIR = "psilink-orchestration-reads";
+const MARKER_SUBDIR = "alcove-orchestration-reads";
 const SESSION = "8f2b1c66-0000-4000-8000-0123456789ab";
 const SESSION_TRANSCRIPT = `/home/node/.claude/projects/-workspace/${SESSION}.jsonl`;
 const HOUR_MS = 60 * 60 * 1000;

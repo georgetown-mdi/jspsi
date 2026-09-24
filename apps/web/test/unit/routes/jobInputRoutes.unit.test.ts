@@ -5,7 +5,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { MAX_TRANSFORM_PATTERN_LENGTH } from "@psilink/core";
+import { MAX_TRANSFORM_PATTERN_LENGTH } from "@alcove/core";
 
 import { MAX_COVERAGE_BODY_BYTES } from "@jobs/workInputs";
 
@@ -15,12 +15,12 @@ import { Route as ProfileRoute } from "../../../src/routes/api/jobs/inputs/profi
 
 import { STUB_CLI_PATH } from "../../utils/jobFixtures";
 
-import type { Standardization } from "@psilink/core";
+import type { Standardization } from "@alcove/core";
 
 const dirs: Array<string> = [];
 
 function tempDir(label: string): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `psilink-${label}-`));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `alcove-${label}-`));
   dirs.push(dir);
   return dir;
 }
@@ -182,7 +182,7 @@ describe("GET /api/jobs/inputs", () => {
   });
 
   test("reports the unreadable-mount state distinctly from empty", async () => {
-    enable({ inputDir: path.join(os.tmpdir(), "psilink-no-such-mount-xyz") });
+    enable({ inputDir: path.join(os.tmpdir(), "alcove-no-such-mount-xyz") });
     const response = await listing();
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({

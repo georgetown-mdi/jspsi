@@ -194,7 +194,7 @@ function SavedExchangesSurface({
   return (
     <AppPage>
       <main className={styles.lobby}>
-        <div className={styles.wordmark}>psilink</div>
+        <div className={styles.wordmark}>Alcove</div>
         <h1>Recurring exchanges</h1>
         <p className={styles.sub}>
           Exchanges you saved to run again with the same partner, stored in this
@@ -305,7 +305,7 @@ function StorageUnavailable() {
   return (
     <AppPage>
       <main className={styles.lobby}>
-        <div className={styles.wordmark}>psilink</div>
+        <div className={styles.wordmark}>Alcove</div>
         <h1>Recurring exchanges</h1>
         <p className={styles.sub}>
           This browser cannot store recurring exchanges -- private browsing may
@@ -471,7 +471,7 @@ export function DeleteExchangeButton({
               it. It cannot be undone here.
             </p>
             <p className={`${styles.small} ${styles.sub}`}>
-              The exchange itself runs from the psilink.yaml and .psilink.key on
+              The exchange itself runs from the alcove.yaml and .alcove.key on
               the machine you run it from. Deleting it here changes nothing
               there, and your partner is not notified.
             </p>
@@ -501,7 +501,7 @@ export function DeleteExchangeButton({
         )}
         {handoff === "command-line" && (
           <p className={`${styles.small} ${styles.sub}`}>
-            The psilink.yaml and .psilink.key you saved still run this exchange.
+            The alcove.yaml and .alcove.key you saved still run this exchange.
             Deleting it here neither retires them nor stops the runs you
             scheduled -- remove the scheduled command and delete those two files
             on that machine to end it.
@@ -678,7 +678,7 @@ function importFailureAlert(error: unknown): ImportFailureAlert {
   };
 }
 
-/** Which alert a psilink.yaml imported with its `.psilink.key` is refused with.
+/** Which alert an alcove.yaml imported with its `.alcove.key` is refused with.
  * The store's three refusals name an exchange this browser holds, each under its
  * own heading, in words that speak of the two files rather than a backup;
  * everything else is the files' own failure ({@link pairImportFailureReason}). */
@@ -709,10 +709,10 @@ function pairImportFailureAlert(error: unknown): ImportFailureAlert {
 }
 
 /** The file type the import control offers in the file chooser beside its
- * own: the `.psilink.key` a configuration is imported with. */
+ * own: the `.alcove.key` a configuration is imported with. */
 const KEY_FILE_ACCEPT = ".key";
 
-/** The note the import gives on choosing the key file: the name psilink
+/** The note the import gives on choosing the key file: the name Alcove
  * writes it under starts with a dot, which file choosers hide by default. */
 const KEY_FILE_CHOOSER_NOTE =
   "Choose both files at once. The key file's name starts with a dot, so the " +
@@ -721,9 +721,9 @@ const KEY_FILE_CHOOSER_NOTE =
 /** The standing import affordance, shared by every list state -- empty,
  * populated, and read-failed -- so all render one markup. It takes either file
  * the operator may hold:
- * the backup this app exports, and the `psilink.yaml` the command line runs,
+ * the backup this app exports, and the `alcove.yaml` the command line runs,
  * which lands as a configuration-only exchange -- or, chosen with the
- * `.psilink.key` beside it, as one that runs here. The file decides which, not
+ * `.alcove.key` beside it, as one that runs here. The file decides which, not
  * the control ({@link importManagedExchangeFile}). A successful import puts the
  * operator on the imported exchange's own surface, so it is a way forward even
  * when the list read itself cannot be mended. A backup is reconciled against
@@ -768,9 +768,9 @@ function ImportExchangeFile() {
       <p className={styles.small}>
         If this browser was cleared or you are moving to a new device, import
         the backup file you exported to bring the exchange back here. You can
-        also import a command-line psilink.yaml: on its own to edit its settings
+        also import a command-line alcove.yaml: on its own to edit its settings
         here while it keeps running from the command line, or with the
-        .psilink.key beside it to run it in this browser.
+        .alcove.key beside it to run it in this browser.
       </p>
       <p className={`${styles.small} ${styles.sub}`}>{KEY_FILE_CHOOSER_NOTE}</p>
       <ImportOutcomeAlerts

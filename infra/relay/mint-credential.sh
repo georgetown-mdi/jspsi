@@ -17,8 +17,8 @@
 # the credential and the URL, which are what a partner needs and which expire.
 set -euo pipefail
 
-ETC=/etc/psilink-relay
-ENV_FILE="${PSILINK_RELAY_ENV_FILE:-$ETC/relay.env}"
+ETC=/etc/alcove-relay
+ENV_FILE="${ALCOVE_RELAY_ENV_FILE:-$ETC/relay.env}"
 
 die() { printf 'ABORTING: %s\n' "$*" >&2; exit 1; }
 
@@ -26,14 +26,14 @@ die() { printf 'ABORTING: %s\n' "$*" >&2; exit 1; }
 # shellcheck disable=SC1090
 . "$ENV_FILE"
 
-REALM="${PSILINK_RELAY_REALM:-}"
-[ -n "$REALM" ] || die "PSILINK_RELAY_REALM is unset in $ENV_FILE"
+REALM="${ALCOVE_RELAY_REALM:-}"
+[ -n "$REALM" ] || die "ALCOVE_RELAY_REALM is unset in $ENV_FILE"
 
-SECRET_FILE="${PSILINK_RELAY_SECRET_FILE:-$ETC/static-auth-secret}"
+SECRET_FILE="${ALCOVE_RELAY_SECRET_FILE:-$ETC/static-auth-secret}"
 [ -e "$SECRET_FILE" ] || die "this relay holds no static secret at $SECRET_FILE; register the exchange's relay key with register-exchange.sh instead"
 [ -r "$SECRET_FILE" ] || die "cannot read $SECRET_FILE; mint as the account that owns it"
 
-NAME="${1:-psilink}"
+NAME="${1:-alcove}"
 TTL="${2:-3600}"
 case "$NAME" in
   *:*) die "a credential name cannot contain ':', which separates it from the expiry" ;;
@@ -61,7 +61,7 @@ credential: $CREDENTIAL
 url:        turns:$REALM:443?transport=tcp
 expires:    $(date -u -d "@$EXPIRY" +%FT%TZ 2>/dev/null || date -u -r "$EXPIRY" +%FT%TZ)
 
-The connection's turn entry, for a psilink.yaml (docs/EXCHANGE_REFERENCE.md,
+The connection's turn entry, for an alcove.yaml (docs/EXCHANGE_REFERENCE.md,
 connection.turn). Write the credential to a mode-600 file and reference it as
 "@/run/secrets/turn.key" rather than inline, so it does not sit in a config
 file a later exchange reuses:

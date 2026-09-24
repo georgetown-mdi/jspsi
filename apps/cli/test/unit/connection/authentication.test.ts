@@ -8,9 +8,9 @@ import {
   fromEventConnection,
   authenticateConnection,
   SHARED_SECRET_REGEX,
-} from "@psilink/core";
-import { createMessagePipe } from "@psilink/core/testing";
-import type { HandshakeRole, MessageConnection } from "@psilink/core";
+} from "@alcove/core";
+import { createMessagePipe } from "@alcove/core/testing";
+import type { HandshakeRole, MessageConnection } from "@alcove/core";
 
 import { LocalFSClient } from "../../../src/connection/localFSClient";
 
@@ -22,7 +22,7 @@ let tmpDir: string;
 let dropDir: string;
 
 beforeEach(() => {
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-auth-test-"));
+  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-auth-test-"));
   dropDir = path.join(tmpDir, "drop");
   fs.mkdirSync(dropDir);
 });
@@ -158,7 +158,7 @@ test("authentication throws for an expired token without opening a connection", 
   ).rejects.toThrow("shared secret expired");
 });
 
-test("authentication tags a pre-handshake-expiry error with psilinkRecoveryHintEmitted", async () => {
+test("authentication tags a pre-handshake-expiry error with alcoveRecoveryHintEmitted", async () => {
   const mc = fromEventConnection(makeConn());
   // Direct tag assertion, symmetric with the malformed-secret and post-
   // handshake-expiry paths: the pre-handshake expiry error (checked before any
@@ -171,8 +171,7 @@ test("authentication tags a pre-handshake-expiry error with psilinkRecoveryHintE
     true,
   ).catch((e: unknown) => e);
   expect(
-    (err as { psilinkRecoveryHintEmitted?: unknown })
-      .psilinkRecoveryHintEmitted,
+    (err as { alcoveRecoveryHintEmitted?: unknown }).alcoveRecoveryHintEmitted,
   ).toBe(true);
 });
 
@@ -209,7 +208,7 @@ test("authentication throws for a token with valid base64url characters but wron
   );
 });
 
-test("authentication tags a malformed-secret error with psilinkRecoveryHintEmitted", async () => {
+test("authentication tags a malformed-secret error with alcoveRecoveryHintEmitted", async () => {
   const mc = fromEventConnection(makeConn());
   // The secret-format error holds the recovery-hint tag so the CLI shows
   // its specific "re-invite" instruction instead of stacking the generic
@@ -221,8 +220,7 @@ test("authentication tags a malformed-secret error with psilinkRecoveryHintEmitt
     true,
   ).catch((e: unknown) => e);
   expect(
-    (err as { psilinkRecoveryHintEmitted?: unknown })
-      .psilinkRecoveryHintEmitted,
+    (err as { alcoveRecoveryHintEmitted?: unknown }).alcoveRecoveryHintEmitted,
   ).toBe(true);
 });
 
@@ -299,7 +297,7 @@ test("a legacy SPAKE2-shaped reply fails a new initiator with a clean error", as
 // starting both authenticateConnection calls and awaiting them -- strictly
 // after both pre-handshake checks and before both post-handshake checks.
 
-test("authentication tags post-handshake-expiry errors with psilinkRecoveryHintEmitted", async () => {
+test("authentication tags post-handshake-expiry errors with alcoveRecoveryHintEmitted", async () => {
   const expires = "2030-01-01T00:00:00.000Z";
   vi.useFakeTimers({
     toFake: ["Date"],
@@ -330,6 +328,6 @@ test("authentication tags post-handshake-expiry errors with psilinkRecoveryHintE
     expect(result.reason.message).toContain(
       "during the key-exchange round-trip",
     );
-    expect(result.reason.psilinkRecoveryHintEmitted).toBe(true);
+    expect(result.reason.alcoveRecoveryHintEmitted).toBe(true);
   }
 });

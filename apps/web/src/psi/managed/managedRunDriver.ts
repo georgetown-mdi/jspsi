@@ -34,7 +34,7 @@ import {
   loadPsiBackend,
   projectPairTable,
   runExchange,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { buildRunOutputs } from "../runOutputs";
 
@@ -61,7 +61,7 @@ import type {
   ExchangeResult,
   MessageConnection,
   ResolvedMatching,
-} from "@psilink/core";
+} from "@alcove/core";
 import type { DataConnection } from "peerjs";
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 import type Peer from "peerjs";
@@ -151,7 +151,7 @@ export interface ManagedRunDriverConfig {
   /** The two record counts this run declared at the terms exchange, reported once
    * the terms are agreed and before the first round, and only where the agreed
    * cardinality makes the pair table their product (`projectPairTable` in
-   * `@psilink/core`). An unattended run keeps them beside what it leaves, so the
+   * `@alcove/core`). An unattended run keeps them beside what it leaves, so the
    * next visit can project how large a result a further run on these terms would
    * produce ({@link ../resultSizeProjection.ts}). Optional: an attended run has the
    * operator present when its own result arrives and omits it. */

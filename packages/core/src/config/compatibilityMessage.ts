@@ -1,7 +1,7 @@
 // The one boundary through which a linkage-terms value enters an
 // operator-facing cross-party compatibility diagnostic
 // (`validateCompatibility`, linkageTermsNegotiation.ts). Those diagnostics are
-// first-party prose an operator reads as psilink's own -- "legal agreement
+// first-party prose an operator reads as Alcove's own -- "legal agreement
 // reference mismatch: local is X, partner is Y" -- and the values they
 // name are partner-chosen, including two on the "local" side that
 // `deriveAcceptedLinkageTerms` adopts verbatim from the inviter.
@@ -9,7 +9,7 @@
 // This is a DELIMITING control, orthogonal to the display escape
 // (CONTRIBUTING.md, Operator-facing escaping), which neutralizes control
 // characters and confusables but leaves printable ASCII alone -- so it does
-// nothing about a value that renders as psilink's own clause (a reference of
+// nothing about a value that renders as Alcove's own clause (a reference of
 // `A", partner is "B`). Delimiting answers that: it emits only printable
 // ASCII and rewrites nothing the escape rewrites, so a delimited fragment
 // survives the display boundary unchanged and neither pass duplicates the

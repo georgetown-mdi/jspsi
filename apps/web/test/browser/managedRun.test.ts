@@ -5,7 +5,7 @@ import {
   ConnectionError,
   generateSharedSecret,
   getDefaultLinkageTerms,
-} from "@psilink/core";
+} from "@alcove/core";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
 import {
@@ -25,7 +25,7 @@ import type {
   ManagedExchangeRecord,
   NewManagedExchange,
 } from "@psi/managed/managedExchangeRecord";
-import type { WebRTCExchangeLocator } from "@psilink/core";
+import type { WebRTCExchangeLocator } from "@alcove/core";
 
 // The re-run orchestration launched from a STORED record, against real Chromium
 // (real Web Locks and real IndexedDB), with the rendezvous/handshake/data-exchange
@@ -327,7 +327,7 @@ describe("runManagedRerun: the runner's failure bookkeeping", () => {
                 new Error(
                   `shared secret expired at ${expires} during the round-trip`,
                 ),
-                { psilinkRecoveryHintEmitted: true },
+                { alcoveRecoveryHintEmitted: true },
               ),
             );
           },

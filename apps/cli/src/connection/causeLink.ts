@@ -3,7 +3,7 @@ import {
   DEFAULT_MAX_DISPLAY_LENGTH,
   redactPrivateKeyMaterial,
   renderedDisplayCost,
-} from "@psilink/core";
+} from "@alcove/core";
 
 /**
  * The single composition of a labelled cause link the bounded-transport

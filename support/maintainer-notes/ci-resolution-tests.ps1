@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
-    Runs this folder's Pester suites -- Setup-PsilinkFileDrop.Tests.ps1 and
-    Start-Psilink.Tests.ps1 -- and reports the run as check-run annotations.
+    Runs this folder's Pester suites -- Setup-AlcoveFileDrop.Tests.ps1 and
+    Start-Alcove.Tests.ps1 -- and reports the run as check-run annotations.
     Maintainer-facing: an operator following the setup page never touches it.
 
 .DESCRIPTION
@@ -156,7 +156,7 @@ function Write-RigPremises {
         block was never entered -- a different fact from a rig that failed to
         build, and one only this annotation carries. #>
 
-    $premises = Get-Variable -Name 'PsilinkRigPremises' -Scope Global -ValueOnly -ErrorAction SilentlyContinue
+    $premises = Get-Variable -Name 'AlcoveRigPremises' -Scope Global -ValueOnly -ErrorAction SilentlyContinue
     if (-not $premises) {
         Write-Measurement -Title 'Rig' -Fields ([ordered]@{ state = 'absent' })
         return
@@ -171,7 +171,7 @@ $failedJob = $false
 try {
     # Named one by one rather than discovered by mask: a suite that was renamed
     # or lost would otherwise leave the job green having run whatever remained.
-    $testFiles = @('Setup-PsilinkFileDrop.Tests.ps1', 'Start-Psilink.Tests.ps1') |
+    $testFiles = @('Setup-AlcoveFileDrop.Tests.ps1', 'Start-Alcove.Tests.ps1') |
         ForEach-Object { Join-Path $PSScriptRoot $_ }
     foreach ($file in $testFiles) {
         if (-not (Test-Path -LiteralPath $file)) { throw "a suite is not at $file" }

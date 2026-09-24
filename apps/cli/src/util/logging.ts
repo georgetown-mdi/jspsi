@@ -16,7 +16,7 @@ import {
   setDiagnosticSink,
   setLogLevel,
   UsageError,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { stripExtendedAcls } from "../fileUtils";
 import { singleValue } from "./flags";
@@ -193,7 +193,7 @@ function installLogSink(
  * directory or other open failure shows up here, as a {@link UsageError}
  * before any exchange work begins, and created owner-only (`0o600`). The path
  * is operator-supplied, not attacker-derived, so the open skips the
- * `O_NOFOLLOW`/`O_EXCL` hardening psilink's credential writers use for paths
+ * `O_NOFOLLOW`/`O_EXCL` hardening Alcove's credential writers use for paths
  * it derives itself.
  *
  * Between that open and the first write, on macOS the file's extended (NFSv4)
@@ -297,7 +297,7 @@ export function configureLogFile(logFilePath: string): LogSink {
  * Without it, loglevel's default routing sends `info`/`debug` to stdout and
  * only `warn`/`error` to stderr, so a redirected run would splice diagnostic
  * lines into the result file. This sink sends every level to
- * `process.stderr` instead, so `psilink <cmd> 2>/dev/null` yields clean
+ * `process.stderr` instead, so `alcove <cmd> 2>/dev/null` yields clean
  * result data on stdout. The interactive confirmation prompt
  * (`promptConfirm` in ./prompt) already writes to stderr for the same
  * reason.

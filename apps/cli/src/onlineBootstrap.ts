@@ -22,7 +22,7 @@ import {
   safeParseConnectionConfig,
   sanitizeErrorForDisplay,
   UsageError,
-} from "@psilink/core";
+} from "@alcove/core";
 import type {
   BuiltInLinkageRuleSet,
   ConnectionConfig,
@@ -38,7 +38,7 @@ import type {
   PreparedExchange,
   SFTPConnectionConfig,
   WebRTCConnectionConfig,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { applyConnectionOverrides, saveConfig } from "./config";
 import { detectFileConflicts } from "./fileUtils";
@@ -224,7 +224,7 @@ export function connectionFromEndpoint(
     case "webrtc": {
       // No `role` here: an invitation's locator says where the coordination
       // server is, never which end of the rendezvous this party is. The caller
-      // stamps it (withWebRTCPeerRole), and `psilink exchange` refuses a
+      // stamps it (withWebRTCPeerRole), and `alcove exchange` refuses a
       // connection that reaches it without one (see webRtcDialFrom). webrtc
       // needs no credential placeholder either -- it authenticates from the
       // shared secret, not a username/password. The inviter's relay is kept
@@ -355,7 +355,7 @@ export function applyEndpointSplitDirectories(
 // --- connection -> endpoint (producer) --------------------------------------
 
 /**
- * The credential-free connection-endpoint producer lives in @psilink/core (one
+ * The credential-free connection-endpoint producer lives in @alcove/core (one
  * definition shared with the web mint layer, next to the endpoint schemas);
  * re-exported here so the CLI's invitation call sites keep importing it from
  * this module. Its EndpointSourceConnectionConfig parameter is structurally the
@@ -363,17 +363,17 @@ export function applyEndpointSplitDirectories(
  * channels an exchange runs on), so the invite-side callers pass their
  * connection unchanged.
  */
-export { endpointFromConnection } from "@psilink/core";
+export { endpointFromConnection } from "@alcove/core";
 
 // --- shared secret --------------------------------------------------------------
 
 /**
- * Secret generation lives in @psilink/core (one definition shared with the web
+ * Secret generation lives in @alcove/core (one definition shared with the web
  * inviter, per the CONTRIBUTING rule against re-implementing crypto helpers);
  * re-exported here so the CLI's invitation call sites keep importing it from this
  * module.
  */
-export { generateSharedSecret } from "@psilink/core";
+export { generateSharedSecret } from "@alcove/core";
 
 /** ISO 8601 datetime `durationSeconds` from now, for an invitation's `expires`. */
 export function expiresFromNow(durationSeconds: number): string {
@@ -585,7 +585,7 @@ export function singlePassDisclosureNotice(): string {
     "the same either way; what differs is how much your partner can observe " +
     "while it runs -- a consented disclosure tradeoff for a round-trip count " +
     "that stays constant as keys are added, not a free speed-up. See " +
-    "https://github.com/georgetown-mdi/jspsi/blob/main/docs/" +
+    "https://github.com/georgetown-mdi/alcove/blob/main/docs/" +
     "EXCHANGE_REFERENCE.md (linkage_terms.linkage_strategy)."
   );
 }
@@ -691,7 +691,7 @@ export function prepareForOnlineExchange(
  * reconciles lazily). A party that learns its received-payload set only by
  * observation -- the online inviter (unknown until the acceptor transmits it)
  * and a zero-setup `--save` party -- crystallizes that observed set into the
- * saved config's `expectedPayloadColumns` so a later recurring `psilink
+ * saved config's `expectedPayloadColumns` so a later recurring `alcove
  * exchange` fails closed on a divergent received payload
  * ({@link reconcileReceivedPayload}); the observe-by-first-exchange counterpart
  * to the acceptor's up-front token commitment.
@@ -729,7 +729,7 @@ export function observedReceivedColumnsForSave(
 const CONFIG_APPEARED_LATE_REMEDY =
   ": a file appeared there after the initial conflict check. The exchange " +
   "completed and the rotated key was saved; move or remove that file (or " +
-  "pass --config-file), then rerun 'psilink exchange' to recover without " +
+  "pass --config-file), then rerun 'alcove exchange' to recover without " +
   "re-inviting.";
 
 /**
@@ -757,7 +757,7 @@ const CONFIG_APPEARED_LATE_REMEDY =
  *
  * When the exchange itself fails after the config was already written, this
  * function logs that the config and key are on disk -- so the user retries with
- * `psilink exchange` rather than re-inviting -- and then rejects with the
+ * `alcove exchange` rather than re-inviting -- and then rejects with the
  * exchange error (the handler's error path reports the error itself). The note
  * is logged only when the config write actually succeeded, so a hook failure
  * followed by an exchange failure never claims a config that is not there.
@@ -790,7 +790,7 @@ export async function runOnlineBootstrap(params: {
    * The field delimiter this run's result CSV is written with -- the one its
    * input was read by. Omit it, or choose detection, to write commas. The
    * configuration this bootstrap saves records it through `dataSpec`, so a
-   * later recurring `psilink exchange` reads and writes by the same delimiter
+   * later recurring `alcove exchange` reads and writes by the same delimiter
    * with no flag.
    */
   csvDelimiter?: string;
@@ -820,7 +820,7 @@ export async function runOnlineBootstrap(params: {
   /**
    * Crystallize the received-payload set this party OBSERVES during the exchange
    * into the freshly-written config's `expectedPayloadColumns`, so a later
-   * recurring `psilink exchange` fails closed on a divergent payload. Passed by
+   * recurring `alcove exchange` fails closed on a divergent payload. Passed by
    * the online INVITER, whose received set is unknown until the acceptor
    * transmits it (the lazy receive-side fill-to-disk this closes). The online
    * ACCEPTOR does not pass it: it learns its received set up front from the
@@ -833,7 +833,7 @@ export async function runOnlineBootstrap(params: {
    * The online ACCEPTOR's received-payload commitment for THIS acceptance: the
    * set it consented to UP FRONT from the invitation token
    * (`token.disclosedPayloadColumns`), recorded as the config's
-   * `expectedPayloadColumns` so a later recurring `psilink exchange` fails closed
+   * `expectedPayloadColumns` so a later recurring `alcove exchange` fails closed
    * on a divergent received payload (reconcileReceivedPayload) -- the online
    * sibling of the offline-accept persistence. Unlike
    * `persistObservedReceivedPayload` (the inviter's observe-then-persist, in a
@@ -856,7 +856,7 @@ export async function runOnlineBootstrap(params: {
   receivedPayloadLockIn?: { consentedColumns: string[] | undefined };
   /**
    * The ACCEPTOR's consent to its OWN outbound payload set, to persist into the
-   * freshly-written config so a later recurring `psilink exchange` sends exactly
+   * freshly-written config so a later recurring `alcove exchange` sends exactly
    * the columns consented to here or stops to ask (assertOutboundPayloadConsented).
    * The send-side counterpart of `receivedPayloadLockIn` above, and known
    * at the same moment -- what the acceptance displayed -- so it rides the same
@@ -871,7 +871,7 @@ export async function runOnlineBootstrap(params: {
    * The online ACCEPTOR's terms-side commitment for THIS acceptance: the
    * `deduplicate` the invitation declared for the INVITING party's own side
    * (`token.linkageTerms.deduplicate`), recorded as the config's
-   * `expectedPartnerDeduplicate` so a later recurring `psilink exchange` refuses a
+   * `expectedPartnerDeduplicate` so a later recurring `alcove exchange` refuses a
    * partner presenting any other value at the terms exchange
    * (assertPresentedDeduplicateMatchesInvitation) -- the online sibling of the
    * offline-accept persistence, and the terms-side twin of
@@ -890,7 +890,7 @@ export async function runOnlineBootstrap(params: {
    * peer waits of the exchange that follows. Applied to the live connection here
    * and to nothing that is written, so the configuration this bootstrap saves
    * has only the budget its `connection` already holds -- the operator's own
-   * `--peer-timeout`, or none, in which case a later recurring `psilink exchange`
+   * `--peer-timeout`, or none, in which case a later recurring `alcove exchange`
    * takes the documented `peer_timeout_ms` default rather than a wait sized for
    * one interactive setup. Absent for a caller whose run budget and persisted
    * budget are the same value (the online acceptor), which needs no override.
@@ -975,7 +975,7 @@ export async function runOnlineBootstrap(params: {
   // pre-existing config and writes no fresh one (configWritten stays false), so
   // without this flag the catch below could not tell a reuse run whose handshake
   // succeeded (key saved) from one that failed pre-handshake (no key) -- and
-  // would falsely promise `psilink exchange` recovery in the latter.
+  // would falsely promise `alcove exchange` recovery in the latter.
   let keyPersisted = false;
   // Open the machine-interface stream here rather than leaving it to runProtocol:
   // this bootstrap's own persistence losses (both hooks below) must ride the
@@ -1140,7 +1140,7 @@ export async function runOnlineBootstrap(params: {
       fileSyncRuntime: {
         eventStream,
         // Crystallize the OBSERVED received-payload set into the freshly-written
-        // config so a later recurring `psilink exchange` fails closed on a
+        // config so a later recurring `alcove exchange` fails closed on a
         // divergent payload (reconcileReceivedPayload). A SECOND write, distinct
         // from the acceptance hook's (which persists BEFORE the data exchange,
         // when the received set is unknown). Rides runProtocol's pre-terminal
@@ -1203,7 +1203,7 @@ export async function runOnlineBootstrap(params: {
             const notice =
               `the exchange succeeded and ${params.configPath} was written, but ` +
               "recording the observed received-payload columns for fail-closed " +
-              "recurring enforcement failed; the next 'psilink exchange' will " +
+              "recurring enforcement failed; the next 'alcove exchange' will " +
               "reconcile the received payload lazily";
             getLogger(params.loggerName).warn(
               `${notice}: ${sanitizeErrorForDisplay(err)}`,
@@ -1221,7 +1221,7 @@ export async function runOnlineBootstrap(params: {
     return { configWriteError: runResult.onAuthenticatedError };
   } catch (err) {
     // The exchange failed after a successful handshake. When BOTH the config and
-    // the rotated key are on disk, tell the user so they retry with `psilink
+    // the rotated key are on disk, tell the user so they retry with `alcove
     // exchange` instead of re-inviting. Logged at error level so it stays
     // visible alongside the error the handler then reports. Both files must
     // actually be present: a fresh run needs `configWritten`; a reuse run needs
@@ -1236,7 +1236,7 @@ export async function runOnlineBootstrap(params: {
         )} and the rotated key at ` +
           `${redactAndRenderOperatorSuppliedText(
             operatorSuppliedText(params.keyPath),
-          )} are on disk; retry with 'psilink exchange' to ` +
+          )} are on disk; retry with 'alcove exchange' to ` +
           `recover without re-inviting.`,
       );
     throw err;
@@ -1309,6 +1309,6 @@ export function logOnlineBootstrapOutcome(
       `(its cause was logged when the write failed). The rotated key is saved, ` +
       `so you do not need to re-invite: recreate ${configFileDisplay} to ` +
       `match your connection and linkage settings before running a recurring ` +
-      `'psilink exchange'. Keep the key file private.`,
+      `'alcove exchange'. Keep the key file private.`,
   );
 }

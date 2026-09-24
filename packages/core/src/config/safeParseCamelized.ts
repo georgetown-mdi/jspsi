@@ -27,7 +27,7 @@ import { unrecognizedKeysAsWritten } from "./unreadKeys.js";
  * named here as the raw document spells it
  * ({@link unrecognizedKeysAsWritten}).
  *
- * Internal to `@psilink/core`: not re-exported, not a stable public API.
+ * Internal to `@alcove/core`: not re-exported, not a stable public API.
  *
  * @internal
  */

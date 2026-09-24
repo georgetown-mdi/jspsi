@@ -8,13 +8,13 @@
  * back to a runnable record, so the format and its trust boundary are unit-testable
  * without a database or a download.
  *
- * The artifact is the browser analog of handing over `psilink.yaml` plus
- * `.psilink.key` together, kept CLI-separable rather than becoming a third format:
+ * The artifact is the browser analog of handing over `alcove.yaml` plus
+ * `.alcove.key` together, kept CLI-separable rather than becoming a third format:
  *
- * - `exchangeDocument` embeds the exchange-file document as a valid `psilink.yaml`,
- *   written by core's `serializeExchangeDocument` -- the writer psilink's own
+ * - `exchangeDocument` embeds the exchange-file document as a valid `alcove.yaml`,
+ *   written by core's `serializeExchangeDocument` -- the writer Alcove's own
  *   `saveConfig` uses, so the embedded half is the file the CLI would write;
- * - `key` is the `.psilink.key` pair -- `sharedSecret` and, when a bound is in
+ * - `key` is the `.alcove.key` pair -- `sharedSecret` and, when a bound is in
  *   force, `expires` -- so the secret half maps onto a valid key file;
  * - `local` holds the browser-only fields the two CLI artifacts do not
  *   (`label`, `side`, `schedule`, `lastRun`, `standingCondition`,
@@ -44,7 +44,7 @@ import {
   parseSensitiveJson,
   parseSensitiveYaml,
   serializeExchangeDocument,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { z } from "zod";
 
@@ -70,7 +70,7 @@ import type {
   ManagedStandingCondition,
   RunnableManagedExchangeRecord,
 } from "./managedExchangeRecord";
-import type { ExchangeSpec } from "@psilink/core";
+import type { ExchangeSpec } from "@alcove/core";
 import type { ZodType } from "zod";
 
 /** The MIME type the artifact downloads as; it is a JSON document. */
@@ -117,25 +117,25 @@ interface ManagedExchangeArtifactLocal {
 export type ManagedPlatformGrant = "input-file" | "output-folder";
 
 /**
- * The export artifact: a version tag, the embedded `psilink.yaml` document as
- * text, the `.psilink.key` pair, and the separable local fields. Neither platform
+ * The export artifact: a version tag, the embedded `alcove.yaml` document as
+ * text, the `.alcove.key` pair, and the separable local fields. Neither platform
  * handle is a member (no file serialization; see the module header).
  */
 interface ManagedExchangeArtifact {
   /** The single recognized artifact-format literal; a reader rejects any other
    * value rather than migrating it. */
   artifactVersion: typeof MANAGED_EXCHANGE_ARTIFACT_VERSION;
-  /** The exchange-file document embedded as a valid `psilink.yaml` (snake_case
+  /** The exchange-file document embedded as a valid `alcove.yaml` (snake_case
    * YAML). The CLI half of the record. */
   exchangeDocument: string;
-  /** The `.psilink.key` pair (see {@link ManagedExchangeKeyFields}). */
+  /** The `.alcove.key` pair (see {@link ManagedExchangeKeyFields}). */
   key: ManagedExchangeKeyFields;
   /** The browser-only fields (see {@link ManagedExchangeArtifactLocal}). */
   local: ManagedExchangeArtifactLocal;
 }
 
 /**
- * Derive the `.psilink.key` pair from a record: the current shared secret and,
+ * Derive the `.alcove.key` pair from a record: the current shared secret and,
  * when a bound is in force, the `expires` it lapses at. The one place a record's
  * secret half becomes the key file's fields, shared by the artifact's `key` block
  * and the CLI cron export's key file so neither can grow a field the other lacks.
@@ -284,7 +284,7 @@ export function parseManagedExchangeArtifact(
  * installs the one owner. The embedded document is parsed back through
  * {@link parseSensitiveYaml} and {@link parseExchangeSpec}, the secret and
  * `expires` come from the key pair, and the local fields pass through
- * unchanged. Built through {@link buildManagedExchangeRecord} -- a fresh `id`, the v3
+ * unchanged. Built through {@link buildManagedExchangeRecord} -- a fresh `id`, the v4
  * `schemaVersion`, re-validated through the record schema -- so a malformed
  * document or secret is rejected and nothing is installed. Holds no
  * input-file handle: the first run re-acquires one by selection.

@@ -4,22 +4,22 @@
 # registrar's sandbox with no network.
 
 [Unit]
-Description=Revoke the psilink relay's lapsed exchange keys
-Documentation=https://github.com/georgetown-mdi/jspsi/blob/main/infra/relay/README.md
+Description=Revoke the Alcove relay's lapsed exchange keys
+Documentation=https://github.com/georgetown-mdi/alcove/blob/main/infra/relay/README.md
 
 [Service]
 Type=oneshot
-EnvironmentFile=/etc/psilink-relay/relay.env
-ExecStart=/usr/bin/python3 -B /opt/psilink-relay/relay_table.py sweep
+EnvironmentFile=/etc/alcove-relay/relay.env
+ExecStart=/usr/bin/python3 -B /opt/alcove-relay/relay_table.py sweep
 StandardInput=null
-User=__PSILINK_RELAY_IMAGE_UID__
-Group=__PSILINK_RELAY_IMAGE_GID__
+User=__ALCOVE_RELAY_IMAGE_UID__
+Group=__ALCOVE_RELAY_IMAGE_GID__
 
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
-ReadWritePaths=/var/lib/psilink-relay
+ReadWritePaths=/var/lib/alcove-relay
 ProtectKernelTunables=true
 RestrictSUIDSGID=true
 ProtectControlGroups=true

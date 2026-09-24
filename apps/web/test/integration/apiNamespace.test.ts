@@ -307,10 +307,10 @@ describe.skipIf(!hasBuild)("the /api namespace's refusal", () => {
   let consoleBase = "";
 
   beforeAll(async () => {
-    const dataRoot = mkdtempSync(join(tmpdir(), "psilink-api-ns-data-"));
+    const dataRoot = mkdtempSync(join(tmpdir(), "alcove-api-ns-data-"));
     // The built server runs as an ordinary user here, so relocate the
     // pasted-credential scratch dir off the root-owned default it boots on.
-    const credentialDir = mkdtempSync(join(tmpdir(), "psilink-api-ns-cred-"));
+    const credentialDir = mkdtempSync(join(tmpdir(), "alcove-api-ns-cred-"));
     roots.push(dataRoot, credentialDir);
 
     const hostedPort = await getFreePort();

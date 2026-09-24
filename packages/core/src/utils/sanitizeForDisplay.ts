@@ -68,7 +68,7 @@ export const DEFAULT_MAX_DISPLAY_LENGTH = 256;
  * each one a labelled link of its own (the transport, host-key, and linkage
  * pre-flight refusals).
  *
- * Sized to admit the longest fixed guidance psilink composes into one
+ * Sized to admit the longest fixed guidance Alcove composes into one
  * message plus the bounded values it names, well under
  * {@link WARNING_MESSAGE_MAX_DISPLAY_LENGTH} (a different, larger shape).
  * The whole rendered chain stays bounded without a separate total-length

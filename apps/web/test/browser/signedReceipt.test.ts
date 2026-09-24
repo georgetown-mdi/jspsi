@@ -14,7 +14,7 @@ import {
   verifyCertificateSelfSignature,
   verifyDualSignedRecord,
   verifyReceiptSignature,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import certVectorsRaw from "../../../../packages/core/test/vectors/signing-cert-vectors.json?raw";
 import receiptVectorsRaw from "../../../../packages/core/test/vectors/signed-receipt-vectors.json?raw";
@@ -23,11 +23,11 @@ import type {
   P256PrivateJwk,
   SigningCertificate,
   SigningIdentity,
-} from "@psilink/core";
+} from "@alcove/core";
 
 // The companion to packages/core/test/records/signedReceipt.test.ts and
 // signingIdentity.test.ts: it runs the same checked-in vectors through the
-// browser build of @psilink/core in real Chromium. ECDSA signing is
+// browser build of @alcove/core in real Chromium. ECDSA signing is
 // randomized, so cross-build verification (not signature reproduction) is
 // what proves the two builds agree on canonical encoding, signed bytes, and
 // key rejection.

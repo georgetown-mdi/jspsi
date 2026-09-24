@@ -11,7 +11,7 @@ import {
   normalizeCsvDelimiter,
   sanitizeErrorForDisplay,
   UsageError,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { parseDurationFlag, parseFineDurationFlag } from "./duration";
 

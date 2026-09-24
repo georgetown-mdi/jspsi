@@ -11,7 +11,7 @@ import { STUB_CLI_PATH } from "../../utils/jobFixtures";
 const dirs: Array<string> = [];
 
 function tempDir(label: string): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `psilink-${label}-`));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `alcove-${label}-`));
   dirs.push(dir);
   return dir;
 }

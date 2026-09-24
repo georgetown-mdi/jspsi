@@ -56,7 +56,7 @@ describe("check-doc-links inline code spans", () => {
 describe("check-doc-links fenced code blocks", () => {
   const scratch = [];
   const fixtureDir = () => {
-    const dir = mkdtempSync(join(tmpdir(), "psilink-doc-links-"));
+    const dir = mkdtempSync(join(tmpdir(), "alcove-doc-links-"));
     scratch.push(dir);
     return dir;
   };

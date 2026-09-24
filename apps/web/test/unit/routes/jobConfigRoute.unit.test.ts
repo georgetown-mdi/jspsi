@@ -5,7 +5,7 @@ import path from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { stringify as stringifyYaml } from "yaml";
 
-import { getDefaultLinkageTerms, snakeizeKeys } from "@psilink/core";
+import { getDefaultLinkageTerms, snakeizeKeys } from "@alcove/core";
 
 import { Route as ConfigRoute } from "../../../src/routes/api/jobs/config";
 
@@ -17,7 +17,7 @@ import { STUB_CLI_PATH } from "../../utils/jobFixtures";
 const dirs: Array<string> = [];
 
 function tempDir(label: string): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `psilink-${label}-`));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `alcove-${label}-`));
   dirs.push(dir);
   return dir;
 }
@@ -71,7 +71,7 @@ async function load(): Promise<Response> {
 
 function writeConfiguration(dataRoot: string, document: unknown): void {
   fs.writeFileSync(
-    path.join(dataRoot, "psilink.yaml"),
+    path.join(dataRoot, "alcove.yaml"),
     stringifyYaml(document),
     "utf8",
   );
@@ -157,16 +157,13 @@ describe("GET /api/jobs/config", () => {
     const response = await load();
     expect(response.status).toBe(400);
     const body = (await response.json()) as { error: string };
-    expect(body.error).toContain("not a psilink exchange configuration");
+    expect(body.error).toContain("not an Alcove exchange configuration");
     expect(body.error).not.toContain("sftp.partner.example");
   });
 
   test("an over-large mounted file is a 400 naming no container path", async () => {
     const dataRoot = enable();
-    fs.writeFileSync(
-      path.join(dataRoot, "psilink.yaml"),
-      "x".repeat(1_000_001),
-    );
+    fs.writeFileSync(path.join(dataRoot, "alcove.yaml"), "x".repeat(1_000_001));
     const response = await load();
     expect(response.status).toBe(400);
     const body = (await response.json()) as { error: string };
@@ -270,7 +267,7 @@ describe("the webrtc connection's credentials never reach the browser", () => {
       expect(JSON.parse(text)).toEqual({ written: true });
       expectNoWebrtcCredential(text);
       const written = fs.readFileSync(
-        path.join(dataRoot, "psilink.yaml"),
+        path.join(dataRoot, "alcove.yaml"),
         "utf8",
       );
       expect(written).toContain("County Health West");
@@ -295,15 +292,13 @@ describe("PUT /api/jobs/config", () => {
   test("admits no connection from the browser", async () => {
     const dataRoot = enable();
     writeConfiguration(dataRoot, webrtcDocuments()[0]);
-    const before = fs.readFileSync(path.join(dataRoot, "psilink.yaml"));
+    const before = fs.readFileSync(path.join(dataRoot, "alcove.yaml"));
     const response = await handBack({
       ...settings,
       connection: { channel: "webrtc", server: { host: "elsewhere" } },
     });
     expect(response.status).toBe(400);
-    expect(fs.readFileSync(path.join(dataRoot, "psilink.yaml"))).toEqual(
-      before,
-    );
+    expect(fs.readFileSync(path.join(dataRoot, "alcove.yaml"))).toEqual(before);
   });
 
   test("refuses a configuration the console runs itself", async () => {
@@ -321,7 +316,7 @@ describe("PUT /api/jobs/config", () => {
     const response = await handBack(settings);
     expect(response.status).toBe(400);
     expect(((await response.json()) as { error: string }).error).toContain(
-      "no longer holds a psilink.yaml",
+      "no longer holds an alcove.yaml",
     );
   });
 });

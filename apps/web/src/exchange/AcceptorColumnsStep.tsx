@@ -21,7 +21,7 @@ import {
   MAX_DECLARED_NAMES_SHOWN,
   OUTBOUND_SEND_NO_PAYLOAD_SENTENCE,
   unshownDeclaredNamesLine,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { ColumnName, isolatedColumnName } from "@components/ColumnName";
 import { MetadataGrid } from "@components/MetadataGrid";
@@ -53,7 +53,7 @@ import type {
   Metadata,
   SemanticType,
   Standardization,
-} from "@psilink/core";
+} from "@alcove/core";
 import type { ReactNode } from "react";
 
 /**

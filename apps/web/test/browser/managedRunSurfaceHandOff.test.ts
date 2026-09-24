@@ -1,7 +1,7 @@
 /// <reference types="@vitest/browser-playwright/context" />
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { generateSharedSecret, getDefaultLinkageTerms } from "@psilink/core";
+import { generateSharedSecret, getDefaultLinkageTerms } from "@alcove/core";
 
 import { page } from "vitest/browser";
 
@@ -324,7 +324,7 @@ describe("a run pressed after the hand-off arrived", () => {
       .toBeInTheDocument();
     // Neither hand-off is named on evidence the surface does not hold.
     expect(app.container.textContent).not.toContain("Import the backup");
-    expect(app.container.textContent).not.toContain("psilink.yaml");
+    expect(app.container.textContent).not.toContain("alcove.yaml");
 
     // The refusal really is what put that surface up: the run reached the store
     // and recorded the hand-off it met.

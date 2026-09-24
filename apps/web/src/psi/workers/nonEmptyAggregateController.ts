@@ -5,7 +5,7 @@ import {
 
 import type { FieldValueCoverage } from "./nonEmptyAggregate";
 
-import type { CSVRow, Standardization } from "@psilink/core";
+import type { CSVRow, Standardization } from "@alcove/core";
 
 /**
  * Orchestrates the silent-empty aggregate ({@link computeFieldCoverage}) on or off

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { getDefaultLinkageTerms } from "@psilink/core";
+import { getDefaultLinkageTerms } from "@alcove/core";
 
 import {
   CONFIGURATION_LOAD_SEALED,
@@ -107,7 +107,7 @@ describe("each answer lands the control in one state", () => {
     // A refusal the route raises reaches the operator whole, and no step is
     // filled from a document the console would not open.
     const error =
-      "The psilink.yaml in your working folder is not a valid psilink " +
+      "The alcove.yaml in your working folder is not a valid Alcove " +
       "configuration. Fix this setting in the file, then open it again: " +
       "connection.server.port.";
     const read = mountedConfigurationRead({ kind: "refused", error });
@@ -280,8 +280,8 @@ describe("a configuration on a channel the console does not conduct", () => {
     const reason = runWithheldReason(state);
     expect(reason).toContain("webrtc");
     expect(reason).toContain("sftp and filedrop");
-    expect(reason).toMatch(/psilink on the command line/);
-    expect(reason).toMatch(/Save your changes to psilink\.yaml/);
+    expect(reason).toMatch(/Alcove on the command line/);
+    expect(reason).toMatch(/Save your changes to alcove\.yaml/);
   });
 
   test("a channel the console conducts withholds nothing", () => {
@@ -313,7 +313,7 @@ describe("a configuration on a channel the console does not conduct", () => {
     });
     expect(notices).toEqual([channelNotConductedNotice("webrtc")]);
     expect(notices[0]).toContain("runs over webrtc");
-    expect(notices[0]).toMatch(/save them to psilink\.yaml/);
+    expect(notices[0]).toMatch(/save them to alcove\.yaml/);
     expect(notices[0]).toMatch(/connection is kept exactly as your file/);
   });
 
@@ -337,7 +337,7 @@ describe("a configuration on a channel the console does not conduct", () => {
     ]);
     const notice = divergedCommitmentNotice(state, edited);
     expect(notice).toContain("disclosed_payload_columns");
-    expect(notice).toMatch(/psilink on the command line refuses to run/);
+    expect(notice).toMatch(/Alcove on the command line refuses to run/);
     expect(notice).toMatch(/invite your partner again/);
     expect(notice).not.toMatch(/a run started here/);
     expect(mountedConfigurationNotices(state, edited)).toEqual([
@@ -494,7 +494,7 @@ describe("the notices name the settings and say what happens to them", () => {
     const notice = carriedThroughNotice([UNCOMPOSED_SETTING]);
     expect(notice).toContain(UNCOMPOSED_SETTING);
     expect(notice).toContain("keeps it unchanged");
-    expect(notice).toMatch(/psilink on the command line/);
+    expect(notice).toMatch(/Alcove on the command line/);
   });
 
   test("a held setting the run does not apply says so", () => {
@@ -572,7 +572,7 @@ describe("the notices name the settings and say what happens to them", () => {
   test("a setting the input file cannot supply is named, not dropped", () => {
     const notice = termsNotAppliedNotice(["metadata", "standardization"]);
     expect(notice).toContain("metadata, standardization");
-    expect(notice).toMatch(/psilink on the command line/);
+    expect(notice).toMatch(/Alcove on the command line/);
     expect(termsNotAppliedNotice([])).toBeUndefined();
   });
 
@@ -882,8 +882,8 @@ describe("the terms of an opened configuration changed here", () => {
     });
     expect(warning).toMatch(/still holds its terms as they were/);
     expect(warning).toMatch(/This run is refused/);
-    expect(warning).toContain("psilink update");
-    expect(warning).toContain("psilink apply");
+    expect(warning).toContain("alcove update");
+    expect(warning).toContain("alcove apply");
   });
 
   test("a configuration saved back names update and apply after the save", () => {
@@ -891,8 +891,8 @@ describe("the terms of an opened configuration changed here", () => {
       termsEdited: true,
       continuesOpenedExchange: false,
     });
-    expect(warning).toMatch(/after you save, run psilink update/);
-    expect(warning).toContain("psilink apply");
+    expect(warning).toMatch(/after you save, run alcove update/);
+    expect(warning).toContain("alcove apply");
     expect(warning).not.toMatch(/This run is refused/);
   });
 

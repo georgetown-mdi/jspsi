@@ -46,7 +46,7 @@ async function loadTestConfig(configPath) {
 
 const WEB_CONFIG = "apps/web/vite.config.ts";
 
-// Every config that owns a run. The apps import the built @psilink/core, so
+// Every config that owns a run. The apps import the built @alcove/core, so
 // they hold the dist guard; packages/core builds its own dist in `pretest` and
 // tests its sources, and the root config runs no suite of its own.
 const CONFIGS = [

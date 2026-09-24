@@ -4,7 +4,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import Peer from "peerjs";
 
-import { generateSharedSecret } from "@psilink/core";
+import { generateSharedSecret } from "@alcove/core";
 
 import {
   WEBRTC_ENDPOINT_HOST_REFUSED,
@@ -12,7 +12,7 @@ import {
   dialAsAcceptor,
 } from "@psi/transport/rendezvous";
 
-import type { WebRTCEndpoint } from "@psilink/core";
+import type { WebRTCEndpoint } from "@alcove/core";
 
 /**
  * What an invitation endpoint's `host` and `path` can do to the address the
@@ -45,13 +45,13 @@ vi.mock("@utils/clientConfig", () => {
       PEERJS_DEBUG_LEVEL: number;
       LOG_LEVEL: string;
       DEPLOYMENT_PROFILE: string;
-      PSILINK_VERSION: string;
+      ALCOVE_VERSION: string;
     }> {
       return Promise.resolve({
         PEERJS_DEBUG_LEVEL: 1,
         LOG_LEVEL: "INFO",
         DEPLOYMENT_PROFILE: "hosted",
-        PSILINK_VERSION: "",
+        ALCOVE_VERSION: "",
       });
     }
   }

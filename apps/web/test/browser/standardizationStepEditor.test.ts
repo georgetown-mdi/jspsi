@@ -12,7 +12,7 @@ import { columnSamplesFromRows } from "@psi/columnSamples";
 
 import { createAppMount } from "./renderApp";
 
-import type { LinkageField, StandardizationStep } from "@psilink/core";
+import type { LinkageField, StandardizationStep } from "@alcove/core";
 
 const app = createAppMount();
 

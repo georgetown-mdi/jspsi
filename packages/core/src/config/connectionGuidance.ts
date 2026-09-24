@@ -17,7 +17,7 @@ import { commentBlock, commentKey } from "./yamlComments.js";
  * name this section rather than a document that only describes the channels.
  */
 export const CONNECTION_BLOCK_DOC_URL =
-  "https://github.com/georgetown-mdi/jspsi/blob/main/docs/" +
+  "https://github.com/georgetown-mdi/alcove/blob/main/docs/" +
   "EXCHANGE_REFERENCE.md#connection-blocks-by-channel";
 
 /**

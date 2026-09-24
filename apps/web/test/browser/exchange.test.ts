@@ -17,8 +17,8 @@ import {
   decodeInvitation,
   describeResolvedMatching,
   getDefaultLinkageTerms,
-} from "@psilink/core";
-import { minimalPreparedExchange } from "@psilink/core/testing";
+} from "@alcove/core";
+import { minimalPreparedExchange } from "@alcove/core/testing";
 
 import { STEP_STATE_KEY } from "@exchange/stepHistory";
 
@@ -42,7 +42,7 @@ import type {
   LinkageTerms,
   PreparedExchange,
   TransformStep,
-} from "@psilink/core";
+} from "@alcove/core";
 
 // The grid's control labels isolate the header they name (the treatment
 // MatchingSharingSection applies), so selectors derive the label from the
@@ -334,7 +334,7 @@ function budgetRefusal(): Error {
 function spoofedRefusalChain(): Error {
   return new Error("mint failed", {
     cause: {
-      psilinkTransformRefusal: {
+      alcoveTransformRefusal: {
         reason: "uncompilable-step",
         stepLabel: `${REFUSAL_MARKER} step`,
       },
@@ -367,7 +367,7 @@ describe("quick path", () => {
 
     await expect
       .element(page.getByRole("heading", { level: 1 }))
-      .toMatchTextContent("psilink - private record linkage");
+      .toMatchTextContent("Alcove - private record linkage");
 
     expect(document.querySelectorAll("main").length).toBe(1);
     expect(document.querySelectorAll("h1").length).toBe(1);
@@ -1126,7 +1126,7 @@ describe("inviter screen", () => {
       // The seed lands on step 1 with the sample file read, the sample name
       // filled, and the default-terms callout showing -- Continue is enabled.
       await expect
-        .element(page.getByText("psilink-sample-inviter.csv"))
+        .element(page.getByText("alcove-sample-inviter.csv"))
         .toBeInTheDocument();
       await expect
         .element(page.getByLabelText("Your name"))
@@ -1176,7 +1176,7 @@ describe("inviter screen", () => {
     try {
       app.render(createElement(InviterScreen));
       await expect
-        .element(page.getByText("psilink-sample-inviter.csv"))
+        .element(page.getByText("alcove-sample-inviter.csv"))
         .toBeInTheDocument();
 
       const ledger = () =>
@@ -1198,7 +1198,7 @@ describe("inviter screen", () => {
       await expect
         .element(page.getByRole("heading", { level: 1 }))
         .toMatchTextContent("Your file");
-      expect(page.getByText("psilink-sample-inviter.csv").query()).toBeNull();
+      expect(page.getByText("alcove-sample-inviter.csv").query()).toBeNull();
       await expect.element(page.getByLabelText("Your name")).toHaveValue("");
       expect(ledger().textContent).not.toContain(
         "Sample data (synthetic records)",
@@ -1224,7 +1224,7 @@ describe("inviter screen", () => {
     try {
       app.render(createElement(InviterScreen));
       await expect
-        .element(page.getByText("psilink-sample-inviter.csv"))
+        .element(page.getByText("alcove-sample-inviter.csv"))
         .toBeInTheDocument();
 
       // The sample is loaded but nothing regrets losing it: the guard never arms
@@ -1556,7 +1556,7 @@ describe("inviter screen", () => {
     // command-line transport mints nothing at Create and everything at Save.
     await reachReviewCreate();
     await page
-      .getByLabelText("Over SFTP, run by the psilink command-line tool")
+      .getByLabelText("Over SFTP, run by the Alcove command-line tool")
       .click();
     await page.getByRole("button", { name: "Create the invitation" }).click();
     await expect
@@ -1656,7 +1656,7 @@ describe("inviter screen", () => {
   test("a mint failure the check did not tag keeps the fixed message at the save click", async () => {
     await reachReviewCreate();
     await page
-      .getByLabelText("Over SFTP, run by the psilink command-line tool")
+      .getByLabelText("Over SFTP, run by the Alcove command-line tool")
       .click();
     await page.getByRole("button", { name: "Create the invitation" }).click();
     await expect
@@ -2028,9 +2028,9 @@ describe("inviter screen", () => {
       },
       record: {
         recordUrl: URL.createObjectURL(new Blob(["{}"])),
-        recordFileName: "psilink-record-2026-07-08T14-32.json",
+        recordFileName: "alcove-record-2026-07-08T14-32.json",
         keysUrl: URL.createObjectURL(new Blob(["{}"])),
-        keysFileName: "psilink-record-2026-07-08T14-32.keys.json",
+        keysFileName: "alcove-record-2026-07-08T14-32.keys.json",
       },
     });
 
@@ -2065,12 +2065,12 @@ describe("inviter screen", () => {
     );
     expect(links.map((link) => link.textContent)).toEqual([
       "results.csv",
-      "psilink-record-2026-07-08T14-32.json",
-      "psilink-record-2026-07-08T14-32.keys.json",
+      "alcove-record-2026-07-08T14-32.json",
+      "alcove-record-2026-07-08T14-32.keys.json",
     ]);
     expect(links[2].getAttribute("aria-label")).toBe(
       "Download verification keys (keep private): " +
-        "psilink-record-2026-07-08T14-32.keys.json",
+        "alcove-record-2026-07-08T14-32.keys.json",
     );
 
     // The timeline finishes whole, and the ledger fixes what happened: the
@@ -2098,9 +2098,9 @@ describe("inviter screen", () => {
       kind: "withheld" as const,
       record: {
         recordUrl: URL.createObjectURL(new Blob(["{}"])),
-        recordFileName: "psilink-record-x.json",
+        recordFileName: "alcove-record-x.json",
         keysUrl: URL.createObjectURL(new Blob(["{}"])),
-        keysFileName: "psilink-record-x.keys.json",
+        keysFileName: "alcove-record-x.keys.json",
       },
     });
 
@@ -2121,8 +2121,8 @@ describe("inviter screen", () => {
       document.querySelectorAll<HTMLAnchorElement>("a[download]"),
     ).map((link) => link.textContent);
     expect(links).toEqual([
-      "psilink-record-x.json",
-      "psilink-record-x.keys.json",
+      "alcove-record-x.json",
+      "alcove-record-x.keys.json",
     ]);
     expect(
       document.querySelector('aside[aria-label="This exchange"]')?.textContent,
@@ -2139,9 +2139,9 @@ describe("inviter screen", () => {
       countReportedByPartner: false,
       record: {
         recordUrl: URL.createObjectURL(new Blob(["{}"])),
-        recordFileName: "psilink-record-x.json",
+        recordFileName: "alcove-record-x.json",
         keysUrl: URL.createObjectURL(new Blob(["{}"])),
-        keysFileName: "psilink-record-x.keys.json",
+        keysFileName: "alcove-record-x.keys.json",
       },
     });
 
@@ -2166,15 +2166,15 @@ describe("inviter screen", () => {
     );
     // And the count it computed itself has no partner caveat.
     expect(document.body.textContent).not.toContain(
-      "psilink does not check a count it is sent",
+      "Alcove does not check a count it is sent",
     );
     // No result download, and the record pair is still offered.
     const links = Array.from(
       document.querySelectorAll<HTMLAnchorElement>("a[download]"),
     ).map((link) => link.textContent);
     expect(links).toEqual([
-      "psilink-record-x.json",
-      "psilink-record-x.keys.json",
+      "alcove-record-x.json",
+      "alcove-record-x.keys.json",
     ]);
     const ledger = document.querySelector(
       'aside[aria-label="This exchange"]',
@@ -2206,7 +2206,7 @@ describe("inviter screen", () => {
     await expect
       .element(
         page.getByText(
-          "Your partner ran the match and sent you this number. psilink does " +
+          "Your partner ran the match and sent you this number. Alcove does " +
             "not check a count it is sent against a run of its own, so the " +
             "figure is your partner's word for it.",
         ),
@@ -2337,7 +2337,7 @@ describe("inviter screen", () => {
         new Error(
           "shared secret expired at 2026-07-08T19:32:00.000Z; obtain a new invitation",
         ),
-        { psilinkRecoveryHintEmitted: true },
+        { alcoveRecoveryHintEmitted: true },
       ),
     });
 
@@ -2445,7 +2445,7 @@ describe("inviter screen", () => {
     // Choosing the SFTP transport reflects in the ledger's How it runs row and
     // the answers table before Create.
     await page
-      .getByLabelText("Over SFTP, run by the psilink command-line tool")
+      .getByLabelText("Over SFTP, run by the Alcove command-line tool")
       .click();
     const ledger = document.querySelector(
       'aside[aria-label="This exchange"]',
@@ -2487,7 +2487,7 @@ describe("inviter screen", () => {
     try {
       await reachReviewCreate();
       await page
-        .getByLabelText("Over SFTP, run by the psilink command-line tool")
+        .getByLabelText("Over SFTP, run by the Alcove command-line tool")
         .click();
       await page.getByRole("button", { name: "Create the invitation" }).click();
       await expect
@@ -2516,7 +2516,7 @@ describe("inviter screen", () => {
       );
       await userEvent.fill(
         page.getByLabelText("Remote directory"),
-        "/exchanges/psilink",
+        "/exchanges/alcove",
       );
       await expect.element(save).toBeEnabled();
       await save.click();
@@ -2528,17 +2528,17 @@ describe("inviter screen", () => {
       const fileName = document.querySelector(
         `.${styles.fileName}`,
       )?.textContent;
-      expect(fileName).toMatch(/^psilink-exchange-\d{4}-\d{2}-\d{2}\.yaml$/);
+      expect(fileName).toMatch(/^alcove-exchange-\d{4}-\d{2}-\d{2}\.yaml$/);
       await expect
         .element(page.getByRole("button", { name: "Copy invitation code" }))
         .toBeInTheDocument();
       // The one copyable run command names the just-minted file with
-      // --config-file (the default `./psilink.yaml` would not match it) and
+      // --config-file (the default `./alcove.yaml` would not match it) and
       // includes the --invitation flag.
       await expect
         .element(
           page.getByText(
-            `psilink exchange your-data.csv --config-file ${fileName} ` +
+            `alcove exchange your-data.csv --config-file ${fileName} ` +
               "--invitation @invitation-code.txt",
           ),
         )
@@ -2558,7 +2558,7 @@ describe("inviter screen", () => {
       )?.text as string;
       expect(yaml).toContain("channel: sftp");
       expect(yaml).toContain("sftp.riverbend.example.gov");
-      expect(yaml).toContain("/exchanges/psilink");
+      expect(yaml).toContain("/exchanges/alcove");
       expect(yaml).not.toMatch(/password/i);
       expect(yaml).not.toMatch(/private_key/i);
       expect(yaml).not.toMatch(/authentication/i);
@@ -2611,7 +2611,7 @@ describe("inviter screen", () => {
       const save = page.getByRole("button", { name: "Save exchange file" });
       await userEvent.fill(
         page.getByLabelText("Shared directory"),
-        "/exchanges/psilink",
+        "/exchanges/alcove",
       );
       await expect.element(save).toBeEnabled();
       await save.click();
@@ -2629,7 +2629,7 @@ describe("inviter screen", () => {
         entry.fileName.endsWith(".yaml"),
       )?.text as string;
       expect(yaml).toContain("channel: filedrop");
-      expect(yaml).toContain("/exchanges/psilink");
+      expect(yaml).toContain("/exchanges/alcove");
       expect(yaml).not.toMatch(/password/i);
       expect(yaml).not.toMatch(/authentication/i);
 
@@ -2664,7 +2664,7 @@ describe("inviter screen", () => {
   test("the hosted save surface offers no partner accept kit", async () => {
     await reachReviewCreate();
     await page
-      .getByLabelText("Over SFTP, run by the psilink command-line tool")
+      .getByLabelText("Over SFTP, run by the Alcove command-line tool")
       .click();
     await page.getByRole("button", { name: "Create the invitation" }).click();
     await expect
@@ -2680,7 +2680,7 @@ describe("inviter screen", () => {
     try {
       await reachReviewCreate();
       await page
-        .getByLabelText("Over SFTP, run by the psilink command-line tool")
+        .getByLabelText("Over SFTP, run by the Alcove command-line tool")
         .click();
       await page.getByRole("button", { name: "Create the invitation" }).click();
       await userEvent.fill(

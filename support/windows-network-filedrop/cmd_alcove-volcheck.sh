@@ -1,7 +1,7 @@
 #!/bin/sh
-# Runs over the mounted volume, for cmd_Setup-PsilinkFileDrop.cmd.
+# Runs over the mounted volume, for cmd_Setup-AlcoveFileDrop.cmd.
 #
-# These are the operations psilink's default rendezvous is built on, exercised
+# These are the operations Alcove's default rendezvous is built on, exercised
 # over the real CIFS mount rather than over smbclient -- smbclient refuses a
 # rename onto an existing file whatever the server would have allowed, so a
 # rename check built on it produces a false negative. A share can pass every
@@ -11,7 +11,7 @@
 # pasted into this text, so a value containing a quote cannot break the script.
 #
 # The exclusive-create test is mkdir and not "set -C" on a file, though the file
-# is what psilink itself uses. busybox ash implements set -C by calling stat and
+# is what Alcove itself uses. busybox ash implements set -C by calling stat and
 # refusing in the shell, so the second attempt never issues a syscall and the
 # share is never asked -- which made EXCL_WEAK unreachable and the whole check a
 # no-op on exactly the sync-backed shares it exists to catch. mkdir takes EEXIST
@@ -39,18 +39,18 @@ else
   echo MARKER_MISSING
 fi
 
-echo probe > .psilink-w.tmp && mv .psilink-w.tmp .psilink-w2.tmp && rm .psilink-w2.tmp && echo WRITE_OK
+echo probe > .alcove-w.tmp && mv .alcove-w.tmp .alcove-w2.tmp && rm .alcove-w2.tmp && echo WRITE_OK
 
-rm -rf .psilink-x.d
-if mkdir .psilink-x.d 2>/dev/null; then
-  if mkdir .psilink-x.d 2>/dev/null; then echo EXCL_WEAK; else echo EXCL_OK; fi
+rm -rf .alcove-x.d
+if mkdir .alcove-x.d 2>/dev/null; then
+  if mkdir .alcove-x.d 2>/dev/null; then echo EXCL_WEAK; else echo EXCL_OK; fi
 else
   echo EXCL_UNTESTED
 fi
-rm -rf .psilink-x.d
+rm -rf .alcove-x.d
 
-rm -f .psilink-a.tmp .psilink-b.tmp
-if echo a > .psilink-a.tmp && echo b > .psilink-b.tmp; then
-  if mv -f .psilink-a.tmp .psilink-b.tmp 2>/dev/null; then echo RENAME_OK; else echo RENAME_FAIL; fi
+rm -f .alcove-a.tmp .alcove-b.tmp
+if echo a > .alcove-a.tmp && echo b > .alcove-b.tmp; then
+  if mv -f .alcove-a.tmp .alcove-b.tmp 2>/dev/null; then echo RENAME_OK; else echo RENAME_FAIL; fi
 fi
-rm -f .psilink-a.tmp .psilink-b.tmp
+rm -f .alcove-a.tmp .alcove-b.tmp

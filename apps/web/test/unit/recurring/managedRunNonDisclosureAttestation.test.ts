@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { generateSharedSecret, getDefaultLinkageTerms } from "@psilink/core";
+import { generateSharedSecret, getDefaultLinkageTerms } from "@alcove/core";
 
 import {
   MANAGED_RUN_HANDED_OFF_ATTESTATION,

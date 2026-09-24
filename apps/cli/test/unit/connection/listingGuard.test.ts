@@ -6,7 +6,7 @@ import {
   MAX_ERROR_CAUSE_DEPTH,
   sanitizeErrorForDisplay,
   UsageError,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   MAX_DIRECTORY_ENTRIES,

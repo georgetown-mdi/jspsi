@@ -64,7 +64,7 @@ describe("parseSigningConfig", () => {
     // The real fingerprint ends in "g"; "h", "i", "j" decode to the same 32
     // bytes (the last char's low 2 bits are unused), so without a canonical
     // constraint they would be accepted as equivalent pins. They must be
-    // rejected so the pin string is a 1:1 image of the digest psilink prints.
+    // rejected so the pin string is a 1:1 image of the digest Alcove prints.
     for (const lastChar of ["h", "i", "j"]) {
       const nonCanonical = FINGERPRINT.slice(0, 42) + lastChar;
       expect(
@@ -111,13 +111,13 @@ describe("ExchangeSpec signing block", () => {
       ...baseSpec,
       signing: {
         mode: "certificate",
-        identity_file: "/run/secrets/psilink-signing-identity.json",
+        identity_file: "/run/secrets/alcove-signing-identity.json",
         partner_fingerprint: FINGERPRINT,
       },
     });
     expect(spec.signing).toEqual({
       mode: "certificate",
-      identityFile: "/run/secrets/psilink-signing-identity.json",
+      identityFile: "/run/secrets/alcove-signing-identity.json",
       partnerFingerprint: FINGERPRINT,
     });
   });

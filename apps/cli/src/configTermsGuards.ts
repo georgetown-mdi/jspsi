@@ -6,11 +6,11 @@ import {
   assertPayloadSendDisclosed,
   assertStandardizationMatchesTerms,
   assertTransformsCompile,
-} from "@psilink/core";
-import type { LinkageTerms, Metadata, Standardization } from "@psilink/core";
+} from "@alcove/core";
+import type { LinkageTerms, Metadata, Standardization } from "@alcove/core";
 
 /**
- * Refuse linkage terms that a `psilink exchange` run from a configuration
+ * Refuse linkage terms that an `alcove exchange` run from a configuration
  * holding them, beside that configuration's own `metadata` and
  * `standardization`, would refuse before it sends anything. Run where terms
  * leave or enter a configuration without an exchange to check them -- an

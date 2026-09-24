@@ -1,12 +1,12 @@
 import { fileURLToPath } from "node:url";
 
-import { UsageError } from "@psilink/core";
+import { UsageError } from "@alcove/core";
 import type {
   ConnectionConfig,
   FileDropConnectionConfig,
   SFTPConnectionConfig,
   WebRTCConnectionConfig,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { applyConnectionOverrides, type ConnectionOverrides } from "./config";
 import { brokerLocationFromConnection } from "./connection/webrtc/weriftPeer";
@@ -24,7 +24,7 @@ export type RunnableConnectionConfig = Extract<
 >;
 
 /**
- * The connection an online `psilink invite` builds from its URL: the file-sync
+ * The connection an online `alcove invite` builds from its URL: the file-sync
  * pair plus webrtc. Invite is the one URL-driven command that can stand up a
  * webrtc rendezvous, because it is the side that both takes the `inviter` end
  * and mints the invitation naming the coordination server for its partner.
@@ -45,7 +45,7 @@ export interface InviterOwnRelay {
 /**
  * The refusal a `ws:`/`wss:` URL gets on the acceptance and zero-setup paths.
  *
- * The channel runs -- `psilink exchange` dispatches it -- but on these paths
+ * The channel runs -- `alcove exchange` dispatches it -- but on these paths
  * not from a URL: the connection needs a `role` no URL has, and an acceptor's
  * comes from the invitation it was sent. The message names the routes that do
  * produce a webrtc connection, so this is not treated as "the CLI cannot do
@@ -53,9 +53,9 @@ export interface InviterOwnRelay {
  */
 export const WEBRTC_URL_REFUSED =
   "a ws:// or wss:// URL cannot be used here: this command runs a webrtc " +
-  "exchange from a saved connection, not from a URL. 'psilink invite' takes " +
+  "exchange from a saved connection, not from a URL. 'alcove invite' takes " +
   "one and mints an invitation naming that coordination server; accepting an " +
-  "invitation writes the connection block, and 'psilink exchange' then runs it.";
+  "invitation writes the connection block, and 'alcove exchange' then runs it.";
 
 /**
  * The refusal a `ws:`/`wss:` URL naming anything past the broker's location
@@ -70,7 +70,7 @@ export const WEBRTC_URL_EXTRAS_REFUSED =
   "a ws:// or wss:// URL names only the coordination server's host, port, and " +
   "path; it cannot include a user, an API key, or any other query. For a " +
   "coordination server that needs a key, author `channel: webrtc` (with " +
-  "`server.key`) in psilink.yaml and run 'psilink exchange'.";
+  "`server.key`) in alcove.yaml and run 'alcove exchange'.";
 
 /**
  * Maps a server URL protocol to a connection channel identifier.
@@ -192,7 +192,7 @@ export function connectionFromURL(
 }
 
 /**
- * Build the connection an online `psilink invite` runs on from its server URL:
+ * Build the connection an online `alcove invite` runs on from its server URL:
  * {@link connectionFromURL}'s file-sync channels, plus a `ws:`/`wss:` URL as
  * the webrtc coordination server this party meets its partner through. The
  * caller stamps the `inviter` role (`withWebRTCPeerRole`) and mints the

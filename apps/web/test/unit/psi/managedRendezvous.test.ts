@@ -6,7 +6,7 @@ import {
   deriveRendezvousPeerId,
   generateSharedSecret,
   getDefaultLinkageTerms,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   assertManagedRerunDispatchable,
@@ -18,7 +18,7 @@ import type {
   ExchangeSpec,
   WebRTCEndpoint,
   WebRTCExchangeLocator,
-} from "@psilink/core";
+} from "@alcove/core";
 import type { DataConnection } from "peerjs";
 import type Peer from "peerjs";
 
@@ -286,7 +286,7 @@ describe("beginManagedRendezvous: relay", () => {
   function stubOwnRelay(): void {
     vi.stubGlobal("localStorage", {
       getItem: (key: string) =>
-        key === "psilink-own-relay"
+        key === "alcove-own-relay"
           ? JSON.stringify({ version: 1, ...ownRelay })
           : null,
     });

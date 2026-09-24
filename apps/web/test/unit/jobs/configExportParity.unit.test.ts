@@ -6,7 +6,7 @@ import {
   parseSensitiveYaml,
   snakeizeKey,
   snakeizeKeys,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   HANDOFF_CREDENTIAL_PATH_PLACEHOLDER,
@@ -30,7 +30,7 @@ import {
   validSftpIntent,
 } from "../../utils/jobFixtures";
 
-import type { ExchangeSpec } from "@psilink/core";
+import type { ExchangeSpec } from "@alcove/core";
 import type { JobFiledropExchangeIntent } from "@jobs/intentSchemas";
 import type { JobHandoff } from "@jobs/handoff";
 import type { JobSftpServerEntry } from "@jobs/sftpServer";
@@ -41,7 +41,7 @@ import type { JobSftpServerEntry } from "@jobs/sftpServer";
  * writes over, and which top-level blocks may be kept at all.
  *
  * Everything here runs in process. The parity claim against the REAL CLI's own
- * bytes -- a configuration `psilink invite` or `psilink accept` wrote, opened,
+ * bytes -- a configuration `alcove invite` or `alcove accept` wrote, opened,
  * run and handed back -- needs the built program and lives in the interop
  * project (test/interop/consoleExportParity.test.ts).
  */
@@ -70,7 +70,7 @@ const RETAIN_OPTIONS = {
 const MOUNTED_SIGNING = {
   mode: "certificate" as const,
   partnerFingerprint: PARTNER_FINGERPRINT,
-  identityFile: "/home/operator/.psilink/identity.json",
+  identityFile: "/home/operator/.alcove/identity.json",
   receiptOutput: "/home/operator/receipt.json",
 };
 
@@ -469,11 +469,11 @@ describe("the sftp credential paths a loaded configuration keeps in the export",
 
   test("an unconverted export states the password path as read", () => {
     const server = exportedServer(
-      sftpDocument({ password: "@/home/operator/.psilink/password" }),
+      sftpDocument({ password: "@/home/operator/.alcove/password" }),
       { password: RUN_PASSWORD_PATH },
       false,
     );
-    expect(server.password).toBe("@/home/operator/.psilink/password");
+    expect(server.password).toBe("@/home/operator/.alcove/password");
   });
 
   test("an unconverted export states the private key and passphrase paths as read", () => {
@@ -493,7 +493,7 @@ describe("the sftp credential paths a loaded configuration keeps in the export",
 
   test("a converted export states the placeholders for all three credential paths", () => {
     const password = exportedServer(
-      sftpDocument({ password: "@/home/operator/.psilink/password" }),
+      sftpDocument({ password: "@/home/operator/.alcove/password" }),
       { password: RUN_PASSWORD_PATH },
       true,
     );
@@ -593,7 +593,7 @@ describe("the sftp credential paths a loaded configuration keeps in the export",
 
   test("a sign-in method the run changed keeps the run's placeholder", () => {
     const server = exportedServer(
-      sftpDocument({ password: "@/home/operator/.psilink/password" }),
+      sftpDocument({ password: "@/home/operator/.alcove/password" }),
       { privateKey: RUN_KEY_PATH },
       false,
     );

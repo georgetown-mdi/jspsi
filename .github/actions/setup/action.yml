@@ -1,5 +1,5 @@
 # Shared CI setup prologue: pin Node, install from the lockfile, and build
-# @psilink/core. The four build/test workflows (static_checks, cli_build_and_test,
+# @alcove/core. The four build/test workflows (static_checks, cli_build_and_test,
 # release, eb_build_and_test) each run this before their app-specific build and
 # test steps, so the Node version and install/cache strategy live in one place.
 #
@@ -7,7 +7,7 @@
 # ./.github/actions/setup only exists on the runner after actions/checkout has
 # run, so each workflow keeps its own checkout step before calling this.
 #
-# Core is built here because the apps consume @psilink/core from its built dist/
+# Core is built here because the apps consume @alcove/core from its built dist/
 # (the same way they do locally), so typecheck/build/test in every workflow needs
 # it present first.
 #
@@ -24,7 +24,7 @@
 # in order and a failed step ends the action, so an install or a build that
 # failed never reaches its save.
 name: "Setup"
-description: "Set up Node, install dependencies, and build @psilink/core"
+description: "Set up Node, install dependencies, and build @alcove/core"
 
 inputs:
   cache:
@@ -64,7 +64,7 @@ runs:
         fi
       shell: bash
     - name: Verify vendored native tarball provenance
-      # The sidecar above is written in the same psilink commit as the bytes it
+      # The sidecar above is written in the same Alcove commit as the bytes it
       # describes, so it cannot bind them to the fork build that produced them.
       # This reads the GitHub artifact attestation stored against the PRODUCING
       # repository instead. It is armed per artifact by the marker committed
@@ -174,7 +174,7 @@ runs:
           apps/*/node_modules
           packages/*/node_modules
         key: ${{ steps.cache-keys.outputs.install }}
-    - name: Restore the @psilink/core build
+    - name: Restore the @alcove/core build
       id: core-cache
       if: inputs.cache != 'false' && runner.os == 'Linux'
       uses: actions/cache/restore@v6
@@ -202,7 +202,7 @@ runs:
         rm -f packages/core/dist/tsconfig.tsbuildinfo
         find packages/core/dist -type f -exec touch {} +
       shell: bash
-    - name: Save the @psilink/core build
+    - name: Save the @alcove/core build
       if: inputs.cache != 'false' && runner.os == 'Linux' && steps.core-cache.outputs.cache-hit != 'true'
       uses: actions/cache/save@v6
       with:

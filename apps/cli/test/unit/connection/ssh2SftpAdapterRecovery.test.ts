@@ -11,7 +11,7 @@ import {
   TransportPublishIndeterminateError,
   UsageError,
   sanitizeErrorForDisplay,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { SSH2SFTPClientAdapter } from "../../../src/connection/ssh2SftpAdapter";
 import { SFTP_REDIAL_WARN_INTERVAL } from "../../../src/connection/sftpAdapterLedger";

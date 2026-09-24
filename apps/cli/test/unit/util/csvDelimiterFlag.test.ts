@@ -4,13 +4,13 @@ import {
   CSV_DELIMITER_DETECT,
   csvDelimiterRefusal,
   UsageError,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { csvDelimiterFlag } from "../../../src/util/flags";
 import { buildCli } from "../../../src/cliParser";
 
 function argv(extra: Record<string, unknown>): Arguments {
-  return { _: [], $0: "psilink", ...extra } as unknown as Arguments;
+  return { _: [], $0: "alcove", ...extra } as unknown as Arguments;
 }
 
 afterEach(() => {

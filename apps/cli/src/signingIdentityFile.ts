@@ -10,14 +10,14 @@ import {
   serializeSigningIdentity,
   SIGNING_IDENTITY_VERSION,
   UsageError,
-} from "@psilink/core";
-import type { SigningCertificate, SigningIdentity } from "@psilink/core";
+} from "@alcove/core";
+import type { SigningCertificate, SigningIdentity } from "@alcove/core";
 
 import { warnIfFileOverPermissive, writeFileOwnerOnly } from "./fileUtils";
 import { parseSensitiveJson } from "./sensitiveFile";
 
 // File custody for the long-lived signing identity (private key + self-signed
-// certificate), kept separate from the rotating key file (`.psilink.key`):
+// certificate), kept separate from the rotating key file (`.alcove.key`):
 // the shared secret rotates every exchange; the signing key must stay stable
 // so a partner's pinned fingerprint keeps matching.
 //
@@ -111,7 +111,7 @@ export async function loadSigningIdentity(
  *
  * The console asks the same question of the same file before a run it launches,
  * through a reader of its own, so the two are driven over one set of documents
- * (`@psilink/core/testing`, this leg
+ * (`@alcove/core/testing`, this leg
  * `apps/cli/test/unit/boundIdentityParity.test.ts`): tightening what this
  * accepts fails that set until the console's reader follows.
  */

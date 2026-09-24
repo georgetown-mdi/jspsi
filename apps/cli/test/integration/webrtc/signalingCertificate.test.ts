@@ -6,7 +6,7 @@ import tls from "node:tls";
 
 import { afterAll, beforeAll, expect, test, vi } from "vitest";
 
-import { loopbackTlsCert } from "@psilink/testkit/loopbackTlsCert";
+import { loopbackTlsCert } from "@alcove/testkit/loopbackTlsCert";
 
 import {
   SIGNALING_TLS_PROBE_TIMEOUT_MS,
@@ -33,7 +33,7 @@ import type { Server as TcpServer } from "node:net";
  * not come up, and both halves of that claim are only worth what a real
  * handshake says.
  *
- * The listener presents the throwaway certificate `@psilink/testkit` mints,
+ * The listener presents the throwaway certificate `@alcove/testkit` mints,
  * and nothing here trusts it, so the handshake fails verification exactly as
  * an untrusted proxy's would.
  *
@@ -348,7 +348,7 @@ test.skipIf(sniVhostCertificates === null)(
  * environment assembled inside this one routes nothing.
  */
 const CHILD_DIAL_SCRIPT = `
-  const socket = new WebSocket(process.env.PSILINK_DIAL_URL);
+  const socket = new WebSocket(process.env.ALCOVE_DIAL_URL);
   const done = () => process.exit(0);
   socket.addEventListener("open", done, { once: true });
   socket.addEventListener("error", done, { once: true });
@@ -384,7 +384,7 @@ function dialFromProcess(
       {
         env: {
           PATH: process.env.PATH ?? "",
-          PSILINK_DIAL_URL: url,
+          ALCOVE_DIAL_URL: url,
           ...environment,
         },
         stdio: "ignore",
@@ -551,13 +551,13 @@ test("which environment routes a signaling dial through a proxy", async () => {
  */
 const CHILD_PROBE_SCRIPT = `
   const answer = {};
-  import(process.env.PSILINK_PROBE_MODULE)
+  import(process.env.ALCOVE_PROBE_MODULE)
     .then(async (module) => {
       answer.configured = module.environmentProxyingConfigured();
       answer.verdict =
         (await module.probeSignalingCertificate({
-          host: process.env.PSILINK_PROBE_HOST,
-          port: Number(process.env.PSILINK_PROBE_PORT),
+          host: process.env.ALCOVE_PROBE_HOST,
+          port: Number(process.env.ALCOVE_PROBE_PORT),
           path: "/",
           key: "peerjs",
           secure: true,
@@ -609,9 +609,9 @@ function probeFromProcess(
       {
         env: {
           PATH: process.env.PATH ?? "",
-          PSILINK_PROBE_MODULE: PROBE_MODULE,
-          PSILINK_PROBE_HOST: host,
-          PSILINK_PROBE_PORT: String(port),
+          ALCOVE_PROBE_MODULE: PROBE_MODULE,
+          ALCOVE_PROBE_HOST: host,
+          ALCOVE_PROBE_PORT: String(port),
           ...environment,
         },
         stdio: ["ignore", "pipe", "ignore"],

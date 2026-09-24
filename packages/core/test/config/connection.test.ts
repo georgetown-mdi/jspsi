@@ -340,7 +340,7 @@ test("parses a full SFTP connection with private key auth", () => {
       host: "sftp.example.org",
       port: 22,
       path: "/exchanges/",
-      username: "psilink",
+      username: "alcove",
       privateKey: "-----BEGIN OPENSSH PRIVATE KEY-----",
       privateKeyPassphrase: "hunter2",
       hostKeyFingerprint: validPin,
@@ -1980,7 +1980,7 @@ test("connection_per_poll is schema-accepted on filedrop (inert; the CLI warns)"
 test("a persisted options block resolves neither sweep flag", () => {
   // --sweep-exchange-files / --force-retain-sweep reach FileSyncConnection
   // through its constructor alone. Mirroring either onto FileSyncOptions would
-  // make it persistable in psilink.yaml, which is what this refuses to allow:
+  // make it persistable in alcove.yaml, which is what this refuses to allow:
   // a config spelling them resolves no such flag for the connection to read.
   const options = safeParseFileSyncOptions({
     sweep_exchange_files: true,

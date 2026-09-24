@@ -9,7 +9,7 @@ import {
   StandaloneOptionError,
   createStandaloneRequestHandler,
   resolveStandaloneOptions,
-} from "@psilink/peerjs-broker/standaloneOptions";
+} from "@alcove/peerjs-broker/standaloneOptions";
 
 import type { AddressInfo } from "node:net";
 

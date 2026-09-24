@@ -5,7 +5,7 @@ import {
   reasonTermsCannotStateIdentity,
   redactAndDisplayPartyIdentity,
   sanitizeForDisplay,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { NOTE_CONTROL_CHAR_PATTERN } from "@jobs/intentSchemas";
 
@@ -242,7 +242,7 @@ function draftMaxAgeDays(draft: ReceiptsDraft): number | undefined {
 
 /** The problem a partner fingerprint that is not a canonical digest reports. */
 export const PARTNER_FINGERPRINT_PROBLEM =
-  "Your partner's fingerprint must be the 43-character value 'psilink " +
+  "Your partner's fingerprint must be the 43-character value 'alcove " +
   "fingerprint' prints. Copy it whole, from a channel you trust.";
 
 /**
@@ -260,7 +260,7 @@ export const FIRST_CONTACT_PIN_ADVISORY =
   "certificate reaches it over the channel the invitation travelled, and " +
   "reports the fingerprint when it does. Its receipt then attests to whoever " +
   "sent that invitation. To tie the receipt to your partner and to nobody " +
-  "else, ask them to run 'psilink fingerprint' and send you the value over a " +
+  "else, ask them to run 'alcove fingerprint' and send you the value over a " +
   "channel you trust -- a phone call, not the same email as the invitation " +
   "-- and enter it above before you run.";
 
@@ -304,7 +304,7 @@ const DIVERGENCE_CONSEQUENCE =
 const DIVERGENCE_RECONCILE_GUIDANCE =
   "Make the two match: set 'Your name' for this exchange to the name the " +
   "identity is bound to, or create a new signing identity under the name " +
-  "these terms state at the command line -- 'psilink fingerprint --force " +
+  "these terms state at the command line -- 'alcove fingerprint --force " +
   "--identity' -- which gives you a new fingerprint every partner who pinned " +
   "the old one must be sent before their verification works again.";
 
@@ -316,7 +316,7 @@ const DIVERGENCE_RECONCILE_GUIDANCE =
 function rekeyGuidance(boundTo: string): string {
   return (
     `Create a new signing identity ${boundTo} at the command line -- ` +
-    "'psilink fingerprint --force --identity' -- then send every partner who " +
+    "'alcove fingerprint --force --identity' -- then send every partner who " +
     "pinned the old fingerprint the new one before their verification works " +
     "again."
   );
@@ -324,7 +324,7 @@ function rekeyGuidance(boundTo: string): string {
 
 /**
  * The one exit left where the bound name is one no terms document may state
- * (`reasonTermsCannotStateIdentity` in `@psilink/core`): naming it in the terms
+ * (`reasonTermsCannotStateIdentity` in `@alcove/core`): naming it in the terms
  * is closed to its holder, so a new identity is the only way out. Core's own
  * answer decides which names those are, read rather than restated so this
  * boundary and the run's cannot disagree.
@@ -607,7 +607,7 @@ const IDENTITY_PICKED_LOCATION_READ_NOTICE =
   "and the console creates no key there, with one exception: showing your " +
   "fingerprint checks that the file is there and then reads it, so a file " +
   "removed between those two steps is created again at that path. Create it " +
-  "once at the command line -- 'psilink fingerprint --identity-file' pointed " +
+  "once at the command line -- 'alcove fingerprint --identity-file' pointed " +
   "at that path -- and mount the folder read-only afterwards, which closes " +
   "that case too. Keep it out of every folder your partner syncs.";
 
@@ -658,7 +658,7 @@ export const IDENTITY_PICKED_LOCATION_NOTICE = `${IDENTITY_PICKED_LOCATION_READ_
  * instead, and a rendezvous with a mount of its own raises neither.
  */
 export const IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY =
-  "Before a shared-folder exchange runs, psilink checks whether the folder " +
+  "Before a shared-folder exchange runs, Alcove checks whether the folder " +
   "your partner writes into holds your signing key, and refuses the run if it " +
   "does: your long-lived private key there lets whoever reads it sign receipts " +
   "in your name -- for every exchange, with every partner. That check compares " +
@@ -705,7 +705,7 @@ export const IDENTITY_SHARED_MOUNT_REFUSAL_ADVISORY =
 export const IDENTITY_REGENERATION_NOTICE =
   "Your signing identity is long-lived: the same key signs every exchange with " +
   "every partner, which is what lets a fingerprint stay pinned. Replacing it is " +
-  "a command-line action -- psilink fingerprint --force -- because the new key " +
+  "a command-line action -- alcove fingerprint --force -- because the new key " +
   "has a new fingerprint, and every partner who pinned the old one must be sent " +
   "the new one before their verification works again.";
 

@@ -3,7 +3,7 @@
 import { afterAll, beforeAll, expect, test, vi } from "vitest";
 import { commands } from "vitest/browser";
 
-import { loadCSVFile, runExchange } from "@psilink/core";
+import { loadCSVFile, runExchange } from "@alcove/core";
 // @ts-ignore this is really there
 import PSI from "@openmined/psi.js/psi_wasm_web";
 
@@ -27,7 +27,7 @@ import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 import type { PeerCloseOutcome } from "@psi/transport/waitForPeerClose";
 
 /**
- * A real `psilink` process and a real browser peer completing one WebRTC PSI
+ * A real `alcove` process and a real browser peer completing one WebRTC PSI
  * exchange through the standalone signaling broker, with each side's
  * association table asserted and each side's clean-close wait measured.
  *
@@ -43,7 +43,7 @@ import type { PeerCloseOutcome } from "@psi/transport/waitForPeerClose";
  * names that broker, and the browser peer dials what the invitation names. A
  * browser inviter would name its own page's origin instead.
  *
- * The Node side -- the broker and the `psilink` process -- runs behind the
+ * The Node side -- the broker and the `alcove` process -- runs behind the
  * vitest browser commands in `legCommands.ts`. Its failures are prefixed
  * {@link LEG_ENVIRONMENT_FAILURE}, so an environment that could not stand the
  * leg up is never read as an interop divergence.
@@ -65,13 +65,13 @@ vi.mock("@utils/clientConfig", () => {
       PEERJS_DEBUG_LEVEL: number;
       LOG_LEVEL: string;
       DEPLOYMENT_PROFILE: string;
-      PSILINK_VERSION: string;
+      ALCOVE_VERSION: string;
     }> {
       return Promise.resolve({
         PEERJS_DEBUG_LEVEL: 1,
         LOG_LEVEL: "INFO",
         DEPLOYMENT_PROFILE: "hosted",
-        PSILINK_VERSION: "",
+        ALCOVE_VERSION: "",
       });
     }
   }
@@ -360,7 +360,7 @@ test("each side's clean-close wait is measured and recorded", () => {
 
 test("the browser peer reaches the broker over the signaling socket alone", () => {
   // PeerJS asks the broker for an id over HTTP only when constructed without
-  // one, and psilink always supplies the id derived from the invitation secret.
+  // one, and Alcove always supplies the id derived from the invitation secret.
   // So a broker on an origin of its own needs no CORS header for this app: the
   // only thing that crosses is the WebSocket, which CORS does not govern. This
   // is that claim as a check rather than a note.

@@ -27,7 +27,7 @@
  * which this page being behind is enough to explain.
  */
 
-import { parseExchangeRecord } from "@psilink/core";
+import { parseExchangeRecord } from "@alcove/core";
 
 import {
   MANAGED_EXCHANGE_DISCLOSURE_STORE_NAME,
@@ -44,7 +44,7 @@ import type {
   DisclosureAccounting,
   StoredDisclosureAccounting,
 } from "./disclosureAccounting";
-import type { ExchangeRecord } from "@psilink/core";
+import type { ExchangeRecord } from "@alcove/core";
 
 /** Read the stored accounting value under `id`, unparsed, or `undefined` when the
  * exchange has none. The one place the disclosure store is read from: every

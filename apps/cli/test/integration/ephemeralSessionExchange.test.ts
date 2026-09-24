@@ -9,11 +9,11 @@ import {
   FileSyncConnection,
   PeerAbortError,
   UsageError,
-} from "@psilink/core";
+} from "@alcove/core";
 import {
   TERMINAL_FRAME_DRAIN_TIMEOUT_MS,
   withCapturedLogs,
-} from "@psilink/core/testing";
+} from "@alcove/core/testing";
 
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
 import {

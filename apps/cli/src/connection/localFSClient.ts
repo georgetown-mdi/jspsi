@@ -7,14 +7,14 @@ import {
   TimeoutError,
   redactPrivateKeyMaterial,
   DEFAULT_SERVER_CONNECT_TIMEOUT_MS,
-} from "@psilink/core";
+} from "@alcove/core";
 import type {
   FileInfo,
   FileTransportClient,
   GetOptions,
   PutOptions,
   PutSource,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { frameSizeExceededError } from "./frameSizeGuard";
 import {
@@ -225,7 +225,7 @@ export class LocalFSClient implements FileTransportClient {
       // default 4-thread pool. A timeout is therefore terminal; every other
       // (fast) error is the transient the retry budget exists for
       // (EACCES/ENOENT while a share is still settling). The name check
-      // alongside `instanceof` is a fallback for `@psilink/core` loaded as
+      // alongside `instanceof` is a fallback for `@alcove/core` loaded as
       // two module copies, where `instanceof` alone would silently fail.
       (err) =>
         !(

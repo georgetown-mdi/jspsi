@@ -4,7 +4,7 @@ import {
   MetadataSchema,
   generateSharedSecret,
   getDefaultLinkageTerms,
-} from "@psilink/core";
+} from "@alcove/core";
 import { describe, expect, test } from "vitest";
 
 import {
@@ -37,7 +37,7 @@ import type {
   Metadata,
   Standardization,
   WebRTCExchangeLocator,
-} from "@psilink/core";
+} from "@alcove/core";
 
 /**
  * The three whole-document points that refuse a document over one column name --

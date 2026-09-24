@@ -549,8 +549,8 @@ for (const {
     });
 
     it("copies both workspace link targets so the node_modules links resolve", () => {
-      // node_modules/@psilink/core -> ../../packages/core and
-      // node_modules/psilink -> ../apps/cli must not dangle.
+      // node_modules/@alcove/core -> ../../packages/core and
+      // node_modules/alcove -> ../apps/cli must not dangle.
       expect(image.allRuntimeDests).toContain(
         "/app/packages/core/package.json",
       );
@@ -625,16 +625,16 @@ for (const {
 // Amazon Linux 2023 has none -- and in nothing this block reads.
 const RUNTIME_USER = "node";
 const EXPECTED_WRITABLE_SETUP =
-  "RUN mkdir -p /work /run/psilink/sftp-credentials " +
-  "&& chown -R node:node /work /run/psilink " +
-  "&& chmod -R 700 /run/psilink";
+  "RUN mkdir -p /work /run/alcove/sftp-credentials " +
+  "&& chown -R node:node /work /run/alcove " +
+  "&& chmod -R 700 /run/alcove";
 
 // The other half of that claim: /app is NOT among them, so the process reads and
 // executes its own code without being able to rewrite it. The Dockerfile says so
 // in a comment, which cannot hold it -- a `--chown` on a COPY, or one path added
 // to the chown above, hands the code to the account the entrypoint runs as and
 // displays as ordinary housekeeping in a diff.
-const WRITABLE_TREES = ["/work", "/run/psilink"];
+const WRITABLE_TREES = ["/work", "/run/alcove"];
 const withinWritableTree = (path) =>
   WRITABLE_TREES.some((tree) => path === tree || path.startsWith(`${tree}/`));
 
@@ -798,7 +798,7 @@ describe("the ownership-verb predicate the refusals above share", () => {
 describe("the npm-invocation predicate the runtime-stage refusal reads", () => {
   it("reads the leading word, not the name anywhere in the command", () => {
     expect(NPM_INVOCATION.test("npm ci --omit=dev --omit=optional")).toBe(true);
-    expect(NPM_INVOCATION.test("npx psilink --help")).toBe(true);
+    expect(NPM_INVOCATION.test("npx alcove --help")).toBe(true);
     expect(NPM_INVOCATION.test("npm")).toBe(true);
     // The removal the runtime stages run, which names npm as a path operand.
     expect(
@@ -990,7 +990,7 @@ describe.each(IMAGES)(
   "the release version $file bakes into the accept kit",
   ({ image }) => {
     const versionRuns = image.builderRuns.filter((run) =>
-      run.includes("VITE_PSILINK_VERSION"),
+      run.includes("VITE_ALCOVE_VERSION"),
     );
 
     it("sets the version in exactly one builder step, which is the web build", () => {
@@ -1015,7 +1015,7 @@ describe.each(IMAGES)(
         image.instructions.filter(
           ({ inst, rest }) =>
             (inst === "ARG" || inst === "ENV") &&
-            rest.includes("VITE_PSILINK_VERSION"),
+            rest.includes("VITE_ALCOVE_VERSION"),
         ),
       ).toEqual([]);
     });
@@ -1029,7 +1029,7 @@ describe.each(IMAGES)(
         .split(";")
         .map((command) => command.trim());
       expect(commands[0]).toMatch(/^set -e[ux]*$/);
-      expect(commands).toContain('test -n "$VITE_PSILINK_VERSION"');
+      expect(commands).toContain('test -n "$VITE_ALCOVE_VERSION"');
     });
   },
 );

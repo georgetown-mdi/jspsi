@@ -1,4 +1,4 @@
-# Using a network file drop with psilink on Windows
+# Using a network file drop with Alcove on Windows
 
 Your file-drop folder lives on a network location -- you open it in File
 Explorer as a mapped drive (`Z:\Exchange`) or a network path
@@ -27,18 +27,18 @@ about ten minutes.
 
 ## Or let the launcher do all of it
 
-If what you want is the psilink console open in your browser, one script does
+If what you want is the Alcove console open in your browser, one script does
 everything on this page and then starts it: it asks for the folders, works out
 the server behind a network one, runs the same checks, makes the volume, and
 opens `http://127.0.0.1:3000`.
 
-Download it from a [psilink release](https://github.com/georgetown-mdi/jspsi/releases):
-`Start-Psilink.ps1` on Windows, with `Setup-PsilinkFileDrop.ps1` from the same
-release beside it, or `start-psilink.sh` on macOS or Linux, which you run with
-`bash start-psilink.sh`. A copy taken from anywhere else refuses to run, because
-only a release copy names the exact psilink image it will run.
+Download it from an [Alcove release](https://github.com/georgetown-mdi/alcove/releases):
+`Start-Alcove.ps1` on Windows, with `Setup-AlcoveFileDrop.ps1` from the same
+release beside it, or `start-alcove.sh` on macOS or Linux, which you run with
+`bash start-alcove.sh`. A copy taken from anywhere else refuses to run, because
+only a release copy names the exact Alcove image it will run.
 
-`Start-Psilink.ps1` takes one folder shared with your partner, or the pair some
+`Start-Alcove.ps1` takes one folder shared with your partner, or the pair some
 partners name -- one they write into for you to read, and one you write into
 for them. Keep a pair side by side inside one exchange folder: two folders on
 one share are reached through a single connection to the folder that holds
@@ -64,7 +64,7 @@ line, or if the launcher will not run here.
 Try the **PowerShell script** first, listed below. If it refuses to run use the
 Command Prompt one instead and stay with it from then on. They ask the same
 questions and catch the same failures, in slightly different words: the
-PowerShell one runs the checks that ship inside the psilink image, and the
+PowerShell one runs the checks that ship inside the Alcove image, and the
 Command Prompt one carries its own copy of them.
 
 Where the two need different commands, this guide gives both, PowerShell first.
@@ -88,11 +88,11 @@ to find again and easy to delete when you are finished.
 **PowerShell:**
 
 ```powershell
-New-Item -ItemType Directory -Force "$env:USERPROFILE\psilink" | Out-Null
-cd "$env:USERPROFILE\psilink"
+New-Item -ItemType Directory -Force "$env:USERPROFILE\alcove" | Out-Null
+cd "$env:USERPROFILE\alcove"
 Invoke-WebRequest -UseBasicParsing `
-  -Uri 'https://raw.githubusercontent.com/georgetown-mdi/jspsi/main/support/windows-network-filedrop/Setup-PsilinkFileDrop.ps1' `
-  -OutFile .\Setup-PsilinkFileDrop.ps1
+  -Uri 'https://raw.githubusercontent.com/georgetown-mdi/alcove/main/support/windows-network-filedrop/Setup-AlcoveFileDrop.ps1' `
+  -OutFile .\Setup-AlcoveFileDrop.ps1
 ```
 
 **Command Prompt** -- four files rather than one, and **all four have to be in
@@ -100,18 +100,18 @@ the same folder**, which is what the folder is for: the script feeds the other
 three to Docker.
 
 ```text
-mkdir "%USERPROFILE%\psilink" 2>nul
-cd /d "%USERPROFILE%\psilink"
-set BASE=https://raw.githubusercontent.com/georgetown-mdi/jspsi/main/support/windows-network-filedrop
-curl -L -o cmd_Setup-PsilinkFileDrop.cmd %BASE%/cmd_Setup-PsilinkFileDrop.cmd
-curl -L -o cmd_psilink-probe.sh %BASE%/cmd_psilink-probe.sh
-curl -L -o cmd_psilink-credcheck.sh %BASE%/cmd_psilink-credcheck.sh
-curl -L -o cmd_psilink-volcheck.sh %BASE%/cmd_psilink-volcheck.sh
+mkdir "%USERPROFILE%\alcove" 2>nul
+cd /d "%USERPROFILE%\alcove"
+set BASE=https://raw.githubusercontent.com/georgetown-mdi/alcove/main/support/windows-network-filedrop
+curl -L -o cmd_Setup-AlcoveFileDrop.cmd %BASE%/cmd_Setup-AlcoveFileDrop.cmd
+curl -L -o cmd_alcove-probe.sh %BASE%/cmd_alcove-probe.sh
+curl -L -o cmd_alcove-credcheck.sh %BASE%/cmd_alcove-credcheck.sh
+curl -L -o cmd_alcove-volcheck.sh %BASE%/cmd_alcove-volcheck.sh
 ```
 
 Use the command rather than saving from a browser, which saves it in a form
 Windows will not run. Nothing appears on screen when the download works -- that
-is success, and the files land in `C:\Users\<you>\psilink`.
+is success, and the files land in `C:\Users\<you>\alcove`.
 
 Then run it. The first line is only needed if you have opened a new window
 since:
@@ -119,15 +119,15 @@ since:
 **PowerShell:**
 
 ```powershell
-cd "$env:USERPROFILE\psilink"
-powershell -ExecutionPolicy Bypass -File .\Setup-PsilinkFileDrop.ps1
+cd "$env:USERPROFILE\alcove"
+powershell -ExecutionPolicy Bypass -File .\Setup-AlcoveFileDrop.ps1
 ```
 
 **Command Prompt:**
 
 ```text
-cd /d "%USERPROFILE%\psilink"
-cmd_Setup-PsilinkFileDrop.cmd
+cd /d "%USERPROFILE%\alcove"
+cmd_Setup-AlcoveFileDrop.cmd
 ```
 
 It asks you for three things, in this order:
@@ -161,7 +161,7 @@ Remove the volume. The script prints this command with your volume name in it
 when it finishes, and it is the same in either shell:
 
 ```text
-docker volume rm psilink-sync
+docker volume rm alcove-sync
 ```
 
 That does not end the exposure of the password you gave it. Having that password
@@ -178,7 +178,7 @@ helping you.
 > **How far this has been tested.** Both versions have been run start to finish
 > on Windows 11 against a real file server. The checks the Command Prompt one
 > runs inside Docker were verified against that server. The PowerShell one runs
-> the checks that ship inside the psilink image, which are verified against a
+> the checks that ship inside the Alcove image, which are verified against a
 > real file server on every change to them, but it has not itself been run start
 > to finish in that form. Neither version has ever met a real DFS namespace, which
 > is why the script asks you to confirm the server it worked out rather than

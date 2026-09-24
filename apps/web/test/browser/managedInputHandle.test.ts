@@ -8,7 +8,7 @@ import {
   generateSharedSecret,
   getDefaultLinkageTerms,
   inferMetadata,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   HandlePermissionError,
@@ -29,7 +29,7 @@ import { ManagedInputError } from "@psi/managed/managedInputGuard";
 import { composeManagedExchangeFile } from "@psi/managed/managedExchangeRecord";
 import { runManagedExchange } from "@psi/managed/managedExchangeRun";
 
-import type { ExchangeSpec, WebRTCExchangeLocator } from "@psilink/core";
+import type { ExchangeSpec, WebRTCExchangeLocator } from "@alcove/core";
 import type {
   HandlePermissionQuery,
   HandlePermissionState,

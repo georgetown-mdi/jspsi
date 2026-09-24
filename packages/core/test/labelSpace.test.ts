@@ -14,11 +14,11 @@ import { RENDEZVOUS_ROLES } from "../src/rendezvous";
 // length-prefixed, so the space must be prefix-free; the three JSON-field
 // domains at the end are held to it as well.
 const SINGLE_LABELS: readonly string[] = [
-  "psilink-shared-secret-rotation-v1",
-  "psilink-relay-key-v1",
-  "psilink-signed-receipt-content/v2",
-  "psilink-signing-cert-signature/v1",
-  "psilink-signing-cert-fingerprint/v1",
+  "alcove-shared-secret-rotation-v2",
+  "alcove-relay-key-v2",
+  "alcove-signed-receipt-content/v3",
+  "alcove-signing-cert-signature/v2",
+  "alcove-signing-cert-fingerprint/v2",
 ];
 
 // Each suffix family, keyed by its prefix with the `:`, and its fixed suffix
@@ -28,36 +28,36 @@ const LABEL_FAMILIES: ReadonlyMap<string, readonly string[]> = new Map<
   readonly string[]
 >([
   [
-    "psilink-kex-v1:",
+    "alcove-kex-v2:",
     ["session", "confirm", "initiator-confirm", "responder-confirm"],
   ],
-  ["psilink-aead-v1:", AEAD_CONTEXTS],
-  ["psilink-abort-token-v1:", ABORT_TOKEN_ROLES],
-  ["psilink-webrtc-peerid-v1:", RENDEZVOUS_ROLES],
+  ["alcove-aead-v2:", AEAD_CONTEXTS],
+  ["alcove-abort-token-v2:", ABORT_TOKEN_ROLES],
+  ["alcove-webrtc-peerid-v2:", RENDEZVOUS_ROLES],
   [
-    "psilink-signed-receipt-payload-v1:",
+    "alcove-signed-receipt-payload-v2:",
     ["initiator-to-responder", "responder-to-initiator"],
   ],
-  ["psilink-signed-receipt-binder-v1:", ["initiator", "responder"]],
-  ["psilink-terms-update-v1:", TERMS_UPDATE_DERIVATIONS],
+  ["alcove-signed-receipt-binder-v2:", ["initiator", "responder"]],
+  ["alcove-terms-update-v2:", TERMS_UPDATE_DERIVATIONS],
 ]);
 
-// psilink- strings in core's source outside the label space: the key
+// alcove- strings in core's source outside the label space: the key
 // exchange's protocol name (hashed into the transcript), document version
 // tags, and the record-layer domains of docs/spec/EXCHANGE_RECORD.md. Listed
 // exactly, so a new or changed one is placed here deliberately.
-const OTHER_PSILINK_STRINGS: readonly string[] = [
-  "psilink-kex-v2:NNpsk0_P256_SHA256",
-  "psilink-signed-receipt/v3",
-  "psilink-signing-cert/v2",
-  "psilink-signing-identity/v2",
-  "psilink-exchange-record/v8",
-  "psilink-exchange-keys/v1",
-  "psilink-commit-association-table/v1",
-  "psilink-commit-payload-sent/v1",
-  "psilink-commit-payload-received/v1",
-  "psilink-agreed-terms/v1",
-  "psilink-signing-keypair-probe/v1",
+const OTHER_ALCOVE_STRINGS: readonly string[] = [
+  "alcove-kex-v3:NNpsk0_P256_SHA256",
+  "alcove-signed-receipt/v4",
+  "alcove-signing-cert/v3",
+  "alcove-signing-identity/v3",
+  "alcove-exchange-record/v9",
+  "alcove-exchange-keys/v2",
+  "alcove-commit-association-table/v2",
+  "alcove-commit-payload-sent/v2",
+  "alcove-commit-payload-received/v2",
+  "alcove-agreed-terms/v2",
+  "alcove-signing-keypair-probe/v2",
 ];
 
 const CORE_SRC = fileURLToPath(new URL("../src", import.meta.url));
@@ -77,7 +77,7 @@ function coreSourceFiles(dir: string): string[] {
   });
 }
 
-function psilinkLiterals(file: string): SourceLiteral[] {
+function alcoveLiterals(file: string): SourceLiteral[] {
   const source = ts.createSourceFile(
     file,
     readFileSync(file, "utf8"),
@@ -86,7 +86,7 @@ function psilinkLiterals(file: string): SourceLiteral[] {
   );
   const found: SourceLiteral[] = [];
   const record = (node: ts.Node, text: string, interpolated: boolean): void => {
-    if (!text.startsWith("psilink-")) return;
+    if (!text.startsWith("alcove-")) return;
     const { line } = source.getLineAndCharacterOfPosition(node.getStart());
     const site = `${relative(CORE_SRC, file)}:${line + 1}`;
     found.push({ text, interpolated, site });
@@ -117,7 +117,7 @@ function enumeratedUnit(literal: SourceLiteral): string | undefined {
     return LABEL_FAMILIES.has(literal.text) ? literal.text : undefined;
   }
   if (SINGLE_LABELS.includes(literal.text)) return literal.text;
-  if (OTHER_PSILINK_STRINGS.includes(literal.text)) return literal.text;
+  if (OTHER_ALCOVE_STRINGS.includes(literal.text)) return literal.text;
   if (LABEL_FAMILIES.has(literal.text)) return literal.text;
   if (LABEL_FAMILIES.has(`${literal.text}:`)) return `${literal.text}:`;
   for (const [prefix, suffixes] of LABEL_FAMILIES) {
@@ -131,10 +131,10 @@ function enumeratedUnit(literal: SourceLiteral): string | undefined {
   return undefined;
 }
 
-const SOURCE_LITERALS = coreSourceFiles(CORE_SRC).flatMap(psilinkLiterals);
+const SOURCE_LITERALS = coreSourceFiles(CORE_SRC).flatMap(alcoveLiterals);
 
 describe("the domain-separation label space", () => {
-  test("every psilink- literal in core's source is enumerated", () => {
+  test("every alcove- literal in core's source is enumerated", () => {
     const unlisted = SOURCE_LITERALS.filter(
       (literal) => enumeratedUnit(literal) === undefined,
     ).map(displayLiteral);
@@ -162,7 +162,7 @@ describe("the domain-separation label space", () => {
     const members = new Set<string>([
       ...SINGLE_LABELS,
       ...LABEL_FAMILIES.keys(),
-      ...OTHER_PSILINK_STRINGS,
+      ...OTHER_ALCOVE_STRINGS,
       ...SOURCE_LITERALS.map(
         (literal) => enumeratedUnit(literal) ?? literal.text,
       ),

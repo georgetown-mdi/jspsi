@@ -743,7 +743,7 @@ export async function linkViaPSI(
   const sendFirst = participant.config.role === "starter";
   const { partnerRecordCount } = bounds;
 
-  const log = getLoggerForVerbosity("psiLink", verbosity);
+  const log = getLoggerForVerbosity("link", verbosity);
   setStage = setStage ?? (() => {});
 
   log.debug(`${participant.id}: linking using ${data.length} key(s) via PSI`);
@@ -1469,7 +1469,7 @@ export async function linkViaCountOnlyPSI(
   if (data.length !== 1)
     throw new UsageError(COUNT_ONLY_SHAPE_REFUSALS.linkageKeys);
 
-  const log = getLoggerForVerbosity("psiLink", verbosity);
+  const log = getLoggerForVerbosity("link", verbosity);
   setStage = setStage ?? (() => {});
   setStage("stage 1 / 1");
 
@@ -1669,7 +1669,7 @@ function relieveTransientMemory(): void {
  * SENDER (the output-entitled party becomes the receiver); the "many" party
  * then resolves the whole pairing, applying the one-side uniqueness rule to
  * the helper's index table on its behalf, needing nothing back for the same
- * two reasons as under `one-to-one`. Pinned in psiLink.test.ts.
+ * two reasons as under `one-to-one`. Pinned in link.test.ts.
  */
 export function withholdsSenderAssociationTable(
   senderExpectsOutput: boolean,
@@ -1802,7 +1802,7 @@ export async function linkViaSinglePassPSI(
   // receiver's is what its replay resolves under.
   const sides = multiplicitySides(protocol.cardinality);
 
-  const log = getLoggerForVerbosity("psiLink", verbosity);
+  const log = getLoggerForVerbosity("link", verbosity);
   const stage = setStage ?? (() => {});
   const numLinkageKeys = data.length;
   // Guaranteed by the schema (linkageKeys is .min(1)); checked so a direct caller

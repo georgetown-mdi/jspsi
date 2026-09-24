@@ -85,7 +85,7 @@ boundaries, which is the same arrangement the inbound scan already stands on.
 
 ## The risk both majority panelists named
 
-A byte-fidelity divergence between psilink's encoder and the library corrupts
+A byte-fidelity divergence between Alcove's encoder and the library corrupts
 frames silently, which is worse than the loud failure it replaces. Three things
 hold it.
 

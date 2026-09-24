@@ -11,8 +11,8 @@ import {
   MAX_ERROR_CAUSE_DEPTH,
   joinErrorCauseChain,
   sanitizeErrorForDisplay,
-} from "@psilink/core";
-import { CAUSE_DEPTH_ELISION_MARKER } from "@psilink/core/testing";
+} from "@alcove/core";
+import { CAUSE_DEPTH_ELISION_MARKER } from "@alcove/core/testing";
 
 import {
   EMPTY_CHAIN_LINK,
@@ -56,7 +56,7 @@ function scratchDir(label: string): string {
 }
 
 /**
- * A real psilink refusal rendered exactly as the CLI puts it on fd 3, with the
+ * A real Alcove refusal rendered exactly as the CLI puts it on fd 3, with the
  * partner-chosen fragment on its first link flooded: the rendezvous listing
  * bound, whose composition partitions by chooser -- the entry the partner named
  * on one link, this party's recovery step on the next. The flood is what pushes
@@ -96,8 +96,8 @@ async function relayErrorFromChild(
   await awaitJobTerminalState((onTerminal) =>
     spawnExchangeJob({
       binaryPath: STUB_CLI_PATH,
-      configPath: path.join(workdir, "psilink.yaml"),
-      keyPath: path.join(workdir, ".psilink.key"),
+      configPath: path.join(workdir, "alcove.yaml"),
+      keyPath: path.join(workdir, ".alcove.key"),
       inputPath: path.join(workdir, "input.csv"),
       outputPath: path.join(workdir, "output.csv"),
       recordPath: path.join(workdir, "record.json"),

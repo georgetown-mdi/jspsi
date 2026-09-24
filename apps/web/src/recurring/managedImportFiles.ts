@@ -1,8 +1,8 @@
 /**
  * Which files an import control was given, read off their names before any is
- * opened: one file on its own -- a backup, or a `psilink.yaml` imported as a
- * configuration only -- or a `psilink.yaml` with the `.psilink.key` beside it.
- * The key file is the one whose name ends in `.key`, the name psilink writes
+ * opened: one file on its own -- a backup, or an `alcove.yaml` imported as a
+ * configuration only -- or an `alcove.yaml` with the `.alcove.key` beside it.
+ * The key file is the one whose name ends in `.key`, the name Alcove writes
  * (`DEFAULT_KEY_PATH`, `apps/cli/src/keyFile.ts`) and the one a browser download
  * keeps; the other file's contents decide what it is, as they do for one file
  * chosen alone.
@@ -21,22 +21,22 @@ export type ManagedImportFileChoice<TFile> =
 
 /** A key file chosen without the configuration it belongs beside. */
 export const KEY_FILE_ALONE_REASON =
-  "This is a .psilink.key on its own. Choose the psilink.yaml beside it as " +
+  "This is a .alcove.key on its own. Choose the alcove.yaml beside it as " +
   "well, both in the same file chooser, and import them together.";
 
 /** Two files chosen, and not one configuration and one key file. */
 export const NOT_A_PAIR_REASON =
-  "Two files are imported together only as a psilink.yaml and the " +
-  ".psilink.key beside it, and exactly one of them has a name ending in .key. " +
+  "Two files are imported together only as an alcove.yaml and the " +
+  ".alcove.key beside it, and exactly one of them has a name ending in .key. " +
   "Choose one file, or those two.";
 
 /** More than two files chosen. */
 export const TOO_MANY_FILES_REASON =
-  "Choose one file, or a psilink.yaml and the .psilink.key beside it.";
+  "Choose one file, or an alcove.yaml and the .alcove.key beside it.";
 
 /** What a pair import that installed or revived a record says before the
  * operator opens it: that this exchange runs here now, unlike one imported
- * from its psilink.yaml alone, and the command-line run to stop. */
+ * from its alcove.yaml alone, and the command-line run to stop. */
 export const PAIR_IMPORTED_NOTICE: ManagedImportGrantNotice = {
   title: "Imported with its key file",
   lead:

@@ -1,4 +1,4 @@
-import { isProtocolTempName, redactAndSanitizeForDisplay } from "@psilink/core";
+import { isProtocolTempName, redactAndSanitizeForDisplay } from "@alcove/core";
 
 import {
   transportOperationStalledError,

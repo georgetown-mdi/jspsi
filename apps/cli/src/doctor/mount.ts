@@ -5,7 +5,7 @@ import type { SmbMountInput } from "./smbEnvironment";
 import type { DoctorCheckRecord, DoctorReport } from "./verdict";
 import { fail, ok, skipped, SKIPPED_BY_FAILURE_MEANING, warn } from "./verdict";
 
-// The kernel half of the file-drop checks: the operations psilink's rendezvous
+// The kernel half of the file-drop checks: the operations Alcove's rendezvous
 // is built on, run over the real mount rather than over smbclient, which refuses
 // a rename onto an existing file whatever the server would have allowed. A share
 // can pass every userspace check and still fail here, so both halves are run --
@@ -38,11 +38,11 @@ const MOUNT_CHECK_NAMES: Record<(typeof MOUNT_CHECK_IDS)[number], string> = {
 };
 
 /** Working names the checks create and remove inside the mounted folder. */
-const WRITE_NAME = ".psilink-w.tmp";
-const WRITE_RENAMED_NAME = ".psilink-w2.tmp";
-const EXCLUSIVE_NAME = ".psilink-x.tmp";
-const RENAME_SOURCE_NAME = ".psilink-a.tmp";
-const RENAME_TARGET_NAME = ".psilink-b.tmp";
+const WRITE_NAME = ".alcove-w.tmp";
+const WRITE_RENAMED_NAME = ".alcove-w2.tmp";
+const EXCLUSIVE_NAME = ".alcove-x.tmp";
+const RENAME_SOURCE_NAME = ".alcove-a.tmp";
+const RENAME_TARGET_NAME = ".alcove-b.tmp";
 
 /**
  * The filesystem operations the checks perform, injectable so a share that
@@ -57,7 +57,7 @@ export interface MountFs {
   writeFile(file: string, contents: string): void;
   /**
    * Create `file`, failing if it already exists. This is `O_EXCL` on a real
-   * open(2) -- the same call psilink's rendezvous uses to decide which side goes
+   * open(2) -- the same call Alcove's rendezvous uses to decide which side goes
    * first, not a proxy for it -- so a share that does not honour the refusal is
    * caught here rather than at the start of an exchange.
    */
@@ -108,7 +108,7 @@ function markerCheck(
     return skipped(
       "marker",
       "no marker and token were supplied, so this folder was not cross-checked " +
-        "against the one `psilink doctor probe` tested.",
+        "against the one `alcove doctor probe` tested.",
       {
         meaning:
           "does not apply to the inputs given: no marker and token were " +
@@ -226,10 +226,10 @@ export function runMountChecks(
     return { mode: "mount", checks: padSkipped(checks) };
   }
   try {
-    // Write under a temporary name and rename into place, which is what psilink
+    // Write under a temporary name and rename into place, which is what Alcove
     // does for every message: read access alone is not enough, and neither is
     // create-without-rename.
-    mountFs.writeFile(at(WRITE_NAME), "psilink write probe\n");
+    mountFs.writeFile(at(WRITE_NAME), "Alcove write probe\n");
     mountFs.rename(at(WRITE_NAME), at(WRITE_RENAMED_NAME));
     mountFs.remove(at(WRITE_RENAMED_NAME));
     checks.push(ok("write_rename", "wrote a file and renamed it into place."));
@@ -238,7 +238,7 @@ export function runMountChecks(
       fail(
         "write_rename",
         `could not write and rename in this folder (${errorCode(err)}).`,
-        "the mount reached a folder but psilink cannot write in it. Either " +
+        "the mount reached a folder but Alcove cannot write in it. Either " +
           "the account this container runs as does not own the folder, or it " +
           "can open the folder but not create files in it, or the share is " +
           "out of space.",
@@ -281,7 +281,7 @@ export function runMountChecks(
           "could not test exclusive create on this share.",
           {
             meaning:
-              "the check was attempted and could not be completed: psilink " +
+              "the check was attempted and could not be completed: Alcove " +
               "uses an exclusive create to decide which side goes first, and " +
               "this share would not stage one.",
             action:
@@ -305,7 +305,7 @@ export function runMountChecks(
           : warn(
               "exclusive_create",
               "this share does not refuse to create a file that already exists.",
-              "psilink uses that refusal to decide which side goes first, so " +
+              "Alcove uses that refusal to decide which side goes first, so " +
                 "without it both sides can believe they did.",
               "pass --lockless-rendezvous on BOTH sides of the exchange.",
             ),
@@ -331,7 +331,7 @@ export function runMountChecks(
           warn(
             "rename_onto_existing",
             "this share will not rename a file onto an existing one.",
-            "psilink does that when two sides meet at once.",
+            "Alcove does that when two sides meet at once.",
             "pass --lockless-rendezvous on BOTH sides of the exchange.",
           ),
         );

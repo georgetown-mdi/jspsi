@@ -8,7 +8,7 @@ import {
   generateSigningIdentity,
   getLogger,
   sanitizeErrorForDisplay,
-} from "@psilink/core";
+} from "@alcove/core";
 import * as signingIdentityFile from "../../src/signingIdentityFile";
 import {
   loadSigningCertificate,
@@ -19,7 +19,7 @@ import {
 let dir: string;
 
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-sign-test-"));
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-sign-test-"));
 });
 
 afterEach(() => {
@@ -127,7 +127,7 @@ test("both loaders reject an unrecognized identity-file version", async () => {
   const id = await generateSigningIdentity("Party A");
   fs.writeFileSync(
     idPath,
-    JSON.stringify({ ...id, version: "psilink-signing-identity/v99" }),
+    JSON.stringify({ ...id, version: "alcove-signing-identity/v100" }),
     { mode: 0o600 },
   );
   await expect(loadSigningCertificate(idPath)).rejects.toThrow(UsageError);
@@ -194,7 +194,7 @@ test.skipIf(process.platform === "win32")(
     // The path is the operator's own, so the display sink renders it as given
     // while the fragment beside it keeps the escape. Off Windows a backslash is
     // a legal filename character, so one file name stands in for the separator.
-    const identityPath = path.join(dir, "C:\\psilink\\signing-identity.json");
+    const identityPath = path.join(dir, "C:\\alcove\\signing-identity.json");
     fs.writeFileSync(identityPath, '{"version":"nonsense\\u001b[2K"}');
 
     const err = await loadSigningIdentity(identityPath).then(
@@ -203,7 +203,7 @@ test.skipIf(process.platform === "win32")(
     );
 
     const rendered = sanitizeErrorForDisplay(err);
-    expect(rendered).toContain("C:\\psilink\\signing-identity.json");
+    expect(rendered).toContain("C:\\alcove\\signing-identity.json");
     expect(rendered).not.toContain("\u001b");
   },
 );
@@ -213,7 +213,7 @@ test.runIf(process.platform === "win32")(
   async () => {
     // The separators here are real ones, which the escape would double on their
     // way to the operator.
-    const identityPath = path.join(dir, "psilink", "signing-identity.json");
+    const identityPath = path.join(dir, "alcove", "signing-identity.json");
     fs.mkdirSync(path.dirname(identityPath), { recursive: true });
     fs.writeFileSync(identityPath, '{"version":"nonsense\\u001b[2K"}');
 

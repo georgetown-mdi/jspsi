@@ -1,6 +1,6 @@
 ---
-title: "psilink Deployment Model and Shared Responsibility"
-review_owner: "psilink maintainers"
+title: "Alcove Deployment Model and Shared Responsibility"
+review_owner: "Alcove maintainers"
 last_reviewed: "2026-09-22"
 ---
 
@@ -10,9 +10,9 @@ Agency security questionnaires are written for cloud services: they ask where th
 
 This document states that split. It names what the project operates and what the deploying agency operates, separately for the two deployments, so a reviewer can answer most of a questionnaire from one page.
 
-It is not a certification, an attestation, or a contract. It describes how psilink is built and deployed; the deploying agency remains responsible for its own risk assessment and authorization ([COMPLIANCE.md](COMPLIANCE.md)).
+It is not a certification, an attestation, or a contract. It describes how Alcove is built and deployed; the deploying agency remains responsible for its own risk assessment and authorization ([COMPLIANCE.md](COMPLIANCE.md)).
 
-## psilink is not a hosted service
+## Alcove is not a hosted service
 
 A security questionnaire's vendor rows have no vendor to land on. The deploying agency runs the software and is the sole controller of the data it processes; the project is neither controller, processor, nor business associate for that data, and operates nothing on the agency's behalf. Nothing in either deployment asks an agency to register, checks a license, calls home for updates, or reports usage.
 
@@ -24,7 +24,7 @@ No personal data is collected, transmitted, or retained by the project on its ow
 
 The split differs by deployment, and a responsibility table written for one is misleading about the other. Read the section for the deployment in question.
 
-One responsibility precedes both and is the same in each: the decision to disclose -- its legal basis, the data sharing agreement behind it, and which columns are designated for disclosure -- together with the risk assessment, the privacy impact assessment, and the authorization that cover it. psilink conducts the exchange the two parties configured and makes no determination about whether a disclosure is lawful ([COMPLIANCE.md](COMPLIANCE.md#authority-to-operate)).
+One responsibility precedes both and is the same in each: the decision to disclose -- its legal basis, the data sharing agreement behind it, and which columns are designated for disclosure -- together with the risk assessment, the privacy impact assessment, and the authorization that cover it. Alcove conducts the exchange the two parties configured and makes no determination about whether a disclosure is lawful ([COMPLIANCE.md](COMPLIANCE.md#authority-to-operate)).
 
 ### Container deployment (CLI and local console)
 
@@ -48,13 +48,13 @@ An agency that deploys the web application on its own infrastructure takes every
 
 ## Responsibility split: container deployment
 
-| Area | The psilink project | The deploying agency |
+| Area | The Alcove project | The deploying agency |
 |------|---------------------|----------------------|
-| Infrastructure and network controls | Publishes the container image and documents how to hold its outbound access to the single endpoint an exchange needs ([DEPLOYMENT.md](DEPLOYMENT.md#restricting-the-containers-outbound-network-access)). Operates no infrastructure the exchange touches. | All of it: the host, the container engine, the network path, egress rules, and the SFTP server or shared folder the two parties rendezvous through. psilink requires no particular SFTP server and provides none ([DEPLOYMENT.md](DEPLOYMENT.md#sftp-server)). |
+| Infrastructure and network controls | Publishes the container image and documents how to hold its outbound access to the single endpoint an exchange needs ([DEPLOYMENT.md](DEPLOYMENT.md#restricting-the-containers-outbound-network-access)). Operates no infrastructure the exchange touches. | All of it: the host, the container engine, the network path, egress rules, and the SFTP server or shared folder the two parties rendezvous through. Alcove requires no particular SFTP server and provides none ([DEPLOYMENT.md](DEPLOYMENT.md#sftp-server)). |
 | Host and OS hardening | Ships the image running unprivileged as uid 1000, with its program files owned by root so the running process cannot rewrite its own code ([DEPLOYMENT.md](DEPLOYMENT.md#the-user-the-image-runs-as)). | The host operating system and its patching, the container engine's configuration, and the ownership and permissions of every mounted directory. |
 | Identity and access | The exchange's own authentication: a pre-shared secret and an authenticated key exchange for recurring exchanges ([SECURITY_DESIGN.md](SECURITY_DESIGN.md#authentication)), and SFTP host-key verification whose no-pin default is fail-closed ([SECURITY_DESIGN.md](SECURITY_DESIGN.md#transport-layer-authentication)). No accounts, no login, no directory integration. | Who may log into the host and run the container; the SFTP accounts, their per-exchange directory permissions, and a separate account per party ([DEPLOYMENT.md](DEPLOYMENT.md#rendezvous-directory-checklist)); and sending the shared secret and the host-key fingerprint to the partner out of band. |
 | Encryption in transit | Wraps every recurring file-sync exchange in application-layer AES-256-GCM keyed from the key exchange, so the SFTP or shared-folder operator sees ciphertext rather than the exchange's contents. The rendezvous files, the key-exchange handshake frames, and the abort marker a failing party leaves sit outside that wrap and hold no exchange data ([COMPLIANCE.md](COMPLIANCE.md#nist-sp-800-53), SC-8). A zero-setup exchange has no session key and relies on the transport alone ([SECURITY_DESIGN.md](SECURITY_DESIGN.md#channel-security)). | The transport beneath it: the SSH server's configuration and the access controls on a shared folder. Constraining SSH negotiation to approved algorithms is a connection setting the agency applies ([FIPS_SFTP_PROFILE.md](FIPS_SFTP_PROFILE.md)). |
-| Encryption at rest | None. psilink applies owner-only access control rather than encryption: the key file, signing identity, exchange records, and result CSV are written unencrypted at owner-only permissions ([SECURITY_DESIGN.md](SECURITY_DESIGN.md#key-file-security)). | At-rest confidentiality in full -- storage or full-disk encryption on the host and on any backup medium ([COMPLIANCE.md](COMPLIANCE.md#nist-sp-800-53), SC-28). |
+| Encryption at rest | None. Alcove applies owner-only access control rather than encryption: the key file, signing identity, exchange records, and result CSV are written unencrypted at owner-only permissions ([SECURITY_DESIGN.md](SECURITY_DESIGN.md#key-file-security)). | At-rest confidentiality in full -- storage or full-disk encryption on the host and on any backup medium ([COMPLIANCE.md](COMPLIANCE.md#nist-sp-800-53), SC-28). |
 | Backup and recovery | Documents that a backed-up shared secret must hold the same owner-only restrictions as the original, and that re-invitation is the recovery when no backup exists ([SECURITY_DESIGN.md](SECURITY_DESIGN.md#backup)). Provides no backup mechanism and holds no copy of anything. | Backing up, restoring, and protecting the key file, signing identity, configuration, input, and results, and the media those backups live on. |
 | Data retention and disposal | Retains nothing. In the default mode the exchange deletes each file it has consumed as a protocol step; in retain mode it leaves the whole transcript in the shared directory by design, and nothing removes it afterwards ([DEPLOYMENT.md](DEPLOYMENT.md#rendezvous-directory-checklist)). | Retention and disposition of the input, the result CSV, the exchange records, and the shared directory's contents, including clearing a retain-mode transcript. The exchange record can hold a self-facing pointer to where the result was filed and under what schedule ([COMPLIANCE.md](COMPLIANCE.md#hipaa-considerations)). |
 | Logging and monitoring | Writes operational logs to the container's own output and keeps PII out of them; content is limited to non-sensitive metadata ([SECURITY_DESIGN.md](SECURITY_DESIGN.md#data-handling)). Emits no telemetry and receives no logs. | Collecting, storing, protecting, and monitoring those logs; reviewing output before forwarding it to a third-party logging service; and alerting on a failed or missed exchange. |
@@ -65,7 +65,7 @@ An agency that deploys the web application on its own infrastructure takes every
 
 ## Responsibility split: hosted web application
 
-| Area | The psilink project | The deploying agency |
+| Area | The Alcove project | The deploying agency |
 |------|---------------------|----------------------|
 | Infrastructure and network controls | Operates the hosting that delivers the application code, the bundled peer-coordination server, and the reverse proxy in front of them ([DEPLOYMENT.md](DEPLOYMENT.md#hardening-the-signaling-surface)). Public TLS terminates a hop further out, at Cloudflare, a third party the project configures in front of that hosting rather than operates; Cloudflare holds a request log of everything it forwards, under its own retention. | The network path from its own endpoints, and any egress or proxy controls it applies to them. |
 | Host and OS hardening | The hosting platform and the application it serves. | The endpoint the browser runs on -- operating system and browser patching, disk encryption, screen lock. All data handling happens there. |
@@ -102,7 +102,7 @@ The per-service detail is in [PRIVACY.md](../PRIVACY.md#what-supporting-services
 | Where is our data hosted? | Where you run it. In the container deployment the project operates nothing and receives nothing. In the hosted web application, data handling stays in the browser and the input file is never uploaded ([Two deployments](#the-two-deployments)). |
 | Who at your organization can access our data? | Nobody. The project receives no agency data in either deployment. Between the two partner agencies, what is disclosed is the intersection plus the payload columns each party designated ([SECURITY_DESIGN.md](SECURITY_DESIGN.md#data-handling)). |
 | What is your uptime commitment or disaster recovery plan? | The project operates nothing on your behalf in the container deployment, so availability is a property of your own host. The hosted web application is for evaluation and demonstration, not production exchanges of real records. |
-| Are you FedRAMP or StateRAMP authorized? Do you have an ATO? | psilink is software, not a service offering, and is not in scope for either on its own ([COMPLIANCE.md](COMPLIANCE.md#fedramp-and-stateramp)). An ATO is granted to a deployment in an authorizing environment, not to open-source software ([COMPLIANCE.md](COMPLIANCE.md#authority-to-operate)). |
+| Are you FedRAMP or StateRAMP authorized? Do you have an ATO? | Alcove is software, not a service offering, and is not in scope for either on its own ([COMPLIANCE.md](COMPLIANCE.md#fedramp-and-stateramp)). An ATO is granted to a deployment in an authorizing environment, not to open-source software ([COMPLIANCE.md](COMPLIANCE.md#authority-to-operate)). |
 | Do you encrypt data at rest? | The software encrypts nothing on disk. It writes its artifacts owner-only, and at-rest confidentiality is the deploying agency's storage or full-disk encryption ([COMPLIANCE.md](COMPLIANCE.md#nist-sp-800-53), SC-28). |
 | Do you use FIPS 140-validated cryptography? | A scoped claim, with its conditions and the places an unqualified claim fails, is set out in full ([COMPLIANCE.md](COMPLIANCE.md#fips-140)). Constraining an SFTP exchange's SSH layer to approved algorithms is separate and available today ([FIPS_SFTP_PROFILE.md](FIPS_SFTP_PROFILE.md)). |
 | List your subprocessors. | None for the container deployment; the project processes nothing. For the hosted web application the project engages one, the Cloudflare front that terminates its public TLS. The supporting services an exchange can rely on, and what each sees, are in [Third-party supporting services](#third-party-supporting-services) above. |
@@ -118,7 +118,7 @@ The per-service detail is in [PRIVACY.md](../PRIVACY.md#what-supporting-services
 
 ## Review and ownership
 
-- **Owner:** the psilink maintainers. This is a maintainer responsibility rather than a named individual's; use the reporting channels in [SECURITY.md](../SECURITY.md) and [SUPPORT.md](../SUPPORT.md) rather than contacting a person.
+- **Owner:** the Alcove maintainers. This is a maintainer responsibility rather than a named individual's; use the reporting channels in [SECURITY.md](../SECURITY.md) and [SUPPORT.md](../SUPPORT.md) rather than contacting a person.
 - **Last reviewed:** the `last_reviewed` date in the front matter at the top of this document.
 - **Cadence:** reviewed on any change that moves the line between what the project operates and what the deploying agency operates, and at least annually regardless of whether anything changed. Every revision and its date are recorded in this repository's version history.
 

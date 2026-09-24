@@ -1,7 +1,7 @@
 # The single home of the relay's image pin.
 #
 # Everything else in this directory -- the Quadlet unit, install.sh, verify.sh --
-# names the locally built `localhost/psilink-relay:installed` tag, so this digest
+# names the locally built `localhost/alcove-relay:installed` tag, so this digest
 # has exactly one copy and a base move is exactly one edit.
 #
 # coturn/coturn:4.18.0, pinned to its multi-arch index digest, so a build

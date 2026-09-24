@@ -3,7 +3,7 @@
 import { EventEmitter } from "node:events";
 
 import { describe, expect, test, vi } from "vitest";
-import { UsageError } from "@psilink/core";
+import { UsageError } from "@alcove/core";
 
 import { SSH2SFTPClientAdapter } from "../../../src/connection/ssh2SftpAdapter";
 

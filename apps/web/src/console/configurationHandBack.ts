@@ -3,7 +3,7 @@ import { standardizationForTerms } from "@psi/authoring/advancedInviteTerms";
 
 import type { InviterEditor } from "@psi/inviterEditor";
 import type { JobConfigurationHandBack } from "@jobs/intentSchemas";
-import type { LinkageTerms } from "@psilink/core";
+import type { LinkageTerms } from "@alcove/core";
 import type { ReceiptsDraft } from "@psi/receiptsModel";
 
 /**

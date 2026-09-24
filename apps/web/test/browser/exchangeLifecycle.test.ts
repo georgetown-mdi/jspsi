@@ -6,8 +6,8 @@ import {
   CONFIRMING_PROTOCOL_STAGE_ID,
   generateSharedSecret,
   prepareForExchange,
-} from "@psilink/core";
-import { sortAssociationTable } from "@psilink/core/testing";
+} from "@alcove/core";
+import { sortAssociationTable } from "@alcove/core/testing";
 // @ts-ignore this is really there
 import PSI from "@openmined/psi.js/psi_wasm_web";
 
@@ -29,7 +29,7 @@ import type {
   ExchangeResult,
   PreparedExchange,
   ResolvedMatching,
-} from "@psilink/core";
+} from "@alcove/core";
 import type { DataConnection } from "peerjs";
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 import type Peer from "peerjs";

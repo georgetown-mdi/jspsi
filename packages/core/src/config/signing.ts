@@ -3,7 +3,7 @@ import { camelizeKeys } from "../utils/camelizeKeys.js";
 import { safeParseCamelized } from "./safeParseCamelized.js";
 
 // Signing configuration for exchange receipts: the optional `signing` block
-// on the ExchangeSpec (psilink.yaml); see EXCHANGE_REFERENCE.md. Carries only
+// on the ExchangeSpec (alcove.yaml); see EXCHANGE_REFERENCE.md. Carries only
 // non-secret references -- signing identity file path, receipt mode, pinned
 // partner certificate fingerprint, and receipt output location. The signing
 // private key stays out of the config and the rotating key file; see
@@ -19,7 +19,7 @@ import { safeParseCamelized } from "./safeParseCamelized.js";
  * values that are a multiple of 4: A E I M Q U Y c g k o s w 0 4 8), since
  * a 43-character base64url string carries 258 bits but a SHA-256 digest is
  * only 256 -- the last character's low 2 bits are unused and zero in what
- * `psilink fingerprint` emits. This keeps the pin string a 1:1 image of the
+ * `alcove fingerprint` emits. This keeps the pin string a 1:1 image of the
  * digest and rejects a near-miss paste rather than silently accepting one.
  */
 export const FINGERPRINT_REGEX = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
@@ -59,7 +59,7 @@ export interface SigningConfig {
    * CLI's certificate-mode pre-flight, not in this schema, so a
    * partially-authored config still parses. Stored verbatim: a leading `~`
    * is not resolved here (a host concern); a consumer that opens this path
-   * must tilde-expand it at use time (`expandTilde`), as `psilink
+   * must tilde-expand it at use time (`expandTilde`), as `alcove
    * fingerprint` does.
    */
   identityFile?: string;
@@ -88,7 +88,7 @@ const SigningConfigSchema: z.ZodType<SigningConfig> = z.object({
     .regex(
       FINGERPRINT_REGEX,
       "partner_fingerprint must be an unpadded base64url SHA-256 digest (43 " +
-        "characters); obtain it from your partner via 'psilink fingerprint' and " +
+        "characters); obtain it from your partner via 'alcove fingerprint' and " +
         "a trusted out-of-band channel",
     )
     .optional(),
@@ -101,7 +101,7 @@ const SigningConfigSchema: z.ZodType<SigningConfig> = z.object({
  * `certificate` mode's cross-field requirements -- a pinned partner
  * fingerprint to verify against, an `identity_file` to sign with -- are
  * enforced at the pre-exchange gate instead, so a partially-authored
- * config still parses. `psilink fingerprint`, which needs only
+ * config still parses. `alcove fingerprint`, which needs only
  * `identity_file`, reads it from the raw config text rather than this
  * schema.
  */

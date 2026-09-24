@@ -17,7 +17,7 @@ import {
   serializeSigningIdentity,
   serializeVerificationKeys,
   signReceiptContent,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { VerifyReceiptScreen } from "@exchange/VerifyReceiptScreen";
 
@@ -33,7 +33,7 @@ import type {
   SigningCertificate,
   SigningIdentity,
   VerificationKeys,
-} from "@psilink/core";
+} from "@alcove/core";
 
 /** Each fixture party's own name, held apart from the terms: `identity` is
  * optional there, so reading it back would type as possibly absent where these
@@ -253,7 +253,7 @@ async function verifyRecordAndSignedRecord(): Promise<{
   );
   await uploadTo(
     "Dual-signed record",
-    jsonFile("psilink-receipt-x.json", serializeDualSignedRecord(signed)),
+    jsonFile("alcove-receipt-x.json", serializeDualSignedRecord(signed)),
   );
   await userEvent.fill(
     page.getByLabelText("Your partner's certificate fingerprint"),
@@ -300,11 +300,11 @@ describe("verify receipt screen", () => {
     // Load the record and its keys.
     await uploadAt(
       0,
-      jsonFile("psilink-record-x.json", serializeExchangeRecord(record)),
+      jsonFile("alcove-record-x.json", serializeExchangeRecord(record)),
     );
     await uploadAt(
       1,
-      jsonFile("psilink-record-x.keys.json", serializeVerificationKeys(keys)),
+      jsonFile("alcove-record-x.keys.json", serializeVerificationKeys(keys)),
     );
 
     // A structure-only verify is incomplete (nothing re-supplied).
@@ -811,7 +811,7 @@ describe("verify receipt screen", () => {
     );
     await uploadTo(
       "Dual-signed record",
-      jsonFile("psilink-receipt-x.json", serializeDualSignedRecord(signed)),
+      jsonFile("alcove-receipt-x.json", serializeDualSignedRecord(signed)),
     );
     await userEvent.fill(
       page.getByLabelText("Your partner's certificate fingerprint"),
@@ -878,7 +878,7 @@ describe("verify receipt screen", () => {
     );
     await uploadTo(
       "Dual-signed record",
-      jsonFile("psilink-receipt-x.json", serializeDualSignedRecord(signed)),
+      jsonFile("alcove-receipt-x.json", serializeDualSignedRecord(signed)),
     );
     await userEvent.fill(
       page.getByLabelText("Your partner's certificate fingerprint"),
@@ -1090,7 +1090,7 @@ describe("verify receipt screen", () => {
       jsonFile("rec2.keys.json", serializeVerificationKeys(nextKeys)),
     );
     await expect
-      .element(page.getByText("psilink-receipt-x.json"))
+      .element(page.getByText("alcove-receipt-x.json"))
       .not.toBeInTheDocument();
 
     await userEvent.click(

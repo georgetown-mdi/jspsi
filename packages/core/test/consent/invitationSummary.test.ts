@@ -205,7 +205,7 @@ describe("the consent summary's retain disclosure", () => {
   // the accepting side into retain mode whatever the token declares (a split
   // connection cannot be configured without it), so a display reading only the
   // declaration would leave that party consenting to a permanent transcript with
-  // nothing said. psilink's own mints do not produce this pair, but a foreign or
+  // nothing said. Alcove's own mints do not produce this pair, but a foreign or
   // older token can, and the shape is decidable right here at display time.
   test("states retention for a split-directory endpoint that declares nothing", () => {
     expect(

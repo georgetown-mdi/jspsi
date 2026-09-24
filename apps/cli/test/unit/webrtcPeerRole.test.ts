@@ -1,10 +1,10 @@
 import { expect, test } from "vitest";
-import { safeParseConnectionConfig } from "@psilink/core";
+import { safeParseConnectionConfig } from "@alcove/core";
 import type {
   FileDropConnectionConfig,
   SFTPConnectionConfig,
   WebRTCConnectionConfig,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { withWebRTCPeerRole } from "../../src/webrtcPeerRole";
 

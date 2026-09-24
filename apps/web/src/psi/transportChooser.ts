@@ -179,7 +179,7 @@ function capabilityNoteFor(
   available: AvailableTransports,
 ): string {
   if (!consoleBuild)
-    return "This browser runs live exchanges only; SFTP and shared-directory exchanges run in the psilink command-line tool.";
+    return "This browser runs live exchanges only; SFTP and shared-directory exchanges run in the Alcove command-line tool.";
   const here = transportNounsByRunMode(available, "server-job");
   const cli = transportNounsByRunMode(available, "save-file");
   const parts: Array<string> = [];
@@ -248,7 +248,7 @@ export function transportChooserCopy(
   return {
     browserLabel: "Live, in this browser",
     browserDescription: consoleBuild
-      ? "In-tab browser exchanges are out of scope on this console -- they are the public psilink web app's domain. Run the exchange over SFTP or a shared directory instead."
+      ? "In-tab browser exchanges are out of scope on this console -- they are the public Alcove web app's domain. Run the exchange over SFTP or a shared directory instead."
       : "Your browsers connect directly. You get an invitation link and code to share; keep this tab open while your partner accepts.",
     filedropLabel: filedropRunsHere
       ? "Over a shared directory, run here"
@@ -267,7 +267,7 @@ export function transportChooserCopy(
         : "Saves an exchange file the command-line tool runs against a directory both parties can reach.",
     sftpLabel: sftpRunsHere
       ? "Over SFTP, run here"
-      : "Over SFTP, run by the psilink command-line tool",
+      : "Over SFTP, run by the Alcove command-line tool",
     sftpDescription: sftpRunsHere
       ? sftpAuthoringRequired
         ? "Runs the exchange here over an SFTP connection you set up below. Your file is read on this console, not uploaded from your browser. Your partner accepts with the same invitation code."

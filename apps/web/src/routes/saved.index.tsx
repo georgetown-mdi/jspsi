@@ -19,7 +19,7 @@ export const Route = createFileRoute("/saved/")({
   component: SavedExchanges,
   head: () => ({
     meta: seo({
-      title: "Recurring exchanges - psilink",
+      title: "Recurring exchanges - Alcove",
       description:
         "The recurring exchanges saved in this browser, run again without a new invitation.",
     }),

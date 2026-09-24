@@ -1,12 +1,12 @@
 import fs from "node:fs";
 
-import { FileSyncConnection } from "@psilink/core";
+import { FileSyncConnection } from "@alcove/core";
 
 import { buildCli } from "../src/cliParser";
 import { armProcessReturnGate } from "../src/util/exitGate";
 
 /**
- * A real `psilink` run whose event loop is held after the run is over, so what
+ * A real `alcove` run whose event loop is held after the run is over, so what
  * the process does next can be measured from outside.
  *
  * It is the process exiting that is under test, which the test runner's own

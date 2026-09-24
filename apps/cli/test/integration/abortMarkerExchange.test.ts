@@ -50,8 +50,8 @@ const fault = vi.hoisted(() => ({
   targetIdentity: undefined as string | undefined,
 }));
 
-vi.mock("@psilink/core", async (importActual) => {
-  const actual = await importActual<typeof import("@psilink/core")>();
+vi.mock("@alcove/core", async (importActual) => {
+  const actual = await importActual<typeof import("@alcove/core")>();
   return {
     ...actual,
     runExchange: ((conn, role, prepared, options) => {
@@ -81,9 +81,9 @@ import {
   prepareForExchange,
   PeerAbortError,
   ConnectionError,
-} from "@psilink/core";
-import type { ExchangeDataSpec, LinkageTerms } from "@psilink/core";
-import { withCapturedLogs } from "@psilink/core/testing";
+} from "@alcove/core";
+import type { ExchangeDataSpec, LinkageTerms } from "@alcove/core";
+import { withCapturedLogs } from "@alcove/core/testing";
 
 import { runProtocol, type ProtocolConnectionConfig } from "../../src/protocol";
 import { loadKeyFile, saveKeyFile } from "../../src/keyFile";
@@ -319,7 +319,7 @@ async function expectPlainRetryToComplete(
 let work: string;
 
 beforeEach(() => {
-  work = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-abort-integ-"));
+  work = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-abort-integ-"));
   fault.inject = true;
   fault.targetIdentity = undefined;
 });

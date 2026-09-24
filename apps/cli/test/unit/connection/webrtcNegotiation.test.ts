@@ -8,7 +8,7 @@ import {
   sanitizeErrorForDisplay,
   setDiagnosticSink,
   setLogLevel,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { snapshotDiagnosticSinkAndLevel } from "../../loggingTestSupport";
 import { BROKER_MESSAGE } from "../../../src/connection/webrtc/brokerClient";

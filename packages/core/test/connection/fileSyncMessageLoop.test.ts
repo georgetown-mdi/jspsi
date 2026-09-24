@@ -550,8 +550,8 @@ describe("FileSyncMessageLoop counter commit points", () => {
     // advisory. This remedy is the only next step printed, so it must end
     // inside the renderer's per-link cap.
     expect(
-      (rejected as { psilinkRecoveryHintEmitted?: unknown })
-        .psilinkRecoveryHintEmitted,
+      (rejected as { alcoveRecoveryHintEmitted?: unknown })
+        .alcoveRecoveryHintEmitted,
     ).toBe(true);
     const publishRender = sanitizeErrorForDisplay(rejected);
     const [publishLink, ...publishCauseLinks] =
@@ -584,8 +584,8 @@ describe("FileSyncMessageLoop counter commit points", () => {
     // suppress the CLI's generic "retry without re-inviting" advisory: the two
     // would otherwise print together and contradict each other.
     expect(
-      (refused as { psilinkRecoveryHintEmitted?: unknown })
-        .psilinkRecoveryHintEmitted,
+      (refused as { alcoveRecoveryHintEmitted?: unknown })
+        .alcoveRecoveryHintEmitted,
     ).toBe(true);
     // Asserted where the operator reads it, not on the raw .message: the tag
     // above is what makes this the only next step printed, and the renderer caps

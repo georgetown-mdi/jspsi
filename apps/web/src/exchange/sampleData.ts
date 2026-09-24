@@ -29,10 +29,10 @@
 import { triggerBlobDownload } from "@components/blobDownload";
 
 /** The filename the inviter's sample downloads and seeds under. */
-export const SAMPLE_INVITER_FILE_NAME = "psilink-sample-inviter.csv";
+export const SAMPLE_INVITER_FILE_NAME = "alcove-sample-inviter.csv";
 
 /** The filename the partner's sample downloads under. */
-export const SAMPLE_PARTNER_FILE_NAME = "psilink-sample-partner.csv";
+export const SAMPLE_PARTNER_FILE_NAME = "alcove-sample-partner.csv";
 
 const SAMPLE_HEADER = "first_name,last_name,dob,ssn,zip,member_id";
 

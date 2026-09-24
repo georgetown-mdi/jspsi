@@ -588,7 +588,7 @@ describe("the aws boundary", () => {
   let stubDirectory;
 
   beforeEach(() => {
-    stubDirectory = mkdtempSync(join(tmpdir(), "psilink-aws-stub-"));
+    stubDirectory = mkdtempSync(join(tmpdir(), "alcove-aws-stub-"));
   });
 
   afterEach(() => {

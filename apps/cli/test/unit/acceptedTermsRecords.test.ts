@@ -9,13 +9,13 @@ import {
   getDefaultLinkageTerms,
   inferMetadata,
   parseExchangeSpec,
-} from "@psilink/core";
+} from "@alcove/core";
 import type {
   ExchangeSpec,
   InvitationToken,
   LinkageTerms,
   Metadata,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   deriveAcceptedInvitationTerms,
@@ -61,8 +61,8 @@ let configPath: string;
 let exitCodeBeforeTest: typeof process.exitCode;
 
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-accepted-terms-"));
-  configPath = path.join(dir, "psilink.yaml");
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-accepted-terms-"));
+  configPath = path.join(dir, "alcove.yaml");
   exitCodeBeforeTest = process.exitCode;
 });
 

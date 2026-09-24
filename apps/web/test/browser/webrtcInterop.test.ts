@@ -7,7 +7,7 @@ import {
   RENDEZVOUS_ROLES,
   deriveRendezvousPeerId,
   encodeInvitation,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { prepareAcceptedInvitation } from "@psi/acceptInvitation";
 
@@ -17,12 +17,12 @@ import type {
   InvitationToken,
   RendezvousRole,
   WebRTCEndpoint,
-} from "@psilink/core";
+} from "@alcove/core";
 
 /**
  * The browser companion to apps/web/test/unit/psi/webrtcInterop.test.ts: it runs
  * the same checked-in CLI-to-web interop vectors through the browser build
- * of @psilink/core and the app's accept path in real Chromium, since the
+ * of @alcove/core and the app's accept path in real Chromium, since the
  * rendezvous peer id and invitation checksum are computed on crypto.subtle,
  * a platform-specific implementation this file is the one to check. Which id
  * each flow registers and dials stays the unit suite's subject.

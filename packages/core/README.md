@@ -1,6 +1,6 @@
-# @psilink/core
+# @alcove/core
 
-The shared PSI-Link library consumed by the CLI and web apps. It is a workspace-internal package; the apps are its only consumers.
+The shared Alcove library consumed by the CLI and web apps. It is a workspace-internal package; the apps are its only consumers.
 
 ## Building
 

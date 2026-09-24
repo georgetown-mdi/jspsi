@@ -22,7 +22,7 @@ import {
   InternalConsistencyError,
   LinkageTermsUnsatisfiableError,
   OutboundDisclosureRefusalError,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { PartnerNoShowError } from "../transport/waitForConnection";
 import { hasRecoveryHint } from "../authenticateExchange";
@@ -236,7 +236,7 @@ export async function runManagedRerun<TInput, THandshake, TExchange>(
  * pre-connection expiry check passed but before the handshake completed -- to
  * the benign {@link ManagedExchangeExpiredError}, or `undefined` when the
  * failure is not that case. Core's expiry guards throw errors tagged
- * `psilinkRecoveryHintEmitted` (the tag survives the security re-wrap; see
+ * `alcoveRecoveryHintEmitted` (the tag survives the security re-wrap; see
  * {@link hasRecoveryHint}); the re-map additionally requires the record's bound
  * has in fact lapsed by `now`, since the tag alone also covers a
  * malformed-secret error (which cannot arise here: a stored secret is
@@ -245,7 +245,7 @@ export async function runManagedRerun<TInput, THandshake, TExchange>(
  * {@link InternalConsistencyError} is excluded by type: the single-pass reply-
  * cap safety check also raises it mid-data-exchange, coinciding with a bound
  * lapsing during a long run as readily as with a real expiry, and re-mapping it
- * would report a defect in psilink as a benign expiry that a fresh invitation
+ * would report a defect in Alcove as a benign expiry that a fresh invitation
  * cannot fix.
  */
 export function remapLapsedRunFailure(

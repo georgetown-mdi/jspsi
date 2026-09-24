@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 
-import { BIDI_CONTROL_PATTERN, TEXT_CONTROL_CHAR_PATTERN } from "@psilink/core";
+import { BIDI_CONTROL_PATTERN, TEXT_CONTROL_CHAR_PATTERN } from "@alcove/core";
 
 import {
   IDENTITY_CONTROL_CHAR_PATTERN,

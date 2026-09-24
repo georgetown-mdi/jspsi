@@ -12,7 +12,7 @@
 // ssh2-sftp-client bump per docs/spec/DEPENDENCY_PINS.md ("Upgrading the SFTP
 // Stack").
 
-import { DEFAULT_SERVER_CONNECT_TIMEOUT_MS, TimeoutError } from "@psilink/core";
+import { DEFAULT_SERVER_CONNECT_TIMEOUT_MS, TimeoutError } from "@alcove/core";
 
 import { subsystemOpenTimeoutMessage } from "./sftpAdapterWarnings";
 

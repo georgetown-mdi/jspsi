@@ -4,9 +4,9 @@ import os from "node:os";
 import path from "node:path";
 
 import { afterEach, beforeEach, expect, test } from "vitest";
-import { UsageError, prepareForExchange } from "@psilink/core";
-import type { ExchangeDataSpec, LinkageTerms } from "@psilink/core";
-import { withCapturedLogs } from "@psilink/core/testing";
+import { UsageError, prepareForExchange } from "@alcove/core";
+import type { ExchangeDataSpec, LinkageTerms } from "@alcove/core";
+import { withCapturedLogs } from "@alcove/core/testing";
 
 import {
   BOTH_SWEPT_GUIDANCE,
@@ -213,7 +213,7 @@ let dropDir: string;
 let keyFiles: { a: string; b: string };
 
 beforeEach(() => {
-  work = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-sweep-collide-"));
+  work = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-sweep-collide-"));
   dropDir = fs.mkdtempSync(path.join(work, "drop-"));
   keyFiles = { a: path.join(work, "a.key"), b: path.join(work, "b.key") };
   saveKeyFile(keyFiles.a, { sharedSecret: INITIAL_SECRET });

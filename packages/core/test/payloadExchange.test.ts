@@ -481,7 +481,7 @@ test("assertPayloadSendDisclosed: every over-declared column is named, disclosed
 // The offending names are partner-controlled on the accept side, where
 // deriveAcceptedLinkageTerms adopts the inviter's payload declaration, so
 // this refusal names values a mutually-distrusting party chose inside prose
-// an operator treats as psilink's own. The names compose through the
+// an operator treats as Alcove's own. The names compose through the
 // compatibility-message boundary in delimited runs; these cases hold the
 // shown clause structure to what this function wrote, whatever the name says.
 
@@ -536,7 +536,7 @@ const NAMED_LIST_SITES: ReadonlyArray<{
 
 /**
  * The adversarial name shapes, each built around the benign token the clause
- * would hold anyway: a name that closes psilink's own delimited run, one that
+ * would hold anyway: a name that closes Alcove's own delimited run, one that
  * spells this message's clause separators, and one that forges an extra element
  * into the bracketed list.
  */

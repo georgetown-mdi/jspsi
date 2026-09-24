@@ -13,13 +13,13 @@ import {
 import { ColumnName, isolatedColumnName } from "@components/ColumnName";
 import { useDeferredAnnouncement } from "@components/useDeferredAnnouncement";
 
-import { disclosedColumnNames } from "@psilink/core";
+import { disclosedColumnNames } from "@alcove/core";
 
 import styles from "@styles/app.module.css";
 
 import { OwnColumnsChoiceField } from "./OwnColumnsChoiceField";
 
-import type { Metadata, SemanticType } from "@psilink/core";
+import type { Metadata, SemanticType } from "@alcove/core";
 import type { DisclosureChoice } from "@psi/metadataEditing";
 import type { OwnColumnsChoice } from "@psi/ownColumnsModel";
 

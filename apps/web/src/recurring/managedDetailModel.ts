@@ -20,7 +20,7 @@ import {
   disclosedColumnNames,
   displayText,
   sanitizeForDisplay,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { dateTimeLabel } from "@psi/formatting";
 
@@ -34,7 +34,7 @@ import {
   unchangedInputNote,
 } from "./scheduleSurfacingModel";
 
-import type { Displayable, ExchangeSpec } from "@psilink/core";
+import type { Displayable, ExchangeSpec } from "@alcove/core";
 import type {
   ManagedExchangeLastRun,
   ManagedExchangeRecord,

@@ -13,7 +13,7 @@ import {
   canonicalString,
   pipelineAlwaysDrops,
   safeParseLinkageTerms,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   draftFromTerms,
@@ -32,7 +32,7 @@ import type {
   LinkageStrategy,
   StandardizationStep,
   TransformStep,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import type { AdvancedInviteDraft } from "../../../src/psi/authoring/advancedInviteTypes.js";
 
@@ -838,7 +838,7 @@ describe("a key-element transform core cannot build", () => {
     const result = validateAdvancedInvite(authored, seed, now);
     expect(result.canGenerate).toBe(false);
     expect(result.errors.keys).toMatch(
-      /psilink does not recognize.*remove the highlighted step/i,
+      /Alcove does not recognize.*remove the highlighted step/i,
     );
     expect(result.errors.keys).not.toMatch(/no_such_function/);
     // Core's own verdict on the same document, so the gate gives advance notice

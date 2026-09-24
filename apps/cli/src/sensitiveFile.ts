@@ -1,5 +1,5 @@
 // The CLI's sensitive-file parsing chokepoint: a thin re-export of the
-// shared implementation in @psilink/core (also used by the web app to parse
+// shared implementation in @alcove/core (also used by the web app to parse
 // an operator's YAML/JSON linkage-terms document). The ESLint routing rule
 // targets this module; raw `yaml` parsers are banned across apps/cli/src
 // except here, which holds no parser of its own. Implementation and
@@ -8,5 +8,5 @@ export {
   parseSensitiveYaml,
   editSensitiveYamlDocument,
   parseSensitiveJson,
-} from "@psilink/core";
-export type { SensitiveFileLabel } from "@psilink/core";
+} from "@alcove/core";
+export type { SensitiveFileLabel } from "@alcove/core";

@@ -146,7 +146,7 @@ const doc = ({
     "",
     "```sh",
     "gh attestation verify oci://ghcr.io/georgetown-mdi/alcove@sha256:... \\",
-    "  --repo georgetown-mdi/jspsi \\",
+    "  --repo georgetown-mdi/alcove \\",
     `  --signer-workflow ${signerWorkflow}`,
     "```",
     "",
@@ -187,12 +187,12 @@ describe("the literal a signer path is made of", () => {
   it("unescapes an escaped dot and passes path characters through", () => {
     expect(
       unescapeRegexLiteral(
-        "georgetown-mdi/jspsi/\\.github/workflows/a_b.yaml".replace(
+        "georgetown-mdi/alcove/\\.github/workflows/a_b.yaml".replace(
           ".yaml",
           "\\.yaml",
         ),
       ),
-    ).toEqual({ literal: "georgetown-mdi/jspsi/.github/workflows/a_b.yaml" });
+    ).toEqual({ literal: "georgetown-mdi/alcove/.github/workflows/a_b.yaml" });
   });
 
   it("refuses an unescaped dot, which matches any character", () => {
@@ -217,7 +217,7 @@ describe("the literal a signer path is made of", () => {
 describe("the signer a published identity names", () => {
   it("decomposes the committed pattern", () => {
     expect(parseSignerIdentity(IDENTITY)).toEqual({
-      repository: "georgetown-mdi/jspsi",
+      repository: "georgetown-mdi/alcove",
       workflowPath: RELEASE_WORKFLOW,
       refPattern: "v[0-9]+\\.[0-9]+\\.[0-9]+",
     });
@@ -225,7 +225,7 @@ describe("the signer a published identity names", () => {
 
   it("refuses a pattern anchored at neither end or at one", () => {
     // An unanchored pattern is satisfied by any identity containing the published
-    // one as a substring -- a fork whose repository name ends in `jspsi`, or a
+    // one as a substring -- a fork whose repository name ends in `alcove`, or a
     // ref that merely starts with a release tag.
     for (const pattern of [
       IDENTITY.slice(1),
@@ -352,7 +352,7 @@ describe("the coupling between the published commands and the signer", () => {
           buildStep("build", true),
           signStep("build"),
           verifyStep("build", {
-            identity: IDENTITY.replace("jspsi", "psilink"),
+            identity: IDENTITY.replace("alcove", "other-repo"),
           }),
           attestStep("build"),
         ],
@@ -360,7 +360,7 @@ describe("the coupling between the published commands and the signer", () => {
     });
     expect(rest).toEqual([]);
     expect(violation).toContain("different");
-    expect(violation).toContain("psilink");
+    expect(violation).toContain("alcove");
   });
 
   it("fails an issuer no GitHub Actions certificate has", () => {
@@ -457,8 +457,8 @@ describe("the attestation command the document publishes", () => {
   it("fails a value that is not an owner/repo/workflow-path triple", () => {
     for (const value of [
       "release.yaml",
-      "georgetown-mdi/jspsi",
-      SIGNER_WORKFLOW.replace("jspsi/", "jspsi//"),
+      "georgetown-mdi/alcove",
+      SIGNER_WORKFLOW.replace("alcove/", "alcove//"),
     ]) {
       const [violation, ...rest] = coupling({
         docSource: doc({ signerWorkflow: value }),
@@ -625,7 +625,7 @@ describe("the arguments each verify step runs", () => {
     });
     expect(
       publishedCertificatePair(
-        doc() + doc({ identity: IDENTITY.replace("jspsi", "psilink") }),
+        doc() + doc({ identity: IDENTITY.replace("alcove", "other-repo") }),
       ),
     ).toEqual({ identity: undefined, issuer: ACTIONS_OIDC_ISSUER });
   });
@@ -658,12 +658,14 @@ describe("the arguments each verify step runs", () => {
     const violations = sequence([
       buildStep("build", true),
       signStep("build"),
-      verifyStep("build", { identity: IDENTITY.replace("jspsi", "psilink") }),
+      verifyStep("build", {
+        identity: IDENTITY.replace("alcove", "other-repo"),
+      }),
       attestStep("build"),
     ]);
     expect(violations).toHaveLength(1);
     expect(violations[0]).toContain('"Verify build" in job');
-    expect(violations[0]).toContain("psilink");
+    expect(violations[0]).toContain("alcove");
     expect(violations[0]).toContain(RELEASES_DOC);
   });
 
@@ -684,7 +686,9 @@ describe("the arguments each verify step runs", () => {
     const divergent = [
       buildStep("build", true),
       signStep("build"),
-      verifyStep("build", { identity: IDENTITY.replace("jspsi", "psilink") }),
+      verifyStep("build", {
+        identity: IDENTITY.replace("alcove", "other-repo"),
+      }),
       attestStep("build"),
     ];
     expect(sequence(divergent, {})).toEqual([]);
@@ -737,7 +741,7 @@ describe("the workflow the check reads the signer identity off", () => {
 describe("the check over a repository tree", () => {
   const trees = [];
   const tree = ({ workflowSource, docSource }) => {
-    const root = mkdtempSync(join(tmpdir(), "psilink-release-signing-"));
+    const root = mkdtempSync(join(tmpdir(), "alcove-release-signing-"));
     trees.push(root);
     mkdirSync(join(root, ".github", "workflows"), { recursive: true });
     mkdirSync(join(root, "docs"), { recursive: true });

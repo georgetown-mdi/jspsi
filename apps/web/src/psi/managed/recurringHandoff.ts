@@ -109,7 +109,7 @@ function parseSigningSettings(
 }
 
 /**
- * The caveat for a `certificate`-mode configuration missing settings psilink
+ * The caveat for a `certificate`-mode configuration missing settings Alcove
  * refuses to run it without, naming each setting and what to set it to.
  */
 export function unsetSigningSettingsCaveat(
@@ -117,7 +117,7 @@ export function unsetSigningSettingsCaveat(
 ): string {
   return (
     "This configuration signs receipts with a certificate (signing.mode: " +
-    `certificate) but does not set ${settings.join(" or ")}, so psilink ` +
+    `certificate) but does not set ${settings.join(" or ")}, so Alcove ` +
     "refuses to run it. Set " +
     settings.map((setting) => SIGNING_SETTING_REMEDY[setting]).join(" and ") +
     ", or set signing.mode to none to run unsigned."

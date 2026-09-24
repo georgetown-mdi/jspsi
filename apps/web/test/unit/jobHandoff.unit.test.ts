@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { parse as parseYaml } from "yaml";
 
-import { disclosedColumnNames, safeParseExchangeSpec } from "@psilink/core";
+import { disclosedColumnNames, safeParseExchangeSpec } from "@alcove/core";
 
 import {
   HANDOFF_CREDENTIAL_PATH_PLACEHOLDER,
@@ -40,7 +40,7 @@ import {
 } from "../utils/jobFixtures";
 
 import type { JobManager as JobManagerType } from "@jobs/jobManager";
-import type { Metadata } from "@psilink/core";
+import type { Metadata } from "@alcove/core";
 
 type Handlers = Record<
   string,
@@ -65,7 +65,7 @@ function handlersOf(route: {
 const DISTINCT_SECRET = "b".repeat(42) + "A";
 // The real container-internal credential @path the sample sftp entry holds; the
 // hand-off must replace it with the placeholder, never emit it.
-const CONTAINER_CREDENTIAL_PATH = "@/etc/psilink/prod-east-password";
+const CONTAINER_CREDENTIAL_PATH = "@/etc/alcove/prod-east-password";
 
 describe("buildJobHandoff composes a portable, secret-free template", () => {
   test("an sftp exchange fills in the connection and pins, and placeholders the credential", () => {
@@ -107,7 +107,7 @@ describe("buildJobHandoff composes a portable, secret-free template", () => {
       facts,
     );
     expect(exchange.template.argv).toEqual([
-      "psilink",
+      "alcove",
       "exchange",
       ...zeroSetup.template.argv.slice(-2),
     ]);
@@ -120,8 +120,8 @@ describe("buildJobHandoff composes a portable, secret-free template", () => {
       {
         host: "sftp.example.org",
         hostKeyFingerprint: TEST_HOST_KEY_FINGERPRINT,
-        privateKey: "@/etc/psilink/id_ed25519",
-        privateKeyPassphrase: "@/etc/psilink/passphrase",
+        privateKey: "@/etc/alcove/id_ed25519",
+        privateKeyPassphrase: "@/etc/alcove/passphrase",
       },
       { credentialPasted: false, filedropSplit: false },
     );
@@ -130,7 +130,7 @@ describe("buildJobHandoff composes a portable, secret-free template", () => {
     expect(yaml).toContain(HANDOFF_CREDENTIAL_PATH_PLACEHOLDER);
     expect(yaml).toContain(HANDOFF_PASSPHRASE_PATH_PLACEHOLDER);
     expect(yaml).not.toContain("id_ed25519");
-    expect(yaml).not.toContain("/etc/psilink/passphrase");
+    expect(yaml).not.toContain("/etc/alcove/passphrase");
   });
 
   test("a split-directory sftp run hands off both remote directories verbatim", () => {
@@ -342,7 +342,7 @@ describe("buildJobHandoff composes a portable, secret-free template", () => {
     const argv =
       handoff.template.kind === "command" ? handoff.template.argv : [];
     const line = shellJoinCommand(argv);
-    expect(argv[0]).toBe("psilink");
+    expect(argv[0]).toBe("alcove");
     expect(line).toContain("sftp://sftp.example.org");
     expect(line).toContain(
       `--server-host-key-fingerprint=${TEST_HOST_KEY_FINGERPRINT}`,
@@ -420,7 +420,7 @@ describe("buildJobHandoff composes a portable, secret-free template", () => {
     expect(argv).toContain("--peer-id=clinic-a");
     // The flags sit between the connection locator and the trailing positionals,
     // so the command displays (and parses) as the CLI's own form.
-    expect(argv[0]).toBe("psilink");
+    expect(argv[0]).toBe("alcove");
     expect(argv[1]).toBe(HANDOFF_SHARED_DIRECTORY_URL_PLACEHOLDER);
     expect(argv.slice(-2)).toEqual(["input.csv", "results.csv"]);
   });
@@ -454,13 +454,13 @@ describe("parseHandoff and shellJoinCommand (browser reader)", () => {
       template: {
         kind: "config",
         yaml: "connection:\n  channel: sftp\n",
-        argv: ["psilink", "exchange", "input.csv", "results.csv"],
+        argv: ["alcove", "exchange", "input.csv", "results.csv"],
       },
     });
     expect(parsed?.template).toEqual({
       kind: "config",
       yaml: "connection:\n  channel: sftp\n",
-      argv: ["psilink", "exchange", "input.csv", "results.csv"],
+      argv: ["alcove", "exchange", "input.csv", "results.csv"],
     });
   });
 
@@ -502,7 +502,7 @@ describe("parseHandoff and shellJoinCommand (browser reader)", () => {
         template: {
           kind: "config",
           yaml: "connection:\n",
-          argv: ["psilink", "exchange", "input.csv", "results.csv"],
+          argv: ["alcove", "exchange", "input.csv", "results.csv"],
         },
       }),
     ).toBeNull();
@@ -531,7 +531,7 @@ describe("parseHandoff and shellJoinCommand (browser reader)", () => {
       template: {
         kind: "config",
         yaml: "connection:\n  channel: filedrop\n",
-        argv: ["psilink", "exchange", "input.csv", "results.csv"],
+        argv: ["alcove", "exchange", "input.csv", "results.csv"],
       },
     };
     expect(
@@ -558,7 +558,7 @@ describe("parseHandoff and shellJoinCommand (browser reader)", () => {
   test("the unset-signing caveat names each setting and what to set it to", () => {
     expect(unsetSigningSettingsCaveat(["linkage_terms.identity"])).toBe(
       "This configuration signs receipts with a certificate (signing.mode: " +
-        "certificate) but does not set linkage_terms.identity, so psilink " +
+        "certificate) but does not set linkage_terms.identity, so Alcove " +
         "refuses to run it. Set linkage_terms.identity to this party's name, " +
         "or set signing.mode to none to run unsigned.",
     );
@@ -578,17 +578,17 @@ describe("parseHandoff and shellJoinCommand (browser reader)", () => {
   test("shellJoinCommand quotes a token with spaces and leaves safe tokens bare", () => {
     expect(
       shellJoinCommand([
-        "psilink",
+        "alcove",
         "--identity=Sample County Health",
         "input.csv",
       ]),
-    ).toBe("psilink '--identity=Sample County Health' input.csv");
+    ).toBe("alcove '--identity=Sample County Health' input.csv");
   });
 
   test("windowsJoinCommand double-quotes a spaced token for cmd and leaves safe tokens bare", () => {
     expect(
-      windowsJoinCommand(["psilink", "--identity=Agency A", "input.csv"]),
-    ).toBe('psilink "--identity=Agency A" input.csv');
+      windowsJoinCommand(["alcove", "--identity=Agency A", "input.csv"]),
+    ).toBe('alcove "--identity=Agency A" input.csv');
     // A token bearing a literal double quote is wrapped with the inner quote doubled.
     expect(windowsJoinCommand(['a"b'])).toBe('"a""b"');
   });

@@ -145,7 +145,7 @@ describe("what a stored set of parked results admits", () => {
   test("rejects an unrecognized version rather than migrating it", () => {
     expect(() =>
       parseParkedResults({
-        version: "psilink-parked-results/v2",
+        version: "alcove-parked-results/v3",
         entries: [],
       }),
     ).toThrow();
@@ -263,7 +263,7 @@ describe("adding a run's entry", () => {
 describe("the name a run's results file takes", () => {
   test("holds the label and the run, so neither two runs nor two exchanges collide", () => {
     expect(runResultsFileName(LABEL, RUN_AT)).toBe(
-      "psilink-results-Riverbend-quarterly-2026-03-01T09-00-00-000Z.csv",
+      "alcove-results-Riverbend-quarterly-2026-03-01T09-00-00-000Z.csv",
     );
     expect(runResultsFileName(LABEL, "2026-03-08T09:00:00.000Z")).not.toBe(
       runResultsFileName(LABEL, RUN_AT),
@@ -277,24 +277,24 @@ describe("the name a run's results file takes", () => {
     // A path separator, a traversal segment, and a leading dot all reduce: the
     // name is written into a folder the operator granted.
     expect(runResultsFileName("../etc/passwd", RUN_AT)).toBe(
-      "psilink-results-etc-passwd-2026-03-01T09-00-00-000Z.csv",
+      "alcove-results-etc-passwd-2026-03-01T09-00-00-000Z.csv",
     );
     expect(runResultsFileName("Riverbend / Q3 (2026)", RUN_AT)).toBe(
-      "psilink-results-Riverbend-Q3-2026-2026-03-01T09-00-00-000Z.csv",
+      "alcove-results-Riverbend-Q3-2026-2026-03-01T09-00-00-000Z.csv",
     );
   });
 
   test("omits the label where it reduces to nothing, rather than standing a hyphen in for it", () => {
     for (const label of ["", "   ", "......", "月次"])
       expect(runResultsFileName(label, RUN_AT)).toBe(
-        "psilink-results-2026-03-01T09-00-00-000Z.csv",
+        "alcove-results-2026-03-01T09-00-00-000Z.csv",
       );
   });
 
   test("truncates a long label, keeping the run stamp whole", () => {
     const name = runResultsFileName("R".repeat(120), RUN_AT);
     expect(name).toBe(
-      `psilink-results-${"R".repeat(40)}-2026-03-01T09-00-00-000Z.csv`,
+      `alcove-results-${"R".repeat(40)}-2026-03-01T09-00-00-000Z.csv`,
     );
   });
 });

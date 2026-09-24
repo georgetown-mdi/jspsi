@@ -55,10 +55,10 @@ import type { Algorithm, AssociationTable } from "../types.js";
  * fields have moved it, are in docs/spec/EXCHANGE_RECORD.md ("Record
  * fields").
  */
-export const EXCHANGE_RECORD_VERSION = "psilink-exchange-record/v8";
+export const EXCHANGE_RECORD_VERSION = "alcove-exchange-record/v9";
 
-/** The one recognized format version for v1 {@link VerificationKeys}. */
-export const EXCHANGE_KEYS_VERSION = "psilink-exchange-keys/v1";
+/** The one recognized format version for v2 {@link VerificationKeys}. */
+export const EXCHANGE_KEYS_VERSION = "alcove-exchange-keys/v2";
 
 // --- Commitment scheme -------------------------------------------------------
 
@@ -83,18 +83,18 @@ export type CommitmentName =
 // separation has for cross-party verification are in
 // docs/spec/EXCHANGE_RECORD.md ("Commitment scheme").
 const COMMITMENT_DOMAINS: Record<CommitmentName, string> = {
-  associationTable: "psilink-commit-association-table/v1",
-  localPayloadSent: "psilink-commit-payload-sent/v1",
-  partnerPayloadReceived: "psilink-commit-payload-received/v1",
+  associationTable: "alcove-commit-association-table/v2",
+  localPayloadSent: "alcove-commit-payload-sent/v2",
+  partnerPayloadReceived: "alcove-commit-payload-received/v2",
 };
 
 // Domain-separation label for the agreed-terms hash, kept distinct from the
 // commitment domains above.
-const AGREED_TERMS_DOMAIN = "psilink-agreed-terms/v1";
+const AGREED_TERMS_DOMAIN = "alcove-agreed-terms/v2";
 
 // computeCommitment, verifyCommitmentOpening, and computeTermsHash are part of
 // the public API (re-exported via main.ts), not internal helpers: an
-// independent implementation reproducing or verifying a psilink record (see
+// independent implementation reproducing or verifying an Alcove record (see
 // test/vectors/exchange-record-vectors.json) recomputes commitments and the
 // agreed-terms hash directly, alongside the higher-level buildExchangeRecord /
 // verifyRecordCommitments. Keep them exported.

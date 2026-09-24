@@ -27,7 +27,7 @@ const SETTLED_WITH_NOTHING: FinalRunStatus = {
   exitReconciled: true,
 };
 
-const STORAGE_KEY = "psilink-console-last-job";
+const STORAGE_KEY = "alcove-console-last-job";
 
 /** Install an in-memory localStorage over the node env, returning its backing map
  * so a test can assert what the re-attach persisted. */

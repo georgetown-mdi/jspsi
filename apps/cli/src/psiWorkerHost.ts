@@ -11,7 +11,7 @@ import {
   type PsiWorkerInit,
   type PsiWorkerRequest,
   type PsiWorkerResponse,
-} from "@psilink/core";
+} from "@alcove/core";
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
 // The host side of the CLI's PSI worker: it spawns the

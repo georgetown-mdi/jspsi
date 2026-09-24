@@ -6,7 +6,7 @@
  *
  * The exportability decision is NOT re-derived here. The composer
  * ({@link composeManagedCronExport}) is the one place that decides which stored
- * documents may become a `psilink.yaml`, and it refuses by throwing; this model
+ * documents may become an `alcove.yaml`, and it refuses by throwing; this model
  * calls it and presents the refusal, so a second copy of the rule cannot drift
  * from the one the export actually enforces.
  *
@@ -16,7 +16,7 @@
  * operator edits for their own times and folder.
  */
 
-import { sanitizeErrorForDisplay } from "@psilink/core";
+import { sanitizeErrorForDisplay } from "@alcove/core";
 
 import {
   composeManagedCronExport,
@@ -103,7 +103,7 @@ export function managedCronExportPanelState(
 }
 
 /**
- * The same for a configuration-only record: the `psilink.yaml` half alone, the
+ * The same for a configuration-only record: the `alcove.yaml` half alone, the
  * key file it runs under having stayed on the machine that holds it.
  */
 export function managedConfigurationExportState(

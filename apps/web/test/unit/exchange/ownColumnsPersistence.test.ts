@@ -7,7 +7,7 @@ import {
   generateSharedSecret,
   getDefaultLinkageTerms,
   inferMetadata,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   EMPTY_SAVE_FIELDS,
@@ -35,7 +35,7 @@ import {
   validSftpIntent,
 } from "../../utils/jobFixtures";
 
-import type { CSVRow, WebRTCEndpoint } from "@psilink/core";
+import type { CSVRow, WebRTCEndpoint } from "@alcove/core";
 import type { GeneratedInvitation } from "@psi/invitation";
 
 // Where the authoring control's choice lands once it leaves the editor: the four

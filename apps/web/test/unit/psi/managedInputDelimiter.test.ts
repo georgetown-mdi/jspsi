@@ -4,12 +4,12 @@ import {
   connectionFromLocator,
   getDefaultLinkageTerms,
   inferMetadata,
-} from "@psilink/core";
+} from "@alcove/core";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { acquireValidatedManagedInput } from "@psi/managed/managedInputHandle";
 
-import type { ExchangeSpec, WebRTCExchangeLocator } from "@psilink/core";
+import type { ExchangeSpec, WebRTCExchangeLocator } from "@alcove/core";
 
 // The stored field delimiter reaching the run-start re-read: a scheduled run has
 // nobody present to choose one, so the document's own value is what the read

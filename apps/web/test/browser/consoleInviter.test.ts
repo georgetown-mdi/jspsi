@@ -9,7 +9,7 @@ import { createElement } from "react";
 // Load Mantine's stylesheet so components render with their real geometry.
 import "@mantine/core/styles.css";
 
-import { decodeInvitation } from "@psilink/core";
+import { decodeInvitation } from "@alcove/core";
 
 import {
   NO_RECORD_CONFIRM_BODY,
@@ -54,7 +54,7 @@ vi.mock("@tanstack/react-router", async () =>
 vi.mock("@utils/clientConfig", () => ({
   deploymentProfile: () => "console" as const,
   isConsoleBuild: () => true,
-  psilinkVersion: () => undefined,
+  alcoveVersion: () => undefined,
 }));
 
 // Nothing here drives the browser transport (it is disabled on the console), so
@@ -535,7 +535,7 @@ describe("console inviter transports and sample data", () => {
     // The disabled card names its in-tab exchange as out of scope on the console
     // (this phrasing is unique to the Browser card's description).
     await expect
-      .element(page.getByText("the public psilink web app's domain"))
+      .element(page.getByText("the public Alcove web app's domain"))
       .toBeInTheDocument();
   });
 
@@ -598,7 +598,7 @@ describe("console inviter file-handling gate", () => {
     configured: true,
     host: "dr.example.gov",
     port: 2222,
-    path: "/drops/psilink",
+    path: "/drops/alcove",
   };
 
   test("offers the whole card, including what only a composed config holds", async () => {
@@ -607,7 +607,7 @@ describe("console inviter file-handling gate", () => {
     await reachReviewCreate();
     await openExchangeFiles();
 
-    // The invitation flow composes a psilink.yaml, so every control reaches the
+    // The invitation flow composes an alcove.yaml, so every control reaches the
     // run as a configuration key -- the foreign-file policy included.
     await expect
       .element(page.getByLabelText("If an unrecognised file appears"))
@@ -692,7 +692,7 @@ describe("console inviter diagnostics gate", () => {
     configured: true,
     host: "dr.example.gov",
     port: 2222,
-    path: "/drops/psilink",
+    path: "/drops/alcove",
   };
 
   test("an unconfirmed sweep blocks the mint and names the card in both places", async () => {
@@ -810,7 +810,7 @@ describe("console inviter mint and run", () => {
         configured: true,
         host: "dr.example.gov",
         port: 2222,
-        path: "/drops/psilink",
+        path: "/drops/alcove",
       },
     });
     app.render(createElement(InviterScreen));
@@ -854,7 +854,7 @@ describe("console inviter mint and run", () => {
       channel: "sftp",
       host: "dr.example.gov",
       port: 2222,
-      path: "/drops/psilink",
+      path: "/drops/alcove",
     });
 
     // The run POSTs an intent holding the mounted-file REFERENCE, not the content,
@@ -941,8 +941,8 @@ describe("console inviter mint and run", () => {
       sftp: { configured: false },
       rendezvous: {
         configured: true,
-        locator: "psilink",
-        folderName: "psilink",
+        locator: "alcove",
+        folderName: "alcove",
       },
     });
     app.render(createElement(InviterScreen));
@@ -967,7 +967,7 @@ describe("console inviter mint and run", () => {
     // browser to begin with.
     expect(token.connectionEndpoint).toEqual({
       channel: "filedrop",
-      path: "psilink",
+      path: "alcove",
     });
   });
 
@@ -1380,7 +1380,7 @@ describe("console inviter sample-data copy", () => {
       .element(link)
       .toHaveAttribute(
         "href",
-        "https://github.com/georgetown-mdi/jspsi/blob/main/docs/DEPLOYMENT.md",
+        "https://github.com/georgetown-mdi/alcove/blob/main/docs/DEPLOYMENT.md",
       );
   });
 });
@@ -1395,7 +1395,7 @@ describe("console inviter re-attaches on a busy create", () => {
     usedSigningIdentity: false,
     template: {
       kind: "config",
-      argv: ["psilink", "exchange", "input.csv", "results.csv"],
+      argv: ["alcove", "exchange", "input.csv", "results.csv"],
       yaml: "connection:\n  channel: sftp\n  server:\n    host: sftp.example.gov\n",
     },
   } satisfies JobHandoff;
@@ -1472,7 +1472,7 @@ describe("console inviter re-attaches on a busy create", () => {
     );
     expect(
       JSON.parse(
-        window.localStorage.getItem("psilink-console-last-job") ?? "null",
+        window.localStorage.getItem("alcove-console-last-job") ?? "null",
       ),
     ).toMatchObject({ jobId: "job-live", seat: "inviter" });
 
@@ -1555,7 +1555,7 @@ describe("console inviter re-attaches on a busy create", () => {
 
 describe("console inviter partner accept kit", () => {
   const ACCEPT_KIT_BUTTON = "Download instructions for your partner";
-  const SHEET_PREFIX = "psilink-accept-instructions-";
+  const SHEET_PREFIX = "alcove-accept-instructions-";
 
   /** The instruction sheet the share step just wrote, once the capture has read
    * its blob back. */
@@ -1581,7 +1581,7 @@ describe("console inviter partner accept kit", () => {
           configured: true,
           host: "dr.example.gov",
           port: 2222,
-          path: "/drops/psilink",
+          path: "/drops/alcove",
         },
       });
       app.render(createElement(InviterScreen));
@@ -1594,13 +1594,13 @@ describe("console inviter partner accept kit", () => {
       await page.getByRole("button", { name: ACCEPT_KIT_BUTTON }).click();
       const sheet = await capturedSheet(downloads);
       expect(sheet.fileName).toMatch(
-        /^psilink-accept-instructions-\d{4}-\d{2}-\d{2}\.txt$/,
+        /^alcove-accept-instructions-\d{4}-\d{2}-\d{2}\.txt$/,
       );
 
       // The sheet names the same rendezvous the token holds, and the field
       // the partner fills in themselves.
       expect(sheet.text).toContain("SFTP server:    dr.example.gov:2222");
-      expect(sheet.text).toContain("Directory:      /drops/psilink");
+      expect(sheet.text).toContain("Directory:      /drops/alcove");
       expect(sheet.text).toContain("REPLACE_WITH_SSH_USERNAME");
 
       // Retain mode was left off, so nothing of it reaches the sheet.
@@ -1630,7 +1630,7 @@ describe("console inviter partner accept kit", () => {
           configured: true,
           host: "dr.example.gov",
           port: 2222,
-          path: "/drops/psilink",
+          path: "/drops/alcove",
         },
       });
       app.render(createElement(InviterScreen));
@@ -1665,7 +1665,7 @@ describe("console inviter partner accept kit", () => {
           configured: true,
           host: "dr.example.gov",
           port: 2222,
-          path: "/drops/psilink",
+          path: "/drops/alcove",
         },
       });
       app.render(createElement(InviterScreen));
@@ -1700,8 +1700,8 @@ describe("console inviter partner accept kit", () => {
         sftp: { configured: false },
         rendezvous: {
           configured: true,
-          locator: "psilink",
-          folderName: "psilink",
+          locator: "alcove",
+          folderName: "alcove",
         },
       });
       app.render(createElement(InviterScreen));
@@ -1717,13 +1717,13 @@ describe("console inviter partner accept kit", () => {
       // Both routing branches: the launcher for a network drive or DFS path,
       // and the direct docker commands for a folder Docker can open.
       expect(sheet.text).toContain("A. A Windows network drive or a DFS path");
-      expect(sheet.text).toContain("Start-Psilink.ps1");
+      expect(sheet.text).toContain("Start-Alcove.ps1");
       expect(sheet.text).toContain("B. A folder that syncs on this PC");
       expect(sheet.text).toContain("accept PASTE_YOUR_INVITATION");
 
       // The console's absolute rendezvous path stays off the sheet exactly as
       // it stays off the token: the shared folder's name is the whole locator.
-      expect(sheet.text).toContain("Shared folder:  psilink");
+      expect(sheet.text).toContain("Shared folder:  Alcove");
       expect(sheet.text).not.toContain("/srv/exchanges");
     } finally {
       downloads.restore();
@@ -1768,7 +1768,7 @@ describe("console inviter recurring hand-off availability", () => {
     usedSigningIdentity: false,
     template: {
       kind: "config",
-      argv: ["psilink", "exchange", "input.csv", "results.csv"],
+      argv: ["alcove", "exchange", "input.csv", "results.csv"],
       yaml: "connection:\n  channel: sftp\n  server:\n    host: sftp.example.gov\n",
     },
   } satisfies JobHandoff;
@@ -1866,7 +1866,7 @@ describe("console inviter receipt on a failed run", () => {
         page.getByRole("link", {
           name:
             "Download signed receipt (holds your partner's linkage terms): " +
-            "psilink-receipt-job-7.json",
+            "alcove-receipt-job-7.json",
         }),
       )
       .toBeInTheDocument();
@@ -1939,7 +1939,7 @@ describe("console inviter exchange record on a terminated run", () => {
     await expect
       .element(
         page.getByRole("link", {
-          name: `Download record (safe to share): psilink-record-${RECORD_STAMP}.json`,
+          name: `Download record (safe to share): alcove-record-${RECORD_STAMP}.json`,
         }),
       )
       .toBeInTheDocument();
@@ -1948,7 +1948,7 @@ describe("console inviter exchange record on a terminated run", () => {
     await expect
       .element(
         page.getByRole("link", {
-          name: `Download verification keys (keep private): psilink-record-${RECORD_STAMP}.keys.json`,
+          name: `Download verification keys (keep private): alcove-record-${RECORD_STAMP}.keys.json`,
         }),
       )
       .toBeInTheDocument();
@@ -2055,7 +2055,7 @@ describe("console inviter exchange record on a terminated run", () => {
   });
 
   test("a record the console cannot read confirms, and links no download", async () => {
-    // A data root a differently-versioned psilink wrote: a record file is in the
+    // A data root a differently-versioned Alcove wrote: a record file is in the
     // run's folder and the console cannot describe it, so it withholds both
     // halves of the pair. The seat must not read that denial as the absence of a
     // record -- the retry beside it removes the folder the file sits in.

@@ -34,7 +34,7 @@ import type { LinkageRuleSetCitationVerdict } from "../defaults/builtInLinkageTe
  *
  * `enforced` is a claim about the run: either the fact is true of it, or the
  * exchange aborts rather than proceed without it. `trust-contingent` is a claim
- * about the partner: a partner that does not honor it is not stopped by psilink.
+ * about the partner: a partner that does not honor it is not stopped by Alcove.
  */
 export type ConsentFactBasis = "enforced" | "trust-contingent";
 
@@ -87,7 +87,7 @@ export const CONSENT_FACTS = {
     reason:
       "The same disclosure at the seat that wrote its own configuration, where " +
       "the half of `outboundSend` resting on a recorded acceptance has nothing " +
-      "to rest on: this party consented to no set and psilink holds none for " +
+      "to rest on: this party consented to no set and Alcove holds none for " +
       "it. What remains is the derivation, which is the whole basis here -- the " +
       "displayed set comes from the run's own resolved metadata through the " +
       "same predicate the payload step transmits on, so no column outside it " +
@@ -99,12 +99,12 @@ export const CONSENT_FACTS = {
     basis: "trust-contingent",
     reason:
       "A free-text name the inviter typed, carried in an invitation accepted " +
-      "on a transcription checksum. Nothing authenticates it, and psilink " +
+      "on a transcription checksum. Nothing authenticates it, and Alcove " +
       "substitutes nothing for an inviter that typed none -- but the absence " +
       "marker shown in its place is itself free text an inviter could type, so " +
       "display does not separate the two cases.",
     note:
-      "Your partner chose what you see here; psilink has not verified it and " +
+      "Your partner chose what you see here; Alcove has not verified it and " +
       "adds no name of its own.",
   },
   algorithm: {
@@ -154,7 +154,7 @@ export const CONSENT_FACTS = {
     basis: "trust-contingent",
     reason:
       "Only the receiver computes the count. Where both parties are entitled to " +
-      "it the other party's copy arrives as the receiver's report, and psilink " +
+      "it the other party's copy arrives as the receiver's report, and Alcove " +
       "does not stop a receiver that reports a different number -- the same " +
       "posture as the `psi` association-table return leg, where the sender's " +
       "half of the pairing likewise arrives as the receiver's word. Which party " +
@@ -163,14 +163,14 @@ export const CONSENT_FACTS = {
       "stated for both.",
     note:
       "Only one of you computes the count and sends it to the other; which one " +
-      "follows from the record counts you exchange when the run starts. psilink " +
+      "follows from the record counts you exchange when the run starts. Alcove " +
       "does not check a count it is sent against a run of its own.",
   },
   countOnlyInputChoice: {
     basis: "trust-contingent",
     reason:
       "The count-only claim holds against a partner that contributes a genuine " +
-      "dataset, and psilink checks no such thing. A partner that chooses its " +
+      "dataset, and Alcove checks no such thing. A partner that chooses its " +
       "contributed values -- one live candidate padded with values it knows this " +
       "party cannot hold, or two runs differing in a single value -- reads that " +
       "value's membership off the count, and nothing on the wire distinguishes a " +
@@ -181,7 +181,7 @@ export const CONSENT_FACTS = {
       "honest-but-curious model leans on exists.",
     note:
       "Not enforced against your partner's choice of input: a count-only " +
-      "exchange bounds what psilink hands your partner, not what they can learn " +
+      "exchange bounds what Alcove hands your partner, not what they can learn " +
       "by choosing which records to ask about. A crafted list, or a second run " +
       "differing by one record, turns a count into an answer about one person.",
   },
@@ -226,7 +226,7 @@ export const CONSENT_FACTS = {
       "the two parties' output directions are compared as a mirror before data " +
       "moves, and the run then delivers the result to the party those agreed " +
       "terms entitle to it. What the partner does with the result once it holds " +
-      "it is governed by the agreement, not by psilink -- a limit on its use, " +
+      "it is governed by the agreement, not by Alcove -- a limit on its use, " +
       "which the note carries, not on whether the disclosure happens.",
     note: "Once received, its use is governed by your agreement, not this tool.",
   },
@@ -357,7 +357,7 @@ export const CONSENT_FACTS = {
       "of its own rather than as a clause of a sentence whose basis is the " +
       "headline's.",
     note:
-      "psilink receives the group sizes and row positions and does not show " +
+      "Alcove receives the group sizes and row positions and does not show " +
       "them to you. Withholding them is this software's choice rather than a " +
       "limit of the exchange, so other software on this side could show them.",
   },
@@ -383,8 +383,8 @@ export const CONSENT_FACTS = {
       "(consent/invitationSummary.ts) off the run's own predicate, so a " +
       "surface never states this basis for a run that does not withhold.",
     note:
-      "This exchange withholds your half of the matched-pair table: psilink " +
-      "on this side never reads it, and a partner running psilink never sends " +
+      "This exchange withholds your half of the matched-pair table: Alcove " +
+      "on this side never reads it, and a partner running Alcove never sends " +
       "it. You are shown no group sizes, no row positions, and nothing about " +
       "which of your own records matched. Withholding them is a limit of the " +
       "exchange rather than this software's choice.",
@@ -473,7 +473,7 @@ export const CONSENT_FACTS = {
   declaredDataStandards: {
     basis: "trust-contingent",
     reason:
-      "Data standards the inviting party commits its own values to. psilink " +
+      "Data standards the inviting party commits its own values to. Alcove " +
       "warns where a value falls outside one; it does not filter or reject.",
   },
   allowedCharacterPatterns: {
@@ -484,7 +484,7 @@ export const CONSENT_FACTS = {
       "evaluating it warns rather than enforces.",
     note:
       "Your partner declares an allowed-character pattern for these fields. " +
-      "Each is a partner-supplied regular expression that psilink has not " +
+      "Each is a partner-supplied regular expression that Alcove has not " +
       "verified, and it is a data expectation rather than an enforced filter.",
   },
   linkageKeys: {
@@ -614,7 +614,7 @@ export const CONSENT_FACTS = {
     basis: "trust-contingent",
     reason:
       "Partner-authored text. The reference and expiry are byte-compared " +
-      "against this party's own copy before data moves, but psilink vets " +
+      "against this party's own copy before data moves, but Alcove vets " +
       "neither the agreement nor the purpose it states.",
   },
   linkageRuleSet: {
@@ -766,7 +766,7 @@ export const CONSENT_BASIS_MARKERS: Record<ConsentFactBasis, string> = {
  * from these two, so the sentences differ only in the remedy each reader can act
  * on -- never in what this build found. */
 const CONTRADICTED_FINDING =
-  "A half marked as not matching names a rule set psilink ships, and the " +
+  "A half marked as not matching names a rule set Alcove ships, and the " +
   "rules declared for it are NOT drawn from that set -- so the citation does " +
   "not describe what the exchange would match on.";
 
@@ -812,7 +812,7 @@ export const LINKAGE_RULE_SET_VERDICT_COPY: Record<
   consistent: {
     marker: "checked: matches",
     note:
-      "A half marked as matching names a rule set psilink ships, and the rules " +
+      "A half marked as matching names a rule set Alcove ships, and the rules " +
       "declared for it are drawn from that set. The declared keys and fields " +
       "are still what the exchange holds both parties to.",
   },
@@ -825,7 +825,7 @@ export const LINKAGE_RULE_SET_VERDICT_COPY: Record<
   unchecked: {
     marker: "not checked",
     note:
-      "A half marked as not checked names a rule set psilink does not ship, so " +
+      "A half marked as not checked names a rule set Alcove does not ship, so " +
       "nothing was compared against it. Your partner's declared keys and " +
       "fields are what the exchange holds both parties to.",
   },
@@ -957,7 +957,7 @@ export function linkageRuleSetVerdictNote(
  */
 export const RECORDED_LINKAGE_RULE_SET_CAVEAT =
   "This citation is the authoring party's own declaration, recorded as " +
-  "written. What psilink could check about it -- whether these names resolve " +
+  "written. What Alcove could check about it -- whether these names resolve " +
   "to a rule set it ships, and whether the declared rules are drawn from that " +
   "set -- is the writing party's verdict, recorded beside the citation in the " +
   "exchange record itself. What the exchange held both parties to is the " +
@@ -1056,12 +1056,12 @@ export const DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT =
   "records share the matched linkage-key value and which of the inviting " +
   "party's rows they are -- a count and row positions, never the value behind " +
   "them, and only for groups that matched. That count is the inviting party's " +
-  "own declaration, which psilink does not check against its data.";
+  "own declaration, which Alcove does not check against its data.";
 
 /**
  * The disclosure statement for the other output shape a deduplicating invitation
  * can have: the inviting party receives the result and the accepting party
- * receives none, so psilink presents the grouping to the declaring party alone.
+ * receives none, so Alcove presents the grouping to the declaring party alone.
  *
  * The shape is representable and derives cleanly -- an invitation declaring
  * `output.expectsOutput` with `shareWithPartner` cleared, which acceptance
@@ -1110,7 +1110,7 @@ export const DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT =
   "the inviting party alone reads it: the result it receives links several of " +
   "its own records to a single one of the accepting party's records, which is " +
   "the evidence that those of its own rows name one individual. The accepting " +
-  "party receives no result from this exchange, so psilink presents it no " +
+  "party receives no result from this exchange, so Alcove presents it no " +
   "group sizes and no row positions.";
 
 /**
@@ -1156,7 +1156,7 @@ export const DEDUPLICATE_ACCEPTOR_WIDENING_NOTE =
  *
  * It names the way to the other direction rather than leaving it unsaid,
  * because this seat offers no control for it: each party's own `deduplicate`
- * comes from its own configuration file, and the two run `psilink exchange`.
+ * comes from its own configuration file, and the two run `alcove exchange`.
  * A seat that DOES offer the control renders
  * {@link DEDUPLICATE_ACCEPTOR_SETTABLE_SIDE_NOTE} instead, whose closing
  * sentence names the control rather than a configuration file the operator
@@ -1211,7 +1211,7 @@ export const DEDUPLICATE_ACCEPTOR_SETTABLE_SIDE_NOTE =
  *
  * It states the same three things the party-named form fixes, the integrity
  * limit it closes on included: the count is the declaring party's own
- * declaration rather than a fact psilink checks against its data, so dropping
+ * declaration rather than a fact Alcove checks against its data, so dropping
  * or softening that clause would state a guarantee no check makes.
  *
  * Fixed first-party copy naming no value, so a surface may render it verbatim.
@@ -1221,7 +1221,7 @@ export const DEDUPLICATE_PARTNER_DECLARED_DISCLOSURE_STATEMENT =
   "partner's matched records, your partner learns how many of your records " +
   "share the matched linkage-key value and which of your rows they are -- a " +
   "count and row positions, never the value behind them, and only for groups " +
-  "that matched. That count is your own declaration, which psilink does not " +
+  "that matched. That count is your own declaration, which Alcove does not " +
   "check against your data.";
 
 /**

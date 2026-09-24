@@ -28,7 +28,7 @@ import {
   maxCodeUnits,
   normalizeCsvDelimiter,
   safeParseFileSyncOptions,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { MAX_CSV_FILE_BYTES } from "@components/csvIntake";
 import { tokenMaxAgeDaysSchema } from "@psi/tokenMaxAge";
@@ -43,7 +43,7 @@ import type {
   OwnColumnSelection,
   SigningConfig,
   Standardization,
-} from "@psilink/core";
+} from "@alcove/core";
 
 /**
  * Upper bound on the `identity` label a zero-setup intent may hold (the CLI's
@@ -419,7 +419,7 @@ const partnerFingerprintSchema = z
   .regex(
     FINGERPRINT_REGEX,
     "partnerFingerprint must be an unpadded base64url SHA-256 digest (43 " +
-      "characters), as 'psilink fingerprint' prints it",
+      "characters), as 'alcove fingerprint' prints it",
   );
 
 const jobSigningChoiceSchema: z.ZodType<JobSigningChoice> = z
@@ -721,10 +721,10 @@ export interface JobExchangeIntentBase {
   /**
    * Whether this run was composed from the configuration the operator opened
    * off the mount. Under this flag the run takes its shared secret from the
-   * `.psilink.key` beside that configuration rather than from the intent, and
+   * `.alcove.key` beside that configuration rather than from the intent, and
    * the recurring-run hand-off merges the held top-level keys of the document
    * the operator opened into its template, so a run authored here from scratch
-   * exports nothing from a `psilink.yaml` the operator never opened (see
+   * exports nothing from an `alcove.yaml` the operator never opened (see
    * `buildJobHandoff` in `./handoff`).
    */
   mountedConfigurationOpened?: boolean;
@@ -1089,7 +1089,7 @@ export const jobCsvDelimiterSchema: z.ZodType<string> = z
     if (isCsvDelimiterChoice(value)) return;
     ctx.addIssue({
       code: "custom",
-      message: `csvDelimiter must state a delimiter psilink accepts: ${csvDelimiterRefusal(value)}`,
+      message: `csvDelimiter must state a delimiter Alcove accepts: ${csvDelimiterRefusal(value)}`,
     });
   });
 
@@ -1485,11 +1485,11 @@ export const jobConfigurationHandBackSchema: z.ZodType<JobConfigurationHandBack>
     .refine(certificateModeNamesThisParty, UNNAMED_CERTIFICATE_PARTY_ISSUE);
 
 /**
- * The copy of the mounted `psilink.yaml` a save of an opened configuration keeps
+ * The copy of the mounted `alcove.yaml` a save of an opened configuration keeps
  * beside it, holding the file as it was before that save (`PUT
  * /api/jobs/config`). Each save replaces the one before.
  */
-export const PREVIOUS_CONFIGURATION_FILE_NAME = "psilink.yaml.previous";
+export const PREVIOUS_CONFIGURATION_FILE_NAME = "alcove.yaml.previous";
 
 /**
  * The fixed, server-chosen file names inside a job workdir. The client never
@@ -1499,9 +1499,9 @@ export const PREVIOUS_CONFIGURATION_FILE_NAME = "psilink.yaml.previous";
  */
 export const JOB_FILE_NAMES = {
   /** The composed CLI config document. */
-  config: "psilink.yaml",
+  config: "alcove.yaml",
   /** The CLI key file holding the shared secret. */
-  key: ".psilink.key",
+  key: ".alcove.key",
   /** The client's input CSV content. */
   input: "input.csv",
   /** The CLI's matched-result output. */

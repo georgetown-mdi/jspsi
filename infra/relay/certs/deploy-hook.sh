@@ -23,9 +23,9 @@
 # the 2026-09-03/04 live run (infra/relay/README.md, Provenance).
 set -euo pipefail
 
-ETC=/etc/psilink-relay
-ENV_FILE="${PSILINK_RELAY_ENV_FILE:-$ETC/relay.env}"
-DEST="${PSILINK_RELAY_CERT_DIR:-$ETC/certs}"
+ETC=/etc/alcove-relay
+ENV_FILE="${ALCOVE_RELAY_ENV_FILE:-$ETC/relay.env}"
+DEST="${ALCOVE_RELAY_CERT_DIR:-$ETC/certs}"
 
 die() { printf 'ABORTING: %s\n' "$*" >&2; exit 1; }
 log() { printf '[%s] %s\n' "$(date -u +%FT%TZ)" "$*" >&2; }
@@ -34,13 +34,13 @@ log() { printf '[%s] %s\n' "$(date -u +%FT%TZ)" "$*" >&2; }
 # shellcheck disable=SC1090
 . "$ENV_FILE"
 
-SRC_CRT="${PSILINK_RELAY_CERT_SOURCE:-}"
-SRC_KEY="${PSILINK_RELAY_KEY_SOURCE:-}"
-[ -s "$SRC_CRT" ] || die "PSILINK_RELAY_CERT_SOURCE names no certificate"
-[ -s "$SRC_KEY" ] || die "PSILINK_RELAY_KEY_SOURCE names no private key"
+SRC_CRT="${ALCOVE_RELAY_CERT_SOURCE:-}"
+SRC_KEY="${ALCOVE_RELAY_KEY_SOURCE:-}"
+[ -s "$SRC_CRT" ] || die "ALCOVE_RELAY_CERT_SOURCE names no certificate"
+[ -s "$SRC_KEY" ] || die "ALCOVE_RELAY_KEY_SOURCE names no private key"
 
-UID_IN_IMAGE="${PSILINK_RELAY_IMAGE_UID:-}"
-[ -n "$UID_IN_IMAGE" ] || die "PSILINK_RELAY_IMAGE_UID is unset in $ENV_FILE; install.sh reads it from the image"
+UID_IN_IMAGE="${ALCOVE_RELAY_IMAGE_UID:-}"
+[ -n "$UID_IN_IMAGE" ] || die "ALCOVE_RELAY_IMAGE_UID is unset in $ENV_FILE; install.sh reads it from the image"
 
 same_file() { [ -f "$2" ] && cmp -s "$1" "$2" && [ "$(stat -c %u "$2")" = "$UID_IN_IMAGE" ]; }
 CHANGED=yes
@@ -55,20 +55,20 @@ chown "$UID_IN_IMAGE" "$DEST/privkey.pem" "$DEST/fullchain.pem"
 log "certificate deployed to $DEST, key owned by uid $UID_IN_IMAGE"
 
 if [ -z "$CHANGED" ]; then
-  if systemctl is-active --quiet psilink-relay.service; then
-    log "certificate and key unchanged; psilink-relay.service left running"
+  if systemctl is-active --quiet alcove-relay.service; then
+    log "certificate and key unchanged; alcove-relay.service left running"
   else
-    log "certificate and key unchanged; psilink-relay.service is not running and was not started"
+    log "certificate and key unchanged; alcove-relay.service is not running and was not started"
   fi
   exit 0
 fi
 
 # Nothing has started yet on a first install; install.sh starts it afterwards.
-if systemctl is-active --quiet psilink-relay.service; then
-  systemctl restart psilink-relay.service
-  log "psilink-relay.service restarted onto the new certificate"
+if systemctl is-active --quiet alcove-relay.service; then
+  systemctl restart alcove-relay.service
+  log "alcove-relay.service restarted onto the new certificate"
 fi
 # The registrar reads the same certificate at start; try-restart leaves a
 # registrar that is not running stopped.
-systemctl try-restart psilink-relay-registrar.service ||
-  log "psilink-relay-registrar.service did not restart onto the new certificate; journalctl -u psilink-relay-registrar.service"
+systemctl try-restart alcove-relay-registrar.service ||
+  log "alcove-relay-registrar.service did not restart onto the new certificate; journalctl -u alcove-relay-registrar.service"

@@ -47,7 +47,7 @@ export function normalizeCsvDelimiter(value: string): string {
 }
 
 /**
- * Whether `value` is a delimiter psilink reads and writes a CSV with: exactly
+ * Whether `value` is a delimiter Alcove reads and writes a CSV with: exactly
  * one character, either a tab or a printable ASCII character other than the
  * double quote.
  *

@@ -15,7 +15,7 @@ import {
   TransportOperationStalledError,
   TransportPublishIndeterminateError,
   UsageError,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { REPORT_LIBRARY_INCOMPATIBILITY } from "./libraryIncompatibility";
 import { transportOperationStalledError } from "./sftpLivenessGuard";
@@ -237,7 +237,7 @@ export function unreadableTransportLifecycleWarning(
     `side first and waits up to ${forcedCloseTimeoutMs} ms for that close, ` +
     `even on a connection that had already closed, so re-dialing is slower ` +
     `than it needs to be. The exchange still completes. This build of ` +
-    `psilink does not fully support the installed SFTP library; ` +
+    `Alcove does not fully support the installed SFTP library; ` +
     `${REPORT_LIBRARY_INCOMPATIBILITY}.`
   );
 }
@@ -263,7 +263,7 @@ export function subsystemOpenTimeoutMessage(
     `the SFTP server accepted this connection's credentials and then did not ` +
     `open the SFTP subsystem within ${subsystemOpenTimeoutMs} ms, so no ` +
     `SFTP session was established. Check that ` +
-    `the account psilink signs in as may use SFTP on that server -- an ` +
+    `the account Alcove signs in as may use SFTP on that server -- an ` +
     `OpenSSH server needs a 'Subsystem sftp' line, and a per-user or ` +
     `per-group setting can withdraw it -- or raise ` +
     `server_connect_timeout_ms if the server is only slow to open it.`
@@ -278,11 +278,11 @@ export function subsystemOpenTimeoutMessage(
  */
 export function unboundedSubsystemOpenWarning(): string {
   return (
-    `This build of psilink cannot put a deadline on the SFTP subsystem ` +
+    `This build of Alcove cannot put a deadline on the SFTP subsystem ` +
     `request that follows authentication, so a server that accepts this ` +
     `connection's credentials and then never opens the SFTP subsystem leaves ` +
     `the command waiting with nothing to end it; interrupt the command if it ` +
-    `stops making progress. This build of psilink does not fully support the ` +
+    `stops making progress. This build of Alcove does not fully support the ` +
     `installed SFTP library; ${REPORT_LIBRARY_INCOMPATIBILITY}.`
   );
 }

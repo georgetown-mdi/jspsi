@@ -42,7 +42,7 @@ export const Route = createFileRoute("/api/jobs/$jobId/record")({
           status: 200,
           headers: {
             "Content-Type": "application/json; charset=utf-8",
-            "Content-Disposition": 'attachment; filename="psilink-record.json"',
+            "Content-Disposition": 'attachment; filename="alcove-record.json"',
             "X-Content-Type-Options": "nosniff",
             ...JOB_RESPONSE_HEADERS,
           },

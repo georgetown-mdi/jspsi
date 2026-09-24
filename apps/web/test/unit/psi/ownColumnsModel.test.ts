@@ -6,7 +6,7 @@ import {
   decodeInvitation,
   getDefaultLinkageTerms,
   inferMetadata,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   OWN_COLUMNS_DEFAULT,
@@ -26,7 +26,7 @@ import {
 } from "@psi/inviterEditor";
 import { generateInvitation } from "@psi/invitation";
 
-import type { LinkageTerms, Output } from "@psilink/core";
+import type { LinkageTerms, Output } from "@alcove/core";
 import type { AcquiredCsv } from "@psi/inviterEditor";
 import type { InvitationLocation } from "@psi/invitation";
 

@@ -42,12 +42,12 @@ describe.skipIf(!hasBuild)("SFTP connection authoring (server side)", () => {
   let port = 0;
 
   beforeAll(async () => {
-    dataRoot = mkdtempSync(join(tmpdir(), "psilink-auth-data-"));
-    rendezvousDir = mkdtempSync(join(tmpdir(), "psilink-auth-rdv-"));
-    secretsDir = mkdtempSync(join(tmpdir(), "psilink-auth-secrets-"));
+    dataRoot = mkdtempSync(join(tmpdir(), "alcove-auth-data-"));
+    rendezvousDir = mkdtempSync(join(tmpdir(), "alcove-auth-rdv-"));
+    secretsDir = mkdtempSync(join(tmpdir(), "alcove-auth-secrets-"));
     // The built server runs as an ordinary user here, so relocate the
     // pasted-credential scratch dir off the root-owned default it uses in-image.
-    scratchDir = mkdtempSync(join(tmpdir(), "psilink-auth-cred-"));
+    scratchDir = mkdtempSync(join(tmpdir(), "alcove-auth-cred-"));
     writeFileSync(join(secretsDir, "partner-password"), "s3cret\n");
     mkdirSync(join(secretsDir, ".ssh"));
     writeFileSync(join(secretsDir, ".ssh", "id_ed25519"), "PRIVATE\n");

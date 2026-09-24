@@ -18,7 +18,7 @@ import {
   sanitizeErrorForDisplay,
   toRetainedResult,
   verifyExchangeRecord,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   INITIAL_CSV_DELIMITER_CHOICE,
@@ -51,7 +51,7 @@ import type {
   LinkageTerms,
   RecordVerificationReport,
   VerificationKeys,
-} from "@psilink/core";
+} from "@alcove/core";
 import type {
   SignedVerdictViewModel,
   VerdictRow,
@@ -610,7 +610,7 @@ export function VerifyReceiptScreen() {
       <Stack gap="lg" mt="md">
         <JsonDropzone
           label="Exchange record"
-          hint="The shareable record: psilink-record-<stamp>.json"
+          hint="The shareable record: alcove-record-<stamp>.json"
           chosen={record?.file}
           onFile={(file) => void onRecordFile(file)}
         />
@@ -623,7 +623,7 @@ export function VerifyReceiptScreen() {
 
         <JsonDropzone
           label="Verification keys"
-          hint="The private keys: psilink-record-<stamp>.keys.json"
+          hint="The private keys: alcove-record-<stamp>.keys.json"
           chosen={keys?.file}
           onFile={(file) => void onKeysFile(file)}
         />
@@ -825,7 +825,7 @@ export function VerifyReceiptScreen() {
             </Text>
             <JsonDropzone
               label="Dual-signed record"
-              hint="The record both parties signed: psilink-receipt-<stamp>.json"
+              hint="The record both parties signed: alcove-receipt-<stamp>.json"
               chosen={signedRecord?.file}
               onFile={(file) => void onSignedRecordFile(file)}
             />
@@ -837,7 +837,7 @@ export function VerifyReceiptScreen() {
             )}
             <TextInput
               label="Your partner's certificate fingerprint"
-              description="The fingerprint your partner gave you out-of-band, from 'psilink fingerprint'. It anchors their slot: without it, nothing outside the record vouches for their certificate."
+              description="The fingerprint your partner gave you out-of-band, from 'alcove fingerprint'. It anchors their slot: without it, nothing outside the record vouches for their certificate."
               classNames={{ input: styles.mono }}
               value={pinnedFingerprint}
               error={pinProblem}
@@ -848,7 +848,7 @@ export function VerifyReceiptScreen() {
             />
             <JsonDropzone
               label="Your exported certificate"
-              hint="The public certificate from 'psilink fingerprint --export-certificate'. Not your signing identity file: nothing here signs, so this page never imports or uses a private key."
+              hint="The public certificate from 'alcove fingerprint --export-certificate'. Not your signing identity file: nothing here signs, so this page never imports or uses a private key."
               chosen={certificate?.file}
               onFile={(file) => void onCertificateFile(file)}
             />

@@ -7,7 +7,7 @@ import {
   getDefaultLinkageTerms,
   parseExchangeSpec,
   parseSensitiveYaml,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   CRON_EXPORT_CONFIG_MIME,
@@ -23,7 +23,7 @@ import {
   managedCronExportPanelState,
 } from "@recurring/managedCronExportModel";
 
-import type { ExchangeLocator, WebRTCExchangeLocator } from "@psilink/core";
+import type { ExchangeLocator, WebRTCExchangeLocator } from "@alcove/core";
 import type {
   NewManagedExchange,
   RunnableManagedExchangeRecord,
@@ -82,9 +82,9 @@ describe("what the panel gets to render", () => {
   test("the two files have their CLI names, contents, and media types", () => {
     const record = managedRecord();
     const { composed } = exportableState(record);
-    expect(composed.config.fileName).toBe("psilink.yaml");
+    expect(composed.config.fileName).toBe("alcove.yaml");
     expect(composed.config.mimeType).toBe(CRON_EXPORT_CONFIG_MIME);
-    expect(composed.key.fileName).toBe(".psilink.key");
+    expect(composed.key.fileName).toBe(".alcove.key");
     expect(composed.key.mimeType).toBe(CRON_EXPORT_KEY_MIME);
     // The secret rides the key half alone, which is what lets the panel tell the
     // operator to handle the two files differently once they land.
@@ -113,7 +113,7 @@ describe("what the panel gets to render", () => {
     // credential-free locator: host, port, and path, and nothing else.
     const { composed } = exportableState(managedRecord());
     const parsed = parseExchangeSpec(
-      parseSensitiveYaml(composed.config.text, "exported psilink.yaml"),
+      parseSensitiveYaml(composed.config.text, "exported alcove.yaml"),
     );
     expect(parsed.connection.channel).toBe("webrtc");
     expect(parsed.connection).not.toHaveProperty("stun");

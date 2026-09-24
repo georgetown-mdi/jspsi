@@ -6,7 +6,7 @@ import {
   getDefaultLinkageTerms,
   inferMetadata,
   overlongDisclosedColumnPositions,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   disclosedColumnNames,
@@ -23,7 +23,7 @@ import {
 
 import { unlinkableFileAlert } from "@components/UnlinkableFileAlert";
 
-import type { LinkageStrategy, LinkageTerms, Metadata } from "@psilink/core";
+import type { LinkageStrategy, LinkageTerms, Metadata } from "@alcove/core";
 
 import type { AlertContent } from "@components/csvIntake";
 import type { LinkageRefusal } from "@psi/linkageRefusal";

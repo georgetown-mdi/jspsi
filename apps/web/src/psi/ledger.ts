@@ -5,7 +5,7 @@
  * drop one from that trust surface.
  */
 
-import { disclosedColumnNames } from "@psilink/core";
+import { disclosedColumnNames } from "@alcove/core";
 
 import { isolatedColumnName } from "@components/ColumnName";
 

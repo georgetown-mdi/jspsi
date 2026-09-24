@@ -7,7 +7,7 @@ import {
   WorkerPsiEngine,
   type PsiEngine,
   type PsiWorkerInit,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { createWorkerThreadHandle } from "../../src/psiWorkerHost";
 
@@ -21,12 +21,12 @@ const workerEntry = fileURLToPath(
 const workerBuilt = existsSync(workerEntry);
 // A skipIf on a missing build artifact is silent: it could pass green with the
 // worker path unexercised if the build step ever regressed. CI's primary CLI leg
-// sets PSILINK_REQUIRE_WORKER_BUILD=1 so a missing bundle fails here instead of
+// sets ALCOVE_REQUIRE_WORKER_BUILD=1 so a missing bundle fails here instead of
 // skipping; it is unset in legs that do not build the CLI and in local src-only
 // runs, where the suite still skips cleanly.
-if (process.env.PSILINK_REQUIRE_WORKER_BUILD === "1" && !workerBuilt) {
+if (process.env.ALCOVE_REQUIRE_WORKER_BUILD === "1" && !workerBuilt) {
   throw new Error(
-    `PSILINK_REQUIRE_WORKER_BUILD=1 but the CLI worker bundle is absent at ` +
+    `ALCOVE_REQUIRE_WORKER_BUILD=1 but the CLI worker bundle is absent at ` +
       `${workerEntry}: the real-worker offload suite would silently skip. Build it ` +
       `first with \`npm run build -w apps/cli\`.`,
   );

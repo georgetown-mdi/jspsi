@@ -1,4 +1,4 @@
-import { UsageError } from "@psilink/core";
+import { UsageError } from "@alcove/core";
 
 // Milliseconds per supported unit suffix. The set is small by design (no
 // weeks/months/years): a CLI duration is a coordination window, and ambiguous
@@ -60,7 +60,7 @@ function parseUnitDuration(
 
 /**
  * Parse a human-readable command-line duration into a positive millisecond
- * offset -- the canonical duration parser for psilink CLI flags. Syntax: a
+ * offset -- the canonical duration parser for Alcove CLI flags. Syntax: a
  * positive integer magnitude plus a REQUIRED unit suffix (`s`, `m`, `h`, `d`),
  * e.g. `45s`, `30m`. Sub-second values are rejected; use
  * {@link parseFineDuration} for millisecond resolution. Full syntax and

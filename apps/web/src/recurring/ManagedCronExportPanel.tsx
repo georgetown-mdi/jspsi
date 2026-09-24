@@ -38,7 +38,7 @@ import type { RunnableManagedExchangeRecord } from "@psi/managed/managedExchange
 
 /** The key file's custody rules, cited rather than restated here. */
 const KEY_FILE_SECURITY_DOC_URL =
-  "https://github.com/georgetown-mdi/jspsi/blob/main/docs/SECURITY_DESIGN.md#key-file-security";
+  "https://github.com/georgetown-mdi/alcove/blob/main/docs/SECURITY_DESIGN.md#key-file-security";
 
 /** The platform call sites the export drives: a read of the record by id (never
  * this component's mounted record, whose secret a concurrent rotation may already
@@ -53,10 +53,10 @@ const cronExportDeps = {
 /**
  * The command-line export panel on a managed exchange's detail surface, beside the
  * backup panel and collapsed until the operator opens it: the graduation path from
- * a browser-run recurring exchange to `psilink exchange` under the host's own
+ * a browser-run recurring exchange to `alcove exchange` under the host's own
  * scheduler (docs/MANAGED_EXCHANGE.md, "Exporting to the command line").
  *
- * Downloads `psilink.yaml` (no secret) and `.psilink.key` (a plaintext credential)
+ * Downloads `alcove.yaml` (no secret) and `.alcove.key` (a plaintext credential)
  * as two separate files rather than one archive, and marks no backup marker --
  * neither file is a backup this browser restores from; taking it, confirming the
  * hand-off, or dismissing it leaves the backup panel's state unchanged.
@@ -176,7 +176,7 @@ export function ManagedCronExportPanel({
             <p className={styles.small}>
               This exchange runs in this browser. To run it on a schedule from
               the command line instead, download the two files{" "}
-              <span className={styles.mono}>psilink exchange</span> opens, put
+              <span className={styles.mono}>alcove exchange</span> opens, put
               them in a folder on the machine that will run the schedule, and
               schedule the command there. Handing it over ends its life in this
               browser: one owner holds a recurring exchange&apos;s secret, never
@@ -184,7 +184,7 @@ export function ManagedCronExportPanel({
             </p>
             <p className={styles.small}>
               These two files are the command line&apos;s, not a backup file
-              this browser can restore from. Importing the psilink.yaml here
+              this browser can restore from. Importing the alcove.yaml here
               brings back its settings and no secret, so downloading them leaves
               the backup state above exactly as it is. If you want a file that
               brings this exchange back to this browser, download a backup up
@@ -285,10 +285,10 @@ export function ManagedCronExportPanel({
                   ariaLabel="Windows Task Scheduler command"
                 />
                 <p className={styles.small}>
-                  Both lines call psilink by name. Under cron&apos;s minimal
-                  PATH or a Task Scheduler service account it may not resolve,
-                  and fails quietly -- use the full path to the psilink binary,
-                  or put it on the scheduling account&apos;s PATH.
+                  Both lines call Alcove by name. Under cron&apos;s minimal PATH
+                  or a Task Scheduler service account it may not resolve, and
+                  fails quietly -- use the full path to the Alcove binary, or
+                  put it on the scheduling account&apos;s PATH.
                 </p>
               </li>
             </ol>

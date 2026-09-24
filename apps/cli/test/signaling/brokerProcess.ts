@@ -22,7 +22,7 @@ import type { Readable } from "node:stream";
 
 /** What the runner prints once it is listening, and the whole of what its stdout
  * protocol admits (packages/peerjs-broker/src/standalone.ts). */
-const READY_PREFIX = "psilink-broker ";
+const READY_PREFIX = "alcove-broker ";
 const READY_LINE = new RegExp(`^${READY_PREFIX}(\\d+)\\n$`);
 
 /** Longest to wait for the child to report its port before giving up. */

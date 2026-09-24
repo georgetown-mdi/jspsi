@@ -3,9 +3,9 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import YAML from "yaml";
-import { getDefaultLinkageTerms, UsageError } from "@psilink/core";
-import type { ExchangeSpec, PreparedExchange } from "@psilink/core";
-import { minimalPreparedExchange } from "@psilink/core/testing";
+import { getDefaultLinkageTerms, UsageError } from "@alcove/core";
+import type { ExchangeSpec, PreparedExchange } from "@alcove/core";
+import { minimalPreparedExchange } from "@alcove/core/testing";
 
 import {
   buildSaveSpec,
@@ -45,9 +45,9 @@ let configFile: string;
 let keyFile: string;
 
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zerosave-"));
-  configFile = path.join(dir, "psilink.yaml");
-  keyFile = path.join(dir, ".psilink.key");
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-zerosave-"));
+  configFile = path.join(dir, "alcove.yaml");
+  keyFile = path.join(dir, ".alcove.key");
 });
 
 afterEach(() => {
@@ -76,7 +76,7 @@ test("buildSaveSpec includes the connection, terms and metadata, omitting standa
 
 test("buildSaveSpec records a non-empty observed received set as the commitment", () => {
   // A zero-setup --save party fixes the payload columns it observed in the
-  // first exchange so a later `psilink exchange` fails closed on a divergence.
+  // first exchange so a later `alcove exchange` fails closed on a divergence.
   const prepared = preparedFrom(getDefaultLinkageTerms("Test Party"), []);
 
   const spec = buildSaveSpec(
@@ -148,7 +148,7 @@ test("both-saved: writes config and key, and reports the shared secret", () => {
 test("save persists an @path credential as the reference, never the secret contents", () => {
   // End-to-end at-rest check for the --save path: a connection whose password is
   // an @path reference is persisted verbatim, so the referenced file's contents
-  // (the secret) never land in psilink.yaml. Read the value back through the YAML
+  // (the secret) never land in alcove.yaml. Read the value back through the YAML
   // parser rather than as a raw substring -- a long quoted scalar may line-wrap.
   const { log } = capture();
   const pwFile = path.join(dir, "pw");
@@ -191,7 +191,7 @@ test("we-saved-partner-did-not: writes config only and instructs to invite", () 
   expect(fs.existsSync(keyFile)).toBe(false);
   const joined = messages.join("\n");
   expect(joined).toContain("did not also choose to save");
-  expect(joined).toContain("psilink invite");
+  expect(joined).toContain("alcove invite");
 });
 
 // --- this party did not save -------------------------------------------------
@@ -227,9 +227,9 @@ test("neither-saved: saves nothing and emits the standard recurring hint", () =>
 
   expect(fs.existsSync(configFile)).toBe(false);
   expect(fs.existsSync(keyFile)).toBe(false);
-  expect(
-    messages.some((m) => m.includes("psilink invite URL INPUT_FILE")),
-  ).toBe(true);
+  expect(messages.some((m) => m.includes("alcove invite URL INPUT_FILE"))).toBe(
+    true,
+  );
 });
 
 // --- post-exchange conflict re-check (TOCTOU window) -------------------------

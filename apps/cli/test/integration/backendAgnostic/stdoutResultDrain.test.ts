@@ -4,9 +4,9 @@ import path from "node:path";
 
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
-import { prepareForExchange } from "@psilink/core";
-import type { ExchangeDataSpec, LinkageTerms } from "@psilink/core";
-import { withCapturedLogs } from "@psilink/core/testing";
+import { prepareForExchange } from "@alcove/core";
+import type { ExchangeDataSpec, LinkageTerms } from "@alcove/core";
+import { withCapturedLogs } from "@alcove/core/testing";
 
 import { saveKeyFile } from "../../../src/keyFile";
 import {
@@ -98,7 +98,7 @@ function preparedFor(identity: string) {
 let work: string;
 
 beforeEach(() => {
-  work = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-stdout-drain-"));
+  work = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-stdout-drain-"));
 });
 
 afterEach(() => {

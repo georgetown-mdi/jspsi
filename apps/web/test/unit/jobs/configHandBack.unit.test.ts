@@ -9,7 +9,7 @@ import {
   getDefaultLinkageTerms,
   serializeExchangeDocument,
   snakeizeKeys,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   ConfigurationHandBackRefusedError,
@@ -25,11 +25,11 @@ import {
 } from "@jobs/intentSchemas";
 import { HANDOFF_SIGNING_IDENTITY_PLACEHOLDER } from "@jobs/handoff";
 
-import type { ExchangeSpec } from "@psilink/core";
+import type { ExchangeSpec } from "@alcove/core";
 import type { JobConfigurationHandBack } from "@jobs/intentSchemas";
 
 // The hand-back of a webrtc configuration the console opened: the settings the
-// authoring steps edit are written into the mounted psilink.yaml, and every
+// authoring steps edit are written into the mounted alcove.yaml, and every
 // other key the file stated -- its whole connection, credentials included --
 // is written back as it was. Driven through the real mount read, core's
 // schema, and core's writer.
@@ -78,7 +78,7 @@ function webrtcDocument(
     retention_disposition: "Filed with the 2026 intake.",
     signing: {
       mode: "certificate",
-      identity_file: "/home/county/.psilink/identity.json",
+      identity_file: "/home/county/.alcove/identity.json",
       partner_fingerprint: PARTNER_FINGERPRINT,
       receipt_output: "/home/county/receipts/latest.json",
     },
@@ -95,16 +95,16 @@ afterEach(() => {
 });
 
 function mountHolding(document: Record<string, unknown>): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-handback-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-handback-"));
   dirs.push(dir);
-  fs.writeFileSync(path.join(dir, "psilink.yaml"), stringifyYaml(document), {
+  fs.writeFileSync(path.join(dir, "alcove.yaml"), stringifyYaml(document), {
     mode: 0o640,
   });
   return dir;
 }
 
 function mountedText(dir: string): string {
-  return fs.readFileSync(path.join(dir, "psilink.yaml"), "utf8");
+  return fs.readFileSync(path.join(dir, "alcove.yaml"), "utf8");
 }
 
 function previousText(dir: string): string {
@@ -148,7 +148,7 @@ function readBack(dir: string): ExchangeSpec {
 }
 
 describe("a webrtc configuration handed back unchanged", () => {
-  test("is the file psilink writes for that document, byte for byte", () => {
+  test("is the file Alcove writes for that document, byte for byte", () => {
     const dir = mountHolding(webrtcDocument());
     const opened = readBack(dir);
     handBackMountedConfiguration(dir, unchangedHandBack(opened));
@@ -226,10 +226,10 @@ describe("a webrtc configuration handed back with edits", () => {
   test("keeps the file's own permission bits and leaves no other file", () => {
     const dir = mountHolding(webrtcDocument());
     handBackMountedConfiguration(dir, editedHandBack(readBack(dir)));
-    for (const name of ["psilink.yaml", PREVIOUS_CONFIGURATION_FILE_NAME])
+    for (const name of ["alcove.yaml", PREVIOUS_CONFIGURATION_FILE_NAME])
       expect(fs.statSync(path.join(dir, name)).mode & 0o777).toBe(0o640);
     expect(fs.readdirSync(dir).sort()).toEqual([
-      "psilink.yaml",
+      "alcove.yaml",
       PREVIOUS_CONFIGURATION_FILE_NAME,
     ]);
   });
@@ -237,7 +237,7 @@ describe("a webrtc configuration handed back with edits", () => {
   test("keeps the file as it was before the save beside it", () => {
     const dir = mountHolding(webrtcDocument());
     fs.appendFileSync(
-      path.join(dir, "psilink.yaml"),
+      path.join(dir, "alcove.yaml"),
       "# the operator's own comment\n",
     );
     const before = mountedText(dir);
@@ -265,7 +265,7 @@ describe("a webrtc configuration handed back with edits", () => {
     ).toThrow(ConfigurationHandBackRefusedError);
     expect(mountedText(dir)).toBe(before);
     expect(fs.readdirSync(dir).sort()).toEqual([
-      "psilink.yaml",
+      "alcove.yaml",
       PREVIOUS_CONFIGURATION_FILE_NAME,
     ]);
   });
@@ -310,7 +310,7 @@ describe("what a hand-back refuses", () => {
   test("a mount holding no configuration", () => {
     const dir = mountHolding(webrtcDocument());
     const handBack = unchangedHandBack(readBack(dir));
-    fs.rmSync(path.join(dir, "psilink.yaml"));
+    fs.rmSync(path.join(dir, "alcove.yaml"));
     expect(() => handBackMountedConfiguration(dir, handBack)).toThrow(
       ConfigurationLoadRefusedError,
     );
@@ -324,7 +324,7 @@ describe("what a hand-back refuses", () => {
       connection: { channel: "filedrop", path: "/drop" },
       signing: undefined,
     });
-    fs.writeFileSync(path.join(dir, "psilink.yaml"), stringifyYaml(filedrop));
+    fs.writeFileSync(path.join(dir, "alcove.yaml"), stringifyYaml(filedrop));
     const before = mountedText(dir);
     expect(() => handBackMountedConfiguration(dir, handBack)).toThrow(
       /runs over filedrop now/,

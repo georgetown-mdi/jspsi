@@ -8,7 +8,7 @@ import {
   parseExchangeSpec,
   parseSensitiveYaml,
   snakeizeKeys,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { stringify as stringifyYaml } from "yaml";
 
@@ -36,7 +36,7 @@ import {
   ownColumnsOffered,
 } from "@recurring/localDocumentFieldsModel";
 
-import type { CSVRow, ExchangeSpec } from "@psilink/core";
+import type { CSVRow, ExchangeSpec } from "@alcove/core";
 import type { LocalDocumentFieldValues } from "@recurring/localDocumentFieldsModel";
 import type { ManagedExchangeRecord } from "@psi/managed/managedExchangeRecord";
 

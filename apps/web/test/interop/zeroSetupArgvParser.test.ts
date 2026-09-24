@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 
 import { afterEach, describe, expect, test } from "vitest";
 
-import { MAX_RECONNECT_ATTEMPTS, MAX_TIMEOUT_SECONDS } from "@psilink/core";
+import { MAX_RECONNECT_ATTEMPTS, MAX_TIMEOUT_SECONDS } from "@alcove/core";
 
 import {
   CONNECTION_TUNING_DEFAULT,
@@ -214,7 +214,7 @@ describe.skipIf(!cliIsBuilt)(
       // does not create, and reported it into the log file the diagnostic
       // tokens pointed the CLI at rather than to stderr.
       expect(fs.readFileSync(logFilePath, "utf8")).toContain(
-        "psilink.yaml does not exist",
+        "alcove.yaml does not exist",
       );
     });
 

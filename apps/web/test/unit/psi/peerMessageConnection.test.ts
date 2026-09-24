@@ -2,7 +2,7 @@ import { describe, expect, test, vi } from "vitest";
 
 import { default as EventEmitter } from "eventemitter3";
 
-import { ConnectionError } from "@psilink/core";
+import { ConnectionError } from "@alcove/core";
 
 import { openPeerMessageConnection } from "../../../src/psi/transport/peerMessageConnection.js";
 

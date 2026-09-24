@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, test } from "vitest";
 
-import { DISPLAY_TRUNCATION_MARKER } from "@psilink/core";
+import { DISPLAY_TRUNCATION_MARKER } from "@alcove/core";
 
 import {
   PROBE_CONNECT_TIMEOUT_MS,

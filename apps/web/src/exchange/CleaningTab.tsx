@@ -16,7 +16,7 @@ import { StandardizationCards } from "@components/StandardizationCards";
 import { declaredFieldsFor } from "@psi/inviterEditor";
 import styles from "@styles/app.module.css";
 
-import type { LinkageField, StandardizationStep } from "@psilink/core";
+import type { LinkageField, StandardizationStep } from "@alcove/core";
 import type { ColumnSamples } from "@psi/columnSamples";
 import type { FieldValueCoverage } from "@psi/workers/nonEmptyAggregate";
 import type { InviterEditor } from "@psi/inviterEditor";

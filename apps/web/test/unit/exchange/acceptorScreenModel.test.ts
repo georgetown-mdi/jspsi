@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { displayText } from "@psilink/core";
+import { displayText } from "@alcove/core";
 
 import { setColumnDisclosure } from "@psi/metadataEditing";
 
@@ -22,7 +22,7 @@ import type {
 import type { AcceptableInvitation } from "@psi/acceptInvitation";
 import type { AcceptorAcquiredCsv } from "@exchange/acceptorColumnsModel";
 import type { AlertContent } from "@components/csvIntake";
-import type { LinkageTerms } from "@psilink/core";
+import type { LinkageTerms } from "@alcove/core";
 import type { ProfiledJobInput } from "@psi/jobClient/workInputClient";
 
 // Headers chosen from inferMetadata's exact-match alias table, as the acceptor
@@ -168,7 +168,7 @@ describe("the invitation the console reviews", () => {
     const state = acceptorScreenReducer(ACCEPTOR_SCREEN_INITIAL, {
       type: "invitation-decoded",
       invitation,
-      rendezvous: { configured: true, folderName: "psilink" },
+      rendezvous: { configured: true, folderName: "alcove" },
     });
     expect(state.decode.status).toBe("ready");
     expect(state.rendezvous?.configured).toBe(true);

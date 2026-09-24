@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-import { describeResolvedRunShape, getLogger } from "@psilink/core";
+import { describeResolvedRunShape, getLogger } from "@alcove/core";
 
 import {
   DISCLOSURE_NOT_FILED_WARNING,

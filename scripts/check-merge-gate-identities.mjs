@@ -182,7 +182,7 @@ export async function fetchBranchRules({
       headers: {
         accept: "application/vnd.github+json",
         authorization: `Bearer ${token}`,
-        "user-agent": "psilink-check-merge-gate-identities",
+        "user-agent": "alcove-check-merge-gate-identities",
         "x-github-api-version": "2022-11-28",
       },
     });

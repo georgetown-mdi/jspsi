@@ -106,7 +106,7 @@ export const OVERRIDE_MARKER = "allow-history-narration";
 
 /**
  * The base candidates, in order; the first that resolves in the checkout is what
- * the range is measured from. `PSILINK_NARRATION_BASE` -- a ref or a sha -- is
+ * the range is measured from. `ALCOVE_NARRATION_BASE` -- a ref or a sha -- is
  * the primary base: static_checks.yaml sets it to the pull request event's base
  * sha, and a local run sets it for a branch cut from something other than
  * staging. An empty value is no value, so a run outside a pull request falls
@@ -114,7 +114,7 @@ export const OVERRIDE_MARKER = "allow-history-narration";
  */
 export function baseCandidates(env) {
   const candidates = [];
-  const named = env.PSILINK_NARRATION_BASE?.trim();
+  const named = env.ALCOVE_NARRATION_BASE?.trim();
   if (named) candidates.push(named);
   if (env.GITHUB_BASE_REF) {
     candidates.push(`origin/${env.GITHUB_BASE_REF}`, env.GITHUB_BASE_REF);
@@ -349,7 +349,7 @@ export function resolveBase(root, env) {
     if (mergeBase) return { commit: mergeBase.trim(), ref };
   }
   throw new Error(
-    `Comment history-narration check: none of ${candidates.join(", ")} resolves to a commit this checkout shares history with, so there is no range to read. Set PSILINK_NARRATION_BASE to the ref or sha this branch was cut from, or fetch the base branch into the checkout.`,
+    `Comment history-narration check: none of ${candidates.join(", ")} resolves to a commit this checkout shares history with, so there is no range to read. Set ALCOVE_NARRATION_BASE to the ref or sha this branch was cut from, or fetch the base branch into the checkout.`,
   );
 }
 

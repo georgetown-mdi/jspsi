@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { spawn } from "node:child_process";
 
-import { READINESS_SEGMENT } from "@psilink/peerjs-broker/standaloneOptions";
+import { READINESS_SEGMENT } from "@alcove/peerjs-broker/standaloneOptions";
 
 import { LEG_ENVIRONMENT_FAILURE } from "./legTypes.ts";
 import { trackChild } from "./childProcess.ts";
@@ -29,7 +29,7 @@ import { trackChild } from "./childProcess.ts";
 
 /** What the runner prints once it is listening, and the whole of what its
  * stdout protocol admits (packages/peerjs-broker/src/standalone.ts). */
-const READY_LINE = /^psilink-broker (\d+)\n$/;
+const READY_LINE = /^alcove-broker (\d+)\n$/;
 
 /** Longest to wait for the child to report its port before giving up. */
 const START_TIMEOUT_MS = 30_000;

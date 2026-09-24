@@ -76,7 +76,7 @@ export const CHECKS = [
   {
     script: "check:image-capabilities",
     description:
-      "Every psilink argument vector the file-drop support scripts use has an image_smoke.yaml capability gate exercising it.",
+      "Every Alcove argument vector the file-drop support scripts use has an image_smoke.yaml capability gate exercising it.",
   },
   {
     script: "check:enforcement-claims",

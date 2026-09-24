@@ -1,6 +1,6 @@
 import { afterEach, expect, test, vi } from "vitest";
 
-import { ConnectionError, UsageError } from "@psilink/core";
+import { ConnectionError, UsageError } from "@alcove/core";
 
 import {
   BROKER_ADDRESS_REFUSED,

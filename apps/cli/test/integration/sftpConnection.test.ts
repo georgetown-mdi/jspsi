@@ -10,8 +10,8 @@ import {
   TransportOperationStalledError,
   UsageError,
   sanitizeErrorForDisplay,
-} from "@psilink/core";
-import type { SFTPConnectionConfig } from "@psilink/core";
+} from "@alcove/core";
+import type { SFTPConnectionConfig } from "@alcove/core";
 import Ssh2SftpClient from "ssh2-sftp-client";
 
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";

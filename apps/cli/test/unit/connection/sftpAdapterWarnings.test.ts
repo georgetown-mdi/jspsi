@@ -5,7 +5,7 @@ import {
   TransportPublishIndeterminateError,
   UsageError,
   sanitizeErrorForDisplay,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   SFTP_SESSION_CLOSED_MESSAGE,
@@ -302,7 +302,9 @@ describe("the unreadable transport lifecycle", () => {
       "does not fully support the installed SFTP library",
     );
     expect(message).toContain("The exchange still completes.");
-    expect(message).toContain("https://github.com/georgetown-mdi/jspsi/issues");
+    expect(message).toContain(
+      "https://github.com/georgetown-mdi/alcove/issues",
+    );
     // The ssh2 reading behind it is contributor-tier detail, logged at debug by
     // the adapter rather than put on the operator's terminal.
     expect(message).not.toContain("ssh2's client.on()");

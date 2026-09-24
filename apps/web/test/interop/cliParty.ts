@@ -4,7 +4,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 
 /**
- * The built `psilink` entry this suite drives. The CLI is a separate workspace
+ * The built `alcove` entry this suite drives. The CLI is a separate workspace
  * apps/web may not import, so the interop party on that side of the wire is the
  * real command-line program, spawned exactly as the console's job driver spawns
  * it (apps/web/src/jobs/cliDriver.ts).
@@ -18,7 +18,7 @@ export const cliEntry = path.resolve(
  * suite skips rather than failing on a tree that has not. */
 export const cliIsBuilt = existsSync(cliEntry);
 
-/** How one `psilink` invocation ended. */
+/** How one `alcove` invocation ended. */
 export interface CliRun {
   exitCode: number | null;
   signal: NodeJS.Signals | null;
@@ -29,7 +29,7 @@ export interface CliRun {
   timedOut: boolean;
 }
 
-/** Spawn one `psilink` invocation and collect everything it wrote. */
+/** Spawn one `alcove` invocation and collect everything it wrote. */
 export function startCli(params: {
   args: Array<string>;
   cwd: string;
@@ -67,14 +67,14 @@ export function startCli(params: {
 export function expectCliSucceeded(run: CliRun, what: string): void {
   if (run.exitCode === 0) return;
   throw new Error(
-    `psilink ${what} exited ${String(run.exitCode)}` +
+    `alcove ${what} exited ${String(run.exitCode)}` +
       (run.timedOut ? " (killed on its deadline)" : "") +
       `\n${run.output}`,
   );
 }
 
 /**
- * The invitation an offline `psilink invite` printed.
+ * The invitation an offline `alcove invite` printed.
  *
  * Matched by shape rather than by the sentence above it: the invitation is the
  * one base64url run long enough to be a token, so the extraction survives a
@@ -122,12 +122,12 @@ export function namesFileDrop(configPath: string, dropDir: string): boolean {
 }
 
 /**
- * Fill in the configuration's connection block, the step `psilink invite` and
- * `psilink accept` tell the operator to take when the invitation named no
- * endpoint of its own ("fill in the connection block in ./psilink.yaml before
- * running 'psilink exchange'").
+ * Fill in the configuration's connection block, the step `alcove invite` and
+ * `alcove accept` tell the operator to take when the invitation named no
+ * endpoint of its own ("fill in the connection block in ./alcove.yaml before
+ * running 'alcove exchange'").
  *
- * A line-scoped rewrite rather than a YAML round-trip: the file is one psilink
+ * A line-scoped rewrite rather than a YAML round-trip: the file is one Alcove
  * just wrote, `connection` is its first top-level block, and re-emitting the
  * document through a parser would rewrite every other block as a side effect of
  * replacing one.

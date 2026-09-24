@@ -43,7 +43,7 @@ interface DirectoryPicker {
 
 /** The picker's `id`, so the browser reopens this app's folder grant where the
  * operator last took it rather than at an unrelated default. */
-const OUTPUT_DIRECTORY_PICKER_ID = "psilink-results";
+const OUTPUT_DIRECTORY_PICKER_ID = "alcove-results";
 
 /**
  * Whether this runtime can take an output-folder grant at all: the directory

@@ -54,21 +54,21 @@ export type { P256PrivateJwk } from "./signingKeys.js";
  * signature scheme and the public-key representation together: a document
  * written under a different version is refused, not reinterpreted under this
  * one. */
-export const SIGNING_CERTIFICATE_VERSION = "psilink-signing-cert/v2";
+export const SIGNING_CERTIFICATE_VERSION = "alcove-signing-cert/v3";
 
 /** Single recognized version for the on-disk signing identity file (private key
  * + certificate). */
-export const SIGNING_IDENTITY_VERSION = "psilink-signing-identity/v2";
+export const SIGNING_IDENTITY_VERSION = "alcove-signing-identity/v3";
 
 // Domain-separation labels folded into the bytes that are signed and hashed.
 // They keep a certificate self-signature cryptographically distinct from a
 // receipt signature and from the fingerprint pre-image, so a signature or
 // digest produced in one context can never be replayed as another. Not
 // versioned alongside the certificate format: the body's own `version` field
-// is already inside the bytes both labels cover, so a v1 and a v2 body
+// is already inside the bytes both labels cover, so a v1 and a v3 body
 // already separate.
-const CERTIFICATE_SIGNATURE_DOMAIN = "psilink-signing-cert-signature/v1";
-const CERTIFICATE_FINGERPRINT_DOMAIN = "psilink-signing-cert-fingerprint/v1";
+const CERTIFICATE_SIGNATURE_DOMAIN = "alcove-signing-cert-signature/v2";
+const CERTIFICATE_FINGERPRINT_DOMAIN = "alcove-signing-cert-fingerprint/v2";
 
 /** The one signature algorithm supported by this certificate version: ECDSA
  * over P-256 with SHA-256, the signature encoded as the fixed-length raw
@@ -522,7 +522,7 @@ export type PartnerCertificateCondition =
 // rather than a field on one error class: the same condition is raised as a
 // SigningError here and re-raised as a ReceiptVerificationError by the receipt
 // step, and one reader answers for both.
-const PARTNER_CERTIFICATE_CONDITION_TAG = "psilinkPartnerCertificateCondition";
+const PARTNER_CERTIFICATE_CONDITION_TAG = "alcovePartnerCertificateCondition";
 
 /**
  * `error` tagged with the partner-certificate condition it refused on, so a

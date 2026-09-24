@@ -1,5 +1,5 @@
 import type { AcceptKitEndpoint } from "@exchange/acceptKit";
-import type { FileDropEndpoint } from "@psilink/core";
+import type { FileDropEndpoint } from "@alcove/core";
 import type { JobRendezvousConfig } from "@psi/jobClient/workInputClient";
 
 /**

@@ -20,7 +20,7 @@ import type { JobHandoff } from "@jobs/handoff";
 
 /** The full CLI reference the panel points at for the recurring-run details. */
 const RECURRING_EXCHANGE_DOC_URL =
-  "https://github.com/georgetown-mdi/jspsi/blob/main/docs/CLI.md#recurring-exchange";
+  "https://github.com/georgetown-mdi/alcove/blob/main/docs/CLI.md#recurring-exchange";
 
 /**
  * The recurring-run hand-off panel, available on every console server-job seat
@@ -28,7 +28,7 @@ const RECURRING_EXCHANGE_DOC_URL =
  * collapsed until the run completes, absent on a failed or stopped run. It
  * fetches the job's portable,
  * secret-free hand-off from `GET /api/jobs/:jobId/handoff` and lays out exactly
- * what the operator takes from this prototyped run to a scheduled `psilink`
+ * what the operator takes from this prototyped run to a scheduled `alcove`
  * command line: the config or command template (the portable values from this run
  * filled in, machine-specific paths shown as placeholders), the key-file copy step
  * for an invitation run, cron and Windows Task Scheduler examples, and the caveats.
@@ -128,9 +128,9 @@ function HandoffBody({ handoff }: { handoff: JobHandoff }) {
         ariaLabel="Windows Task Scheduler command"
       />
       <p className={styles.small}>
-        Both lines call psilink by name. Under cron&apos;s minimal PATH or a
-        Task Scheduler service account it may not resolve, and fails quietly --
-        use the full path to the psilink binary, or put it on the scheduling
+        Both lines call Alcove by name. Under cron&apos;s minimal PATH or a Task
+        Scheduler service account it may not resolve, and fails quietly -- use
+        the full path to the Alcove binary, or put it on the scheduling
         account&apos;s PATH.
       </p>
 
@@ -171,9 +171,9 @@ function ConfigSteps({
     <ol className={styles.handoffSteps}>
       <li>
         <p className={styles.handoffStepLabel}>
-          Save this as psilink.yaml in a folder on the scheduling machine
+          Save this as alcove.yaml in a folder on the scheduling machine
         </p>
-        <CopyableCode code={yaml} ariaLabel="psilink.yaml configuration" />
+        <CopyableCode code={yaml} ariaLabel="alcove.yaml configuration" />
       </li>
       {usedKeyFile && (
         <li>
@@ -182,13 +182,13 @@ function ConfigSteps({
           </p>
           <p className={styles.small}>
             {keyFileBesideConfiguration
-              ? "This run used the .psilink.key beside psilink.yaml in your " +
+              ? "This run used the .alcove.key beside alcove.yaml in your " +
                 "working folder and wrote its new shared secret back to that " +
                 "file."
-              : "This run writes its shared secret to .psilink.key in the " +
+              : "This run writes its shared secret to .alcove.key in the " +
                 "exchange folder."}{" "}
-            Copy that file into the same folder as psilink.yaml, readable only
-            by you (chmod 600 on Linux/macOS). The secret rotates at each run's
+            Copy that file into the same folder as alcove.yaml, readable only by
+            you (chmod 600 on Linux/macOS). The secret rotates at each run's
             handshake, before any data moves -- even a run that later failed has
             usually rotated it -- so take your copy from the file as it stands
             after your last run here, never from an earlier one.
@@ -206,7 +206,7 @@ function ConfigSteps({
             picked in your secrets folder. Copy that file to the scheduling
             machine, readable only by you (chmod 600 on Linux/macOS), and set
             signing.identity_file to where you put it -- the path in the
-            configuration above is a placeholder. Copy it; do not run psilink
+            configuration above is a placeholder. Copy it; do not run Alcove
             fingerprint there to make a new one. That mints a different key with
             a different fingerprint, and your partner has pinned the old one.
           </p>
@@ -242,14 +242,14 @@ function CommandSteps({ command }: { command: string }) {
         A Direct exchange has no shared secret -- trust rests on the transport
         -- and re-infers the linkage terms from your file each run, so there is
         no key file to copy. To persist a configuration and host-key pin for
-        later plain psilink exchange runs, add --save the first time you run it.
+        later plain alcove exchange runs, add --save the first time you run it.
       </p>
     </>
   );
 }
 
 /** The all-modes caveats, tailored to the channel, to a pasted credential, and
- * to a signing block missing a setting psilink requires. */
+ * to a signing block missing a setting Alcove requires. */
 function Caveats({ handoff }: { handoff: JobHandoff }) {
   return (
     <>

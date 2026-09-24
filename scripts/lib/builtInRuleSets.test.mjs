@@ -349,7 +349,7 @@ function build() {
   });
 
   it("fails a tree that does not contain the source at all, naming the file", () => {
-    const root = mkdtempSync(resolve(tmpdir(), "psilink-rule-set-source-"));
+    const root = mkdtempSync(resolve(tmpdir(), "alcove-rule-set-source-"));
     try {
       const { ruleSets, unreadable } = readRuleSetsFrom(root);
       expect(ruleSets).toEqual([]);

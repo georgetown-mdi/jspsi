@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { disclosedColumnNames } from "@psilink/core";
+import { disclosedColumnNames } from "@alcove/core";
 
 import { acceptorServerJobConfig } from "@exchange/useAcceptorExchange";
 
@@ -9,7 +9,7 @@ import type {
   LinkageTerms,
   Metadata,
   Standardization,
-} from "@psilink/core";
+} from "@alcove/core";
 import type { AcceptorDataEdits } from "@psi/acceptInvitation";
 
 // The inviter-perspective terms an accepted invitation holds: the inviter is
@@ -284,7 +284,7 @@ describe("acceptorServerJobConfig received-payload commitment", () => {
 });
 
 // The terms-side commitment the console acceptor must hold for the same reason as
-// the received-payload one, and more sharply: the console runs `psilink
+// the received-payload one, and more sharply: the console runs `alcove
 // exchange` at a separate invocation, so a binding the browser held only in
 // memory would bind nothing there. The value is the invitation's declaration for
 // the INVITER's side, never read off the acceptor's derived mirror.
@@ -318,7 +318,7 @@ describe("the accepting party's own deduplicate in the composed job config", () 
   test.each([false, true])(
     "rides the terms the console hands the CLI (invitation declares %s)",
     (declared) => {
-      // The console runs this config through `psilink exchange` at a separate
+      // The console runs this config through `alcove exchange` at a separate
       // invocation, so a value held only in the browser would reach no run. It
       // travels on the acceptor's own-perspective terms; the binding on the
       // PARTNER's value stays the invitation's own declaration.

@@ -28,7 +28,7 @@ import styles from "@styles/app.module.css";
 import { restoreConnectivity, setConnectivity } from "./connectivity";
 import { createAppMount } from "./renderApp";
 
-import type { LinkageTerms } from "@psilink/core";
+import type { LinkageTerms } from "@alcove/core";
 import type { ProfiledJobInput } from "@psi/jobClient/workInputClient";
 
 // The block sits on the control that begins a live run -- the inviter's create,
@@ -245,7 +245,7 @@ describe("the inviter's create action", () => {
     // the operator's own tool: no listener, no dial, nothing this device's
     // connectivity decides.
     await page
-      .getByLabelText("Over SFTP, run by the psilink command-line tool")
+      .getByLabelText("Over SFTP, run by the Alcove command-line tool")
       .click();
 
     await expect

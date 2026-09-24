@@ -9,7 +9,7 @@ import {
 } from "@exchange/acceptorColumnsModel";
 import { importLinkageTerms } from "@psi/linkageTermsIO";
 
-import type { CSVRow, LinkageTerms } from "@psilink/core";
+import type { CSVRow, LinkageTerms } from "@alcove/core";
 
 // The count-only shape refusals as the ACCEPTING web operator meets them: an
 // out-of-shape document refused on import (core's schema, shared with the

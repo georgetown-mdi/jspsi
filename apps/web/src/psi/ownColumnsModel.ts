@@ -1,11 +1,11 @@
-import { ownResultColumnNames } from "@psilink/core";
+import { ownResultColumnNames } from "@alcove/core";
 
 import type {
   Algorithm,
   Metadata,
   Output,
   OwnColumnSelection,
-} from "@psilink/core";
+} from "@alcove/core";
 
 /**
  * The pure model behind the authoring surface's "Your own columns in the

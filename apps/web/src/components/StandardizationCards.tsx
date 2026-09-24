@@ -16,7 +16,7 @@ import type {
   Metadata,
   Standardization,
   StandardizationStep,
-} from "@psilink/core";
+} from "@alcove/core";
 import type { ReactNode } from "react";
 
 /**

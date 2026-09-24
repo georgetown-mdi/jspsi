@@ -3,7 +3,7 @@ import {
   assembleExchangeSpec,
   connectionFromLocator,
   getDefaultLinkageTerms,
-} from "@psilink/core";
+} from "@alcove/core";
 import { describe, expect, test } from "vitest";
 
 import {
@@ -28,7 +28,7 @@ import type {
   ManagedExchangeSide,
   NewManagedExchange,
 } from "@psi/managed/managedExchangeRecord";
-import type { WebRTCExchangeLocator } from "@psilink/core";
+import type { WebRTCExchangeLocator } from "@alcove/core";
 
 // The pure derivation behind the managed exchange detail view, tested in Node: the
 // read-only configuration rows (both sides), the run-history entries around the most

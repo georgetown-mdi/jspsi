@@ -1747,7 +1747,7 @@ function StalePageAccountingNotice({
     <>
       <Alert
         color="blue"
-        title="This page is running an older version of psilink"
+        title="This page is running an older version of Alcove"
       >
         <p>
           The disclosure records stored for this exchange were filed by a newer

@@ -28,7 +28,7 @@ prose has no comment syntax to scope a match to.
 ## The base the range is measured against
 
 In CI the base is the pull request event's own `base.sha`, handed to the check
-as `PSILINK_NARRATION_BASE` by
+as `ALCOVE_NARRATION_BASE` by
 [static_checks.yaml](../../.github/workflows/static_checks.yaml); the symbolic
 refs -- `origin/<base branch>`, then `origin/staging` -- are the fallback a
 local run and any non-pull-request event take. Nothing here was driven against

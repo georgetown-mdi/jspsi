@@ -20,7 +20,7 @@ import type {
   Metadata,
   Standardization,
   StandardizationStep,
-} from "@psilink/core";
+} from "@alcove/core";
 import type { ColumnSamples } from "@psi/columnSamples";
 import type { FieldValueCoverage } from "@psi/workers/nonEmptyAggregate";
 import type { OverlongColumnName } from "@psi/columnNames";

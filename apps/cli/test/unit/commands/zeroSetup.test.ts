@@ -16,14 +16,14 @@ import {
   prepareForExchange,
   sanitizeErrorForDisplay,
   UsageError,
-} from "@psilink/core";
+} from "@alcove/core";
 import type {
   ExchangeBootstrapResult,
   FileDropConnectionConfig,
   LinkageTerms,
   PreparedExchange,
   SFTPConnectionConfig,
-} from "@psilink/core";
+} from "@alcove/core";
 import {
   builder,
   channelFromURL,
@@ -70,8 +70,8 @@ vi.mock("../../../src/hostKeyTrust", () => ({
 // below needs to observe when the handler reaches it, while every test in the
 // file -- the refusal the ordering pair's second half drives included -- keeps
 // running the real prepare behind it.
-vi.mock("@psilink/core", async (importActual) => {
-  const actual = await importActual<typeof import("@psilink/core")>();
+vi.mock("@alcove/core", async (importActual) => {
+  const actual = await importActual<typeof import("@alcove/core")>();
   return { ...actual, prepareForExchange: vi.fn(actual.prepareForExchange) };
 });
 
@@ -136,8 +136,8 @@ test("builder: zero-setup's --save-scoped config/key help reaches the rendered h
   // shared default. Whitespace is normalized so a wrapped help line still
   // matches.
   const help = (await builder(yargs([])).getHelp()).replace(/\s+/g, " ");
-  expect(help).toContain("where to write psilink.yaml when --save is given");
-  expect(help).toContain("where to write .psilink.key when --save is given");
+  expect(help).toContain("where to write alcove.yaml when --save is given");
+  expect(help).toContain("where to write .alcove.key when --save is given");
   // zero-setup keeps the shared URL wording for server-*, so the default text
   // remains (it did not override those).
   expect(help).toContain("overrides the port in URL");
@@ -204,7 +204,7 @@ test("server URL credentials are preserved in the returned URL", () => {
 
 test("single positional that is a file throws hint to use exchange subcommand", () => {
   existsSyncSpy.mockReturnValue(true);
-  expect(() => resolvePositionals(["input.csv"])).toThrow("psilink exchange");
+  expect(() => resolvePositionals(["input.csv"])).toThrow("alcove exchange");
 });
 
 test("single positional that is not a file throws input-not-specified error", () => {
@@ -286,7 +286,7 @@ test("createConnection refuses a webrtc URL, naming what does run one", () => {
   ).toThrow(UsageError);
   expect(() =>
     createConnection(new URL("ws://example.org/path"), baseOptions),
-  ).toThrow("psilink exchange");
+  ).toThrow("alcove exchange");
 });
 
 test("createConnection filedrop: file://localhost/path is accepted", () => {
@@ -343,7 +343,7 @@ test("createConnection sftp never produces a config with authentication set", ()
 // boundary, resolveConnectionCredentials). A literal credential is kept literal.
 
 test("createConnection sftp keeps an @path server-password as the reference, not the file contents", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zerocred-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-zerocred-"));
   try {
     const pwFile = path.join(dir, "pw");
     fs.writeFileSync(pwFile, "s3cret\n");
@@ -364,7 +364,7 @@ test("createConnection sftp keeps an @path server-password as the reference, not
 });
 
 test("createConnection sftp keeps an @path server-private-key as the reference", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zerocred-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-zerocred-"));
   try {
     const keyFile = path.join(dir, "id_rsa");
     fs.writeFileSync(keyFile, "KEYDATA\n");
@@ -383,7 +383,7 @@ test("createConnection sftp keeps an @path server-private-key as the reference",
 });
 
 test("createConnection sftp keeps an @path server-private-key-passphrase as the reference", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zerocred-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-zerocred-"));
   try {
     const keyFile = path.join(dir, "id_rsa");
     const passFile = path.join(dir, "passphrase");
@@ -431,7 +431,7 @@ test("handler: a repeated single-value flag exits 64 naming the flag", async () 
     await expect(
       handler({
         _: [],
-        $0: "psilink",
+        $0: "alcove",
         "server-port": [2222, 2223],
         "log-level": "silent",
       } as unknown as Arguments),
@@ -463,9 +463,9 @@ async function termsFromZeroSetupRun(
 
   await handler({
     _: ["sftp://userb@localhost:2222/drop", input],
-    $0: "psilink",
-    "config-file": path.join(dir, "psilink.yaml"),
-    "key-file": path.join(dir, ".psilink.key"),
+    $0: "alcove",
+    "config-file": path.join(dir, "alcove.yaml"),
+    "key-file": path.join(dir, ".alcove.key"),
     ...(identity !== undefined ? { identity } : {}),
     record: false,
     "log-level": "silent",
@@ -479,9 +479,9 @@ async function termsFromZeroSetupRun(
 test("handler: no --identity asks nothing and sends no identity", async () => {
   // The quick path's whole property: a run given no label completes without a
   // question and without a stand-in. The terms have no `identity` key at all --
-  // not the account psilink runs as, not an empty string -- so a partner reads
+  // not the account Alcove runs as, not an empty string -- so a partner reads
   // this party as one that named itself none.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zeroidentity-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-zeroidentity-"));
   const exitSpy = captureProcessExit();
   try {
     for (const blank of [undefined, "", "   "]) {
@@ -500,7 +500,7 @@ test("handler: an --identity still holding the init placeholder exits 64", async
   // as a label it would send the words asking for a name, and treated as absence
   // it would silently unname a run whose operator typed a value believing it
   // named them. It stops before the connection is opened.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zeroidentity-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-zeroidentity-"));
   const exitSpy = captureProcessExit();
   vi.mocked(runProtocol).mockClear();
   try {
@@ -515,7 +515,7 @@ test("handler: an --identity still holding the init placeholder exits 64", async
 });
 
 test("handler: a supplied --identity rides into the terms, trimmed", async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zeroidentity-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-zeroidentity-"));
   const exitSpy = captureProcessExit();
   try {
     const terms = await termsFromZeroSetupRun(dir, "  Jane Smith, Agency A  ");
@@ -534,7 +534,7 @@ test("handler hands the resolved credential to the exchange while persisting not
   // form --save would persist -- still holds the @path. runProtocol is mocked
   // to capture the connection it receives; process.exit is trapped so an
   // unexpected failure shows as a thrown test error rather than killing the run.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zerohandler-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-zerohandler-"));
   const exitSpy = captureProcessExit();
   try {
     const pwFile = path.join(dir, "pw");
@@ -558,10 +558,10 @@ test("handler hands the resolved credential to the exchange while persisting not
 
     await handler({
       _: ["sftp://userb@localhost:2222/drop", input],
-      $0: "psilink",
+      $0: "alcove",
       "server-password": `@${pwFile}`,
-      "config-file": path.join(dir, "psilink.yaml"),
-      "key-file": path.join(dir, ".psilink.key"),
+      "config-file": path.join(dir, "alcove.yaml"),
+      "key-file": path.join(dir, ".alcove.key"),
       identity: "Tester",
       record: false,
       "log-level": "silent",
@@ -570,7 +570,7 @@ test("handler hands the resolved credential to the exchange while persisting not
     expect(connToRunProtocol?.channel).toBe("sftp");
     expect(connToRunProtocol?.server.password).toBe("s3cret");
     // No --save, so nothing is written here.
-    expect(fs.existsSync(path.join(dir, "psilink.yaml"))).toBe(false);
+    expect(fs.existsSync(path.join(dir, "alcove.yaml"))).toBe(false);
     // The handler wires first-use host-key trust on the unsaved (ephemeral) path:
     // it prompts on a TTY and fails closed otherwise (covered in hostKeyTrust.test.ts).
     expect(vi.mocked(establishHostKeyTrust)).toHaveBeenCalledWith(
@@ -590,7 +590,7 @@ test("handler: a result file the exchange could not write exits 73, not 69", asy
   // runProtocol stamps the error at the failed result write (protocol.test.ts
   // drives the real stamp); measured here is what the COMMAND reports. A boundary
   // mapping every non-usage error to 69 fails only this.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zeroexit-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-zeroexit-"));
   const exitSpy = captureProcessExit();
   try {
     const input = path.join(dir, "input.csv");
@@ -610,9 +610,9 @@ test("handler: a result file the exchange could not write exits 73, not 69", asy
     await expect(
       handler({
         _: ["sftp://userb@localhost:2222/drop", input],
-        $0: "psilink",
-        "config-file": path.join(dir, "psilink.yaml"),
-        "key-file": path.join(dir, ".psilink.key"),
+        $0: "alcove",
+        "config-file": path.join(dir, "alcove.yaml"),
+        "key-file": path.join(dir, ".alcove.key"),
         identity: "Tester",
         record: false,
         "log-level": "silent",
@@ -632,7 +632,7 @@ test("handler with --save persists the first-use pin into the written config", a
   // refactor that would persist the unmutated clone and silently re-prompt every
   // run.
   const FP = "SHA256:" + "C".repeat(43);
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zerosave-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-zerosave-"));
   const exitSpy = captureProcessExit();
   try {
     const input = path.join(dir, "input.csv");
@@ -640,7 +640,7 @@ test("handler with --save persists the first-use pin into the written config", a
       input,
       "first_name,last_name,date_of_birth\nBob,Jones,1990-01-02\n",
     );
-    const configFile = path.join(dir, "psilink.yaml");
+    const configFile = path.join(dir, "alcove.yaml");
 
     // Emulate just the real establishHostKeyTrust mutation (its own behavior is
     // covered in hostKeyTrust.test.ts); the persistence wiring is what's tested.
@@ -658,10 +658,10 @@ test("handler with --save persists the first-use pin into the written config", a
 
     await handler({
       _: ["sftp://userb@localhost:2222/drop", input],
-      $0: "psilink",
+      $0: "alcove",
       save: true,
       "config-file": configFile,
-      "key-file": path.join(dir, ".psilink.key"),
+      "key-file": path.join(dir, ".alcove.key"),
       identity: "Tester",
       record: false,
       "log-level": "silent",
@@ -689,7 +689,7 @@ test("handler with --save persists the first-use pin into the written config", a
 // opens is hostKeyTrust.test.ts's.
 
 test("handler: the dataset is prepared before host-key trust", async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zeroprepare-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-zeroprepare-"));
   const exitSpy = captureProcessExit();
   try {
     const input = path.join(dir, "input.csv");
@@ -706,9 +706,9 @@ test("handler: the dataset is prepared before host-key trust", async () => {
 
     await handler({
       _: ["sftp://userb@localhost:2222/drop", input],
-      $0: "psilink",
-      "config-file": path.join(dir, "psilink.yaml"),
-      "key-file": path.join(dir, ".psilink.key"),
+      $0: "alcove",
+      "config-file": path.join(dir, "alcove.yaml"),
+      "key-file": path.join(dir, ".alcove.key"),
       identity: "Tester",
       record: false,
       "log-level": "silent",
@@ -737,7 +737,7 @@ test("handler: an input the prepare refuses exits 64 with no host-key probe", as
   // same sftp URL: a header naming a transmitted column too long to send is
   // refused from this party's own file, and must end the run there, exit 64,
   // with the host-key step -- and so the probe inside it -- never entered.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zerorefusal-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-zerorefusal-"));
   const stderrChunks: string[] = [];
   const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(((
     chunk: string | Uint8Array,
@@ -760,9 +760,9 @@ test("handler: an input the prepare refuses exits 64 with no host-key probe", as
     await expect(
       handler({
         _: ["sftp://userb@localhost:2222/drop", input],
-        $0: "psilink",
-        "config-file": path.join(dir, "psilink.yaml"),
-        "key-file": path.join(dir, ".psilink.key"),
+        $0: "alcove",
+        "config-file": path.join(dir, "alcove.yaml"),
+        "key-file": path.join(dir, ".alcove.key"),
         identity: "Tester",
         record: false,
         "log-level": "error",
@@ -772,7 +772,7 @@ test("handler: an input the prepare refuses exits 64 with no host-key probe", as
     expect(vi.mocked(establishHostKeyTrust)).not.toHaveBeenCalled();
     expect(vi.mocked(runProtocol)).not.toHaveBeenCalled();
   } finally {
-    getLogger("psilink").setLevel("silent");
+    getLogger("alcove").setLevel("silent");
     stderrSpy.mockRestore();
     exitSpy.mockRestore();
     fs.rmSync(dir, { recursive: true, force: true });
@@ -784,7 +784,7 @@ test("handler: a header the strip emptied names the removal, not the header row"
   // returned, so that read's changed positions travel with them: the operator's
   // header held neither a trailing comma nor a blank cell, and the remedy for a
   // name the removal emptied is a different one.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zerobidi-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-zerobidi-"));
   const stderrChunks: string[] = [];
   const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(((
     chunk: string | Uint8Array,
@@ -802,9 +802,9 @@ test("handler: a header the strip emptied names the removal, not the header row"
     await expect(
       handler({
         _: [platformLocalhostFileUrl("/drop").href, input],
-        $0: "psilink",
-        "config-file": path.join(dir, "psilink.yaml"),
-        "key-file": path.join(dir, ".psilink.key"),
+        $0: "alcove",
+        "config-file": path.join(dir, "alcove.yaml"),
+        "key-file": path.join(dir, ".alcove.key"),
         identity: "Tester",
         record: false,
         "log-level": "error",
@@ -815,7 +815,7 @@ test("handler: a header the strip emptied names the removal, not the header row"
     expect(stderr).toContain("nothing but invisible control characters");
     expect(stderr).not.toContain("trailing delimiter");
   } finally {
-    getLogger("psilink").setLevel("silent");
+    getLogger("alcove").setLevel("silent");
     stderrSpy.mockRestore();
     exitSpy.mockRestore();
     fs.rmSync(dir, { recursive: true, force: true });
@@ -827,7 +827,7 @@ test("handler: a pipe file read with no named delimiter names the remedy", async
   // so a pipe-separated file read by the comma default gives one mashed column
   // and terms declaring no linkage key -- a different refusal from the one a
   // configured run with declared terms reaches, owing the same remedy.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zerodelim-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-zerodelim-"));
   const stderrChunks: string[] = [];
   const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(((
     chunk: string | Uint8Array,
@@ -843,9 +843,9 @@ test("handler: a pipe file read with no named delimiter names the remedy", async
     await expect(
       handler({
         _: [platformLocalhostFileUrl("/drop").href, input],
-        $0: "psilink",
-        "config-file": path.join(dir, "psilink.yaml"),
-        "key-file": path.join(dir, ".psilink.key"),
+        $0: "alcove",
+        "config-file": path.join(dir, "alcove.yaml"),
+        "key-file": path.join(dir, ".alcove.key"),
         identity: "Tester",
         record: false,
         "log-level": "error",
@@ -857,7 +857,7 @@ test("handler: a pipe file read with no named delimiter names the remedy", async
     expect(stderr).toContain("CSV delimiter");
     expect(stderr).toContain("detect");
   } finally {
-    getLogger("psilink").setLevel("silent");
+    getLogger("alcove").setLevel("silent");
     stderrSpy.mockRestore();
     exitSpy.mockRestore();
     fs.rmSync(dir, { recursive: true, force: true });
@@ -870,7 +870,7 @@ test("handler: a credential @path naming a missing file exits 64 with no host-ke
   // party's own filesystem, so it must end the run before the host-key step --
   // whose probe opens a real transport -- is entered. The credential values are
   // therefore read ahead of that step even though they are applied after it.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zerocred-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-zerocred-"));
   const stderrChunks: string[] = [];
   const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(((
     chunk: string | Uint8Array,
@@ -891,10 +891,10 @@ test("handler: a credential @path naming a missing file exits 64 with no host-ke
     await expect(
       handler({
         _: ["sftp://userb@localhost:2222/drop", input],
-        $0: "psilink",
+        $0: "alcove",
         "server-password": `@${path.join(dir, "absent-password")}`,
-        "config-file": path.join(dir, "psilink.yaml"),
-        "key-file": path.join(dir, ".psilink.key"),
+        "config-file": path.join(dir, "alcove.yaml"),
+        "key-file": path.join(dir, ".alcove.key"),
         identity: "Tester",
         record: false,
         "log-level": "error",
@@ -904,7 +904,7 @@ test("handler: a credential @path naming a missing file exits 64 with no host-ke
     expect(vi.mocked(establishHostKeyTrust)).not.toHaveBeenCalled();
     expect(vi.mocked(runProtocol)).not.toHaveBeenCalled();
   } finally {
-    getLogger("psilink").setLevel("silent");
+    getLogger("alcove").setLevel("silent");
     stderrSpy.mockRestore();
     exitSpy.mockRestore();
     fs.rmSync(dir, { recursive: true, force: true });
@@ -925,7 +925,7 @@ async function zeroSetupRunOutput(
   csv: string,
   extraArgs: Record<string, unknown> = {},
 ): Promise<{ stderr: string; atFirstContact: string; contacted: boolean }> {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zerodisclose-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-zerodisclose-"));
   const stderrChunks: string[] = [];
   const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(((
     chunk: string | Uint8Array,
@@ -950,9 +950,9 @@ async function zeroSetupRunOutput(
 
     await handler({
       _: ["sftp://userb@localhost:2222/drop", input],
-      $0: "psilink",
-      "config-file": path.join(dir, "psilink.yaml"),
-      "key-file": path.join(dir, ".psilink.key"),
+      $0: "alcove",
+      "config-file": path.join(dir, "alcove.yaml"),
+      "key-file": path.join(dir, ".alcove.key"),
       identity: "Tester",
       record: false,
       "log-level": "silent",
@@ -966,7 +966,7 @@ async function zeroSetupRunOutput(
   }
 }
 
-/** A CSV whose fourth column psilink recognizes as neither a linkage nor an
+/** A CSV whose fourth column Alcove recognizes as neither a linkage nor an
  * identifier column, which is the set a zero-setup run transmits. */
 const CSV_WITH_TRANSMITTED_COLUMN =
   "first_name,last_name,date_of_birth,diagnosis\nBob,Jones,1990-01-02,A\n";
@@ -1000,7 +1000,7 @@ test("handler: the run states what it transmits and what it matches on", async (
 });
 
 test("handler: a run transmitting no column of its own says so", async () => {
-  // Every column here is one psilink recognizes and matches on, so the run
+  // Every column here is one Alcove recognizes and matches on, so the run
   // sends its partner nothing beyond the fact of a match. The display states
   // that rather than printing an empty list.
   const { stderr } = await zeroSetupRunOutput(
@@ -1040,7 +1040,7 @@ test("handler: the first-use pin reaches the connection the exchange dials", asy
   // the read instead would hold the resolved credential and no pin, and dial an
   // unverified server -- so the run driven here supplies both.
   const FP = "SHA256:" + "D".repeat(43);
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zeropin-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-zeropin-"));
   const exitSpy = captureProcessExit();
   try {
     const pwFile = path.join(dir, "pw");
@@ -1067,10 +1067,10 @@ test("handler: the first-use pin reaches the connection the exchange dials", asy
 
     await handler({
       _: ["sftp://userb@localhost:2222/drop", input],
-      $0: "psilink",
+      $0: "alcove",
       "server-password": `@${pwFile}`,
-      "config-file": path.join(dir, "psilink.yaml"),
-      "key-file": path.join(dir, ".psilink.key"),
+      "config-file": path.join(dir, "alcove.yaml"),
+      "key-file": path.join(dir, ".alcove.key"),
       identity: "Tester",
       record: false,
       "log-level": "silent",
@@ -1097,7 +1097,7 @@ test("handler: an unrecognized --linkage-strategy exits 64, naming the valid val
     await expect(
       handler({
         _: [],
-        $0: "psilink",
+        $0: "alcove",
         "linkage-strategy": "complete",
         "log-level": "silent",
       } as unknown as Arguments),
@@ -1115,7 +1115,7 @@ test("handler --save: the selected strategy flows into the saved config (single-
   // The selection rides into the terms zero-setup authors from its input and so
   // into the --save spec; omitting it leaves the cascade default. Drive the
   // handler to completion with runProtocol mocked and read the written config.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zerostrategy-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-zerostrategy-"));
   const exitSpy = captureProcessExit();
   vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) =>
     driveCompletedExchange(callArgs, { partnerSaveIntent: false })) as never);
@@ -1131,7 +1131,7 @@ test("handler --save: the selected strategy flows into the saved config (single-
     ): Promise<string> => {
       await handler({
         _: ["sftp://userb@localhost:2222/drop", input],
-        $0: "psilink",
+        $0: "alcove",
         save: true,
         ...(strategy !== undefined && { "linkage-strategy": strategy }),
         "config-file": configFile,
@@ -1192,9 +1192,9 @@ async function termsFromZeroSetupFlags(
 
   await handler({
     _: ["sftp://userb@localhost:2222/drop", input],
-    $0: "psilink",
-    "config-file": path.join(dir, "psilink.yaml"),
-    "key-file": path.join(dir, ".psilink.key"),
+    $0: "alcove",
+    "config-file": path.join(dir, "alcove.yaml"),
+    "key-file": path.join(dir, ".alcove.key"),
     identity: "Tester",
     record: false,
     "log-level": "silent",
@@ -1210,7 +1210,7 @@ test("handler: --deduplicate reaches the terms this party presents", async () =>
   // The flag is this party's own side of the matching cardinality, applied over
   // the terms inferred from the input file; the partner meets it at the terms
   // exchange, where resolveLinkageCardinality reads the pair.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zerodedup-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-zerodedup-"));
   const exitSpy = captureProcessExit();
   try {
     expect(
@@ -1225,7 +1225,7 @@ test("handler: --deduplicate reaches the terms this party presents", async () =>
 test("handler: omitting --deduplicate leaves the closed default", async () => {
   // A party that leaves the flag off runs exactly what it ran before the flag
   // existed: the false the inferred terms declare.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zerodedupdef-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-zerodedupdef-"));
   const exitSpy = captureProcessExit();
   try {
     expect((await termsFromZeroSetupFlags(dir, {})).deduplicate).toBe(false);
@@ -1242,7 +1242,7 @@ test("handler: --deduplicate rides single-pass, which matches every pair", async
   // The strategy matches this party's own declaration whatever the partner
   // declares beside it, so the selection is applied here rather than held for a
   // pair only the terms exchange resolves.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zerodedupsp-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-zerodedupsp-"));
   const exitSpy = captureProcessExit();
   try {
     const terms = await termsFromZeroSetupFlags(dir, {
@@ -1259,9 +1259,9 @@ test("handler: --deduplicate rides single-pass, which matches every pair", async
 
 test("handler --save: the selection flows into the saved config", async () => {
   // Graduation: the config a --save run writes is the one a later recurring
-  // `psilink exchange` loads, so the setting the operator prototyped under must
+  // `alcove exchange` loads, so the setting the operator prototyped under must
   // be in it rather than re-declared by hand.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zerodedupsave-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-zerodedupsave-"));
   const exitSpy = captureProcessExit();
   vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) =>
     driveCompletedExchange(callArgs, { partnerSaveIntent: false })) as never);
@@ -1277,7 +1277,7 @@ test("handler --save: the selection flows into the saved config", async () => {
     ): Promise<string> => {
       await handler({
         _: ["sftp://userb@localhost:2222/drop", input],
-        $0: "psilink",
+        $0: "alcove",
         save: true,
         deduplicate,
         "config-file": configFile,
@@ -1308,7 +1308,7 @@ test("handler: a zero-setup retain run states no consent fact about the retained
   // its PSI frames over the bare transport with no encryption to promise, so it
   // must render no consent fact at all -- wiring one in here should trip this
   // test, prompting the note's claim to be re-examined.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zeroretain-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-zeroretain-"));
   const stderrChunks: string[] = [];
   const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(((
     chunk: string | Uint8Array,
@@ -1317,7 +1317,7 @@ test("handler: a zero-setup retain run states no consent fact about the retained
     return true;
   }) as typeof process.stderr.write);
   const exitSpy = captureProcessExit();
-  getLogger("psilink").setLevel("info");
+  getLogger("alcove").setLevel("info");
   let ran: FileDropConnectionConfig | undefined;
   vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
     ran = optionsArg(callArgs).connection as FileDropConnectionConfig;
@@ -1333,10 +1333,10 @@ test("handler: a zero-setup retain run states no consent fact about the retained
     fs.mkdirSync(drop);
     await handler({
       _: [`file://${drop}`, input],
-      $0: "psilink",
+      $0: "alcove",
       "retain-files": true,
-      "config-file": path.join(dir, "psilink.yaml"),
-      "key-file": path.join(dir, ".psilink.key"),
+      "config-file": path.join(dir, "alcove.yaml"),
+      "key-file": path.join(dir, ".alcove.key"),
       identity: "Tester",
       record: false,
       "log-level": "info",
@@ -1353,7 +1353,7 @@ test("handler: a zero-setup retain run states no consent fact about the retained
     expect(emitted).not.toContain("stays where the two of you meet");
     expect(emitted).not.toContain("exchange files (enforced)");
   } finally {
-    getLogger("psilink").setLevel("silent");
+    getLogger("alcove").setLevel("silent");
     stderrSpy.mockRestore();
     exitSpy.mockRestore();
     fs.rmSync(dir, { recursive: true, force: true });
@@ -1367,7 +1367,7 @@ test("handler refuses a webrtc URL by naming the missing rendezvous secret", asy
   // other at signaling ids derived from a shared secret, and a zero-setup
   // exchange is defined by not having one. The refusal has to say that, and it
   // has to come before any file is read or written.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zerowebrtc-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-zerowebrtc-"));
   vi.mocked(runProtocol).mockClear();
   const stderrChunks: string[] = [];
   const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(((
@@ -1386,9 +1386,9 @@ test("handler refuses a webrtc URL by naming the missing rendezvous secret", asy
     await expect(
       handler({
         _: ["wss://peers.example.org/", input],
-        $0: "psilink",
-        "config-file": path.join(dir, "psilink.yaml"),
-        "key-file": path.join(dir, ".psilink.key"),
+        $0: "alcove",
+        "config-file": path.join(dir, "alcove.yaml"),
+        "key-file": path.join(dir, ".alcove.key"),
         identity: "Tester",
         record: false,
         "log-level": "error",
@@ -1396,12 +1396,12 @@ test("handler refuses a webrtc URL by naming the missing rendezvous secret", asy
     ).rejects.toThrow("exit:64");
     const reported = stderrChunks.join("");
     expect(reported).toContain("shared secret");
-    expect(reported).toContain("psilink invite");
+    expect(reported).toContain("alcove invite");
     // Nothing was attempted: no exchange, and no config or key reserved.
     expect(vi.mocked(runProtocol)).not.toHaveBeenCalled();
-    expect(fs.existsSync(path.join(dir, "psilink.yaml"))).toBe(false);
+    expect(fs.existsSync(path.join(dir, "alcove.yaml"))).toBe(false);
   } finally {
-    getLogger("psilink").setLevel("silent");
+    getLogger("alcove").setLevel("silent");
     stderrSpy.mockRestore();
     exitSpy.mockRestore();
     fs.rmSync(dir, { recursive: true, force: true });
@@ -1430,7 +1430,7 @@ function saveFailureFixture(): {
   exitSpy: MockInstance;
   restore: () => void;
 } {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zeroloss-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-zeroloss-"));
   const input = path.join(dir, "input.csv");
   fs.writeFileSync(
     input,
@@ -1452,15 +1452,15 @@ function saveFailureFixture(): {
   return {
     dir,
     input,
-    configFile: path.join(dir, "psilink.yaml"),
-    unwritableConfigFile: path.join(unreachable, "psilink.yaml"),
-    keyFile: path.join(dir, ".psilink.key"),
-    unwritableKeyFile: path.join(unreachable, ".psilink.key"),
+    configFile: path.join(dir, "alcove.yaml"),
+    unwritableConfigFile: path.join(unreachable, "alcove.yaml"),
+    keyFile: path.join(dir, ".alcove.key"),
+    unwritableKeyFile: path.join(unreachable, ".alcove.key"),
     stderr: () => stderrChunks.join(""),
     exitSpy,
     restore: () => {
       process.exitCode = previousExitCode;
-      getLogger("psilink").setLevel("silent");
+      getLogger("alcove").setLevel("silent");
       stderrSpy.mockRestore();
       exitSpy.mockRestore();
       fs.rmSync(dir, { recursive: true, force: true });
@@ -1476,7 +1476,7 @@ test("handler --save: a save that cannot reach disk warns on fd 3 and exits 73, 
   // party's records. Both machine channels send it: the warning names what is
   // missing, the exit code says do not re-run.
   const f = saveFailureFixture();
-  getLogger("psilink").setLevel("error");
+  getLogger("alcove").setLevel("error");
   vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) =>
     driveCompletedExchange(callArgs, {
       partnerSaveIntent: true,
@@ -1486,7 +1486,7 @@ test("handler --save: a save that cannot reach disk warns on fd 3 and exits 73, 
     const { lines } = await captureFd3(() =>
       handler({
         _: ["sftp://userb@localhost:2222/drop", f.input],
-        $0: "psilink",
+        $0: "alcove",
         save: true,
         "event-stream": true,
         "config-file": f.unwritableConfigFile,
@@ -1537,7 +1537,7 @@ test("handler --save: a failed key save whose rollback also fails names the conf
   // its rollback is stubbed, since no portable filesystem state makes a removal
   // fail right after the same write succeeds.
   const f = saveFailureFixture();
-  getLogger("psilink").setLevel("error");
+  getLogger("alcove").setLevel("error");
   const realRmSync = fs.rmSync;
   const rmSpy = vi.spyOn(fs, "rmSync").mockImplementation(((
     target: fs.PathLike,
@@ -1558,7 +1558,7 @@ test("handler --save: a failed key save whose rollback also fails names the conf
     const { lines } = await captureFd3(() =>
       handler({
         _: ["sftp://userb@localhost:2222/drop", f.input],
-        $0: "psilink",
+        $0: "alcove",
         save: true,
         "event-stream": true,
         "config-file": f.configFile,
@@ -1603,7 +1603,7 @@ test("handler --save: a config that appeared after the pre-flight is the same lo
   // completed, so there is nothing about the invocation for the operator to
   // correct and exit 64 would invite the re-run 73 exists to prevent.
   const f = saveFailureFixture();
-  getLogger("psilink").setLevel("error");
+  getLogger("alcove").setLevel("error");
   vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
     fs.writeFileSync(f.configFile, "preexisting: true\n");
     return driveCompletedExchange(callArgs, { partnerSaveIntent: false });
@@ -1612,7 +1612,7 @@ test("handler --save: a config that appeared after the pre-flight is the same lo
     const { lines } = await captureFd3(() =>
       handler({
         _: ["sftp://userb@localhost:2222/drop", f.input],
-        $0: "psilink",
+        $0: "alcove",
         save: true,
         "event-stream": true,
         "config-file": f.configFile,
@@ -1650,14 +1650,14 @@ test("handler --save: a completed exchange holding no bootstrap result reports t
   // silent skip must not exit clean with nothing on disk; this takes the same
   // persistence-loss report as a failed write.
   const f = saveFailureFixture();
-  getLogger("psilink").setLevel("error");
+  getLogger("alcove").setLevel("error");
   vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) =>
     driveCompletedExchange(callArgs, undefined)) as never);
   try {
     const { lines } = await captureFd3(() =>
       handler({
         _: ["sftp://userb@localhost:2222/drop", f.input],
-        $0: "psilink",
+        $0: "alcove",
         save: true,
         "event-stream": true,
         "config-file": f.configFile,
@@ -1703,7 +1703,7 @@ test("handler --save: the save rides the pre-terminal hook, not the return from 
   try {
     await handler({
       _: ["sftp://userb@localhost:2222/drop", f.input],
-      $0: "psilink",
+      $0: "alcove",
       save: true,
       "config-file": f.configFile,
       "key-file": f.keyFile,

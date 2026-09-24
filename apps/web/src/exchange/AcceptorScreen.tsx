@@ -17,7 +17,7 @@ import {
   displayText,
   getLogger,
   sanitizeErrorForDisplay,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   acceptorDeduplicateRefusal,
@@ -154,7 +154,7 @@ import type {
   SemanticType,
   Standardization,
   StandardizationStep,
-} from "@psilink/core";
+} from "@alcove/core";
 import type { AcceptorLaunchSource } from "./useAcceptorExchange";
 import type { AcceptorStep } from "./acceptorModel";
 import type { CoverageInput } from "@components/useNonEmptyRates";

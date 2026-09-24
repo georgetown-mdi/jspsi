@@ -1,7 +1,7 @@
 import fs from "node:fs";
 
-import type { ConnectionConfig, ExchangeSpec, HttpAuth } from "@psilink/core";
-import { HOST_KEY_FINGERPRINT_REGEX, UsageError } from "@psilink/core";
+import type { ConnectionConfig, ExchangeSpec, HttpAuth } from "@alcove/core";
+import { HOST_KEY_FINGERPRINT_REGEX, UsageError } from "@alcove/core";
 
 import { expandTilde } from "../fileUtils";
 
@@ -60,7 +60,7 @@ export function resolveAtSignRef(value: string): string {
  *
  * Credential preservation at persistence sites does NOT use this: it uses
  * {@link resolveConnectionCredentials} so the original `@path` survives to disk
- * and the secret is never inlined into `psilink.yaml`.
+ * and the secret is never inlined into `alcove.yaml`.
  */
 export function resolveAtSignRefs(obj: unknown): unknown {
   if (typeof obj === "string") return resolveAtSignRef(obj);
@@ -281,7 +281,7 @@ function readValueFor(value: string | undefined, field: string): string {
  * Return a clone of `connection` holding the credential values
  * {@link readConnectionCredentials} read from it. The input is NOT mutated, so
  * the caller connects with the clone while persisting the original -- whose
- * `@path` is still in place -- keeping the secret out of `psilink.yaml`. The
+ * `@path` is still in place -- keeping the secret out of `alcove.yaml`. The
  * preserved `@path` is re-resolved (by {@link resolveExchangeSpecRefs}) at the
  * next exchange's config load.
  *

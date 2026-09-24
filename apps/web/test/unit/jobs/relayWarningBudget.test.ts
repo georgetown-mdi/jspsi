@@ -8,8 +8,8 @@ import {
   DISPLAY_TRUNCATION_MARKER,
   WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
   redactAndSanitizeForDisplay,
-} from "@psilink/core";
-import { reconcileHostKeyFingerprints } from "@psilink/core/testing";
+} from "@alcove/core";
+import { reconcileHostKeyFingerprints } from "@alcove/core/testing";
 
 import {
   createFetchJobApiClient,
@@ -25,7 +25,7 @@ import {
   tempDataRoot,
 } from "../../utils/jobFixtures";
 
-import type { PresentedHostKey } from "@psilink/core";
+import type { PresentedHostKey } from "@alcove/core";
 import type { RelayEvent } from "@jobs/cliDriver";
 
 // A CLI warning is one composition; the relay's trust-boundary pass and the
@@ -112,8 +112,8 @@ async function relayWarningFromChild(
   await awaitJobTerminalState((onTerminal) =>
     spawnExchangeJob({
       binaryPath: STUB_CLI_PATH,
-      configPath: path.join(workdir, "psilink.yaml"),
-      keyPath: path.join(workdir, ".psilink.key"),
+      configPath: path.join(workdir, "alcove.yaml"),
+      keyPath: path.join(workdir, ".alcove.key"),
       inputPath: path.join(workdir, "input.csv"),
       outputPath: path.join(workdir, "output.csv"),
       recordPath: path.join(workdir, "record.json"),

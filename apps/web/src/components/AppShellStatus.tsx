@@ -15,7 +15,7 @@ import { useOnlineStatus } from "./useOnlineStatus";
 const OFFLINE_TITLE = "You are offline";
 
 /** The waiting-update strip's title, announced the same way. */
-const UPDATE_READY_TITLE = "A new version of psilink is ready";
+const UPDATE_READY_TITLE = "A new version of Alcove is ready";
 
 /** Whether a newer app version is installed and waiting. Always `false` on the
  * server, which registers no worker. */

@@ -778,7 +778,7 @@ test("single-pass reads the strategy's own both-sided verdict", async () => {
 
 // --- the two strategies agree, table for table --------------------------------
 // The equivalence property the cascade and single-pass hold under `one-to-one`
-// (psiLink.test.ts), extended to the cardinality where multiplicity governs the
+// (link.test.ts), extended to the cardinality where multiplicity governs the
 // outcome. Every case below is a dataset whose table DIFFERS from the one-to-one
 // table for the same inputs, so a replay that quietly matched one-to-one under a
 // deduplicating label would fail here rather than pass vacuously.

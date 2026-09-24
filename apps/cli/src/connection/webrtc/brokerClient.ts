@@ -5,7 +5,7 @@ import {
   ConnectionError,
   parseBoundedJson,
   UsageError,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { fittedCauseLink } from "../causeLink";
 import {

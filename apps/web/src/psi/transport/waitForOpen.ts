@@ -1,4 +1,4 @@
-import { TimeoutError, withTimeout } from "@psilink/core";
+import { TimeoutError, withTimeout } from "@alcove/core";
 
 import { watchIceGathering, withIceServerFailure } from "./iceGathering";
 

@@ -7,8 +7,8 @@ import { afterEach, expect, vi } from "vitest";
 import {
   FileSyncConnection,
   TransportOperationStalledError,
-} from "@psilink/core";
-import { withCapturedLogs } from "@psilink/core/testing";
+} from "@alcove/core";
+import { withCapturedLogs } from "@alcove/core/testing";
 
 import { startInProcessSftpServer } from "../sftpServer";
 import { serverAuth } from "../sftpServer/testContext";

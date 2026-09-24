@@ -3,7 +3,7 @@ import {
   ProcessState,
   SINGLE_PASS_STAGE_IDS,
   describeExchangeStages,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import type {
   PreparedExchange,
@@ -11,7 +11,7 @@ import type {
   PsiProgress,
   ResolvedMatching,
   SinglePassStageId,
-} from "@psilink/core";
+} from "@alcove/core";
 import type { StageDefinition } from "@psi/exchangeLifecycle";
 
 /**

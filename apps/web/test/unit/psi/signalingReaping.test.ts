@@ -7,17 +7,17 @@ import {
   MAX_OUTSTANDING_QUEUES,
   MAX_QUEUE_BYTES,
   Realm,
-} from "@psilink/peerjs-broker/models/realm";
-import { CheckBrokenConnections } from "@psilink/peerjs-broker/services/checkBrokenConnections/index";
-import { Client } from "@psilink/peerjs-broker/models/client";
-import { MAX_SIGNALING_PAYLOAD_BYTES } from "@psilink/peerjs-broker/services/webSocketServer/index";
-import { MessageType } from "@psilink/peerjs-broker/enums";
+} from "@alcove/peerjs-broker/models/realm";
+import { CheckBrokenConnections } from "@alcove/peerjs-broker/services/checkBrokenConnections/index";
+import { Client } from "@alcove/peerjs-broker/models/client";
+import { MAX_SIGNALING_PAYLOAD_BYTES } from "@alcove/peerjs-broker/services/webSocketServer/index";
+import { MessageType } from "@alcove/peerjs-broker/enums";
 import { PEER_PING_INTERVAL_MS } from "@psi/transport/rendezvous";
-import defaultConfig from "@psilink/peerjs-broker/config/index";
-import { deriveRendezvousPeerId } from "@psilink/core";
-import { serializeFrame } from "@psilink/peerjs-broker/models/messageQueue";
+import defaultConfig from "@alcove/peerjs-broker/config/index";
+import { deriveRendezvousPeerId } from "@alcove/core";
+import { serializeFrame } from "@alcove/peerjs-broker/models/messageQueue";
 
-import type { IMessage } from "@psilink/peerjs-broker/models/message";
+import type { IMessage } from "@alcove/peerjs-broker/models/message";
 
 /** The resident bytes a frame is accounted at, which is what the queue holds
  * it as: the frame serialized. */
@@ -411,7 +411,7 @@ describe("relay message-queue bounds", () => {
     // refused. The worst case is the biggest frame a peer can actually put on
     // the socket -- the sender omits `src`, which the server stamps for it, so
     // every byte saved there becomes payload -- addressed between the two ids
-    // psilink derives for a rendezvous.
+    // Alcove derives for a rendezvous.
     const secret = Buffer.alloc(32, 1).toString("base64url");
     const inviterId = await deriveRendezvousPeerId(secret, "inviter");
     const acceptorId = await deriveRendezvousPeerId(secret, "acceptor");

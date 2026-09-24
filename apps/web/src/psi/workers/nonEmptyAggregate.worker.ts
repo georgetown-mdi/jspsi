@@ -5,7 +5,7 @@ import type {
   AggregateResponse,
 } from "./nonEmptyAggregateController";
 
-import type { CSVRow } from "@psilink/core";
+import type { CSVRow } from "@alcove/core";
 
 /**
  * The off-main-thread entry for the silent-empty aggregate. Seeded once with the

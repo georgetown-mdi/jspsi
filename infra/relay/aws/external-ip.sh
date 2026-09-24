@@ -4,7 +4,7 @@
 #
 # The one AWS-specific file the relay's own configuration depends on. Everything
 # else here is cloud-neutral: render-config.sh calls whatever
-# PSILINK_RELAY_EXTERNAL_IP_HELPER names and only requires this output shape, so
+# ALCOVE_RELAY_EXTERNAL_IP_HELPER names and only requires this output shape, so
 # Azure, on-prem, or a host with a statically known pair is a sibling of this
 # file and no other change.
 #
@@ -15,12 +15,12 @@
 # asking for the surface those rules close.
 #
 # Run on the relay instance during the 2026-09-03/04 live run: render-config.sh
-# called this script by its default PSILINK_RELAY_EXTERNAL_IP_HELPER and used
+# called this script by its default ALCOVE_RELAY_EXTERNAL_IP_HELPER and used
 # its output to render listening-ip= (infra/relay/install.sh, the verify step;
 # infra/relay/README.md, Provenance).
 set -euo pipefail
 
-IMDS="${PSILINK_RELAY_IMDS:-http://169.254.169.254}"
+IMDS="${ALCOVE_RELAY_IMDS:-http://169.254.169.254}"
 TTL=60
 
 die() { printf 'ABORTING: %s\n' "$*" >&2; exit 1; }

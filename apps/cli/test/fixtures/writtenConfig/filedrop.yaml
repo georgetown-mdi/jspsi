@@ -1,6 +1,6 @@
 # How to reach your exchange partner. channel is one of sftp, filedrop (a
 # shared mounted directory), or webrtc; the block each one takes is at
-# https://github.com/georgetown-mdi/jspsi/blob/main/docs/EXCHANGE_REFERENCE.md#connection-blocks-by-channel
+# https://github.com/georgetown-mdi/alcove/blob/main/docs/EXCHANGE_REFERENCE.md#connection-blocks-by-channel
 connection:
   channel: filedrop
   inbound_path: /mnt/from-partner

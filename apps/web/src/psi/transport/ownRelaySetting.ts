@@ -15,14 +15,14 @@ import {
   getLogger,
   maxCodeUnits,
   parseBoundedJson,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import type { RelayLocator } from "./rendezvous";
 
 const log = getLogger("ownRelaySetting");
 
 /** The localStorage key the setting is written under. */
-const STORAGE_KEY = "psilink-own-relay";
+const STORAGE_KEY = "alcove-own-relay";
 
 /** The stored value's schema version; a value under any other is refused. */
 const SETTING_VERSION = 1;

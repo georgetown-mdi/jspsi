@@ -3,7 +3,7 @@ import {
   connectionFromLocator,
   getDefaultLinkageTerms,
   inferMetadata,
-} from "@psilink/core";
+} from "@alcove/core";
 import { describe, expect, test } from "vitest";
 
 import {
@@ -14,7 +14,7 @@ import {
 } from "@psi/managed/managedInputGuard";
 import { lastRunSchema } from "@psi/managed/managedExchangeRecord";
 
-import type { ExchangeSpec, WebRTCExchangeLocator } from "@psilink/core";
+import type { ExchangeSpec, WebRTCExchangeLocator } from "@alcove/core";
 
 // The pure, platform-free half of the run-start input guard, tested in Node
 // without a file handle, a permission prompt, or a database: the column-shape

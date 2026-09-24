@@ -59,7 +59,7 @@ export class JsonStructureBoundError extends Error {
  *
  * Throws {@link JsonStructureBoundError} on an out-of-bound structure,
  * or the native error on malformed or invalid-UTF-8 input. An ESLint rule
- * requires every untrusted-JSON parse in `@psilink/core` to route through
+ * requires every untrusted-JSON parse in `@alcove/core` to route through
  * here (a trusted parse opts out with a justified `eslint-disable`). See
  * docs/spec/CHANNEL_SECURITY.md.
  */

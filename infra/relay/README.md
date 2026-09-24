@@ -1,6 +1,6 @@
-# The psilink standing relay: a reference for a dedicated instance
+# The Alcove standing relay: a reference for a dedicated instance
 
-Everything needed to bring up a self-hosted TURN relay that carries a psilink
+Everything needed to bring up a self-hosted TURN relay that carries an Alcove
 WebRTC exchange for a party on a network that blocks UDP or admits only TCP/443:
 a digest-pinned coturn image, a hardened configuration, the systemd unit that
 supervises it, an ACME renewal that keeps its certificate current, scripts that
@@ -47,9 +47,9 @@ internal address was confirmed refused, and `verify.sh` finished 6 pass / 0
 fail / 0 unclear from `install.sh`'s own end-of-install run.
 
 **The podman/Quadlet path remains undriven** -- everything measured above went
-through `psilink-relay-docker.service`, and nothing has exercised
-`psilink-relay.container` or its generator. `verify.sh` has also not
-exercised the data leg to a responsive peer (`PSILINK_RELAY_VERIFY_PEER`):
+through `alcove-relay-docker.service`, and nothing has exercised
+`alcove-relay.container` or its generator. `verify.sh` has also not
+exercised the data leg to a responsive peer (`ALCOVE_RELAY_VERIFY_PEER`):
 its allocation and refusal probes were driven, not exchange traffic. A
 relayed exchange has been driven through this relay separately; what that
 covered and what it did not is in
@@ -109,10 +109,10 @@ other repository-level coupling is the docker Dependabot entry for
 
 1. Hold an elastic address, create the DNS A record for the relay's name, and
    launch the instance -- [`aws/provision.md`](aws/provision.md).
-2. Put `/etc/psilink-relay/relay.env` on the host from
+2. Put `/etc/alcove-relay/relay.env` on the host from
    [`relay.env.example`](relay.env.example) and set the realm. Every script
    refuses to run without it; nothing defaults to a hostname.
-3. Put `/etc/psilink-relay/acme.env` from [`certs/env.example`](certs/env.example)
+3. Put `/etc/alcove-relay/acme.env` from [`certs/env.example`](certs/env.example)
    at mode 600, with the DNS provider's credential.
 4. Run `install.sh` as root. It installs a container runtime, builds the image,
    creates the data directory for the secrets table, obtains a certificate,
@@ -134,20 +134,20 @@ or the Dockerfile and it converges.
 
 | path | what it is |
 | --- | --- |
-| `Dockerfile` | The base image pin, and nothing else. One line of instruction: `coturn/coturn` at a tag and its multi-arch index digest. The single home of that digest -- every other file names the locally built `localhost/psilink-relay:installed` tag, so a base move is exactly one edit. Its comment carries the fallback if the community image stops publishing |
+| `Dockerfile` | The base image pin, and nothing else. One line of instruction: `coturn/coturn` at a tag and its multi-arch index digest. The single home of that digest -- every other file names the locally built `localhost/alcove-relay:installed` tag, so a base move is exactly one edit. Its comment carries the fallback if the community image stops publishing |
 | `turnserver.conf.tmpl` | The hardened coturn configuration, with `__PLACEHOLDER__` values. Tracked; the rendered file is not |
 | `render-config.sh` | Substitutes the template at mode 600. Run at install and again on every start, because a stopped and started instance comes back on a different address and a stale `external-ip` advertises a candidate nobody can reach. The cloud seam is one variable: an executable printing `<public>/<private>` |
-| `psilink-relay.container` | The Quadlet unit for a podman host, installed at `/etc/containers/systemd/`. systemd is the only supervisor; there is no container daemon under it |
-| `psilink-relay-docker.service` | The same container on a docker host: a plain systemd unit running `docker run` in the foreground, installed as `/etc/systemd/system/psilink-relay.service`. Same image, mounts, and flags as the Quadlet unit -- the two are edited together |
-| `psilink-relay-verify.service`, `.timer` | The daily verification. A standing relay is idle between exchanges, so nothing else notices it stopped carrying allocations until a partner is waiting on one |
+| `alcove-relay.container` | The Quadlet unit for a podman host, installed at `/etc/containers/systemd/`. systemd is the only supervisor; there is no container daemon under it |
+| `alcove-relay-docker.service` | The same container on a docker host: a plain systemd unit running `docker run` in the foreground, installed as `/etc/systemd/system/alcove-relay.service`. Same image, mounts, and flags as the Quadlet unit -- the two are edited together |
+| `alcove-relay-verify.service`, `.timer` | The daily verification. A standing relay is idle between exchanges, so nothing else notices it stopped carrying allocations until a partner is waiting on one |
 | `install.sh` | The whole install, idempotent |
 | `relay_table.py` | The one write path to the secrets table: register, revoke, and sweep, each one SQLite transaction, as the relay image's account. Everything below that touches the table calls it. See [Per-exchange keys](#per-exchange-keys) |
 | `register-exchange.sh`, `revoke-exchange.sh`, `exchange-keys.sh` | Add and remove one exchange's relay key, through `relay_table.py`; the third is the shared part both source, and `sweep-exchanges.sh` and `verify.sh` too. See [Per-exchange keys](#per-exchange-keys) |
-| `sweep-exchanges.sh`, `psilink-relay-sweep.service`, `.timer` | Revokes every exchange whose registration has lapsed, hourly. See [Per-exchange keys](#per-exchange-keys), Lifetime |
-| `registrar.py`, `psilink-relay-registrar.service` | The optional HTTPS registrar, which registers and revokes through `relay_table.py` for a caller holding the relay-owner token. See [The registrar](#the-registrar) |
-| `verify.sh` | Drives a real TURNS handshake, a real allocation, a probe that an allocation toward an internal address is refused, and the secrets table: two keys registered for the run both allocate, an unregistered key and a credential keyed with a key's decoded bytes are refused, and a revoked key's new allocation is refused. Where the host holds a registrar token it also asks the registrar: calls with no token or a wrong one are answered 401 and write nothing, and a registration and a revocation with the token reach the mapping and the table; with no token it says it skipped the registrar. Its exchanges are under the ids `psilink-verify-a`, `-b`, and `-registrar`, a prefix every other caller is refused. On exit it revokes them, each in one transaction, and warns naming the exchange id, never the key, for any it could not revoke. Passes only on an observed refusal: a question that could not be asked reports UNCLEAR and fails. Connects to the realm's name by default; `PSILINK_RELAY_VERIFY_CONNECT` overrides the TCP connect target while the realm still names the SNI and TURN realm -- `install.sh` sets it to the instance's private address for the end-of-install run, because EC2 does not hairpin an instance's traffic back to its own Elastic IP, while the daily timer stays on the public name so it fails if that path breaks. `PSILINK_RELAY_VERIFY_WAIT` sets how many seconds it retries a bare TCP connect before its first probe, waiting for a just-(re)started listener to come up; 30 by default |
+| `sweep-exchanges.sh`, `alcove-relay-sweep.service`, `.timer` | Revokes every exchange whose registration has lapsed, hourly. See [Per-exchange keys](#per-exchange-keys), Lifetime |
+| `registrar.py`, `alcove-relay-registrar.service` | The optional HTTPS registrar, which registers and revokes through `relay_table.py` for a caller holding the relay-owner token. See [The registrar](#the-registrar) |
+| `verify.sh` | Drives a real TURNS handshake, a real allocation, a probe that an allocation toward an internal address is refused, and the secrets table: two keys registered for the run both allocate, an unregistered key and a credential keyed with a key's decoded bytes are refused, and a revoked key's new allocation is refused. Where the host holds a registrar token it also asks the registrar: calls with no token or a wrong one are answered 401 and write nothing, and a registration and a revocation with the token reach the mapping and the table; with no token it says it skipped the registrar. Its exchanges are under the ids `alcove-verify-a`, `-b`, and `-registrar`, a prefix every other caller is refused. On exit it revokes them, each in one transaction, and warns naming the exchange id, never the key, for any it could not revoke. Passes only on an observed refusal: a question that could not be asked reports UNCLEAR and fails. Connects to the realm's name by default; `ALCOVE_RELAY_VERIFY_CONNECT` overrides the TCP connect target while the realm still names the SNI and TURN realm -- `install.sh` sets it to the instance's private address for the end-of-install run, because EC2 does not hairpin an instance's traffic back to its own Elastic IP, while the daily timer stays on the public name so it fails if that path breaks. `ALCOVE_RELAY_VERIFY_WAIT` sets how many seconds it retries a bare TCP connect before its first probe, waiting for a just-(re)started listener to come up; 30 by default |
 | `mint-credential.sh` | One time-limited credential under the static secret, on a host that holds one: `<expiry>:<name>` as the username, the base64 HMAC-SHA1 of it as the password |
-| `relay.env.example` | The host's one configuration file, copied to `/etc/psilink-relay/relay.env` |
+| `relay.env.example` | The host's one configuration file, copied to `/etc/alcove-relay/relay.env` |
 | `certs/` | ACME DNS-01 renewal: the timer and its unit, the client-neutral `renew.sh`, the deploy hook, and the provider credential's example |
 | `aws/` | The AWS-specific half: instance provisioning, the IMDSv2 external-address helper, and the demo box's stop/start scripts |
 
@@ -156,10 +156,10 @@ or the Dockerfile and it converges.
 Each exchange has its own relay key, derived from the exchange's shared secret
 ([PROTOCOL.md, Relay credential derivation](../../docs/spec/PROTOCOL.md#relay-credential-derivation)).
 The relay holds one row per registered exchange in coturn's `turn_secret` table,
-in the SQLite file `/var/lib/psilink-relay/turndb` (mounted at
+in the SQLite file `/var/lib/alcove-relay/turndb` (mounted at
 `/var/lib/coturn/turndb`), and accepts a credential minted under any row.
 
-Run both scripts as root on the relay host, from `/opt/psilink-relay`, or call
+Run both scripts as root on the relay host, from `/opt/alcove-relay`, or call
 [the registrar](#the-registrar), which writes through the same code:
 
 ```sh
@@ -170,7 +170,7 @@ revoke-exchange.sh <exchange-id>
 - **The arguments.** The exchange id is 1 to 128 of `[A-Za-z0-9._-]`, not
   starting with `-`. An id containing a run of 64 hex characters of either
   case is refused, so a key passed in the id's place is never registered or
-  journaled, and so is an id starting with `psilink-verify-`, which `verify.sh`
+  journaled, and so is an id starting with `alcove-verify-`, which `verify.sh`
   registers and revokes on every run. max-age-days is a whole number of days
   from 1 to 36500, or `none` for a row that never lapses -- see Lifetime below;
   it is required, so a registration never clears a lapse by leaving it out.
@@ -182,7 +182,7 @@ revoke-exchange.sh <exchange-id>
   shell's history, or a `sudo` log:
 
   ```sh
-  printf '%s\n' "$KEY" | /opt/psilink-relay/register-exchange.sh exchange-1 90
+  printf '%s\n' "$KEY" | /opt/alcove-relay/register-exchange.sh exchange-1 90
   ```
 
 - **Registering.** Adds the key's row and maps the exchange to it. An exchange
@@ -210,7 +210,7 @@ revoke-exchange.sh <exchange-id>
     refresh.
 - **Lifetime.** A row registered with max-age-days lapses that many days after
   its registration, and the sweep -- `sweep-exchanges.sh`, or
-  `psilink-relay-sweep.timer` hourly -- revokes it within the hour. Registering
+  `alcove-relay-sweep.timer` hourly -- revokes it within the hour. Registering
   the exchange's next key, or its current key again, replaces the row and
   restarts the count, so each run's registration is the renewal and an exchange
   that keeps running is never swept. max-age-days is the managed-exchange
@@ -225,16 +225,16 @@ revoke-exchange.sh <exchange-id>
   is no relay-side setting for the lapse.
 - **The mapping.** `turn_secret` is keyed by realm and key and holds no exchange
   id, so `relay_table.py` keeps a second table in the same file,
-  `psilink_exchange`: the exchange id, the realm, the key, the Unix time of the
+  `alcove_exchange`: the exchange id, the realm, the key, the Unix time of the
   registration, and max-age-days (empty for no lapse). coturn reads neither the
   table nor anything else it does not know. One file means a register, revoke,
   or sweep is one SQLite transaction across the row and the mapping: it lands
   whole or not at all, and its result is the write's own, with nothing read
   back. `install.sh` carries a mapping an earlier install kept in
-  `/etc/psilink-relay/exchange-keys` into the table once, and moves that file
+  `/etc/alcove-relay/exchange-keys` into the table once, and moves that file
   to `exchange-keys.imported`.
 - **How they reach the table.** `relay_table.py`, on the host's own `python3`
-  and its `sqlite3` module, opens `/var/lib/psilink-relay/turndb` as the relay
+  and its `sqlite3` module, opens `/var/lib/alcove-relay/turndb` as the relay
   image's account -- a script run as root drops to the account that owns the
   file first -- so every file SQLite creates beside it is one coturn can use. No
   container runtime is involved. It never creates `turndb`: coturn does at its
@@ -242,8 +242,8 @@ revoke-exchange.sh <exchange-id>
   cannot be written -- read-only, unopenable, locked past 10 s -- exits 1 with
   SQLite's own reason, having changed nothing. A row no exchange maps -- one
   added by hand -- is removed by value, the key on standard input:
-  `printf '%s\n' "$KEY" | python3 /opt/psilink-relay/relay_table.py forget-key`,
-  with `relay.env`'s variables in the environment. A `psilink-verify-` row
+  `printf '%s\n' "$KEY" | python3 /opt/alcove-relay/relay_table.py forget-key`,
+  with `relay.env`'s variables in the environment. An `alcove-verify-` row
   the import skips -- a verify run that died before cleaning up -- gets no
   mapping, so if an earlier install already wrote its key into the table
   that key stays until it is removed with `forget-key`, the key taken from
@@ -253,14 +253,14 @@ revoke-exchange.sh <exchange-id>
   from backup -- leaves the server reading the file it opened while every write
   lands in the new one: a revoke reports success while the key still
   allocates, and a registration does not allocate. After touching the file,
-  `systemctl restart psilink-relay.service`.
+  `systemctl restart alcove-relay.service`.
 
 **The static secret is optional.** A host holding
-`/etc/psilink-relay/static-auth-secret` renders it beside the table, and coturn
+`/etc/alcove-relay/static-auth-secret` renders it beside the table, and coturn
 accepts a credential under the static secret or any row -- measured, so a
 relay can move to per-exchange keys with its static secret still set, while
 credentials from `mint-credential.sh` keep working. To finish the move, delete
-the file and restart `psilink-relay.service`. `install.sh` keeps a secret it
+the file and restart `alcove-relay.service`. `install.sh` keeps a secret it
 finds and mints none.
 
 ## The registrar
@@ -269,17 +269,17 @@ An HTTPS service beside coturn that registers and revokes an exchange's key
 for a caller holding the relay-owner token, so a browser inviter can register
 the key it rotates to at the end of each run without shell access to the relay
 host. It is optional: `install.sh` runs it only on a host holding
-`/etc/psilink-relay/registrar-token`. To turn it on:
+`/etc/alcove-relay/registrar-token`. To turn it on:
 
 ```sh
-(umask 077; openssl rand -hex 32 > /etc/psilink-relay/registrar-token)
-/opt/psilink-relay/install.sh   # or the checkout's install.sh
+(umask 077; openssl rand -hex 32 > /etc/alcove-relay/registrar-token)
+/opt/alcove-relay/install.sh   # or the checkout's install.sh
 ```
 
 Give the token to the relay's operator, who keeps it in the browser's own
 settings, never in a served bundle. To turn it off, delete the file and run
 `install.sh` again. To replace the token, overwrite the file and
-`systemctl restart psilink-relay-registrar.service`.
+`systemctl restart alcove-relay-registrar.service`.
 
 - **The calls.** Every request needs `Authorization: Bearer <token>`; without
   it, or with a wrong token, the answer is 401 and nothing is written. A CORS
@@ -300,8 +300,8 @@ settings, never in a served bundle. To turn it off, delete the file and run
   The registrar checks the exchange id, the key, and `maxAgeDays` against the
   rules in [Per-exchange keys](#per-exchange-keys), The arguments, and answers a
   value that fails them 400 with a fixed message naming the field, never the
-  value, before anything is written. An id starting with `psilink-verify-` is
-  refused 400 unless the request carries `Psilink-Relay-Verify-Run: 1`, which
+  value, before anything is written. An id starting with `alcove-verify-` is
+  refused 400 unless the request carries `Alcove-Relay-Verify-Run: 1`, which
   `verify.sh` sends and which the preflight does not allow a browser to send. A
   body that is not that JSON object is answered 400, one over 1024 bytes 413,
   and one without a `Content-Length` 411. A request line or header block the
@@ -314,9 +314,9 @@ settings, never in a served bundle. To turn it off, delete the file and run
   `Access-Control-Allow-Credentials`, so a browser's ambient credentials never
   authenticate a cross-origin call. `Access-Control-Allow-Origin: *` is safe for
   that reason. `scripts/relay-exchange-keys.test.mjs` holds both.
-- **Where it listens.** HTTPS on `PSILINK_RELAY_REGISTRAR_PORT` in `relay.env`,
+- **Where it listens.** HTTPS on `ALCOVE_RELAY_REGISTRAR_PORT` in `relay.env`,
   8443 by default, on every address, with the relay's own certificate from
-  `/etc/psilink-relay/certs`; the certificate deploy hook restarts it when the
+  `/etc/alcove-relay/certs`; the certificate deploy hook restarts it when the
   certificate changes. TURNS holds 443, so the registrar cannot share it. Open
   the port in the instance's security group to the addresses the operator
   registers from ([aws/provision.md](aws/provision.md), Ports).
@@ -324,15 +324,15 @@ settings, never in a served bundle. To turn it off, delete the file and run
   `relay_table.py`, so the table and mapping have one write path. It runs as the
   relay image's uid and gid, which `install.sh` reads from the image and fills
   into the unit, with no capability and no container runtime; the token and
-  certificate under the root-only `/etc/psilink-relay` reach it as systemd
+  certificate under the root-only `/etc/alcove-relay` reach it as systemd
   credentials (`LoadCredential=`). The unit carries a full systemd sandbox --
   read-only system and no home, a private `/tmp` and `/dev`, no kernel,
   cgroup, clock, or hostname writes, the `@system-service` system calls, and
-  write access to `/var/lib/psilink-relay` alone -- and the sweep's unit the
+  write access to `/var/lib/alcove-relay` alone -- and the sweep's unit the
   same with no network. It is `python3` from the distribution (3.9 or later,
   the standard library only), which Amazon Linux 2023 ships.
 - **What it logs.** One line per request to the journal (`journalctl -u
-  psilink-relay-registrar.service`), naming the method, the status, and the
+  alcove-relay-registrar.service`), naming the method, the status, and the
   path, and the result of each write. The path is logged only when it is
   `/exchanges/<exchange-id>` with a well-formed id, and the method only when
   it is a standard one; any other path or method, and any part of a malformed
@@ -341,7 +341,7 @@ settings, never in a served bundle. To turn it off, delete the file and run
 
 ## Supervision and the container runtime
 
-One service name, `psilink-relay.service`, whichever runtime the host carries:
+One service name, `alcove-relay.service`, whichever runtime the host carries:
 the certificate deploy hook restarts it by that name and the verification timer
 requires it. Which file defines it is what `install.sh` decides, and it decides
 once per host -- the runtime is recorded in `relay.env` and read back on every
@@ -350,8 +350,8 @@ other.
 
 | The host has | The unit | The supervisor |
 | --- | --- | --- |
-| podman | `psilink-relay.container`, at `/etc/containers/systemd/` | podman's systemd generator: daemonless, and systemd is the only supervisor |
-| docker | `psilink-relay-docker.service`, installed as `/etc/systemd/system/psilink-relay.service` | systemd, over a foreground `docker run`; the unit `Requires=docker.service` |
+| podman | `alcove-relay.container`, at `/etc/containers/systemd/` | podman's systemd generator: daemonless, and systemd is the only supervisor |
+| docker | `alcove-relay-docker.service`, installed as `/etc/systemd/system/alcove-relay.service` | systemd, over a foreground `docker run`; the unit `Requires=docker.service` |
 
 **Amazon Linux 2023 is a docker host.** It publishes no `podman` package and
 carries no EPEL, so `dnf install podman` fails there with no match, while `dnf
@@ -361,7 +361,7 @@ is a tracked unit rather than a documented equivalence. `install.sh` still
 prefers podman wherever the distribution carries it.
 
 The two unit files carry the same image, the same read-only mounts, and the same
-container flags. `psilink-relay-docker.service`'s header holds the
+container flags. `alcove-relay-docker.service`'s header holds the
 directive-to-flag mapping between them, and an edit to one is an edit to both.
 
 Host networking is a requirement of the protocol rather than a convenience. TURN
@@ -377,7 +377,7 @@ rejects) or `acme.sh`. DNS-01 rather than HTTP-01 because the relay already
 terminates TLS on 443 for TURNS -- an HTTP-01 challenge would need a second
 service on 80 whose only job is to answer it.
 
-The provider is a variable, and the credential lives in `/etc/psilink-relay/acme.env`
+The provider is a variable, and the credential lives in `/etc/alcove-relay/acme.env`
 at mode 600. `certs/env.example` carries the Cloudflare shape (a token scoped to
 `Zone:DNS:Edit` on the one zone, not a global key); another provider is that
 provider's variables in the same file.
@@ -396,7 +396,7 @@ The hook **restarts** rather than reloads. Whether a signal makes coturn re-read
 its certificate is a question nobody has driven against the real server, so the
 hook does the thing that certainly works. A restart drops any allocation in
 flight, so the hook restarts only when the certificate or key it deploys differs
-from the copy already in `/etc/psilink-relay/certs` in content or owner -- on
+from the copy already in `/etc/alcove-relay/certs` in content or owner -- on
 most days the timer fires, the ACME client renews nothing and the relay keeps
 running -- and the timer runs at a fixed early hour for the day it does renew.
 
@@ -406,7 +406,7 @@ The core of this directory is cloud-neutral. Moving it to Azure, to another
 provider, or on-prem changes two things and nothing else:
 
 - **The external address.** `render-config.sh` calls whatever
-  `PSILINK_RELAY_EXTERNAL_IP_HELPER` names and requires only that it print
+  `ALCOVE_RELAY_EXTERNAL_IP_HELPER` names and requires only that it print
   `<public>/<private>` on one line. `aws/external-ip.sh` reads IMDSv2; another
   cloud is a sibling of that file, and a host with a static pair is two lines of
   `printf`.
@@ -427,13 +427,13 @@ given.
 
 | path | what goes there |
 | --- | --- |
-| `/etc/psilink-relay/static-auth-secret` | Optional. The static secret `mint-credential.sh` signs under, mode 600. It never appears on a unit's `ExecStart` line, in a tracked file, or in the journal |
-| `/etc/psilink-relay/registrar-token` | Optional. The relay-owner token the registrar requires, mode 600; the registrar runs only where it exists |
-| `/etc/psilink-relay/turnserver.conf` | The rendered configuration, mode 600, because it can hold that secret. Rendered from the tracked template on every start |
-| `/var/lib/psilink-relay/turndb` | The secrets table and the exchange mapping beside it, owned by the container's uid, in a mode-700 directory of that account's |
-| `/etc/psilink-relay/certs/` | The certificate and private key the ACME hook deploys. The key is mode 600 and owned by the container's uid |
-| `/etc/psilink-relay/relay.env` | The realm, the port range, the quotas, and the external-address helper. Copy [`relay.env.example`](relay.env.example) |
-| `/etc/psilink-relay/acme.env` | The ACME contact, client, provider, and the provider's credential. Copy [`certs/env.example`](certs/env.example) |
+| `/etc/alcove-relay/static-auth-secret` | Optional. The static secret `mint-credential.sh` signs under, mode 600. It never appears on a unit's `ExecStart` line, in a tracked file, or in the journal |
+| `/etc/alcove-relay/registrar-token` | Optional. The relay-owner token the registrar requires, mode 600; the registrar runs only where it exists |
+| `/etc/alcove-relay/turnserver.conf` | The rendered configuration, mode 600, because it can hold that secret. Rendered from the tracked template on every start |
+| `/var/lib/alcove-relay/turndb` | The secrets table and the exchange mapping beside it, owned by the container's uid, in a mode-700 directory of that account's |
+| `/etc/alcove-relay/certs/` | The certificate and private key the ACME hook deploys. The key is mode 600 and owned by the container's uid |
+| `/etc/alcove-relay/relay.env` | The realm, the port range, the quotas, and the external-address helper. Copy [`relay.env.example`](relay.env.example) |
+| `/etc/alcove-relay/acme.env` | The ACME contact, client, provider, and the provider's credential. Copy [`certs/env.example`](certs/env.example) |
 | `aws/env` | The demo box's instance id, region, profile, and optional zone credential. Copy [`aws/env.example`](aws/env.example) |
 
 Not to be confused with [`hosted/`](../hosted/README.md), the OpenTofu root

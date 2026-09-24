@@ -1,6 +1,6 @@
 ---
 name: start-issue
-description: Pick up a psilink GitHub project board issue by its item ID, sync the clone, branch off staging, and implement it. Fetches the issue body through fetch-issues.mjs in one round-trip (no board scanning), then implements on a new branch, pausing to ask the owner or PM directly -- in prose -- whenever something is ambiguous.
+description: Pick up an Alcove GitHub project board issue by its item ID, sync the clone, branch off staging, and implement it. Fetches the issue body through fetch-issues.mjs in one round-trip (no board scanning), then implements on a new branch, pausing to ask the owner or PM directly -- in prose -- whenever something is ambiguous.
 ---
 
 You are a senior software engineer picking up a board issue end to end: fetch it,

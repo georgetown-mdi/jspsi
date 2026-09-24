@@ -10,7 +10,7 @@ name: Static Checks
 # `npm run typecheck` runs each workspace's noEmit tsconfig, including the
 # tsconfig.test.json files that cover test sources (the build/composite configs
 # exclude test/ so test code never reaches the emitted dist). It resolves
-# @psilink/core from the built package, so packages/core is built first.
+# @alcove/core from the built package, so packages/core is built first.
 #
 # Two jobs, two required-status-check identities. `Typecheck, Lint, Format`
 # carries only the three checks it names, so the context holding the merge
@@ -26,7 +26,7 @@ name: Static Checks
 # token that can read them, and states a skip when it does not.
 #
 # Both jobs pay the setup action, since the second holds every check that reads
-# node_modules and the vectors check that reads the @psilink/core build.
+# node_modules and the vectors check that reads the @alcove/core build.
 
 on:
   pull_request:
@@ -47,7 +47,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      # Pins Node, installs from the lockfile, and builds @psilink/core (built
+      # Pins Node, installs from the lockfile, and builds @alcove/core (built
       # first so the CLI and web typechecks resolve its declarations from dist,
       # the same way the apps consume it).
       - uses: ./.github/actions/setup
@@ -72,7 +72,7 @@ jobs:
           # range, so this job takes the full history. The job beside it keeps
           # the default.
           fetch-depth: 0
-      # Pins Node, installs from the lockfile, and builds @psilink/core. Most of
+      # Pins Node, installs from the lockfile, and builds @alcove/core. Most of
       # the checks below read their parsers and fixtures out of the install; the
       # vectors check reads the built dist, since its generators import the
       # package the way the apps do.
@@ -94,7 +94,7 @@ jobs:
           # from, taken from the event rather than left to a ref resolving in
           # the checkout. On any event that is not a pull request this is empty
           # and the check falls back to its ref candidates.
-          PSILINK_NARRATION_BASE: ${{ github.event.pull_request.base.sha || '' }}
+          ALCOVE_NARRATION_BASE: ${{ github.event.pull_request.base.sha || '' }}
         run: npm run check:all
       # Blocking half of the dependency audit, over the production tree the
       # shipped image runs: the release SBOM's scope -- the two workspaces the

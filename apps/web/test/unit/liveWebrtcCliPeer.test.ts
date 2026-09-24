@@ -19,7 +19,7 @@ describe("the live WebRTC leg's CLI party", () => {
   let work: string;
 
   beforeEach(() => {
-    work = mkdtempSync(path.join(tmpdir(), "psilink-cli-peer-"));
+    work = mkdtempSync(path.join(tmpdir(), "alcove-cli-peer-"));
   });
 
   afterEach(() => {

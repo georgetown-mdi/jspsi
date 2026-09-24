@@ -77,9 +77,9 @@ export class NodeCountExceededError extends UsageError {
  * library, whose keys must therefore NOT be case-transformed. Currently only
  * `connection.provider_options` / `providerOptions`, spread directly into
  * the `ssh2-sftp-client` connect options -- a namespace defined by that
- * library (camelCase keys like `readyTimeout`, `algorithms`), not psilink's
+ * library (camelCase keys like `readyTimeout`, `algorithms`), not Alcove's
  * to normalize. Every other map in the exchange schema, including the
- * function-specific `params` blocks, is psilink's own vocabulary and
+ * function-specific `params` blocks, is Alcove's own vocabulary and
  * follows the snake_case-in-YAML <-> camelCase-in-TS convention.
  *
  * Keyed by canonical camelCase name and baked into the shared
@@ -126,7 +126,7 @@ export function camelizeKey(key: string): string {
  * its field by the camelCase name while the operator reads a document that
  * writes the key in snake_case. A call site naming a key to a human passes
  * each path segment through this, so it names the key as the file -- and
- * psilink's own writer, {@link snakeizeKeys} -- would spell it.
+ * Alcove's own writer, {@link snakeizeKeys} -- would spell it.
  *
  * It has {@link snakeizeKeys}'s limit: not a general camelCase inverse, so a
  * key with an embedded acronym (`URL`) renders `u_r_l`. Every schema-defined

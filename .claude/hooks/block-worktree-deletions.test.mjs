@@ -193,7 +193,7 @@ describe("block-worktree-deletions hook", () => {
       `find ${SIBLING} -name '*.ts' -exec rm {} +`,
       `find ${SIBLING} -print0 | xargs -0 rm -rf`,
       `sudo rm -rf ${SIBLING}`,
-      `shred -u ${SIBLING}/.psilink.key`,
+      `shred -u ${SIBLING}/.alcove.key`,
     ]);
   });
 

@@ -1,4 +1,4 @@
-// A stub psilink CLI the job-driver tests point the driver at via the
+// A stub Alcove CLI the job-driver tests point the driver at via the
 // JOB_CLI_BINARY override. It emulates the parts of the real CLI the driver
 // depends on: it can emit chosen fd-3 NDJSON events, write an output file, exit
 // with a chosen code, and honor or ignore an interrupt signal -- all configured
@@ -71,13 +71,13 @@
 //   STUB_CWD_FILE     When set, the child's own process.cwd() is written to this
 //                     path by the `fingerprint` branch, so a test can assert the
 //                     directory the driver spawned the child in -- which is what
-//                     decides whose ./psilink.yaml the real CLI would resolve.
+//                     decides whose ./alcove.yaml the real CLI would resolve.
 
 import fs from "node:fs";
 
 import YAML from "yaml";
 
-import { sanitizeForDisplay } from "@psilink/core/untrusted-text";
+import { sanitizeForDisplay } from "@alcove/core/untrusted-text";
 
 // The token STUB_FD3_EVENTS spells the --config-file value with, paired with
 // STUB_CONFIG_FILE_TOKEN in ./jobFixtures.ts (this file is spawned as a

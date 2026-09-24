@@ -4,7 +4,7 @@ import * as path from "node:path";
 import yargs from "yargs";
 import type { Argv } from "yargs";
 
-import { sanitizeForDisplay } from "@psilink/core";
+import { sanitizeForDisplay } from "@alcove/core";
 
 import {
   builder as zeroSetupBuilder,
@@ -68,7 +68,7 @@ function readCliVersion(): string {
 }
 
 /**
- * Build the configured psilink yargs parser for `argv`, up to but NOT including
+ * Build the configured Alcove yargs parser for `argv`, up to but NOT including
  * `.parseAsync()`. Kept separate from the entry point (`index.ts`) so importing
  * it has no side effect: the entry point drives it against the real process argv,
  * and tests drive it against a synthetic one to assert the strict-option / fail
@@ -78,11 +78,11 @@ function readCliVersion(): string {
 export function buildCli(argv: string[]): Argv {
   return (
     yargs(argv)
-      .scriptName("psilink")
+      .scriptName("alcove")
       .version(readCliVersion())
       .command(
         "$0",
-        "Quick exchange (no shared secret; trusts the server): psilink " +
+        "Quick exchange (no shared secret; trusts the server): Alcove " +
           "[--save] URL INPUT_FILE [OUTPUT_FILE]",
         zeroSetupBuilder,
         zeroSetupHandler,
@@ -142,7 +142,7 @@ export function buildCli(argv: string[]): Argv {
         verifyReceiptHandler,
       )
       // Registered with a builder and no handler: the builder demands one of the
-      // `probe` / `mount` subcommands, so there is no bare `psilink doctor` for a
+      // `probe` / `mount` subcommands, so there is no bare `alcove doctor` for a
       // handler to serve.
       .command(
         "doctor",

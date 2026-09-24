@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { getDefaultLinkageTerms } from "@psilink/core";
+import { getDefaultLinkageTerms } from "@alcove/core";
 
 import {
   MAX_IMPORT_CHARS,
@@ -8,7 +8,7 @@ import {
   importLinkageTerms,
 } from "../../../src/psi/linkageTermsIO.js";
 
-import type { LinkageTerms } from "@psilink/core";
+import type { LinkageTerms } from "@alcove/core";
 
 // A complete, valid terms object spanning the surface an expert can author:
 // multiple keys, a transformed element, and a swap.
@@ -28,7 +28,7 @@ describe("exportLinkageTerms", () => {
   test("emits snake_case JSON for the user-facing on-disk form", () => {
     const json = exportLinkageTerms(TERMS, "json");
     const parsed = JSON.parse(json) as Record<string, unknown>;
-    // Keys are snake_cased, matching psilink.yaml and the EXCHANGE_REFERENCE
+    // Keys are snake_cased, matching alcove.yaml and the EXCHANGE_REFERENCE
     // snippets -- not the camelCase the TypeScript uses.
     expect(parsed).toHaveProperty("linkage_fields");
     expect(parsed).toHaveProperty("linkage_keys");

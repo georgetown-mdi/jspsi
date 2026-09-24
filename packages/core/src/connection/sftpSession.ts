@@ -125,7 +125,7 @@ export class SftpSession {
    * Build the ssh2-sftp-client connect options for an sftp config, EXCEPT the
    * `hostVerifier` (the caller installs the verifier appropriate to its path:
    * enforce, fail-closed, or capture). The operator's opaque providerOptions are
-   * applied FIRST through the default-deny allowlist, then psilink's own
+   * applied FIRST through the default-deny allowlist, then Alcove's own
    * security-critical fields -- host, credentials, the managed readyTimeout --
    * are assigned AFTER and always win, so a providerOptions entry can never
    * override them even if the allowlist were loosened. Shared by the `sftp`
@@ -196,7 +196,7 @@ export class SftpSession {
    * dropped with a warning (so an operator who relied on it can see why it had no
    * effect); `algorithms` passes through with its sub-object filtered by
    * {@link filterAlgorithms}. Called before the security-critical fields are
-   * assigned, so an allowlisted key that ever collided with one of psilink's own
+   * assigned, so an allowlisted key that ever collided with one of Alcove's own
    * host/credential fields would still lose to the structured value assigned
    * afterward -- defense in depth atop the allowlist, which already excludes
    * every such field (the host-key-verification keys included).

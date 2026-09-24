@@ -106,7 +106,7 @@ export function validateStandardizationAgainstTerms(
  * Fail closed when an AUTHORED ("authoritative") standardization contradicts its
  * linkage terms -- the throwing wrapper around
  * {@link validateStandardizationAgainstTerms}, so the mint boundary
- * (`psilink invite`) and {@link prepareForExchange} refuse an inconsistent config
+ * (`alcove invite`) and {@link prepareForExchange} refuse an inconsistent config
  * with one identical, actionable error rather than each inlining the check. The
  * standardization sibling of `assertPayloadSendDisclosed`.
  *
@@ -289,7 +289,7 @@ export type TransformRefusal =
 
 /** The property {@link markTransformRefusal} sets and {@link transformRefusalIn}
  * reads. */
-const TRANSFORM_REFUSAL_TAG = "psilinkTransformRefusal";
+const TRANSFORM_REFUSAL_TAG = "alcoveTransformRefusal";
 
 // A property tag rather than a subclass, the shape markPeerWaitTimeout keeps:
 // each refusal's class already follows whose content the fault is (the

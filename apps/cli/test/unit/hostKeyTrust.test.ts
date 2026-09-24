@@ -14,9 +14,9 @@ import {
   sanitizeErrorForDisplay,
   setDiagnosticSink,
   UsageError,
-} from "@psilink/core";
-import { MAX_ENDPOINT_HOST_LENGTH } from "@psilink/core/testing";
-import type { ConnectionConfig, PresentedHostKey } from "@psilink/core";
+} from "@alcove/core";
+import { MAX_ENDPOINT_HOST_LENGTH } from "@alcove/core/testing";
+import type { ConnectionConfig, PresentedHostKey } from "@alcove/core";
 
 import {
   establishHostKeyTrust,
@@ -122,7 +122,7 @@ test("against a silent host the probe dials once, so the connect timeout bounds 
   try {
     const conn: ConnectionConfig = {
       channel: "sftp",
-      server: { host: "127.0.0.1", port, username: "psilink-test" },
+      server: { host: "127.0.0.1", port, username: "alcove-test" },
       options: {
         serverConnectTimeoutMs: STALLED_HOST_BUDGET_MS,
         maxReconnectAttempts: 3,
@@ -271,7 +271,7 @@ test("is a no-op when a list of host_key_fingerprints is already pinned", async 
     {
       verbosity: 0,
       loggerName: "accept",
-      persistence: { mode: "save-with-config", configPath: "psilink.yaml" },
+      persistence: { mode: "save-with-config", configPath: "alcove.yaml" },
     },
     deps,
   );
@@ -403,7 +403,7 @@ test("interactive confirm (save-with-config) pins in memory and writes no file",
       // not write it (the caller's saveConfig persists the mutation later).
       persistence: {
         mode: "save-with-config",
-        configPath: "/nonexistent/psilink.yaml",
+        configPath: "/nonexistent/alcove.yaml",
       },
     },
     deps,
@@ -415,9 +415,9 @@ test("interactive confirm (save-with-config) pins in memory and writes no file",
 });
 
 test("interactive confirm (write-now) pins in memory and writes the config in place", async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-hkt-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-hkt-"));
   try {
-    const configPath = path.join(dir, "psilink.yaml");
+    const configPath = path.join(dir, "alcove.yaml");
     fs.writeFileSync(
       configPath,
       "connection:\n  channel: sftp\n  server:\n    host: sftp.example.org\n",
@@ -447,9 +447,9 @@ test("declining under the config-writing mode leaves the file byte-identical", a
   // mode that writes at all -- so the claim is measured against the bytes of the
   // config a confirmation WOULD have been persisted into, not just against the
   // in-memory connection.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-hkt-declined-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-hkt-declined-"));
   try {
-    const configPath = path.join(dir, "psilink.yaml");
+    const configPath = path.join(dir, "alcove.yaml");
     const before =
       "connection:\n  channel: sftp\n  server:\n    host: sftp.example.org\n";
     fs.writeFileSync(configPath, before);
@@ -469,7 +469,7 @@ test("declining under the config-writing mode leaves the file byte-identical", a
     ).rejects.toThrow(/not trusted/);
     expect(deps.confirmCalls).toBe(1);
     expect(fs.readFileSync(configPath, "utf8")).toBe(before);
-    expect(fs.readdirSync(dir)).toEqual(["psilink.yaml"]);
+    expect(fs.readdirSync(dir)).toEqual(["alcove.yaml"]);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -520,7 +520,7 @@ test("the trust prompt names the bounded key type, never the server's bytes", as
       conn,
       {
         verbosity: -1,
-        loggerName: "psilink",
+        loggerName: "alcove",
         persistence: { mode: "ephemeral" },
       },
       deps,
@@ -551,7 +551,7 @@ test("the trust prompt names a conforming key type verbatim", async () => {
       conn,
       {
         verbosity: -1,
-        loggerName: "psilink",
+        loggerName: "alcove",
         persistence: { mode: "ephemeral" },
       },
       deps,
@@ -636,7 +636,7 @@ async function refuse(options: {
   process.stdin.isTTY = options.interactive === true;
   const error: unknown = await establishHostKeyTrust(
     connection,
-    { verbosity: -1, loggerName: "psilink", persistence: options.persistence },
+    { verbosity: -1, loggerName: "alcove", persistence: options.persistence },
     deps,
   ).then(
     () => new Error("establishHostKeyTrust resolved instead of refusing"),
@@ -653,7 +653,7 @@ async function refuse(options: {
 }
 
 const ORDINARY_HOST = "sftp.example.org";
-const ORDINARY_CONFIG_PATH = "/etc/psilink.yaml";
+const ORDINARY_CONFIG_PATH = "/etc/alcove.yaml";
 
 // The sizes the configured host arrives in. On the acceptor route it is the
 // partner's, copied verbatim from the invitation endpoint into the written
@@ -683,11 +683,7 @@ const HOSTS: Array<[string, string, boolean]> = [
 // axis: an over-long one must spend its own link and nothing else.
 const CONFIG_PATHS: Array<[string, string, boolean]> = [
   ["an ordinary config path", ORDINARY_CONFIG_PATH, false],
-  [
-    "a config path past its budget",
-    `/${"d".repeat(50_000)}/psilink.yaml`,
-    true,
-  ],
+  ["a config path past its budget", `/${"d".repeat(50_000)}/alcove.yaml`, true],
 ];
 
 // The two persistence shapes that name a config path. Both must render the same
@@ -810,7 +806,7 @@ const FLOODED_REFUSALS: Array<
       refuse({
         persistence: {
           mode: "save-with-config",
-          configPath: `/${"d".repeat(100_000)}/psilink.yaml`,
+          configPath: `/${"d".repeat(100_000)}/alcove.yaml`,
         },
         host: "h".repeat(100_000),
       }),
@@ -918,7 +914,7 @@ test("a sliced key in the config path is redacted on the config path's own link"
   const { rendered, links } = await refuse({
     persistence: {
       mode: "write-now",
-      configPath: `/etc/${PEM_MARKER}${KEY_BODY}/psilink.yaml`,
+      configPath: `/etc/${PEM_MARKER}${KEY_BODY}/alcove.yaml`,
     },
     host: ORDINARY_HOST,
   });
@@ -1013,7 +1009,7 @@ test("a marker in the configured host cannot delete the verify step or the promp
 });
 
 test("a marker in the config path cannot delete the pin line's assurance", async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-hkt-redact-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-hkt-redact-"));
   try {
     const configPath = path.join(dir, `${PEM_MARKER}.yaml`);
     fs.writeFileSync(

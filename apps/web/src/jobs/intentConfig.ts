@@ -5,7 +5,7 @@ import {
   deriveOutboundPayloadConsent,
   mintExchangeSpec,
   snakeizeKeys,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { composedSigning } from "./intentSchemas";
 
@@ -14,7 +14,7 @@ import type {
   ExchangeSpec,
   FileSyncOptions,
   OutboundPayloadConsent,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import type { JobSftpServerEntry } from "./sftpServer";
 

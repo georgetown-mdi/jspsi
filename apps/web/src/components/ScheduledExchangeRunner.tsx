@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 
-import { getLogger } from "@psilink/core";
+import { getLogger } from "@alcove/core";
 
 import { isConsoleBuild as consoleBuild } from "@utils/clientConfig";
 import { isInstalledRuntime as installedRuntime } from "@utils/installedRuntime";

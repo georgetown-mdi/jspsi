@@ -2,7 +2,7 @@
 
 import { describe, expect, test } from "vitest";
 
-import { loadCSVFile } from "@psilink/core";
+import { loadCSVFile } from "@alcove/core";
 
 import {
   CSV_WORKER_FILE_BYTE_THRESHOLD,

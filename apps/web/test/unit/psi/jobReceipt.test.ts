@@ -40,7 +40,7 @@ describe("fetchJobReceiptOffer", () => {
     ).resolves.toEqual({
       kind: "available",
       receiptUrl: "/api/jobs/job-1/receipt",
-      receiptFileName: `psilink-receipt-${RECORD_STAMP}.json`,
+      receiptFileName: `alcove-receipt-${RECORD_STAMP}.json`,
     });
   });
 
@@ -57,7 +57,7 @@ describe("fetchJobReceiptOffer", () => {
     ).resolves.toEqual({
       kind: "available",
       receiptUrl: "/api/jobs/job-1/receipt",
-      receiptFileName: "psilink-receipt-job-1.json",
+      receiptFileName: "alcove-receipt-job-1.json",
     });
   });
 
@@ -120,7 +120,7 @@ describe("fetchJobReceiptOffer", () => {
         recordCreatedAt: CREATED_AT,
       }),
     ).resolves.toMatchObject({
-      receiptFileName: "psilink-receipt-job-1.json",
+      receiptFileName: "alcove-receipt-job-1.json",
     });
   });
 });
@@ -185,7 +185,7 @@ describe("the receipt ask's bound on a console that stops answering", () => {
     ).resolves.toEqual({
       kind: "available",
       receiptUrl: "/api/jobs/job-1/receipt",
-      receiptFileName: "psilink-receipt-job-1.json",
+      receiptFileName: "alcove-receipt-job-1.json",
     });
 
     expect(asks()).toBe(2);

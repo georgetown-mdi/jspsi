@@ -1,7 +1,7 @@
 import {
   WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
   sanitizeForDisplay,
-} from "@psilink/core";
+} from "@alcove/core";
 
 /**
  * Fold one driver `onWarning` message into a seat's accumulated run warnings.

@@ -8,7 +8,7 @@ import {
   authoredLinkageFields,
   disclosedColumnNames,
   sanitizeForDisplay,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { isolatedColumnName } from "@components/ColumnName";
 
@@ -32,7 +32,7 @@ import type {
   AdvancedValidation,
 } from "./authoring/advancedInvite";
 
-import type { LinkageField } from "@psilink/core";
+import type { LinkageField } from "@alcove/core";
 
 import type { FieldValueCoverage } from "./workers/nonEmptyAggregate";
 

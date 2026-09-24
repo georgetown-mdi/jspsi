@@ -4,7 +4,7 @@ import {
   ConnectionError,
   MAX_WEBRTC_FRAME_BYTES,
   MAX_WEBRTC_STRING_BYTES,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { MAX_CSV_FILE_BYTES } from "@components/csvIntake";
 

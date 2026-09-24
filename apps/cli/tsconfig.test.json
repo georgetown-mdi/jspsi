@@ -4,7 +4,7 @@
   // declaration graph consumers depend on), which means nothing typechecks
   // test/ -- the bundler emits, and vitest transpiles with esbuild without type
   // checking. This config closes that gap: `tsc -p tsconfig.test.json` checks
-  // src + test together with no emit. (`@psilink/core` resolves via node_modules
+  // src + test together with no emit. (`@alcove/core` resolves via node_modules
   // like it does at test runtime, so build core first.)
   "extends": "./tsconfig.json",
   "compilerOptions": {

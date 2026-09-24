@@ -3,7 +3,7 @@ import {
   MAX_WEBRTC_FRAME_BYTES,
   QueuedMessageConnection,
   asConnectionError,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   assertChunkReassemblySupported,
@@ -19,7 +19,7 @@ import { waitForConnectionOpen } from "./waitForOpen";
 import { waitForPeerClose } from "./waitForPeerClose";
 
 import type { DataConnection } from "peerjs";
-import type { MessageConnection } from "@psilink/core";
+import type { MessageConnection } from "@alcove/core";
 import type { PeerCloseOutcome } from "./waitForPeerClose";
 
 /**

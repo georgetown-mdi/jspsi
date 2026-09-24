@@ -6,7 +6,7 @@ import type { Arguments } from "yargs";
 import {
   computeCertificateFingerprint,
   generateSigningIdentity,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { handler as inviteHandler } from "../../../src/commands/invite";
 import { handler as initHandler } from "../../../src/commands/init";
@@ -70,7 +70,7 @@ async function runCapturing(
 }
 
 test("offline invite: stdout is the invitation token only, diagnostics on stderr", async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-stdout-invite-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-stdout-invite-"));
   try {
     const input = path.join(dir, "in.csv");
     fs.writeFileSync(
@@ -80,10 +80,10 @@ test("offline invite: stdout is the invitation token only, diagnostics on stderr
     const { stdout, stderr } = await runCapturing(() =>
       inviteHandler({
         _: [],
-        $0: "psilink",
+        $0: "alcove",
         args: [input],
-        "config-file": path.join(dir, "psilink.yaml"),
-        "key-file": path.join(dir, ".psilink.key"),
+        "config-file": path.join(dir, "alcove.yaml"),
+        "key-file": path.join(dir, ".alcove.key"),
         identity: "Tester",
         "log-level": "info",
         record: false,
@@ -109,13 +109,13 @@ test("offline invite: stdout is the invitation token only, diagnostics on stderr
 });
 
 test("init: stdout is empty (its result is the written file), diagnostics on stderr", async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-stdout-init-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-stdout-init-"));
   try {
-    const configFile = path.join(dir, "psilink.yaml");
+    const configFile = path.join(dir, "alcove.yaml");
     const { stdout, stderr } = await runCapturing(() =>
       initHandler({
         _: [],
-        $0: "psilink",
+        $0: "alcove",
         "config-file": configFile,
       } as unknown as Arguments),
     );
@@ -132,15 +132,15 @@ test("init: stdout is empty (its result is the written file), diagnostics on std
 });
 
 test("fingerprint (created): stdout is the bare fingerprint value, diagnostics on stderr", async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-stdout-fp-new-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-stdout-fp-new-"));
   const cwd = process.cwd();
   try {
-    process.chdir(dir); // hermetic: no ambient ./psilink.yaml is consulted
+    process.chdir(dir); // hermetic: no ambient ./alcove.yaml is consulted
     const idPath = path.join(dir, "id.json");
     const { stdout, stderr } = await runCapturing(() =>
       fingerprintHandler({
         _: [],
-        $0: "psilink",
+        $0: "alcove",
         "identity-file": idPath,
         identity: "Party A, Agency A",
         "log-level": "info",
@@ -178,10 +178,10 @@ test("fingerprint (created): stdout is the bare fingerprint value, diagnostics o
 });
 
 test("fingerprint (loaded): stdout is the bare fingerprint value, diagnostics on stderr", async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-stdout-fp-load-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-stdout-fp-load-"));
   const cwd = process.cwd();
   try {
-    process.chdir(dir); // hermetic: no ambient ./psilink.yaml is consulted
+    process.chdir(dir); // hermetic: no ambient ./alcove.yaml is consulted
     const idPath = path.join(dir, "id.json");
     // Seed an existing identity so a plain (no --force) run loads it (Loaded)
     // rather than creating or regenerating; report() runs the same on this path,
@@ -191,7 +191,7 @@ test("fingerprint (loaded): stdout is the bare fingerprint value, diagnostics on
     const { stdout, stderr } = await runCapturing(() =>
       fingerprintHandler({
         _: [],
-        $0: "psilink",
+        $0: "alcove",
         "identity-file": idPath,
         "log-level": "info",
         force: false,
@@ -222,12 +222,10 @@ test("fingerprint (loaded): stdout is the bare fingerprint value, diagnostics on
 });
 
 test("fingerprint (regenerated): stdout is the new bare fingerprint value, the --force warning on stderr", async () => {
-  const dir = fs.mkdtempSync(
-    path.join(os.tmpdir(), "psilink-stdout-fp-regen-"),
-  );
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-stdout-fp-regen-"));
   const cwd = process.cwd();
   try {
-    process.chdir(dir); // hermetic: no ambient ./psilink.yaml is consulted
+    process.chdir(dir); // hermetic: no ambient ./alcove.yaml is consulted
     const idPath = path.join(dir, "id.json");
     // Seed an existing identity so the --force run re-keys it (Regenerated).
     saveSigningIdentity(idPath, await generateSigningIdentity("Party A"));
@@ -235,7 +233,7 @@ test("fingerprint (regenerated): stdout is the new bare fingerprint value, the -
     const { stdout, stderr } = await runCapturing(() =>
       fingerprintHandler({
         _: [],
-        $0: "psilink",
+        $0: "alcove",
         "identity-file": idPath,
         "log-level": "info",
         force: true,
@@ -267,13 +265,13 @@ test("fingerprint (regenerated): stdout is the new bare fingerprint value, the -
 });
 
 test("doctor mount --json: stdout is the verdict line only, check lines on stderr", async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-stdout-doctor-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-stdout-doctor-"));
   const previousExitCode = process.exitCode;
   try {
     const { stdout, stderr } = await runCapturing(() =>
       doctorMountHandler({
         _: [],
-        $0: "psilink",
+        $0: "alcove",
         directory: dir,
         json: true,
         "log-level": "info",
@@ -295,15 +293,13 @@ test("doctor mount --json: stdout is the verdict line only, check lines on stder
 });
 
 test("doctor mount without --json: stdout is empty, the check lines go to stderr", async () => {
-  const dir = fs.mkdtempSync(
-    path.join(os.tmpdir(), "psilink-stdout-doctor-h-"),
-  );
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-stdout-doctor-h-"));
   const previousExitCode = process.exitCode;
   try {
     const { stdout, stderr } = await runCapturing(() =>
       doctorMountHandler({
         _: [],
-        $0: "psilink",
+        $0: "alcove",
         directory: dir,
         json: false,
         "log-level": "info",

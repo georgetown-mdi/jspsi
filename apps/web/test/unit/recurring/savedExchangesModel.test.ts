@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { generateSharedSecret, getDefaultLinkageTerms } from "@psilink/core";
+import { generateSharedSecret, getDefaultLinkageTerms } from "@alcove/core";
 
 import {
   MANAGED_EXCHANGE_SCHEMA_VERSION,
@@ -478,7 +478,7 @@ describe("a configuration-only row", () => {
 
     expect(row.configurationOnly).toBe(true);
     expect(row.status).toBe(
-      "Configuration only - edit it here, run it with psilink",
+      "Configuration only - edit it here, run it with Alcove",
     );
   });
 
@@ -512,7 +512,7 @@ describe("a configuration-only row", () => {
     expect(row.configurationOnly).toBe(true);
     expect(row.sideLabel).toBe("Shared-folder exchange");
     expect(row.status).toBe(
-      "Configuration only - this app cannot run it, run it with psilink",
+      "Configuration only - this app cannot run it, run it with Alcove",
     );
   });
 });

@@ -4,7 +4,7 @@
 // checkout's scratch/, when the PR branch has more than one commit over its
 // base.
 //
-// Why this exists: psilink merges pull requests with squash-and-merge, so GitHub
+// Why this exists: Alcove merges pull requests with squash-and-merge, so GitHub
 // folds every commit on the branch into one commit whose default message is the PR
 // title plus a bullet list of commit subjects, not a coherent hand-written summary.
 // A maintainer squash-merging a multi-commit PR is better served by a ready-to-paste

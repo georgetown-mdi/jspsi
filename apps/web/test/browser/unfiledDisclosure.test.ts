@@ -13,7 +13,7 @@ import {
   generateSharedSecret,
   getDefaultLinkageTerms,
   getLogger,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   MANAGED_EXCHANGE_DISCLOSURE_STORE_NAME,
@@ -45,7 +45,7 @@ import {
   neighbouringRecordVersion,
 } from "../utils/disclosureFixtures";
 
-import type { ExchangeRecord } from "@psilink/core";
+import type { ExchangeRecord } from "@alcove/core";
 import type { NewManagedExchange } from "@psi/managed/managedExchangeRecord";
 
 /**

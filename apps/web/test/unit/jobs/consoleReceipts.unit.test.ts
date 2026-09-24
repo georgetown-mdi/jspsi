@@ -12,7 +12,7 @@ import {
   generateSigningIdentity,
   safeParseExchangeSpec,
   serializeSigningIdentity,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   FIRST_CONTACT_PIN_ADVISORY,
@@ -90,7 +90,7 @@ import {
   validZeroSetupIntent,
 } from "../../utils/jobFixtures";
 
-import type { CertificateBody, LinkageTerms } from "@psilink/core";
+import type { CertificateBody, LinkageTerms } from "@alcove/core";
 import type { JobRendezvousConfig } from "@psi/jobClient/workInputClient";
 import type { JobSigningPaths } from "@jobs/intentSchemas";
 import type { ReceiptsDraft } from "@psi/receiptsModel";
@@ -115,8 +115,8 @@ const RETENTION_NOTE =
  * match), so the advisory states the refusal in force there. */
 const SHARED_RENDEZVOUS: JobRendezvousConfig = {
   configured: true,
-  locator: "psilink",
-  folderName: "psilink",
+  locator: "alcove",
+  folderName: "alcove",
   sharesDataRoot: true,
   sharesDataRootUncertain: false,
 };
@@ -151,7 +151,7 @@ function scratchDir(): string {
 }
 
 const signingPaths = (workdir = "/srv/job"): JobSigningPaths => ({
-  identityFile: "/data/.psilink-signing-identity.json",
+  identityFile: "/data/.alcove-signing-identity.json",
   receiptOutput: path.join(workdir, "receipt.json"),
 });
 
@@ -303,8 +303,8 @@ describe("the intent boundary admits only a mode an exchange honors", () => {
 
   test("no path field is representable on the signing block", () => {
     for (const smuggled of [
-      { mode: "certificate", identityFile: "/etc/psilink/identity.json" },
-      { mode: "certificate", identity_file: "/etc/psilink/identity.json" },
+      { mode: "certificate", identityFile: "/etc/alcove/identity.json" },
+      { mode: "certificate", identity_file: "/etc/alcove/identity.json" },
       { mode: "certificate", receiptOutput: "/tmp/receipt.json" },
     ]) {
       const parsed = jobExchangeIntentSchema.safeParse({
@@ -412,7 +412,7 @@ describe("the composed signing block, per mode", () => {
     );
     expect(composed["signing"]).toEqual({
       mode: "certificate",
-      identity_file: "/data/.psilink-signing-identity.json",
+      identity_file: "/data/.alcove-signing-identity.json",
       partner_fingerprint: PARTNER_FINGERPRINT,
       receipt_output: "/srv/job-a/receipt.json",
     });
@@ -433,7 +433,7 @@ describe("the composed signing block, per mode", () => {
     );
     expect(composed["signing"]).toEqual({
       mode: "certificate",
-      identity_file: "/data/.psilink-signing-identity.json",
+      identity_file: "/data/.alcove-signing-identity.json",
       partner_fingerprint: PARTNER_FINGERPRINT,
       receipt_output: "/srv/job-b/receipt.json",
     });
@@ -677,16 +677,16 @@ describe("the fingerprint driver", () => {
   test("never emits --force, and states every value as a single =token", () => {
     const argv = fingerprintArgv({
       binaryPath: "/cli/index.js",
-      identityPath: "/data/.psilink-signing-identity.json",
+      identityPath: "/data/.alcove-signing-identity.json",
       identityLabel: "-Agency A, contact@example.org",
-      exportPath: "/data/psilink-certificate.json",
+      exportPath: "/data/alcove-certificate.json",
     });
     expect(argv).toEqual([
       "/cli/index.js",
       "fingerprint",
-      "--identity-file=/data/.psilink-signing-identity.json",
+      "--identity-file=/data/.alcove-signing-identity.json",
       "--identity=-Agency A, contact@example.org",
-      "--export-certificate=/data/psilink-certificate.json",
+      "--export-certificate=/data/alcove-certificate.json",
     ]);
     expect(argv).not.toContain("--force");
     // No config file is named, so which document the child could read for hints
@@ -711,7 +711,7 @@ describe("the fingerprint driver", () => {
     expect(parseFingerprintStdout("  not a fingerprint  ")).toBeUndefined();
     expect(parseFingerprintStdout("")).toBeUndefined();
     // A non-canonical final character decodes to the same digest but is not the
-    // value psilink prints, so it is refused rather than shown to share.
+    // value Alcove prints, so it is refused rather than shown to share.
     expect(parseFingerprintStdout("D".repeat(43))).toBeUndefined();
   });
 
@@ -798,8 +798,8 @@ describe("the fingerprint driver", () => {
     expect(fs.existsSync(signingCertificatePath(root))).toBe(true);
   });
 
-  test("runs the child in the mount, so the server's own psilink.yaml is out of reach", async () => {
-    // With --config-file omitted the CLI resolves its default ./psilink.yaml
+  test("runs the child in the mount, so the server's own alcove.yaml is out of reach", async () => {
+    // With --config-file omitted the CLI resolves its default ./alcove.yaml
     // against the CHILD's working directory, and a malformed one is the exit 64
     // this endpoint reports as a condition in the operator's folder. What keeps a
     // document the operator never mounted out of that decision is the explicit
@@ -807,7 +807,7 @@ describe("the fingerprint driver", () => {
     const root = scratchDir();
     const serverCwd = scratchDir();
     fs.writeFileSync(
-      path.join(serverCwd, "psilink.yaml"),
+      path.join(serverCwd, "alcove.yaml"),
       "signing: [ unclosed",
     );
     const cwdFile = path.join(root, "child-cwd.txt");
@@ -1244,7 +1244,7 @@ describe("the receipts card's model", () => {
     // leave a first contact looking like a dead end rather than a step with a
     // follow-up.
     expect(FIRST_CONTACT_PIN_ADVISORY).toMatch(/reports the fingerprint/);
-    expect(FIRST_CONTACT_PIN_ADVISORY).toMatch(/psilink fingerprint/);
+    expect(FIRST_CONTACT_PIN_ADVISORY).toMatch(/alcove fingerprint/);
   });
 
   test("signing states where both durable files land, before the run", () => {
@@ -1391,7 +1391,7 @@ describe("the receipts card's model", () => {
       undefined,
       { configured: false },
       { configured: false, sharesDataRoot: false },
-      { configured: true, locator: "psilink" },
+      { configured: true, locator: "alcove" },
     ])
       expect(receiptsAdvisories(pinned, rendezvous)).toContainEqual({
         message: IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY,
@@ -1543,7 +1543,7 @@ describe("the receipts card's model", () => {
     expect(IDENTITY_SHARED_MOUNT_REFUSAL_ADVISORY).toMatch(/secrets folder/);
     expect(IDENTITY_AT_REST_NOTICE).toMatch(/secrets folder/);
     expect(IDENTITY_PICKED_LOCATION_NOTICE).toMatch(/creates no key there/);
-    expect(IDENTITY_PICKED_LOCATION_NOTICE).toMatch(/psilink fingerprint/);
+    expect(IDENTITY_PICKED_LOCATION_NOTICE).toMatch(/alcove fingerprint/);
     expect(IDENTITY_PICKED_LOCATION_NOTICE).toMatch(/your partner syncs/);
   });
 
@@ -1651,7 +1651,7 @@ describe("the signing identity's bound name against the agreed terms", () => {
     // key invalidates every fingerprint a partner has pinned.
     expect(statement).toMatch(/this run is refused before it connects/);
     expect(statement).toMatch(/set 'Your name' for this exchange/);
-    expect(statement).toMatch(/psilink fingerprint --force --identity/);
+    expect(statement).toMatch(/alcove fingerprint --force --identity/);
     expect(statement).toMatch(/new fingerprint/);
     // The console's own words, not the configuration keys the CLI states them in.
     expect(statement).not.toContain("linkage_terms.identity");

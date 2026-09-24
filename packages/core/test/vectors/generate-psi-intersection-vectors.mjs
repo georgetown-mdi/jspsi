@@ -1,6 +1,6 @@
 // Regenerates psi-intersection-vectors.json: the resolved intersection-and-
 // association known-answer vectors for the vendored @openmined/psi.js engine as
-// psilink drives it. Run from the repo root:
+// Alcove drives it. Run from the repo root:
 //
 //   npm run build -w packages/core   # the generator imports the built dist below
 //   node packages/core/test/vectors/generate-psi-intersection-vectors.mjs
@@ -8,9 +8,9 @@
 //
 // Purpose: hold in one explicit, portable fixture the intersection membership and
 // the association/permutation mapping back to original input rows for every
-// scenario psilink's matching cascade has to get right -- the empty-round and
+// scenario Alcove's matching cascade has to get right -- the empty-round and
 // empty-key scenarios pinned nowhere else, plus the projections
-// psiParticipant.test.ts, psiLink.test.ts, and psiLinkForLinkageKeys.test.ts
+// psiParticipant.test.ts, link.test.ts, and linkForLinkageKeys.test.ts
 // exercise from the API side. A fork re-roll or an accidental engine swap that
 // silently permutes or corrupts the association mapping flips these projections
 // and fails psiIntersectionVectors.test.ts deterministically in CI (no network,
@@ -152,7 +152,7 @@ async function runLink(cardinality, starterKeys, joinerKeys) {
   ];
 }
 
-// -- Multi-key standardized scenario (psiLinkForLinkageKeys.test.ts) ------------
+// -- Multi-key standardized scenario (linkForLinkageKeys.test.ts) ------------
 // The engine sees per-round KEY STRINGS, not raw rows; the raw-row ->
 // key-string mapping is the standardization layer's concern, covered by its own
 // tests. So the generator runs the standardization pipeline once to derive the
@@ -302,7 +302,7 @@ const scenarios = [
     description:
       "linkViaPSI one-to-one, two key rounds: a name round then a value round " +
       "where within-round uniqueness among the survivors drives the second " +
-      "match. Source: psiLink.test.ts ('results are correct').",
+      "match. Source: link.test.ts ('results are correct').",
     method: "linkViaPSI",
     cardinality: "one-to-one",
     starterKeys: [
@@ -320,7 +320,7 @@ const scenarios = [
       "linkViaPSI one-to-one where a value duplicated across the whole dataset " +
       "('Z','Z') becomes matchable once an earlier key claims its twin -- " +
       "uniqueness is evaluated over the round's survivors, not the full dataset. " +
-      "Source: psiLink.test.ts ('single-pass reproduces the cascade's " +
+      "Source: link.test.ts ('single-pass reproduces the cascade's " +
       "survivor-relative uniqueness'), whose cascade branch pins this projection.",
     method: "linkViaPSI",
     cardinality: "one-to-one",
@@ -341,7 +341,7 @@ const scenarios = [
       "2 carry forward and match on key 2, and key 1 having consumed a shared-SSN " +
       "record forces row 2's match into key 2. The engine inputs are the per-row " +
       "key strings the standardization pipeline derives from the source rows " +
-      "(baked here for portability). Source: psiLinkForLinkageKeys.test.ts.",
+      "(baked here for portability). Source: linkForLinkageKeys.test.ts.",
     method: "linkViaPSI",
     cardinality: "one-to-one",
     starterKeys: multiKeyStarterKeys,
@@ -531,7 +531,7 @@ if (JSON.stringify(bakedProjection) !== JSON.stringify(liveProjection)) {
   throw new Error(
     "baked multi-key key strings diverge from the live StandardizedKeyIterable " +
       "projection; the fixture would not faithfully reproduce " +
-      "psiLinkForLinkageKeys.test.ts.",
+      "linkForLinkageKeys.test.ts.",
   );
 }
 
@@ -555,13 +555,13 @@ for (const scenario of scenarios) {
 const doc = {
   description:
     "Resolved intersection-and-association known-answer vectors for the vendored " +
-    "@openmined/psi.js engine as psilink drives it. Each scenario fixes the " +
+    "@openmined/psi.js engine as Alcove drives it. Each scenario fixes the " +
     "engine inputs and pins both the intersection membership and the " +
     "association/permutation mapping back to original input rows, normalized by " +
-    "sorting on the local index. They hold every scenario psilink's matching " +
+    "sorting on the local index. They hold every scenario Alcove's matching " +
     "cascade has to get right -- the empty-round and empty-key scenarios pinned " +
-    "nowhere else, plus the projections psiParticipant.test.ts, psiLink.test.ts, " +
-    "and psiLinkForLinkageKeys.test.ts exercise from the API side -- in one " +
+    "nowhere else, plus the projections psiParticipant.test.ts, link.test.ts, " +
+    "and linkForLinkageKeys.test.ts exercise from the API side -- in one " +
     "portable fork-bump acceptance gate: a fork re-roll or an accidental engine " +
     "swap that permutes or corrupts the association mapping fails " +
     "psiIntersectionVectors.test.ts deterministically. " +

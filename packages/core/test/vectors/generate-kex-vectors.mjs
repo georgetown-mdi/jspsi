@@ -1,6 +1,6 @@
 // Independent generator for test/vectors/kex-vectors.json.
 //
-// Reimplements the psilink-kex-v2 key schedule from scratch using Node's
+// Reimplements the alcove-kex-v3 key schedule from scratch using Node's
 // OpenSSL-backed `crypto` (createHash/createHmac/hkdfSync/createECDH) -- a
 // different code path from the module under test, which uses WebCrypto
 // (crypto.subtle). kex.test.ts asserts computeKexKeys reproduces these
@@ -26,11 +26,11 @@
 
 import { createECDH, createHash, createHmac, hkdfSync } from "node:crypto";
 
-const PROTOCOL_NAME = "psilink-kex-v2:NNpsk0_P256_SHA256";
-const SESSION_LABEL = "psilink-kex-v1:session";
-const CONFIRM_KEY_LABEL = "psilink-kex-v1:confirm";
-const INITIATOR_CONFIRM_LABEL = "psilink-kex-v1:initiator-confirm";
-const RESPONDER_CONFIRM_LABEL = "psilink-kex-v1:responder-confirm";
+const PROTOCOL_NAME = "alcove-kex-v3:NNpsk0_P256_SHA256";
+const SESSION_LABEL = "alcove-kex-v2:session";
+const CONFIRM_KEY_LABEL = "alcove-kex-v2:confirm";
+const INITIATOR_CONFIRM_LABEL = "alcove-kex-v2:initiator-confirm";
+const RESPONDER_CONFIRM_LABEL = "alcove-kex-v2:responder-confirm";
 
 // The pinned wire encoding: SEC1 uncompressed, 0x04 || X || Y.
 const CURVE = "prime256v1";
@@ -227,7 +227,7 @@ const cases = computed.map(({ c, k }) => ({
 
 const vector = {
   description:
-    "Known-answer vectors for the psilink-kex-v2 P-256 authenticated key " +
+    "Known-answer vectors for the alcove-kex-v3 P-256 authenticated key " +
     "exchange (Noise NNpsk0 over P-256 ECDH + explicit role-asymmetric key " +
     "confirmation + a per-party request-encryption flag bound into the " +
     "transcript). Fixes the pre-shared secret and both ephemeral P-256 private " +

@@ -54,7 +54,7 @@ jobs:
           # is promoted to main slowly, so checking out main here would catch a
           # regression late. staging is the branch this nightly exists to watch.
           ref: staging
-      # Pins Node, installs from the lockfile, and builds @psilink/core so the
+      # Pins Node, installs from the lockfile, and builds @alcove/core so the
       # stress tests run against the compiled fork in dist/.
       - uses: ./.github/actions/setup
       - name: Stress tests (core PSI)

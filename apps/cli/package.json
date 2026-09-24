@@ -1,9 +1,9 @@
 {
-  "name": "psilink",
+  "name": "alcove",
   "version": "0.1.0",
   "private": true,
   "bin": {
-    "psilink": "./dist/index.js"
+    "alcove": "./dist/index.js"
   },
   "scripts": {
     "build": "rollup -c rollup.config.ts --configPlugin \"@rollup/plugin-typescript={outputToFilesystem:true}\"",
@@ -18,7 +18,7 @@
   },
   "dependencies": {
     "@openmined/psi.js": "file:../../lib/openmined-psi.js-2.0.6-seclink.3.tgz",
-    "@psilink/core": "file:../../packages/core",
+    "@alcove/core": "file:../../packages/core",
     "loglevel": "^1.9.2",
     "peerjs-js-binarypack": "2.1.0",
     "ssh2": "1.17.0",
@@ -30,7 +30,7 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@psilink/testkit": "file:../../packages/testkit",
+    "@alcove/testkit": "file:../../packages/testkit",
     "@rollup/plugin-commonjs": "^29.0.3",
     "@rollup/plugin-json": "^6.1.0",
     "@rollup/plugin-node-resolve": "^16.0.1",

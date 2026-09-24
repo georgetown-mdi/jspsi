@@ -1,7 +1,7 @@
 import {
   safeParseFileSyncOptions,
   withRetainModeImplications,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { PEER_ID_SHAPE_MESSAGE, isAdmissiblePeerId } from "@jobs/intentSchemas";
 
@@ -126,7 +126,7 @@ export interface ExchangeFilesCapabilities {
   unexpectedFiles: boolean;
 }
 
-/** The capabilities of a flow that composes a `psilink.yaml` (the invitation
+/** The capabilities of a flow that composes an `alcove.yaml` (the invitation
  * flows): every control the card offers reaches the run as a configuration key. */
 export const CONFIG_EXCHANGE_FILES: ExchangeFilesCapabilities = {
   unexpectedFiles: true,

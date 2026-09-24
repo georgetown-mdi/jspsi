@@ -91,7 +91,7 @@ async function rejection(call: Promise<unknown>): Promise<Error | undefined> {
 }
 
 // The same inputs and known-correct result as the in-process cascade in
-// psiLink.test.ts; a worker-backed exchange must reproduce them exactly.
+// link.test.ts; a worker-backed exchange must reproduce them exactly.
 const serverData = [
   ["Alice", "Bob", "Carol", "David", "Elizabeth", "Frank", "Greta"],
   ["1", "2", "1", "1", "1", "1", "1"],

@@ -1,4 +1,4 @@
-# coturn configuration for the psilink standing relay.
+# coturn configuration for the Alcove standing relay.
 #
 # render-config.sh substitutes every value written between double underscores
 # below and writes the result at mode 600, because the rendered file can hold the
@@ -71,7 +71,7 @@ no-multicast-peers
 
 # What a leaked credential is worth. The credential expires in an hour, so these
 # bound the damage inside that hour: concurrent allocations per user and in
-# total, and the per-session rate. A psilink exchange is tens of kilobytes over
+# total, and the per-session rate. An Alcove exchange is tens of kilobytes over
 # seconds, so these sit far above one exchange and far below a useful open relay.
 user-quota=__USER_QUOTA__
 total-quota=__TOTAL_QUOTA__

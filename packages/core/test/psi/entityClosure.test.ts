@@ -15,7 +15,7 @@ import type { AssociationTable } from "../../src/types";
 // it, and the check that holds its result to the round-diagonal shape the
 // both-sided cardinality actually produces (docs/spec/PROTOCOL.md, The
 // many-to-many entity closure). The runs that drive it through linkViaPSI are
-// in psiLinkManyToMany.test.ts; here the tables are hand-built so the check
+// in linkManyToMany.test.ts; here the tables are hand-built so the check
 // can be shown to REFUSE shapes no real run produces.
 
 describe("entityClusters", () => {

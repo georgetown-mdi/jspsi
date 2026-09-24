@@ -16,7 +16,7 @@ import {
   describeEntityClusters,
   describeResolvedMatching,
   replaceControlCharactersForDisplay,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { dateTimeLabel } from "@psi/formatting";
 import styles from "@styles/app.module.css";
@@ -366,7 +366,7 @@ function WithheldResultInset() {
  * The trust-contingent caveat attached to a count this party did not
  * compute, stated where the number is read: only one party runs the
  * count-only round, and the other's copy travels back as that party's word
- * over a leg psilink does not check against a run of its own. The seat that
+ * over a leg Alcove does not check against a run of its own. The seat that
  * computed its own count gets no such line, since the count-only mode is
  * enforced for it there.
  *
@@ -376,7 +376,7 @@ function WithheldResultInset() {
  * @internal
  */
 const REPORTED_COUNT_CAVEAT =
-  "Your partner ran the match and sent you this number. psilink does not " +
+  "Your partner ran the match and sent you this number. Alcove does not " +
   "check a count it is sent against a run of its own, so the figure is your " +
   "partner's word for it.";
 

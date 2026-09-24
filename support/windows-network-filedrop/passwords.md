@@ -35,7 +35,7 @@ The main places it ends up:
   EDR agent). That is a wider boundary than "Docker on this PC" -- the password
   may leave the machine and be retained by people you will never speak to.
 - **In the volume metadata, in cleartext.** `docker volume inspect
-  psilink-sync` shows it to anyone who can run Docker here.
+  alcove-sync` shows it to anyone who can run Docker here.
 - **On the screen you were typing at,** if you used the Command Prompt version,
   which cannot hide typing. It stays in the window's scrollback until you run
   `cls` or close it -- which matters most when you copy the run out of that
@@ -49,7 +49,7 @@ The main places it ends up:
   which backup and imaging software copies whole. This is the one copy that can
   leave your PC without anyone touching Docker.
 
-None of that is introduced by psilink; it is how Docker CIFS volumes work, and
+None of that is introduced by Alcove; it is how Docker CIFS volumes work, and
 a password that has been in a process's memory on a Windows PC cannot be
 reliably erased afterwards. What you control is which account you use.
 

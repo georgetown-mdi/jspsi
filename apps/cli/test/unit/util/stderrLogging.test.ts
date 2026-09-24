@@ -5,7 +5,7 @@ import {
   getLogger,
   setDiagnosticSink,
   type DiagnosticSink,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { configureStderrLogging } from "../../../src/util/logging";
 import { captureStdio } from "../../loggingTestSupport";

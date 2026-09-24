@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
-import type { ExchangeSpec, LinkageTerms } from "@psilink/core";
+import type { ExchangeSpec, LinkageTerms } from "@alcove/core";
 
 import { saveConfig } from "../../src/config";
 
@@ -79,7 +79,7 @@ const specs: Record<string, ExchangeSpec> = {
 let dir: string;
 
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-written-config-"));
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-written-config-"));
 });
 
 afterEach(() => {
@@ -88,7 +88,7 @@ afterEach(() => {
 
 for (const [channel, spec] of Object.entries(specs)) {
   test(`saveConfig writes the pinned document for a ${channel} exchange`, () => {
-    const configPath = path.join(dir, "psilink.yaml");
+    const configPath = path.join(dir, "alcove.yaml");
     saveConfig(configPath, spec);
     expect(fs.readFileSync(configPath, "utf8")).toBe(
       fs.readFileSync(path.join(FIXTURES, `${channel}.yaml`), "utf8"),

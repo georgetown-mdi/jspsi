@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { default as EventEmitter } from "eventemitter3";
 
-import { ConnectionError, generateSharedSecret } from "@psilink/core";
+import { ConnectionError, generateSharedSecret } from "@alcove/core";
 
 import {
   MAX_RECORDED_ICE_ERRORS,

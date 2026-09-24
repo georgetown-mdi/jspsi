@@ -7,7 +7,7 @@ import {
   deriveAcceptedLinkageTerms,
   getLogger,
   loadPsiBackend,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   createFetchJobApiClient,
@@ -51,7 +51,7 @@ import type {
   ExchangeErrorCategory,
   GenerateOutput,
 } from "@psi/exchangeLifecycle";
-import type { CSVRow, InvitationToken } from "@psilink/core";
+import type { CSVRow, InvitationToken } from "@alcove/core";
 import type {
   JobInputSource,
   JobRunStatus,
@@ -185,7 +185,7 @@ export function acceptorServerJobConfig({
     // The terms-side enforcement, mirrored from the invitation's declared
     // `deduplicate` for the INVITER's own side exactly as the browser accept path
     // does (prepareAcceptorExchange -> prepared.expectedPartnerDeduplicate). The
-    // console runs this config through `psilink exchange` at a separate
+    // console runs this config through `alcove exchange` at a separate
     // invocation, so a binding held only in the browser's memory would bind
     // nothing there; including it makes the CLI refuse an inviter presenting a
     // value this acceptance did not consent to. Read off the token's own terms,

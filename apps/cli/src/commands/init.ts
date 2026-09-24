@@ -9,8 +9,8 @@ import {
   operatorSuppliedText,
   redactAndRenderOperatorSuppliedText,
   UsageError,
-} from "@psilink/core";
-import type { BuiltInLinkageRuleSet } from "@psilink/core";
+} from "@alcove/core";
+import type { BuiltInLinkageRuleSet } from "@alcove/core";
 
 import { DEFAULT_CONFIG_PATH } from "../config";
 import {
@@ -64,7 +64,7 @@ export function builder(cmd: Argv): Argv {
   return addLoggingOptions(withoutLogging).usage(
     "Usage:\n" +
       "  $0 init [options] [INPUT_FILE]\n\n" +
-      "Write a commented psilink.yaml template -- every option documented\n" +
+      "Write a commented alcove.yaml template -- every option documented\n" +
       "inline with defaults pre-filled -- then exit. No key file is created\n" +
       "and no exchange is run. With an INPUT_FILE, column metadata, linkage\n" +
       "fields, and standardizing transformations are inferred from it.\n\n" +
@@ -145,7 +145,7 @@ export async function handler(argv: Arguments): Promise<void> {
 
       // Asked after the overwrite decision, so a run that leaves the existing
       // file alone asks nothing: there is no file being written for the answer
-      // to be remembered in, and psilink remembers an answer nowhere else.
+      // to be remembered in, and Alcove remembers an answer nowhere else.
       // Absent both the flag and an answer, the template holds the
       // placeholder, like the connection's host and username: init produces a
       // scaffold to hand-edit, not a runnable config.
@@ -199,8 +199,8 @@ export async function handler(argv: Arguments): Promise<void> {
           operatorSuppliedText(configFile),
         )}. No key file was ` +
           "created and no exchange was run. Edit the file -- at least the " +
-          "connection block and the identity -- then run 'psilink invite' or " +
-          "'psilink accept' to set up an exchange.",
+          "connection block and the identity -- then run 'alcove invite' or " +
+          "'alcove accept' to set up an exchange.",
       );
     });
   } finally {
@@ -225,7 +225,7 @@ export function resolveInitInput(
 ): string | undefined {
   if (positionals.length > 1)
     throw new UsageError(
-      "init takes at most one INPUT_FILE; usage: psilink init [INPUT_FILE]",
+      "init takes at most one INPUT_FILE; usage: alcove init [INPUT_FILE]",
     );
   return positionals[0] !== undefined ? String(positionals[0]) : undefined;
 }

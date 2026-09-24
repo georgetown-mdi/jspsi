@@ -3,14 +3,14 @@ import {
   isDrawnFromLinkageRuleSet,
   isOptInLinkageKey,
   linkageRuleSetReferenceFor,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import type {
   BuiltInLinkageRuleSet,
   LinkageKey,
   LinkageRuleSetReference,
   LinkageTerms,
-} from "@psilink/core";
+} from "@alcove/core";
 
 /**
  * The rule-set membership questions the inviter's editor asks about DRAFT-side
@@ -38,7 +38,7 @@ import type {
  * editor's membership compares through this module rather than core's predicate
  * directly, refusing an import of `encodeForComparison`, `isOptInLinkageKey`,
  * `isDrawnFromLinkageRuleSet`, or `linkageRuleSetReferenceFor` from
- * `@psilink/core` anywhere under `apps/web/src` but this module. It reads static
+ * `@alcove/core` anywhere under `apps/web/src` but this module. It reads static
  * import and re-export specifiers -- a named import, a rename, a namespace
  * binding and a blanket re-export alike -- so a predicate reached through a
  * runtime `import()` is past it;

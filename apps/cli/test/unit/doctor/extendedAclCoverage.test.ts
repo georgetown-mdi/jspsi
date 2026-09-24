@@ -9,7 +9,7 @@ import {
   joinErrorCauseChain,
   sanitizeErrorForDisplay,
   UsageError,
-} from "@psilink/core";
+} from "@alcove/core";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { configureLogFile } from "../../../src/util/logging";
@@ -79,11 +79,11 @@ const INPUT: SmbProbeInput = {
   server: "files.example.org",
   share: "exchange",
   subdirectory: "dropbox",
-  username: "svc-psilink",
+  username: "svc-alcove",
   domain: "AGENCY",
   password: PASSWORD,
   dialect: "",
-  marker: "psilink-check.txt",
+  marker: "alcove-check.txt",
   token: "abc123",
 };
 
@@ -92,7 +92,7 @@ let dir: string;
 snapshotDiagnosticSinkAndLevel();
 
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-acl-sites-"));
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-acl-sites-"));
 });
 
 afterEach(() => {
@@ -406,7 +406,7 @@ function recordDoctorWorkDir(): { path?: string } {
   vi.spyOn(fs, "mkdtempSync").mockImplementation(
     (...args: Parameters<typeof fs.mkdtempSync>) => {
       const made = realMkdtemp(...args) as string;
-      if (path.basename(made).startsWith("psilink-doctor-")) seen.path = made;
+      if (path.basename(made).startsWith("alcove-doctor-")) seen.path = made;
       return made;
     },
   );
@@ -471,9 +471,9 @@ describe("the doctor credentials directory's and file's extended ACL", () => {
     "the work directory is stripped before the credentials file exists, and the password through the owner-only writer's temp path",
     async () => {
       // Two strips in the order the run makes them: the directory at `mkdtemp`,
-      // before anything is created in it, and then the writer's own on psilink's
+      // before anything is created in it, and then the writer's own on Alcove's
       // temp path, before the password is written -- the writer strips between its
-      // fchmod and its write. Both have -h: each entry is one psilink created
+      // fchmod and its write. Both have -h: each entry is one Alcove created
       // itself, so a symlink at it is a plant, and following it would clear an
       // unrelated ACL while the password landed under one that still stood.
       const commands = recordAclStripCommands();

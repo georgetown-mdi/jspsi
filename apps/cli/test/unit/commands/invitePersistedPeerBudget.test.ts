@@ -5,7 +5,7 @@ import path from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
 import type { Arguments } from "yargs";
 import YAML from "yaml";
-import type { ConnectionConfig } from "@psilink/core";
+import type { ConnectionConfig } from "@alcove/core";
 
 // Only runProtocol is mocked: the handshake "succeeds" through its
 // post-handshake and post-exchange hooks, with no connection opened.
@@ -60,7 +60,7 @@ function outputCompleteHook(
 const OBSERVED_RECEIVED_COLUMNS = ["notes"];
 
 /**
- * Drive one online `psilink invite` to completion against the mocked exchange,
+ * Drive one online `alcove invite` to completion against the mocked exchange,
  * returning the FINAL configuration on disk (raw, as YAML.parse yields it --
  * not through the schema, which would fill in defaults the command never
  * wrote) and the connection the run itself was conducted over. Both of the
@@ -71,14 +71,14 @@ async function inviteOnline(
   url: string,
   extraArgv: Record<string, unknown> = {},
 ): Promise<{ saved: Record<string, unknown>; ran: ConnectionConfig }> {
-  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-budget-"));
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "alcove-invite-budget-"));
   tmpDirs.push(dir);
   const input = path.join(dir, "input.csv");
   fs.writeFileSync(
     input,
     "first_name,last_name,dob,ssn\nAlice,Smith,1990-01-02,123456789\n",
   );
-  const configFile = path.join(dir, "psilink.yaml");
+  const configFile = path.join(dir, "alcove.yaml");
   vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
     await onAuthenticatedArg(callArgs)();
     await outputCompleteHook(callArgs)({
@@ -94,11 +94,11 @@ async function inviteOnline(
   try {
     await inviteHandler({
       _: [],
-      $0: "psilink",
+      $0: "alcove",
       identity: "Agency A",
       args: [url, input],
       "config-file": configFile,
-      "key-file": path.join(dir, ".psilink.key"),
+      "key-file": path.join(dir, ".alcove.key"),
       "log-level": "silent",
       record: false,
       ...extraArgv,
@@ -135,12 +135,12 @@ function savedConnectionOptions(
 test("an online file-sync invite writes no peer_timeout_ms from its accept wait", async () => {
   // The accept timeout is a window for one operator waiting at a terminal; the
   // configuration this invite leaves behind is what every later unattended
-  // `psilink exchange` runs on. Written as that config's peer budget, the
+  // `alcove exchange` runs on. Written as that config's peer budget, the
   // 15-minute default would silently become the peer budget of runs nobody
   // chose it for, so the field is absent and those runs take the documented
   // default instead.
   const { saved, ran } = await inviteOnline(
-    `file://${path.join(tmpdir(), "psilink-invite-budget-drop")}`,
+    `file://${path.join(tmpdir(), "alcove-invite-budget-drop")}`,
   );
   expect(savedConnectionOptions(saved)?.["peer_timeout_ms"]).toBeUndefined();
   // The run's own budget is unchanged: the same default accept timeout still

@@ -5,26 +5,26 @@ import { randomBytes } from "node:crypto";
 import WebSocket, { WebSocketServer as WsServer } from "ws";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-import { getDiagnosticSink, setDiagnosticSink } from "@psilink/core";
+import { getDiagnosticSink, setDiagnosticSink } from "@alcove/core";
 
 import {
   DIAGNOSTICS_PER_RATE_LIMIT_WINDOW,
   DIAGNOSTIC_DETAIL_MAX_LENGTH,
   DIAGNOSTIC_RATE_LIMIT_WINDOW_MS,
   attachSignalingDiagnostics,
-} from "@psilink/peerjs-broker/diagnostics";
+} from "@alcove/peerjs-broker/diagnostics";
 import {
   SOCKET_RELEASE_TIMEOUT_MS,
   WebSocketServer,
-} from "@psilink/peerjs-broker/services/webSocketServer/index";
-import { CreatePeerServerWSOnly } from "@psilink/peerjs-broker";
-import { Realm } from "@psilink/peerjs-broker/models/realm";
+} from "@alcove/peerjs-broker/services/webSocketServer/index";
+import { CreatePeerServerWSOnly } from "@alcove/peerjs-broker";
+import { Realm } from "@alcove/peerjs-broker/models/realm";
 
 import { signalingDiagnosticSink } from "../../src/signalingDiagnostics";
 
 import type { AddressInfo } from "node:net";
-import type { DiagnosticSink } from "@psilink/core";
-import type { IRealm } from "@psilink/peerjs-broker/models/realm";
+import type { DiagnosticSink } from "@alcove/core";
+import type { IRealm } from "@alcove/peerjs-broker/models/realm";
 
 // The sink behind the signaling server's `error` event: that a released socket
 // reaches an operator-readable log line at all, that the line says which release

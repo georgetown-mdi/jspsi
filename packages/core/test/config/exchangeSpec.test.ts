@@ -125,7 +125,7 @@ test("parses an ExchangeSpec with an SFTP connection", () => {
     linkageTerms: minimalLinkageTerms,
     connection: {
       channel: "sftp",
-      server: { host: "sftp.example.org", username: "psilink" },
+      server: { host: "sftp.example.org", username: "alcove" },
     },
   });
   expect(result.connection.channel).toBe("sftp");

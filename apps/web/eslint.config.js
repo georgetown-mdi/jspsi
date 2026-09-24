@@ -15,7 +15,7 @@ const sensitiveYamlParseBan = {
   selector:
     "CallExpression[callee.object.name='YAML'][callee.property.name=/^(parse|parseDocument|parseAllDocuments)$/]",
   message:
-    "Parse config/credential or imported documents through @psilink/core's sensitive-file chokepoint (parseSensitiveYaml / parseSensitiveJson), not a raw YAML parser (it leaks source into errors).",
+    "Parse config/credential or imported documents through @alcove/core's sensitive-file chokepoint (parseSensitiveYaml / parseSensitiveJson), not a raw YAML parser (it leaks source into errors).",
 };
 
 // The raw-YAML-parser import ban (shared by the src block and the linkage-compare
@@ -24,12 +24,12 @@ const rawYamlParserImportBan = {
   name: "yaml",
   importNames: ["parse", "parseDocument", "parseAllDocuments"],
   message:
-    "Do not import yaml's raw parsers in the web app; route parsing through @psilink/core's parseSensitiveYaml / parseSensitiveJson (the shared sensitive-file chokepoint). yaml's `stringify` is allowed.",
+    "Do not import yaml's raw parsers in the web app; route parsing through @alcove/core's parseSensitiveYaml / parseSensitiveJson (the shared sensitive-file chokepoint). yaml's `stringify` is allowed.",
 };
 
 // The root-logger import ban, over `src/`. loglevel's default export IS the root
 // logger, so holding emission to core's named loggers means the browser bundle
-// never binds it: every diagnostic line goes through `@psilink/core`'s getLogger,
+// never binds it: every diagnostic line goes through `@alcove/core`'s getLogger,
 // which adds the `[timestamp] [LEVEL] [context]` prefix and strips private-key
 // material out of string arguments. The named exports stay available -- the
 // client entry takes `setDefaultLevel`, and two config modules take the
@@ -43,7 +43,7 @@ const rootLoglevelImportBan = {
   name: "loglevel",
   importNames: ["default"],
   message:
-    "Do not import loglevel's default export in the web app: it is the root logger, whose emits skip the context prefix and the private-key redaction @psilink/core's getLogger installs. Emit through getLogger; import the named `setDefaultLevel` / `levels` for level configuration.",
+    "Do not import loglevel's default export in the web app: it is the root logger, whose emits skip the context prefix and the private-key redaction @alcove/core's getLogger installs. Emit through getLogger; import the named `setDefaultLevel` / `levels` for level configuration.",
 };
 
 // The server tree's ban on loglevel altogether, name and all. Node runs the built
@@ -58,7 +58,7 @@ const rootLoglevelImportBan = {
 const serverLoglevelModuleBan = {
   name: "loglevel",
   message:
-    "Do not import loglevel in the web app's server tree: it is a CommonJS module the built Nitro entry keeps external, so a named import of it throws `Named export not found` at boot, and its default export is the root logger, whose emits skip the context prefix and the private-key redaction @psilink/core's getLogger installs. Set the level with @psilink/core's setLogLevel and emit through getLogger.",
+    "Do not import loglevel in the web app's server tree: it is a CommonJS module the built Nitro entry keeps external, so a named import of it throws `Named export not found` at boot, and its default export is the root logger, whose emits skip the context prefix and the private-key redaction @alcove/core's getLogger installs. Set the level with @alcove/core's setLogLevel and emit through getLogger.",
 };
 
 // Hold the draft-side rule-set membership compares at the one chokepoint that
@@ -73,7 +73,7 @@ const serverLoglevelModuleBan = {
 // says nothing. The failure is silent at the call site, which is why the routing is a
 // rule rather than a note in the module.
 const linkageComparisonChokepointBan = {
-  name: "@psilink/core",
+  name: "@alcove/core",
   importNames: [
     "encodeForComparison",
     "isDrawnFromLinkageRuleSet",
@@ -328,7 +328,7 @@ export default [
     // error, and an imported config document an operator pastes could hold a
     // secret by mistake -- so raw `yaml` parsers are banned here: route YAML/JSON
     // parsing through the shared chokepoint now promoted to packages/core
-    // (`@psilink/core`'s parseSensitiveYaml / parseSensitiveJson), which reports
+    // (`@alcove/core`'s parseSensitiveYaml / parseSensitiveJson), which reports
     // path-only. `stringify` carries no such channel and is allowed.
     files: ["src/**/*.{ts,tsx}", "server/**/*.ts"],
     // Fail CI on a stray or rule-silencing disable so the tripwire cannot be
@@ -378,7 +378,7 @@ export default [
     // no-restricted-properties form packages/core/src and apps/cli/src already
     // use, which also catches an alias, a computed access, and a destructure. A
     // request body, a relayed CLI line, and a persisted record are input this
-    // app did not produce, so each is parsed through `@psilink/core`'s
+    // app did not produce, so each is parsed through `@alcove/core`'s
     // parseBoundedJson; its bound and the rationale for it are in
     // packages/core/src/utils/boundedJson.ts and docs/spec/CHANNEL_SECURITY.md.
     // A parse of a value this process serialized itself opts out with an
@@ -409,7 +409,7 @@ export default [
           object: "JSON",
           property: "parse",
           message:
-            "Parse JSON this app did not produce -- a request body, a relayed CLI line, a persisted record -- through @psilink/core's parseBoundedJson (a secret-bearing document through parseSensitiveJson); a raw JSON.parse is unbounded and can echo a leading span of the source. A value this process serialized itself: eslint-disable-next-line with a one-line justification.",
+            "Parse JSON this app did not produce -- a request body, a relayed CLI line, a persisted record -- through @alcove/core's parseBoundedJson (a secret-bearing document through parseSensitiveJson); a raw JSON.parse is unbounded and can echo a leading span of the source. A value this process serialized itself: eslint-disable-next-line with a one-line justification.",
         },
         {
           property: "json",

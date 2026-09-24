@@ -46,7 +46,7 @@ describe("the tag a release publishes under", () => {
 
 describe("the version a manifest has", () => {
   it("reads a release version", () => {
-    expect(manifestVersion('{"name":"psilink","version":"0.4.2"}')).toBe(
+    expect(manifestVersion('{"name":"alcove","version":"0.4.2"}')).toBe(
       "0.4.2",
     );
   });
@@ -54,7 +54,7 @@ describe("the version a manifest has", () => {
   it("reads an absent, empty, or non-string version as none", () => {
     // Each is a manifest the image build bakes nothing from, so each is the
     // same failure rather than three.
-    expect(manifestVersion('{"name":"psilink"}')).toBeUndefined();
+    expect(manifestVersion('{"name":"alcove"}')).toBeUndefined();
     expect(manifestVersion('{"version":""}')).toBeUndefined();
     expect(manifestVersion('{"version":null}')).toBeUndefined();
     expect(manifestVersion('{"version":2}')).toBeUndefined();
@@ -98,8 +98,8 @@ describe("the agreement the check holds", () => {
 // The script driven as the workflow runs it, against the committed manifest.
 function runCheck(tag) {
   const env = { ...process.env };
-  delete env.PSILINK_TAG;
-  if (tag !== undefined) env.PSILINK_TAG = tag;
+  delete env.ALCOVE_TAG;
+  if (tag !== undefined) env.ALCOVE_TAG = tag;
   try {
     const stdout = execFileSync(process.execPath, [SCRIPT], {
       cwd: repoRoot,
@@ -176,7 +176,7 @@ describe("the release workflow's version check step", () => {
     const step = publishJobs[0].steps.find((s) =>
       (s.run ?? "").includes("npm run check:release-version"),
     );
-    expect(step.env).toEqual({ PSILINK_TAG: "${{ github.ref_name }}" });
+    expect(step.env).toEqual({ ALCOVE_TAG: "${{ github.ref_name }}" });
   });
 
   it("runs under a Node the workflow pins", () => {

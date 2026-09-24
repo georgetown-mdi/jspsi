@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 
-import { describeResolvedMatching } from "@psilink/core";
+import { describeResolvedMatching } from "@alcove/core";
 
 import { invitationUsable } from "@psi/formatting";
 

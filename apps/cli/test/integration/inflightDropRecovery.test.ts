@@ -7,8 +7,8 @@ import {
   TransportPublishIndeterminateError,
   UsageError,
   sanitizeErrorForDisplay,
-} from "@psilink/core";
-import { withCapturedLogs } from "@psilink/core/testing";
+} from "@alcove/core";
+import { withCapturedLogs } from "@alcove/core/testing";
 
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
 import { startInProcessSftpServer } from "../sftpServer";
@@ -238,7 +238,7 @@ inProcessOnly(
       expect(
         logs.filter((entry) =>
           entry.message.includes(
-            "https://github.com/georgetown-mdi/jspsi/issues",
+            "https://github.com/georgetown-mdi/alcove/issues",
           ),
         ),
       ).toEqual([]);

@@ -5,7 +5,7 @@ import {
   authoredPreflightIds,
   dispositionReason,
   preflightIds,
-} from "@psilink/testkit/preflightInventory";
+} from "@alcove/testkit/preflightInventory";
 
 import {
   CONNECTION_PER_POLL_SHORT_INTERVAL_ADVISORY,
@@ -28,11 +28,11 @@ import { linkageRefusalFor } from "@psi/linkageRefusal";
 import { probePeerAnswerCopy } from "@console/SftpAuthoringForm";
 import { signingIdentityDivergence } from "@psi/receiptsModel";
 
-import type { PreflightId } from "@psilink/testkit/preflightInventory";
+import type { PreflightId } from "@alcove/testkit/preflightInventory";
 import type { SftpConnectionFormValues } from "@console/sftpConnectionForm";
 
 // This is the console half of the preflight parity inventory
-// (`@psilink/testkit/preflightInventory`); the CLI half is
+// (`@alcove/testkit/preflightInventory`); the CLI half is
 // apps/cli/test/unit/commands/preflightInventoryParity.test.ts. A row claiming the
 // console states it at a control has to name the control, and the control
 // has to exist.

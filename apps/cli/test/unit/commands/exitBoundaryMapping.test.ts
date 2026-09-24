@@ -55,8 +55,8 @@ vi.mock("../../../src/connection/ssh2SftpAdapter", () => ({
   SSH2SFTPClientAdapter: class {},
 }));
 
-vi.mock("@psilink/core", async (importActual) => {
-  const actual = await importActual<typeof import("@psilink/core")>();
+vi.mock("@alcove/core", async (importActual) => {
+  const actual = await importActual<typeof import("@alcove/core")>();
   return {
     ...actual,
     FileSyncConnection: class {
@@ -72,7 +72,7 @@ snapshotDiagnosticSinkAndLevel();
 let dir: string;
 
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-exit-boundary-"));
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-exit-boundary-"));
 });
 
 afterEach(() => {
@@ -104,7 +104,7 @@ describe("doctor mount reports the class of what stopped the checks", () => {
         () =>
           mountHandler({
             _: [],
-            $0: "psilink",
+            $0: "alcove",
             directory: dir,
             json: false,
             "log-level": "silent",
@@ -124,7 +124,7 @@ describe("fingerprint reports the class of what stopped the identity", () => {
         () =>
           fingerprintHandler({
             _: [],
-            $0: "psilink",
+            $0: "alcove",
             force: false,
             "identity-file": path.join(dir, "signing-identity.json"),
             "log-level": "silent",
@@ -144,7 +144,7 @@ describe("probe-host-key reports the class of what stopped the dial", () => {
         () =>
           probeHostKeyHandler({
             _: [],
-            $0: "psilink",
+            $0: "alcove",
             "sftp-url": "sftp://sftp.example.org",
             json: false,
             "log-level": "silent",
@@ -168,7 +168,7 @@ describe("verify-receipt reports the class of what stopped the read", () => {
         () =>
           verifyReceiptHandler({
             _: [],
-            $0: "psilink",
+            $0: "alcove",
             record: recordPath,
             "log-level": "silent",
           } as unknown as Arguments),

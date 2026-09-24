@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Alert, Anchor, Button, Text, TextInput } from "@mantine/core";
 import { Dropzone } from "@mantine/dropzone";
 import { IconAlertCircle } from "@tabler/icons-react";
-import { getLogger } from "@psilink/core";
+import { getLogger } from "@alcove/core";
 
 import {
   CSV_DELIMITER_LOCAL_NOTICE,
@@ -181,7 +181,7 @@ export function YourFileSection({
               see the{" "}
               <Anchor
                 inherit
-                href="https://github.com/georgetown-mdi/jspsi/blob/main/docs/DEPLOYMENT.md"
+                href="https://github.com/georgetown-mdi/alcove/blob/main/docs/DEPLOYMENT.md"
                 target="_blank"
                 rel="noreferrer"
               >

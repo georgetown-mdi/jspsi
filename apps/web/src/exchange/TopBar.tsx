@@ -101,7 +101,7 @@ export function TopBar({
   const narrow = useNarrowViewport();
   return (
     <div className={styles.topBar}>
-      <div className={styles.wordmark}>psilink</div>
+      <div className={styles.wordmark}>Alcove</div>
       <nav aria-label={navLabel} className={styles.topBarNav}>
         {narrow ? <StepStrip steps={steps} /> : <StepRail steps={steps} />}
       </nav>

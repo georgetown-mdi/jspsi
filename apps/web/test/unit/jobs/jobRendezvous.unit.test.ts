@@ -10,8 +10,8 @@ import {
   WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
   renderedDisplayCost,
   sanitizeForDisplay,
-} from "@psilink/core";
-import { MAX_ENDPOINT_PATH_LENGTH } from "@psilink/core/testing";
+} from "@alcove/core";
+import { MAX_ENDPOINT_PATH_LENGTH } from "@alcove/core/testing";
 
 import { MAX_INPUT_NAME_LENGTH } from "@jobs/workInputName";
 import { SWEEP_CONTROL_LABEL } from "@psi/runDiagnosticsModel";
@@ -39,7 +39,7 @@ const MKDTEMP_SUFFIX_LENGTH = 6;
 
 /** The prefix {@link tempDir} hands `mkdtempSync` for `label`. */
 function tempDirPrefix(label: string): string {
-  return `psilink-${label}-`;
+  return `alcove-${label}-`;
 }
 
 /** What the directory {@link tempDir} creates for a mount spends of a path budget
@@ -325,20 +325,20 @@ describe("the shared folder's name the invitation is minted from", () => {
   });
 
   test("an operator-authored mount is named by its own last segment", () => {
-    expect(
-      locatorFor({ JOB_RENDEZVOUS_DIR: "/srv/exchanges/psilink" }),
-    ).toEqual({ folderName: "psilink", locator: "psilink" });
+    expect(locatorFor({ JOB_RENDEZVOUS_DIR: "/srv/exchanges/alcove" })).toEqual(
+      { folderName: "alcove", locator: "alcove" },
+    );
   });
 
   test("an operator-authored mount ignores a trailing separator", () => {
     expect(
-      locatorFor({ JOB_RENDEZVOUS_DIR: "/srv/exchanges/psilink/" }),
-    ).toEqual({ folderName: "psilink", locator: "psilink" });
+      locatorFor({ JOB_RENDEZVOUS_DIR: "/srv/exchanges/alcove/" }),
+    ).toEqual({ folderName: "alcove", locator: "alcove" });
   });
 
   test("an operator-authored mount reduces a Windows-authored path", () => {
-    expect(resolveJobRendezvousFolderName({}, "C:\\drops\\psilink")).toBe(
-      "psilink",
+    expect(resolveJobRendezvousFolderName({}, "C:\\drops\\alcove")).toBe(
+      "alcove",
     );
   });
 
@@ -347,8 +347,8 @@ describe("the shared folder's name the invitation is minted from", () => {
     ["blank", "   "],
     ["a bare dot", "."],
     ["a parent segment", ".."],
-    ["a POSIX path", "/srv/exchanges/psilink"],
-    ["a Windows path", "drops\\psilink"],
+    ["a POSIX path", "/srv/exchanges/alcove"],
+    ["a Windows path", "drops\\alcove"],
     ["a control character", "psi\u0007link"],
     ["longer than a filesystem name", "x".repeat(256)],
   ])(
@@ -628,8 +628,8 @@ describe("the split rendezvous a second mount provisions", () => {
     // mints single-segment locators; without this the operator would meet core's
     // refusal at the mint with nothing to act on.
     const problem = resolveJobRendezvousProvisioning({
-      JOB_RENDEZVOUS_DIR: "/mnt/in/psilink",
-      JOB_RENDEZVOUS_OUTBOUND_DIR: "/mnt/out/psilink",
+      JOB_RENDEZVOUS_DIR: "/mnt/in/alcove",
+      JOB_RENDEZVOUS_OUTBOUND_DIR: "/mnt/out/alcove",
     }).problem;
     expect(problem).toContain("JOB_RENDEZVOUS_OUTBOUND_NAME");
     expect(problem).toContain("same name");
@@ -638,9 +638,9 @@ describe("the split rendezvous a second mount provisions", () => {
   test("the name override clears a derived-name collision", () => {
     expect(
       resolveJobRendezvousProvisioning({
-        JOB_RENDEZVOUS_DIR: "/mnt/in/psilink",
-        JOB_RENDEZVOUS_OUTBOUND_DIR: "/mnt/out/psilink",
-        JOB_RENDEZVOUS_OUTBOUND_NAME: "psilink-out",
+        JOB_RENDEZVOUS_DIR: "/mnt/in/alcove",
+        JOB_RENDEZVOUS_OUTBOUND_DIR: "/mnt/out/alcove",
+        JOB_RENDEZVOUS_OUTBOUND_NAME: "alcove-out",
       }).problem,
     ).toBeUndefined();
   });

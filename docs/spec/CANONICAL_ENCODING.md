@@ -4,7 +4,7 @@ title: "Canonical Encoding for Receipts"
 
 # Canonical encoding for receipts
 
-PSI-Link receipts -- the [self-attested record](EXCHANGE_RECORD.md) and the
+Alcove receipts -- the [self-attested record](EXCHANGE_RECORD.md) and the
 certificate-backed non-repudiation receipt (see
 [PROTOCOL.md](PROTOCOL.md#third-party-verifiable-proof-of-a-data-flow)) -- are
 hashed and signed over a byte string. For a hash or signature to verify, every
@@ -16,7 +16,7 @@ only the receipt, the certificate, and this document.
 The [Canonical encoding](../SECURITY_DESIGN.md#canonical-encoding) overview
 covers what this encoding is for and what it protects against; this document is
 its normative complement -- the specification of that byte string. It is written
-so the bytes can be reproduced without reading the PSI-Link source. Wherever a
+so the bytes can be reproduced without reading the Alcove source. Wherever a
 detail is delegated to an external standard, that standard is cited; nothing is
 left to an implementation's discretion.
 
@@ -25,18 +25,18 @@ left to an implementation's discretion.
 The canonical encoding is **[RFC 8785](https://www.rfc-editor.org/rfc/rfc8785),
 JSON Canonicalization Scheme (JCS)**, applied to the restricted value domain in
 [Value domain](#value-domain) below. An implementation that produces RFC 8785
-output for an object in that domain produces the correct PSI-Link canonical
+output for an object in that domain produces the correct Alcove canonical
 bytes; the rules in [Encoding rules](#encoding-rules) restate the parts of
-RFC 8785 that matter here, plus the additional constraints PSI-Link imposes so
+RFC 8785 that matter here, plus the additional constraints Alcove imposes so
 that the input domain is always reproducible.
 
 There is no exception to that equivalence. Across the whole domain, RFC 8785
-output is PSI-Link output, so an implementation written to the RFC alone
-reproduces every canonical byte string PSI-Link produces. The domain admits only
+output is Alcove output, so an implementation written to the RFC alone
+reproduces every canonical byte string Alcove produces. The domain admits only
 a well-formed string, which is what keeps the two in step over the one case
 where an encoder could otherwise diverge: RFC 8785 section 3.2.2.2 requires a
 compliant implementation to **terminate with an error** on invalid Unicode data
-such as a lone surrogate, and PSI-Link refuses such a value rather than encoding
+such as a lone surrogate, and Alcove refuses such a value rather than encoding
 it (see [Strings](#strings)).
 
 RFC 8785 builds both of its primitive serializations on ECMAScript
@@ -154,7 +154,7 @@ lowercase letter is left intact, so `input_format` -> `inputFormat` but
 (digit), and `input__format` -> `input_Format` (only the second underscore folds);
 a leading underscore before a lowercase letter still folds and is dropped, so
 `_format` -> `Format`; an already-camelCase key has no underscore-plus-lowercase
-and is unchanged. psilink
+and is unchanged. Alcove
 emits only camelCase keys, so a token it produced is already in this normal form --
 the fold is observable only for a hand-authored or third-party token containing
 `snake_case` keys.
@@ -175,7 +175,7 @@ normalization is applied: a name holding U+00E9 (NFC) and one holding `e`
 followed by the combining acute U+0301 (NFD) are two distinct columns, and both
 entries stand. Names are not case folded either, so `dose` and `Dose` are
 distinct, and whitespace is significant, so `dose ` is not `dose`. A reproducer
-that folds any of these collapses entries psilink keeps, and encodes different
+that folds any of these collapses entries Alcove keeps, and encodes different
 bytes.
 
 The collapse changes the agreed-terms hash for a terms document that carries a
@@ -194,7 +194,7 @@ the same IEEE-754 double, with `-0` rendered as `0` (RFC 8785 Appendix B), no
 insignificant trailing zeros, and exponential form only outside the magnitude
 range that same ECMA-262 section fixes.
 
-PSI-Link adds one constraint to keep the input reproducible: an **integer-valued
+Alcove adds one constraint to keep the input reproducible: an **integer-valued
 number MUST be a safe integer**, i.e. its absolute value is at most
 2^53 - 1 (`9007199254740991`). Beyond that range a decimal integer literal in
 the source JSON may not round-trip to the same double across implementations, so
@@ -235,7 +235,7 @@ string, which is what RFC 8785 requires:
   refusal; a well-formed surrogate pair is unaffected and emits its raw UTF-8
   bytes, as the `astral-emoji` vector fixes. A linkage terms document an
   earlier build accepted over such a value is refused before
-  `psilink verify-receipt` reaches a verdict: its `--config-file` and
+  `alcove verify-receipt` reaches a verdict: its `--config-file` and
   `--partner-terms` inputs both load their document through the linkage terms
   parse, which refuses it and reports the CLI's own invalid-linkage-terms
   usage error (`config file <path> has invalid linkage_terms: a linkage
@@ -347,7 +347,7 @@ negative zero -- a `-0` literal parses to `0` -- so it cannot be represented as 
 JSON `value`. Verify it from a `-0` literal in your own language; the Node suite
 does so directly.
 
-The PSI-Link test suite runs these vectors in both Node.js
+The Alcove test suite runs these vectors in both Node.js
 ([`packages/core/test/utils/canonical.test.ts`](../../packages/core/test/utils/canonical.test.ts))
 and a real browser
 ([`apps/web/test/browser/canonical.test.ts`](../../apps/web/test/browser/canonical.test.ts)),
@@ -355,7 +355,7 @@ asserting byte-identical output on both platforms.
 
 ## Implementation note (non-normative)
 
-PSI-Link implements the encoding in `packages/core/src/utils/canonical.ts`. It
+Alcove implements the encoding in `packages/core/src/utils/canonical.ts`. It
 delegates the RFC 8785 serialization to the
 [`canonicalize`](https://www.npmjs.com/package/canonicalize) package -- the
 scheme author's reference implementation -- behind a strict pre-validation pass
@@ -365,7 +365,7 @@ character string and `canonicalBytes(value)` returns its UTF-8 bytes. Numeric
 schema fields use `safeIntegerSchema`. None of this is required to reproduce the
 bytes; the normative definition is RFC 8785 over the value domain above.
 
-The `canonicalize` package is inlined into `@psilink/core`'s built artifacts
+The `canonicalize` package is inlined into `@alcove/core`'s built artifacts
 rather than resolved at runtime; why, and what that costs when an advisory
 lands against it, are in
 [DEPENDENCY_PINS.md](DEPENDENCY_PINS.md#inlined-dependencies-and-their-remediation-path).

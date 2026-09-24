@@ -2,7 +2,7 @@
 // implementation runs an SFTP server inside the test process (the default);
 // the other spawns a native OpenSSH sshd as an unprivileged child. The
 // conformance suite drives the production SSH2SFTPClientAdapter against
-// whichever backend PSILINK_SFTP_BACKEND selects, reading every
+// whichever backend ALCOVE_SFTP_BACKEND selects, reading every
 // server-shaped detail from the handle instead of hardcoding it.
 
 /**

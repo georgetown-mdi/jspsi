@@ -12,7 +12,7 @@ import type {
   JobInputProfileErrorCode,
 } from "@jobs/workInputs";
 import type { FieldValueCoverage } from "@psi/workers/nonEmptyAggregate";
-import type { Standardization } from "@psilink/core";
+import type { Standardization } from "@alcove/core";
 
 /**
  * The browser-side client for the console's work-input API

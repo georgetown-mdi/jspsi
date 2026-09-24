@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-import { getLogger } from "@psilink/core";
+import { getLogger } from "@alcove/core";
 
 import {
   clearUnfiledExchangeFlag,
@@ -27,7 +27,7 @@ vi.mock("@psi/managed/managedExchangeStore", () => ({
     Promise.reject(new Error("the quota refused the write")),
 }));
 
-const KEY = "psilink-unfiled-disclosure";
+const KEY = "alcove-unfiled-disclosure";
 
 /** Run once on the next read of the stored value, after that read has taken the
  * value it returns: how a test stands a second context's write exactly in the

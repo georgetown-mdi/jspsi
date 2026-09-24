@@ -113,7 +113,7 @@ const browserDisableFeaturesSwitch = `--disable-features=${[
 // every module id it resolves so the check can hold the filter against the real
 // graph instead of predicting it. Unset -- every developer build, every CI build
 // that is not that check -- no plugin is added at all.
-const deployGraphRecordPath = process.env.PSILINK_DEPLOY_GRAPH_RECORD;
+const deployGraphRecordPath = process.env.ALCOVE_DEPLOY_GRAPH_RECORD;
 
 // Records the module ids of one build into recordPath. It contributes no hook
 // that can resolve, load, or rewrite a module (`transform` returns null), so the
@@ -125,7 +125,7 @@ const deployGraphRecordPath = process.env.PSILINK_DEPLOY_GRAPH_RECORD;
 function deployGraphRecorder(recordPath: string): Plugin {
   const moduleIds = new Set<string>();
   return {
-    name: "psilink-deploy-graph-recorder",
+    name: "alcove-deploy-graph-recorder",
     apply: "build",
     transform(_code, id) {
       moduleIds.add(id);
@@ -198,7 +198,7 @@ export default defineConfig((_configEnv) => {
       // than per project, so every project below -- and every project added
       // later -- is covered without registering anything of its own.
       //
-      // The dist guard fails the run when the built @psilink/core these suites
+      // The dist guard fails the run when the built @alcove/core these suites
       // import is older than its sources, instead of letting the run report
       // failures that belong to the build. The prerequisite guard names (and, in
       // CI, fails on) an environment tool a suite would otherwise skip over
@@ -279,7 +279,7 @@ export default defineConfig((_configEnv) => {
             include: ["test/interop/**/*.{test,spec}.ts"],
             name: "interop",
             environment: "node",
-            // The cross-runtime suite: a real `psilink` child process meeting a
+            // The cross-runtime suite: a real `alcove` child process meeting a
             // party built from this app's own exchange modules. A project of its
             // own rather than a file in `integration`, because it needs neither
             // the production server build nor the dev server that project's
@@ -356,7 +356,7 @@ export default defineConfig((_configEnv) => {
           test: {
             include: ["test/liveWebrtc/**/*.{test,spec}.ts"],
             name: "live-webrtc",
-            // The live CLI-to-browser leg: a real `psilink` process and a real
+            // The live CLI-to-browser leg: a real `alcove` process and a real
             // browser peer completing one WebRTC exchange through the
             // standalone broker. A project of its own, off every other script,
             // because it needs the built CLI and minutes of real ICE, DTLS and
@@ -386,7 +386,7 @@ export default defineConfig((_configEnv) => {
               headless: true,
               enabled: true,
               instances: [{ browser: "chromium" }],
-              // The broker and the `psilink` party the browser half cannot
+              // The broker and the `alcove` party the browser half cannot
               // spawn itself. Registered here because this is where vitest
               // takes them; the implementations are in the test tree.
               commands: liveWebrtcLegCommands,

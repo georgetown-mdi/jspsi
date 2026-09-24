@@ -10,19 +10,19 @@ import {
   MAX_HANDSHAKE_PARAM_LENGTH,
   SOCKET_RELEASE_TIMEOUT_MS,
   WebSocketServer,
-} from "@psilink/peerjs-broker/services/webSocketServer/index";
-import { Errors } from "@psilink/peerjs-broker/enums";
-import { Realm } from "@psilink/peerjs-broker/models/realm";
+} from "@alcove/peerjs-broker/services/webSocketServer/index";
+import { Errors } from "@alcove/peerjs-broker/enums";
+import { Realm } from "@alcove/peerjs-broker/models/realm";
 
 import {
   loopbackTlsCert,
   requireLoopbackTlsCert,
-} from "@psilink/testkit/loopbackTlsCert";
+} from "@alcove/testkit/loopbackTlsCert";
 import { hardenUpgradeSurface } from "../../server/upgradeHardening";
 
 import type { AddressInfo } from "node:net";
 import type { Duplex } from "node:stream";
-import type { IRealm } from "@psilink/peerjs-broker/models/realm";
+import type { IRealm } from "@alcove/peerjs-broker/models/realm";
 import type { ServerResponse } from "node:http";
 
 // Socket-level coverage for the signaling guards that need a live `ws`

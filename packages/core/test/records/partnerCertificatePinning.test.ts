@@ -415,7 +415,7 @@ describe("a certificate the wire format does not admit is refused at parse", () 
   // fingerprint or signature work touches it, so an over-bound value is
   // rejected at the parse rather than driving allocation proportional to it.
   const overBound = {
-    version: "psilink-signing-cert/v2",
+    version: "alcove-signing-cert/v3",
     algorithm: "ecdsa-p256-sha256",
     identity: "x".repeat(MAX_TEXT_LENGTH + 1),
     publicKey: identityB.certificate.publicKey,
@@ -633,7 +633,7 @@ describe("a run that does not sign in band presents no certificate", () => {
 });
 
 describe("every terms-time pin refusal states its own next step and condition", () => {
-  // Each of the five is raised with core's `psilinkRecoveryHintEmitted` tag,
+  // Each of the five is raised with core's `alcoveRecoveryHintEmitted` tag,
   // whose two-state convention is that an error holds it exactly when its
   // message holds the step to take. What the tag buys is a display layer
   // showing the refusal instead of fixed copy for its category -- the CLI's
@@ -713,8 +713,8 @@ describe("every terms-time pin refusal states its own next step and condition", 
     );
     expect(raised).toBeInstanceOf(ReceiptVerificationError);
     expect(
-      (raised as { psilinkRecoveryHintEmitted?: unknown })
-        .psilinkRecoveryHintEmitted,
+      (raised as { alcoveRecoveryHintEmitted?: unknown })
+        .alcoveRecoveryHintEmitted,
     ).toBe(true);
     // The claim the tag makes: the message names what to do, not only what
     // went wrong. Every one of the five ends in an instruction.

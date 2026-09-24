@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { deriveAcceptedLinkageTerms, prepareForExchange } from "@psilink/core";
+import { deriveAcceptedLinkageTerms, prepareForExchange } from "@alcove/core";
 
 import {
   addKey,
@@ -14,7 +14,7 @@ import {
   setDraftMetadataKeepingKeys,
 } from "../../../src/psi/authoring/advancedInviteDraft.js";
 
-import type { CSVRow, Metadata } from "@psilink/core";
+import type { CSVRow, Metadata } from "@alcove/core";
 
 const ALL_COLUMNS = ["ssn", "ssn4", "first_name", "last_name", "dob"];
 

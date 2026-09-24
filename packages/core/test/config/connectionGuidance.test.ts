@@ -21,7 +21,7 @@ import {
 } from "../../src/connection/fileSyncConnection";
 import { getDefaultLinkageTerms } from "../../src/defaults/builtInLinkageTerms";
 
-/** The placeholder connection block an offline `psilink invite` writes. */
+/** The placeholder connection block an offline `alcove invite` writes. */
 function placeholderSpec(): ExchangeSpec {
   return {
     connection: {

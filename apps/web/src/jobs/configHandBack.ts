@@ -22,7 +22,7 @@ import type { JobConfigurationHandBack } from "./intentSchemas";
  *
  * A run's hand-off shows the operator a template to copy; this one cannot, since
  * the document's connection can hold a credential no browser receives. It is
- * written in place of the `psilink.yaml` it was opened from instead, the file
+ * written in place of the `alcove.yaml` it was opened from instead, the file
  * the command line runs, and the response states only that it was written.
  */
 
@@ -40,7 +40,7 @@ export class ConfigurationHandBackRefusedError extends Error {
 
 /** The message reaching the operator when the file could not be replaced. */
 const UNWRITABLE_CONFIGURATION_MESSAGE =
-  "The console could not write psilink.yaml in your working folder. Check " +
+  "The console could not write alcove.yaml in your working folder. Check " +
   "that the folder and the file are writable, then save again.";
 
 /**
@@ -63,7 +63,7 @@ export function handBackMountedConfiguration(
   } catch (error) {
     if (error instanceof ZodError)
       throw new ConfigurationHandBackRefusedError(
-        "These settings do not make a configuration psilink can run (" +
+        "These settings do not make a configuration Alcove can run (" +
           formatFirstIssue(error.issues) +
           "). Change them, then save again.",
       );
@@ -73,11 +73,11 @@ export function handBackMountedConfiguration(
 }
 
 /**
- * Replace the mounted `psilink.yaml` with `text`, first copying the file as it
+ * Replace the mounted `alcove.yaml` with `text`, first copying the file as it
  * stands to {@link PREVIOUS_CONFIGURATION_FILE_NAME} in the same folder: the
  * writer keeps none of the operator's comments, key order, or quoting, so the
  * copy is what they have to recover them from. A copy that cannot be written
- * leaves the file unreplaced. A `psilink.yaml` that is a link is replaced at the
+ * leaves the file unreplaced. An `alcove.yaml` that is a link is replaced at the
  * file it names, and the copy and the replacement keep that file's permission
  * bits.
  */

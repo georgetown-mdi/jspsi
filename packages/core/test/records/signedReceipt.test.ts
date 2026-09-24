@@ -379,12 +379,12 @@ describe("buildReceiptContent (session-keyed directional payload MACs)", () => {
   test("the empty-payload direction is not a public constant (session-keyed)", async () => {
     const macKeyA = await hkdfDerive(
       sessionKey,
-      "psilink-signed-receipt-payload-v1:initiator-to-responder",
+      "alcove-signed-receipt-payload-v2:initiator-to-responder",
       32,
     );
     const macKeyB = await hkdfDerive(
       otherSessionKey,
-      "psilink-signed-receipt-payload-v1:initiator-to-responder",
+      "alcove-signed-receipt-payload-v2:initiator-to-responder",
       32,
     );
     const emptyA = await buildReceiptContent(
@@ -720,7 +720,7 @@ describe("serialize / parse dual-signed record", () => {
   test("rejects an unrecognized version", () => {
     expect(() =>
       parseDualSignedRecord({
-        version: "psilink-signed-receipt/v9",
+        version: "alcove-signed-receipt/v10",
         content: content(),
         initiator: { certificate: identityA.certificate, signature: "AAAA" },
         responder: { certificate: identityB.certificate, signature: "AAAA" },
@@ -733,7 +733,7 @@ describe("serialize / parse dual-signed record", () => {
     // record version and old certificates (an Ed25519 key in an RFC 8037 OKP
     // JWK). Either discriminant refuses it; neither is reinterpreted.
     const v1Certificate = {
-      version: "psilink-signing-cert/v1",
+      version: "alcove-signing-cert/v1",
       algorithm: "ed25519",
       identity: "Party A",
       publicKey: {
@@ -747,7 +747,7 @@ describe("serialize / parse dual-signed record", () => {
     const v1Party = { certificate: v1Certificate, signature: "AAAA" };
     expect(() =>
       parseDualSignedRecord({
-        version: "psilink-signed-receipt/v1",
+        version: "alcove-signed-receipt/v1",
         content: content(),
         initiator: v1Party,
         responder: v1Party,

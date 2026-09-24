@@ -58,8 +58,8 @@ A one-shot web exchange is single-use: the browser runs the authenticated
 exchange, derives the rotated secret, and **discards** it, so the exchange
 cannot run again and nothing sensitive persists. A managed exchange instead
 persists the rotated secret alongside this party's exchange-file document (the
-standing terms and rendezvous locator -- the browser's `psilink.yaml` plus
-`.psilink.key` analog) so the same partnership can run again later.
+standing terms and rendezvous locator -- the browser's `alcove.yaml` plus
+`.alcove.key` analog) so the same partnership can run again later.
 
 What managed **adds**:
 
@@ -211,7 +211,7 @@ needs:
 
 Chromium-based desktop browsers have a per-app "start at sign-in" setting for an
 installed app, offered from the installed app's own menu; it is the browser's
-setting, not the application's, so psilink cannot turn it on and does not ask to.
+setting, not the application's, so Alcove cannot turn it on and does not ask to.
 A browser that does not offer it cannot be made to, and nothing here claims
 otherwise -- that platform's degradation is the operator-initiated run named
 under [The automation goal](#the-automation-goal-and-its-platform-envelope).
@@ -985,8 +985,8 @@ other rather than racing, in either order.
 The artifact is a **plaintext credential file in the operator's custody**.
 Passphrase encryption is not done, by design: the record must be usable with
 nobody present to supply a passphrase at the moment of use. It is the browser
-analog of handing over `psilink.yaml` plus `.psilink.key`, and it adopts the key
-file's exact trust model: `.psilink.key` is a plaintext credential protected by
+analog of handing over `alcove.yaml` plus `.alcove.key`, and it adopts the key
+file's exact trust model: `.alcove.key` is a plaintext credential protected by
 custody and storage permissions, not a passphrase (see [Key file
 security](SECURITY_DESIGN.md#key-file-security)), and the export asks for the
 same handling -- owner-only storage, never an unencrypted transmission channel,
@@ -1012,14 +1012,14 @@ the deferred hardening that would, are in
 The graduation the calibration in [Who this is for](#who-this-is-for) names has
 its own action on the exchange's detail surface: a collapsed **Run this from the
 command line instead** panel, beside the backup panel. It hands the exchange to
-`psilink exchange` under the host's own scheduler, and it is a migration by
+`alcove exchange` under the host's own scheduler, and it is a migration by
 another route -- the single-owner rule applies to it unchanged.
 
 It downloads **two files rather than one archive**, because the two are handled
 differently once they land:
 
-- `psilink.yaml` -- the agreed terms and the rendezvous address. No secret.
-- `.psilink.key` -- this exchange's shared secret, in plain text, under the key
+- `alcove.yaml` -- the agreed terms and the rendezvous address. No secret.
+- `.alcove.key` -- this exchange's shared secret, in plain text, under the key
   file's own custody rules ([Key file
   security](SECURITY_DESIGN.md#key-file-security)).
 
@@ -1078,7 +1078,7 @@ public address, in this browser as on the command line, disclosing that address
 and the fact of a session to that server (no exchange content). What the hand-off
 changes is **whose** address is disclosed -- the scheduling machine's rather than
 this browser's -- and that the CLI names it in a warning on every run. Naming a
-`stun` server in the exported `psilink.yaml` is what replaces the default.
+`stun` server in the exported `alcove.yaml` is what replaces the default.
 
 The two files have the current secret, but they are a backup for the command line,
 not for this browser: reconstituting a browser copy after an eviction is the artifact
@@ -1086,7 +1086,7 @@ import ([Eviction recovery is the import
 flow](#eviction-recovery-is-the-import-flow)), which these two files are not. The
 pair can be imported back ([Bringing a command-line configuration
 back](#bringing-a-command-line-configuration-back)), but it is the command line's
-working copy: every run there rewrites `.psilink.key` with the secret it rotated
+working copy: every run there rewrites `.alcove.key` with the secret it rotated
 to. So -- unlike the backup and migration exports -- taking this one **marks nothing**: the
 exchange's backup state is exactly what it was before, whether the operator confirms
 the hand-off or declines it. A backup indicator reading green is a promise that a file
@@ -1110,12 +1110,12 @@ because two things have to be true and only the operator knows them:
   the shared secret and whichever copy rotates second leaves the other unable to
   connect to the partner.
 - **Whether it has run there since the hand-off.** Every command-line run changes
-  the shared secret and writes the new one back into `.psilink.key`, so after a run
+  the shared secret and writes the new one back into `.alcove.key`, so after a run
   that file holds the secret the partner expects and this browser's stored one does
-  not. The confirmation asks for that file; choose the `.psilink.key` from the
+  not. The confirmation asks for that file; choose the `.alcove.key` from the
   machine that was running the exchange and this browser picks the exchange back up
   where the command line left it. Take it from the folder holding that exchange's
-  `psilink.yaml`: every exchange's key file has that same name, and the file chosen
+  `alcove.yaml`: every exchange's key file has that same name, and the file chosen
   replaces the only copy of the secret this browser has, so another exchange's file
   or an older copy of this one leaves the exchange unable to connect and a fresh
   invitation the only way back.
@@ -1141,7 +1141,7 @@ is no longer the one meeting it, so remove it there.
 
 ### Bringing a command-line configuration back
 
-A `psilink.yaml` written for the command line imports here on its own, without
+An `alcove.yaml` written for the command line imports here on its own, without
 its key file, whichever channel it runs over. What lands is a
 **configuration-only** exchange: the agreed terms, the connection, and the local
 settings, with no shared secret. It is for the operator who would rather set an
@@ -1154,22 +1154,22 @@ exchanges already, or cannot be read; the same control takes a backup file
 ([Eviction recovery is the import
 flow](#eviction-recovery-is-the-import-flow)).
 
-**To run the exchange in this browser, choose its `.psilink.key` too**, in the
-same pick as the `psilink.yaml`. Its name starts with a dot, so the file chooser
+**To run the exchange in this browser, choose its `.alcove.key` too**, in the
+same pick as the `alcove.yaml`. Its name starts with a dot, so the file chooser
 may hide it until hidden files are shown. The pair lands as an exchange that runs
-here, and the import says so before you open it; a `psilink.yaml` chosen alone
+here, and the import says so before you open it; an `alcove.yaml` chosen alone
 lands as the configuration only, and its page says that instead. Before the
 first run here, stop the scheduled command-line run of the same exchange: each
 run on either side changes the shared secret, and the copy that falls behind can
 no longer connect to your partner. What the pair import takes and refuses:
 
-- **The key file psilink wrote.** A file that is not JSON, holds no shared
-  secret or one psilink would not write, has an `expires` that is not a date and
+- **The key file Alcove wrote.** A file that is not JSON, holds no shared
+  secret or one Alcove would not write, has an `expires` that is not a date and
   time, or holds any other field is refused, saying which, and nothing is
   imported. The refusal never shows what the file holds.
 - **Only an exchange this browser runs.** An sftp or filedrop configuration, or
   one with a `signing` block, is refused with its key file; import the
-  `psilink.yaml` on its own to edit it here.
+  `alcove.yaml` on its own to edit it here.
 - **One copy of an exchange.** An exchange is recognized by its shared secret. If
   this browser already runs the exchange the key file belongs to, nothing is
   imported and the refusal names it. If you handed it off to the command line
@@ -1191,7 +1191,7 @@ place of the Run and schedule controls:
   partnership rotates, there is nothing here to connect with.
 - **An sftp or filedrop configuration** runs over a channel this browser does
   not conduct -- it runs live browser exchanges (webrtc) only. The page names the
-  channel and says to run the exchange with psilink on the command line; a key
+  channel and says to run the exchange with Alcove on the command line; a key
   file would not change that.
 - **A configuration with a `signing` block** asks for a signed exchange receipt,
   which this browser does not produce. The page names `signing` as the part
@@ -1203,8 +1203,8 @@ configuration -- it keeps running there, from the files it already has.
 
 What the import accepts is what this app can hold:
 
-- **A file psilink itself would load.** A hand-edited configuration that no
-  longer matches the format psilink reads is refused naming the fields to fix,
+- **A file Alcove itself would load.** A hand-edited configuration that no
+  longer matches the format Alcove reads is refused naming the fields to fix,
   spelled as the file spells them, so the operator goes back to the line rather
   than to the app.
 - **A connection this app can hold.** A webrtc connection may hold what this
@@ -1214,12 +1214,12 @@ What the import accepts is what this app can hold:
   connection holds its folders and `options`. An sftp connection is held whole
   -- host, port, username, folders, `options`, `host_key_fingerprint`,
   `keyboard_interactive`, `proxy`, and `provider_options` -- since
-  nothing here runs it and each setting goes back into the file psilink runs.
+  nothing here runs it and each setting goes back into the file Alcove runs.
 - **A `signing` block, held unchanged.** The mode, `identity_file`,
   `partner_fingerprint`, and `receipt_output` are kept exactly as the file
   writes them -- an `@` in a path is text, and this browser opens no file it
   names -- with no editor here, and the exported configuration states the block
-  as the imported one did. The exchange runs with psilink.
+  as the imported one did. The exchange runs with Alcove.
 - **Credentials as `@path` references, never as values.** An sftp `password`,
   `private_key`, or `private_key_passphrase`, the `bearer` or `password` of a
   `proxy` block's `auth`, and a `password`, `passphrase`,
@@ -1231,8 +1231,8 @@ What the import accepts is what this app can hold:
   that file's path. Any other `provider_options` setting, such as a cipher
   list, is held as written.
 - **No shared secret.** A configuration naming one in its `authentication` block
-  is refused: the secret comes in only from the `.psilink.key` chosen beside it.
-  psilink reads the secret from `.psilink.key` and refuses it in `psilink.yaml`
+  is refused: the secret comes in only from the `.alcove.key` chosen beside it.
+  Alcove reads the secret from `.alcove.key` and refuses it in `alcove.yaml`
   for the same reason.
 - **A `role` on a webrtc connection.** The configuration has to say which side of
   the partnership this party takes; the command line refuses a webrtc connection
@@ -1259,11 +1259,11 @@ The page states three more things where they apply:
   edit it.
 - **The files it names by `@path`.** This browser never opens the file an
   `@path` names. The page warns, naming each such setting and never its path,
-  that the psilink.yaml it hands back keeps the reference as the file wrote it
-  and psilink reads that file on the machine that runs the exchange; the export
+  that the alcove.yaml it hands back keeps the reference as the file wrote it
+  and Alcove reads that file on the machine that runs the exchange; the export
   panel repeats the names.
 - **A pending outbound payload consent.** A configuration whose
-  `outbound_payload_consent` is pending is refused by psilink at any run that
+  `outbound_payload_consent` is pending is refused by Alcove at any run that
   shares results with the partner until the columns are confirmed, which it asks
   for at a terminal. The page says so, so a scheduled run is not the first place
   the operator meets that refusal.
@@ -1824,7 +1824,7 @@ The skew runs both ways. A new deployment does not replace the code of a page th
 is already open, so a tab left open across one goes on running what it loaded
 with. If a newer version has filed records for this exchange since, that page
 cannot read them -- and says so as what it is: **this page is running an older
-version of psilink**.
+version of Alcove**.
 
 Nothing is wrong with the records, and clearing them is not offered here: a
 version of the app that reads them exists, and this page is not it. Reload the
@@ -1933,8 +1933,8 @@ a new device are the **same import operation** (consistent with
 migration-not-sync): an import re-establishes the one owner, wherever it
 runs. The one control takes either file the operator may hold and routes it by
 what the file is: the backup artifact restores the exchange, and a command-line
-`psilink.yaml` lands as a configuration-only exchange instead, or as one that
-runs here when its `.psilink.key` is chosen with it ([Bringing a
+`alcove.yaml` lands as a configuration-only exchange instead, or as one that
+runs here when its `.alcove.key` is chosen with it ([Bringing a
 command-line configuration
 back](#bringing-a-command-line-configuration-back)). One limit: a wholesale
 eviction erases the evidence that

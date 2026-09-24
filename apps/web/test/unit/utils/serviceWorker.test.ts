@@ -20,8 +20,8 @@ import type { ServiceWorkerHarness } from "../../utils/serviceWorkerHarness";
 // what Chromium does own -- that an offline shell renders the list from the
 // local store -- is test/browser/offlineShell.test.ts.
 
-const SHELL_CACHE = "psilink-shell-v1";
-const ASSET_CACHE = "psilink-assets-v1";
+const SHELL_CACHE = "alcove-shell-v2";
+const ASSET_CACHE = "alcove-assets-v2";
 
 /** The app document as the server renders it: the asset graph the worker reads at
  * install is discovered from these references. */
@@ -29,7 +29,7 @@ function shellDocument(assets: Array<string> = ["/assets/index-AAAA1111.js"]) {
   const links = assets
     .map((asset) => `<link rel="modulepreload" href="${asset}"/>`)
     .join("");
-  return `<!DOCTYPE html><html><head>${links}</head><body>psilink</body></html>`;
+  return `<!DOCTYPE html><html><head>${links}</head><body>Alcove</body></html>`;
 }
 
 function html(body: string): Response {
@@ -131,8 +131,8 @@ describe("install", () => {
 describe("activate", () => {
   test("discards every cache outside the current scheme and claims open clients", async () => {
     const harness = servedHarness();
-    await harness.seedCache("psilink-shell-v0");
-    await harness.seedCache("psilink-assets-v0");
+    await harness.seedCache("alcove-shell-v0");
+    await harness.seedCache("alcove-assets-v0");
     await harness.seedCache("something-else");
     await harness.install();
 
@@ -147,7 +147,7 @@ describe("the skip-waiting message", () => {
   test("makes a waiting worker take over", async () => {
     const harness = servedHarness();
 
-    await harness.postMessage("psilink-skip-waiting");
+    await harness.postMessage("alcove-skip-waiting");
 
     expect(harness.skipWaitingCalls).toBe(1);
   });
@@ -155,7 +155,7 @@ describe("the skip-waiting message", () => {
   test("ignores any other message", async () => {
     const harness = servedHarness();
 
-    await harness.postMessage({ type: "psilink-skip-waiting" });
+    await harness.postMessage({ type: "alcove-skip-waiting" });
     await harness.postMessage("something-else");
 
     expect(harness.skipWaitingCalls).toBe(0);
@@ -182,7 +182,7 @@ describe("the warm-routes message", () => {
     await harness.install();
     await harness.activate();
 
-    await harness.postMessage("psilink-warm-routes");
+    await harness.postMessage("alcove-warm-routes");
 
     for (const route of serviceWorkerStringArray("SHELL_ROUTES"))
       expect(harness.cachedUrls(ASSET_CACHE)).toContain(
@@ -195,7 +195,7 @@ describe("the warm-routes message", () => {
     await harness.install();
     await harness.activate();
 
-    await harness.postMessage("psilink-warm-routes");
+    await harness.postMessage("alcove-warm-routes");
 
     expect(harness.cachedUrls(SHELL_CACHE)).not.toContain(
       `${HARNESS_ORIGIN}/saved`,
@@ -206,13 +206,13 @@ describe("the warm-routes message", () => {
     const harness = routedHarness();
     await harness.install();
     await harness.activate();
-    await harness.postMessage("psilink-warm-routes");
+    await harness.postMessage("alcove-warm-routes");
     const assetRequests = () =>
       harness.network.requested.filter((path) => path.startsWith("/assets/"))
         .length;
     const before = assetRequests();
 
-    await harness.postMessage("psilink-warm-routes");
+    await harness.postMessage("alcove-warm-routes");
 
     expect(assetRequests()).toBe(before);
   });
@@ -224,7 +224,7 @@ describe("the warm-routes message", () => {
     harness.network.goOffline();
     const before = harness.network.requested.length;
 
-    await harness.postMessage("psilink-warm-routes");
+    await harness.postMessage("alcove-warm-routes");
 
     expect(harness.network.requested.length).toBe(before + 1);
   });
@@ -311,7 +311,7 @@ describe("navigations", () => {
     const response = await harness.handleFetch(navigationRequest("/saved"));
 
     expect(response?.status).toBe(200);
-    expect(await response?.text()).toContain("psilink");
+    expect(await response?.text()).toContain("Alcove");
   });
 
   test("answer every route from the one cached shell", async () => {
@@ -363,7 +363,7 @@ describe("navigations", () => {
     const response = await cold.handleFetch(navigationRequest("/"));
 
     expect(response?.status).toBe(503);
-    expect(await response?.text()).toContain("psilink is offline");
+    expect(await response?.text()).toContain("Alcove is offline");
   });
 });
 
@@ -473,7 +473,7 @@ describe("the asset-cache cap", () => {
     for (const [route, assets] of assetsOf)
       routeServing(harness, route, assets);
 
-    await harness.postMessage("psilink-warm-routes");
+    await harness.postMessage("alcove-warm-routes");
 
     const cached = harness.cachedUrls(ASSET_CACHE);
     expect(cached.length).toBe(cap);
@@ -612,7 +612,7 @@ describe("a fetch handler meeting a failing cache", () => {
     const response = await harness.handleFetch(navigationRequest("/"));
 
     expect(response?.status).toBe(503);
-    expect(await response?.text()).toContain("psilink is offline");
+    expect(await response?.text()).toContain("Alcove is offline");
   });
 
   test("serves a build asset when the cache will not open", async () => {
@@ -693,7 +693,7 @@ describe("the worker's lifecycle meeting a failing cache", () => {
     harness.storageFails.open(true);
 
     await expect(
-      harness.postMessage("psilink-warm-routes"),
+      harness.postMessage("alcove-warm-routes"),
     ).resolves.toBeUndefined();
   });
 });

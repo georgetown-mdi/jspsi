@@ -10,7 +10,7 @@
     anywhere when this was written: a drive letter mapped to an SMB share, and a
     DFS namespace. This harness asks whether a GitHub windows-latest runner can
     host a rig for them, by building one and reporting what each step actually
-    did. Setup-PsilinkFileDrop.Tests.ps1 is what asserts against the rig it
+    did. Setup-AlcoveFileDrop.Tests.ps1 is what asserts against the rig it
     proved possible.
 
     It measures; it does not assert. "No" is a result rather than a failure, so
@@ -25,9 +25,9 @@
       Q3  Install FS-DFS-Namespace, create a standalone namespace over a second
           share, link the Q1 share into it, and resolve through the namespace.
 
-    Q2 mirrors Resolve-MappedDrive in Setup-PsilinkFileDrop.ps1 rather than
+    Q2 mirrors Resolve-MappedDrive in Setup-AlcoveFileDrop.ps1 rather than
     calling it, by choice rather than by necessity: that script dot-sources with
-    -LoadFunctionsOnly, and Setup-PsilinkFileDrop.Tests.ps1 drives the function
+    -LoadFunctionsOnly, and Setup-AlcoveFileDrop.Tests.ps1 drives the function
     itself. What the copy buys is the difference between the two questions.
     Resolve-MappedDrive returns the first surface that answers,
     while this reports all of them separately -- including the WScript.Network
@@ -172,7 +172,7 @@ function Get-DriveLookups {
     <#  Every surface that can name the UNC behind a mapped drive letter, each
         reported on its own: the value it returned, 'empty' when it returned
         nothing, or 'failed:<message>' when it threw. Mirrors Resolve-MappedDrive
-        in Setup-PsilinkFileDrop.ps1; the header says why it is a copy. #>
+        in Setup-AlcoveFileDrop.ps1; the header says why it is a copy. #>
     param([string] $Letter)
 
     $lookups = [ordered]@{
@@ -230,7 +230,7 @@ function Get-DriveLookups {
 
 function Get-DriveTypeName {
     <# What IO.DriveInfo calls the letter -- the reading Get-DriveKind in
-       Setup-PsilinkFileDrop.ps1 classifies a drop path from. #>
+       Setup-AlcoveFileDrop.ps1 classifies a drop path from. #>
     param([string] $Letter)
 
     try {
@@ -278,10 +278,10 @@ function Test-WriteThrough {
 
 # --- state the cleanup pass needs, whatever the run reaches -----------------
 $suffix = [guid]::NewGuid().ToString('N').Substring(0, 8)
-$dataShareName = "psilinkci$suffix"
-$dfsShareName = "psilinkdfs$suffix"
-$dataShareRoot = Join-Path $env:TEMP "psilink-ci-data-$suffix"
-$dfsShareRoot = Join-Path $env:TEMP "psilink-ci-dfs-$suffix"
+$dataShareName = "alcoveci$suffix"
+$dfsShareName = "alcovedfs$suffix"
+$dataShareRoot = Join-Path $env:TEMP "alcove-ci-data-$suffix"
+$dfsShareRoot = Join-Path $env:TEMP "alcove-ci-dfs-$suffix"
 $dataUnc = "\\localhost\$dataShareName"
 # The same share under the server's own name. DFS names its targets by server, so
 # the namespace link cannot be pointed at the loopback form above.

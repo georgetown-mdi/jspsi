@@ -42,9 +42,9 @@
  * boundary, pinned without a connection.
  */
 
-import { prepareForExchange } from "@psilink/core";
+import { prepareForExchange } from "@alcove/core";
 
-import type { CSVRow, ExchangeSpec, PreparedExchange } from "@psilink/core";
+import type { CSVRow, ExchangeSpec, PreparedExchange } from "@alcove/core";
 
 /**
  * Build the re-run's prepared exchange. `identity` is read from the persisted

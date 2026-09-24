@@ -1,14 +1,14 @@
 // @ts-ignore this is really there
 import PSI from "@openmined/psi.js/psi_wasm_worker";
 
-import { loadPsiBackend, servePsiWorker } from "@psilink/core";
+import { loadPsiBackend, servePsiWorker } from "@alcove/core";
 
 import {
   createBufferingRequestRouter,
   decodePsiWorkerInit,
 } from "./psiCryptoController";
 
-import type { PsiWorkerRequest, PsiWorkerResponse } from "@psilink/core";
+import type { PsiWorkerRequest, PsiWorkerResponse } from "@alcove/core";
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
 /**

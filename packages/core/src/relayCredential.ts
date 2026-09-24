@@ -13,7 +13,7 @@ import type { WebRTCConnectionConfig } from "./config/connection.js";
  * domain-separation label space (docs/spec/PROTOCOL.md, "The domain-separation
  * label space").
  */
-const RELAY_KEY_INFO = "psilink-relay-key-v1";
+const RELAY_KEY_INFO = "alcove-relay-key-v2";
 
 const RELAY_KEY_BYTES = 32;
 
@@ -125,7 +125,7 @@ export async function mintRelayCredential({
  * username. The relay operator reads it in its logs, so it names the software
  * and nothing about the exchange or the party.
  */
-export const RUN_RELAY_CREDENTIAL_LABEL = "psilink";
+export const RUN_RELAY_CREDENTIAL_LABEL = "alcove";
 
 /**
  * The relay servers a webrtc run gathers candidates from, chosen per kind: the

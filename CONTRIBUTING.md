@@ -1,10 +1,10 @@
 ---
-title: "Contributing to psilink"
+title: "Contributing to Alcove"
 ---
 
-# Contributing to psilink
+# Contributing to Alcove
 
-Thank you for your interest in contributing. psilink handles personally identifiable information in high-stakes environments; correctness, security, and auditability matter more than velocity. Please read this document before opening a pull request.
+Thank you for your interest in contributing. Alcove handles personally identifiable information in high-stakes environments; correctness, security, and auditability matter more than velocity. Please read this document before opening a pull request.
 
 ## Scope of this document
 
@@ -16,18 +16,18 @@ This is the pre-contribution quickstart: repository layout, how to build and tes
 
 ## Repository Structure
 
-psilink is organized as an npm workspaces monorepo. The workspaces and the supporting directories, all of them:
+Alcove is organized as an npm workspaces monorepo. The workspaces and the supporting directories, all of them:
 
 | Path             | Description                                                                                |
 | ---------------- | ------------------------------------------------------------------------------------------ |
 | `packages/core/` | Shared library: PSI primitive, exchange orchestration, file-sync transport, config schemas |
-| `packages/peerjs-broker/` | The PeerJS-compatible WebRTC signaling broker: vendored server source plus a standalone entry point (`npm start -w packages/peerjs-broker`). Ships TypeScript source with no build step of its own, reading `@psilink/core/untrusted-text` -- the whole of its reach into core -- from that workspace's `dist/`; the web app bundles it into its server |
-| `packages/testkit/` | Test-only material shared by more than one workspace's test tree (`@psilink/testkit`), consumed as raw TypeScript with no build step; what qualifies and why: [docs/TESTING.md](docs/TESTING.md#shared-test-material) and [docs/notes/cross-workspace-test-material.md](docs/notes/cross-workspace-test-material.md) |
-| `apps/cli/`      | Node.js CLI (`psilink`), built with Rollup, distributed as a Docker image                  |
+| `packages/peerjs-broker/` | The PeerJS-compatible WebRTC signaling broker: vendored server source plus a standalone entry point (`npm start -w packages/peerjs-broker`). Ships TypeScript source with no build step of its own, reading `@alcove/core/untrusted-text` -- the whole of its reach into core -- from that workspace's `dist/`; the web app bundles it into its server |
+| `packages/testkit/` | Test-only material shared by more than one workspace's test tree (`@alcove/testkit`), consumed as raw TypeScript with no build step; what qualifies and why: [docs/TESTING.md](docs/TESTING.md#shared-test-material) and [docs/notes/cross-workspace-test-material.md](docs/notes/cross-workspace-test-material.md) |
+| `apps/cli/`      | Node.js CLI (`alcove`), built with Rollup, distributed as a Docker image                  |
 | `apps/web/`      | TanStack Start (React/SSR) web app; serves the peer-coordination broker above at `/api`    |
 | `docs/`          | Documentation, three tiers: `docs/` overview (conceptual/operational), `docs/spec/` technical, `docs/notes/` design records |
 | `scripts/`       | [Repository checks CI runs](scripts/README.md) (doc links, PR checklist, claim and drift guards) with their tests |
-| `support/`       | [Field guides](support/README.md) for the environment around psilink -- Windows, Docker, agency networks -- plus the FIPS measurement harness |
+| `support/`       | [Field guides](support/README.md) for the environment around Alcove -- Windows, Docker, agency networks -- plus the FIPS measurement harness |
 | `lib/`           | The vendored `@openmined/psi.js` tarball and its checksum                                  |
 | `test_data/`     | Two synthetic CSVs with partial overlap, for practicing a complete exchange                |
 | `design/`        | Interface design records: [`design/web-redesign/`](design/web-redesign/README.md) is the linkage-bench mockup and rationale the web app implements. Not a build input |
@@ -46,8 +46,8 @@ The OpenMined PSI module is vendored at `lib/openmined-psi.js-2.0.6-seclink.3.tg
 ## Development Setup
 
 ```sh
-git clone git@github.com:georgetown-mdi/jspsi.git psilink
-cd psilink
+git clone git@github.com:georgetown-mdi/alcove.git alcove
+cd alcove
 npm install
 npm run build -w packages/core   # core must be built before the apps and the broker
 ```
@@ -59,9 +59,9 @@ npm run dev            # core's build watcher + the web dev server
 npm run dev:console    # the same, with the console deployment profile
 ```
 
-The apps consume `@psilink/core` from its built `dist/`, so a core edit made while a bare `npm run dev -w apps/web` is running never reaches the page. The root script brings `dist/` up to date before the server starts and rebuilds it on every later change; either side exiting stops the other.
+The apps consume `@alcove/core` from its built `dist/`, so a core edit made while a bare `npm run dev -w apps/web` is running never reaches the page. The root script brings `dist/` up to date before the server starts and rebuilds it on every later change; either side exiting stops the other.
 
-No additional environment variables are required for local development or the tests. The CLI SFTP integration suite starts its own server; set `PSILINK_SFTP_BACKEND=native` to run it against a native OpenSSH `sshd` instead of the in-process default (see [docs/TESTING.md](docs/TESTING.md), which documents the variable).
+No additional environment variables are required for local development or the tests. The CLI SFTP integration suite starts its own server; set `ALCOVE_SFTP_BACKEND=native` to run it against a native OpenSSH `sshd` instead of the in-process default (see [docs/TESTING.md](docs/TESTING.md), which documents the variable).
 
 ## Building
 
@@ -94,7 +94,7 @@ npm run test:integration:webrtc -w apps/cli  # WebRTC transport over loopback we
 npm run test:integration:backend-agnostic -w apps/cli  # the integration files no SFTP backend differentiates
 npm run test:integration -w apps/web
 npm run test:browser     -w apps/web         # cross-impl vectors + live exchange, real Chromium
-npm run test:interop     -w apps/web         # a real psilink process and a web party, one live exchange
+npm run test:interop     -w apps/web         # a real alcove process and a web party, one live exchange
 ```
 
 The interop suite drives the built CLI, so run `npm run build -w apps/cli` first;
@@ -123,8 +123,8 @@ not add one. Rationale and what the report covers: [docs/TESTING.md](docs/TESTIN
 - **Transport branching**: `connection.channel` is the discriminant. Use allowlists (not blocklists) so a new channel is rejected unless explicitly added. The guards are in `packages/core/src/config/connection.ts`, `packages/core/src/config/invitation.ts`, `packages/core/src/config/exchangeFile.ts`, `apps/cli/src/commands/exchange.ts`, `apps/cli/src/protocol.ts`, and `apps/cli/src/onlineBootstrap.ts`.
 - **New channels**: add a discriminant value and config interface to `packages/core/src/config/connection.ts`, update the `ConnectionConfig` union, then update the guards. See existing `sftp`, `webrtc`, and `filedrop` entries for examples.
 - **Security primitives**: extract a shared cryptographic helper as soon as it is correct and tested rather than waiting for a second caller, and land a security-relevant fix at the single upstream chokepoint that closes the whole class, preferring a misuse made unrepresentable over one documented -- when that reaches past the issue's stated scope, say so and ask before landing it.
-- **Sensitive-file parsing**: parse any secret-bearing config or credential document only through the sensitive-parse chokepoint in `@psilink/core` (`parseSensitiveYaml` / `parseSensitiveJson` in `packages/core/src/sensitiveFile.ts`, re-exported by `apps/cli/src/sensitiveFile.ts`), never a raw YAML or JSON parser; an ESLint rule enforces it, and its message names the entry points and the one-line `eslint-disable` opt-out for a non-sensitive parse. Which documents qualify, how far the ban reaches, and the leak channels behind it: that module's header and [docs/SECURITY_DESIGN.md](docs/SECURITY_DESIGN.md#console-and-log-hygiene).
-- **Untrusted-JSON parsing**: parse any untrusted JSON -- a partner wire frame, a transport-controlled file, an invitation token -- only through `parseBoundedJson` (`packages/core/src/utils/boundedJson.ts`), never a raw `JSON.parse`; an ESLint rule enforces it across `@psilink/core`, `apps/web/src`, and `packages/peerjs-broker/src`, naming the entry point and the one-line `eslint-disable` opt-out for a trusted parse. A fetched body is read the same way: the web app reads one through the bounded read in `apps/web/src/psi/jobClient/jobApiBody.ts` under the cap that endpoint's answer needs, never a whole-body read (`.json()`, `.text()`, `.arrayBuffer()`), each of which the web app's own lint rules ban. The structural bounds it applies, and the uncatchable process-terminating abort they forestall: that module's header and [docs/spec/CHANNEL_SECURITY.md](docs/spec/CHANNEL_SECURITY.md#application-layer-parsed-input-bounds).
+- **Sensitive-file parsing**: parse any secret-bearing config or credential document only through the sensitive-parse chokepoint in `@alcove/core` (`parseSensitiveYaml` / `parseSensitiveJson` in `packages/core/src/sensitiveFile.ts`, re-exported by `apps/cli/src/sensitiveFile.ts`), never a raw YAML or JSON parser; an ESLint rule enforces it, and its message names the entry points and the one-line `eslint-disable` opt-out for a non-sensitive parse. Which documents qualify, how far the ban reaches, and the leak channels behind it: that module's header and [docs/SECURITY_DESIGN.md](docs/SECURITY_DESIGN.md#console-and-log-hygiene).
+- **Untrusted-JSON parsing**: parse any untrusted JSON -- a partner wire frame, a transport-controlled file, an invitation token -- only through `parseBoundedJson` (`packages/core/src/utils/boundedJson.ts`), never a raw `JSON.parse`; an ESLint rule enforces it across `@alcove/core`, `apps/web/src`, and `packages/peerjs-broker/src`, naming the entry point and the one-line `eslint-disable` opt-out for a trusted parse. A fetched body is read the same way: the web app reads one through the bounded read in `apps/web/src/psi/jobClient/jobApiBody.ts` under the cap that endpoint's answer needs, never a whole-body read (`.json()`, `.text()`, `.arrayBuffer()`), each of which the web app's own lint rules ban. The structural bounds it applies, and the uncatchable process-terminating abort they forestall: that module's header and [docs/spec/CHANNEL_SECURITY.md](docs/spec/CHANNEL_SECURITY.md#application-layer-parsed-input-bounds).
 - **Operator-facing escaping**: escape untrusted text at ONE altitude, the display sink -- a fragment interpolated into an `Error` message or `cause` is composed RAW and `sanitizeErrorForDisplay` escapes the whole rendered chain once where it is shown, while a value that reaches a `log.*`, `console.*`, or UI sink without ever becoming an `Error` is escaped with `sanitizeForDisplay` at that call site; escaping at both altitudes double-escapes every literal backslash on its way to the operator. An ESLint rule bans rendering a raw error at a sink across `packages/core/src`, `apps/cli/src`, and `packages/peerjs-broker/src`, its message naming both entry points and the one-line `eslint-disable` opt-out. A second rule holds the composition side across `packages/` and `apps/cli/`, test sources included: an already-escaped `Displayable` may not be composed into an `Error` message, its `cause`, or a cause link (what it matches, and why it has no runtime half: [docs/spec/CHANNEL_SECURITY.md](docs/spec/CHANNEL_SECURITY.md#display-sanitization-escape-format)). The shapes the sink ban matches (`eslint.config.mjs`), the console sentinel that is its runtime half, what bounds each of them, and the few routes that still escape twice (add no more): [docs/spec/CHANNEL_SECURITY.md](docs/spec/CHANNEL_SECURITY.md#display-sanitization-escape-format).
 - **CLI durations**: a duration-valued CLI flag parses its value through the shared `parseDuration` / human-readable `<int><unit>` format (`apps/cli/src/util/duration.ts`), read from args via `durationFlagSeconds` (`apps/cli/src/util/flags.ts`), never a bare integer of seconds, so the accepted value syntax stays consistent across flags.
 - **CLI flag naming**: a flag names the object of the action rather than the mechanism, stays self-scoping (a generic `--yes` overclaims), does not stutter with its subcommand, and a weighty or irreversible action gets no terse short form.
@@ -166,7 +166,7 @@ not add one. Rationale and what the report covers: [docs/TESTING.md](docs/TESTIN
       bubble up | paper over | knob | legible -> raise / hide / setting / clear
       appliance | bench              -> console (prose and user-visible text only)
           The `/bench` route segments are compatibility redirects for links
-          issued before the primary routes existed, and the `psilinkBenchStep`
+          issued before the primary routes existed, and the `alcoveBenchStep`
           history-state marker is the same kind of key for entries the deployed
           build already wrote; both keep the word.
       battery                        -> the checks / the run
@@ -196,7 +196,7 @@ npm run check:all -- --list  # what each holds, and what it does not run
 
 ## Documentation
 
-psilink documentation is three-tier:
+Alcove documentation is three-tier:
 
 - `docs/` (overview) - conceptual and operational documents for program officers, security reviewers, compliance officers, IT staff, and contributors.
 - `docs/spec/` - the technical specification tier: wire formats, byte encodings, normative constant values, protocol internals, and implementation-level design, for implementors and auditors. See [`docs/spec/README.md`](docs/spec/README.md) for the index and routing guide.
@@ -222,9 +222,9 @@ Documentation-tier placement is in scope for code review: a reviewer flags spec-
 
 ## Changelog
 
-`CHANGELOG.md` is reader-facing release notes for whoever runs or vets psilink from outside this repo, browsing to learn what it does and whether it is worth adopting -- not a second copy of the git history. It is a short list of the product's headline capabilities, not a record of the work done.
+`CHANGELOG.md` is reader-facing release notes for whoever runs or vets Alcove from outside this repo, browsing to learn what it does and whether it is worth adopting -- not a second copy of the git history. It is a short list of the product's headline capabilities, not a record of the work done.
 
-- Pre-release, the default answer to "does this PR need a changelog entry?" is no. Add one only for a major feature -- a new capability a reader browsing the repo needs to know exists -- or a breaking change to something already listed. Everything else is skipped: individual flags and config fields, UI polish, operational and error-handling refinements, bug fixes, changed defaults, exit-code and format tweaks, internal refactors, test/CI/tooling changes, `@psilink/core` API reshapes, and doc-only edits. When in doubt, leave it out; a reviewer adds an entry back far more cheaply than the log recovers from bloat.
+- Pre-release, the default answer to "does this PR need a changelog entry?" is no. Add one only for a major feature -- a new capability a reader browsing the repo needs to know exists -- or a breaking change to something already listed. Everything else is skipped: individual flags and config fields, UI polish, operational and error-handling refinements, bug fixes, changed defaults, exit-code and format tweaks, internal refactors, test/CI/tooling changes, `@alcove/core` API reshapes, and doc-only edits. When in doubt, leave it out; a reviewer adds an entry back far more cheaply than the log recovers from bloat.
 - One or two lines per entry, stating the capability; push rationale and wire detail to `docs/`, `docs/spec/`, or the PR and link it with a trailing `See docs/...`.
 - Group under Added / Changed / Deprecated / Removed / Fixed / Security; prefix a breaking change `BREAKING:`. Keep the Security section to the headline security posture, not each hardening change.
 - Once there are releases operators upgrade between, the bar drops to any change a reader acts on when deciding whether to upgrade -- a changed default, behavior, exit code, wire/on-disk format, or security fix -- and security entries are recorded exhaustively per release. Until then, hold the higher bar.
@@ -270,7 +270,7 @@ A change requires explicit security review and maintainer approval before mergin
 
 Modifying an existing control in these areas is in scope exactly as adding one is: a change that weakens or removes a guarantee triggers review no less than a new control does.
 
-psilink is licensed under [Apache 2.0](LICENSE.md); add third-party dependencies conservatively. For every new dependency:
+Alcove is licensed under [Apache 2.0](LICENSE.md); add third-party dependencies conservatively. For every new dependency:
 
 1. Confirm the license permits Apache 2.0 distribution. Copyleft licenses (GPL, AGPL) are not compatible. The [Dependency Review workflow](.github/workflows/dependency_review.yaml) enforces this automatically for the strong-copyleft GPL/AGPL family via its `deny-licenses` blocklist, failing any PR that introduces a dependency under one. That gate catches part of the rule, not all of it: it fails only on a _declared_ denied SPDX id, so a passing check is not proof a dependency is clean -- one that ships no license metadata (or `NOASSERTION`) is reported but does not fail it. This review stays the authority for weak copyleft (LGPL, MPL), whose acceptability is linkage-dependent, and for any dependency whose license the action cannot resolve or that declares none (exempt a mis-flagged dependency with the workflow's `allow-dependencies-licenses` and clear it here). Both this rule and that gate scope to the npm tree. Each image's OS layer ships its base distribution's packages, some declaring GPL-3.0 or LGPL-3.0 terms, and is attributed instead in the lists beside [`NOTICE`](NOTICE); see [docs/spec/CONTAINER_IMAGES.md](docs/spec/CONTAINER_IMAGES.md#the-os-layer-attribution-lists).
 2. Run `npm audit --omit=dev -w packages/core -w apps/cli -w apps/web` -- the scope the shipped image runs -- and resolve any known vulnerabilities before merging. [Static Checks](.github/workflows/static_checks.yaml) runs that exact command as a merge gate on every pull request and fails on any finding, so this is a faster local answer rather than the only one; resolve a red gate by a reviewed bump, never by `npm audit fix`. A finding outside that scope is a development-tree finding, reported by the scheduled [Dependency Audit](.github/workflows/dependency_audit.yaml) and triaged separately rather than at merge time; see [docs/spec/DEPENDENCY_PINS.md](docs/spec/DEPENDENCY_PINS.md).
@@ -287,7 +287,7 @@ Per-dependency licenses for the npm tree are recorded in the CycloneDX SBOM atta
 
 ## Export Control
 
-psilink incorporates cryptographic software. Distribution may be subject to U.S. Export Administration Regulations (EAR). Most open-source cryptographic software qualifies for License Exception ENC under ECCN 5D002, but the exception requires a one-time notification to BIS and NSA. This notification is pending and will be completed before the 1.0 release. See [docs/COMPLIANCE.md](docs/COMPLIANCE.md#export-control-ear) for the full regulatory framing.
+Alcove incorporates cryptographic software. Distribution may be subject to U.S. Export Administration Regulations (EAR). Most open-source cryptographic software qualifies for License Exception ENC under ECCN 5D002, but the exception requires a one-time notification to BIS and NSA. This notification is pending and will be completed before the 1.0 release. See [docs/COMPLIANCE.md](docs/COMPLIANCE.md#export-control-ear) for the full regulatory framing.
 
 ## Reporting Security Issues
 
@@ -295,4 +295,4 @@ Do not open a public issue for security vulnerabilities. See [SECURITY.md](SECUR
 
 ## Reporting Other Issues
 
-Open a [GitHub issue](https://github.com/georgetown-mdi/jspsi/issues). Include the version (Docker image tag or `package.json` version), the operating system, and a minimal reproducing case.
+Open a [GitHub issue](https://github.com/georgetown-mdi/alcove/issues). Include the version (Docker image tag or `package.json` version), the operating system, and a minimal reproducing case.

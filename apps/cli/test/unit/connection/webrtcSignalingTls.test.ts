@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
-import { sanitizeErrorForDisplay } from "@psilink/core";
+import { sanitizeErrorForDisplay } from "@alcove/core";
 
 import {
   SIGNALING_CERTIFICATE_FAILED_MESSAGE,

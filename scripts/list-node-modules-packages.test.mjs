@@ -83,28 +83,28 @@ describe("listNodeModulesPackages", () => {
 
   it("skips a dotted entry inside a scope directory", () => {
     const nodeModules = tree({
-      "@psilink/.cache": null,
-      "@psilink/core": { name: "@psilink/core", version: "0.1.0" },
+      "@alcove/.cache": null,
+      "@alcove/core": { name: "@alcove/core", version: "0.1.0" },
     });
 
     expect(listNodeModulesPackages(nodeModules)).toEqual([
-      "@psilink/core@0.1.0",
+      "@alcove/core@0.1.0",
     ]);
   });
 
   it("reads a workspace link from its target without descending into it", () => {
     const nodeModules = tree({
-      "../packages/core": { name: "@psilink/core", version: "0.1.0" },
+      "../packages/core": { name: "@alcove/core", version: "0.1.0" },
       "../packages/core/node_modules/vitest": {
         name: "vitest",
         version: "4.0.0",
       },
-      "@psilink": null,
+      "@alcove": null,
     });
-    symlinkSync("../../packages/core", join(nodeModules, "@psilink/core"));
+    symlinkSync("../../packages/core", join(nodeModules, "@alcove/core"));
 
     expect(listNodeModulesPackages(nodeModules)).toEqual([
-      "@psilink/core@0.1.0",
+      "@alcove/core@0.1.0",
     ]);
   });
 

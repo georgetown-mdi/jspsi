@@ -21,18 +21,18 @@ import {
   setDiagnosticSink,
   SHARED_SECRET_REGEX,
   UsageError,
-} from "@psilink/core";
+} from "@alcove/core";
 import {
   CSV_LINE_BYTE_CEILING,
   minimalPreparedExchange,
-} from "@psilink/core/testing";
+} from "@alcove/core/testing";
 import type {
   ConnectionConfig,
   ConnectionEndpoint,
   PartnerPayload,
   SFTPConnectionConfig,
   WebRTCConnectionConfig,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { saveConfig } from "../../src/config";
 import { brokerLocationFromConnection } from "../../src/connection/webrtc/weriftPeer";
@@ -187,7 +187,7 @@ test("connectionFromURL: a webrtc (ws) URL is a usage error", () => {
     UsageError,
   );
   expect(() => connectionFromURL(new URL("ws://host/path"), {})).toThrow(
-    "psilink exchange",
+    "alcove exchange",
   );
 });
 
@@ -252,7 +252,7 @@ test("connectionFromURL: a traversal-shaped path is decoded literally, not rejec
   // Encoded dot-dot segments joined by an encoded slash (%2e%2e%2f) survive the
   // WHATWG parser's double-dot collapsing (only literal "/" triggers it) and
   // decode to a literal "..". The builder decodes faithfully, with no
-  // traversal special case, matching a hand-authored psilink.yaml with the same
+  // traversal special case, matching a hand-authored alcove.yaml with the same
   // path. Traversal defense belongs at the connection layer instead, which
   // covers every config source, not just URLs; this test pins that scope.
   const conn = connectionFromURL(new URL("sftp://host/%2e%2e%2fetc"), {});
@@ -280,7 +280,7 @@ test("connectionFromURL: a malformed percent-escape is a redacted usage error", 
 });
 
 test("connectionFromURL and diffConnectionAgainstTarget agree on an encoded URL", () => {
-  // A pre-existing config holds decoded values (a hand-authored psilink.yaml, or
+  // A pre-existing config holds decoded values (a hand-authored alcove.yaml, or
   // a config the decoded builder saved earlier); the accept URL has the same
   // drop percent-encoded. Because the builder decodes, the reconcile compares
   // decoded-vs-decoded and reports a clean match -- no false conflict, and
@@ -730,7 +730,7 @@ test("parseCommonBootstrapArgs: an unrecognized log-level is a usage error", () 
   expect(() =>
     parseCommonBootstrapArgs({
       _: [],
-      $0: "psilink",
+      $0: "alcove",
       "log-level": "bogus",
     } as unknown as Arguments),
   ).toThrow(UsageError);
@@ -743,14 +743,14 @@ test("parseCommonBootstrapArgs: a repeated number flag is a usage error naming t
   expect(() =>
     parseCommonBootstrapArgs({
       _: [],
-      $0: "psilink",
+      $0: "alcove",
       "server-port": [2222, 2223],
     } as unknown as Arguments),
   ).toThrow(UsageError);
   expect(() =>
     parseCommonBootstrapArgs({
       _: [],
-      $0: "psilink",
+      $0: "alcove",
       "server-port": [2222, 2223],
     } as unknown as Arguments),
   ).toThrow("--server-port may be given only once");
@@ -762,7 +762,7 @@ test("parseCommonBootstrapArgs: a repeated string flag is a usage error naming t
   expect(() =>
     parseCommonBootstrapArgs({
       _: [],
-      $0: "psilink",
+      $0: "alcove",
       "log-level": ["info", "debug"],
     } as unknown as Arguments),
   ).toThrow("--log-level may be given only once");
@@ -771,7 +771,7 @@ test("parseCommonBootstrapArgs: a repeated string flag is a usage error naming t
 test("parseCommonBootstrapArgs: --outbound-path is read as a string", () => {
   const parsed = parseCommonBootstrapArgs({
     _: [],
-    $0: "psilink",
+    $0: "alcove",
     "outbound-path": "/mnt/share/to-partner",
   } as unknown as Arguments);
   expect(parsed.outboundPath).toBe("/mnt/share/to-partner");
@@ -781,7 +781,7 @@ test("parseCommonBootstrapArgs: a repeated --outbound-path is a usage error", ()
   expect(() =>
     parseCommonBootstrapArgs({
       _: [],
-      $0: "psilink",
+      $0: "alcove",
       "outbound-path": ["/a", "/b"],
     } as unknown as Arguments),
   ).toThrow("--outbound-path may be given only once");
@@ -793,7 +793,7 @@ test("parseCommonBootstrapArgs: human-readable timeouts parse to whole seconds",
   // scales to ms) expect, so only the input form changed.
   const parsed = parseCommonBootstrapArgs({
     _: [],
-    $0: "psilink",
+    $0: "alcove",
     "connection-timeout": "2m",
     "peer-timeout": "30s",
   } as unknown as Arguments);
@@ -805,14 +805,14 @@ test("parseCommonBootstrapArgs: a bare-integer timeout is rejected with the suff
   expect(() =>
     parseCommonBootstrapArgs({
       _: [],
-      $0: "psilink",
+      $0: "alcove",
       "peer-timeout": "30",
     } as unknown as Arguments),
   ).toThrow(UsageError);
   expect(() =>
     parseCommonBootstrapArgs({
       _: [],
-      $0: "psilink",
+      $0: "alcove",
       "peer-timeout": "30",
     } as unknown as Arguments),
   ).toThrow("30s");
@@ -822,7 +822,7 @@ test("parseCommonBootstrapArgs: a malformed timeout is a flag-named usage error"
   expect(() =>
     parseCommonBootstrapArgs({
       _: [],
-      $0: "psilink",
+      $0: "alcove",
       "connection-timeout": "soon",
     } as unknown as Arguments),
   ).toThrow("--connection-timeout");
@@ -839,7 +839,7 @@ test("parseCommonBootstrapArgs: a connection-/peer-timeout above the 7d ceiling 
     const parse = () =>
       parseCommonBootstrapArgs({
         _: [],
-        $0: "psilink",
+        $0: "alcove",
         [flag]: justOver,
       } as unknown as Arguments);
     // Assert the throw first, so a regression that fails to reject shows up as a
@@ -860,7 +860,7 @@ test("parseCommonBootstrapArgs: a negative max-reconnect-attempts is a flag-name
   const parse = () =>
     parseCommonBootstrapArgs({
       _: [],
-      $0: "psilink",
+      $0: "alcove",
       "max-reconnect-attempts": -1,
     } as unknown as Arguments);
   expect(parse).toThrow(UsageError);
@@ -876,7 +876,7 @@ test("parseCommonBootstrapArgs: a max-reconnect-attempts above the ceiling is re
   const parse = () =>
     parseCommonBootstrapArgs({
       _: [],
-      $0: "psilink",
+      $0: "alcove",
       "max-reconnect-attempts": MAX_RECONNECT_ATTEMPTS + 1,
     } as unknown as Arguments);
   expect(parse).toThrow(UsageError);
@@ -892,7 +892,7 @@ test("parseCommonBootstrapArgs: a max-reconnect-attempts at the ceiling is accep
   // an off-by-one in the ceiling the parse site hands nonNegativeIntFlag.
   const parsed = parseCommonBootstrapArgs({
     _: [],
-    $0: "psilink",
+    $0: "alcove",
     "max-reconnect-attempts": MAX_RECONNECT_ATTEMPTS,
   } as unknown as Arguments);
   expect(parsed.maxReconnectAttempts).toBe(MAX_RECONNECT_ATTEMPTS);
@@ -906,7 +906,7 @@ test("parseCommonBootstrapArgs: a non-numeric server-port is a flag-named usage 
   const parse = () =>
     parseCommonBootstrapArgs({
       _: [],
-      $0: "psilink",
+      $0: "alcove",
       "server-port": Number.NaN,
     } as unknown as Arguments);
   expect(parse).toThrow(UsageError);
@@ -921,7 +921,7 @@ test("parseCommonBootstrapArgs: an out-of-range server-port is a flag-named usag
     const parse = () =>
       parseCommonBootstrapArgs({
         _: [],
-        $0: "psilink",
+        $0: "alcove",
         "server-port": bad,
       } as unknown as Arguments);
     expect(parse).toThrow(UsageError);
@@ -935,14 +935,14 @@ test("parseCommonBootstrapArgs: server-port at 0 and at the 65535 ceiling are ac
   expect(
     parseCommonBootstrapArgs({
       _: [],
-      $0: "psilink",
+      $0: "alcove",
       "server-port": 0,
     } as unknown as Arguments).serverPort,
   ).toBe(0);
   expect(
     parseCommonBootstrapArgs({
       _: [],
-      $0: "psilink",
+      $0: "alcove",
       "server-port": MAX_PORT,
     } as unknown as Arguments).serverPort,
   ).toBe(MAX_PORT);
@@ -953,7 +953,7 @@ test("parseCommonBootstrapArgs: a connection-/peer-timeout at the 7d ceiling is 
   // largest in-range value behaves exactly as it does today.
   const parsed = parseCommonBootstrapArgs({
     _: [],
-    $0: "psilink",
+    $0: "alcove",
     "connection-timeout": `${MAX_TIMEOUT_SECONDS / 86_400}d`,
     "peer-timeout": `${MAX_TIMEOUT_SECONDS / 86_400}d`,
   } as unknown as Arguments);
@@ -1099,7 +1099,7 @@ test("warnUnsupportedWebRTCServerFlags: webrtc warns once per flag set", () => {
 test("warnUnsupportedWebRTCServerFlags: each remedy points at the connection the caller has", () => {
   // The two flags holding a remedy of their own are the two that can point at
   // the wrong thing: a caller running a configuration has no URL to be told its
-  // port comes from, and telling it to author a config and run 'psilink
+  // port comes from, and telling it to author a config and run 'alcove
   // exchange' is the command it already is.
   const fromUrl = collectWarnings();
   warnUnsupportedWebRTCServerFlags(
@@ -1109,7 +1109,7 @@ test("warnUnsupportedWebRTCServerFlags: each remedy points at the connection the
     "url",
   );
   expect(fromUrl.messages[0]).toContain("ws:// or wss:// URL");
-  expect(fromUrl.messages[1]).toContain("psilink exchange");
+  expect(fromUrl.messages[1]).toContain("alcove exchange");
 
   const fromConfiguration = collectWarnings();
   warnUnsupportedWebRTCServerFlags(
@@ -1124,7 +1124,7 @@ test("warnUnsupportedWebRTCServerFlags: each remedy points at the connection the
   // was not given, or back to the command it is.
   const rendered = fromConfiguration.messages.join("");
   expect(rendered).not.toContain("ws://");
-  expect(rendered).not.toContain("psilink exchange'");
+  expect(rendered).not.toContain("alcove exchange'");
 });
 
 test("warnUnsupportedWebRTCServerFlags: every dropped credential flag is reported, by name only", () => {
@@ -1891,7 +1891,7 @@ test("endpointFromConnection: nothing but the webrtc locator survives the emit",
     turn: [
       {
         url: "turns:relay.example.org:443",
-        username: "psilink",
+        username: "alcove",
         credential: "relaysecret",
       },
       { url: "turns:minted.example.org:443" },
@@ -1914,7 +1914,7 @@ test("endpointFromConnection: nothing but the webrtc locator survives the emit",
     "topsecret",
     "relaysecret",
     "relay.example.org",
-    "psilink",
+    "alcove",
     "secure",
     "role",
   ])
@@ -2093,7 +2093,7 @@ function onlineBootstrapParams(
   const dataSpec = buildDataSpec({ identity: "Agency A", rows: ROWS });
   const connection: RunnableConnectionConfig = {
     channel: "filedrop",
-    path: "/tmp/psilink-drop",
+    path: "/tmp/alcove-drop",
   };
   return {
     connection,
@@ -2104,7 +2104,7 @@ function onlineBootstrapParams(
     }),
     sharedSecret: generateSharedSecret(),
     expires: undefined,
-    keyPath: path.join(path.dirname(configPath), ".psilink.key"),
+    keyPath: path.join(path.dirname(configPath), ".alcove.key"),
     configPath,
     output: undefined,
     verbosity: -1,
@@ -2152,8 +2152,8 @@ test("runOnlineBootstrap writes the config from the hook even when the exchange 
     throw new Error("data exchange failed");
   }) as never);
 
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
-  const configPath = path.join(dir, "psilink.yaml");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bootstrap-"));
+  const configPath = path.join(dir, "alcove.yaml");
   try {
     await expect(
       runOnlineBootstrap(onlineBootstrapParams(configPath)),
@@ -2172,8 +2172,8 @@ test("runOnlineBootstrap does not write the config when the handshake fails", as
     throw new Error("partner declined the invitation");
   }) as never);
 
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
-  const configPath = path.join(dir, "psilink.yaml");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bootstrap-"));
+  const configPath = path.join(dir, "alcove.yaml");
   try {
     await expect(
       runOnlineBootstrap(onlineBootstrapParams(configPath)),
@@ -2196,8 +2196,8 @@ test("runOnlineBootstrap does not write the config when the handshake fails", as
 function backslashedPath(dir: string, name: string): string {
   const full =
     process.platform === "win32"
-      ? path.join(dir, "psilink", name)
-      : path.join(dir, `C:\\psilink\\${name}`);
+      ? path.join(dir, "alcove", name)
+      : path.join(dir, `C:\\alcove\\${name}`);
   fs.mkdirSync(path.dirname(full), { recursive: true });
   return full;
 }
@@ -2205,8 +2205,8 @@ function backslashedPath(dir: string, name: string): string {
 test("runOnlineBootstrap marks the path in the refusal to overwrite a config that appeared late", async () => {
   // The re-gate immediately before the write: a file lands at the config path
   // between the pre-network check and the acceptance hook.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
-  const configPath = backslashedPath(dir, "psilink.yaml");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bootstrap-"));
+  const configPath = backslashedPath(dir, "alcove.yaml");
   vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
     const onAuthenticated = onAuthenticatedArg(callArgs);
     fs.writeFileSync(configPath, "");
@@ -2237,10 +2237,10 @@ test("runOnlineBootstrap marks the path in the refusal to overwrite a config tha
 
 test("runOnlineBootstrap names both written paths as the operator typed them when the exchange then fails", async () => {
   // Handshake and both writes succeeded, then the exchange failed: the note
-  // telling the operator to retry with 'psilink exchange' names the two files
+  // telling the operator to retry with 'alcove exchange' names the two files
   // they would look for.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
-  const configPath = backslashedPath(dir, "psilink.yaml");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bootstrap-"));
+  const configPath = backslashedPath(dir, "alcove.yaml");
   vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
     const onAuthenticated = onAuthenticatedArg(callArgs);
     await onAuthenticated();
@@ -2271,7 +2271,7 @@ test("runOnlineBootstrap names both written paths as the operator typed them whe
 test("runOnlineBootstrap passes a webrtc connection through to the exchange and the saved config", async () => {
   // The inviter's own webrtc connection reaches runProtocol unchanged (role
   // included -- without it the dial refuses) and is what the hook persists, so
-  // the recurring `psilink exchange` this bootstrap sets up meets the same
+  // the recurring `alcove exchange` this bootstrap sets up meets the same
   // coordination server the invitation named.
   const connection: WebRTCConnectionConfig = {
     channel: "webrtc",
@@ -2284,8 +2284,8 @@ test("runOnlineBootstrap passes a webrtc connection through to the exchange and 
     return {};
   }) as never);
 
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
-  const configPath = path.join(dir, "psilink.yaml");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bootstrap-"));
+  const configPath = path.join(dir, "alcove.yaml");
   try {
     await runOnlineBootstrap({
       ...onlineBootstrapParams(configPath),
@@ -2313,15 +2313,15 @@ test("runOnlineBootstrap spends a run-only peer budget on the run and writes non
   // The online inviter's --accept-timeout: a window for one operator waiting at
   // a rendezvous, which must bound the run it was typed for and nothing after
   // it. The config this same call writes is what every later unattended
-  // `psilink exchange` reads, so putting the budget into it would hand those
+  // `alcove exchange` reads, so putting the budget into it would hand those
   // runs a peer timeout nobody chose for them.
   vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
     await onAuthenticatedArg(callArgs)();
     return {};
   }) as never);
 
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
-  const configPath = path.join(dir, "psilink.yaml");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bootstrap-"));
+  const configPath = path.join(dir, "alcove.yaml");
   try {
     await runOnlineBootstrap({
       ...onlineBootstrapParams(configPath),
@@ -2351,8 +2351,8 @@ test("runOnlineBootstrap leaves a connection's own peer budget on both the run a
     return {};
   }) as never);
 
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
-  const configPath = path.join(dir, "psilink.yaml");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bootstrap-"));
+  const configPath = path.join(dir, "alcove.yaml");
   const params = onlineBootstrapParams(configPath);
   try {
     await runOnlineBootstrap({
@@ -2382,8 +2382,8 @@ test("runOnlineBootstrap returns the config-write error when the hook fails but 
     onAuthenticatedError: writeError,
   })) as never);
 
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
-  const configPath = path.join(dir, "psilink.yaml");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bootstrap-"));
+  const configPath = path.join(dir, "alcove.yaml");
   try {
     const { configWriteError } = await runOnlineBootstrap(
       onlineBootstrapParams(configPath),
@@ -2399,8 +2399,8 @@ test("runOnlineBootstrap reports no config-write error on a clean run", async ()
   // runOnlineBootstrap reports a clean outcome.
   vi.mocked(runProtocol).mockImplementation((async () => ({})) as never);
 
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
-  const configPath = path.join(dir, "psilink.yaml");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bootstrap-"));
+  const configPath = path.join(dir, "alcove.yaml");
   try {
     const { configWriteError } = await runOnlineBootstrap(
       onlineBootstrapParams(configPath),
@@ -2468,10 +2468,10 @@ function mockSuccessfulExchange(
 test("runOnlineBootstrap crystallizes the observed received set when the inviter opts in", async () => {
   // The online inviter passes persistObservedReceivedPayload: after the exchange
   // it re-writes the freshly-saved config with the columns it observed, so a later
-  // `psilink exchange` fails closed on a divergent payload.
+  // `alcove exchange` fails closed on a divergent payload.
   mockSuccessfulExchange(["dob", "zip"]);
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
-  const configPath = path.join(dir, "psilink.yaml");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bootstrap-"));
+  const configPath = path.join(dir, "alcove.yaml");
   try {
     await runOnlineBootstrap({
       ...onlineBootstrapParams(configPath),
@@ -2497,8 +2497,8 @@ test("runOnlineBootstrap crystallizes from the pre-terminal hook, not after runP
     await onAuthenticated?.();
     return { observedReceivedPayloadColumns: ["dob", "zip"] };
   }) as never);
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
-  const configPath = path.join(dir, "psilink.yaml");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bootstrap-"));
+  const configPath = path.join(dir, "alcove.yaml");
   try {
     await runOnlineBootstrap({
       ...onlineBootstrapParams(configPath),
@@ -2515,8 +2515,8 @@ test("runOnlineBootstrap leaves an empty observation lazy even when the inviter 
   // An observed-empty payload is an ambiguous zero-match run; persisting [] would
   // false-abort a later matching exchange, so no commitment is written.
   mockSuccessfulExchange([]);
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
-  const configPath = path.join(dir, "psilink.yaml");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bootstrap-"));
+  const configPath = path.join(dir, "alcove.yaml");
   try {
     await runOnlineBootstrap({
       ...onlineBootstrapParams(configPath),
@@ -2534,8 +2534,8 @@ test("runOnlineBootstrap does not crystallize the observed set without the invit
   // not pass persistObservedReceivedPayload, so its saved config records no
   // observed commitment.
   mockSuccessfulExchange(["dob", "zip"]);
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
-  const configPath = path.join(dir, "psilink.yaml");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bootstrap-"));
+  const configPath = path.join(dir, "alcove.yaml");
   try {
     await runOnlineBootstrap(onlineBootstrapParams(configPath));
     const written = YAML.parse(fs.readFileSync(configPath, "utf8"));
@@ -2550,8 +2550,8 @@ test("runOnlineBootstrap does not crystallize onto a reused pre-existing config"
   // (configWritten stays false), so the observe-then-persist second write must not
   // fire and rewrite it -- even with the inviter opt-in set.
   mockSuccessfulExchange(["dob", "zip"]);
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
-  const configPath = path.join(dir, "psilink.yaml");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bootstrap-"));
+  const configPath = path.join(dir, "alcove.yaml");
   fs.writeFileSync(configPath, "preexisting: true\n");
   try {
     await runOnlineBootstrap({
@@ -2573,8 +2573,8 @@ test("runOnlineBootstrap keeps a failed observed-payload write non-fatal", async
   // exchange is not undone, nothing rethrows, and the clean hook write is still
   // reported (configWriteError undefined). getLogger("bootstrap-test") is silenced
   // above, so the catch's warn does not print.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
-  const configPath = path.join(dir, "psilink.yaml");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bootstrap-"));
+  const configPath = path.join(dir, "alcove.yaml");
   mockSuccessfulExchange(["dob", "zip"], () => {
     fs.rmSync(configPath); // swap the acceptance hook's file for a directory
     fs.mkdirSync(configPath); // so the second saveConfig's rename throws (EISDIR)
@@ -2601,8 +2601,8 @@ test("runOnlineBootstrap reports a lost observed-payload write on fd 3 and in th
   // machine-interface stream plus the persistence-loss exit code (73), never a
   // rejection. 69 would tell a supervisor to retry an exchange that already
   // happened.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
-  const configPath = path.join(dir, "psilink.yaml");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bootstrap-"));
+  const configPath = path.join(dir, "alcove.yaml");
   mockSuccessfulExchange(["dob", "zip"], () => {
     fs.rmSync(configPath); // swap the acceptance hook's file for a directory
     fs.mkdirSync(configPath); // so the second saveConfig's rename throws (EISDIR)
@@ -2669,8 +2669,8 @@ test("runOnlineBootstrap's post-output hook reports the write it lost", async ()
   // normally, so the result is the only thing that tells the output stage the
   // write did not land -- and the stage lowers its every-artifact-on-disk flag
   // off nothing else, which is what the overrun notice tells the operator.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
-  const configPath = path.join(dir, "psilink.yaml");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bootstrap-"));
+  const configPath = path.join(dir, "alcove.yaml");
   const reported = captureOutputCompleteResults(["dob", "zip"], () => {
     fs.rmSync(configPath); // swap the acceptance hook's file for a directory
     fs.mkdirSync(configPath); // so the second saveConfig's rename throws (EISDIR)
@@ -2691,8 +2691,8 @@ test("runOnlineBootstrap's post-output hook reports the write that landed", asyn
   // of the write reports a complete persistence, and the config on disk holds
   // the commitment that report is about -- so `persisted: true` is the answer
   // to a write that happened rather than a constant.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
-  const configPath = path.join(dir, "psilink.yaml");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bootstrap-"));
+  const configPath = path.join(dir, "alcove.yaml");
   const reported = captureOutputCompleteResults(["dob", "zip"]);
   try {
     await runOnlineBootstrap({
@@ -2717,8 +2717,8 @@ test("runOnlineBootstrap hands runProtocol the emitter it opened itself, not the
   mockSuccessfulExchange(undefined);
   vi.mocked(openEventStream).mockClear();
   vi.mocked(runProtocol).mockClear();
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
-  const configPath = path.join(dir, "psilink.yaml");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bootstrap-"));
+  const configPath = path.join(dir, "alcove.yaml");
   try {
     const { lines } = await captureFd3(() =>
       runOnlineBootstrap({
@@ -2748,10 +2748,10 @@ test("runOnlineBootstrap persists the acceptor's up-front token received set int
   // The online ACCEPTOR knows the columns it consented to receive up front from the
   // token, so the set rides the acceptance hook's FIRST write (no observation
   // needed, unlike the inviter's observe-then-persist second write above). A later
-  // `psilink exchange` then locks it in and fails closed on a divergent payload.
+  // `alcove exchange` then locks it in and fails closed on a divergent payload.
   mockSuccessfulExchange(undefined); // acceptor learns nothing by observation
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
-  const configPath = path.join(dir, "psilink.yaml");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bootstrap-"));
+  const configPath = path.join(dir, "alcove.yaml");
   try {
     await runOnlineBootstrap({
       ...onlineBootstrapParams(configPath),
@@ -2771,8 +2771,8 @@ test("runOnlineBootstrap persists the acceptance's declared deduplicate into the
   // nothing to hold the partner's presented cardinality to.
   for (const declared of [false, true]) {
     mockSuccessfulExchange(undefined);
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
-    const configPath = path.join(dir, "psilink.yaml");
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bootstrap-"));
+    const configPath = path.join(dir, "alcove.yaml");
     try {
       await runOnlineBootstrap({
         ...onlineBootstrapParams(configPath),
@@ -2793,8 +2793,8 @@ test("runOnlineBootstrap writes no declaration for a party that accepted none", 
   // binding at all -- an absent field, not a `false` that would refuse a partner
   // legitimately running as the "many" side.
   mockSuccessfulExchange(undefined);
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
-  const configPath = path.join(dir, "psilink.yaml");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bootstrap-"));
+  const configPath = path.join(dir, "alcove.yaml");
   try {
     await runOnlineBootstrap(onlineBootstrapParams(configPath));
     const raw = fs.readFileSync(configPath, "utf8");
@@ -2811,10 +2811,10 @@ test("runOnlineBootstrap persists the acceptor's own outbound consent into the f
   // The send-side sibling of the commitment above, known at the same moment (it is the
   // set the acceptance displayed), so it rides the same first write. Without it the
   // fresh config would leave the acceptor's own disclosure unrecorded and a later
-  // `psilink exchange` would transmit whatever its CSV happened to disclose.
+  // `alcove exchange` would transmit whatever its CSV happened to disclose.
   mockSuccessfulExchange(undefined);
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
-  const configPath = path.join(dir, "psilink.yaml");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bootstrap-"));
+  const configPath = path.join(dir, "alcove.yaml");
   try {
     await runOnlineBootstrap({
       ...onlineBootstrapParams(configPath),
@@ -2835,8 +2835,8 @@ test("runOnlineBootstrap persists a pending outbound consent into the fresh conf
   // not resolve the set, so `pending` rides the write and the first resolving run
   // shows and asks before anything is sent.
   mockSuccessfulExchange(undefined);
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
-  const configPath = path.join(dir, "psilink.yaml");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bootstrap-"));
+  const configPath = path.join(dir, "alcove.yaml");
   try {
     await runOnlineBootstrap({
       ...onlineBootstrapParams(configPath),
@@ -2854,8 +2854,8 @@ test("runOnlineBootstrap refreshes a reused config's record to pending", async (
   // confirmed columns must not stand as if confirmed by THIS acceptance, which
   // displayed no set -- pending overwrites them and the next run asks.
   mockSuccessfulExchange(undefined);
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
-  const configPath = path.join(dir, "psilink.yaml");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bootstrap-"));
+  const configPath = path.join(dir, "alcove.yaml");
   fs.writeFileSync(
     configPath,
     "preexisting: true\noutbound_payload_consent:\n  status: confirmed\n" +
@@ -2881,8 +2881,8 @@ test("runOnlineBootstrap refreshes the outbound consent surgically on a reused c
   // next recurring run stop for a set the operator never declined. The write is
   // surgical: the operator's own keys and comments survive it.
   mockSuccessfulExchange(undefined);
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
-  const configPath = path.join(dir, "psilink.yaml");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bootstrap-"));
+  const configPath = path.join(dir, "alcove.yaml");
   fs.writeFileSync(
     configPath,
     "# operator note\npreexisting: true\noutbound_payload_consent:\n  status: pending\n",
@@ -2914,8 +2914,8 @@ test("runOnlineBootstrap keeps a failed reuse-path consent refresh non-fatal", a
   // catch's warn covers this one). getLogger("bootstrap-test") is silenced above,
   // so the warn does not print. A stale record only makes the next run ask again.
   mockSuccessfulExchange(undefined);
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
-  const configPath = path.join(dir, "psilink.yaml");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bootstrap-"));
+  const configPath = path.join(dir, "alcove.yaml");
   fs.mkdirSync(configPath);
   try {
     const { configWriteError } = await runOnlineBootstrap({
@@ -2934,8 +2934,8 @@ test("runOnlineBootstrap omits the outbound consent when the caller passes none"
   // The online INVITER, which authored its own set at mint and pins it as
   // disclosedPayloadColumns instead: no consent record, so its runs stay lazy.
   mockSuccessfulExchange(undefined);
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
-  const configPath = path.join(dir, "psilink.yaml");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bootstrap-"));
+  const configPath = path.join(dir, "alcove.yaml");
   try {
     await runOnlineBootstrap(onlineBootstrapParams(configPath));
     const written = YAML.parse(fs.readFileSync(configPath, "utf8"));
@@ -2951,8 +2951,8 @@ test("runOnlineBootstrap persists an empty token set as a strict receive-nothing
   // operator consented to: a later non-empty payload must abort, so the empty set is
   // written rather than left lazy.
   mockSuccessfulExchange(undefined);
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
-  const configPath = path.join(dir, "psilink.yaml");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bootstrap-"));
+  const configPath = path.join(dir, "alcove.yaml");
   try {
     await runOnlineBootstrap({
       ...onlineBootstrapParams(configPath),
@@ -2970,8 +2970,8 @@ test("runOnlineBootstrap omits the received commitment when the acceptor passes 
   // set, so the acceptor passes undefined and the fresh config records no
   // commitment -- the recurring exchange reconciles lazily.
   mockSuccessfulExchange(undefined);
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
-  const configPath = path.join(dir, "psilink.yaml");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bootstrap-"));
+  const configPath = path.join(dir, "alcove.yaml");
   try {
     await runOnlineBootstrap(onlineBootstrapParams(configPath));
     const written = YAML.parse(fs.readFileSync(configPath, "utf8"));
@@ -2990,7 +2990,7 @@ test("runOnlineBootstrap omits the received commitment when the acceptor passes 
  *  commitment and leave the operator's comment and every other key alone. */
 function writeReusedConfigWithStaleLockIn(configPath: string): void {
   saveConfig(configPath, {
-    connection: { channel: "filedrop", path: "/tmp/psilink-drop" },
+    connection: { channel: "filedrop", path: "/tmp/alcove-drop" },
     linkageTerms: getDefaultLinkageTerms("Acceptor Org"),
   });
   // The note trails the commitment rather than heading it: a comment written
@@ -3008,8 +3008,8 @@ test("runOnlineBootstrap refreshes a stale received commitment surgically on a r
   // would false-abort the next recurring exchange. The write is surgical: the
   // operator's comment and other keys survive it.
   mockSuccessfulExchange(undefined);
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
-  const configPath = path.join(dir, "psilink.yaml");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bootstrap-"));
+  const configPath = path.join(dir, "alcove.yaml");
   writeReusedConfigWithStaleLockIn(configPath);
   try {
     await runOnlineBootstrap({
@@ -3024,7 +3024,7 @@ test("runOnlineBootstrap refreshes a stale received commitment surgically on a r
     const reloaded = parseExchangeSpec(YAML.parse(raw));
     expect(reloaded.connection).toEqual({
       channel: "filedrop",
-      path: "/tmp/psilink-drop",
+      path: "/tmp/alcove-drop",
     });
     expect(reloaded.linkageTerms).toEqual(
       getDefaultLinkageTerms("Acceptor Org"),
@@ -3041,8 +3041,8 @@ test("runOnlineBootstrap refreshes a stale declaration surgically on a reused co
   // acceptance's `true` left standing would refuse the honest partner now
   // presenting `false`; the operator's comment and other keys survive the write.
   mockSuccessfulExchange(undefined);
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
-  const configPath = path.join(dir, "psilink.yaml");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bootstrap-"));
+  const configPath = path.join(dir, "alcove.yaml");
   writeReusedConfigWithStaleLockIn(configPath);
   fs.appendFileSync(configPath, "expected_partner_deduplicate: true\n");
   try {
@@ -3057,7 +3057,7 @@ test("runOnlineBootstrap refreshes a stale declaration surgically on a reused co
     expect(reloaded.expectedPartnerDeduplicate).toBe(false);
     expect(reloaded.connection).toEqual({
       channel: "filedrop",
-      path: "/tmp/psilink-drop",
+      path: "/tmp/alcove-drop",
     });
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -3072,8 +3072,8 @@ test("the refreshed reuse-path commitment fixes the false-abort a stale one woul
   // asserting the stale set would have thrown proves the refresh changed the
   // outcome rather than the payload simply matching either way.
   mockSuccessfulExchange(undefined);
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
-  const configPath = path.join(dir, "psilink.yaml");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bootstrap-"));
+  const configPath = path.join(dir, "alcove.yaml");
   writeReusedConfigWithStaleLockIn(configPath);
   try {
     const staleLockIn = parseExchangeSpec(
@@ -3085,7 +3085,7 @@ test("the refreshed reuse-path commitment fixes the false-abort a stale one woul
       reuseExistingConfig: true,
       receivedPayloadLockIn: { consentedColumns: ["diagnosis", "notes"] },
     });
-    // Reload exactly as a recurring `psilink exchange` would, from the on-disk file.
+    // Reload exactly as a recurring `alcove exchange` would, from the on-disk file.
     const refreshedLockIn = parseExchangeSpec(
       YAML.parse(fs.readFileSync(configPath, "utf8")),
     ).expectedPayloadColumns;
@@ -3112,8 +3112,8 @@ test("runOnlineBootstrap removes a reused config's commitment for a subset-less 
   // recurring exchange reconciles lazily, rather than enforcing a set this
   // acceptance never showed.
   mockSuccessfulExchange(undefined);
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
-  const configPath = path.join(dir, "psilink.yaml");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bootstrap-"));
+  const configPath = path.join(dir, "alcove.yaml");
   writeReusedConfigWithStaleLockIn(configPath);
   try {
     await runOnlineBootstrap({
@@ -3140,8 +3140,8 @@ test("runOnlineBootstrap writes an empty reuse-path consented set verbatim", asy
   // absent: it replaces the stale set as an empty list, so a later non-empty payload
   // aborts while an empty one still passes.
   mockSuccessfulExchange(undefined);
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
-  const configPath = path.join(dir, "psilink.yaml");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bootstrap-"));
+  const configPath = path.join(dir, "alcove.yaml");
   writeReusedConfigWithStaleLockIn(configPath);
   try {
     await runOnlineBootstrap({
@@ -3173,8 +3173,8 @@ test("runOnlineBootstrap leaves a reused config's commitment alone for a caller 
   // by observation -- must not have its recorded set removed by the reuse refresh,
   // which would silently reopen the fail-closed enforcement its own config holds.
   mockSuccessfulExchange(["dob", "zip"]);
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
-  const configPath = path.join(dir, "psilink.yaml");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bootstrap-"));
+  const configPath = path.join(dir, "alcove.yaml");
   writeReusedConfigWithStaleLockIn(configPath);
   const before = fs.readFileSync(configPath, "utf8");
   try {
@@ -3197,8 +3197,8 @@ test("runOnlineBootstrap keeps a failed reuse-path commitment refresh non-fatal 
   // is reported separately, proving the writes are caught independently.
   // getLogger("bootstrap-test") is silenced above, so the warns do not print.
   mockSuccessfulExchange(undefined);
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
-  const configPath = path.join(dir, "psilink.yaml");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bootstrap-"));
+  const configPath = path.join(dir, "alcove.yaml");
   fs.mkdirSync(configPath);
   const warn = vi.spyOn(getLogger("bootstrap-test"), "warn");
   try {
@@ -3231,8 +3231,8 @@ test("runOnlineBootstrap reports both lost reuse-path refreshes on fd 3 and in t
   // what proves the two writes stay independently caught once they report -- and
   // the run has the persistence-loss exit code rather than a clean 0.
   mockSuccessfulExchange(undefined);
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
-  const configPath = path.join(dir, "psilink.yaml");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bootstrap-"));
+  const configPath = path.join(dir, "alcove.yaml");
   fs.mkdirSync(configPath); // a directory: both refreshes' reads throw
   try {
     const { value, lines } = await captureFd3(() =>
@@ -3271,8 +3271,8 @@ test("the persisted empty online-accept commitment aborts a later non-empty payl
   // "receive nothing" commitment and reconcileReceivedPayload aborts if the partner
   // then transmits any column, while an empty received payload still passes.
   mockSuccessfulExchange(undefined);
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
-  const configPath = path.join(dir, "psilink.yaml");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bootstrap-"));
+  const configPath = path.join(dir, "alcove.yaml");
   try {
     await runOnlineBootstrap({
       ...onlineBootstrapParams(configPath),
@@ -3304,8 +3304,8 @@ test("runOnlineBootstrap rejects both received-payload persistence inputs at onc
   // mutually exclusive; setting both is a caller error caught fail-fast, before any
   // connection, rather than silently letting the observe write clobber the token
   // commitment. runProtocol must never be reached.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
-  const configPath = path.join(dir, "psilink.yaml");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bootstrap-"));
+  const configPath = path.join(dir, "alcove.yaml");
   // Call counts accumulate across this file's tests (no shared reset hook), so clear
   // before asserting the guard short-circuits before runProtocol.
   vi.mocked(runProtocol).mockClear();
@@ -3326,19 +3326,19 @@ test("runOnlineBootstrap rejects both received-payload persistence inputs at onc
 
 test("the persisted online-accept commitment drives fail-closed recurring enforcement", async () => {
   // End to end: the online accept writes expected_payload_columns from the token; a
-  // later `psilink exchange` reloads that config (parseExchangeSpec) and locks the
+  // later `alcove exchange` reloads that config (parseExchangeSpec) and locks the
   // set into reconcileReceivedPayload, which PASSES on a matching received payload
   // and ABORTS on a divergent one -- the same guarantee the offline-accept and
   // up-front-locked cases give.
   mockSuccessfulExchange(undefined);
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
-  const configPath = path.join(dir, "psilink.yaml");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bootstrap-"));
+  const configPath = path.join(dir, "alcove.yaml");
   try {
     await runOnlineBootstrap({
       ...onlineBootstrapParams(configPath),
       receivedPayloadLockIn: { consentedColumns: ["diagnosis", "notes"] },
     });
-    // Reload exactly as a recurring `psilink exchange` would, from the on-disk file.
+    // Reload exactly as a recurring `alcove exchange` would, from the on-disk file.
     const reloaded = parseExchangeSpec(
       YAML.parse(fs.readFileSync(configPath, "utf8")),
     );
@@ -3366,10 +3366,10 @@ test("runOnlineBootstrap persists an @path credential as the reference while con
   // The invite/accept persistence path: the connection has an @path
   // server-password. saveConfig (in the hook) must write the @path, never the
   // secret, while runProtocol receives the resolved value to actually connect.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bootstrap-"));
   const pwFile = path.join(dir, "pw");
   fs.writeFileSync(pwFile, "s3cret\n");
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
 
   let connectionPassedToRunProtocol: SFTPConnectionConfig | undefined;
   vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
@@ -3419,12 +3419,12 @@ test("runOnlineBootstrap persists an @path private-key passphrase as the referen
   // key and its @path passphrase. saveConfig (in the hook) must write both @path
   // references, never the resolved secrets, while runProtocol receives the
   // resolved passphrase to actually unlock the key.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bootstrap-"));
   const keyFile = path.join(dir, "id_ed25519");
   const passFile = path.join(dir, "passphrase");
   fs.writeFileSync(keyFile, "KEYDATA\n");
   fs.writeFileSync(passFile, "unlock-me\n");
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
 
   let connectionPassedToRunProtocol: SFTPConnectionConfig | undefined;
   vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
@@ -3482,8 +3482,8 @@ test("runOnlineBootstrap refuses a credential @path naming a missing file before
   // file is decided from this party's own filesystem, so the credential is read
   // (though applied later) before that step, and the run ends at the refusal --
   // a UsageError, mapped to exit 64 -- with the host-key step never entered.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
-  const configPath = path.join(dir, "psilink.yaml");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bootstrap-"));
+  const configPath = path.join(dir, "alcove.yaml");
   const connection: SFTPConnectionConfig = {
     channel: "sftp",
     server: {
@@ -3512,8 +3512,8 @@ test("runOnlineBootstrap dials the connection the host-key step pinned", async (
   // the read instead would hold the resolved credential and no pin, and dial an
   // unverified server -- so the run driven here supplies both.
   const FP = "SHA256:" + "D".repeat(43);
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
-  const configPath = path.join(dir, "psilink.yaml");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bootstrap-"));
+  const configPath = path.join(dir, "alcove.yaml");
   const pwFile = path.join(dir, "pw");
   fs.writeFileSync(pwFile, "s3cret\n");
   const connection: SFTPConnectionConfig = {
@@ -3547,15 +3547,15 @@ test("runOnlineBootstrap dials the connection the host-key step pinned", async (
   }
 });
 
-// A recovery note must point the user at `psilink exchange` only when the config
+// A recovery note must point the user at `alcove exchange` only when the config
 // is actually on disk. These tests spy on the (silenced) named logger that
 // runOnlineBootstrap resolves internally via getLogger(loggerName).
-const RECOVERY_NOTE = "retry with 'psilink exchange'";
+const RECOVERY_NOTE = "retry with 'alcove exchange'";
 
 test("runOnlineBootstrap notes the config is on disk when the exchange fails after the config was written", async () => {
   // Hook writes the config (real saveConfig), then the exchange fails. The user
   // must be told the config + key are on disk so they retry with
-  // `psilink exchange` rather than re-inviting.
+  // `alcove exchange` rather than re-inviting.
   vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
     const onAuthenticated = onAuthenticatedArg(callArgs);
     await onAuthenticated();
@@ -3565,8 +3565,8 @@ test("runOnlineBootstrap notes the config is on disk when the exchange fails aft
   const log = getLogger("bootstrap-recovery-test");
   log.setLevel("silent");
   const errorSpy = vi.spyOn(log, "error");
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
-  const configPath = path.join(dir, "psilink.yaml");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bootstrap-"));
+  const configPath = path.join(dir, "alcove.yaml");
   try {
     await expect(
       runOnlineBootstrap({
@@ -3596,8 +3596,8 @@ test("runOnlineBootstrap does not log a config-on-disk note when the handshake f
   const log = getLogger("bootstrap-recovery-test");
   log.setLevel("silent");
   const errorSpy = vi.spyOn(log, "error");
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
-  const configPath = path.join(dir, "psilink.yaml");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bootstrap-"));
+  const configPath = path.join(dir, "alcove.yaml");
   try {
     await expect(
       runOnlineBootstrap({
@@ -3620,7 +3620,7 @@ test("runOnlineBootstrap does not log a config-on-disk note when the handshake f
 test("runOnlineBootstrap with reuseExistingConfig does not log a recovery note when the handshake fails before the key is saved", async () => {
   // Reuse keeps a pre-existing config (on disk), but a pre-handshake failure
   // (declined, expired, unreachable) never reaches the hook, so runProtocol never
-  // saves the rotated key. The recovery note must not fire: `psilink exchange`
+  // saves the rotated key. The recovery note must not fire: `alcove exchange`
   // would fail on the missing key. This guards the keyPersisted gate -- before
   // it, `reuseExistingConfig` alone fired the note regardless of the key.
   vi.mocked(runProtocol).mockImplementation((async () => {
@@ -3630,8 +3630,8 @@ test("runOnlineBootstrap with reuseExistingConfig does not log a recovery note w
   const log = getLogger("bootstrap-recovery-test");
   log.setLevel("silent");
   const errorSpy = vi.spyOn(log, "error");
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
-  const configPath = path.join(dir, "psilink.yaml");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bootstrap-"));
+  const configPath = path.join(dir, "alcove.yaml");
   try {
     fs.writeFileSync(configPath, "channel: filedrop\npath: /mnt/share\n");
     await expect(
@@ -3655,7 +3655,7 @@ test("runOnlineBootstrap with reuseExistingConfig does not log a recovery note w
 test("runOnlineBootstrap with reuseExistingConfig logs the recovery note when the exchange fails after the handshake", async () => {
   // The complement of the test above: the handshake succeeds (hook reached, so
   // the rotated key is saved) and the reused config is on disk, then the exchange
-  // fails. Both files are present, so the note must point at `psilink exchange`.
+  // fails. Both files are present, so the note must point at `alcove exchange`.
   vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
     const onAuthenticated = onAuthenticatedArg(callArgs);
     await onAuthenticated();
@@ -3665,8 +3665,8 @@ test("runOnlineBootstrap with reuseExistingConfig logs the recovery note when th
   const log = getLogger("bootstrap-recovery-test");
   log.setLevel("silent");
   const errorSpy = vi.spyOn(log, "error");
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
-  const configPath = path.join(dir, "psilink.yaml");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bootstrap-"));
+  const configPath = path.join(dir, "alcove.yaml");
   try {
     fs.writeFileSync(configPath, "channel: filedrop\npath: /mnt/share\n");
     await expect(
@@ -3696,14 +3696,14 @@ test("logOnlineBootstrapOutcome: a clean run reports both files saved", () => {
     error: vi.fn(),
   } as unknown as ReturnType<typeof getLogger>;
   logOnlineBootstrapOutcome(log, {
-    configFile: "psilink.yaml",
-    keyFile: ".psilink.key",
+    configFile: "alcove.yaml",
+    keyFile: ".alcove.key",
   });
   expect(log.warn).not.toHaveBeenCalled();
   expect(log.error).not.toHaveBeenCalled();
   expect(log.info).toHaveBeenCalledTimes(1);
   expect(vi.mocked(log.info).mock.calls[0][0]).toContain(
-    "saved config to psilink.yaml",
+    "saved config to alcove.yaml",
   );
 });
 
@@ -3715,8 +3715,8 @@ test("logOnlineBootstrapOutcome: a config-write failure logs at error level and 
   } as unknown as ReturnType<typeof getLogger>;
   const exitCodeBefore = process.exitCode;
   logOnlineBootstrapOutcome(log, {
-    configFile: "psilink.yaml",
-    keyFile: ".psilink.key",
+    configFile: "alcove.yaml",
+    keyFile: ".alcove.key",
     configWriteError: new Error("permission denied"),
   });
   // The summary moves no process state: the exit code that keeps a wrapper
@@ -3730,8 +3730,8 @@ test("logOnlineBootstrapOutcome: a config-write failure logs at error level and 
   expect(log.error).toHaveBeenCalledTimes(1);
   const msg = vi.mocked(log.error).mock.calls[0][0] as string;
   // The rotated key is still reported saved; the config is reported NOT written.
-  expect(msg).toContain("rotated key was saved to .psilink.key");
-  expect(msg).toContain("could not be written to psilink.yaml");
+  expect(msg).toContain("rotated key was saved to .alcove.key");
+  expect(msg).toContain("could not be written to alcove.yaml");
   expect(msg).not.toContain("saved config to");
 });
 
@@ -3742,8 +3742,8 @@ test("logOnlineBootstrapOutcome: a reused config reports the existing config and
     error: vi.fn(),
   } as unknown as ReturnType<typeof getLogger>;
   logOnlineBootstrapOutcome(log, {
-    configFile: "psilink.yaml",
-    keyFile: ".psilink.key",
+    configFile: "alcove.yaml",
+    keyFile: ".alcove.key",
     reuseExistingConfig: true,
   });
   expect(log.warn).not.toHaveBeenCalled();
@@ -3765,8 +3765,8 @@ test("runOnlineBootstrap with reuseExistingConfig keeps the existing config and 
     return {};
   }) as never);
 
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
-  const configPath = path.join(dir, "psilink.yaml");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bootstrap-"));
+  const configPath = path.join(dir, "alcove.yaml");
   try {
     const existing = "channel: filedrop\npath: /mnt/share\n# user-authored\n";
     fs.writeFileSync(configPath, existing);
@@ -3796,8 +3796,8 @@ test("runOnlineBootstrap re-gates the config write: a config appearing after the
     }
   }) as never);
 
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
-  const configPath = path.join(dir, "psilink.yaml");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bootstrap-"));
+  const configPath = path.join(dir, "alcove.yaml");
   try {
     // A config "appears" between the pre-network conflict check and the write.
     const existing = "channel: filedrop\npath: /mnt/share\n# pre-existing\n";
@@ -4105,7 +4105,7 @@ test("loadInputRows: a CSV piped via `-` yields the same rows as the equivalent 
   // invite reads its input through loadInputRows with allowStdin enabled; a CSV
   // piped through stdin must parse to the same rows and columns as the file.
   const csv = "first_name,last_name,dob\nAlice,Smith,1990-01-02\n";
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-loadrows-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-loadrows-"));
   try {
     const file = path.join(dir, "in.csv");
     fs.writeFileSync(file, csv);
@@ -4130,7 +4130,7 @@ test("loadInputRows: a dataset with no data rows refuses, from a file or stdin",
   // non-match, and exit 0. The loader refuses instead, as a usage error (exit 64)
   // naming the input, and identically whether the bytes came from a file or a
   // pipe.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-loadrows-empty-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-loadrows-empty-"));
   try {
     const empty = path.join(dir, "empty.csv");
     fs.writeFileSync(empty, "");
@@ -4161,7 +4161,7 @@ test("loadInputRows: a row-level parse fault refuses before any exchange work", 
   // core loader refuses it, and the refusal is a usage error here too, so the
   // invite / accept / exchange / zero-setup paths that share this loader all exit
   // 64 rather than exchanging a truncated dataset.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-loadrows-fault-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-loadrows-fault-"));
   try {
     const file = path.join(dir, "in.csv");
     fs.writeFileSync(
@@ -4210,7 +4210,7 @@ test("loadInputRows: a tab inside a header name is removed and reported too", as
   // a header the operator's own export wrote with a tab in it never reaches the
   // terms schema as a name it refuses. A column of control characters alone
   // comes back unnamed, the same consequence the bidi half already had.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-loadrows-c0-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-loadrows-c0-"));
   const logged: Array<string> = [];
   const previousSink = getDiagnosticSink();
   const log = getLogger("input");
@@ -4256,7 +4256,7 @@ test("loadInputRows: a bidi-stripped header is reported by position, never by na
   // seat runs on a name that differs from the file's header with no notice. The
   // header itself stays out of the line: printing it would put the removed
   // characters back into the diagnostic. A clean header logs nothing.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-loadrows-bidi-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-loadrows-bidi-"));
   const logged: Array<string> = [];
   const previousSink = getDiagnosticSink();
   const log = getLogger("input");
@@ -4300,7 +4300,7 @@ test("loadInputRows: a header that collides after the strip is warned by positio
   // not tell the operator the name kept is the rest of the header -- the later
   // column's name is in neither the file nor the line -- so it states the
   // numbering instead.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-loadrows-clash-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-loadrows-clash-"));
   const logged: Array<string> = [];
   const previousSink = getDiagnosticSink();
   const log = getLogger("input");
@@ -4405,7 +4405,7 @@ test("the strip warning names the class, not what the header held", () => {
 });
 
 test("the strip warning names no configuration to rewrite", () => {
-  // loadInputRows serves every CLI read: `psilink accept`, whose declared names
+  // loadInputRows serves every CLI read: `alcove accept`, whose declared names
   // are the partner's invitation, and a zero-setup run with no configuration at
   // all. A remedy naming this operator's configuration would address the wrong
   // party on both, so the line states the consequence and stops.
@@ -4438,7 +4438,7 @@ test("the empty-name refusal blames the removal when the strip emptied the name"
   // control characters strips to the empty name inferMetadata refuses, and
   // the operator's header was neither a trailing comma nor a blank cell, so the
   // stated cause and remedy must not be those. The strip warning lands ahead of it.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-loadrows-empty-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-loadrows-empty-"));
   const logged: Array<string> = [];
   const previousSink = getDiagnosticSink();
   const log = getLogger("input");
@@ -4478,7 +4478,7 @@ test("the empty-name refusal blames the removal when the strip emptied the name"
 });
 
 test("the empty-name refusal keeps the blank-cell cause for a blank header cell", async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-loadrows-blank-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-loadrows-blank-"));
   let message = "";
   try {
     const blank = path.join(dir, "blank.csv");
@@ -4553,7 +4553,7 @@ test("inferDateInputFormatFromSource: the init path infers the same metadata, fi
   // The divergence guard the issue makes critical: init's lighter read must
   // author terms byte-identical to what invite/accept derive from a full read of
   // the same file. Pin all four inferred outputs by comparing the two dataSpecs.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-infer-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-infer-"));
   try {
     const file = path.join(dir, "in.csv");
     fs.writeFileSync(file, csvWithRows(40));
@@ -4577,7 +4577,7 @@ test("inferDateInputFormatFromSource: reads a bounded DOB sample, so a file far 
   // row, while the helper reads only the header plus a sample bounded at
   // INFER_DATE_SCAN_CAP, so init's memory does not scale with the file yet the
   // inferred format is unchanged.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bounded-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bounded-"));
   try {
     const file = path.join(dir, "in.csv");
     const rowCount = INFER_DATE_SCAN_CAP + 500;
@@ -4595,7 +4595,7 @@ test("inferDateInputFormatFromSource: reads a bounded DOB sample, so a file far 
 });
 
 test("inferDateInputFormatFromSource: a file with no dob column yields no format and infers the same terms as a full read", async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-nodob-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-nodob-"));
   try {
     const file = path.join(dir, "in.csv");
     fs.writeFileSync(file, "first_name,last_name,member_id\nAlice,Smith,1\n");
@@ -4620,7 +4620,7 @@ test("inferDateInputFormatFromSource: a header larger than the read buffer is re
   // stream reads, so the bounded read must not commit to the first (empty-field)
   // chunk -- otherwise init reads an empty header and silently infers nothing
   // while the full read infers correctly. Compare the header both paths recover.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bighdr-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bighdr-"));
   try {
     const cols = Array.from({ length: 8000 }, (_v, i) =>
       i === 4000 ? "dob" : `column_${i}`,
@@ -4645,7 +4645,7 @@ test("inferDateInputFormatFromSource: a header larger than the read buffer is re
 test("inferDateInputFormatFromSource: a `-` CSV from stdin infers the same as the file", async () => {
   // init reads its input with allowStdin enabled; the bounded read must work over
   // a non-rewindable stdin stream in a single pass, matching the file path.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-infer-stdin-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-infer-stdin-"));
   try {
     const file = path.join(dir, "in.csv");
     fs.writeFileSync(file, csvWithRows(10));
@@ -4683,7 +4683,7 @@ test("inferDateInputFormatFromSource: a no-newline input fails fast rather than 
 
 test("parseLinkageStrategyFlag: absent selection is undefined (terms keep the cascade default)", () => {
   expect(
-    parseLinkageStrategyFlag({ _: [], $0: "psilink" } as unknown as Arguments),
+    parseLinkageStrategyFlag({ _: [], $0: "alcove" } as unknown as Arguments),
   ).toBeUndefined();
 });
 
@@ -4692,7 +4692,7 @@ test("parseLinkageStrategyFlag: each valid value parses to itself", () => {
     expect(
       parseLinkageStrategyFlag({
         _: [],
-        $0: "psilink",
+        $0: "alcove",
         "linkage-strategy": value,
       } as unknown as Arguments),
     ).toBe(value);
@@ -4704,7 +4704,7 @@ test("parseLinkageStrategyFlag: an unknown value is a usage error (exit 64 via r
   const parse = () =>
     parseLinkageStrategyFlag({
       _: [],
-      $0: "psilink",
+      $0: "alcove",
       "linkage-strategy": "complete",
     } as unknown as Arguments);
   expect(parse).toThrow(UsageError);
@@ -4719,7 +4719,7 @@ test("parseLinkageStrategyFlag: a repeated flag is rejected before the enum chec
   expect(() =>
     parseLinkageStrategyFlag({
       _: [],
-      $0: "psilink",
+      $0: "alcove",
       "linkage-strategy": ["cascade", "single-pass"],
     } as unknown as Arguments),
   ).toThrow("--linkage-strategy may be given only once");

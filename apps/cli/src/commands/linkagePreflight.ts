@@ -9,13 +9,13 @@ import {
   redactAndSanitizeForDisplay,
   singleColumnDelimiterClause,
   summarizeLinkageShortfall,
-} from "@psilink/core";
+} from "@alcove/core";
 import type {
   LinkageTerms,
   LinkageTermsStanding,
   Metadata,
   Standardization,
-} from "@psilink/core";
+} from "@alcove/core";
 
 /**
  * Source-specific wording for {@link checkLinkageSatisfiability}. The accept,
@@ -221,7 +221,7 @@ export function checkLinkageSatisfiability(
   );
 }
 
-/** Which `psilink accept` path is running, selecting the outcome stated. */
+/** Which `alcove accept` path is running, selecting the outcome stated. */
 export type AcceptMode = "online" | "offline";
 
 /**
@@ -229,7 +229,7 @@ export type AcceptMode = "online" | "offline";
  * answer differently: online, `prepareForOnlineExchange` inside `validateAccept`
  * enforces the refusal before the terms display, the prompt, or any write;
  * offline there is no prepare call, so the acceptance runs to its prompt and the
- * refusal waits for `psilink exchange`.
+ * refusal waits for `alcove exchange`.
  */
 const ACCEPTANCE_OUTCOME: Record<AcceptMode, string> = {
   online:
@@ -238,7 +238,7 @@ const ACCEPTANCE_OUTCOME: Record<AcceptMode, string> = {
     "configuration or key file.",
   offline:
     "This acceptance is not stopped by it: confirming writes the configuration " +
-    "and key file, and the refusal arrives when you run 'psilink exchange'.",
+    "and key file, and the refusal arrives when you run 'alcove exchange'.",
 };
 
 /**

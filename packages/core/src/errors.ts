@@ -327,7 +327,7 @@ export class UnknownStandardizationFunctionError extends UsageError {
  * check at the CLI catch sites.
  *
  * Unlike its terminal {@link UsageError} siblings it holds no
- * `psilinkRecoveryHintEmitted` tag and appends no next step. Its call-site
+ * `alcoveRecoveryHintEmitted` tag and appends no next step. Its call-site
  * message already names each side's setting and the concrete fix ("both
  * parties must use the same setting"), so there is no missing step to
  * add. The tag is omitted rather than set for family symmetry: it exists
@@ -370,7 +370,7 @@ export class BilateralModeMismatchError extends UsageError {
  * pre-`get()` check -- still reports the same terminal, typed failure
  * once the read itself crosses the cap.
  *
- * Every instance holds `psilinkRecoveryHintEmitted`, and the constructor
+ * Every instance holds `alcoveRecoveryHintEmitted`, and the constructor
  * puts a uniform, class-wide operator next step on a cause link of its
  * own -- this fault always means a peer- or admin-supplied frame crossed
  * the cap, so the step lives here rather than at each throw site, which
@@ -384,7 +384,7 @@ export class BilateralModeMismatchError extends UsageError {
  * summary.
  */
 export class FrameSizeExceededError extends UsageError {
-  readonly psilinkRecoveryHintEmitted = true;
+  readonly alcoveRecoveryHintEmitted = true;
 
   constructor(message: string, options?: TransportRefusalOptions) {
     super(message, {
@@ -430,7 +430,7 @@ export class FrameSizeExceededError extends UsageError {
  * frame-size cap, no `packages/core` code pre-checks a listing size, so
  * the constants belong where they are enforced.
  *
- * Holds `psilinkRecoveryHintEmitted` and puts a uniform operator next
+ * Holds `alcoveRecoveryHintEmitted` and puts a uniform operator next
  * step on its own cause link, on the same reasoning as
  * {@link FrameSizeExceededError}: a listing that breaches its bound is
  * terminal, so the CLI's generic "retry" advisory is suppressed and
@@ -440,7 +440,7 @@ export class FrameSizeExceededError extends UsageError {
  * offending entry name as `details` fragments.
  */
 export class DirectoryListingBoundsError extends UsageError {
-  readonly psilinkRecoveryHintEmitted = true;
+  readonly alcoveRecoveryHintEmitted = true;
 
   constructor(message: string, options?: TransportRefusalOptions) {
     super(message, {
@@ -497,7 +497,7 @@ export class DirectoryListingBoundsError extends UsageError {
  * `packages/core` code drives these reads, so the constants belong where
  * they are enforced.
  *
- * Holds `psilinkRecoveryHintEmitted` and puts a uniform operator next
+ * Holds `alcoveRecoveryHintEmitted` and puts a uniform operator next
  * step on its own cause link, on the same reasoning as
  * {@link FrameSizeExceededError}: the operation is failed rather than
  * retried into the same hang, so the CLI's generic advisory is suppressed
@@ -510,7 +510,7 @@ export class DirectoryListingBoundsError extends UsageError {
  * itself reported -- as `details` fragments.
  */
 export class TransportOperationStalledError extends UsageError {
-  readonly psilinkRecoveryHintEmitted = true;
+  readonly alcoveRecoveryHintEmitted = true;
 
   constructor(message: string, options?: TransportRefusalOptions) {
     super(message, {
@@ -553,13 +553,13 @@ export class TransportOperationStalledError extends UsageError {
  * `security` category, which is observable only in the category (see
  * docs/spec/CLI_EVENTS.md).
  *
- * `psilinkRecoveryHintEmitted` is a class field, the
+ * `alcoveRecoveryHintEmitted` is a class field, the
  * {@link FrameSizeExceededError} shape rather than
  * {@link TransportPublishIndeterminateError}'s per-instance one: every
  * internal fault takes the same next step -- report it, never retry -- so
  * no raise site has a different one to choose, and each states that step
  * in its own message (the reply-cap check ends "report it with this
- * message", pinned in psiLink.test.ts). The tag makes the CLI's
+ * message", pinned in link.test.ts). The tag makes the CLI's
  * hint-walker suppress its generic "retry the exchange without
  * re-inviting" advisory, which would otherwise print beneath that
  * message: the check fires mid-data-exchange, after the handshake
@@ -570,7 +570,7 @@ export class TransportOperationStalledError extends UsageError {
  * raise site added here holds its own next step in its message.
  */
 export class InternalConsistencyError extends Error {
-  readonly psilinkRecoveryHintEmitted = true;
+  readonly alcoveRecoveryHintEmitted = true;
 
   constructor(message: string) {
     super(message);
@@ -608,7 +608,7 @@ export class InternalConsistencyError extends Error {
  * ack never republished. So the classification buys the loop's own
  * retry, not a surviving exchange.
  *
- * The `psilinkRecoveryHintEmitted` tag is a per-instance property here,
+ * The `alcoveRecoveryHintEmitted` tag is a per-instance property here,
  * not a class field, and the class itself sets none. A transport raises
  * it for any of several publishes -- a message, an ack, a rendezvous
  * hello, an abort marker -- which share no recovery, so the transport's
@@ -673,7 +673,7 @@ export function isTransportPublishIndeterminate(error: unknown): boolean {
  * classification above is the contract; consumers should not depend on
  * catching it by type.
  *
- * It holds no `psilinkRecoveryHintEmitted` tag and no operator next
+ * It holds no `alcoveRecoveryHintEmitted` tag and no operator next
  * step. It is a local teardown signal that almost never reaches the
  * process exit code (the signal handler owns 130/143 and this rejection
  * is logged and swallowed), so there is no actionable step to report and
@@ -721,13 +721,13 @@ export class ConnectionClosedError extends Error {
  * It holds no partner-controlled bytes: the marker token never decodes to
  * display text, the abort frame's reasons are not read, and the message
  * is fixed, so the display-boundary sanitizer is only belt-and-suspenders
- * here. `psilinkRecoveryHintEmitted` is set so the CLI's hint-walker
+ * here. `alcoveRecoveryHintEmitted` is set so the CLI's hint-walker
  * suppresses its generic "retry without re-inviting" advisory, which would
  * otherwise contradict the definitive peer-abort message. (This reuses the
  * CLI-recovery convention that `auth.ts` already sets on core errors.)
  */
 export class PeerAbortError extends ConnectionError {
-  readonly psilinkRecoveryHintEmitted = true;
+  readonly alcoveRecoveryHintEmitted = true;
 
   constructor(options?: ErrorOptions) {
     super(
@@ -743,7 +743,7 @@ export class PeerAbortError extends ConnectionError {
 }
 
 /** The property {@link markPeerWaitTimeout} sets and {@link isPeerWaitTimeout} reads. */
-const PEER_WAIT_TIMEOUT_TAG = "psilinkPeerWaitTimedOut";
+const PEER_WAIT_TIMEOUT_TAG = "alcovePeerWaitTimedOut";
 
 /**
  * Tags an error as "this party waited its full budget for the partner and
@@ -754,7 +754,7 @@ const PEER_WAIT_TIMEOUT_TAG = "psilinkPeerWaitTimedOut";
  * its `instanceof` classification, which the CLI's 64-vs-69 exit-code
  * split reads.
  *
- * It is not {@link PeerAbortError}'s `psilinkRecoveryHintEmitted`, whose
+ * It is not {@link PeerAbortError}'s `alcoveRecoveryHintEmitted`, whose
  * meaning is the unrelated "suppress the CLI's generic advisory". A
  * tagged error asserts only the local fact that the wait expired, never
  * a reason for the partner's absence. A consumer that knows more about
@@ -782,7 +782,7 @@ export function isPeerWaitTimeout(error: unknown): boolean {
 }
 
 /** The property {@link markNamedDiagnosis} sets and {@link isNamedDiagnosis} reads. */
-const NAMED_DIAGNOSIS_TAG = "psilinkNamedDiagnosis";
+const NAMED_DIAGNOSIS_TAG = "alcoveNamedDiagnosis";
 
 /**
  * Tags an error whose own message states the condition that failed, so a

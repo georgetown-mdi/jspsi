@@ -2,12 +2,12 @@ import type {
   ConnectionConfig,
   RendezvousRole,
   WebRTCConnectionConfig,
-} from "@psilink/core";
+} from "@alcove/core";
 
 /**
  * Return `connection` holding `role`, for the bootstrap commands to apply to
- * every connection they run and persist -- `psilink invite` stamps `inviter`
- * and `psilink accept` stamps `acceptor`, decided by which command runs and
+ * every connection they run and persist -- `alcove invite` stamps `inviter`
+ * and `alcove accept` stamps `acceptor`, decided by which command runs and
  * orthogonal to the PSI sender/receiver roles the linkage terms resolve.
  *
  * On the WebRTC channel `role` is the half of the rendezvous peer-id

@@ -1,0 +1,9 @@
+[Unit]
+Description=Renew the Alcove relay's TLS certificate by ACME DNS-01
+Documentation=https://github.com/georgetown-mdi/alcove/blob/main/infra/relay/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/alcove-relay/certs/renew.sh

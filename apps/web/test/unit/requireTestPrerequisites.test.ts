@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from "vitest";
 
-import { loopbackTlsCert } from "@psilink/testkit/loopbackTlsCert";
+import { loopbackTlsCert } from "@alcove/testkit/loopbackTlsCert";
 
 import {
   ALLOW_MISSING_PREREQUISITES_ENV,

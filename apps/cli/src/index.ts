@@ -1,6 +1,6 @@
 import { hideBin } from "yargs/helpers";
 
-import { sanitizeErrorForDisplay } from "@psilink/core";
+import { sanitizeErrorForDisplay } from "@alcove/core";
 
 import { buildCli } from "./cliParser";
 import { armProcessReturnGate } from "./util/exitGate";

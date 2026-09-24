@@ -73,10 +73,10 @@ jobs:
           # self-managing: a vitest globalSetup starts the SFTP test server
           # before it and stops it after, so no extra setup step is needed.
           #
-          # PSILINK_REQUIRE_WORKER_BUILD=1 makes the real-worker offload suite
+          # ALCOVE_REQUIRE_WORKER_BUILD=1 makes the real-worker offload suite
           # FAIL (not skip) if the CLI bundle is missing, so a regressed build
           # step cannot let that suite silently no-op green here -- mirroring
-          # PSILINK_SFTP_CHROOT_REQUIRED in the chroot leg. It is set on the two
+          # ALCOVE_SFTP_CHROOT_REQUIRED in the chroot leg. It is set on the two
           # legs that build the CLI, this one and the native sshd leg; the
           # hardened legs do not build it and skip.
           - suite: in-process sftp
@@ -121,7 +121,7 @@ jobs:
             require-worker-build: "1"
     steps:
       - uses: actions/checkout@v7
-      # Pins Node, installs from the lockfile, and builds @psilink/core. Those
+      # Pins Node, installs from the lockfile, and builds @alcove/core. Those
       # two are what every leg would otherwise repeat; the action restores both
       # from content-keyed caches, so they are paid once per lockfile and
       # core-source state across the whole repository rather than once per leg.
@@ -148,8 +148,8 @@ jobs:
           # "" to the in-process backend, and
           # apps/cli/test/integration/psiWorkerRealWorker.test.ts compares
           # against the literal "1".
-          PSILINK_REQUIRE_WORKER_BUILD: ${{ matrix.require-worker-build }}
-          PSILINK_SFTP_BACKEND: ${{ matrix.sftp-backend }}
+          ALCOVE_REQUIRE_WORKER_BUILD: ${{ matrix.require-worker-build }}
+          ALCOVE_SFTP_BACKEND: ${{ matrix.sftp-backend }}
 
   # The one job name a required status check can name, standing for every suite
   # leg above. `if: always()` is what makes it usable as one: without it a failed
@@ -176,7 +176,7 @@ jobs:
   # allowlist), proving the pure-JS ssh2 adapter still negotiates and runs under
   # them. Additive and parallel: the in-process and native sshd legs of the
   # `suite` matrix above are unchanged. Integration tests import the adapter
-  # from src (vitest transpiles) and consume @psilink/core from the setup
+  # from src (vitest transpiles) and consume @alcove/core from the setup
   # action's build, so no CLI build step is needed. If the added CI minutes
   # prove too costly, trim this matrix -- the three hardened profiles are
   # independent legs.
@@ -199,8 +199,8 @@ jobs:
           sudo mkdir -p /run/sshd
           npm run test:integration -w apps/cli
         env:
-          PSILINK_SFTP_BACKEND: native
-          PSILINK_SFTP_NATIVE_PROFILE: ${{ matrix.profile }}
+          ALCOVE_SFTP_BACKEND: native
+          ALCOVE_SFTP_NATIVE_PROFILE: ${{ matrix.profile }}
 
   # The chroot profile confines the SFTP session with ChrootDirectory, which needs
   # sshd to run as root over a root-owned jail. The Ubuntu runner has passwordless
@@ -225,15 +225,15 @@ jobs:
         run: |
           # sshd needs its privilege-separation directory present at startup.
           sudo mkdir -p /run/sshd
-          # PSILINK_SFTP_CHROOT_REQUIRED=1 makes the runner FAIL (not skip) if it
+          # ALCOVE_SFTP_CHROOT_REQUIRED=1 makes the runner FAIL (not skip) if it
           # cannot run as root here, so a broken sudo elevation cannot let this
           # leg go green without actually exercising the chroot path. It is set
           # via env (not sudo's environment) since sudo forwards only PATH.
           sudo --preserve-env=PATH \
-            env "PATH=$PATH" PSILINK_SFTP_CHROOT_REQUIRED=1 \
+            env "PATH=$PATH" ALCOVE_SFTP_CHROOT_REQUIRED=1 \
             npm run test:integration:native-chroot -w apps/cli
 
-  # `psilink doctor` against a real Samba server. Its unit tests drive a recorded
+  # `alcove doctor` against a real Samba server. Its unit tests drive a recorded
   # smbclient transcript, which pins the classification but cannot settle what the
   # real tool does -- whether the dialect pair `-m X --option=client min protocol=X`
   # is accepted, whether a `put` resolves its local side against the child's
@@ -255,7 +255,7 @@ jobs:
     if: github.event.pull_request.head.repo.full_name == github.repository
     env:
       SMB_TEST_USER: runner
-      SMB_TEST_PASSWORD: psilink-ci-throwaway
+      SMB_TEST_PASSWORD: alcove-ci-throwaway
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
@@ -279,8 +279,8 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends samba smbclient cifs-utils
-          sudo mkdir -p /srv/psilink/dropbox /srv/psilink-readonly
-          sudo chown -R "$SMB_TEST_USER":"$SMB_TEST_USER" /srv/psilink /srv/psilink-readonly
+          sudo mkdir -p /srv/alcove/dropbox /srv/alcove-readonly
+          sudo chown -R "$SMB_TEST_USER":"$SMB_TEST_USER" /srv/alcove /srv/alcove-readonly
           sudo tee /etc/samba/smb.conf >/dev/null <<CONF
           [global]
             workgroup = WORKGROUP
@@ -291,12 +291,12 @@ jobs:
             bind interfaces only = yes
 
           [exchange]
-            path = /srv/psilink
+            path = /srv/alcove
             read only = no
             valid users = $SMB_TEST_USER
 
           [readonly]
-            path = /srv/psilink-readonly
+            path = /srv/alcove-readonly
             read only = yes
             valid users = $SMB_TEST_USER
           CONF
@@ -318,15 +318,15 @@ jobs:
           set -euo pipefail
           export SMB_SERVER=127.0.0.1 SMB_SHARE=exchange SMB_PATH=dropbox
           export SMB_USER="$SMB_TEST_USER" SMB_PASS="$SMB_TEST_PASSWORD"
-          export SMB_MARKER=psilink-check.txt SMB_TOKEN=healthyrun
+          export SMB_MARKER=alcove-check.txt SMB_TOKEN=healthyrun
           verdict=$(node apps/cli/dist/index.js doctor probe --json)
           echo "$verdict" | jq .
           echo "$verdict" | jq -e '.version == 1 and .mode == "probe" and .overall == "ok"'
           echo "$verdict" | jq -e '[.checks[] | select(.status != "ok")] | length == 0'
           # The probe removes every file it creates except the marker, which the
           # mount checks are meant to find.
-          grep -qx healthyrun /srv/psilink/dropbox/psilink-check.txt
-          test "$(ls -A /srv/psilink/dropbox | wc -l)" = 1
+          grep -qx healthyrun /srv/alcove/dropbox/alcove-check.txt
+          test "$(ls -A /srv/alcove/dropbox | wc -l)" = 1
 
       - name: Probe with a pinned dialect
         run: |
@@ -439,21 +439,21 @@ jobs:
           set -euo pipefail
           export SMB_SERVER=127.0.0.1 SMB_SHARE=exchange SMB_PATH=dropbox
           export SMB_USER="$SMB_TEST_USER" SMB_PASS="$SMB_TEST_PASSWORD"
-          export SMB_MARKER=psilink-check.txt SMB_TOKEN=volumerun
+          export SMB_MARKER=alcove-check.txt SMB_TOKEN=volumerun
           node apps/cli/dist/index.js doctor probe --json | jq -e '.overall == "ok"'
 
           # The production shape the Windows setup script creates: a local-driver
           # cifs volume whose device is //server/share/subpath, mounted by the
           # daemon on the host. The container running the check is a stock node
-          # image with the repo bind-mounted rather than the psilink image, so this
+          # image with the repo bind-mounted rather than the Alcove image, so this
           # job does not also build that image (image_smoke.yaml does); the volume,
           # which is what this leg exists to exercise, is identical either way.
           docker volume create --driver local --opt type=cifs \
             --opt device="//127.0.0.1/exchange/dropbox" \
             --opt o="username=$SMB_TEST_USER,password=$SMB_TEST_PASSWORD,vers=3.1.1,uid=$(id -u),gid=$(id -g),file_mode=0777,dir_mode=0777" \
-            psilink-doctor-volume
+            alcove-doctor-volume
           verdict=$(docker run --rm \
-            -v psilink-doctor-volume:/rz -v "$PWD":/repo -w /repo \
+            -v alcove-doctor-volume:/rz -v "$PWD":/repo -w /repo \
             -e SMB_MARKER -e SMB_TOKEN \
             node:26 node apps/cli/dist/index.js doctor mount /rz --json)
           echo "$verdict" | jq .
@@ -461,33 +461,33 @@ jobs:
           echo "$verdict" | jq -e '[.checks[] | select(.status != "ok")] | length == 0'
           # The two halves agreed on the directory, and the mount checks own the
           # marker's lifecycle, so it is consumed and nothing is left behind.
-          test "$(ls -A /srv/psilink/dropbox | wc -l)" = 0
-          docker volume rm psilink-doctor-volume
+          test "$(ls -A /srv/alcove/dropbox | wc -l)" = 0
+          docker volume rm alcove-doctor-volume
 
       - name: Check the mount through a kernel CIFS mount
         run: |
           set -euo pipefail
           export SMB_SERVER=127.0.0.1 SMB_SHARE=exchange SMB_PATH=dropbox
           export SMB_USER="$SMB_TEST_USER" SMB_PASS="$SMB_TEST_PASSWORD"
-          export SMB_MARKER=psilink-check.txt SMB_TOKEN=kernelrun
+          export SMB_MARKER=alcove-check.txt SMB_TOKEN=kernelrun
           node apps/cli/dist/index.js doctor probe --json | jq -e '.overall == "ok"'
 
-          sudo mkdir -p /mnt/psilink
-          sudo mount -t cifs //127.0.0.1/exchange/dropbox /mnt/psilink \
+          sudo mkdir -p /mnt/alcove
+          sudo mount -t cifs //127.0.0.1/exchange/dropbox /mnt/alcove \
             -o "username=$SMB_TEST_USER,password=$SMB_TEST_PASSWORD,vers=3.1.1,uid=$(id -u),gid=$(id -g)"
-          verdict=$(node apps/cli/dist/index.js doctor mount /mnt/psilink --json)
+          verdict=$(node apps/cli/dist/index.js doctor mount /mnt/alcove --json)
           echo "$verdict" | jq .
           echo "$verdict" | jq -e '.overall == "ok"'
           echo "$verdict" | jq -e '.checks[] | select(.id == "marker") | .status == "ok"'
 
           # A mount pointing at a different directory is the case the marker exists
           # to catch, so it is staged rather than assumed.
-          sudo mkdir -p /srv/psilink/elsewhere /mnt/psilink-elsewhere
-          sudo chown "$SMB_TEST_USER":"$SMB_TEST_USER" /srv/psilink/elsewhere
-          sudo mount -t cifs //127.0.0.1/exchange/elsewhere /mnt/psilink-elsewhere \
+          sudo mkdir -p /srv/alcove/elsewhere /mnt/alcove-elsewhere
+          sudo chown "$SMB_TEST_USER":"$SMB_TEST_USER" /srv/alcove/elsewhere
+          sudo mount -t cifs //127.0.0.1/exchange/elsewhere /mnt/alcove-elsewhere \
             -o "username=$SMB_TEST_USER,password=$SMB_TEST_PASSWORD,vers=3.1.1,uid=$(id -u),gid=$(id -g)"
           set +e
-          verdict=$(node apps/cli/dist/index.js doctor mount /mnt/psilink-elsewhere --json)
+          verdict=$(node apps/cli/dist/index.js doctor mount /mnt/alcove-elsewhere --json)
           code=$?
           set -e
           echo "$verdict" | jq .
@@ -497,10 +497,10 @@ jobs:
           # A directory that is not mounted at all is fatal, not a verdict about
           # the share, and carries its own exit code.
           set +e
-          verdict=$(node apps/cli/dist/index.js doctor mount /mnt/psilink-absent --json)
+          verdict=$(node apps/cli/dist/index.js doctor mount /mnt/alcove-absent --json)
           code=$?
           set -e
           test "$code" = 69
           echo "$verdict" | jq -e '.overall == "fatal"'
 
-          sudo umount /mnt/psilink /mnt/psilink-elsewhere
+          sudo umount /mnt/alcove /mnt/alcove-elsewhere

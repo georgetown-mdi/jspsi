@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 
 import { z } from "zod";
 
-import { holdsPrivateKeyMaterial, maxCodeUnits } from "@psilink/core";
+import { holdsPrivateKeyMaterial, maxCodeUnits } from "@alcove/core";
 
 import {
   IDENTITY_CONTROL_CHAR_MESSAGE,
@@ -127,7 +127,7 @@ function pickedFileName(
  * It is the console's whole signing-identity surface, narrow by design: it can
  * create-or-reuse and export the PUBLIC certificate, but cannot regenerate --
  * re-keying invalidates every partner-pinned fingerprint, so that coordinated
- * action stays on the command line (`psilink fingerprint --force`).
+ * action stays on the command line (`alcove fingerprint --force`).
  *
  * The request contains an identity label, a boolean, and a mount locator ONLY;
  * the response contains a fingerprint, a created flag, file names, and the bound

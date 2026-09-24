@@ -101,7 +101,7 @@ export const ${prefix}_RULE_SET = Object.freeze({
 
 /** A tree holding only what the check reads: the registry and its sets. */
 function fixtureTree({ fields = FIELDS, keys = KEYS, second, source } = {}) {
-  const root = mkdtempSync(resolve(tmpdir(), "psilink-zero-setup-keys-"));
+  const root = mkdtempSync(resolve(tmpdir(), "alcove-zero-setup-keys-"));
   temporaryRoots.push(root);
   mkdirSync(resolve(root, dirname(RULE_SET_SOURCE)), { recursive: true });
   const entries = [
@@ -291,7 +291,7 @@ export const ${REGISTRY_DECLARATION} = Object.freeze([DEFAULT_LINKAGE_RULE_SET])
   });
 
   it("fails a --root missing the source file rather than crashing", () => {
-    const root = mkdtempSync(resolve(tmpdir(), "psilink-zero-setup-keys-"));
+    const root = mkdtempSync(resolve(tmpdir(), "alcove-zero-setup-keys-"));
     temporaryRoots.push(root);
     const { status, stderr } = runCheck(root);
     expect(status).toBe(1);

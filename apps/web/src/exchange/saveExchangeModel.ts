@@ -2,7 +2,7 @@ import type {
   ConnectionEndpointRequest,
   GeneratedInvitation,
 } from "@psi/invitation";
-import type { ExchangeFileConnection, ExchangeFileInput } from "@psilink/core";
+import type { ExchangeFileConnection, ExchangeFileInput } from "@alcove/core";
 import type { Transport } from "@psi/transportChooser";
 
 /**
@@ -52,7 +52,7 @@ export const EMPTY_SAVE_FIELDS: SaveExchangeFields = {
 export function saveLeadCopy(transport: CliTransport): string {
   const over = transport === "sftp" ? "over SFTP" : "over a shared directory";
   return (
-    `You chose to run this exchange ${over} with the psilink command-line ` +
+    `You chose to run this exchange ${over} with the Alcove command-line ` +
     "tool. The linkage terms inside the exchange file are identical to a " +
     "browser exchange - only the transport differs."
   );
@@ -60,7 +60,7 @@ export function saveLeadCopy(transport: CliTransport): string {
 
 /** The info-alert copy about credentials: SFTP credentials are never stored in
  * this file -- the operator fills in the SSH username and points the config at
- * a key or password (an `@file` reference) before running; the psilink key
+ * a key or password (an `@file` reference) before running; the Alcove key
  * file the printed command provisions holds only the exchange's shared
  * secret. A shared-directory exchange has no credentials at all, only the
  * directory both parties can reach. */
@@ -68,7 +68,7 @@ export function credentialAlertCopy(transport: CliTransport): string {
   return transport === "sftp"
     ? "Credentials are never stored in this file. You fill in the SSH " +
         "username and point the config at your key or password (an @file " +
-        "reference) before running - the psilink key file holds only the " +
+        "reference) before running - the Alcove key file holds only the " +
         "exchange secret, provisioned by the command below."
     : "A shared-directory exchange has no credentials at all. The file " +
         "names only the directory both parties can reach.";
@@ -119,7 +119,7 @@ export function saveCapabilityCopy(transport: CliTransport): string {
   const noun = transport === "sftp" ? "SFTP" : "shared-directory";
   return (
     `This browser does not run ${noun} exchanges; this file runs in the ` +
-    "psilink command-line tool."
+    "Alcove command-line tool."
   );
 }
 
@@ -139,7 +139,7 @@ export function saveClosingCopy(
   // it is blank so the sentence still reads (a filedrop directory is required).
   const throughClause = through.trim() === "" ? "the shared location" : through;
   return (
-    `Run it with the psilink command-line tool ${where}. Your partner ` +
+    `Run it with the Alcove command-line tool ${where}. Your partner ` +
     "accepts with the same invitation code and their own exchange file; the " +
     `tool exchanges protocol messages through ${throughClause} and writes ` +
     "the same three result files you would download here."
@@ -177,7 +177,7 @@ export function saveExchangeError(
   if (!isAbsolutePath(dir))
     return {
       field: "sharedDirectory",
-      message: "Enter an absolute path, e.g. /exchanges/psilink.",
+      message: "Enter an absolute path, e.g. /exchanges/alcove.",
     };
   return undefined;
 }
@@ -192,7 +192,7 @@ function isAbsolutePath(path: string): boolean {
   );
 }
 
-/** The download filename `psilink-exchange-<date>.yaml`, the date the local
+/** The download filename `alcove-exchange-<date>.yaml`, the date the local
  * calendar day of `at` (the moment the invitation and file are minted). Mirrors
  * the record-filename timestamp discipline: the stamp comes from the artifact's
  * own creation instant, so repeated saves after edits have distinct dates. */
@@ -200,7 +200,7 @@ export function exchangeFileName(at: Date): string {
   const year = at.getFullYear();
   const month = String(at.getMonth() + 1).padStart(2, "0");
   const day = String(at.getDate()).padStart(2, "0");
-  return `psilink-exchange-${year}-${month}-${day}.yaml`;
+  return `alcove-exchange-${year}-${month}-${day}.yaml`;
 }
 
 /**
@@ -266,14 +266,14 @@ export function exchangeFileInputFor(
 
 /** The one copyable run command the surface offers, naming the JUST-minted
  * exchange file so the command runs as printed instead of falling back to the
- * CLI's default `./psilink.yaml`. Takes the filename rather than a `Date` so a
+ * CLI's default `./alcove.yaml`. Takes the filename rather than a `Date` so a
  * re-save's new date always flows through {@link exchangeFileName} once, at
  * the mint site, rather than being recomputed (and risking drift) here.
  * Saving the invitation code to a file keeps it out of the shell history (the
  * `@file` reference reads it back). */
 export function runCommand(fileName: string): string {
   return (
-    `psilink exchange your-data.csv --config-file ${fileName} ` +
+    `alcove exchange your-data.csv --config-file ${fileName} ` +
     "--invitation @invitation-code.txt"
   );
 }

@@ -3,7 +3,7 @@ import {
   generateSharedSecret,
   getDefaultLinkageTerms,
   snakeizeKeys,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { stringify as stringifyYaml } from "yaml";
 
@@ -38,7 +38,7 @@ import type {
 import type {
   WebRTCConnectionConfig,
   WebRTCExchangeLocator,
-} from "@psilink/core";
+} from "@alcove/core";
 
 /** A record built from `fields` and narrowed to the runnable shape: every fixture
  * here is built with a shared secret, and the export paths take the record type
@@ -142,7 +142,7 @@ describe("a backup file the artifact schema rejects", () => {
 
   test("says the same for an artifact version this build does not know", () => {
     const document = artifactDocument();
-    document.artifactVersion = "psilink-managed-exchange-artifact/v2";
+    document.artifactVersion = "alcove-managed-exchange-artifact/v3";
 
     expect(reasonForImporting(serialize(document))).toBe(
       UNRECOGNIZED_IMPORT_REASON,

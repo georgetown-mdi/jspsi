@@ -59,7 +59,7 @@ describe("recipe coverage of the derived set", () => {
       ...derived,
       cli: [
         ...derived.cli,
-        { argv: ["doctor", "network"], sites: ["Start-Psilink.ps1:900"] },
+        { argv: ["doctor", "network"], sites: ["Start-Alcove.ps1:900"] },
       ],
     };
     expect(coverageGaps(grown)).toEqual([
@@ -73,10 +73,10 @@ describe("recipe coverage of the derived set", () => {
       helpers: [
         ...derived.helpers,
         {
-          script: "cmd_psilink-newcheck.sh",
+          script: "cmd_alcove-newcheck.sh",
           env: [],
           mounts: [],
-          sites: ["cmd_Setup-PsilinkFileDrop.cmd:900"],
+          sites: ["cmd_Setup-AlcoveFileDrop.cmd:900"],
         },
       ],
     };
@@ -192,7 +192,7 @@ case "$*" in
   *"--entrypoint node"*)
     printf 'stub-peer-id\\n' ;;
   *"doctor --help")
-    printf 'Usage: psilink doctor <probe | mount DIRECTORY> [options]\\n' ;;
+    printf 'Usage: alcove doctor <probe | mount DIRECTORY> [options]\\n' ;;
   *"doctor probe --json")
     printf '%s\\n' "$STUB_PROBE_VERDICT"; exit "$STUB_PROBE_STATUS" ;;
   *"doctor mount /rz --json")
@@ -256,13 +256,13 @@ describe("the gate driven against a stub engine", () => {
   });
 
   function drive(overrides = {}) {
-    workspace = mkdtempSync(join(tmpdir(), "psilink-gate-stub-"));
+    workspace = mkdtempSync(join(tmpdir(), "alcove-gate-stub-"));
     const engine = join(workspace, "docker");
     writeFileSync(engine, STUB_ENGINE);
     chmodSync(engine, 0o755);
     const log = join(workspace, "engine.log");
     writeFileSync(log, "");
-    const result = spawnSync(process.execPath, [GATE, "psi-link:smoke"], {
+    const result = spawnSync(process.execPath, [GATE, "alcove:smoke"], {
       encoding: "utf8",
       env: {
         ...process.env,

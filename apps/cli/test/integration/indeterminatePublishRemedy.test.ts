@@ -11,9 +11,9 @@ import {
   getLogger,
   prepareForExchange,
   sanitizeErrorForDisplay,
-} from "@psilink/core";
-import type { ExchangeDataSpec, LinkageTerms } from "@psilink/core";
-import { withCapturedLogs } from "@psilink/core/testing";
+} from "@alcove/core";
+import type { ExchangeDataSpec, LinkageTerms } from "@alcove/core";
+import { withCapturedLogs } from "@alcove/core/testing";
 
 import { runProtocol, type ProtocolConnectionConfig } from "../../src/protocol";
 import { loadKeyFile, saveKeyFile } from "../../src/keyFile";
@@ -213,9 +213,7 @@ inProcessOnly(
     "that works, and only that one",
   async () => {
     const srv = await startInProcessSftpServer();
-    const work = fs.mkdtempSync(
-      path.join(os.tmpdir(), "psilink-undetermined-"),
-    );
+    const work = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-undetermined-"));
     try {
       const keyFiles = {
         receiver: path.join(work, "receiver.key"),
@@ -382,7 +380,7 @@ inProcessOnly(
     // control grammar, so a leftover message is untouched by it -- which is why a
     // plain retry is not the remedy and a restart in a clean directory is.
     const srv = await startInProcessSftpServer();
-    const work = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-unconsumed-"));
+    const work = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-unconsumed-"));
     try {
       const keyFiles = {
         receiver: path.join(work, "receiver.key"),

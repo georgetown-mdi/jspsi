@@ -5,8 +5,8 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 
 import { expect, test } from "vitest";
-import { FileSyncConnection } from "@psilink/core";
-import { withCapturedLogs } from "@psilink/core/testing";
+import { FileSyncConnection } from "@alcove/core";
+import { withCapturedLogs } from "@alcove/core/testing";
 
 import { MAX_DIRECTORY_ENTRIES } from "../../src/connection/listingGuard";
 import {

@@ -536,11 +536,11 @@ describe("the verdict npm reaches for a lockfile entry", () => {
     const packages = installedPackages({
       packages: {
         "apps/cli": {
-          name: "psilink",
+          name: "alcove",
           version: "0.1.0",
           hasInstallScript: true,
         },
-        "node_modules/psilink": { resolved: "apps/cli", link: true },
+        "node_modules/alcove": { resolved: "apps/cli", link: true },
         "node_modules/@parcel/watcher-wasm/node_modules/napi-wasm": {
           version: "1.1.0",
           inBundle: true,

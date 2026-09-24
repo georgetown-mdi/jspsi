@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { getLogger } from "@psilink/core";
-import { withCapturedLogs } from "@psilink/core/testing";
+import { getLogger } from "@alcove/core";
+import { withCapturedLogs } from "@alcove/core/testing";
 
 // Materialize a named logger at module load, before this file's first
 // withCapturedLogs call. It only routes through capture because the

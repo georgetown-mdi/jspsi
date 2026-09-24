@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from "vitest";
-import { generateSharedSecret } from "@psilink/core";
+import { generateSharedSecret } from "@alcove/core";
 
 import {
   parseManagedKeyFile,

@@ -49,7 +49,7 @@ const UNNAMED_CONFIGURATION_TITLE = "Imported configuration";
 
 /**
  * The per-exchange surface of a CONFIGURATION-ONLY record: the settings the
- * operator edits in a browser and the `psilink.yaml` they run on the command
+ * operator edits in a browser and the `alcove.yaml` they run on the command
  * line (docs/MANAGED_EXCHANGE.md, "Bringing a command-line configuration
  * back"). It is the whole of what such a record has -- no run, no schedule, no
  * backup, no hand-off, no re-invite -- because the record holds no shared
@@ -95,7 +95,7 @@ export function ManagedConfigurationSurface({
         {referenceNotice !== undefined && (
           <Alert
             color="yellow"
-            title="Files psilink reads when it runs"
+            title="Files Alcove reads when it runs"
             mt="sm"
             mb="sm"
           >
@@ -167,9 +167,9 @@ function ConfigurationRows({ record }: { record: ManagedExchangeRecord }) {
 }
 
 /**
- * The export back to the command line: the `psilink.yaml` this browser composed
+ * The export back to the command line: the `alcove.yaml` this browser composed
  * from the stored settings, and the invocation that runs it beside the
- * `.psilink.key` the operator already has. No key file and no hand-off
+ * `.alcove.key` the operator already has. No key file and no hand-off
  * confirmation: nothing here was ever this browser's to hand over.
  *
  * The composed file is the mounted record's, which is the record the store
@@ -208,7 +208,7 @@ function ConfigurationExportPanel({
       <h2 className={styles.eyebrow}>Run it from the command line</h2>
       <p className={styles.small}>
         Download the configuration into the folder holding this exchange&apos;s{" "}
-        <span className={styles.mono}>.psilink.key</span> and your input file,
+        <span className={styles.mono}>.alcove.key</span> and your input file,
         then run the command there. The file holds the agreed terms and where
         the exchange connects, and no secret.
       </p>
@@ -250,10 +250,10 @@ function ConfigurationExportPanel({
           ariaLabel="Windows Task Scheduler command"
         />
         <p className={styles.small}>
-          Both lines call psilink by name. Under cron&apos;s minimal PATH or a
+          Both lines call Alcove by name. Under cron&apos;s minimal PATH or a
           Task Scheduler service account it may not resolve, and fails quietly
-          -- use the full path to the psilink binary, or put it on the
-          scheduling account&apos;s PATH.
+          -- use the full path to the Alcove binary, or put it on the scheduling
+          account&apos;s PATH.
         </p>
       </DisclosureSection>
       {record.exchangeFile.connection.channel === "webrtc" && (

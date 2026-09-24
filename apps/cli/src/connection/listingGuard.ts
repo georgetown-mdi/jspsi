@@ -3,7 +3,7 @@ import {
   DISPLAY_TRUNCATION_MARKER,
   redactPrivateKeyMaterial,
   type TransportOperationStalledError,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { fittedCauseLink } from "./causeLink";
 import { transportOperationStalledError } from "./sftpLivenessGuard";

@@ -1,10 +1,10 @@
 import { describe, expect, test, vi } from "vitest";
 
-import { Realm } from "@psilink/peerjs-broker/models/realm";
-import defaultConfig from "@psilink/peerjs-broker/config/index";
+import { Realm } from "@alcove/peerjs-broker/models/realm";
+import defaultConfig from "@alcove/peerjs-broker/config/index";
 
-import type { IClient } from "@psilink/peerjs-broker/models/client";
-import type { PeerServerInstance } from "@psilink/peerjs-broker/instance";
+import type { IClient } from "@alcove/peerjs-broker/models/client";
+import type { PeerServerInstance } from "@alcove/peerjs-broker/instance";
 
 const mockUsePeerServer = vi.fn<() => PeerServerInstance>();
 

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { generateSharedSecret, getDefaultLinkageTerms } from "@psilink/core";
+import { generateSharedSecret, getDefaultLinkageTerms } from "@alcove/core";
 
 import {
   MANAGED_EXCHANGE_SCHEMA_VERSION,
@@ -53,7 +53,7 @@ describe("composeConfirmationMessage", () => {
   });
 
   test("asks what the partner's own tool reported and when", () => {
-    expect(message).toMatch(/your own psilink reported/i);
+    expect(message).toMatch(/your own Alcove reported/i);
     expect(message).toMatch(/real\s+failure happened on your side/i);
   });
 

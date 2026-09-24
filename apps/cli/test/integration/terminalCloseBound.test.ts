@@ -3,9 +3,9 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 
 import { expect } from "vitest";
-import { FileSyncConnection } from "@psilink/core";
-import { withCapturedLogs } from "@psilink/core/testing";
-import type { LogEntry } from "@psilink/core/testing";
+import { FileSyncConnection } from "@alcove/core";
+import { withCapturedLogs } from "@alcove/core/testing";
+import type { LogEntry } from "@alcove/core/testing";
 
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
 import { startInProcessSftpServer } from "../sftpServer";
@@ -170,13 +170,13 @@ for (const [mode, connectionPerPoll] of [
             cwd: path.join(import.meta.dirname, "..", ".."),
             env: {
               ...process.env,
-              PSILINK_TEST_HOST: srv.handle.host,
-              PSILINK_TEST_PORT: String(srv.handle.port),
-              PSILINK_TEST_USERNAME: srv.handle.usera.username,
-              PSILINK_TEST_PASSWORD: password as string,
-              PSILINK_TEST_HOST_KEY: srv.handle.hostKeyFingerprint,
-              PSILINK_TEST_REMOTE_PATH: srv.handle.remoteRoot,
-              PSILINK_TEST_CONNECTION_PER_POLL: connectionPerPoll ? "1" : "0",
+              ALCOVE_TEST_HOST: srv.handle.host,
+              ALCOVE_TEST_PORT: String(srv.handle.port),
+              ALCOVE_TEST_USERNAME: srv.handle.usera.username,
+              ALCOVE_TEST_PASSWORD: password as string,
+              ALCOVE_TEST_HOST_KEY: srv.handle.hostKeyFingerprint,
+              ALCOVE_TEST_REMOTE_PATH: srv.handle.remoteRoot,
+              ALCOVE_TEST_CONNECTION_PER_POLL: connectionPerPoll ? "1" : "0",
             },
             stdio: ["ignore", "pipe", "pipe"],
           },

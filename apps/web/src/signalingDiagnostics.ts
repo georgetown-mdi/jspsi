@@ -1,12 +1,12 @@
-import { getLogger } from "@psilink/core";
+import { getLogger } from "@alcove/core";
 
-import type { SignalingDiagnosticSink } from "@psilink/peerjs-broker";
+import type { SignalingDiagnosticSink } from "@alcove/peerjs-broker";
 
 const log = getLogger("peerjs-broker");
 
 /**
  * Where the signaling broker mounted in this server writes its diagnostics: a
- * prefixed `@psilink/core` logger, so a report lands beside the rest of the
+ * prefixed `@alcove/core` logger, so a report lands beside the rest of the
  * server's output with the same timestamp, level and context on it.
  *
  * A module of its own rather than a closure inside the mount, so the unit suite

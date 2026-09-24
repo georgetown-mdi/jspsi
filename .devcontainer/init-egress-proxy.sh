@@ -2,7 +2,7 @@
 set -Eeuo pipefail # Exit on error (inherited by functions/subshells), undefined
 IFS=$'\n\t'        # vars, and pipeline failures; stricter word splitting.
 
-# Hostname-gated egress lane for the psilink dev container, applied on start
+# Hostname-gated egress lane for the Alcove dev container, applied on start
 # AFTER init-firewall.sh. Both profiles run it; the allowlist baked into the
 # image is what differs.
 #
@@ -13,7 +13,7 @@ IFS=$'\n\t'        # vars, and pipeline failures; stricter word splitting.
 # Door host resolved once at container start misses on most later requests. So
 # this script adds a second lane without touching the first: a tinyproxy CONNECT
 # proxy bound to loopback, default-deny, admitting a destination by HOSTNAME from
-# /usr/local/share/psilink-egress-allowlist plus PSILINK_EGRESS_EXTRA_HOSTS,
+# /usr/local/share/alcove-egress-allowlist plus ALCOVE_EGRESS_EXTRA_HOSTS,
 # and an iptables OUTPUT rule that lets the tinyproxy uid -- and nothing else in
 # the container -- reach ports 443 and 22 on an address outside the IP
 # allowlist.
@@ -32,12 +32,12 @@ IFS=$'\n\t'        # vars, and pipeline failures; stricter word splitting.
 PROXY_PORT=8888
 PROXY_URL="http://127.0.0.1:$PROXY_PORT"
 PROXY_USER=tinyproxy
-CONF_DIR=/etc/psilink-egress-proxy
+CONF_DIR=/etc/alcove-egress-proxy
 CONF_FILE="$CONF_DIR/tinyproxy.conf"
 FILTER_FILE="$CONF_DIR/filter"
-LOG_FILE=/var/log/psilink-egress-proxy.log
-PID_FILE=/run/psilink-egress-proxy.pid
-ALLOWLIST_FILE=/usr/local/share/psilink-egress-allowlist
+LOG_FILE=/var/log/alcove-egress-proxy.log
+PID_FILE=/run/alcove-egress-proxy.pid
+ALLOWLIST_FILE=/usr/local/share/alcove-egress-allowlist
 
 # The one firewall rule this script adds, written once so the insert, the
 # existence check, and the delete cannot drift from each other. The port bound
@@ -124,7 +124,7 @@ fi
 patterns=$(
   {
     cat "$ALLOWLIST_FILE"
-    printf '%s\n' "${PSILINK_EGRESS_EXTRA_HOSTS:-}" | tr ',' '\n'
+    printf '%s\n' "${ALCOVE_EGRESS_EXTRA_HOSTS:-}" | tr ',' '\n'
   } | sed -e 's/#.*$//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e '/^$/d' | sort -u
 )
 if [ -z "$patterns" ]; then
@@ -336,22 +336,22 @@ expect "an unlisted host is refused by the proxy" \
 expect "the AWS customer-instance namespace is refused by the proxy" \
   "$(via_proxy https://ec2-1-2-3-4.us-west-2.compute.amazonaws.com/)" filtered
 
-# Every host the owner added through PSILINK_EGRESS_EXTRA_HOSTS must actually be
+# Every host the owner added through ALCOVE_EGRESS_EXTRA_HOSTS must actually be
 # admitted by the assembled filter, or the variable is silently doing nothing.
 # The assertion is "the proxy did not filter it" rather than "the origin
 # answered": an added host is often an instance address with no HTTPS listener,
 # and a proxy 5xx from an unreachable origin is a pass here. A pattern carrying
 # a wildcard names no host to probe and is skipped.
-if [ -n "${PSILINK_EGRESS_EXTRA_HOSTS:-}" ]; then
+if [ -n "${ALCOVE_EGRESS_EXTRA_HOSTS:-}" ]; then
   while read -r extra; do
     [ -n "$extra" ] || continue
     [[ "$extra" != *'*'* ]] || continue
     result=$(via_proxy "https://$extra/")
     if [ "$result" = filtered ]; then
-      fail "Proxy verification failed - PSILINK_EGRESS_EXTRA_HOSTS host $extra is filtered"
+      fail "Proxy verification failed - ALCOVE_EGRESS_EXTRA_HOSTS host $extra is filtered"
     fi
     echo "Proxy verification passed - added host $extra is admitted by the filter: $result"
-  done < <(printf '%s\n' "${PSILINK_EGRESS_EXTRA_HOSTS}" | tr ',' '\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+  done < <(printf '%s\n' "${ALCOVE_EGRESS_EXTRA_HOSTS}" | tr ',' '\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
 fi
 
 # Reading the chain needs root, which the node user has for these two scripts

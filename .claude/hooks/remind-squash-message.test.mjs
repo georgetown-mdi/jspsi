@@ -41,8 +41,8 @@ const prCreateEvent = (
 });
 
 const ghOutput = (number) =>
-  "Creating pull request for feature into staging in georgetown-mdi/jspsi\n\n" +
-  `https://github.com/georgetown-mdi/jspsi/pull/${number}\n`;
+  "Creating pull request for feature into staging in georgetown-mdi/alcove\n\n" +
+  `https://github.com/georgetown-mdi/alcove/pull/${number}\n`;
 
 // Build a throwaway git repo with a `refs/remotes/origin/staging` ref pinned at
 // its first commit, then `commitsAheadOfBase` further commits on top -- so
@@ -142,7 +142,7 @@ describe("remind-squash-message hook", () => {
     const additionalContext = context(
       prCreateEvent(dir, {
         stdout:
-          "Depends on https://github.com/georgetown-mdi/jspsi/pull/11\n" +
+          "Depends on https://github.com/georgetown-mdi/alcove/pull/11\n" +
           ghOutput(12),
       }),
     );

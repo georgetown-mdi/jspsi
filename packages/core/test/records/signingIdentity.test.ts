@@ -393,7 +393,7 @@ describe("parseSigningIdentity / parseCertificate", () => {
 // current scheme -- an OKP JWK has no `y`, so a reader that ignored the
 // version would be guessing at a coordinate.
 const V1_CERTIFICATE = {
-  version: "psilink-signing-cert/v1",
+  version: "alcove-signing-cert/v1",
   algorithm: "ed25519",
   identity: IDENTITY,
   publicKey: {
@@ -406,7 +406,7 @@ const V1_CERTIFICATE = {
 };
 
 const V1_IDENTITY_FILE = {
-  version: "psilink-signing-identity/v1",
+  version: "alcove-signing-identity/v1",
   privateKey: {
     kty: "OKP",
     crv: "Ed25519",
@@ -431,7 +431,7 @@ describe("format-version enforcement", () => {
     const cert = clone((await freshIdentity()).certificate) as unknown as {
       version: string;
     };
-    cert.version = "psilink-signing-cert/v1";
+    cert.version = "alcove-signing-cert/v1";
     await expect(parseCertificate(cert)).rejects.toThrow();
   });
 });

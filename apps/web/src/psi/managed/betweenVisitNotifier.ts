@@ -24,14 +24,14 @@
  * constructor.
  */
 
-import { getLogger } from "@psilink/core";
+import { getLogger } from "@alcove/core";
 
 import type { BetweenVisitNotice } from "./betweenVisitNotice";
 
 const log = getLogger("betweenVisitNotifier");
 
 /** The localStorage key holding this device's opt-in. */
-const OPT_IN_STORAGE_KEY = "psilink-between-visit-notifications";
+const OPT_IN_STORAGE_KEY = "alcove-between-visit-notifications";
 
 /** The stored value that means opted in. Any other stored value, and a key that
  * is absent or unreadable, reads as not opted in. */

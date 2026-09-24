@@ -279,7 +279,7 @@ beforeAll(() => {
       scripts: {
         // The build records which pass of the script reached it, which is the
         // only place the handover after a re-point shows from outside.
-        build: `node -e "const fs=require('node:fs');fs.mkdirSync('dist',{recursive:true});fs.writeFileSync('dist/built.txt',process.env.PSILINK_WORKTREE_INIT_REPOINTED?'built after the re-point':'built in the first pass')"`,
+        build: `node -e "const fs=require('node:fs');fs.mkdirSync('dist',{recursive:true});fs.writeFileSync('dist/built.txt',process.env.ALCOVE_WORKTREE_INIT_REPOINTED?'built after the re-point':'built in the first pass')"`,
       },
     }),
   );
@@ -329,7 +329,15 @@ beforeAll(() => {
   git(["push", "-q", "origin", "unservable"], seed);
 
   pushScriptRevisions("swap", readFileSync(SCRIPT, "utf8"));
-  pushScriptRevisions("control", scriptAt(CONTROL_REV));
+  // The control revision reads its two variables under an earlier prefix;
+  // point them at the names this suite sets.
+  pushScriptRevisions(
+    "control",
+    scriptAt(CONTROL_REV).replace(
+      /\b[A-Z]+(_WORKTREE_(?:BASE_REF|INIT_REPOINTED))\b/g,
+      "ALCOVE$1",
+    ),
+  );
   inPlaceResetGit = writeInPlaceResetGit();
 
   primary = join(root, "primary");
@@ -353,7 +361,7 @@ describe("the base a worktree starts on", () => {
 
     expect(status).toBe(0);
     expect(output).toContain("re-pointing");
-    expect(output).toContain("PSILINK_WORKTREE_BASE_REF");
+    expect(output).toContain("ALCOVE_WORKTREE_BASE_REF");
     expect(output).toContain("agrees with package-lock.json");
     expect(head(tree)).toBe(staging);
     expect(
@@ -384,7 +392,7 @@ describe("the base a worktree starts on", () => {
     expect(output).toContain("NOT re-pointing");
     expect(output).toContain("Work in flight");
     expect(output).toContain("git rebase --onto origin/staging");
-    expect(output).toContain("PSILINK_WORKTREE_BASE_REF");
+    expect(output).toContain("ALCOVE_WORKTREE_BASE_REF");
     expect(head(tree)).toBe(before);
     expect(readFileSync(join(tree, "work.txt"), "utf8")).toBe("in flight\n");
     expect(
@@ -414,7 +422,7 @@ describe("the base a worktree starts on", () => {
     const tree = worktree("unknown-base", "origin/staging");
 
     const { status, output } = runInit(tree, {
-      PSILINK_WORKTREE_BASE_REF: "origin/no-such-branch",
+      ALCOVE_WORKTREE_BASE_REF: "origin/no-such-branch",
     });
 
     expect(status).toBe(1);
@@ -429,7 +437,7 @@ describe("the base a worktree starts on", () => {
     const before = head(tree);
 
     const { status, output } = runInit(tree, {
-      PSILINK_WORKTREE_BASE_REF: "HEAD",
+      ALCOVE_WORKTREE_BASE_REF: "HEAD",
     });
 
     expect(status).toBe(0);
@@ -514,7 +522,7 @@ describe("a re-point that replaces the script the shell is running", () => {
   const repoint = (tree, name, env = {}) =>
     runInit(
       tree,
-      { PSILINK_WORKTREE_BASE_REF: `origin/${name}-base`, ...env },
+      { ALCOVE_WORKTREE_BASE_REF: `origin/${name}-base`, ...env },
       join(tree, SCRIPT_IN_TREE),
     );
 
@@ -603,7 +611,7 @@ describe("a re-point that replaces the script the shell is running", () => {
 
     const { status, output } = runInit(
       tree,
-      { PSILINK_WORKTREE_BASE_REF: "origin/swap-scriptless" },
+      { ALCOVE_WORKTREE_BASE_REF: "origin/swap-scriptless" },
       join(tree, SCRIPT_IN_TREE),
     );
 

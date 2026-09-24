@@ -4,7 +4,7 @@ import {
   DEFAULT_MAX_DISPLAY_LENGTH,
   UsageError,
   sanitizeErrorForDisplay,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   KEX_PRIMITIVES,
@@ -132,7 +132,7 @@ describe("constrainKexToPlatformCapabilities with X25519 unavailable", () => {
       [MISSING],
       log,
     );
-    // ssh2 stays the owner of WHICH algorithms are offered: psilink supplies the
+    // ssh2 stays the owner of WHICH algorithms are offered: Alcove supplies the
     // subtraction, never a list of its own.
     expect(constrained).toEqual({
       host: "sftp.example",
@@ -482,7 +482,7 @@ describe("what the operator actually reads", () => {
 
     expect(topLink(explained)).not.toContain("[truncated]");
     expect(topLink(explained)).toContain(
-      "or run psilink on a host that provides",
+      "or run Alcove on a host that provides",
     );
     expect(topLink(explained).length).toBeLessThanOrEqual(
       DEFAULT_MAX_DISPLAY_LENGTH,

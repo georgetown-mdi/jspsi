@@ -3,8 +3,8 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   minimalExchangeResult,
   minimalPreparedExchange,
-} from "@psilink/core/testing";
-import { ProcessState } from "@psilink/core";
+} from "@alcove/core/testing";
+import { ProcessState } from "@alcove/core";
 
 import {
   JobApiRequestError,
@@ -24,7 +24,7 @@ import {
   validLinkageTerms,
 } from "../../utils/jobFixtures";
 
-import type { ExchangeResult, Metadata, Standardization } from "@psilink/core";
+import type { ExchangeResult, Metadata, Standardization } from "@alcove/core";
 import type {
   FinalRunStatus,
   JobApiClient,
@@ -729,8 +729,8 @@ describe("createServerJobExchangeDriver event mapping", () => {
 
 describe("createServerJobExchangeDriver record downloads", () => {
   const CREATED_AT = "2026-07-08T14:32:00.000Z";
-  const RECORD_NAME = "psilink-record-2026-07-08T14-32-00-000Z.json";
-  const KEYS_NAME = "psilink-record-2026-07-08T14-32-00-000Z.keys.json";
+  const RECORD_NAME = "alcove-record-2026-07-08T14-32-00-000Z.json";
+  const KEYS_NAME = "alcove-record-2026-07-08T14-32-00-000Z.keys.json";
 
   test("a completed job with an available record yields the full result set", async () => {
     const { client } = scriptedClient([result(true)], {
@@ -1258,9 +1258,9 @@ describe("createFetchJobApiClient over an injected fetch", () => {
     expect(resultsUrlOf(outputs)).toBe("/api/jobs/job-9/result");
     expect(outputs.record).toEqual({
       recordUrl: "/api/jobs/job-9/record",
-      recordFileName: "psilink-record-2026-07-08T14-32-00-000Z.json",
+      recordFileName: "alcove-record-2026-07-08T14-32-00-000Z.json",
       keysUrl: "/api/jobs/job-9/keys",
-      keysFileName: "psilink-record-2026-07-08T14-32-00-000Z.keys.json",
+      keysFileName: "alcove-record-2026-07-08T14-32-00-000Z.keys.json",
     });
   });
 

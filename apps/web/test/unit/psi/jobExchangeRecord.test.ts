@@ -34,9 +34,9 @@ describe("jobRecordDownloads", () => {
     // artifacts file together whichever seat produced them.
     expect(jobRecordDownloads("job-1", CREATED_AT)).toEqual({
       recordUrl: "/api/jobs/job-1/record",
-      recordFileName: `psilink-record-${RECORD_STAMP}.json`,
+      recordFileName: `alcove-record-${RECORD_STAMP}.json`,
       keysUrl: "/api/jobs/job-1/keys",
-      keysFileName: `psilink-record-${RECORD_STAMP}.keys.json`,
+      keysFileName: `alcove-record-${RECORD_STAMP}.keys.json`,
     });
   });
 });
@@ -148,7 +148,7 @@ describe("fetchJobExchangeRecordOffer", () => {
 
   test("a record the console holds and cannot describe is its own answer", async () => {
     // The version-skew case, distinct from a plain `none` denial: a record
-    // file IS in the run's folder, written by a psilink the console does not
+    // file IS in the run's folder, written by an Alcove the console does not
     // recognize, and nothing downloads (the routes 404 under the same gate). The
     // seat must not treat that as the absence of a record, because the controls
     // beside it destroy the folder it sits in.

@@ -2,9 +2,9 @@ import {
   displayText,
   redactAndSanitizeForDisplay,
   sanitizeForDisplay,
-} from "@psilink/core/untrusted-text";
+} from "@alcove/core/untrusted-text";
 
-import type { Displayable } from "@psilink/core/untrusted-text";
+import type { Displayable } from "@alcove/core/untrusted-text";
 import type { EventEmitter } from "node:events";
 
 // Every source the sink recognizes. The type below is derived from it rather
@@ -96,7 +96,7 @@ export const DIAGNOSTIC_DETAIL_MAX_LENGTH = 256;
  * Where a signaling diagnostic goes once this module has attributed, escaped,
  * capped and rate limited it. Injected by whoever builds the server rather than
  * resolved here, so this package holds no logging policy of its own: the web
- * app's mount hands it a prefixed `@psilink/core` logger, and the standalone
+ * app's mount hands it a prefixed `@alcove/core` logger, and the standalone
  * runner a stderr writer, each unconditionally. Every report is a warning, so
  * the sink takes no level.
  *

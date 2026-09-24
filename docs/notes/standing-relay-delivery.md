@@ -59,8 +59,8 @@ ratified by the owner.
   AMI this reference prescribes publishes no podman package and includes no EPEL
   while taking docker from `dnf`, so `install.sh` detects the runtime and
   installs the matching unit; both are tracked
-  (`infra/relay/psilink-relay.container` and
-  `infra/relay/psilink-relay-docker.service`). The container flags are identical
+  (`infra/relay/alcove-relay.container` and
+  `infra/relay/alcove-relay-docker.service`). The container flags are identical
   either way, so a host that already runs docker needs no different
   configuration.
 - **Host networking**, which is a requirement of the protocol rather than a

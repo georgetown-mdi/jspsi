@@ -1,7 +1,7 @@
 /**
  * Naming the settings a refused exchange file holds, as the FILE spells them.
  *
- * Two readers of an operator-written `psilink.yaml` share this: the managed
+ * Two readers of an operator-written `alcove.yaml` share this: the managed
  * exchange's configuration import ({@link ./managed/managedCommandLineImport.ts})
  * and the console's mount load ({@link ../jobs/configLoad.ts}). Both refuse a
  * document the shared schema rejects, and both must point the operator at a line
@@ -20,7 +20,7 @@
  * console owns the mount and takes credentials and paths.
  */
 
-import { snakeizeKey } from "@psilink/core";
+import { snakeizeKey } from "@alcove/core";
 
 import type { ZodError } from "zod";
 

@@ -159,7 +159,7 @@ describe("the console server's persistence-loss exit code tracks the CLI's", () 
 
   it("refuses a declaration shape it cannot read rather than passing it", () => {
     const sources = {
-      "imported.ts": `import { ${CONSTANT} } from "@psilink/cli";`,
+      "imported.ts": `import { ${CONSTANT} } from "@alcove/cli";`,
       "unexported.ts": `const ${CONSTANT} = 73;`,
       "reassignable.ts": `export let ${CONSTANT} = 73;`,
       "computed.ts": `export const ${CONSTANT} = EX_CANTCREAT;`,

@@ -11,8 +11,8 @@ import {
   parseExchangeSpec,
   setDiagnosticSink,
   UsageError,
-} from "@psilink/core";
-import type { ExchangeDataSpec, LinkageTerms, Metadata } from "@psilink/core";
+} from "@alcove/core";
+import type { ExchangeDataSpec, LinkageTerms, Metadata } from "@alcove/core";
 
 import { confirmOutboundPayloadConsent } from "../../src/outboundPayloadConsent";
 import { prepareDataset } from "../../src/commands/exchange";
@@ -39,8 +39,8 @@ let dir: string;
 let configFile: string;
 
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-outbound-consent-"));
-  configFile = path.join(dir, "psilink.yaml");
+  dir = fs.mkdtempSync(path.join(tmpdir(), "alcove-outbound-consent-"));
+  configFile = path.join(dir, "alcove.yaml");
   promptConfirmMock.mockReset();
 });
 

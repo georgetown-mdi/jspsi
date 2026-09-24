@@ -4,7 +4,7 @@ import {
   getDefaultLinkageTerms,
   referencedLinkageFieldNames,
   resolveLinkageRuleSetCitation,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   isDraftDrawnFromLinkageRuleSet,
@@ -27,7 +27,7 @@ import type {
   OwnColumnSelection,
   Payload,
   Standardization,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import type { AdvancedInviteDraft, DraftKey } from "./advancedInviteTypes";
 

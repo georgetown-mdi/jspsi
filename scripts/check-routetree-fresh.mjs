@@ -52,7 +52,7 @@
 //     measures.
 //   - It cannot separate a stale route tree from a broken web config: an
 //     invocation that fails for any other reason (an uncollectable test file, a
-//     missing @psilink/core build) fails this check too, reported as a codegen
+//     missing @alcove/core build) fails this check too, reported as a codegen
 //     failure including the command's own output rather than as staleness.
 //   - It is not concurrency-safe against another writer. A process running the
 //     web tooling at the same time -- a live `npm run dev` -- races it for the
@@ -103,7 +103,7 @@ export const REGENERATE_COMMAND = REGENERATE_ARGV.join(" ");
  * finds it in a committed file after a run was killed outright.
  */
 export const PROBE =
-  "psilink route tree freshness probe -- an interrupted `npm run check:routetree` left this line; regenerate the file";
+  "Alcove route tree freshness probe -- an interrupted `npm run check:routetree` left this line; regenerate the file";
 
 const PROBE_LINE = `\n// ${PROBE}\n`;
 

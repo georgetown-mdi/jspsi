@@ -20,7 +20,7 @@ import { jobConfigurationHandBackSchema } from "@jobs/intentSchemas";
 
 /**
  * `GET /api/jobs/config` -- the command-line configuration the operator mounted
- * at `<JOB_DATA_ROOT>/psilink.yaml`, as the settings the console's authoring
+ * at `<JOB_DATA_ROOT>/alcove.yaml`, as the settings the console's authoring
  * forms edit. Shares `gateJobRoute` (404 when the API is disabled, no-store, no
  * CORS), and the `{ configured, ... }` shape family of `GET /api/jobs/inputs`
  * and `GET /api/jobs/rendezvous`.

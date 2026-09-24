@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 // Built-in STUN default claim check, run by static_checks.yaml on every PR.
 //
-// A psilink run that configures no STUN or TURN server gathers ICE against the
+// An Alcove run that configures no STUN or TURN server gathers ICE against the
 // WebRTC library's built-in default, disclosing the running host's public
 // address to whoever operates it. Three surfaces name that endpoint to an
 // operator, one of them right before they hand a recurring exchange's secret to
 // a scheduler: the CLI's own warning, the web app's command-line export panel,
 // and the docs. Only one of them can be derived from another -- an app may not
 // import from another app, and a document imports nothing -- so the rest are
-// hand-written copies of a value the library, not psilink, decides. A copy left
+// hand-written copies of a value the library, not Alcove, decides. A copy left
 // behind by a bump is not a typo: it is a confidentiality statement that has
 // gone false, and prose cannot hold it true. So the agreement is a check.
 //

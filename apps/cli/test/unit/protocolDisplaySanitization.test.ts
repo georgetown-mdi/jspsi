@@ -19,13 +19,13 @@ vi.mock("@openmined/psi.js", () => ({
   default: vi.fn().mockResolvedValue({}),
 }));
 
-// Keep all of @psilink/core real -- FileSyncConnection, fromEventConnection, and
+// Keep all of @alcove/core real -- FileSyncConnection, fromEventConnection, and
 // the sanitize helpers especially -- and replace only getLogger so runProtocol's
 // log.{info,warn,debug,error} calls land in mockState. FileSyncConnection logs
 // through getLoggerForVerbosity (a different, un-mocked export), so its internal
 // chatter does not pollute these arrays: they hold runProtocol's sinks alone.
-vi.mock("@psilink/core", async (importActual) => {
-  const actual = await importActual<typeof import("@psilink/core")>();
+vi.mock("@alcove/core", async (importActual) => {
+  const actual = await importActual<typeof import("@alcove/core")>();
   return {
     ...actual,
     getLogger: () => ({
@@ -74,11 +74,11 @@ vi.mock("../../src/connection/ssh2SftpAdapter", () => ({
   },
 }));
 
-import { FileSyncConnection } from "@psilink/core";
+import { FileSyncConnection } from "@alcove/core";
 import {
   minimalPreparedExchange,
   withCapturedLogs,
-} from "@psilink/core/testing";
+} from "@alcove/core/testing";
 
 import { runProtocol } from "../../src/protocol";
 import type { RunProtocolOptions } from "../../src/protocol";

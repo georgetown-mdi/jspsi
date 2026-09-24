@@ -29,7 +29,7 @@ export function jobDiagnosticLogUrl(jobId: string): string {
 /** The download name the operator's browser saves the log under, stamped with
  * the job so repeated downloads across runs do not collide. */
 export function jobDiagnosticLogFileName(jobId: string): string {
-  return `psilink-run-${jobId}.log`;
+  return `alcove-run-${jobId}.log`;
 }
 
 /**

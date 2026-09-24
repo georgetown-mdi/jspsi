@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   generateSigningIdentity,
   serializeSigningIdentity,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   JOB_FILE_NAMES,
@@ -188,7 +188,7 @@ describe("POST /api/jobs/signing/fingerprint maps each condition", () => {
       label: "a path-shaped extra",
       body: {
         identity: "Agency A",
-        exportPath: "/data/.psilink-signing-identity.json",
+        exportPath: "/data/.alcove-signing-identity.json",
       },
       absent: ["exportPath", SIGNING_IDENTITY_FILE_NAME],
     },
@@ -494,7 +494,7 @@ describe("POST /api/jobs/signing/fingerprint maps each condition", () => {
   test("an unexpected internal fault is an empty-bodied 500, with no detail", async () => {
     const { manager } = seedManager();
     vi.spyOn(manager, "resolveSigningFingerprint").mockRejectedValue(
-      new Error("ENOENT: /srv/appliance/data/.psilink-signing-identity.json"),
+      new Error("ENOENT: /srv/appliance/data/.alcove-signing-identity.json"),
     );
     const response = await postFingerprint({ identity: "Agency A" });
     expect(response.status).toBe(500);
@@ -602,7 +602,7 @@ describe("GET /api/jobs/:jobId/receipt serves only a workdir-contained receipt",
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(response.headers.get("content-disposition")).toContain("attachment");
     expect(response.headers.get("content-disposition")).toContain(
-      "psilink-receipt.json",
+      "alcove-receipt.json",
     );
     expect(JSON.parse(await response.text())).toEqual({
       version: 1,

@@ -1,5 +1,5 @@
 [Unit]
-Description=Revoke the psilink relay's lapsed exchange keys hourly
+Description=Revoke the Alcove relay's lapsed exchange keys hourly
 
 [Timer]
 # A lapse is a whole number of days, so an hourly sweep revokes a row within an

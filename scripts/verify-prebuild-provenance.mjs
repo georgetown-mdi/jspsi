@@ -7,11 +7,11 @@
 // process privilege into the PSI crypto pipeline, and it is built in another
 // repository (the fork's native-prebuilds.yml) and copied here by hand. The
 // committed `.sha256` sidecar cannot close that hop: it is written in the same
-// psilink commit as the bytes it describes, so a writer who controls lib/
+// Alcove commit as the bytes it describes, so a writer who controls lib/
 // controls both. It detects a truncated checkout, a corrupt download, or a
 // stale re-vendor -- accident and availability -- and it is the only check that
 // works with no network, no token, and no extra tooling. Tamper resistance
-// across the fork boundary needs a claim made outside any psilink commit, which
+// across the fork boundary needs a claim made outside any Alcove commit, which
 // is what a GitHub artifact attestation stored against the PRODUCING repository
 // is; `gh attestation verify` is how this reads it.
 //

@@ -50,7 +50,7 @@ const payloadColumnNameList = (message: string): z.ZodType<string[]> =>
   ).transform((names) => columnsNamedOnce(names, (name) => name));
 
 /**
- * A complete psilink exchange specification. Consumed by both the web
+ * A complete alcove exchange specification. Consumed by both the web
  * application and the CLI application: the web app provides an interactive
  * editor, the CLI accepts it as a configuration file.
  *
@@ -81,7 +81,7 @@ export const ExchangeSpecSchema = z
     // trust mechanism, channel-agnostic across sftp/filedrop/webrtc. A
     // sibling of `signing`, kept separate since the two have opposed
     // lifetimes and trust models (see SECURITY_DESIGN.md). Mixes
-    // runtime-injected secret state (from .psilink.key, never written to
+    // runtime-injected secret state (from .alcove.key, never written to
     // YAML) with operator-settable policy fields. See connection.ts and
     // EXCHANGE_REFERENCE.md.
     authentication: AuthenticationSchema.optional(),
@@ -128,9 +128,9 @@ export const ExchangeSpecSchema = z
     // party's OWN namespace) it promised to disclose when the exchange was
     // established -- the send-side mirror of expectedPayloadColumns above.
     // Per-party and local, distinct from linkageTerms.payload.send (the
-    // negotiated dictionary). Persisted by every `psilink invite` mint path
+    // negotiated dictionary). Persisted by every `alcove invite` mint path
     // that publishes a disclosed set, so it never lags the token the
-    // partner locks in. A later recurring `psilink exchange` verifies its
+    // partner locks in. A later recurring `alcove exchange` verifies its
     // current metadata still discloses exactly this set before any
     // credential, terms, or data are sent
     // (assertDisclosureMatchesCommitment): drift would otherwise abort the
@@ -153,7 +153,7 @@ export const ExchangeSpecSchema = z
     // Optional local TERMS-side enforcement record, the deduplicate
     // counterpart of expectedPayloadColumns above: the `deduplicate` the accepted
     // INVITATION declared for the INVITING party's own side, which a later
-    // `psilink exchange` holds the partner's presented value to
+    // `alcove exchange` holds the partner's presented value to
     // (assertPresentedDeduplicateMatchesInvitation), refusing a
     // contradiction before any key or payload moves. Per-party and local,
     // distinct from linkageTerms.deduplicate (THIS party's own side).

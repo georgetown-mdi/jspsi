@@ -20,13 +20,13 @@ import {
   serializeDualSignedRecord,
   SIGNED_RECEIPT_VERSION,
   signReceiptContent,
-} from "@psilink/core";
+} from "@alcove/core";
 import type {
   ConnectionEndpoint,
   ExchangeSpec,
   LinkageTerms,
   ReceiptContent,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   handler as acceptHandler,
@@ -107,7 +107,7 @@ const FILEDROP_CONFIG = {
 let dir: string;
 
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-operator-path-"));
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-operator-path-"));
 });
 
 afterEach(() => {
@@ -119,8 +119,8 @@ afterEach(() => {
 function backslashedPath(name: string): string {
   const full =
     process.platform === "win32"
-      ? path.join(dir, "psilink", name)
-      : path.join(dir, `C:\\psilink\\${name}`);
+      ? path.join(dir, "alcove", name)
+      : path.join(dir, `C:\\alcove\\${name}`);
   fs.mkdirSync(path.dirname(full), { recursive: true });
   return full;
 }
@@ -239,7 +239,7 @@ const REFUSALS: readonly SinkCase<RefusalOutcome>[] = [
     name: "exchange: a config file that does not exist",
     says: ["does not exist; to create one"],
     drive: async () => {
-      const filePath = backslashedPath("psilink.yaml");
+      const filePath = backslashedPath("alcove.yaml");
       return {
         filePath,
         thrown: await raised(() =>
@@ -252,7 +252,7 @@ const REFUSALS: readonly SinkCase<RefusalOutcome>[] = [
     name: "exchange: a config file that cannot be read",
     says: ["could not be read"],
     drive: async () => {
-      const filePath = backslashedPath("psilink.yaml");
+      const filePath = backslashedPath("alcove.yaml");
       fs.mkdirSync(filePath);
       return {
         filePath,
@@ -266,7 +266,7 @@ const REFUSALS: readonly SinkCase<RefusalOutcome>[] = [
     name: "exchange: a config file that is not a valid exchange spec",
     says: ["is not a valid exchange spec"],
     drive: async () => {
-      const filePath = backslashedPath("psilink.yaml");
+      const filePath = backslashedPath("alcove.yaml");
       fs.writeFileSync(filePath, YAML.stringify({ connection: {} }));
       return {
         filePath,
@@ -280,9 +280,9 @@ const REFUSALS: readonly SinkCase<RefusalOutcome>[] = [
     name: "exchange: a malformed key file",
     says: ["is malformed"],
     drive: async () => {
-      const configFile = backslashedPath("psilink.yaml");
+      const configFile = backslashedPath("alcove.yaml");
       writeFiledropConfig(configFile);
-      const filePath = backslashedPath(".psilink.key");
+      const filePath = backslashedPath(".alcove.key");
       fs.writeFileSync(filePath, JSON.stringify({ version: "nonsense" }));
       return {
         filePath,
@@ -296,9 +296,9 @@ const REFUSALS: readonly SinkCase<RefusalOutcome>[] = [
     name: "exchange: a key file that does not exist",
     says: ["does not exist. Create one with"],
     drive: async () => {
-      const configFile = backslashedPath("psilink.yaml");
+      const configFile = backslashedPath("alcove.yaml");
       writeFiledropConfig(configFile);
-      const filePath = backslashedPath(".psilink.key");
+      const filePath = backslashedPath(".alcove.key");
       return {
         filePath,
         thrown: await raised(() =>
@@ -311,9 +311,9 @@ const REFUSALS: readonly SinkCase<RefusalOutcome>[] = [
     name: "exchange: a shared secret that has expired",
     says: ["expired at"],
     drive: async () => {
-      const configFile = backslashedPath("psilink.yaml");
+      const configFile = backslashedPath("alcove.yaml");
       writeFiledropConfig(configFile);
-      const filePath = backslashedPath(".psilink.key");
+      const filePath = backslashedPath(".alcove.key");
       saveKeyFile(filePath, {
         sharedSecret: TOKEN,
         expires: "2020-01-01T00:00:00.000Z",
@@ -337,7 +337,7 @@ const REFUSALS: readonly SinkCase<RefusalOutcome>[] = [
           resolveSigningPersist(
             { mode: "certificate", identityFile: filePath },
             "Test Party",
-            backslashedPath("psilink.yaml"),
+            backslashedPath("alcove.yaml"),
           ),
         ),
       };
@@ -347,7 +347,7 @@ const REFUSALS: readonly SinkCase<RefusalOutcome>[] = [
     name: "init: a file already at the path with no terminal to confirm",
     says: ["refusing to overwrite it without an interactive confirmation"],
     drive: async () => {
-      const filePath = backslashedPath("psilink.yaml");
+      const filePath = backslashedPath("alcove.yaml");
       fs.writeFileSync(filePath, "");
       return {
         filePath,
@@ -364,14 +364,14 @@ const REFUSALS: readonly SinkCase<RefusalOutcome>[] = [
     name: "provision: a reused config removed since it was reconciled",
     says: ["no longer exists"],
     drive: async () => {
-      const filePath = backslashedPath("psilink.yaml");
+      const filePath = backslashedPath("alcove.yaml");
       return {
         filePath,
         thrown: await raised(() =>
           provisionConfigAndKey(
             sampleSpec(),
             { sharedSecret: TOKEN },
-            { configPath: filePath, keyPath: backslashedPath(".psilink.key") },
+            { configPath: filePath, keyPath: backslashedPath(".alcove.key") },
             { reuseExistingConfig: true },
           ),
         ),
@@ -395,7 +395,7 @@ const REFUSALS: readonly SinkCase<RefusalOutcome>[] = [
     says: ["has an unrecognized version"],
     drive: async () => {
       const filePath = backslashedPath("record.json");
-      fs.writeFileSync(filePath, JSON.stringify({ version: "psilink/nope" }));
+      fs.writeFileSync(filePath, JSON.stringify({ version: "alcove/nope" }));
       return {
         filePath,
         thrown: await raised(() => readVerifiableArtifact(filePath)),
@@ -437,7 +437,7 @@ const REFUSALS: readonly SinkCase<RefusalOutcome>[] = [
     says: ["has an unrecognized version"],
     drive: async () => {
       const filePath = backslashedPath("keys.json");
-      fs.writeFileSync(filePath, JSON.stringify({ version: "psilink/nope" }));
+      fs.writeFileSync(filePath, JSON.stringify({ version: "alcove/nope" }));
       return {
         filePath,
         thrown: await raised(() => readVerificationKeysFile(filePath)),
@@ -463,7 +463,7 @@ const REFUSALS: readonly SinkCase<RefusalOutcome>[] = [
     name: "verify-receipt: a named config file that does not exist",
     says: ["does not exist"],
     drive: async () => {
-      const filePath = backslashedPath("psilink.yaml");
+      const filePath = backslashedPath("alcove.yaml");
       return {
         filePath,
         thrown: await raised(() => readConfigSigningBlock(filePath, true)),
@@ -474,7 +474,7 @@ const REFUSALS: readonly SinkCase<RefusalOutcome>[] = [
     name: "verify-receipt: a config file that cannot be read",
     says: ["could not be read"],
     drive: async () => {
-      const filePath = backslashedPath("psilink.yaml");
+      const filePath = backslashedPath("alcove.yaml");
       fs.mkdirSync(filePath);
       return {
         filePath,
@@ -486,7 +486,7 @@ const REFUSALS: readonly SinkCase<RefusalOutcome>[] = [
     name: "fingerprint: a named config file that does not exist",
     says: ["config file", "does not exist"],
     drive: async () => {
-      const filePath = backslashedPath("psilink.yaml");
+      const filePath = backslashedPath("alcove.yaml");
       return {
         filePath,
         thrown: await raised(() => readConfigHints(filePath, true)),
@@ -497,7 +497,7 @@ const REFUSALS: readonly SinkCase<RefusalOutcome>[] = [
     name: "fingerprint: a config file that cannot be read",
     says: ["config file", "could not be read"],
     drive: async () => {
-      const filePath = backslashedPath("psilink.yaml");
+      const filePath = backslashedPath("alcove.yaml");
       fs.mkdirSync(filePath);
       return {
         filePath,
@@ -523,7 +523,7 @@ const REFUSALS: readonly SinkCase<RefusalOutcome>[] = [
     name: "verify-receipt: a pinned fingerprint that is not a fingerprint",
     says: ["signing.partner_fingerprint"],
     drive: async () => {
-      const filePath = backslashedPath("psilink.yaml");
+      const filePath = backslashedPath("alcove.yaml");
       fs.writeFileSync(
         filePath,
         YAML.stringify({ signing: { partner_fingerprint: "not-a-digest" } }),
@@ -559,7 +559,7 @@ const LINES: readonly SinkCase<LineOutcome>[] = [
     name: "exchange: an injected authentication field it ignores",
     says: ["is set and will be ignored"],
     drive: async () => {
-      const filePath = backslashedPath("psilink.yaml");
+      const filePath = backslashedPath("alcove.yaml");
       const { log, lines } = stubLog();
       warnAndStripInjectedAuthFields({ shared_secret: "x" }, filePath, log);
       return { filePath, lines };
@@ -569,9 +569,9 @@ const LINES: readonly SinkCase<LineOutcome>[] = [
     name: "exchange: the spec it loaded",
     says: ["loaded exchange spec from"],
     drive: async () => {
-      const filePath = backslashedPath("psilink.yaml");
+      const filePath = backslashedPath("alcove.yaml");
       writeFiledropConfig(filePath);
-      const keyFile = backslashedPath(".psilink.key");
+      const keyFile = backslashedPath(".alcove.key");
       saveKeyFile(keyFile, { sharedSecret: TOKEN });
       const lines = captureLines(getLogger("exchange"));
       loadConfig({ configFile: filePath, keyFile });
@@ -598,7 +598,7 @@ const LINES: readonly SinkCase<LineOutcome>[] = [
     name: "invite: the key file that withdraws an offline invitation",
     says: ["To withdraw this invitation"],
     drive: async () => {
-      const filePath = backslashedPath(".psilink.key");
+      const filePath = backslashedPath(".alcove.key");
       return { filePath, lines: [offlineAbandonNotice(filePath)] };
     },
   },
@@ -606,14 +606,14 @@ const LINES: readonly SinkCase<LineOutcome>[] = [
     name: "zero-setup: the config and key file both parties saved",
     says: ["established a shared secret with your partner"],
     drive: async () => {
-      const filePath = backslashedPath("psilink.yaml");
+      const filePath = backslashedPath("alcove.yaml");
       const { log, lines } = stubLog();
       finalizeBootstrap({
         save: true,
         bootstrap: { sharedSecret: TOKEN, partnerSaveIntent: true },
         spec: sampleSpec(),
         configFile: filePath,
-        keyFile: backslashedPath(".psilink.key"),
+        keyFile: backslashedPath(".alcove.key"),
         log,
       });
       return { filePath, lines };
@@ -623,14 +623,14 @@ const LINES: readonly SinkCase<LineOutcome>[] = [
     name: "zero-setup: the config saved with no shared secret",
     says: ["your partner did not also choose to save"],
     drive: async () => {
-      const filePath = backslashedPath("psilink.yaml");
+      const filePath = backslashedPath("alcove.yaml");
       const { log, lines } = stubLog();
       finalizeBootstrap({
         save: true,
         bootstrap: { partnerSaveIntent: false },
         spec: sampleSpec(),
         configFile: filePath,
-        keyFile: backslashedPath(".psilink.key"),
+        keyFile: backslashedPath(".alcove.key"),
         log,
       });
       return { filePath, lines };
@@ -686,8 +686,8 @@ function bootstrapOptions(
   overrides: Partial<CommonBootstrapOptions> = {},
 ): CommonBootstrapOptions {
   return {
-    configFile: path.join(dir, "psilink.yaml"),
-    keyFile: path.join(dir, ".psilink.key"),
+    configFile: path.join(dir, "alcove.yaml"),
+    keyFile: path.join(dir, ".alcove.key"),
     identity: "Agency B",
     record: false,
     eventStream: false,
@@ -729,7 +729,7 @@ async function stderrLinesOf(act: () => Promise<void>): Promise<string[]> {
 function argvOf(overrides: Record<string, unknown>): Arguments {
   return {
     _: [],
-    $0: "psilink",
+    $0: "alcove",
     "log-level": "info",
     record: false,
     ...overrides,
@@ -741,7 +741,7 @@ const COMMAND_LINES: readonly SinkCase<LineOutcome>[] = [
     name: "accept: a pre-existing config that is not valid YAML",
     says: ["is not valid YAML"],
     drive: async () => {
-      const filePath = backslashedPath("psilink.yaml");
+      const filePath = backslashedPath("alcove.yaml");
       fs.writeFileSync(filePath, "a:\n\tb: 1\n");
       const invitation = await encodedInvitation();
       const thrown = await raised(() =>
@@ -758,7 +758,7 @@ const COMMAND_LINES: readonly SinkCase<LineOutcome>[] = [
     name: "accept: a pre-existing config that is not a valid exchange spec",
     says: ["could not be parsed to compare against"],
     drive: async () => {
-      const filePath = backslashedPath("psilink.yaml");
+      const filePath = backslashedPath("alcove.yaml");
       fs.writeFileSync(filePath, YAML.stringify({ connection: {} }));
       const invitation = await encodedInvitation();
       const thrown = await raised(() =>
@@ -775,7 +775,7 @@ const COMMAND_LINES: readonly SinkCase<LineOutcome>[] = [
     name: "accept: a kept config whose recorded received set this acceptance clears",
     says: ["recorded in"],
     drive: async () => {
-      const filePath = backslashedPath("psilink.yaml");
+      const filePath = backslashedPath("alcove.yaml");
       saveConfig(filePath, {
         connection: { channel: "filedrop", path: "/mnt/share" },
         linkageTerms: sampleTerms("Acceptor Org"),
@@ -798,7 +798,7 @@ const COMMAND_LINES: readonly SinkCase<LineOutcome>[] = [
     name: "accept: a kept config the invitation agrees with",
     says: ["matches the invitation"],
     drive: async () => {
-      const filePath = backslashedPath("psilink.yaml");
+      const filePath = backslashedPath("alcove.yaml");
       saveConfig(filePath, {
         connection: { channel: "filedrop", path: "/mnt/share" },
         linkageTerms: sampleTerms("Acceptor Org"),
@@ -823,7 +823,7 @@ const COMMAND_LINES: readonly SinkCase<LineOutcome>[] = [
       "the connection differences above",
     ],
     drive: async () => {
-      const filePath = backslashedPath("psilink.yaml");
+      const filePath = backslashedPath("alcove.yaml");
       saveConfig(filePath, {
         connection: {
           channel: "sftp",
@@ -856,7 +856,7 @@ const COMMAND_LINES: readonly SinkCase<LineOutcome>[] = [
     name: "accept: the config it reused",
     says: ["reused the existing configuration at"],
     drive: async () => {
-      const filePath = backslashedPath("psilink.yaml");
+      const filePath = backslashedPath("alcove.yaml");
       saveConfig(filePath, {
         connection: { channel: "filedrop", path: "/mnt/share" },
         linkageTerms: sampleTerms("Acceptor Org"),
@@ -870,7 +870,7 @@ const COMMAND_LINES: readonly SinkCase<LineOutcome>[] = [
             args: [invitation, input],
             "consent-to-terms": true,
             "config-file": filePath,
-            "key-file": path.join(dir, ".psilink.key"),
+            "key-file": path.join(dir, ".alcove.key"),
           }),
         ),
       );
@@ -881,7 +881,7 @@ const COMMAND_LINES: readonly SinkCase<LineOutcome>[] = [
     name: "accept: the config and key file it wrote with no endpoint to seed",
     says: ["fill in the connection block before"],
     drive: async () => {
-      const filePath = backslashedPath("psilink.yaml");
+      const filePath = backslashedPath("alcove.yaml");
       fs.rmSync(filePath, { force: true });
       const invitation = await encodedInvitation();
       const input = writeInput();
@@ -892,7 +892,7 @@ const COMMAND_LINES: readonly SinkCase<LineOutcome>[] = [
             args: [invitation, input],
             "consent-to-terms": true,
             "config-file": filePath,
-            "key-file": backslashedPath(".psilink.key"),
+            "key-file": backslashedPath(".alcove.key"),
           }),
         ),
       );
@@ -903,7 +903,7 @@ const COMMAND_LINES: readonly SinkCase<LineOutcome>[] = [
     name: "accept: the key file it wrote",
     says: ["wrote key file to"],
     drive: async () => {
-      const filePath = backslashedPath(".psilink.key");
+      const filePath = backslashedPath(".alcove.key");
       const invitation = await encodedInvitation();
       const input = writeInput();
       const lines = await stderrLinesOf(() =>
@@ -912,7 +912,7 @@ const COMMAND_LINES: readonly SinkCase<LineOutcome>[] = [
             identity: "Agency B",
             args: [invitation, input],
             "consent-to-terms": true,
-            "config-file": backslashedPath("psilink.yaml"),
+            "config-file": backslashedPath("alcove.yaml"),
             "key-file": filePath,
           }),
         ),
@@ -924,7 +924,7 @@ const COMMAND_LINES: readonly SinkCase<LineOutcome>[] = [
     name: "accept: the config it seeded from a webrtc endpoint",
     says: ["it needs no credentials of your own"],
     drive: async () => {
-      const filePath = backslashedPath("psilink.yaml");
+      const filePath = backslashedPath("alcove.yaml");
       // No input file: an acceptance that names one runs the exchange through
       // the endpoint instead of writing a configuration to run later.
       const invitation = await encodedInvitation({
@@ -939,7 +939,7 @@ const COMMAND_LINES: readonly SinkCase<LineOutcome>[] = [
             args: [invitation],
             "consent-to-terms": true,
             "config-file": filePath,
-            "key-file": path.join(dir, ".psilink.key"),
+            "key-file": path.join(dir, ".alcove.key"),
           }),
         ),
       );
@@ -950,7 +950,7 @@ const COMMAND_LINES: readonly SinkCase<LineOutcome>[] = [
     name: "accept: the config it seeded from an sftp endpoint",
     says: ["review it and add your own credentials"],
     drive: async () => {
-      const filePath = backslashedPath("psilink.yaml");
+      const filePath = backslashedPath("alcove.yaml");
       const invitation = await encodedInvitation({
         channel: "sftp",
         host: "sftp.example.org",
@@ -964,7 +964,7 @@ const COMMAND_LINES: readonly SinkCase<LineOutcome>[] = [
             args: [invitation, input],
             "consent-to-terms": true,
             "config-file": filePath,
-            "key-file": path.join(dir, ".psilink.key"),
+            "key-file": path.join(dir, ".alcove.key"),
           }),
         ),
       );
@@ -1009,7 +1009,7 @@ async function writeSignedRecord(filePath: string): Promise<void> {
 async function verifyReceiptWithConfiguredIdentity(
   identityFile: string,
 ): Promise<string[]> {
-  const configFile = path.join(dir, "psilink.yaml");
+  const configFile = path.join(dir, "alcove.yaml");
   fs.writeFileSync(
     configFile,
     YAML.stringify({ signing: { identity_file: identityFile } }),
@@ -1101,7 +1101,7 @@ const MORE_COMMAND_LINES: readonly SinkCase<LineOutcome>[] = [
     name: "invite: a key file already at the path on the online mint",
     says: ["it will be overwritten by the rotated token"],
     drive: async () => {
-      const filePath = backslashedPath(".psilink.key");
+      const filePath = backslashedPath(".alcove.key");
       fs.writeFileSync(filePath, "{}");
       const { log, lines } = stubLog();
       await validateInvite({
@@ -1124,7 +1124,7 @@ const MORE_COMMAND_LINES: readonly SinkCase<LineOutcome>[] = [
     name: "invite: a --linkage-strategy the config's own terms override",
     says: ["Edit linkage_strategy in"],
     drive: async () => {
-      const filePath = backslashedPath("psilink.yaml");
+      const filePath = backslashedPath("alcove.yaml");
       saveConfig(filePath, {
         connection: { channel: "filedrop", path: "/mnt/share" },
         linkageTerms: sampleTerms("Agency A"),
@@ -1135,7 +1135,7 @@ const MORE_COMMAND_LINES: readonly SinkCase<LineOutcome>[] = [
         options: bootstrapOptions({
           identity: "Agency A",
           configFile: filePath,
-          keyFile: path.join(dir, ".psilink.key"),
+          keyFile: path.join(dir, ".alcove.key"),
         }),
         acceptTimeout: 900,
         linkageStrategy: "single-pass",
@@ -1148,7 +1148,7 @@ const MORE_COMMAND_LINES: readonly SinkCase<LineOutcome>[] = [
     name: "invite: the config an input is checked against",
     says: ["checking the input file"],
     drive: async () => {
-      const filePath = backslashedPath("psilink.yaml");
+      const filePath = backslashedPath("alcove.yaml");
       saveConfig(filePath, {
         connection: { channel: "filedrop", path: "/mnt/share" },
         linkageTerms: sampleTerms("Agency A"),
@@ -1159,7 +1159,7 @@ const MORE_COMMAND_LINES: readonly SinkCase<LineOutcome>[] = [
         options: bootstrapOptions({
           identity: "Agency A",
           configFile: filePath,
-          keyFile: path.join(dir, ".psilink.key"),
+          keyFile: path.join(dir, ".alcove.key"),
         }),
         acceptTimeout: 900,
         log,
@@ -1171,7 +1171,7 @@ const MORE_COMMAND_LINES: readonly SinkCase<LineOutcome>[] = [
     name: "invite: the config the terms come from with no input named",
     says: ["deriving the invitation's linkage terms from it."],
     drive: async () => {
-      const filePath = backslashedPath("psilink.yaml");
+      const filePath = backslashedPath("alcove.yaml");
       saveConfig(filePath, {
         connection: { channel: "filedrop", path: "/mnt/share" },
         linkageTerms: sampleTerms("Agency A"),
@@ -1182,7 +1182,7 @@ const MORE_COMMAND_LINES: readonly SinkCase<LineOutcome>[] = [
         options: bootstrapOptions({
           identity: "Agency A",
           configFile: filePath,
-          keyFile: path.join(dir, ".psilink.key"),
+          keyFile: path.join(dir, ".alcove.key"),
         }),
         acceptTimeout: 900,
         log,
@@ -1194,7 +1194,7 @@ const MORE_COMMAND_LINES: readonly SinkCase<LineOutcome>[] = [
     name: "invite: the config and key file an offline mint wrote",
     says: ["wrote config to", "fill in the connection block in"],
     drive: async () => {
-      const filePath = backslashedPath("psilink.yaml");
+      const filePath = backslashedPath("alcove.yaml");
       const input = writeInput();
       const lines = await stderrLinesOf(() =>
         inviteHandler(
@@ -1202,7 +1202,7 @@ const MORE_COMMAND_LINES: readonly SinkCase<LineOutcome>[] = [
             identity: "Agency A",
             args: [input],
             "config-file": filePath,
-            "key-file": backslashedPath(".psilink.key"),
+            "key-file": backslashedPath(".alcove.key"),
           }),
         ),
       );
@@ -1216,7 +1216,7 @@ const MORE_COMMAND_LINES: readonly SinkCase<LineOutcome>[] = [
       "ensure the connection block in",
     ],
     drive: async () => {
-      const filePath = backslashedPath("psilink.yaml");
+      const filePath = backslashedPath("alcove.yaml");
       saveConfig(filePath, {
         connection: { channel: "filedrop", path: "/mnt/share" },
         linkageTerms: sampleTerms("Agency A"),
@@ -1228,7 +1228,7 @@ const MORE_COMMAND_LINES: readonly SinkCase<LineOutcome>[] = [
             identity: "Agency A",
             args: [input],
             "config-file": filePath,
-            "key-file": backslashedPath(".psilink.key"),
+            "key-file": backslashedPath(".alcove.key"),
           }),
         ),
       );
@@ -1239,7 +1239,7 @@ const MORE_COMMAND_LINES: readonly SinkCase<LineOutcome>[] = [
     name: "init: the file it left alone at the prompt",
     says: ["Overwrite", "left the existing file at"],
     drive: async () => {
-      const filePath = backslashedPath("psilink.yaml");
+      const filePath = backslashedPath("alcove.yaml");
       fs.writeFileSync(filePath, "");
       const lines = await stderrLinesOf(() =>
         withStdin(answeringTtyStream("n"), () =>
@@ -1253,7 +1253,7 @@ const MORE_COMMAND_LINES: readonly SinkCase<LineOutcome>[] = [
     name: "init: the template it wrote",
     says: ["wrote a configuration template to"],
     drive: async () => {
-      const filePath = backslashedPath("psilink.yaml");
+      const filePath = backslashedPath("alcove.yaml");
       const lines = await stderrLinesOf(() =>
         initHandler(argvOf({ "config-file": filePath })),
       );
@@ -1264,7 +1264,7 @@ const MORE_COMMAND_LINES: readonly SinkCase<LineOutcome>[] = [
     name: "verify-receipt: a --config-file that does not exist",
     says: ["config file", "does not exist"],
     drive: async () => {
-      const filePath = backslashedPath("psilink.yaml");
+      const filePath = backslashedPath("alcove.yaml");
       const record = path.join(dir, "receipt.json");
       await writeSignedRecord(record);
       const lines = await stderrLinesOf(() =>
@@ -1431,7 +1431,7 @@ const INIT_WRITE_FAILURES: readonly SinkCase<LineOutcome>[] = [
     drive: async () => {
       // A write that fails where no earlier check could have seen it: the path
       // held nothing when the overwrite decision was taken.
-      const filePath = backslashedPath("psilink.yaml");
+      const filePath = backslashedPath("alcove.yaml");
       vi.spyOn(fileUtils, "writeFileOwnerOnly").mockImplementationOnce(() => {
         throw new Error("EROFS: read-only file system");
       });
@@ -1447,7 +1447,7 @@ const INIT_WRITE_FAILURES: readonly SinkCase<LineOutcome>[] = [
     drive: async () => {
       // The write finds a file the overwrite decision did not: nothing was at
       // the path when that decision was taken.
-      const filePath = backslashedPath("psilink.yaml");
+      const filePath = backslashedPath("alcove.yaml");
       vi.spyOn(fileUtils, "writeFileOwnerOnly").mockImplementationOnce(() => {
         throw new fileUtils.FileExistsError(filePath);
       });

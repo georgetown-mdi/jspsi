@@ -2,8 +2,8 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 
 import { expect } from "vitest";
-import { FileSyncConnection } from "@psilink/core";
-import { withCapturedLogs } from "@psilink/core/testing";
+import { FileSyncConnection } from "@alcove/core";
+import { withCapturedLogs } from "@alcove/core/testing";
 
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
 import { startInProcessSftpServer } from "../sftpServer";
@@ -12,8 +12,8 @@ import { inProcessOnly } from "../sftpBackendGate";
 
 // ssh2 defers a Client.connect() issued on a socket it still considers writable:
 // the attempt sits behind once('close', ...) with no readyTimeout armed, so
-// nothing on psilink's side bounds it (measured unsettled at 45 s on the pinned
-// versions). psilink's own dial gates and forced closes keep a dial from
+// nothing on Alcove's side bounds it (measured unsettled at 45 s on the pinned
+// versions). Alcove's own dial gates and forced closes keep a dial from
 // reaching that state by leaving an ended transport destroyed rather than
 // writable -- a property of this code, not the library, that a dependency bump
 // or a change to those gates could take away.

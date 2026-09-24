@@ -26,7 +26,7 @@ snapshotDiagnosticSinkAndLevel();
 let tmpDir: string;
 
 beforeEach(() => {
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-doctor-render-"));
+  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-doctor-render-"));
 });
 
 afterEach(() => {

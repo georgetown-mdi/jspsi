@@ -156,7 +156,7 @@ for (const [shell, label] of SHELLS) {
           probeOutput: "- fips.so was not mapped into the process",
         });
 
-        expect(stderr).toContain("[psilink] WARNING:");
+        expect(stderr).toContain("[Alcove] WARNING:");
         expect(stderr).toContain("a module this run cannot name");
         expect(stderr).not.toMatch(/\(module *\)/);
       });
@@ -177,7 +177,7 @@ for (const [shell, label] of SHELLS) {
         probeOutput: "- fips.so was not mapped into the process",
       });
 
-      expect(stderr).toContain("[psilink] WARNING:");
+      expect(stderr).toContain("[Alcove] WARNING:");
       expect(stderr).toContain(
         "This image's cryptography is not running in the module it was built around.",
       );
@@ -195,8 +195,8 @@ for (const [shell, label] of SHELLS) {
     });
 
     // The Amazon Linux `openssl` CLI is a different libcrypto from the one
-    // inside the `node` binary that runs psilink, so a provider it reports as
-    // active says nothing about the consumer psilink uses. The preamble must
+    // inside the `node` binary that runs Alcove, so a provider it reports as
+    // active says nothing about the consumer Alcove uses. The preamble must
     // not consult it, whatever it says.
     it("does not believe the system openssl over the probe", () => {
       const stderr = run({
@@ -208,7 +208,7 @@ for (const [shell, label] of SHELLS) {
     status: active`,
       });
 
-      expect(stderr).toContain("[psilink] WARNING:");
+      expect(stderr).toContain("[Alcove] WARNING:");
       expect(stderr).not.toContain(SERVED_SENTENCE);
     });
   });
@@ -221,7 +221,7 @@ for (const [shell, label] of SHELLS) {
 // being no FIPS provider to load. The cases below are therefore written against
 // the decision rule rather than against a fixed verdict -- each asserts that the
 // failure list, the verdict and the exit status agree with the legs actually
-// measured, which holds whatever the host serves. Whether psilink's five call
+// measured, which holds whatever the host serves. Whether Alcove's five call
 // shapes survive the certified module is CI's to measure against a real build.
 describe("the engagement probe the image ships", () => {
   const result = spawnSync(process.execPath, [PROBE], {
@@ -245,7 +245,7 @@ describe("the engagement probe the image ships", () => {
     ["ecdh_p256_derive_bits", "the P-256 ECDH derivation failed"],
   ];
 
-  it.each(PRODUCT_LEGS)("completes psilink's %s call shape", (leg) => {
+  it.each(PRODUCT_LEGS)("completes Alcove's %s call shape", (leg) => {
     expect(summary.operations[leg]).toEqual({ ok: true, error: null });
   });
 

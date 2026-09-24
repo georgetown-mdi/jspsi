@@ -4,8 +4,8 @@ import {
   redactAndRenderOperatorSuppliedText,
   sanitizeErrorForDisplay,
   serializeDualSignedRecord,
-} from "@psilink/core";
-import type { DualSignedRecord } from "@psilink/core";
+} from "@alcove/core";
+import type { DualSignedRecord } from "@alcove/core";
 
 import { writeFileOwnerOnly } from "./fileUtils";
 
@@ -14,10 +14,10 @@ import { writeFileOwnerOnly } from "./fileUtils";
 // writes. See docs/spec/EXCHANGE_RECORD.md, Dual-signed record file.
 
 /** Basename stem for the default dual-signed record file. */
-export const DEFAULT_RECEIPT_BASENAME = "psilink-receipt";
+export const DEFAULT_RECEIPT_BASENAME = "alcove-receipt";
 
 /**
- * Default path for the dual-signed record: `./psilink-receipt-<stamp>.json` in the
+ * Default path for the dual-signed record: `./alcove-receipt-<stamp>.json` in the
  * working directory, where `<stamp>` is the exchange's `createdAt` timestamp made
  * filesystem-safe (colons and the fractional-second dot replaced with hyphens).
  * The stamp is supplied by the caller (the same value the self-attested record

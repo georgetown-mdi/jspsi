@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 
 import { Button } from "@mantine/core";
 
-import { describeResolvedMatching } from "@psilink/core";
+import { describeResolvedMatching } from "@alcove/core";
 
 import { dateTimeLabel, invitationUsable } from "@psi/formatting";
 import { OPENED_EXCHANGE_CONTINUES } from "@console/mountedConfiguration";

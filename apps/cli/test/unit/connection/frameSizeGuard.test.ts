@@ -8,7 +8,7 @@ import {
   sanitizeErrorForDisplay,
   TransportOperationStalledError,
   UsageError,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   createCappedSink,

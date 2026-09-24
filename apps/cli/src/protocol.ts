@@ -30,7 +30,7 @@ import {
   sanitizeErrorForDisplay,
   UsageError,
   WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
-} from "@psilink/core";
+} from "@alcove/core";
 import type {
   Authentication,
   ConnectionConfig,
@@ -41,7 +41,7 @@ import type {
   RelayCredential,
   SigningIdentity,
   WebRTCConnectionConfig,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { LocalFSClient } from "./connection/localFSClient";
 import { SSH2SFTPClientAdapter } from "./connection/ssh2SftpAdapter";
@@ -231,7 +231,7 @@ function partnerCertificatePinnedNotice(
     `fingerprint ${fingerprint}, recorded as signing.partner_fingerprint in ` +
     `${configPath}. This pin is authenticated by the channel the invitation ` +
     "secret travelled and nothing else, so compare the fingerprint with the " +
-    "one your partner's 'psilink fingerprint' prints, over a channel you " +
+    "one your partner's 'alcove fingerprint' prints, over a channel you " +
     "trust. Every later exchange refuses a certificate that does not match it."
   );
 }
@@ -301,16 +301,16 @@ export type ProtocolConnectionConfig = Extract<
 export const WEBRTC_RENDEZVOUS_SECRET_REQUIRED =
   "the webrtc channel needs a shared secret: both parties derive the " +
   "signaling ids they meet at from it, so without one there is no address to " +
-  "dial. Establish one with 'psilink invite' and 'psilink accept', then run " +
-  "'psilink exchange'.";
+  "dial. Establish one with 'alcove invite' and 'alcove accept', then run " +
+  "'alcove exchange'.";
 
 /**
  * The refusal a webrtc connection with no `role` gets.
  *
  * The two parties register under complementary ids, so each has to know which
  * end it is; a config missing the field is a misconfiguration that would
- * otherwise show up as a rendezvous that never completes. `psilink invite` and
- * `psilink accept` stamp it, so a config missing it was hand-authored.
+ * otherwise show up as a rendezvous that never completes. `alcove invite` and
+ * `alcove accept` stamp it, so a config missing it was hand-authored.
  */
 export const WEBRTC_ROLE_REQUIRED =
   "this webrtc connection has no `role`: each party registers with the " +
@@ -391,7 +391,7 @@ export function webRtcDialFrom(
  * {@link FileSyncConnection} constructor), the machine-interface stream, and
  * the caller's pre-terminal hook. The sweep controls are not part of
  * {@link ProtocolConnectionConfig} / FileSyncOptions / the Zod config schema,
- * since anything there is persistable to psilink.yaml. The CLI command layer
+ * since anything there is persistable to alcove.yaml. The CLI command layer
  * resolves these from argv and passes them here, separate from config
  * construction (applyConnectionOverrides).
  */
@@ -464,7 +464,7 @@ export interface OutputCompleteContext {
    * A save-capable caller that learns its received set only by observation --
    * the online inviter, a zero-setup `--save` party -- stores this into the
    * persisted config's `expectedPayloadColumns` so a later recurring
-   * `psilink exchange` fails closed on a divergent received payload
+   * `alcove exchange` fails closed on a divergent received payload
    * ({@link reconcileReceivedPayload}). Callers must persist an empty
    * observation as NOTHING, never as `[]`: a zero-match first exchange is
    * indistinguishable from "partner discloses nothing", and a strict empty
@@ -1071,7 +1071,7 @@ async function authenticateRun(params: {
     //
     // The wrapped error already holds the full recovery hint specific
     // to this failure mode. Tag it with the same
-    // `psilinkRecoveryHintEmitted` convention authenticateConnection
+    // `alcoveRecoveryHintEmitted` convention authenticateConnection
     // uses on its own validation errors (see auth.ts), so the
     // runProtocol catch below skips its generic authStarted advisory
     // and the user sees one coherent recovery message.
@@ -1080,7 +1080,7 @@ async function authenticateRun(params: {
     )}: ${err instanceof Error ? err.message : String(err)}${ROTATED_TOKEN_SAVE_REMEDY}`;
     throw Object.assign(
       keepOperatorSuppliedText(new Error(message.text), message),
-      { psilinkRecoveryHintEmitted: true },
+      { alcoveRecoveryHintEmitted: true },
     );
   }
 
@@ -1563,7 +1563,7 @@ async function prepareTransport(
     // "peer abandoned the handshake" hint for what is really an expired or
     // malformed secret. authenticateConnection still runs the same check
     // as the authoritative boundary for library consumers that bypass
-    // runProtocol. The shared check sets psilinkRecoveryHintEmitted, so the
+    // runProtocol. The shared check sets alcoveRecoveryHintEmitted, so the
     // catch block below suppresses its generic advisory.
     assertSharedSecretReadyForHandshake(auth);
     // Validate and trim the key-file path before any credential is
@@ -1606,7 +1606,7 @@ async function prepareTransport(
     build.client = client;
     // CLI-only sweep controls are passed straight to the constructor (the
     // verbose/joinerRecoveryMs precedent), never through config.options, so they
-    // cannot be persisted to psilink.yaml. Spread conditionally so an unset value
+    // cannot be persisted to alcove.yaml. Spread conditionally so an unset value
     // does not clobber the constructor default.
     const fileSyncConn = new FileSyncConnection(client, {
       verbose: verbosity,
@@ -1731,7 +1731,7 @@ async function writeExchangeOutputs(params: {
       countIsPartnerReported({ intersectionCount, resolvedRole })
         ? `exchange complete: your partner reported ${intersectionCount} ` +
             "record(s) in common. Only your partner computed the count; " +
-            "psilink does not check a count it is sent against a run of its " +
+            "Alcove does not check a count it is sent against a run of its " +
             "own. The agreed terms asked for a count only, so no result file " +
             "was written."
         : `exchange complete: ${intersectionCount} record(s) in common. The ` +
@@ -2032,7 +2032,7 @@ export interface RunProtocolOptions {
  * `fileSyncRuntime` holds the CLI-only, non-persistable file-sync
  * entry-sweep controls (`--sweep-exchange-files` / `--force-retain-sweep`)
  * passed straight to the {@link FileSyncConnection} constructor, bypassing
- * config construction so they can never be persisted to psilink.yaml.
+ * config construction so they can never be persisted to alcove.yaml.
  * Defaults to `{}` (no sweep) and is inert on any non-file-sync transport.
  * Also holds the run's machine-interface stream and the caller's
  * pre-terminal {@link FileSyncRuntimeOptions.onOutputComplete} hook.
@@ -2506,7 +2506,7 @@ export async function runProtocol(
     // exchange may have completed on the partner side even though our own
     // save did not run. Raised at error level (rather than warn) because
     // the user's exchange is failing and needs the recovery hint shown
-    // prominently. The `psilinkRecoveryHintEmitted` tag marks an error
+    // prominently. The `alcoveRecoveryHintEmitted` tag marks an error
     // whose own message already states the next step for its fault, so
     // the generic advisory is skipped rather than printed beneath a step
     // it contradicts. Set wherever that holds: the saveKeyFile-failure
@@ -2524,8 +2524,8 @@ export async function runProtocol(
       causeChainSome(
         e,
         (link) =>
-          (link as { psilinkRecoveryHintEmitted?: unknown })
-            .psilinkRecoveryHintEmitted === true,
+          (link as { alcoveRecoveryHintEmitted?: unknown })
+            .alcoveRecoveryHintEmitted === true,
       );
     // Walks the `cause` chain for a PeerAbortError, so the echo gate below
     // still recognizes one even behind a future wrap. The critical
@@ -2647,7 +2647,7 @@ export async function runProtocol(
         // failed (onAuthenticatedError is set), so whatever it would have
         // written -- e.g. the online invite/accept config -- is not on disk. A
         // plain "retry the exchange without re-inviting" is misleading here:
-        // `psilink exchange` may have no config to run against. The specific
+        // `alcove exchange` may have no config to run against. The specific
         // hook failure was already logged at error level when it happened, so
         // emit a corrected advisory rather than the clean-retry one, which would
         // point the user at a recovery path that cannot succeed.

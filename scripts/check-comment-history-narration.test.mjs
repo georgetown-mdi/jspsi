@@ -335,7 +335,7 @@ describe("the range", () => {
   it("prefers the override, then the pull request's base, then staging", () => {
     expect(
       baseCandidates({
-        PSILINK_NARRATION_BASE: "abc123",
+        ALCOVE_NARRATION_BASE: "abc123",
         GITHUB_BASE_REF: "main",
       }),
     ).toEqual(["abc123", "origin/main", "main", "origin/staging", "staging"]);
@@ -344,7 +344,7 @@ describe("the range", () => {
 
   it("takes an empty base sha as no base", () => {
     expect(
-      baseCandidates({ PSILINK_NARRATION_BASE: "", GITHUB_BASE_REF: "main" }),
+      baseCandidates({ ALCOVE_NARRATION_BASE: "", GITHUB_BASE_REF: "main" }),
     ).toEqual(["origin/main", "main", "origin/staging", "staging"]);
   });
 
@@ -371,13 +371,13 @@ describe("the range", () => {
         cwd: dir,
         stdio: "ignore",
       });
-      expect(() => resolveBase(dir, {})).toThrow(/PSILINK_NARRATION_BASE/);
+      expect(() => resolveBase(dir, {})).toThrow(/ALCOVE_NARRATION_BASE/);
     });
   });
 
   it("falls through to the base branch when the base sha is empty", () => {
     withRepository({ [FIXTURE]: "const a = 1;\n" }, (dir) => {
-      expect(resolveBase(dir, { PSILINK_NARRATION_BASE: "" }).ref).toBe(
+      expect(resolveBase(dir, { ALCOVE_NARRATION_BASE: "" }).ref).toBe(
         "staging",
       );
     });
@@ -391,7 +391,7 @@ describe("the range", () => {
         cwd: dir,
         encoding: "utf8",
       }).trim();
-      expect(resolveBase(dir, { PSILINK_NARRATION_BASE: head })).toEqual({
+      expect(resolveBase(dir, { ALCOVE_NARRATION_BASE: head })).toEqual({
         commit: head,
         ref: head,
       });
@@ -475,7 +475,7 @@ describe("the wiring", () => {
       (step) => step.run?.trim() === "npm run check:all",
     );
     expect(
-      checks.env?.PSILINK_NARRATION_BASE,
+      checks.env?.ALCOVE_NARRATION_BASE,
       "the comment history-narration check takes the pull request event's base sha as its base; a ref resolving in the checkout is the fallback",
     ).toContain("github.event.pull_request.base.sha");
   });

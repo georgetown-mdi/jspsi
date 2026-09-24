@@ -4,7 +4,7 @@ import {
   COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
   PARTNER_CERTIFICATE_REFUSAL_MESSAGES,
   sanitizeForDisplay,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { RelayedSelfExplainingError } from "@psi/jobClient/serverJobExchangeDriver";
 import { consolePartnerCertificateRefusal } from "@console/partnerCertificateRefusal";
@@ -115,10 +115,10 @@ describe("the console's copy states the cause and a step the operator holds", ()
         consolePartnerCertificateRefusal(message)!,
       ]),
     );
-    expect(byKind.unreadable).toMatch(/psilink fingerprint/);
+    expect(byKind.unreadable).toMatch(/alcove fingerprint/);
     expect(byKind.unreadable).toMatch(/'No receipt'/);
     expect(byKind.absent).toMatch(/'No receipt'/);
-    expect(byKind.unverified).toMatch(/psilink fingerprint/);
+    expect(byKind.unverified).toMatch(/alcove fingerprint/);
     expect(byKind.unauthorizedIdentity).toMatch(/agree terms under/);
     expect(byKind.divergent).toMatch(/your partner's fingerprint/);
     expect(byKind.divergent).toMatch(/channel you trust/);

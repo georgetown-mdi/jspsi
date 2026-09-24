@@ -32,8 +32,8 @@ import { createHash, hkdfSync } from "node:crypto";
 // --- The shared constructions, restated ---------------------------------------
 
 // rendezvous.ts: HKDF-SHA-256 over the decoded 32-byte secret, 32-byte zero
-// salt, info `psilink-webrtc-peerid-v1:<role>`, first 16 bytes, lowercase hex.
-const PEER_ID_INFO_PREFIX = "psilink-webrtc-peerid-v1:";
+// salt, info `alcove-webrtc-peerid-v2:<role>`, first 16 bytes, lowercase hex.
+const PEER_ID_INFO_PREFIX = "alcove-webrtc-peerid-v2:";
 const PEER_ID_BYTES = 16;
 
 // config/invitation.ts: base64url(JSON body) with a 4-byte truncated SHA-256
@@ -74,7 +74,7 @@ const sharedSecret = b64url(secretBytes);
 // The inviter's browser location, as the web app reads it off `window.location`
 // to mint the signaling locator (webrtcEndpointFromLocation in
 // apps/web/src/psi/invitation.ts). `port` is a string there, as the DOM gives it.
-const signalingLocation = { hostname: "psilink.example.org", port: "8443" };
+const signalingLocation = { hostname: "alcove.example.org", port: "8443" };
 const signalingPath = "/api/";
 
 const connectionEndpoint = {
@@ -84,7 +84,7 @@ const connectionEndpoint = {
   path: signalingPath,
 };
 
-// The other mint direction: what `psilink invite` emits from a ws/wss URL, and
+// The other mint direction: what `alcove invite` emits from a ws/wss URL, and
 // where a BROWSER acceptor seeded from that endpoint opens its signaling socket.
 // Stated literally here, as everything in this file is, rather than computed
 // from either app's builder.

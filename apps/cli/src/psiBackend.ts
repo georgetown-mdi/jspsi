@@ -1,8 +1,8 @@
 import PSI from "@openmined/psi.js";
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
-import { loadPsiBackend } from "@psilink/core";
-import type { PsiBackendOptions, PsiBackendSelection } from "@psilink/core";
+import { loadPsiBackend } from "@alcove/core";
+import type { PsiBackendOptions, PsiBackendSelection } from "@alcove/core";
 
 /**
  * Loads the native N-API PSI addon when a prebuild is available for this

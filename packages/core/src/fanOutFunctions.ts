@@ -434,7 +434,7 @@ export function declaredWidthRefusal(
  * cleaned by a pipeline declaring a fan-out step, else 1.
  *
  * A local fan-out rides no agreed term -- the partner cannot see the
- * standardization, and a party that pre-fanned its file outside psilink would
+ * standardization, and a party that pre-fanned its file outside Alcove would
  * present the same wire behavior -- so it is declared as the extra RECORDS it
  * stands for rather than as extra width. Role resolution therefore reads the
  * fanned count, which is the one consequence the specification states

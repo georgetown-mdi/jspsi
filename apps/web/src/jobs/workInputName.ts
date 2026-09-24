@@ -38,7 +38,7 @@ function hasAdmissibleSegmentShape(name: string): boolean {
 /**
  * Whether `name` is an admissible input file name: the shared single-segment
  * shape ({@link hasAdmissibleSegmentShape}) plus no leading dot, so a
- * `.psilink.key`-shaped file is excluded by construction. The listing admits
+ * `.alcove.key`-shaped file is excluded by construction. The listing admits
  * only a regular file (a plain `statSync` + `isFile`, which follows a symlink);
  * this predicate bounds only the name shape.
  */

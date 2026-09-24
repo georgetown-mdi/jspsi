@@ -8,14 +8,14 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 // be written" WARN is asserted (proving the failure is reported) rather than
 // leaked to the suite output, and so the INFO lines the successful writes emit
 // can be asserted for what they tell the operator. getLogger is the only
-// @psilink/core export replaced; everything else stays real.
+// @alcove/core export replaced; everything else stays real.
 const logCapture = vi.hoisted(() => ({
   infos: [] as string[],
   warnings: [] as string[],
 }));
 
-vi.mock("@psilink/core", async (importActual) => {
-  const actual = await importActual<typeof import("@psilink/core")>();
+vi.mock("@alcove/core", async (importActual) => {
+  const actual = await importActual<typeof import("@alcove/core")>();
   return {
     ...actual,
     getLogger: () => ({
@@ -37,7 +37,7 @@ import {
   parseVerificationKeys,
   type ExchangeRecord,
   type VerificationKeys,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   keysPathFor,
@@ -49,7 +49,7 @@ import {
 let dir: string;
 
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-record-test-"));
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-record-test-"));
   logCapture.infos.length = 0;
   logCapture.warnings.length = 0;
 });
@@ -60,7 +60,7 @@ afterEach(() => {
 
 // A minimal but schema-valid record + verification-keys pair to write to disk.
 const record: ExchangeRecord = {
-  version: "psilink-exchange-record/v8",
+  version: "alcove-exchange-record/v9",
   outcome: "completed",
   certificateMismatchObserved: false,
   createdAt: "2026-01-02T03:04:05.000Z",
@@ -88,7 +88,7 @@ const record: ExchangeRecord = {
 };
 
 const keys: VerificationKeys = {
-  version: "psilink-exchange-keys/v1",
+  version: "alcove-exchange-keys/v2",
   salts: {
     localPayloadSent: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
     partnerPayloadReceived: "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI",
@@ -98,8 +98,8 @@ const keys: VerificationKeys = {
 test("keysPathFor swaps a .json suffix for .keys.json", () => {
   expect(keysPathFor("/tmp/rec.json")).toBe("/tmp/rec.keys.json");
   // A leading ./ is preserved so the paired record and keys paths match.
-  expect(keysPathFor("./psilink-record-X.json")).toBe(
-    "./psilink-record-X.keys.json",
+  expect(keysPathFor("./alcove-record-X.json")).toBe(
+    "./alcove-record-X.keys.json",
   );
   // No .json suffix: append rather than mangle.
   expect(keysPathFor("/tmp/rec")).toBe("/tmp/rec.keys.json");
@@ -139,8 +139,8 @@ test("recordPathsFor stamps the default path with the record's createdAt", () =>
   // The default filename timestamp is the record's createdAt, not a separate
   // clock read, so the filename matches the timestamp recorded inside the file.
   expect(recordPathsFor({}, "2026-06-06T01:02:03.456Z")).toEqual({
-    recordFilePath: "./psilink-record-2026-06-06T01-02-03-456Z.json",
-    keysFilePath: "./psilink-record-2026-06-06T01-02-03-456Z.keys.json",
+    recordFilePath: "./alcove-record-2026-06-06T01-02-03-456Z.json",
+    keysFilePath: "./alcove-record-2026-06-06T01-02-03-456Z.keys.json",
   });
 });
 

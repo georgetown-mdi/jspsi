@@ -11,5 +11,5 @@
  * No trailing period: a caller inside a sentence adds its own.
  */
 export const REPORT_LIBRARY_INCOMPATIBILITY =
-  "report it at https://github.com/georgetown-mdi/jspsi/issues with the " +
-  "version from 'psilink --version'";
+  "report it at https://github.com/georgetown-mdi/alcove/issues with the " +
+  "version from 'alcove --version'";

@@ -57,7 +57,7 @@ vulnerabilities:
       pins, measured 2026-09-10 -- and that build asserts the rootfs release
       equals the dnf releasever, so a snapshot-only bump fails by design and
       there is no base to bump to. Accepted because the vulnerable path is a
-      QUIC server and no psilink role opens one: psilink's transports are SFTP
+      QUIC server and no Alcove role opens one: Alcove's transports are SFTP
       over ssh2, WebRTC data channels, file drop, and the console's localhost
       HTTP server, and the image's other OpenSSL consumers are the openssl CLI
       and samba-client. Cleared by the base bump "Bumping the FIPS base image"
@@ -81,8 +81,8 @@ vulnerabilities:
       libsmbclient, libwbclient, samba-client, samba-client-libs,
       samba-common and samba-common-libs at 2:4.17.12-1.amzn2023.0.5,
       fixed at 2:4.17.12-1.amzn2023.0.7, and no other package. Accepted
-      because the vulnerable path is Samba's DNS server and no psilink
-      role runs one. The image does install samba-client, and psilink's
+      because the vulnerable path is Samba's DNS server and no Alcove
+      role runs one. The image does install samba-client, and Alcove's
       doctor command runs smbclient inside it to probe a Windows file-drop
       share, so this closure is reached; no samba server or authentication
       component is. The built image's own package list
@@ -112,8 +112,8 @@ vulnerabilities:
       libsmbclient, libwbclient, samba-client, samba-client-libs,
       samba-common and samba-common-libs at 2:4.17.12-1.amzn2023.0.5,
       fixed at 2:4.17.12-1.amzn2023.0.7, and no other package. Accepted
-      because the vulnerable path is Samba's DNS server and no psilink
-      role runs one. The image does install samba-client, and psilink's
+      because the vulnerable path is Samba's DNS server and no Alcove
+      role runs one. The image does install samba-client, and Alcove's
       doctor command runs smbclient inside it to probe a Windows file-drop
       share, so this closure is reached; no samba server or authentication
       component is. The built image's own package list
@@ -148,7 +148,7 @@ vulnerabilities:
       it needs a Unix account authentication neither role performs -- the
       runtime stage strips every setuid and setgid bit in the closure and
       drops to an unprivileged account. The image does install
-      samba-client, and psilink's doctor command runs smbclient inside it
+      samba-client, and Alcove's doctor command runs smbclient inside it
       to probe a Windows file-drop share, so this closure is reached; no
       samba server or authentication component is. The built image's own
       package list (NOTICE-os-packages-fips.tsv) holds no smbd, nmbd,
@@ -175,13 +175,13 @@ vulnerabilities:
       authentication tag. This entry covers the FIPS variant image's
       Amazon Linux openssl and openssl-libs at 1:3.5.7-2.amzn2023.0.1,
       fixed at 1:3.5.8-1.amzn2023.0.1, and no other package. Accepted
-      because neither cipher nor that call shape is on a psilink path: the
+      because neither cipher nor that call shape is on an Alcove path: the
       application-layer AEAD is AES-GCM through WebCrypto
       (packages/core/src/connection/encryptedMessageConnection.ts), which
       the advisory does not name and which does not finalize through
       EVP_Cipher(), and the advisory records no FIPS impact for the 3.5
       module. SMB3 encrypts with AES-CCM and AES-GCM, so smbclient does
-      not meet the cipher condition either. psilink's own cryptography
+      not meet the cipher condition either. Alcove's own cryptography
       does not run on these two: node comes from the official tarball
       rather than from a package and links its own libcrypto, and the
       certified module this image is built around
@@ -212,8 +212,8 @@ vulnerabilities:
       openssl and openssl-libs at 1:3.5.7-2.amzn2023.0.1, fixed at
       1:3.5.8-1.amzn2023.0.1, and no other package. Accepted because the
       vulnerable path is the CMP certificate-management protocol, which
-      nothing in this image speaks: psilink enrolls no certificates and
-      manages none. psilink's own cryptography does not run on these two:
+      nothing in this image speaks: Alcove enrolls no certificates and
+      manages none. Alcove's own cryptography does not run on these two:
       node comes from the official tarball rather than from a package and
       links its own libcrypto, and the certified module this image is
       built around (openssl-fips-provider-certified 3.2.2-1.amzn2023, a
@@ -242,9 +242,9 @@ vulnerabilities:
       the FIPS variant image's Amazon Linux openssl and openssl-libs at
       1:3.5.7-2.amzn2023.0.1, fixed at 1:3.5.8-1.amzn2023.0.1, and no
       other package. Accepted because the vulnerable path is a QUIC server
-      and no psilink role opens one: psilink's transports are SFTP over
+      and no Alcove role opens one: Alcove's transports are SFTP over
       ssh2, WebRTC data channels, file drop, and the console's localhost
-      HTTP server. psilink's own cryptography does not run on these two:
+      HTTP server. Alcove's own cryptography does not run on these two:
       node comes from the official tarball rather than from a package and
       links its own libcrypto, and the certified module this image is
       built around (openssl-fips-provider-certified 3.2.2-1.amzn2023, a
@@ -274,7 +274,7 @@ vulnerabilities:
       1:3.5.7-2.amzn2023.0.1, fixed at 1:3.5.8-1.amzn2023.0.1, and no
       other package. Accepted because the vulnerable path is the CMP
       certificate-management protocol, which nothing in this image speaks:
-      psilink enrolls no certificates and manages none. psilink's own
+      Alcove enrolls no certificates and manages none. Alcove's own
       cryptography does not run on these two: node comes from the official
       tarball rather than from a package and links its own libcrypto, and
       the certified module this image is built around
@@ -305,8 +305,8 @@ vulnerabilities:
       Linux openssl and openssl-libs at 1:3.5.7-2.amzn2023.0.1, fixed at
       1:3.5.8-1.amzn2023.0.1, and no other package. Accepted because the
       vulnerable path is the CMP certificate-management protocol, which
-      nothing in this image speaks: psilink enrolls no certificates and
-      manages none. psilink's own cryptography does not run on these two:
+      nothing in this image speaks: Alcove enrolls no certificates and
+      manages none. Alcove's own cryptography does not run on these two:
       node comes from the official tarball rather than from a package and
       links its own libcrypto, and the certified module this image is
       built around (openssl-fips-provider-certified 3.2.2-1.amzn2023, a
@@ -335,9 +335,9 @@ vulnerabilities:
       FIPS variant image's Amazon Linux openssl and openssl-libs at
       1:3.5.7-2.amzn2023.0.1, fixed at 1:3.5.8-1.amzn2023.0.1, and no
       other package. Accepted because the vulnerable path is CMS message
-      processing, which nothing in this image performs: psilink's wire
+      processing, which nothing in this image performs: Alcove's wire
       frames are JSON under its own AES-GCM application layer, and its key
-      material is the signing identity file it writes itself. psilink's
+      material is the signing identity file it writes itself. Alcove's
       own cryptography does not run on these two: node comes from the
       official tarball rather than from a package and links its own
       libcrypto, and the certified module this image is built around
@@ -367,9 +367,9 @@ vulnerabilities:
       entry covers the FIPS variant image's Amazon Linux openssl and
       openssl-libs at 1:3.5.7-2.amzn2023.0.1, fixed at
       1:3.5.8-1.amzn2023.0.1, and no other package. Accepted because no
-      psilink role terminates DTLS on these packages: the CLI's WebRTC
+      Alcove role terminates DTLS on these packages: the CLI's WebRTC
       transport is werift, a JavaScript implementation running on node's
-      own crypto, and a browser party's DTLS is the browser's. psilink's
+      own crypto, and a browser party's DTLS is the browser's. Alcove's
       own cryptography does not run on these two: node comes from the
       official tarball rather than from a package and links its own
       libcrypto, and the certified module this image is built around
@@ -399,9 +399,9 @@ vulnerabilities:
       packet. This entry covers the FIPS variant image's Amazon Linux
       openssl and openssl-libs at 1:3.5.7-2.amzn2023.0.1, fixed at
       1:3.5.8-1.amzn2023.0.1, and no other package. Accepted because the
-      vulnerable path is a QUIC server and no psilink role opens one:
-      psilink's transports are SFTP over ssh2, WebRTC data channels, file
-      drop, and the console's localhost HTTP server. psilink's own
+      vulnerable path is a QUIC server and no Alcove role opens one:
+      Alcove's transports are SFTP over ssh2, WebRTC data channels, file
+      drop, and the console's localhost HTTP server. Alcove's own
       cryptography does not run on these two: node comes from the official
       tarball rather than from a package and links its own libcrypto, and
       the certified module this image is built around
@@ -431,11 +431,11 @@ vulnerabilities:
       can dereference a certificate that is absent. This entry covers the
       FIPS variant image's Amazon Linux openssl and openssl-libs at
       1:3.5.7-2.amzn2023.0.1, fixed at 1:3.5.8-1.amzn2023.0.1, and no
-      other package. Accepted because no psilink role runs a TLS server on
-      these packages and none negotiates raw public keys: psilink's
+      other package. Accepted because no Alcove role runs a TLS server on
+      these packages and none negotiates raw public keys: Alcove's
       transports are SFTP over ssh2, WebRTC data channels, file drop, and
       the console's localhost HTTP server, all of them node code on the
-      libcrypto node links. psilink's own cryptography does not run on
+      libcrypto node links. Alcove's own cryptography does not run on
       these two: node comes from the official tarball rather than from a
       package and links its own libcrypto, and the certified module this
       image is built around (openssl-fips-provider-certified
@@ -521,7 +521,7 @@ vulnerabilities:
       dependency of the base package closure, installed by no name in
       Dockerfile.fips, and its callers here are the dnf and python stack
       the base carries, which runs during the build and not in a container
-      the entrypoint starts. Neither role parses XML: psilink reads CSV
+      the entrypoint starts. Neither role parses XML: Alcove reads CSV
       inputs, YAML and JSON configuration and JSON wire frames, and no XML
       parser is called anywhere in apps/cli/src or packages/core/src.
       Cleared by moving Dockerfile.fips to the amazonlinux:2023 rootfs
@@ -548,7 +548,7 @@ vulnerabilities:
       package closure, installed by no name in Dockerfile.fips, and its
       callers here are the dnf and python stack the base carries, which
       runs during the build and not in a container the entrypoint starts.
-      Neither role parses XML: psilink reads CSV inputs, YAML and JSON
+      Neither role parses XML: Alcove reads CSV inputs, YAML and JSON
       configuration and JSON wire frames, and no XML parser is called
       anywhere in apps/cli/src or packages/core/src. Cleared by moving
       Dockerfile.fips to the amazonlinux:2023 rootfs carrying
@@ -574,7 +574,7 @@ vulnerabilities:
       base package closure, installed by no name in Dockerfile.fips, and
       its callers here are the dnf and python stack the base carries,
       which runs during the build and not in a container the entrypoint
-      starts. Neither role parses XML: psilink reads CSV inputs, YAML and
+      starts. Neither role parses XML: Alcove reads CSV inputs, YAML and
       JSON configuration and JSON wire frames, and no XML parser is called
       anywhere in apps/cli/src or packages/core/src. Cleared by moving
       Dockerfile.fips to the amazonlinux:2023 rootfs carrying
@@ -600,7 +600,7 @@ vulnerabilities:
       dependency of the base package closure, installed by no name in
       Dockerfile.fips, and its callers here are the dnf and python stack
       the base carries, which runs during the build and not in a container
-      the entrypoint starts. Neither role parses XML: psilink reads CSV
+      the entrypoint starts. Neither role parses XML: Alcove reads CSV
       inputs, YAML and JSON configuration and JSON wire frames, and no XML
       parser is called anywhere in apps/cli/src or packages/core/src.
       Cleared by moving Dockerfile.fips to the amazonlinux:2023 rootfs
@@ -627,7 +627,7 @@ vulnerabilities:
       transitive dependency of the base package closure, installed by no
       name in Dockerfile.fips, and its callers here are the dnf and python
       stack the base carries, which runs during the build and not in a
-      container the entrypoint starts. Neither role parses XML: psilink
+      container the entrypoint starts. Neither role parses XML: Alcove
       reads CSV inputs, YAML and JSON configuration and JSON wire frames,
       and no XML parser is called anywhere in apps/cli/src or
       packages/core/src. Cleared by moving Dockerfile.fips to the
@@ -654,7 +654,7 @@ vulnerabilities:
       dependency of the base package closure, installed by no name in
       Dockerfile.fips, and its callers here are the dnf and python stack
       the base carries, which runs during the build and not in a container
-      the entrypoint starts. Neither role parses XML: psilink reads CSV
+      the entrypoint starts. Neither role parses XML: Alcove reads CSV
       inputs, YAML and JSON configuration and JSON wire frames, and no XML
       parser is called anywhere in apps/cli/src or packages/core/src.
       Cleared by moving Dockerfile.fips to the amazonlinux:2023 rootfs
@@ -680,7 +680,7 @@ vulnerabilities:
       package closure, installed by no name in Dockerfile.fips, and its
       callers here are the dnf and python stack the base carries, which
       runs during the build and not in a container the entrypoint starts.
-      Neither role parses XML: psilink reads CSV inputs, YAML and JSON
+      Neither role parses XML: Alcove reads CSV inputs, YAML and JSON
       configuration and JSON wire frames, and no XML parser is called
       anywhere in apps/cli/src or packages/core/src. Cleared by moving
       Dockerfile.fips to the amazonlinux:2023 rootfs carrying
@@ -707,7 +707,7 @@ vulnerabilities:
       installed by no name in Dockerfile.fips, and its callers here are
       the dnf and python stack the base carries, which runs during the
       build and not in a container the entrypoint starts. Neither role
-      parses XML: psilink reads CSV inputs, YAML and JSON configuration
+      parses XML: Alcove reads CSV inputs, YAML and JSON configuration
       and JSON wire frames, and no XML parser is called anywhere in
       apps/cli/src or packages/core/src. Cleared by moving Dockerfile.fips
       to the amazonlinux:2023 rootfs carrying 2023.12.20260914 or later,
@@ -732,7 +732,7 @@ vulnerabilities:
       of the base package closure, installed by no name in
       Dockerfile.fips, and its callers here are the dnf and python stack
       the base carries, which runs during the build and not in a container
-      the entrypoint starts. Neither role parses XML: psilink reads CSV
+      the entrypoint starts. Neither role parses XML: Alcove reads CSV
       inputs, YAML and JSON configuration and JSON wire frames, and no XML
       parser is called anywhere in apps/cli/src or packages/core/src.
       Cleared by moving Dockerfile.fips to the amazonlinux:2023 rootfs
@@ -758,7 +758,7 @@ vulnerabilities:
       of the base package closure, installed by no name in
       Dockerfile.fips, and its callers here are the dnf and python stack
       the base carries, which runs during the build and not in a container
-      the entrypoint starts. Neither role parses XML: psilink reads CSV
+      the entrypoint starts. Neither role parses XML: Alcove reads CSV
       inputs, YAML and JSON configuration and JSON wire frames, and no XML
       parser is called anywhere in apps/cli/src or packages/core/src.
       Cleared by moving Dockerfile.fips to the amazonlinux:2023 rootfs
@@ -784,7 +784,7 @@ vulnerabilities:
       of the base package closure, installed by no name in
       Dockerfile.fips, and its callers here are the dnf and python stack
       the base carries, which runs during the build and not in a container
-      the entrypoint starts. Neither role parses XML: psilink reads CSV
+      the entrypoint starts. Neither role parses XML: Alcove reads CSV
       inputs, YAML and JSON configuration and JSON wire frames, and no XML
       parser is called anywhere in apps/cli/src or packages/core/src.
       Cleared by moving Dockerfile.fips to the amazonlinux:2023 rootfs

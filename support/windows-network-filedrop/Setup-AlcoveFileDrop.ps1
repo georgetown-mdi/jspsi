@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Makes a network file-drop folder usable by psilink running in Docker.
+    Makes a network file-drop folder usable by Alcove running in Docker.
     Run this once before your first exchange.
 
 .DESCRIPTION
@@ -19,7 +19,7 @@
       2. Tests that the server is reachable and that your credentials work,
          reporting exactly what is wrong when they do not.
       3. Creates the Docker volume and verifies that the filesystem behaviour
-         psilink depends on actually works over it.
+         Alcove depends on actually works over it.
       4. Prints the docker command to run your exchange.
 
     Nothing is installed on Windows; the checks run in throwaway containers.
@@ -46,19 +46,19 @@
     page.
 
 .LINK
-    https://github.com/georgetown-mdi/jspsi/blob/main/support/windows-network-filedrop/troubleshooting.md
+    https://github.com/georgetown-mdi/alcove/blob/main/support/windows-network-filedrop/troubleshooting.md
 
 .LINK
-    https://github.com/georgetown-mdi/jspsi/blob/main/support/windows-network-filedrop/passwords.md
+    https://github.com/georgetown-mdi/alcove/blob/main/support/windows-network-filedrop/passwords.md
 
 .EXAMPLE
-    powershell -ExecutionPolicy Bypass -File .\Setup-PsilinkFileDrop.ps1
+    powershell -ExecutionPolicy Bypass -File .\Setup-AlcoveFileDrop.ps1
 
 .EXAMPLE
-    powershell -ExecutionPolicy Bypass -File .\Setup-PsilinkFileDrop.ps1 -DropPath 'Z:\Exchange\psilink'
+    powershell -ExecutionPolicy Bypass -File .\Setup-AlcoveFileDrop.ps1 -DropPath 'Z:\Exchange\alcove'
 
 .EXAMPLE
-    powershell -ExecutionPolicy Bypass -File .\Setup-PsilinkFileDrop.ps1 -Server fs-04.agency.gov -Share 'exchange$' -SubPath dropbox
+    powershell -ExecutionPolicy Bypass -File .\Setup-AlcoveFileDrop.ps1 -Server fs-04.agency.gov -Share 'exchange$' -SubPath dropbox
 #>
 
 [CmdletBinding()]
@@ -71,7 +71,7 @@ param(
     [string] $SubPath,
     [ValidateSet('', 'SMB3', 'SMB2', 'NT1')]
     [string] $Dialect = '',
-    [string] $VolumeName = 'psilink-sync',
+    [string] $VolumeName = 'alcove-sync',
     [switch] $SkipVolumeTest,
     [switch] $SkipConfirm,
     # Dot-source the script with this switch to define its functions and stop
@@ -88,7 +88,7 @@ $ErrorActionPreference = 'Stop'
 # earlier run left behind. Two people setting up the same share at the same
 # time would collide on it, which is why the content is a per-run token and the
 # volume test compares it rather than merely finding the file.
-$MarkerName = 'psilink-setup-check.tmp'
+$MarkerName = 'alcove-setup-check.tmp'
 
 # The drive letters whose mapping has been announced, so that resolving several
 # folders on one letter says where it goes once.
@@ -115,7 +115,7 @@ function Read-YesNoAnswer {
         -DefaultYes is where an empty answer goes, which is the letter the
         prompt capitalises.
 
-        Named apart from Start-Psilink.ps1's Read-YesNo, which that script keeps
+        Named apart from Start-Alcove.ps1's Read-YesNo, which that script keeps
         a copy of for the runs where this one cannot be loaded at all -- a
         constrained language mode, or no copy of it beside the launcher. The
         suite pins the two to the same answers. #>
@@ -246,7 +246,7 @@ function Get-DialectMountVersion {
 }
 
 function Test-DoctorCapableImage {
-    <#  Whether the image carries `psilink doctor` at all.
+    <#  Whether the image carries `alcove doctor` at all.
 
         An image published before the doctor existed answers a battery with
         exit 64, the same code the doctor itself uses for an input it refuses
@@ -309,7 +309,7 @@ function Invoke-ImageFetch {
     if ($Refresh) {
         Write-Host 'Fetching a newer copy from the registry before giving up.'
     } else {
-        Write-Host 'Fetching the psilink image (first run only).'
+        Write-Host 'Fetching the Alcove image (first run only).'
     }
     Write-Host 'It is a few hundred megabytes -- the same image the exchange itself'
     Write-Host 'runs -- so this can take several minutes with nothing on screen.'
@@ -320,7 +320,7 @@ function Invoke-ImageFetch {
 # ==========================================================================
 # The credentials and the volume
 #
-# Both are shared with Start-Psilink.ps1, which dot-sources this script and
+# Both are shared with Start-Alcove.ps1, which dot-sources this script and
 # needs the same two sequences: one copy, run against a real file server,
 # rather than two that drift apart.
 # ==========================================================================
@@ -394,7 +394,7 @@ function Read-ShareCredential {
         Write-Note 'Mount options are separated by commas, so the password is cut off at'
         Write-Note 'the first one and the mount fails with "invalid argument". There is'
         Write-Note 'no way to quote or escape it -- this is a limit of Docker volumes,'
-        Write-Note 'not of psilink, and doing it by hand hits exactly the same wall.'
+        Write-Note 'not of Alcove, and doing it by hand hits exactly the same wall.'
         Write-Info ''
         Write-Info 'Use an account whose password has no comma. The troubleshooting'
         Write-Info 'page has a ready-made request for one, under "What to ask your'
@@ -435,7 +435,7 @@ function New-ShareVolume {
     $device = "//$Server/$Share"
     if ($SubPath) { $device = "$device/$SubPath" }
 
-    # uid/gid are what make the mount writable from the psilink image, which runs
+    # uid/gid are what make the mount writable from the Alcove image, which runs
     # as an unprivileged account (uid 1000). A Windows SMB server serves no Unix
     # ownership for the client to read, so without them the whole tree presents
     # as owned by root and every write is refused inside the container. They map
@@ -682,7 +682,7 @@ function Resolve-DropPath {
 function Get-RendezvousFolderName {
     <#  The name of the folder shared with the partner, as the operator knows
         it, for the console to mint into the invitation. Shared with
-        Start-Psilink.ps1, which dot-sources this script rather than carrying a
+        Start-Alcove.ps1, which dot-sources this script rather than carrying a
         share rule of its own. It does carry the -Path arm below, for the runs
         that cannot load this script and are left with a local folder; the suite
         pins the two to the same answers.
@@ -752,7 +752,7 @@ if ($LoadFunctionsOnly) { return }
 # ==========================================================================
 # Preflight
 # ==========================================================================
-Write-Head 'psilink file-drop setup'
+Write-Head 'Alcove file-drop setup'
 
 if ($ExecutionContext.SessionState.LanguageMode -ne 'FullLanguage') {
     Write-Bad "PowerShell is running in $($ExecutionContext.SessionState.LanguageMode) mode."
@@ -784,7 +784,7 @@ if ($dockerInfo.ExitCode -ne 0) {
 $dockerOs = ($dockerInfo.Output -split '\s+')[0]
 if ($dockerOs -eq 'windows') {
     Write-Bad 'Docker Desktop is in Windows containers mode.'
-    Write-Note 'psilink and these checks are Linux containers. In this mode the'
+    Write-Note 'Alcove and these checks are Linux containers. In this mode the'
     Write-Note 'engine answers normally and then every container fails to start.'
     Write-Info ''
     Write-Info 'Right-click the Docker whale icon in the notification area and'
@@ -793,7 +793,7 @@ if ($dockerOs -eq 'windows') {
 }
 Write-Good "Docker engine $(($dockerInfo.Output -split '\s+')[1]) is running."
 
-# The checks are the image's own -- `psilink doctor` -- run in the same image the
+# The checks are the image's own -- `alcove doctor` -- run in the same image the
 # exchange itself runs, at the same floating tag. Floating is deliberate: this
 # script is downloaded on its own rather than shipped with a release, so pinning
 # the diagnostic tighter than the thing it diagnoses buys nothing.
@@ -806,7 +806,7 @@ $imagePresent = Invoke-Docker -DockerArgs @('image', 'inspect', 'ghcr.io/georget
 if ($imagePresent.ExitCode -ne 0) {
     $pull = Invoke-ImageFetch -Image 'ghcr.io/georgetown-mdi/alcove:latest'
     if ($pull.ExitCode -ne 0) {
-        Write-Bad 'Could not fetch the psilink image the checks run in.'
+        Write-Bad 'Could not fetch the Alcove image the checks run in.'
         Write-Host ''
         Write-Host $pull.Output
         Write-Host ''
@@ -831,8 +831,8 @@ $explicitTarget = [bool]($Server -and $Share)
 if (-not $explicitTarget) {
     if (-not $DropPath) {
         Write-Host 'Enter the file-drop folder exactly as you see it in File Explorer.'
-        Write-Host 'Examples:  Z:\Exchange\psilink'
-        Write-Host '           \\fileserver.agency.gov\exchange\psilink'
+        Write-Host 'Examples:  Z:\Exchange\alcove'
+        Write-Host '           \\fileserver.agency.gov\exchange\alcove'
         Write-Host ''
         $DropPath = Read-Host 'File-drop folder'
     }
@@ -919,7 +919,7 @@ if (-not $explicitTarget -and -not $SkipConfirm) {
         Write-Host ''
         Write-Note 'Run the script again with the real values:'
         Write-Info ''
-        Write-Info '    .\Setup-PsilinkFileDrop.ps1 -Server fs-04.agency.gov -Share ''exchange$'' -SubPath dropbox'
+        Write-Info '    .\Setup-AlcoveFileDrop.ps1 -Server fs-04.agency.gov -Share ''exchange$'' -SubPath dropbox'
         Write-Info ''
         Write-Info 'See the troubleshooting page, "Reading the real path from'
         Write-Info 'Windows".'
@@ -949,7 +949,7 @@ $doctorImage = Test-DoctorCapableImage -Image 'ghcr.io/georgetown-mdi/alcove:lat
 # thing to fail in front of the message the operator has to read.
 $refreshFailure = ''
 if (-not $doctorImage.Capable -and $doctorImage.Reason -eq 'NoDoctor') {
-    Write-Head 'Refreshing the psilink image'
+    Write-Head 'Refreshing the Alcove image'
     Write-Warn 'The copy on this PC does not carry the checks this script runs.'
     Write-Note 'An image is fetched only when it is missing, so a copy from'
     Write-Note 'before the checks existed stays until something asks the'
@@ -983,7 +983,7 @@ if (-not $doctorImage.Capable) {
         Write-Note 'Docker printed is the one to read.'
         exit 1
     }
-    Write-Head 'The psilink image on this PC is too old'
+    Write-Head 'The Alcove image on this PC is too old'
     Write-Bad 'It does not carry the checks this script runs.'
     Write-Note 'Nothing about your file drop has been tested. Nothing is wrong'
     Write-Note 'with your share, your credentials, or this script -- the checks'
@@ -1022,7 +1022,7 @@ if (-not $doctorImage.Capable) {
     Write-Host $doctorImage.Output
     exit 1
 }
-Write-Good 'The psilink image carries the checks.'
+Write-Good 'The Alcove image carries the checks.'
 
 # ==========================================================================
 # Part 2: credentials
@@ -1062,7 +1062,7 @@ try {
     # argument any process listing on this PC could read -- and their exit code
     # is the verdict: 0 nothing blocks an exchange, 78 something to change first,
     # 69 the checks could not be run at all. The image entrypoint is left alone,
-    # because "doctor probe" is what it hands to psilink.
+    # because "doctor probe" is what it hands to Alcove.
     #
     # Collected rather than streamed: the checks write their lines to standard
     # error, and re-emitting them with Write-Host is what puts them in the file
@@ -1096,10 +1096,10 @@ try {
             Write-Note "leading '-', or a stray control character is refused before"
             Write-Note 'anything is tested.'
             Write-Info ''
-            Write-Info 'If those look right, this is a defect in Setup-PsilinkFileDrop.ps1;'
+            Write-Info 'If those look right, this is a defect in Setup-AlcoveFileDrop.ps1;'
             Write-Info 'please report it, with the message above and the command you ran.'
         } else {
-            Write-Note 'This is a defect in Setup-PsilinkFileDrop.ps1 rather than a'
+            Write-Note 'This is a defect in Setup-AlcoveFileDrop.ps1 rather than a'
             Write-Note 'problem with your share or your credentials.'
             Write-Info ''
             Write-Info 'Please report it, with the message above and the command you ran.'
@@ -1118,7 +1118,7 @@ try {
         Write-Bad 'The file drop is not usable from Docker. Follow the ACTION above.'
         Write-Info ''
         Write-Info 'The troubleshooting page explains every one of these in more detail:'
-        Write-Info 'https://github.com/georgetown-mdi/jspsi/blob/main/support/windows-network-filedrop/troubleshooting.md'
+        Write-Info 'https://github.com/georgetown-mdi/alcove/blob/main/support/windows-network-filedrop/troubleshooting.md'
         exit $probeExit
     }
     # Anything else is not a verdict at all: the codes above are the whole set
@@ -1235,7 +1235,7 @@ try {
         # image with no doctor command at all, was turned away above part 2.
         Write-Bad 'The checks refused the values this script gave them.'
         Write-Note 'Nothing was established about the folder. This is a defect in'
-        Write-Note 'Setup-PsilinkFileDrop.ps1; please report it, with the message'
+        Write-Note 'Setup-AlcoveFileDrop.ps1; please report it, with the message'
         Write-Note 'above and the command you ran.'
         Invoke-Docker -DockerArgs @('volume', 'rm', $VolumeName) | Out-Null
         exit 9
@@ -1246,7 +1246,7 @@ try {
         Write-Note 'problem and -Dialect will not change it. Follow the ACTION above.'
         Write-Info ''
         Write-Info 'The troubleshooting page explains every one of these in more detail:'
-        Write-Info 'https://github.com/georgetown-mdi/jspsi/blob/main/support/windows-network-filedrop/troubleshooting.md'
+        Write-Info 'https://github.com/georgetown-mdi/alcove/blob/main/support/windows-network-filedrop/troubleshooting.md'
         Invoke-Docker -DockerArgs @('volume', 'rm', $VolumeName) | Out-Null
         exit 9
     }
@@ -1258,7 +1258,7 @@ try {
         Invoke-Docker -DockerArgs @('volume', 'rm', $VolumeName) | Out-Null
         exit 9
     }
-    Write-Good 'The volume mounts and psilink can write to it.'
+    Write-Good 'The volume mounts and Alcove can write to it.'
 }
 finally {
     foreach ($v in 'SMB_SERVER', 'SMB_SHARE', 'SMB_PATH', 'SMB_USER', 'SMB_DOMAIN',
@@ -1289,7 +1289,7 @@ Write-Info 'CSV; results are written back there. It must not be a network path.'
 Write-Info 'input.csv and matches.csv are named relative to that folder. Keep the'
 Write-Info 'quotes -- a work folder under OneDrive has a space in its path.'
 Write-Host ''
-Write-Warn 'The exchange also writes a psilink-record-....keys.json file into that'
+Write-Warn 'The exchange also writes an alcove-record-....keys.json file into that'
 Write-Note 'folder. It is not a result: it holds the keys to the exchange and'
 Write-Note 'should be treated like the input data, not sent on with the matches.'
 Write-Host ''

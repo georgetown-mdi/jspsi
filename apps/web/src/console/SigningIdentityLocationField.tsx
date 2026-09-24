@@ -85,7 +85,7 @@ export function SigningIdentityLocationField({
                   This console has no separate secrets directory to browse, so
                   your signing identity stays in the folder you mounted. To keep
                   it somewhere else, mount a separate directory as
-                  JOB_SECRETS_DIR, put your identity file there with psilink
+                  JOB_SECRETS_DIR, put your identity file there with Alcove
                   fingerprint, and restart the console.
                 </>
               }

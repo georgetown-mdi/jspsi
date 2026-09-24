@@ -21,7 +21,7 @@ import {
   SINGLE_PASS_STAGE_IDS,
   type PsiOperation,
   type PsiProgress,
-} from "@psilink/core";
+} from "@alcove/core";
 
 // How the operator is told which operation is running: the exchange's own stage
 // ids, except for the count-only round, whose stage lines are numbered rather

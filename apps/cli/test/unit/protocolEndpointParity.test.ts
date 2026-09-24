@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import type { EndpointSourceConnectionConfig } from "@psilink/core";
+import type { EndpointSourceConnectionConfig } from "@alcove/core";
 
 import type { ProtocolConnectionConfig } from "../../src/protocol";
 

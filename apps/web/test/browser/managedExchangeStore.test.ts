@@ -2,7 +2,7 @@
 /// <reference types="vite/client" />
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { generateSharedSecret, getDefaultLinkageTerms } from "@psilink/core";
+import { generateSharedSecret, getDefaultLinkageTerms } from "@alcove/core";
 
 import {
   IDB_VERSION,
@@ -68,7 +68,7 @@ import {
   neighbouringRecordVersion,
 } from "../utils/disclosureFixtures";
 
-import type { ExchangeRecord, WebRTCExchangeLocator } from "@psilink/core";
+import type { ExchangeRecord, WebRTCExchangeLocator } from "@alcove/core";
 import type {
   ManagedExchangeRecord,
   ManagedExchangeSchedule,
@@ -400,7 +400,7 @@ describe("managed exchange store CRUD", () => {
     // The record is under the app's named database and store, keyed by its id.
     const stored = (await rawStored(created.id)) as { id: string } | undefined;
     expect(stored?.id).toBe(created.id);
-    expect(MANAGED_EXCHANGE_DB_NAME).toBe("psilink-managed-exchanges");
+    expect(MANAGED_EXCHANGE_DB_NAME).toBe("alcove-managed-exchanges");
   });
 
   test("get of a missing id resolves undefined", async () => {
@@ -979,7 +979,7 @@ describe("deposit persists a managed record of the party's side", () => {
 describe("reader rejects unknown on a store read", () => {
   test("a future schemaVersion in the store rejects rather than loading", async () => {
     const created = await createRunnableExchange(newExchange());
-    await rawPut({ ...created, schemaVersion: "psilink-managed-exchange/v4" });
+    await rawPut({ ...created, schemaVersion: "alcove-managed-exchange/v5" });
     await expect(getManagedExchange(created.id)).rejects.toThrow();
     await expect(listManagedExchanges()).rejects.toThrow();
   });
@@ -1478,7 +1478,7 @@ describe("a scheduled run's results wait for the next visit", () => {
   test("a stored value this build refuses is reported as unreadable, and is left where it is", async () => {
     const created = await createRunnableExchange(newExchange());
     await putRawParkedStored(created.id, {
-      version: "psilink-parked-results/v2",
+      version: "alcove-parked-results/v3",
       entries: [],
     });
 
@@ -1490,7 +1490,7 @@ describe("a scheduled run's results wait for the next visit", () => {
 
   test("a value this build refuses refuses the next run's parking too, and is not overwritten", async () => {
     const created = await createRunnableExchange(newExchange());
-    const stored = { version: "psilink-parked-results/v2", entries: [] };
+    const stored = { version: "alcove-parked-results/v3", entries: [] };
     await putRawParkedStored(created.id, stored);
 
     // The write re-reads through the same parse, so a run cannot append to a set
@@ -1526,7 +1526,7 @@ describe("clearing what scheduled runs left takes the bytes with it", () => {
   test("removes a stored value this build cannot read, which nothing else does", async () => {
     const created = await createRunnableExchange(newExchange());
     await putRawParkedStored(created.id, {
-      version: "psilink-parked-results/v2",
+      version: "alcove-parked-results/v3",
       entries: [],
     });
 
@@ -1660,7 +1660,7 @@ describe("diagnostic read never rejects wholesale", () => {
     await rawPut({
       ...good,
       id: "bad-record",
-      schemaVersion: "psilink-managed-exchange/v4",
+      schemaVersion: "alcove-managed-exchange/v5",
     });
     // The spend is the sibling entry's, so it reads whatever the record does: the
     // delete confirm for this row must still state what the hand-off keeps running.
@@ -1685,7 +1685,7 @@ describe("diagnostic read never rejects wholesale", () => {
     await rawPut({
       ...good,
       id: "bad-record",
-      schemaVersion: "psilink-managed-exchange/v4",
+      schemaVersion: "alcove-managed-exchange/v5",
     });
 
     // The strict read still rejects wholesale -- the untouched contract.
@@ -1708,7 +1708,7 @@ describe("diagnostic read never rejects wholesale", () => {
     await rawPut({
       ...good,
       id: "bad-record",
-      schemaVersion: "psilink-managed-exchange/v4",
+      schemaVersion: "alcove-managed-exchange/v5",
     });
     // The sibling backup marker survives the record's unreadability: a delete of the
     // bad record must still warn about the exported backup's custody.
@@ -1728,7 +1728,7 @@ describe("diagnostic read never rejects wholesale", () => {
     await rawPut({
       ...good,
       id: "bad-record",
-      schemaVersion: "psilink-managed-exchange/v4",
+      schemaVersion: "alcove-managed-exchange/v5",
     });
 
     await deleteManagedExchange("bad-record");

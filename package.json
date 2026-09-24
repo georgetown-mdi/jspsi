@@ -1,5 +1,5 @@
 {
-  "name": "jspsi",
+  "name": "alcove-monorepo",
   "version": "0.0.0",
   "description": "JavaScript implementation of private set intersection for record linkage.",
   "license": "Apache-2.0",

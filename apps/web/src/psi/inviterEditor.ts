@@ -6,7 +6,7 @@
  * on.
  */
 
-import { authoredLinkageFields, getDefaultLinkageTerms } from "@psilink/core";
+import { authoredLinkageFields, getDefaultLinkageTerms } from "@alcove/core";
 
 import { isolatedColumnName } from "@components/ColumnName";
 
@@ -46,7 +46,7 @@ import type {
   LinkageTerms,
   Metadata,
   SemanticType,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import type { DisclosureChoice } from "./metadataEditing";
 

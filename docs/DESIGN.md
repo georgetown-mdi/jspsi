@@ -1,5 +1,5 @@
 ---
-title: "psilink"
+title: "alcove"
 author: "Vincent Dorie"
 ---
 
@@ -23,7 +23,7 @@ When adopting the software, program officers are likely to first conduct exchang
 
 ## Core library
 
-The core library includes the base PSI function, linkage term verification, input ingestion and cleaning, linkage key generation, and the execution of the linkage algorithms over PSI. The library also generates a [self-attested exchange record](spec/EXCHANGE_RECORD.md) at the end of each exchange -- a local, unsigned record of what was exchanged that a party can retain for its own disclosure records. Certificate-backed signing of that record into a third-party-verifiable receipt is an opt-in mode, selected through the configuration's `signing` block and checked with `psilink verify-receipt` (see [Receipt signing identities](SECURITY_DESIGN.md#receipt-signing-identities)). The various libraries that are run-time dependent, such as communication channels and cryptography, are abstracted over and need to be supplied by specific applications.
+The core library includes the base PSI function, linkage term verification, input ingestion and cleaning, linkage key generation, and the execution of the linkage algorithms over PSI. The library also generates a [self-attested exchange record](spec/EXCHANGE_RECORD.md) at the end of each exchange -- a local, unsigned record of what was exchanged that a party can retain for its own disclosure records. Certificate-backed signing of that record into a third-party-verifiable receipt is an opt-in mode, selected through the configuration's `signing` block and checked with `alcove verify-receipt` (see [Receipt signing identities](SECURITY_DESIGN.md#receipt-signing-identities)). The various libraries that are run-time dependent, such as communication channels and cryptography, are abstracted over and need to be supplied by specific applications.
 
 ## Command line application
 
@@ -51,22 +51,22 @@ A user should be able to *invite* someone to conduct an exchange, *accept* an ex
 
 For the rest of this section we describe use cases as in the command line application. The application provides ten explicit subcommands - `init`, `invite`, `accept`, `update` and `apply` (which change an established partnership's linkage terms without a new shared secret), `exchange`, `fingerprint` (which shows this party's signing-certificate fingerprint), `verify-receipt` (which checks a stored exchange record or dual-signed receipt), `probe-host-key` (which reads an SFTP server's host-key fingerprint), and `doctor` (which checks a network file drop before an exchange is attempted) - alongside a zero-setup mode in which both parties run the same command against a shared server without specifying a subcommand. The full command inventory and behavior is in [CLI.md](CLI.md). Web application versions implement the same functionality with an appropriate graphical user interface and use browser storage instead of the file system.
 
-A typical first exchange of a recurring relationship begins with one party generating an invitation with `psilink invite` and securely transmitting it to their partner out-of-band. The partner accepts with `psilink accept`, which establishes the shared configuration and key on both sides. Both parties then run `psilink exchange` to conduct the data exchange. Subsequent exchanges use `psilink exchange` with the stored configuration and shared secret, requiring no further coordination. After any successful exchange the shared secret is rotated. As a one-step alternative, parties can run `invite` and `accept` with a server URL as an argument, in which case acceptance leads to immediately conducting an exchange.
+A typical first exchange of a recurring relationship begins with one party generating an invitation with `alcove invite` and securely transmitting it to their partner out-of-band. The partner accepts with `alcove accept`, which establishes the shared configuration and key on both sides. Both parties then run `alcove exchange` to conduct the data exchange. Subsequent exchanges use `alcove exchange` with the stored configuration and shared secret, requiring no further coordination. After any successful exchange the shared secret is rotated. As a one-step alternative, parties can run `invite` and `accept` with a server URL as an argument, in which case acceptance leads to immediately conducting an exchange.
 
 Two invitation flows are supported: an offline flow where no server is involved and a server-coordinated flow where a server address is used for coordination and is given to both parties. In the server-coordinated flow, setup and exchange happen in one step: the inviter waits for the acceptor to respond, and both parties exchange immediately on acceptance.
 
 | Intent | Invocation |
 |---|---|
-| Zero-setup exchange (both parties) | `psilink URL input.csv` |
-| Generate a config file for editing | `psilink init [input.csv]` |
-| Start a recurring exchange relationship (offline) | `psilink invite --identity IDENTITY [input.csv]`, then share the invitation string out-of-band |
-| Start a recurring exchange relationship and exchange (server-coordinated) | `psilink invite --identity IDENTITY URL input.csv`, then share the invitation string; the exchange runs on acceptance |
-| Accept an offline invitation | `psilink accept --identity IDENTITY INVITATION [input.csv]` |
-| Accept a WebRTC invitation and exchange | `psilink accept --identity IDENTITY INVITATION input.csv` |
-| Accept a server-coordinated invitation and exchange | `psilink accept --identity IDENTITY URL INVITATION input.csv` |
-| Recurring exchange | `psilink exchange input.csv` |
-| Zero-setup exchange, establish recurring relationship (both parties) | `psilink --save URL input.csv` |
-| Re-establish after lost secret | Delete key file on both sides; re-run `psilink invite` and `psilink accept` |
+| Zero-setup exchange (both parties) | `alcove URL input.csv` |
+| Generate a config file for editing | `alcove init [input.csv]` |
+| Start a recurring exchange relationship (offline) | `alcove invite --identity IDENTITY [input.csv]`, then share the invitation string out-of-band |
+| Start a recurring exchange relationship and exchange (server-coordinated) | `alcove invite --identity IDENTITY URL input.csv`, then share the invitation string; the exchange runs on acceptance |
+| Accept an offline invitation | `alcove accept --identity IDENTITY INVITATION [input.csv]` |
+| Accept a WebRTC invitation and exchange | `alcove accept --identity IDENTITY INVITATION input.csv` |
+| Accept a server-coordinated invitation and exchange | `alcove accept --identity IDENTITY URL INVITATION input.csv` |
+| Recurring exchange | `alcove exchange input.csv` |
+| Zero-setup exchange, establish recurring relationship (both parties) | `alcove --save URL input.csv` |
+| Re-establish after lost secret | Delete key file on both sides; re-run `alcove invite` and `alcove accept` |
 
 If only one party uses `--save` during a zero-setup exchange, no shared secret is established; see [Bootstrapping a shared secret](SECURITY_DESIGN.md#bootstrapping-a-shared-secret) for the full set of outcomes.
 
@@ -106,9 +106,9 @@ It may also be beneficial to build the web application as a desktop Electron app
 
 # License and disclaimer
 
-psilink is free, open-source software released under the [Apache License, Version 2.0](../LICENSE.md) and will remain available at no cost. It is provided "as-is," without warranty of any kind, express or implied, including without limitation any warranties of merchantability, fitness for a particular purpose, or non-infringement. The full warranty disclaimer and limitation of liability appear in sections 7 and 8 of the Apache License.
+Alcove is free, open-source software released under the [Apache License, Version 2.0](../LICENSE.md) and will remain available at no cost. It is provided "as-is," without warranty of any kind, express or implied, including without limitation any warranties of merchantability, fitness for a particular purpose, or non-infringement. The full warranty disclaimer and limitation of liability appear in sections 7 and 8 of the Apache License.
 
-Agencies evaluating psilink for operational use are responsible for their own risk assessments, authority-to-operate (ATO) determinations, and compliance reviews under applicable federal, state, or local regulations. The project documentation -- including this document, [SECURITY_DESIGN.md](SECURITY_DESIGN.md), [PROTOCOL.md](spec/PROTOCOL.md), and [COMPLIANCE.md](COMPLIANCE.md) -- is intended to support those reviews, not to substitute for them.
+Agencies evaluating Alcove for operational use are responsible for their own risk assessments, authority-to-operate (ATO) determinations, and compliance reviews under applicable federal, state, or local regulations. The project documentation -- including this document, [SECURITY_DESIGN.md](SECURITY_DESIGN.md), [PROTOCOL.md](spec/PROTOCOL.md), and [COMPLIANCE.md](COMPLIANCE.md) -- is intended to support those reviews, not to substitute for them.
 
 # See also
 

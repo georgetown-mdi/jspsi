@@ -575,7 +575,7 @@ describe("what a failing check delivers through a pipe", () => {
   // A repeated distinctive line rather than filler bytes: the check's own
   // report contains letters filler would collide with, and the count has to be
   // exact to say how much of the verifier's stream arrived.
-  const FLOOD_LINE = "psilink-verifier-flood\n";
+  const FLOOD_LINE = "alcove-verifier-flood\n";
   const FLOOD_LINES = 12_000;
 
   const stubDirs = [];
@@ -587,7 +587,7 @@ describe("what a failing check delivers through a pipe", () => {
   // exiting, so nothing is lost on its own way out and the only delivery under
   // test is the check's.
   const runCheckAgainstStubGh = (floodLines) => {
-    const dir = mkdtempSync(join(tmpdir(), "psilink-provenance-gh-"));
+    const dir = mkdtempSync(join(tmpdir(), "alcove-provenance-gh-"));
     stubDirs.push(dir);
 
     const stubSource = join(dir, "gh-stub.cjs");
@@ -705,7 +705,7 @@ describe("the offline binding between the marker and the bytes", () => {
 });
 
 describe("reading the marker", () => {
-  const dir = mkdtempSync(join(tmpdir(), "psilink-provenance-"));
+  const dir = mkdtempSync(join(tmpdir(), "alcove-provenance-"));
   afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
   it("returns the bytes of a marker that is there", () => {

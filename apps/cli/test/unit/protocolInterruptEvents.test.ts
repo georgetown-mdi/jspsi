@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { vi, test, expect, beforeEach, afterEach } from "vitest";
-import { minimalPreparedExchange } from "@psilink/core/testing";
+import { minimalPreparedExchange } from "@alcove/core/testing";
 
 // This test lives in its own file because it mocks process.exit to a no-op
 // and delivers a real process.emit("SIGINT") while a live filedrop exchange
@@ -23,12 +23,12 @@ vi.mock("@openmined/psi.js", () => ({
 // interrupt reached first. Hoisted because the module mocks below close over it.
 const runEvents = vi.hoisted(() => ({ ordered: [] as Array<string> }));
 
-// Keep @psilink/core real -- FileSyncConnection and the rendezvous especially,
+// Keep @alcove/core real -- FileSyncConnection and the rendezvous especially,
 // since the interrupt has to land on a live exchange -- and replace only the
 // operator logger, whose lines are recorded rather than printed, and
 // runExchange, which nothing here should reach.
-vi.mock("@psilink/core", async (importActual) => {
-  const actual = await importActual<typeof import("@psilink/core")>();
+vi.mock("@alcove/core", async (importActual) => {
+  const actual = await importActual<typeof import("@alcove/core")>();
   const record =
     (level: string) =>
     (...args: unknown[]) =>
@@ -56,7 +56,7 @@ vi.mock("../../src/psiProgressDisplay", () => ({
   terminalPsiStatusLine: () => undefined,
 }));
 
-import { runExchange } from "@psilink/core";
+import { runExchange } from "@alcove/core";
 
 import { runProtocol } from "../../src/protocol";
 
@@ -103,7 +103,7 @@ let dropDir: string;
 
 beforeEach(() => {
   runEvents.ordered.length = 0;
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-proto-interrupt-"));
+  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-proto-interrupt-"));
   dropDir = path.join(tmpDir, "drop");
   fs.mkdirSync(dropDir);
 

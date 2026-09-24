@@ -1,6 +1,6 @@
 # PSI Link Web App
 
-The browser-based PSI-Link app: two parties run a peer-to-peer exchange over WebRTC using ephemeral invitation links.
+The browser-based Alcove app: two parties run a peer-to-peer exchange over WebRTC using ephemeral invitation links.
 
 ## Quickstart
 

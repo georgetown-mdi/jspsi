@@ -14,8 +14,8 @@ import {
   getDefaultLinkageTerms,
   inferMetadata,
   parseExchangeSpec,
-} from "@psilink/core";
-import type { ExchangeSpec, LinkageTerms, Metadata } from "@psilink/core";
+} from "@alcove/core";
+import type { ExchangeSpec, LinkageTerms, Metadata } from "@alcove/core";
 
 vi.mock("../../../src/util/prompt", async () => {
   const actual = await vi.importActual<
@@ -56,12 +56,12 @@ function metadataWith(...extra: string[]): Metadata {
 }
 
 /**
- * An established partnership as `psilink invite` and `psilink accept` leave
+ * An established partnership as `alcove invite` and `alcove accept` leave
  * it: Agency A's configuration discloses `notes`, Agency B's records that
  * commitment and discloses `program`, and both key files hold one secret.
  */
 function establishPartnership(): Partnership {
-  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-terms-update-"));
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "alcove-terms-update-"));
   const a = { config: path.join(dir, "a.yaml"), key: path.join(dir, "a.key") };
   const b = { config: path.join(dir, "b.yaml"), key: path.join(dir, "b.key") };
   const aTerms = getDefaultLinkageTerms(
@@ -116,7 +116,7 @@ function argv(
 ): Arguments {
   return {
     _: [command],
-    $0: "psilink",
+    $0: "alcove",
     "config-file": party.config,
     "key-file": party.key,
     "log-level": "info",
@@ -124,7 +124,7 @@ function argv(
   } as unknown as Arguments;
 }
 
-/** Run `psilink update` for Agency A, returning the printed update. */
+/** Run `alcove update` for Agency A, returning the printed update. */
 async function runUpdate(): Promise<string> {
   const printedLines: string[] = [];
   const logSpy = vi
@@ -144,7 +144,7 @@ async function runUpdate(): Promise<string> {
   return printed;
 }
 
-/** Run `psilink apply` for Agency B; returns stderr and the exit code. */
+/** Run `alcove apply` for Agency B; returns stderr and the exit code. */
 async function runApply(
   update: string,
   party: Party = partnership.b,
@@ -173,7 +173,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("psilink update", () => {
+describe("alcove update", () => {
   test("prints the edited terms and disclosed columns, authenticated under the key file's secret", async () => {
     const edited = editAgencyA();
     const keyBefore = fs.readFileSync(partnership.a.key, "utf8");
@@ -214,7 +214,7 @@ describe("psilink update", () => {
   });
 });
 
-describe("psilink apply", () => {
+describe("alcove apply", () => {
   test("rewrites the linkage terms and refreshes every record in one write", async () => {
     const edited = editAgencyA();
     const update = await runUpdate();

@@ -7,7 +7,7 @@ import {
   joinErrorCauseChain,
   operatorSuppliedSpans,
   sanitizeErrorForDisplay,
-} from "@psilink/core";
+} from "@alcove/core";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import {
@@ -73,7 +73,7 @@ vi.mock("node:child_process", async (importOriginal) => {
 let dir: string;
 
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-fileutils-"));
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-fileutils-"));
 });
 
 afterEach(() => {
@@ -148,8 +148,8 @@ function recordDurabilitySyncs(): string[] {
 
 describe("detectFileConflicts", () => {
   test("returns only the paths that already exist", () => {
-    const existing = path.join(dir, "psilink.yaml");
-    const missing = path.join(dir, ".psilink.key");
+    const existing = path.join(dir, "alcove.yaml");
+    const missing = path.join(dir, ".alcove.key");
     fs.writeFileSync(existing, "channel: filedrop\n");
     expect(detectFileConflicts([existing, missing])).toEqual([existing]);
   });
@@ -1145,7 +1145,7 @@ describe("extended-ACL strip symlink posture", () => {
   test.skipIf(process.platform === "win32")(
     "the temp-file writers strip the temp path without following a symlink",
     () => {
-      // -h keeps the strip on the named entry: the temp path is psilink's own and
+      // -h keeps the strip on the named entry: the temp path is Alcove's own and
       // a symlink at it is an attacker's, so following one would aim the strip at
       // another file's ACL while the content went to the temp file.
       const commands = recordAclStripCommands();
@@ -1397,7 +1397,7 @@ async function runWindowsAclCheckFresh(
   keyFilePath: string = path.join(dir, "secret"),
 ): Promise<{ commands: string[]; warnings: string[] }> {
   vi.resetModules();
-  const { getLogger: freshGetLogger } = await import("@psilink/core");
+  const { getLogger: freshGetLogger } = await import("@alcove/core");
   const warnings = captureWarnings(freshGetLogger("file-utils"));
   const fresh = await import("../../src/fileUtils");
   answerAclCommands(replies);
@@ -1789,13 +1789,13 @@ describe("expandTilde", () => {
   });
 
   test("expands a leading ~/ to a path under home", () => {
-    expect(expandTilde("~/.psilink/signing-identity.json")).toBe(
-      path.join(home, ".psilink/signing-identity.json"),
+    expect(expandTilde("~/.alcove/signing-identity.json")).toBe(
+      path.join(home, ".alcove/signing-identity.json"),
     );
   });
 
   test("leaves an absolute path unchanged", () => {
-    expect(expandTilde("/etc/psilink/id.json")).toBe("/etc/psilink/id.json");
+    expect(expandTilde("/etc/alcove/id.json")).toBe("/etc/alcove/id.json");
   });
 
   test("leaves a relative path unchanged", () => {
@@ -1833,8 +1833,8 @@ describe("an operator's own path in a warning or refusal", () => {
   const backslashedPath = (name = "secret"): string => {
     const full =
       process.platform === "win32"
-        ? path.join(dir, "psilink", name)
-        : path.join(dir, `C:\\psilink\\${name}`);
+        ? path.join(dir, "alcove", name)
+        : path.join(dir, `C:\\alcove\\${name}`);
     fs.mkdirSync(path.dirname(full), { recursive: true });
     return full;
   };

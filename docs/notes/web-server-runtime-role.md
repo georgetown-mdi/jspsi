@@ -31,7 +31,7 @@ the data channel is confidential against it under DTLS
 
 The same application also builds as the console -- one party's own machine,
 one operator, one exchange at a time -- and there the server's runtime role is a
-larger one: it drives that party's `psilink` CLI as a subprocess. The job
+larger one: it drives that party's `alcove` CLI as a subprocess. The job
 API is what does it (`apps/web/src/routes/api/jobs/`, specified in
 [SERVER_JOB_API.md](../spec/SERVER_JOB_API.md)). A create request composes the
 CLI's inputs from a typed intent, the server spawns the run, owns a workdir on

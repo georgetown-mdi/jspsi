@@ -1,6 +1,6 @@
-import { readRowColumn } from "@psilink/core";
+import { readRowColumn } from "@alcove/core";
 
-import type { CSVRow } from "@psilink/core";
+import type { CSVRow } from "@alcove/core";
 
 /**
  * The before->after preview's value sampling. The preview samples a few non-empty

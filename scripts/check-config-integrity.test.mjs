@@ -35,7 +35,7 @@ const fixtureRoots = [];
 
 /** A scratch directory removed when the file finishes. */
 function scratchDirectory() {
-  const root = mkdtempSync(join(tmpdir(), "psilink-config-integrity-"));
+  const root = mkdtempSync(join(tmpdir(), "alcove-config-integrity-"));
   fixtureRoots.push(root);
   return root;
 }
@@ -130,10 +130,10 @@ describe("vitestViolations", () => {
   it("reports a missing project and names what was listed instead", () => {
     const [violation] = vitestViolations(
       guard,
-      new Map([["@psilink/core", 149]]),
+      new Map([["@alcove/core", 149]]),
     );
     expect(violation).toContain('"unit", "stress"');
-    expect(violation).toContain('It listed "@psilink/core"');
+    expect(violation).toContain('It listed "@alcove/core"');
   });
 
   it("reports a listing that turned up no project at all", () => {

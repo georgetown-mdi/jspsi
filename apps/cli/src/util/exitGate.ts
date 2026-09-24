@@ -49,7 +49,7 @@ export function processHeldNotice(
   const held =
     kinds.length === 0 ? "something Node does not name" : kinds.join(", ");
   return (
-    `psilink finished this run and wrote its files, but the process was ` +
+    `Alcove finished this run and wrote its files, but the process was ` +
     `still held open ${Math.round(elapsedMs / 1000)}s later by: ${held}. ` +
     `Exiting with the run's own status; report this with those names.`
   );

@@ -7,8 +7,8 @@ import path from "node:path";
 import logLibrary from "loglevel";
 import ssh2 from "ssh2";
 import { describe, expect, test, vi } from "vitest";
-import { setLogLevel } from "@psilink/core";
-import { withCapturedLogs } from "@psilink/core/testing";
+import { setLogLevel } from "@alcove/core";
+import { withCapturedLogs } from "@alcove/core/testing";
 
 import { probeHostKeyLines } from "../../src/commands/probeHostKey";
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
@@ -104,7 +104,7 @@ function hostilePeer(
 
 /**
  * A server offering `keyboard-interactive` and nothing else, so a dial reaches
- * the path where psilink itself answers the prompt with the operator's
+ * the path where Alcove itself answers the prompt with the operator's
  * password. Neither suite backend offers the method, and what is under test is
  * what the client renders of its own answer.
  */
@@ -179,7 +179,7 @@ function disconnectingPeer(description: string): {
     socket.on("error", () => {});
     socket.end(
       Buffer.concat([
-        Buffer.from("SSH-2.0-psilink-refusing-peer\r\n", "utf8"),
+        Buffer.from("SSH-2.0-alcove-refusing-peer\r\n", "utf8"),
         disconnect(),
       ]),
     );
@@ -195,7 +195,7 @@ function disconnectingPeer(description: string): {
  * a root log level of `rootLevel`, and hand back every diagnostic line the run
  * emitted. The root level is applied before the adapter is constructed because
  * a `getLoggerForVerbosity` logger is never more verbose than the root live when
- * it is built (`@psilink/core/testing`, `withCapturedLogs`).
+ * it is built (`@alcove/core/testing`, `withCapturedLogs`).
  */
 async function dialCapturingLogs(
   rootLevel: logLibrary.LogLevelNumbers,
@@ -281,7 +281,7 @@ describe("a root log level of trace, with no -v count", () => {
       // the value is one no backend holds. What matters is that the client
       // SENDS it, which the request line below is the evidence of; whether the
       // server then accepts is nothing the trace renders differently.
-      const password = "psilink-wire-trace-probe-not-a-real-secret";
+      const password = "alcove-wire-trace-probe-not-a-real-secret";
       const { privateKey: _key, ...rest } = serverDialOptions();
       const { lines } = await dialCapturingLogs(logLibrary.levels.TRACE, 0, {
         ...rest,
@@ -296,10 +296,10 @@ describe("a root log level of trace, with no -v count", () => {
   );
 
   test(
-    "reports no credential psilink itself answered a prompt with",
+    "reports no credential Alcove itself answered a prompt with",
     { timeout: TEST_TIMEOUT_MS },
     async () => {
-      const password = "psilink-wire-trace-prompt-not-a-real-secret";
+      const password = "alcove-wire-trace-prompt-not-a-real-secret";
       const peer = keyboardInteractivePeer(password);
       try {
         const { lines, failure } = await dialCapturingLogs(
@@ -385,7 +385,7 @@ describe("a peer's own bytes", () => {
         ).toBe(true);
         expect(holds(trace, /back\\\\slash/)).toBe(true);
         // The identification string is the half ssh2 escapes before handing it
-        // over, so psilink's own escape lands on ssh2's backslash and the
+        // over, so Alcove's own escape lands on ssh2's backslash and the
         // operator reads it doubled. Held here so a version that stopped
         // escaping it is a changed rendering rather than a silent raw byte.
         expect(holds(trace, /Remote ident: .*evil\\\\x1B\[31mRED/)).toBe(true);
@@ -413,7 +413,7 @@ async function traceToLogFile(probe: () => Promise<unknown>): Promise<{
   stderr: string;
   failure: unknown;
 }> {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-wire-trace-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-wire-trace-"));
   const logFile = path.join(dir, "trace.log");
   const previousLevel = logLibrary.getLevel();
   const stderr: string[] = [];
@@ -542,7 +542,7 @@ async function drainChild(logLevel: string): Promise<{
     ],
     {
       cwd: path.join(import.meta.dirname, "..", ".."),
-      env: { ...process.env, PSILINK_TEST_LOG_LEVEL: logLevel },
+      env: { ...process.env, ALCOVE_TEST_LOG_LEVEL: logLevel },
       stdio: ["ignore", "pipe", "pipe"],
     },
   );

@@ -15,14 +15,14 @@ import {
   coalesceSubstitutesConstant,
   sanitizeForDisplay,
   stepCanEmptyRealizedValue,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import type {
   Standardization,
   StandardizationFunctionDescriptor,
   StandardizationStep,
   TransformStep,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import type { ZodType } from "zod";
 
@@ -535,7 +535,7 @@ export function declaresBothNullIfValues(step: StandardizationStep): boolean {
  * and each of those counts as declared.
  */
 export const NULL_IF_BOTH_VALUES_REFUSAL =
-  "This step declares both a single value and a list of values. psilink " +
+  "This step declares both a single value and a list of values. Alcove " +
   "accepts one or the other, not both. Remove this step and add it again " +
   "with the one you want.";
 

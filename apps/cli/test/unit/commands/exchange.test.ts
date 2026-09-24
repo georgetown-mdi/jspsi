@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import yargs, { type Arguments } from "yargs";
 import YAML from "yaml";
-import { UsageError } from "@psilink/core";
+import { UsageError } from "@alcove/core";
 import {
   DEFAULT_LINKAGE_RULE_SET,
   csvDelimiterRefusal,
@@ -14,13 +14,13 @@ import {
   getLogger,
   prepareForExchange,
   sanitizeErrorForDisplay,
-} from "@psilink/core";
+} from "@alcove/core";
 import type {
   InvitationToken,
   LinkageRuleSetReference,
   LinkageTerms,
   PreparedExchange,
-} from "@psilink/core";
+} from "@alcove/core";
 import {
   loadKeyFile,
   provisionKeyFileFromInvitation,
@@ -56,8 +56,8 @@ const mockState = vi.hoisted(() => ({
   errors: [] as string[],
 }));
 
-vi.mock("@psilink/core", async (importActual) => {
-  const actual = await importActual<typeof import("@psilink/core")>();
+vi.mock("@alcove/core", async (importActual) => {
+  const actual = await importActual<typeof import("@alcove/core")>();
   return {
     ...actual,
     getLogger: (_name: string) => ({
@@ -183,9 +183,9 @@ const minimalFiledropConfig = {
 };
 
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-exchange-test-"));
-  configFile = path.join(dir, "psilink.yaml");
-  keyFile = path.join(dir, ".psilink.key");
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-exchange-test-"));
+  configFile = path.join(dir, "alcove.yaml");
+  keyFile = path.join(dir, ".alcove.key");
   mockState.warnings.length = 0;
   mockState.errors.length = 0;
 });
@@ -212,7 +212,7 @@ test("builder: exchange's command-specific option help reaches the rendered help
   // The URL/write-oriented defaults must NOT appear: exchange reads a config and
   // has no URL, so their presence would mean an override was dropped.
   expect(help).not.toContain("overrides the port in URL");
-  expect(help).not.toContain("where to write psilink.yaml");
+  expect(help).not.toContain("where to write alcove.yaml");
 });
 
 // --- parseArgs: CLI credential overrides resolved at parse time --------------
@@ -227,7 +227,7 @@ test("parseArgs resolves an @path server-password to the file contents", () => {
   fs.writeFileSync(passwordRef, "S3cr3tSFTPPassw0rd\n");
   const argv = {
     _: [],
-    $0: "psilink",
+    $0: "alcove",
     input: "data.csv",
     "server-password": `@${passwordRef}`,
   } as unknown as Arguments;
@@ -238,7 +238,7 @@ test("parseArgs resolves an @path server-password to the file contents", () => {
 test("parseArgs passes a literal server-password through unchanged", () => {
   const argv = {
     _: [],
-    $0: "psilink",
+    $0: "alcove",
     input: "data.csv",
     "server-password": "inline-password",
   } as unknown as Arguments;
@@ -253,7 +253,7 @@ test("parseArgs resolves an @path server-private-key-passphrase and private key 
   fs.writeFileSync(passRef, "unlock-me\n");
   const argv = {
     _: [],
-    $0: "psilink",
+    $0: "alcove",
     input: "data.csv",
     "server-private-key": `@${keyRef}`,
     "server-private-key-passphrase": `@${passRef}`,
@@ -266,7 +266,7 @@ test("parseArgs resolves an @path server-private-key-passphrase and private key 
 test("parseArgs passes a literal passphrase through unchanged", () => {
   const argv = {
     _: [],
-    $0: "psilink",
+    $0: "alcove",
     input: "data.csv",
     "server-private-key": "inline-key",
     "server-private-key-passphrase": "inline-pass",
@@ -297,7 +297,7 @@ test("injects expires from key file when present", () => {
 });
 
 test("injects sharedSecret from key file even when a top-level authentication block is present in config", () => {
-  // A top-level authentication block in psilink.yaml has no injected fields
+  // A top-level authentication block in alcove.yaml has no injected fields
   // (those come from the key file); an empty one must not break loading.
   const configWithAuth = {
     ...minimalSFTPConfig,
@@ -771,7 +771,7 @@ test("a persisted connection_per_poll: true in an sftp config does not warn it i
 // --- config warnings ---------------------------------------------------------
 // These tests exercise the warn-and-strip on the top-level authentication block:
 // a warning when an injected field (shared_secret/sharedSecret, expires) appears
-// in psilink.yaml, the invariant that the key-file value always wins, and that an
+// in alcove.yaml, the invariant that the key-file value always wins, and that an
 // operator-policy (non-injected) field is admitted through. The check runs before
 // schema parsing so any token format (valid or not) triggers the warning rather
 // than a ZodError.
@@ -794,7 +794,7 @@ test("shared_secret set in the top-level authentication block does not override 
 
 test("camelCase sharedSecret in the top-level authentication block does not override the key file token", () => {
   // Exercises the camelCase spelling (sharedSecret, as opposed to shared_secret).
-  // A user who writes `sharedSecret: foo` directly in psilink.yaml hits this path.
+  // A user who writes `sharedSecret: foo` directly in alcove.yaml hits this path.
   const configWithCamelToken = {
     ...minimalSFTPConfig,
     authentication: { sharedSecret: TOKEN_A },
@@ -1088,7 +1088,7 @@ test("the webrtc drops are reported in wording that fits a configured exchange",
   // No remedy sends this operator to a URL they were never given, back to the
   // command they are running, or away with a promise the channel does not keep.
   expect(rendered).not.toContain("ws://");
-  expect(rendered).not.toContain("run 'psilink exchange'");
+  expect(rendered).not.toContain("run 'alcove exchange'");
   expect(rendered).not.toContain("no credential of any kind");
   // The configured key is named as a field, never echoed as a value.
   expect(rendered).not.toContain("deployment-key");
@@ -1123,7 +1123,7 @@ test("a file-sync config reports none of the webrtc drops", () => {
 // --- token_max_age_days and load-time expiry ---------------------------------
 
 test("loadConfig exposes token_max_age_days from the authentication block", () => {
-  // End-to-end: a policy field in psilink.yaml reaches result.authentication
+  // End-to-end: a policy field in alcove.yaml reaches result.authentication
   // (camelized), where protocol.ts reads it to stamp the rotated token's expiry.
   const config = {
     ...minimalSFTPConfig,
@@ -1171,10 +1171,10 @@ test("loadConfig hard-stops an expired token before any exchange", () => {
   // forms are not a recovery route -- they abort on a pre-existing configuration
   // file, which is exactly what this recovery reuses.
   expect(message).toContain("remove the expired key file on both sides");
-  expect(message).toContain("'psilink invite'");
-  expect(message).toContain("'psilink accept INVITATION [INPUT_FILE]'");
-  expect(message).not.toContain("psilink invite URL");
-  expect(message).not.toContain("psilink accept URL");
+  expect(message).toContain("'alcove invite'");
+  expect(message).toContain("'alcove accept INVITATION [INPUT_FILE]'");
+  expect(message).not.toContain("alcove invite URL");
+  expect(message).not.toContain("alcove accept URL");
   expect(message).toContain("Each side's configuration is reused");
   expect(message).toContain("only the key file is recreated");
   // The remedy is stated in full above, so the message needs no reference to a
@@ -1307,7 +1307,7 @@ test("handler: a repeated single-value flag exits 64 naming the flag", async () 
     await expect(
       handler({
         _: [],
-        $0: "psilink",
+        $0: "alcove",
         input: "x.csv",
         "server-port": [2222, 2223],
         "log-level": "silent",
@@ -1333,7 +1333,7 @@ test("handler: `-` input at an interactive terminal exits 64 (usage), not 69", a
       expect(
         handler({
           _: [],
-          $0: "psilink",
+          $0: "alcove",
           input: "-",
           "config-file": configFile,
           "key-file": keyFile,
@@ -1376,7 +1376,7 @@ test("handler warns when an expiring-soon token is not refreshed by a failed exc
     await expect(
       handler({
         _: [],
-        $0: "psilink",
+        $0: "alcove",
         input,
         "config-file": configFile,
         "key-file": keyFile,
@@ -1414,7 +1414,7 @@ test("handler: a result file the exchange could not write exits 73, not 69", asy
     await expect(
       handler({
         _: [],
-        $0: "psilink",
+        $0: "alcove",
         input,
         "config-file": configFile,
         "key-file": keyFile,
@@ -1455,7 +1455,7 @@ test("handler suppresses the advisory when a successful exchange refreshes the t
   try {
     await handler({
       _: [],
-      $0: "psilink",
+      $0: "alcove",
       input,
       "config-file": configFile,
       "key-file": keyFile,
@@ -1499,7 +1499,7 @@ async function delimiterReachingTheRun(
   vi.mocked(runProtocol).mockResolvedValueOnce({});
   await handler({
     _: [],
-    $0: "psilink",
+    $0: "alcove",
     input,
     "config-file": configFile,
     "key-file": keyFile,
@@ -1623,7 +1623,7 @@ test("handler: a delimiter outside the accepted set stops the run before anythin
     await expect(
       handler({
         _: [],
-        $0: "psilink",
+        $0: "alcove",
         input,
         "config-file": configFile,
         "key-file": keyFile,
@@ -1655,7 +1655,7 @@ test("handler: a refused delimiter stops the run before an @-file credential is 
     await expect(
       handler({
         _: [],
-        $0: "psilink",
+        $0: "alcove",
         input,
         "config-file": configFile,
         "key-file": keyFile,
@@ -1702,7 +1702,7 @@ async function signedExchangeRun(bound: string): Promise<Arguments> {
   fs.writeFileSync(input, "ssn\n123456789\n");
   return {
     _: [],
-    $0: "psilink",
+    $0: "alcove",
     input,
     "config-file": configFile,
     "key-file": keyFile,
@@ -1779,7 +1779,7 @@ test("handler takes the run's identity from the configuration", async () => {
   vi.mocked(runProtocol).mockResolvedValueOnce({});
   await handler({
     _: [],
-    $0: "psilink",
+    $0: "alcove",
     input,
     "config-file": configFile,
     "key-file": keyFile,
@@ -1801,7 +1801,7 @@ test("handler treats a blank --identity as absent, falling back to the config", 
   vi.mocked(runProtocol).mockResolvedValueOnce({});
   await handler({
     _: [],
-    $0: "psilink",
+    $0: "alcove",
     input,
     "config-file": configFile,
     "key-file": keyFile,
@@ -1828,7 +1828,7 @@ test("handler exits 64 on an --identity still holding the init placeholder", asy
     await expect(
       handler({
         _: [],
-        $0: "psilink",
+        $0: "alcove",
         input,
         "config-file": configFile,
         "key-file": keyFile,
@@ -1845,7 +1845,7 @@ test("handler exits 64 on an --identity still holding the init placeholder", asy
 test("handler runs a configuration with no identity, sending none", async () => {
   // `linkage_terms.identity` is optional, so a configuration that names this
   // party nothing runs -- the terms have no identity rather than a label the
-  // operator never chose, and nothing is read off the account psilink runs as.
+  // operator never chose, and nothing is read off the account Alcove runs as.
   const { identity: _dropped, ...unnamedTerms } = minimalLinkageTerms;
   fs.writeFileSync(
     configFile,
@@ -1862,7 +1862,7 @@ test("handler runs a configuration with no identity, sending none", async () => 
   vi.mocked(runProtocol).mockResolvedValueOnce({});
   await handler({
     _: [],
-    $0: "psilink",
+    $0: "alcove",
     input,
     "config-file": configFile,
     "key-file": keyFile,
@@ -1884,7 +1884,7 @@ test("handler trims a supplied --identity before using it", async () => {
   vi.mocked(runProtocol).mockResolvedValueOnce({});
   await handler({
     _: [],
-    $0: "psilink",
+    $0: "alcove",
     input,
     "config-file": configFile,
     "key-file": keyFile,
@@ -1932,7 +1932,7 @@ test("handler: --invitation provisions the key file when none exists and the exc
   try {
     await handler({
       _: [],
-      $0: "psilink",
+      $0: "alcove",
       input,
       "config-file": configFile,
       "key-file": keyFile,
@@ -1966,7 +1966,7 @@ test("handler: --invitation errors (exit 64) when a key file already exists and 
     await expect(
       handler({
         _: [],
-        $0: "psilink",
+        $0: "alcove",
         input,
         "config-file": configFile,
         "key-file": keyFile,
@@ -1993,7 +1993,7 @@ test("handler: --invitation with a malformed code fails closed (exit 64), writin
     await expect(
       handler({
         _: [],
-        $0: "psilink",
+        $0: "alcove",
         input,
         "config-file": configFile,
         "key-file": keyFile,
@@ -2045,7 +2045,7 @@ function filedropRun(): Arguments {
   fs.writeFileSync(input, "ssn\n123456789\n");
   return {
     _: [],
-    $0: "psilink",
+    $0: "alcove",
     input,
     "config-file": configFile,
     "key-file": keyFile,
@@ -2063,7 +2063,7 @@ test.each(ERROR_CLASS_EXIT_CODES)(
     await expectExchangeExit(
       {
         _: [],
-        $0: "psilink",
+        $0: "alcove",
         input,
         "config-file": configFile,
         "key-file": keyFile,
@@ -2115,7 +2115,7 @@ test("handler: the prepare-time guard completes before runProtocol on an sftp co
   try {
     await handler({
       _: [],
-      $0: "psilink",
+      $0: "alcove",
       input,
       "config-file": configFile,
       "key-file": keyFile,
@@ -2155,7 +2155,7 @@ test("handler: certificate mode with no partner pin runs as a first contact", as
   // configuration sits in a writable directory, so the run that will adopt a
   // pin is handed the file it will record it into.
   const core =
-    await vi.importActual<typeof import("@psilink/core")>("@psilink/core");
+    await vi.importActual<typeof import("@alcove/core")>("@alcove/core");
   fs.writeFileSync(
     configFile,
     YAML.stringify({
@@ -2174,7 +2174,7 @@ test("handler: certificate mode with no partner pin runs as a first contact", as
   vi.mocked(runProtocol).mockReset();
   await handler({
     _: [],
-    $0: "psilink",
+    $0: "alcove",
     input,
     "config-file": configFile,
     "key-file": keyFile,
@@ -2196,7 +2196,7 @@ test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
     // write bit on the file itself, so a read-only configuration in a writable
     // directory is a run that can pin and is let through.
     const core =
-      await vi.importActual<typeof import("@psilink/core")>("@psilink/core");
+      await vi.importActual<typeof import("@alcove/core")>("@alcove/core");
     fs.writeFileSync(
       configFile,
       YAML.stringify({
@@ -2219,7 +2219,7 @@ test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
     try {
       await handler({
         _: [],
-        $0: "psilink",
+        $0: "alcove",
         input,
         "config-file": configFile,
         "key-file": keyFile,
@@ -2241,10 +2241,10 @@ test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
     // and certificate, and only then dies at the adoption write. Held ahead of
     // the host-key probe, which is the first step to open a transport.
     const core =
-      await vi.importActual<typeof import("@psilink/core")>("@psilink/core");
+      await vi.importActual<typeof import("@alcove/core")>("@alcove/core");
     const readOnlyDir = path.join(dir, "readonly");
     fs.mkdirSync(readOnlyDir);
-    const readOnlyConfig = path.join(readOnlyDir, "psilink.yaml");
+    const readOnlyConfig = path.join(readOnlyDir, "alcove.yaml");
     fs.writeFileSync(
       readOnlyConfig,
       YAML.stringify({
@@ -2270,7 +2270,7 @@ test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
       await expect(
         handler({
           _: [],
-          $0: "psilink",
+          $0: "alcove",
           input,
           "config-file": readOnlyConfig,
           "key-file": keyFile,
@@ -2283,7 +2283,7 @@ test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
       const reported = mockState.errors.join("\n");
       expect(reported).toContain(readOnlyConfig);
       expect(reported).toContain("signing.partner_fingerprint");
-      expect(reported).toContain("psilink fingerprint");
+      expect(reported).toContain("alcove fingerprint");
       expect(reported).toContain("mount the configuration writable");
     } finally {
       exitSpy.mockRestore();
@@ -2302,7 +2302,7 @@ test("handler: certificate mode with an unnamed party exits 64 before runProtoco
   // credentials, terms, and data, and its remedy has to reach the operator as
   // exit 64.
   const core =
-    await vi.importActual<typeof import("@psilink/core")>("@psilink/core");
+    await vi.importActual<typeof import("@alcove/core")>("@alcove/core");
   const { identity: _named, ...unnamedTerms } = minimalLinkageTerms;
   fs.writeFileSync(
     configFile,
@@ -2327,7 +2327,7 @@ test("handler: certificate mode with an unnamed party exits 64 before runProtoco
     await expect(
       handler({
         _: [],
-        $0: "psilink",
+        $0: "alcove",
         input,
         "config-file": configFile,
         "key-file": keyFile,
@@ -2348,7 +2348,7 @@ test("handler: an unnamed party that signs nothing runs unchanged", async () => 
   // for: nothing is asked of an unnamed run that configures no receipt. Drives
   // the same real prepare, so the pass is core's own and not the stub's.
   const core =
-    await vi.importActual<typeof import("@psilink/core")>("@psilink/core");
+    await vi.importActual<typeof import("@alcove/core")>("@alcove/core");
   const { identity: _named, ...unnamedTerms } = minimalLinkageTerms;
   fs.writeFileSync(
     configFile,
@@ -2365,7 +2365,7 @@ test("handler: an unnamed party that signs nothing runs unchanged", async () => 
   try {
     await handler({
       _: [],
-      $0: "psilink",
+      $0: "alcove",
       input,
       "config-file": configFile,
       "key-file": keyFile,
@@ -2416,7 +2416,7 @@ test("handler: the outbound-consent surface runs before host-key trust", async (
   try {
     await handler({
       _: [],
-      $0: "psilink",
+      $0: "alcove",
       input,
       "config-file": configFile,
       "key-file": keyFile,
@@ -2447,7 +2447,7 @@ test("handler: an input that cannot satisfy the agreed terms exits 64 with no ho
     await expect(
       handler({
         _: [],
-        $0: "psilink",
+        $0: "alcove",
         input,
         "config-file": configFile,
         "key-file": keyFile,
@@ -2468,7 +2468,7 @@ test("handler: certificate mode naming no identity file is refused before either
   // A run the parsed configuration alone shows cannot finish, so it is refused
   // ahead of BOTH steps: the preparation, whose consent surface can stop for an
   // answer, and the first-use host-key step, whose probe connects and writes an
-  // accepted pin into psilink.yaml. The config below is unpinned sftp and pins
+  // accepted pin into alcove.yaml. The config below is unpinned sftp and pins
   // the partner's certificate, so the missing identity file is the only thing
   // that makes it unrunnable; the host-key step is stubbed file-wide, so the
   // config-file assertion adds that nothing else on the handler's path wrote it.
@@ -2494,7 +2494,7 @@ test("handler: certificate mode naming no identity file is refused before either
     await expect(
       handler({
         _: [],
-        $0: "psilink",
+        $0: "alcove",
         input,
         "config-file": configFile,
         "key-file": keyFile,
@@ -2554,7 +2554,7 @@ test("handler: the signing identity resolves before host-key trust", async () =>
   try {
     await handler({
       _: [],
-      $0: "psilink",
+      $0: "alcove",
       input,
       "config-file": configFile,
       "key-file": keyFile,
@@ -2593,7 +2593,7 @@ test("handler: a signing identity missing from its configured path exits 64 with
     await expect(
       handler({
         _: [],
-        $0: "psilink",
+        $0: "alcove",
         input,
         "config-file": configFile,
         "key-file": keyFile,

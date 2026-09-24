@@ -45,7 +45,7 @@ const versionRun = readFileSync(resolve(repoRoot, "Dockerfile"), "utf8")
   .split("\n")
   .map((line) => line.trim())
   .find(
-    (line) => line.startsWith("RUN ") && line.includes("VITE_PSILINK_VERSION"),
+    (line) => line.startsWith("RUN ") && line.includes("VITE_ALCOVE_VERSION"),
   )
   .replace(/^RUN /, "");
 
@@ -57,7 +57,7 @@ const [, manifestPath] = /require\('([^']+)'\)/.exec(readerExpression);
 
 let dir;
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), "psilink-version-gate-"));
+  dir = mkdtempSync(join(tmpdir(), "alcove-version-gate-"));
 });
 afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
@@ -97,7 +97,7 @@ function runInstruction({ output, status }) {
   );
   writeFileSync(
     join(bin, "npm"),
-    `#!/bin/sh\nprintf '%s' "\${VITE_PSILINK_VERSION-<unset>}" > '${record}'\n`,
+    `#!/bin/sh\nprintf '%s' "\${VITE_ALCOVE_VERSION-<unset>}" > '${record}'\n`,
   );
   chmodSync(join(bin, "node"), 0o755);
   chmodSync(join(bin, "npm"), 0o755);
@@ -119,7 +119,7 @@ function runInstruction({ output, status }) {
 
 describe("the manifest read the image build's version step performs", () => {
   it("yields the release version the manifest has", () => {
-    expect(readVersion('{"name":"psilink","version":"0.4.2"}')).toEqual({
+    expect(readVersion('{"name":"alcove","version":"0.4.2"}')).toEqual({
       status: 0,
       stdout: "0.4.2\n",
     });
@@ -130,7 +130,7 @@ describe("the manifest read the image build's version step performs", () => {
     // "undefined", which is non-empty and would sail through the gate below and
     // into the bundle. Yielding the empty string instead is what routes an
     // absent version into the gate rather than around it.
-    expect(readVersion('{"name":"psilink"}')).toEqual({
+    expect(readVersion('{"name":"alcove"}')).toEqual({
       status: 0,
       stdout: "\n",
     });

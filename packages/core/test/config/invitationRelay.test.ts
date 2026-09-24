@@ -95,7 +95,7 @@ describe("the invitation's relay locator", () => {
 
   test.each([
     ["a credential", { ...RELAY, credential: "hunter2" }],
-    ["a username", { ...RELAY, username: "1767229200:psilink" }],
+    ["a username", { ...RELAY, username: "1767229200:alcove" }],
     ["an unknown key", { ...RELAY, credentialType: "hmac-sha1" }],
   ])(
     "a locator holding %s is refused at decode and at mint",
@@ -185,7 +185,7 @@ describe("the invitation's relay locator", () => {
     const token = tokenWithEndpoint({
       channel: "webrtc",
       host: "signal.example",
-      relay: { turn: ["turns:psilink:secret@relay.example.org:443"] },
+      relay: { turn: ["turns:alcove:secret@relay.example.org:443"] },
     });
     await expect(decodeInvitation(await encodeRaw(token))).rejects.toThrow(
       /the 1st turn url names a user before its host/,

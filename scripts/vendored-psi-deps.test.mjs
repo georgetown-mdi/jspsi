@@ -9,8 +9,8 @@ import { describe, expect, it } from "vitest";
 // package the shipped type declarations import, and node-gyp-build, which
 // psi_native_node.js requires to resolve a prebuild. Upstream additionally
 // miscategorises a gRPC / protoc codegen set as runtime dependencies; the fork
-// holds those as devDependencies, so they stay out of every psilink install.
-// These assertions stand in for the "psilink loads no gRPC and no proto codegen
+// holds those as devDependencies, so they stay out of every Alcove install.
+// These assertions stand in for the "Alcove loads no gRPC and no proto codegen
 // at runtime" claim -- a re-roll that regresses the fork's manifest fails here
 // rather than silently restoring the surface, which is what a comment or a doc
 // note alone could not do. Rationale: docs/spec/DEPENDENCY_PINS.md.

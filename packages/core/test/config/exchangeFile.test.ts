@@ -327,12 +327,12 @@ test("connectionFromLocator: a webrtc locator expands to a valid webrtc connecti
     channel: "webrtc",
     host: "peer.example.org",
     port: 9000,
-    path: "/psilink",
+    path: "/alcove",
   });
   // The expansion is exactly the credential-free server locator, nothing more.
   expect(connection).toEqual({
     channel: "webrtc",
-    server: { host: "peer.example.org", port: 9000, path: "/psilink" },
+    server: { host: "peer.example.org", port: 9000, path: "/alcove" },
   });
   // And it validates as the shared exchange-file schema's own connection would:
   // the parse result (not the raw input) is what a composer persists.
@@ -367,7 +367,7 @@ test("connectionFromLocator: no credential field appears in a webrtc expansion, 
     channel: "webrtc",
     host: "peer.example.org",
     port: 9000,
-    path: "/psilink",
+    path: "/alcove",
   });
   if (connection.channel !== "webrtc")
     throw new Error("expected webrtc connection");

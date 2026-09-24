@@ -35,10 +35,10 @@
 // pass the pin while deferring to nothing.
 //
 // RULE 2, THE RESET. EXCHANGE_RECORD_VERSION is an internal development counter.
-// It has cycled freely -- through psilink-exchange-record/v1 and on up -- because
+// It has cycled freely -- through alcove-exchange-record/v1 and on up -- because
 // no published artifact contains any of its literals: packages/core/src/records/exchangeRecord.ts
 // does not exist at v0.1.0, the only release this project has tagged. First
-// publication ships the counter reset to psilink-exchange-record/v1, and the
+// publication ships the counter reset to alcove-exchange-record/v1, and the
 // reset is taken AT that release rather than earlier: re-using a
 // previously-cycled value mid-development would let a development artifact
 // written under the OLD v1 parse as the current version and fail on its field
@@ -120,7 +120,7 @@ export const CHECK_SOURCE = "scripts/check-exchange-record-version.mjs";
 
 /** The exchange-record version the recovery path has been driven against. Moving
  * it here is how the bump decision this check defers is recorded as taken. */
-export const RECORD_VERSION_PIN = "psilink-exchange-record/v8";
+export const RECORD_VERSION_PIN = "alcove-exchange-record/v9";
 
 /** The entry points the recovery from a version-invalidated accounting is built
  * on, per file. Named functions rather than a surface description: a declaration
@@ -136,7 +136,7 @@ export const RECOVERY_ENTRY_POINTS = {
 };
 
 /** The record format literal first publication ships. */
-export const RESET_RECORD_VERSION = "psilink-exchange-record/v1";
+export const RESET_RECORD_VERSION = "alcove-exchange-record/v1";
 
 /** The Release Checklist heading holding the obligations this check cannot
  * read: the artifacts to clear, and the order the reset is taken in. */

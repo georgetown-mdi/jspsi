@@ -14,7 +14,7 @@ import {
   DirectoryListingBoundsError,
   TransportOperationStalledError,
   UsageError,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { SSH2SFTPClientAdapter } from "../../../src/connection/ssh2SftpAdapter";
 import { MAX_FILENAME_LENGTH } from "../../../src/connection/listingGuard";

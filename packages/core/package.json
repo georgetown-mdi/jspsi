@@ -1,5 +1,5 @@
 {
-  "name": "@psilink/core",
+  "name": "@alcove/core",
   "version": "0.1.0",
   "description": "Library for linkage with private set intersection",
   "license": "Apache-2.0",

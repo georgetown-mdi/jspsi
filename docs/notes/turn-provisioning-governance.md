@@ -87,7 +87,7 @@ here by what the organization runs, because a partner-facing answer to "what
 will your security team accept" starts from what an organization would
 recognize in itself.
 
-| profile | you are here if | what it runs for psilink |
+| profile | you are here if | what it runs for Alcove |
 | --- | --- | --- |
 | **Credential service** | You already operate authenticated, internet-facing APIs, and one more is a platform team's ordinary work | An HTTPS endpoint that mints a per-exchange relay credential on request, in front of its own relay or a managed vendor's -- the [`ice_provision`](../EXCHANGE_REFERENCE.md#connectionice_provision) shape, which the CLI refuses today |
 | **Runbook relay** | You can run a VM from a runbook, keep it patched, and keep its certificate renewed | A persistent coturn from [`infra/relay/`](../../infra/relay/README.md): TLS on 443, shared-secret time-limited credentials, peer ranges denied |
@@ -128,7 +128,7 @@ governance has a stake in the relay the other chose.
 
 ### Outbound TLS on 443 to a partner's relay, against outbound SFTP
 
-psilink already asks a partner to connect outbound to a server the other party
+Alcove already asks a partner to connect outbound to a server the other party
 runs: an SFTP exchange does
 ([DEPLOYMENT.md](../DEPLOYMENT.md#sftp-server)). A partner-run relay asks for
 the same kind of connection, over a different path.
@@ -165,7 +165,7 @@ What the sources say about each difference:
   exempt it from inspection: Microsoft for Microsoft 365 [V1], Cisco for Webex
   media [V2], and Zoom for its domains [V3]. Asking a partner to exempt the
   relay's name is therefore an established kind of request; that it applies to
-  a psilink relay is an inference by analogy.
+  an Alcove relay is an inference by analogy.
 - **An explicit proxy moves browser media onto it.** Chrome's
   `WebRtcIPHandling` policy value `disable_non_proxied_udp` makes WebRTC use UDP
   SOCKS proxying or fall back to TCP proxying [V6], the proxy mode RFC 8828

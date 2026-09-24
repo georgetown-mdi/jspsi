@@ -12,7 +12,7 @@
 // consume apps, and the two apps never reach into each other (CLAUDE.md).
 //
 // npm workspaces symlinks each workspace into the root node_modules, so the app
-// package names `psilink` (apps/cli) and `jspsi` (apps/web) resolve as bare
+// package names `alcove` (apps/cli) and `alcove-web` (apps/web) resolve as bare
 // specifiers from anywhere in the tree: the ban covers those names, not only
 // relative paths.
 //
@@ -42,10 +42,10 @@ const PACKAGE_MESSAGE =
   "a package must not import from an app: apps consume packages, never the reverse. Move the shared code into a packages/ workspace and import it from the app.";
 
 const CLI_MESSAGE =
-  "apps/cli must not import from apps/web: the two apps share code only through @psilink/core. Move the shared code into packages/core/src.";
+  "apps/cli must not import from apps/web: the two apps share code only through @alcove/core. Move the shared code into packages/core/src.";
 
 const WEB_MESSAGE =
-  "apps/web must not import from apps/cli: the two apps share code only through @psilink/core. Move the shared code into packages/core/src.";
+  "apps/web must not import from apps/cli: the two apps share code only through @alcove/core. Move the shared code into packages/core/src.";
 
 /**
  * Cross-workspace import bans, keyed by the tree each one guards -- `packages`
@@ -55,7 +55,7 @@ const WEB_MESSAGE =
  */
 export const crossWorkspaceImportBans = {
   packages: [
-    { group: ["**/apps/**", "psilink", "jspsi"], message: PACKAGE_MESSAGE },
+    { group: ["**/apps/**", "alcove", "alcove-web"], message: PACKAGE_MESSAGE },
   ],
   cli: [
     {
@@ -64,7 +64,7 @@ export const crossWorkspaceImportBans = {
         "**/apps/web/**",
         "**/../web",
         "**/../web/**",
-        "jspsi",
+        "alcove-web",
       ],
       message: CLI_MESSAGE,
     },
@@ -76,7 +76,7 @@ export const crossWorkspaceImportBans = {
         "**/apps/cli/**",
         "**/../cli",
         "**/../cli/**",
-        "psilink",
+        "alcove",
       ],
       message: WEB_MESSAGE,
     },

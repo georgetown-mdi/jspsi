@@ -16,7 +16,7 @@ import type {
  * CLI worker's `workerData`; see {@link encodePsiWorkerInit}), so it is available
  * synchronously at worker startup and the worker's message channel then handles
  * only crypto requests. `{ type: "module" }` lets the worker use ESM imports
- * (`@psilink/core`, the WASM worker build). The real `Worker` is structurally wider
+ * (`@alcove/core`, the WASM worker build). The real `Worker` is structurally wider
  * than the narrow interface the host drives, so adapt it.
  */
 export const defaultSpawnPsiCryptoWorker: SpawnPsiCryptoWorker = (init) =>

@@ -6,7 +6,7 @@ import {
   generateSharedSecret,
   getDefaultLinkageTerms,
   snakeizeKeys,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { stringify as stringifyYaml } from "yaml";
 
@@ -330,7 +330,7 @@ describe("importManagedExchange", () => {
 });
 
 describe("importManagedExchangeFile routes by what the file is", () => {
-  /** The `psilink.yaml` the app's own command-line export writes, which is the
+  /** The `alcove.yaml` the app's own command-line export writes, which is the
    * file an operator brings back. */
   function configurationBytes(): string {
     return composeManagedCronExport(

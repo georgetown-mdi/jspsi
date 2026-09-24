@@ -40,7 +40,7 @@ import {
   UNRECOGNIZED_TRANSFORM_NOTE,
   unshownDeclaredNamesLine,
   UsageError,
-} from "@psilink/core";
+} from "@alcove/core";
 import {
   BEL,
   CONSENT_PROBE_TERMS,
@@ -52,7 +52,7 @@ import {
   RLO,
   consentRepresentationProbes,
   hostileVariants,
-} from "@psilink/core/testing";
+} from "@alcove/core/testing";
 import type {
   Algorithm,
   ConnectionConfig,
@@ -64,7 +64,7 @@ import type {
   LinkageStrategy,
   LinkageTerms,
   TransformStep,
-} from "@psilink/core";
+} from "@alcove/core";
 
 // Mock only the two terminal reads; the rest of util/prompt, and every other
 // util module (util/dataIo's openInputSource, which the `-` stdin tests exercise
@@ -148,8 +148,8 @@ function testOptions(
 ): CommonBootstrapOptions {
   const id = `${process.pid}-${optionsCounter++}`;
   return {
-    configFile: path.join(tmpdir(), `psilink-accept-test-${id}.yaml`),
-    keyFile: path.join(tmpdir(), `psilink-accept-test-${id}.key`),
+    configFile: path.join(tmpdir(), `alcove-accept-test-${id}.yaml`),
+    keyFile: path.join(tmpdir(), `alcove-accept-test-${id}.key`),
     identity: "Agency B",
     record: false,
     eventStream: false,
@@ -276,7 +276,7 @@ describe("offline vs online dispatch", () => {
     };
     expect(offline).toThrow(UsageError);
     expect(offline).toThrow(
-      "psilink accept --identity IDENTITY INVITATION [INPUT_FILE] [OUTPUT_FILE]",
+      "alcove accept --identity IDENTITY INVITATION [INPUT_FILE] [OUTPUT_FILE]",
     );
     const online = (): void => {
       resolveAcceptPositionals([
@@ -289,7 +289,7 @@ describe("offline vs online dispatch", () => {
     };
     expect(online).toThrow(UsageError);
     expect(online).toThrow(
-      "psilink accept --identity IDENTITY URL INVITATION INPUT_FILE " +
+      "alcove accept --identity IDENTITY URL INVITATION INPUT_FILE " +
         "[OUTPUT_FILE]",
     );
     // The classification an unattended caller reads: a positional it typed is its
@@ -369,7 +369,7 @@ describe("decode + validate (the gate before the prompt)", () => {
     const viaArgv = await decodeAndValidateInvitation(wrapped);
 
     const dir = fs.mkdtempSync(
-      path.join(tmpdir(), "psilink-accept-invitation-atfile-"),
+      path.join(tmpdir(), "alcove-accept-invitation-atfile-"),
     );
     const file = path.join(dir, "invitation.txt");
     fs.writeFileSync(file, wrapped);
@@ -668,7 +668,7 @@ describe("validateAccept (the no-commit phase, before the prompt)", () => {
           mode: "online",
           url: new URL("sftp://host/drop"),
           invitation: encoded,
-          input: "/nonexistent/psilink-input.csv",
+          input: "/nonexistent/alcove-input.csv",
         },
         options: testOptions(),
         log: silentLog,
@@ -703,7 +703,7 @@ describe("validateAccept (the no-commit phase, before the prompt)", () => {
 // --- `--consent-to-terms` (consentToTerms) relaxes the `-` rejection ---------
 // With the prompt skipped, stdin is free for the CSV, so `-` is read rather than
 // rejected. Run validateAccept with process.stdin replaced by a byte stream that
-// emits a CSV then EOF, mirroring `cat data.csv | psilink accept --consent-to-terms - INVITE`.
+// emits a CSV then EOF, mirroring `cat data.csv | alcove accept --consent-to-terms - INVITE`.
 
 /** A byte-stream stand-in for process.stdin that emits `csv` then ends. */
 function makeStdin(csv: string): Readable {
@@ -768,7 +768,7 @@ describe("'--consent-to-terms' (consentToTerms) relaxes the '-' rejection", () =
     const csv =
       "first_name,last_name,dob,ssn\nAlice,Smith,1990-01-02,123456789\n";
     const dir = fs.mkdtempSync(
-      path.join(tmpdir(), "psilink-accept-online-stdin-"),
+      path.join(tmpdir(), "alcove-accept-online-stdin-"),
     );
     const encoded = await encodeInvitation(
       sampleToken(new Date(Date.now() + 3_600_000).toISOString()),
@@ -783,8 +783,8 @@ describe("'--consent-to-terms' (consentToTerms) relaxes the '-' rejection", () =
             input: "-",
           },
           options: testOptions({
-            configFile: path.join(dir, "psilink.yaml"),
-            keyFile: path.join(dir, ".psilink.key"),
+            configFile: path.join(dir, "alcove.yaml"),
+            keyFile: path.join(dir, ".alcove.key"),
           }),
           consentToTerms: true,
           log: silentLog,
@@ -813,7 +813,7 @@ describe("'--consent-to-terms' (consentToTerms) relaxes the '-' rejection", () =
           mode: "online",
           url: new URL("ws://host/path"),
           invitation: encoded,
-          input: "/nonexistent/psilink-input.csv",
+          input: "/nonexistent/alcove-input.csv",
         },
         options: testOptions(),
         log: silentLog,
@@ -835,7 +835,7 @@ const CPP_CSV =
 describe("connection_per_poll ignored on a non-sftp online URL", () => {
   test("validateAccept: online file:// URL with --connection-per-poll warns it is ignored", async () => {
     const dir = fs.mkdtempSync(
-      path.join(tmpdir(), "psilink-accept-cpp-filedrop-"),
+      path.join(tmpdir(), "alcove-accept-cpp-filedrop-"),
     );
     const input = path.join(dir, "input.csv");
     fs.writeFileSync(input, CPP_CSV);
@@ -854,8 +854,8 @@ describe("connection_per_poll ignored on a non-sftp online URL", () => {
           input,
         },
         options: testOptions({
-          configFile: path.join(dir, "psilink.yaml"),
-          keyFile: path.join(dir, ".psilink.key"),
+          configFile: path.join(dir, "alcove.yaml"),
+          keyFile: path.join(dir, ".alcove.key"),
           connectionPerPoll: true,
         }),
         log,
@@ -876,7 +876,7 @@ describe("connection_per_poll ignored on a non-sftp online URL", () => {
   });
 
   test("validateAccept: online sftp URL with --connection-per-poll does not warn it is ignored", async () => {
-    const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-accept-cpp-sftp-"));
+    const dir = fs.mkdtempSync(path.join(tmpdir(), "alcove-accept-cpp-sftp-"));
     const input = path.join(dir, "input.csv");
     fs.writeFileSync(input, CPP_CSV);
     const encoded = await encodeInvitation(
@@ -894,8 +894,8 @@ describe("connection_per_poll ignored on a non-sftp online URL", () => {
           input,
         },
         options: testOptions({
-          configFile: path.join(dir, "psilink.yaml"),
-          keyFile: path.join(dir, ".psilink.key"),
+          configFile: path.join(dir, "alcove.yaml"),
+          keyFile: path.join(dir, ".alcove.key"),
           connectionPerPoll: true,
           // A long poll interval keeps the wasteful-short-interval advisory silent
           // too, so no connection_per_poll warning of any kind appears on sftp.
@@ -924,7 +924,7 @@ const FUTURE = () => new Date(Date.now() + 3_600_000).toISOString();
 // pre-flight reasons about column names, not values). Returns the path.
 function writeInputCSV(columns: string[]): string {
   const id = `${process.pid}-${optionsCounter++}`;
-  const file = path.join(tmpdir(), `psilink-accept-input-${id}.csv`);
+  const file = path.join(tmpdir(), `alcove-accept-input-${id}.csv`);
   fs.writeFileSync(
     file,
     `${columns.join(",")}\n${columns.map(() => "x").join(",")}\n`,
@@ -1198,7 +1198,7 @@ describe("the count-only shape, at the accept boundary", () => {
     // becoming an Error, so the sink is where they are escaped.
     expect(refused).not.toContain("\u200d");
     // Offline acceptance completes, so it says where the refusal actually arrives.
-    expect(refused).toContain("psilink exchange");
+    expect(refused).toContain("alcove exchange");
   });
 
   test("validateAccept: online states that the acceptance itself stops, and it does", async () => {
@@ -1216,7 +1216,7 @@ describe("the count-only shape, at the accept boundary", () => {
     });
     const refused = refusedDisclosureWarning(warnings);
     expect(refused).toContain("exit 64");
-    expect(refused).not.toContain("psilink exchange");
+    expect(refused).not.toContain("alcove exchange");
     expect(error).toBeInstanceOf(UsageError);
     // The refusal the warning describes, not some other usage error on the path.
     expect((error as Error).message).toContain("payload.send");
@@ -1330,7 +1330,7 @@ describe("the count-only shape, at the accept boundary", () => {
     // rerunning with a fixed CSV to learn it.
     const missingInput = path.join(
       tmpdir(),
-      `psilink-accept-absent-${process.pid}-${optionsCounter++}.csv`,
+      `alcove-accept-absent-${process.pid}-${optionsCounter++}.csv`,
     );
     const log = getLogger("accept-offline-override-warn-before-abort");
     log.setLevel("silent");
@@ -1366,7 +1366,7 @@ describe("the count-only shape, at the accept boundary", () => {
     // applyConnectionOverrides, so the override takes effect and no
     // ignored-override warning is emitted.
     const dir = fs.mkdtempSync(
-      path.join(tmpdir(), "psilink-accept-online-override-"),
+      path.join(tmpdir(), "alcove-accept-online-override-"),
     );
     const input = path.join(dir, "input.csv");
     fs.writeFileSync(
@@ -1386,8 +1386,8 @@ describe("the count-only shape, at the accept boundary", () => {
           input,
         },
         options: testOptions({
-          configFile: path.join(dir, "psilink.yaml"),
-          keyFile: path.join(dir, ".psilink.key"),
+          configFile: path.join(dir, "alcove.yaml"),
+          keyFile: path.join(dir, ".alcove.key"),
           serverUsername: "alice",
         }),
         log,
@@ -1472,7 +1472,7 @@ describe("the count-only shape, at the accept boundary", () => {
     // applyConnectionOverrides, so a connection-options override takes effect and
     // no ignored-override warning is emitted.
     const dir = fs.mkdtempSync(
-      path.join(tmpdir(), "psilink-accept-online-opt-override-"),
+      path.join(tmpdir(), "alcove-accept-online-opt-override-"),
     );
     const input = path.join(dir, "input.csv");
     fs.writeFileSync(
@@ -1492,8 +1492,8 @@ describe("the count-only shape, at the accept boundary", () => {
           input,
         },
         options: testOptions({
-          configFile: path.join(dir, "psilink.yaml"),
-          keyFile: path.join(dir, ".psilink.key"),
+          configFile: path.join(dir, "alcove.yaml"),
+          keyFile: path.join(dir, ".alcove.key"),
           maxReconnectAttempts: 5,
         }),
         log,
@@ -1568,7 +1568,7 @@ describe("the WebRTC peer-addressing role", () => {
   test("validateAccept: offline stamps role: acceptor onto a seeded webrtc connection", async () => {
     // The accepting side derives its WebRTC rendezvous peer id from the `acceptor`
     // label, and the persisted connection block is the only place a later
-    // `psilink exchange` can learn which side it is on -- the operator never
+    // `alcove exchange` can learn which side it is on -- the operator never
     // authors it. Given no input file this acceptance writes that block and stops,
     // so the stamp is asserted on the connection it writes.
     const endpoint: ConnectionEndpoint = {
@@ -1790,7 +1790,7 @@ describe("accepting and running a webrtc exchange in one command", () => {
 
   test("validateAccept: a webrtc invitation with no input file keeps the two-command shape", async () => {
     // No dataset, so there is no exchange to run: the acceptance writes the
-    // configuration and key file, and `psilink exchange` conducts it later.
+    // configuration and key file, and `alcove exchange` conducts it later.
     const encoded = await encodeInvitation(
       sampleToken(FUTURE(), WEBRTC_ENDPOINT),
     );
@@ -1830,7 +1830,7 @@ describe("accepting and running a webrtc exchange in one command", () => {
   });
 
   test("validateAccept: a webrtc acceptance over a kept configuration keeps the two-command shape", async () => {
-    // The kept configuration governs its own exchange -- `psilink exchange` loads
+    // The kept configuration governs its own exchange -- `alcove exchange` loads
     // it, resolves its @path references and its own server.key/secure, and dials
     // what it says -- so running the endpoint-built connection here would dial a
     // coordination server that configuration does not name.
@@ -1859,7 +1859,7 @@ describe("accepting and running a webrtc exchange in one command", () => {
         messages.some(
           (m) =>
             m.includes("keeps the existing configuration") &&
-            m.includes("psilink exchange"),
+            m.includes("alcove exchange"),
         ),
       ).toBe(true);
     } finally {
@@ -2042,9 +2042,9 @@ async function acceptOverKeptConfig(params: {
     logFile,
     consentToTerms = false,
   } = params;
-  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-accept-kept-"));
-  const configFile = path.join(dir, "psilink.yaml");
-  const keyFile = path.join(dir, ".psilink.key");
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "alcove-accept-kept-"));
+  const configFile = path.join(dir, "alcove.yaml");
+  const keyFile = path.join(dir, ".alcove.key");
   const input = path.join(dir, "input.csv");
   fs.writeFileSync(
     input,
@@ -2338,7 +2338,7 @@ describe("reconciling a pre-existing config", () => {
   });
 
   test("validateAccept: the no-effect notice escapes both labels it reports", async () => {
-    // Neither value is psilink's: one was typed at the command line and one read
+    // Neither value is Alcove's: one was typed at the command line and one read
     // out of a file, and the consent-surface sink this notice takes is their
     // display boundary.
     const flag = `Agency B${ESC}[0m`;
@@ -2590,7 +2590,7 @@ describe("reconciling a pre-existing config", () => {
             invitation: encoded,
             // Never read: the reconcile check throws before the input is loaded,
             // which is also before any network activity (so no acceptance is sent).
-            input: "/nonexistent/psilink-input.csv",
+            input: "/nonexistent/alcove-input.csv",
           },
           options,
           log: silentLog,
@@ -2604,14 +2604,14 @@ describe("reconciling a pre-existing config", () => {
   });
 
   test("validateAccept: online reuse warns (does not abort) on a differing --server-port override", async () => {
-    const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-accept-online-"));
+    const dir = fs.mkdtempSync(path.join(tmpdir(), "alcove-accept-online-"));
     const input = path.join(dir, "input.csv");
     fs.writeFileSync(
       input,
       "first_name,last_name,dob,ssn\nAlice,Smith,1990-01-02,123456789\n",
     );
-    const configFile = path.join(dir, "psilink.yaml");
-    const keyFile = path.join(dir, ".psilink.key");
+    const configFile = path.join(dir, "alcove.yaml");
+    const keyFile = path.join(dir, ".alcove.key");
     // Terms and host (the abort fields) agree, so reconcile proceeds; only the
     // overridden port differs from the saved 22 -- a "how you reach it" detail
     // that must warn and apply, not abort.
@@ -2673,8 +2673,8 @@ describe("reconciling a pre-existing config", () => {
     keyFile: string;
     input: string;
   } {
-    const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-accept-delim-"));
-    const configFile = path.join(dir, "psilink.yaml");
+    const dir = fs.mkdtempSync(path.join(tmpdir(), "alcove-accept-delim-"));
+    const configFile = path.join(dir, "alcove.yaml");
     saveConfig(configFile, {
       connection: { channel: "filedrop", path: "/mnt/share" },
       linkageTerms: sampleTerms("Acceptor Org"),
@@ -2685,7 +2685,7 @@ describe("reconciling a pre-existing config", () => {
       input,
       "first_name|last_name|dob|ssn\nAlice|Smith|1990-01-02|123456789\n",
     );
-    return { dir, configFile, keyFile: path.join(dir, ".psilink.key"), input };
+    return { dir, configFile, keyFile: path.join(dir, ".alcove.key"), input };
   }
 
   test("validateAccept: the kept configuration's csv_delimiter reads this acceptance's input", async () => {
@@ -2810,7 +2810,7 @@ function onlineSplitFixture(): {
   configFile: string;
   keyFile: string;
 } {
-  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-accept-split-"));
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "alcove-accept-split-"));
   const input = path.join(dir, "input.csv");
   fs.writeFileSync(
     input,
@@ -2819,8 +2819,8 @@ function onlineSplitFixture(): {
   return {
     dir,
     input,
-    configFile: path.join(dir, "psilink.yaml"),
-    keyFile: path.join(dir, ".psilink.key"),
+    configFile: path.join(dir, "alcove.yaml"),
+    keyFile: path.join(dir, ".alcove.key"),
   };
 }
 
@@ -3175,7 +3175,7 @@ describe("displayInvitation: the declared terms it discloses (columns, citations
   test("displayInvitation: the rule-set citation displays as the partner's word, and is absent when none is cited", () => {
     // The citation is the inviting party's own claim about its rules, so the block
     // holds the trust-contingent marker rather than displaying as a provenance
-    // psilink vouched for. An invitation citing nothing prints no line:
+    // Alcove vouched for. An invitation citing nothing prints no line:
     // hand-authored rules have no citation, and inventing one would attribute them.
     const log = getLogger("accept-display-rule-set-test");
     log.setLevel("silent");
@@ -4144,7 +4144,7 @@ describe("displayInvitation: the declared terms it discloses (columns, citations
     );
   });
 
-  test("displayInvitation: a sole-receiver deduplicating term states psilink presents the acceptor no grouping when the inviter alone receives", () => {
+  test("displayInvitation: a sole-receiver deduplicating term states Alcove presents the acceptor no grouping when the inviter alone receives", () => {
     // The other output shape a deduplicating invitation can take: the inviting
     // party receives the result and shares none of it, so this party is sent no
     // table and is presented no grouping. The shared-result sentence would tell it
@@ -4168,7 +4168,7 @@ describe("displayInvitation: the declared terms it discloses (columns, citations
     );
     // The limit on that withholding is its own classified fact, rendered from the
     // shared table at the same level as the statement it qualifies: what the
-    // statement says psilink presents, this says the rounds still hold.
+    // statement says Alcove presents, this says the rounds still hold.
     expect(soleReceiver).toContain(
       `    ${CONSENT_FACTS.duplicateGroupingDisplayLimit.note}`,
     );
@@ -4585,7 +4585,7 @@ const COUNT_ONLY_STATEMENT =
   "records match.";
 const COUNT_ONLY_INPUT_CHOICE_BOUND =
   "Not enforced against your partner's choice of input: a count-only exchange " +
-  "bounds what psilink hands your partner, not what they can learn by choosing " +
+  "bounds what Alcove hands your partner, not what they can learn by choosing " +
   "which records to ask about. A crafted list, or a second run differing by one " +
   "record, turns a count into an answer about one person.";
 
@@ -4872,7 +4872,7 @@ describe("displayInvitation: linkage-key detail, heading order, and the repeated
   test("displayInvitation: a transform this version cannot explain is marked as unrecognized", () => {
     // A declared function name core does not recognize has neither a literal slice
     // phrase nor a glossary description, so unmarked it prints in exactly the shape
-    // of a recognized rule minus one line -- indistinguishable from a rule psilink
+    // of a recognized rule minus one line -- indistinguishable from a rule Alcove
     // understands. A rule this version cannot explain earns the same explicitness as
     // one it cannot apply.
     const log = getLogger("accept-display-unknown-transform-test");
@@ -5197,7 +5197,7 @@ describe("handler: repeated single-value flag", () => {
     try {
       await acceptHandler({
         _: [],
-        $0: "psilink",
+        $0: "alcove",
         identity: "Agency B",
         args: ["sftp://host/drop", "INVITATION", "input.csv"],
         "server-port": [2222, 2223],
@@ -5218,9 +5218,9 @@ describe("handler: repeated single-value flag", () => {
     // which also lands a mistyped --server-usernam in the positionals; it must be
     // rejected before the invitation decode, the confirmation prompt, or any file
     // write -- not absorbed as the invitation positional.
-    const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-accept-unknown-"));
-    const configFile = path.join(dir, "psilink.yaml");
-    const keyFile = path.join(dir, ".psilink.key");
+    const dir = fs.mkdtempSync(path.join(tmpdir(), "alcove-accept-unknown-"));
+    const configFile = path.join(dir, "alcove.yaml");
+    const keyFile = path.join(dir, ".alcove.key");
     const exit = vi
       .spyOn(process, "exit")
       .mockImplementation((() => undefined) as never);
@@ -5235,7 +5235,7 @@ describe("handler: repeated single-value flag", () => {
       );
       await acceptHandler({
         _: [],
-        $0: "psilink",
+        $0: "alcove",
         identity: "Agency B",
         args: ["--server-usernam", "u", encoded, "input.csv"],
         "config-file": configFile,
@@ -5265,7 +5265,7 @@ function offlineAcceptFixture(): {
   configFile: string;
   keyFile: string;
 } {
-  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-accept-consent-"));
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "alcove-accept-consent-"));
   const input = path.join(dir, "input.csv");
   fs.writeFileSync(
     input,
@@ -5274,15 +5274,15 @@ function offlineAcceptFixture(): {
   return {
     dir,
     input,
-    configFile: path.join(dir, "psilink.yaml"),
-    keyFile: path.join(dir, ".psilink.key"),
+    configFile: path.join(dir, "alcove.yaml"),
+    keyFile: path.join(dir, ".alcove.key"),
   };
 }
 
 describe("handler: '--consent-to-terms' gates the confirmation prompt", () => {
   test("handler: at a terminal with no --identity, the answer lands in the config it writes", async () => {
     // The whole point of asking: the label reaches the file this acceptance
-    // writes, so the later `psilink exchange` over it sends the name the operator
+    // writes, so the later `alcove exchange` over it sends the name the operator
     // gave here. Both questions belong to one session -- the identity first, then
     // the terms and their y/N -- so the consent prompt is answered too.
     const { dir, input, configFile, keyFile } = offlineAcceptFixture();
@@ -5299,7 +5299,7 @@ describe("handler: '--consent-to-terms' gates the confirmation prompt", () => {
       await withStdinStream(ttyStream(), () =>
         acceptHandler({
           _: [],
-          $0: "psilink",
+          $0: "alcove",
           args: [encoded, input],
           "config-file": configFile,
           "key-file": keyFile,
@@ -5339,7 +5339,7 @@ describe("handler: '--consent-to-terms' gates the confirmation prompt", () => {
       await withStdinStream(makeStdin(""), () =>
         acceptHandler({
           _: [],
-          $0: "psilink",
+          $0: "alcove",
           args: [encoded, input],
           "config-file": configFile,
           "key-file": keyFile,
@@ -5377,7 +5377,7 @@ describe("handler: '--consent-to-terms' gates the confirmation prompt", () => {
       await withStdinStream(ttyStream(), () =>
         acceptHandler({
           _: [],
-          $0: "psilink",
+          $0: "alcove",
           args: [encoded, input],
           "consent-to-terms": true,
           "config-file": configFile,
@@ -5414,7 +5414,7 @@ describe("handler: '--consent-to-terms' gates the confirmation prompt", () => {
       );
       await acceptHandler({
         _: [],
-        $0: "psilink",
+        $0: "alcove",
         identity: "Agency B",
         args: [encoded, input],
         "consent-to-terms": true,
@@ -5434,7 +5434,7 @@ describe("handler: '--consent-to-terms' gates the confirmation prompt", () => {
   });
 
   test("handler: an accepted webrtc invitation writes role: acceptor into the config", async () => {
-    // What reaches disk is what the later `psilink exchange` reads, so assert the
+    // What reaches disk is what the later `alcove exchange` reads, so assert the
     // written file rather than the in-memory connection: the field has to survive
     // the spec's snake_case serialization and parse back off the schema. Given no
     // input file this acceptance writes that configuration and stops, which is the
@@ -5453,7 +5453,7 @@ describe("handler: '--consent-to-terms' gates the confirmation prompt", () => {
       );
       await acceptHandler({
         _: [],
-        $0: "psilink",
+        $0: "alcove",
         identity: "Agency B",
         args: [encoded],
         "consent-to-terms": true,
@@ -5478,7 +5478,7 @@ describe("handler: '--consent-to-terms' gates the confirmation prompt", () => {
 
   test("handler: an accepted webrtc invitation's relay is written as invitation_relay, leaving turn and stun unset", async () => {
     // The configuration is where the partner's signaling endpoint is kept for
-    // every later `psilink exchange`, so the relay is kept there too -- beside
+    // every later `alcove exchange`, so the relay is kept there too -- beside
     // this party's own relay settings, not in them.
     const { dir, configFile, keyFile } = offlineAcceptFixture();
     const exit = vi
@@ -5499,7 +5499,7 @@ describe("handler: '--consent-to-terms' gates the confirmation prompt", () => {
       );
       await acceptHandler({
         _: [],
-        $0: "psilink",
+        $0: "alcove",
         identity: "Agency B",
         args: [encoded],
         "consent-to-terms": true,
@@ -5523,8 +5523,8 @@ describe("handler: '--consent-to-terms' gates the confirmation prompt", () => {
     }
   });
 
-  test("handler: a no-input webrtc acceptance points the operator at psilink exchange, not a second accept", async () => {
-    // A second `psilink accept` on the key file this run just wrote would hit
+  test("handler: a no-input webrtc acceptance points the operator at alcove exchange, not a second accept", async () => {
+    // A second `alcove accept` on the key file this run just wrote would hit
     // assertNoProvisionConflicts's unconditional key-conflict gate in
     // validateAccept and refuse, so the guidance must name the command that
     // actually works -- matching docs/CLI.md's "No INPUT_FILE" guidance.
@@ -5546,7 +5546,7 @@ describe("handler: '--consent-to-terms' gates the confirmation prompt", () => {
       );
       await acceptHandler({
         _: [],
-        $0: "psilink",
+        $0: "alcove",
         identity: "Agency B",
         args: [encoded],
         "consent-to-terms": true,
@@ -5558,7 +5558,7 @@ describe("handler: '--consent-to-terms' gates the confirmation prompt", () => {
       expect(exit).not.toHaveBeenCalled();
       const stderr = stdio.stderrWrites.join("");
       expect(stderr).toContain(
-        "Run 'psilink exchange' with your input file to conduct the exchange.",
+        "Run 'alcove exchange' with your input file to conduct the exchange.",
       );
       expect(stderr).not.toContain("accept' to accept and run it in one");
     } finally {
@@ -5592,7 +5592,7 @@ describe("handler: '--consent-to-terms' gates the confirmation prompt", () => {
       );
       await acceptHandler({
         _: [],
-        $0: "psilink",
+        $0: "alcove",
         identity: "Agency B",
         args: [encoded],
         "consent-to-terms": true,
@@ -5641,7 +5641,7 @@ describe("handler: '--consent-to-terms' gates the confirmation prompt", () => {
       });
       await acceptHandler({
         _: [],
-        $0: "psilink",
+        $0: "alcove",
         identity: "Agency B",
         args: [encoded, input, output],
         "consent-to-terms": true,
@@ -5683,7 +5683,7 @@ describe("handler: '--consent-to-terms' gates the confirmation prompt", () => {
   test("handler: --peer-timeout reaches the run and the configuration it writes", async () => {
     // One connection is both the run's and the bootstrap's, so the value the
     // dial waits on is the peer_timeout_ms the written configuration holds and
-    // a later unattended `psilink exchange` inherits. No run-only override is
+    // a later unattended `alcove exchange` inherits. No run-only override is
     // passed, which is what keeps the two the same value.
     const { dir, input, configFile, keyFile } = offlineAcceptFixture();
     const runOnlineBootstrapMock = vi.mocked(runOnlineBootstrap);
@@ -5701,7 +5701,7 @@ describe("handler: '--consent-to-terms' gates the confirmation prompt", () => {
       );
       await acceptHandler({
         _: [],
-        $0: "psilink",
+        $0: "alcove",
         identity: "Agency B",
         args: [encoded, input, path.join(dir, "results.csv")],
         "consent-to-terms": true,
@@ -5744,7 +5744,7 @@ describe("handler: '--consent-to-terms' gates the confirmation prompt", () => {
       );
       await acceptHandler({
         _: [],
-        $0: "psilink",
+        $0: "alcove",
         identity: "Agency B",
         args: [encoded, input],
         "config-file": configFile,
@@ -5782,7 +5782,7 @@ describe("handler: '--consent-to-terms' gates the confirmation prompt", () => {
       );
       await acceptHandler({
         _: [],
-        $0: "psilink",
+        $0: "alcove",
         identity: "Agency B",
         args: [encoded, input],
         "consent-to-terms": true,
@@ -5836,7 +5836,7 @@ describe("handler: '--consent-to-terms' gates the confirmation prompt", () => {
         const encoded = await encodeInvitation(token);
         await acceptHandler({
           _: [],
-          $0: "psilink",
+          $0: "alcove",
           identity: "Agency B",
           args: [encoded, input],
           "consent-to-terms": true,
@@ -5886,7 +5886,7 @@ describe("handler: '--consent-to-terms' gates the confirmation prompt", () => {
       );
       await acceptHandler({
         _: [],
-        $0: "psilink",
+        $0: "alcove",
         identity: "Agency B",
         args: [encoded, input],
         "config-file": configFile,
@@ -5925,7 +5925,7 @@ describe("handler: '--consent-to-terms' gates the confirmation prompt", () => {
       const encoded = await encodeInvitation(sampleToken(FUTURE()));
       await acceptHandler({
         _: [],
-        $0: "psilink",
+        $0: "alcove",
         identity: "Agency B",
         args: [encoded, input],
         "config-file": configFile,
@@ -6066,7 +6066,7 @@ async function runOfflineAcceptCapturingStdio(params: {
   try {
     await acceptHandler({
       _: [],
-      $0: "psilink",
+      $0: "alcove",
       identity: "Agency B",
       args: [encoded, ...(positionals ?? [fixture.input])],
       "config-file": fixture.configFile,
@@ -6632,7 +6632,7 @@ describe("handler: the prompt's copy has the redaction on its own", () => {
   test("handler: an armored inviting-party identity is refused at the decode", async () => {
     // The other rendered partner value the fixture above cannot plant. The
     // surface would have shown the redaction marker where the partner names
-    // itself, which a reader cannot tell from a marker psilink placed, so the
+    // itself, which a reader cannot tell from a marker Alcove placed, so the
     // decode refuses the invitation and the refusal reaches the operator
     // redacted.
     const base = sampleToken(FUTURE());
@@ -6790,7 +6790,7 @@ describe("handler: online accept threads the token commitment to the persistence
       });
       await acceptHandler({
         _: [],
-        $0: "psilink",
+        $0: "alcove",
         identity: "Agency B",
         args: ["sftp://host/drop", encoded, input],
         "consent-to-terms": true,
@@ -6845,7 +6845,7 @@ describe("handler: online accept threads the token commitment to the persistence
         });
         await acceptHandler({
           _: [],
-          $0: "psilink",
+          $0: "alcove",
           identity: "Agency B",
           args: [platformFileUrl("/mnt/share").href, encoded, input],
           "consent-to-terms": true,
@@ -6897,12 +6897,12 @@ async function runOfflineAcceptReuse(params: {
     });
     await acceptHandler({
       _: [],
-      $0: "psilink",
+      $0: "alcove",
       identity: "Agency B",
       args: params.input !== undefined ? [encoded, params.input] : [encoded],
       "consent-to-terms": true,
       "config-file": params.configFile,
-      "key-file": path.join(path.dirname(params.configFile), ".psilink.key"),
+      "key-file": path.join(path.dirname(params.configFile), ".alcove.key"),
       "log-level": "silent",
       record: false,
     } as unknown as Arguments);
@@ -6948,7 +6948,7 @@ describe("handler: offline accept-reuse refreshes the received-payload commitmen
   test("handler: accept-reuse leaves the kept configuration's identity untouched", async () => {
     // The other half of the stored label winning: the acceptance runs under the
     // file's label and leaves the file as it found it. A flag that rewrote the
-    // field here would rename the party for every later `psilink exchange`, out of
+    // field here would rename the party for every later `alcove exchange`, out of
     // a run whose one intended effect is a new key file.
     const { dir, input, configFile } = offlineAcceptFixture();
     try {
@@ -7167,7 +7167,7 @@ describe("handler: offline accept-reuse refreshes the invitation's relay", () =>
 describe("the acceptance's terms-side commitment reaches the config", () => {
   test("handler: offline accept writes the invitation's declared deduplicate to the config", async () => {
     // Offline accept writes a config and stops, so the binding the invitation
-    // declared has to reach DISK or the later `psilink exchange` holds the partner
+    // declared has to reach DISK or the later `alcove exchange` holds the partner
     // to nothing. Both booleans, and read back off the schema so the snake_case
     // serialization is part of what is pinned: `false` is a real declaration, and
     // the one a hostile inviter would widen away from.
@@ -7184,7 +7184,7 @@ describe("the acceptance's terms-side commitment reaches the config", () => {
         });
         await acceptHandler({
           _: [],
-          $0: "psilink",
+          $0: "alcove",
           identity: "Agency B",
           args: [encoded, input],
           "consent-to-terms": true,
@@ -7261,7 +7261,7 @@ describe("the acceptance's terms-side commitment reaches the config", () => {
         });
         await acceptHandler({
           _: [],
-          $0: "psilink",
+          $0: "alcove",
           identity: "Agency B",
           args: ["sftp://host/drop", encoded, input],
           "consent-to-terms": true,
@@ -7305,9 +7305,9 @@ async function reuseLockInWarnings(params: {
   mode?: "online" | "offline";
 }): Promise<string[]> {
   const { recorded, disclosed, loggerName, mode = "offline" } = params;
-  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-accept-lockin-"));
-  const configFile = path.join(dir, "psilink.yaml");
-  const keyFile = path.join(dir, ".psilink.key");
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "alcove-accept-lockin-"));
+  const configFile = path.join(dir, "alcove.yaml");
+  const keyFile = path.join(dir, ".alcove.key");
   const input = path.join(dir, "input.csv");
   fs.writeFileSync(
     input,
@@ -7514,7 +7514,7 @@ async function runOfflineAcceptFresh(params: {
     );
     await acceptHandler({
       _: [],
-      $0: "psilink",
+      $0: "alcove",
       identity: "Agency B",
       args: params.input !== undefined ? [encoded, params.input] : [encoded],
       "consent-to-terms": true,
@@ -7747,7 +7747,7 @@ describe("handler: the acceptance records consent to its OWN outbound set", () =
       const encoded = await encodeInvitation(sampleToken(FUTURE()));
       await acceptHandler({
         _: [],
-        $0: "psilink",
+        $0: "alcove",
         identity: "Agency B",
         args: ["sftp://host/drop", encoded, input],
         "consent-to-terms": true,
@@ -7793,7 +7793,7 @@ describe("handler: the acceptance records consent to its OWN outbound set", () =
       const encoded = await encodeInvitation(sampleToken(FUTURE()));
       await acceptHandler({
         _: [],
-        $0: "psilink",
+        $0: "alcove",
         identity: "Agency B",
         args: ["sftp://host/drop", encoded, input],
         "consent-to-terms": true,
@@ -7845,7 +7845,7 @@ describe("handler: the acceptance records consent to its OWN outbound set", () =
       const encoded = await encodeInvitation(sampleToken(FUTURE()));
       await acceptHandler({
         _: [],
-        $0: "psilink",
+        $0: "alcove",
         identity: "Agency B",
         args: ["sftp://host/drop", encoded, input],
         "consent-to-terms": true,

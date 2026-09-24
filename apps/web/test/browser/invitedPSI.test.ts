@@ -6,8 +6,8 @@ import {
   generateSharedSecret,
   prepareForExchange,
   runExchange,
-} from "@psilink/core";
-import { sortAssociationTable } from "@psilink/core/testing";
+} from "@alcove/core";
+import { sortAssociationTable } from "@alcove/core/testing";
 // @ts-ignore this is really there
 import PSI from "@openmined/psi.js/psi_wasm_web";
 

@@ -15,7 +15,7 @@ import {
   saveTrustFooter,
 } from "@exchange/saveExchangeModel";
 
-import type { LinkageTerms, Metadata } from "@psilink/core";
+import type { LinkageTerms, Metadata } from "@alcove/core";
 import type { GeneratedInvitation } from "@psi/invitation";
 import type { SaveExchangeFields } from "@exchange/saveExchangeModel";
 
@@ -57,12 +57,12 @@ function invitationStub(
 const sftpFields: SaveExchangeFields = {
   ...EMPTY_SAVE_FIELDS,
   host: "sftp.riverbend.example.gov",
-  remoteDirectory: "/exchanges/psilink",
+  remoteDirectory: "/exchanges/alcove",
 };
 
 const filedropFields: SaveExchangeFields = {
   ...EMPTY_SAVE_FIELDS,
-  sharedDirectory: "/exchanges/psilink",
+  sharedDirectory: "/exchanges/alcove",
 };
 
 describe("save-surface field validation", () => {
@@ -83,7 +83,7 @@ describe("save-surface field validation", () => {
     );
     const relative = saveExchangeError("filedrop", {
       ...EMPTY_SAVE_FIELDS,
-      sharedDirectory: "exchanges/psilink",
+      sharedDirectory: "exchanges/alcove",
     });
     expect(relative?.field).toBe("sharedDirectory");
     expect(relative?.message).toContain("absolute");
@@ -100,10 +100,10 @@ describe("save-surface field validation", () => {
 describe("filename derivation", () => {
   test("stamps the local calendar day of the mint moment", () => {
     expect(exchangeFileName(new Date(2026, 6, 8, 15, 32))).toBe(
-      "psilink-exchange-2026-07-08.yaml",
+      "alcove-exchange-2026-07-08.yaml",
     );
     expect(exchangeFileName(new Date(2026, 11, 1, 0, 0))).toBe(
-      "psilink-exchange-2026-12-01.yaml",
+      "alcove-exchange-2026-12-01.yaml",
     );
   });
 });
@@ -112,7 +112,7 @@ describe("copy is transport-specific", () => {
   test("lead names the transport and the capability statement is explicit", () => {
     expect(saveLeadCopy("sftp")).toContain("over SFTP");
     expect(saveLeadCopy("filedrop")).toContain("over a shared directory");
-    expect(saveCapabilityCopy("sftp")).toContain("psilink command-line tool");
+    expect(saveCapabilityCopy("sftp")).toContain("Alcove command-line tool");
     expect(saveCapabilityCopy("sftp")).toContain("does not run SFTP");
     expect(saveCapabilityCopy("filedrop")).toContain(
       "does not run shared-directory",
@@ -164,16 +164,16 @@ describe("live-run ledger footer by driver", () => {
 
 describe("the run command names the minted config file", () => {
   test("interpolates the exact filename with --config-file, ahead of --invitation", () => {
-    expect(runCommand("psilink-exchange-2026-07-10.yaml")).toBe(
-      "psilink exchange your-data.csv --config-file " +
-        "psilink-exchange-2026-07-10.yaml --invitation @invitation-code.txt",
+    expect(runCommand("alcove-exchange-2026-07-10.yaml")).toBe(
+      "alcove exchange your-data.csv --config-file " +
+        "alcove-exchange-2026-07-10.yaml --invitation @invitation-code.txt",
     );
   });
 
   test("a re-save's new date-derived filename flows straight through", () => {
     expect(runCommand(exchangeFileName(new Date(2026, 11, 25)))).toBe(
-      "psilink exchange your-data.csv --config-file " +
-        "psilink-exchange-2026-12-25.yaml --invitation @invitation-code.txt",
+      "alcove exchange your-data.csv --config-file " +
+        "alcove-exchange-2026-12-25.yaml --invitation @invitation-code.txt",
     );
   });
 });
@@ -184,13 +184,13 @@ describe("endpoint and config derive from one locator", () => {
     expect(request).toEqual({
       channel: "sftp",
       host: "sftp.riverbend.example.gov",
-      path: "/exchanges/psilink",
+      path: "/exchanges/alcove",
     });
     const input = exchangeFileInputFor("sftp", sftpFields, invitationStub());
     expect(input.connection).toEqual({
       channel: "sftp",
       host: "sftp.riverbend.example.gov",
-      path: "/exchanges/psilink",
+      path: "/exchanges/alcove",
     });
     // The config's terms, metadata, and disclosed set are read off the same
     // minted invitation the code came from -- config and token agree. The
@@ -225,11 +225,11 @@ describe("endpoint and config derive from one locator", () => {
   test("filedrop request and config hold the shared directory only", () => {
     expect(endpointRequestFor("filedrop", filedropFields)).toEqual({
       channel: "filedrop",
-      path: "/exchanges/psilink",
+      path: "/exchanges/alcove",
     });
     expect(
       exchangeFileInputFor("filedrop", filedropFields, invitationStub())
         .connection,
-    ).toEqual({ channel: "filedrop", path: "/exchanges/psilink" });
+    ).toEqual({ channel: "filedrop", path: "/exchanges/alcove" });
   });
 });

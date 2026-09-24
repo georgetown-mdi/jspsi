@@ -2,7 +2,7 @@ import {
   ConnectionConfigSchema,
   HOST_KEY_FINGERPRINT_REGEX,
   withRetainModeImplications,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { isBareSftpHost } from "@psi/sftpHost";
 
@@ -341,7 +341,7 @@ function splitDirectoryError(
  */
 export const PASSPHRASE_REQUIRES_PRIVATE_KEY =
   'A key passphrase only decrypts a private key: choose "Private key" under ' +
-  '"How psilink signs in", or clear the passphrase reference.';
+  '"How Alcove signs in", or clear the passphrase reference.';
 
 /**
  * What the console says when keyboard-interactive is armed while the connection
@@ -351,7 +351,7 @@ export const PASSPHRASE_REQUIRES_PRIVATE_KEY =
  */
 export const KEYBOARD_INTERACTIVE_REQUIRES_PASSWORD =
   "Answering the server's prompts sends the password, so it needs one: choose " +
-  '"Password" under "How psilink signs in", or turn this off.';
+  '"Password" under "How Alcove signs in", or turn this off.';
 
 /**
  * The console's wording for core's credential-coherence verdicts, keyed by the

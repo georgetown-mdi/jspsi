@@ -229,7 +229,7 @@ export async function generateP256PrivateJwk(): Promise<P256PrivateJwk> {
 // label a certificate or receipt signature covers, so a probe signature could
 // not be replayed as either even if one escaped.
 const KEYPAIR_PROBE = new TextEncoder().encode(
-  "psilink-signing-keypair-probe/v1",
+  "alcove-signing-keypair-probe/v2",
 );
 
 /**

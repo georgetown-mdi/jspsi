@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import YAML from "yaml";
-import { getLogger, operatorSuppliedSpans } from "@psilink/core";
+import { getLogger, operatorSuppliedSpans } from "@alcove/core";
 import type {
   DualSignedRecord,
   ExchangeDataSpec,
@@ -12,7 +12,7 @@ import type {
   LinkageTerms,
   Metadata,
   VerificationKeys,
-} from "@psilink/core";
+} from "@alcove/core";
 
 // The prompt is mocked so the confirmation cases drive the answer rather than a
 // terminal; util/prompt's own tests cover promptConfirm, and the sink under test
@@ -55,7 +55,7 @@ import { ttyStream, withStdin } from "../stdinStream";
 let dir: string;
 
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-operator-path-"));
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-operator-path-"));
   vi.mocked(promptConfirm).mockReset();
 });
 
@@ -68,8 +68,8 @@ afterEach(() => {
 function backslashedPath(name: string): string {
   const full =
     process.platform === "win32"
-      ? path.join(dir, "psilink", name)
-      : path.join(dir, `C:\\psilink\\${name}`);
+      ? path.join(dir, "alcove", name)
+      : path.join(dir, `C:\\alcove\\${name}`);
   fs.mkdirSync(path.dirname(full), { recursive: true });
   return full;
 }
@@ -166,7 +166,7 @@ async function raised(act: () => unknown): Promise<unknown> {
 // --- the record and receipt writers ------------------------------------------
 
 const RECORD: ExchangeRecord = {
-  version: "psilink-exchange-record/v8",
+  version: "alcove-exchange-record/v9",
   outcome: "completed",
   certificateMismatchObserved: false,
   createdAt: "2026-01-02T03:04:05.000Z",
@@ -194,7 +194,7 @@ const RECORD: ExchangeRecord = {
 };
 
 const KEYS: VerificationKeys = {
-  version: "psilink-exchange-keys/v1",
+  version: "alcove-exchange-keys/v2",
   salts: {
     localPayloadSent: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
     partnerPayloadReceived: "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI",
@@ -202,7 +202,7 @@ const KEYS: VerificationKeys = {
 };
 
 const CERTIFICATE = {
-  version: "psilink-signing-cert/v2" as const,
+  version: "alcove-signing-cert/v3" as const,
   algorithm: "ecdsa-p256-sha256" as const,
   identity: "Party A",
   publicKey: {
@@ -216,7 +216,7 @@ const CERTIFICATE = {
 };
 
 const DUAL_SIGNED_RECORD: DualSignedRecord = {
-  version: "psilink-signed-receipt/v3",
+  version: "alcove-signed-receipt/v4",
   content: {
     termsHash: "dGVybXNIYXNo",
     initiatorToResponderPayload: "aTJyUGF5bG9hZA",
@@ -306,7 +306,7 @@ const REFUSALS: readonly SinkCase<RefusalOutcome>[] = [
     drive: async () => {
       // No file at the path, so the surgical one-field write fails where the
       // answer has already been given and nothing has been sent.
-      const filePath = backslashedPath("psilink.yaml");
+      const filePath = backslashedPath("alcove.yaml");
       const { log } = stubLog();
       return {
         filePath,
@@ -342,7 +342,7 @@ const LINES: readonly SinkCase<LineOutcome>[] = [
     name: "record file: the verification keys it wrote",
     says: ["wrote private verification keys to"],
     drive: async () => {
-      const filePath = backslashedPath("psilink-record.json");
+      const filePath = backslashedPath("alcove-record.json");
       const lines = captureLines("record-marks");
       writeExchangeRecord(
         { recordFile: filePath },
@@ -357,7 +357,7 @@ const LINES: readonly SinkCase<LineOutcome>[] = [
     name: "record file: the self-attested record it wrote",
     says: ["self-attested exchange record"],
     drive: async () => {
-      const filePath = backslashedPath("psilink-record.json");
+      const filePath = backslashedPath("alcove-record.json");
       const lines = captureLines("record-marks");
       writeExchangeRecord(
         { recordFile: filePath },
@@ -374,7 +374,7 @@ const LINES: readonly SinkCase<LineOutcome>[] = [
     drive: async () => {
       // A directory at the record's own path: the keys beside it are written
       // first and the record write then fails, leaving them to be named.
-      const filePath = backslashedPath("psilink-record.json");
+      const filePath = backslashedPath("alcove-record.json");
       fs.mkdirSync(filePath);
       const lines = captureLines("record-marks");
       writeExchangeRecord(
@@ -390,7 +390,7 @@ const LINES: readonly SinkCase<LineOutcome>[] = [
     name: "receipt file: the dual-signed record it wrote",
     says: ["wrote dual-signed exchange record"],
     drive: async () => {
-      const filePath = backslashedPath("psilink-receipt.json");
+      const filePath = backslashedPath("alcove-receipt.json");
       const lines = captureLines("receipt-marks");
       writeDualSignedRecord(
         { receiptFile: filePath },
@@ -405,7 +405,7 @@ const LINES: readonly SinkCase<LineOutcome>[] = [
     name: "outbound consent: the confirmation it recorded",
     says: ["recorded your confirmation in"],
     drive: async () => {
-      const filePath = backslashedPath("psilink.yaml");
+      const filePath = backslashedPath("alcove.yaml");
       writePendingConfig(filePath);
       const { log, lines } = stubLog();
       await confirmYes(filePath, log);
@@ -416,8 +416,8 @@ const LINES: readonly SinkCase<LineOutcome>[] = [
     name: "bootstrap summary: the config and key a clean run wrote",
     says: ["saved config to"],
     drive: async () => {
-      const configFile = backslashedPath("psilink.yaml");
-      const keyFile = backslashedPath(".psilink.key");
+      const configFile = backslashedPath("alcove.yaml");
+      const keyFile = backslashedPath(".alcove.key");
       const { log, lines } = stubLog();
       logOnlineBootstrapOutcome(log, { configFile, keyFile });
       return { filePaths: [configFile, keyFile], lines };
@@ -427,8 +427,8 @@ const LINES: readonly SinkCase<LineOutcome>[] = [
     name: "bootstrap summary: the config a reuse run kept",
     says: ["reused the existing configuration at"],
     drive: async () => {
-      const configFile = backslashedPath("psilink.yaml");
-      const keyFile = backslashedPath(".psilink.key");
+      const configFile = backslashedPath("alcove.yaml");
+      const keyFile = backslashedPath(".alcove.key");
       const { log, lines } = stubLog();
       logOnlineBootstrapOutcome(log, {
         configFile,
@@ -442,8 +442,8 @@ const LINES: readonly SinkCase<LineOutcome>[] = [
     name: "bootstrap summary: the config a failed write left unwritten",
     says: ["but the configuration could not be written to"],
     drive: async () => {
-      const configFile = backslashedPath("psilink.yaml");
-      const keyFile = backslashedPath(".psilink.key");
+      const configFile = backslashedPath("alcove.yaml");
+      const keyFile = backslashedPath(".alcove.key");
       const { log, lines } = stubLog();
       logOnlineBootstrapOutcome(log, {
         configFile,
@@ -467,10 +467,10 @@ test("a log sink renders an operator path rather than interpolating it raw", asy
   // byte would reach the operator as it stands.
   const { log, lines } = stubLog();
   logOnlineBootstrapOutcome(log, {
-    configFile: "/srv/\x1b[31mdrop/psilink.yaml",
-    keyFile: ".psilink.key",
+    configFile: "/srv/\x1b[31mdrop/alcove.yaml",
+    keyFile: ".alcove.key",
   });
   const text = lines.join("\n");
-  expect(text).toContain("/srv/<1b>[31mdrop/psilink.yaml");
+  expect(text).toContain("/srv/<1b>[31mdrop/alcove.yaml");
   expect(text).not.toContain("\x1b");
 });

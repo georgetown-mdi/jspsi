@@ -539,17 +539,17 @@ describe("allowlist matching", () => {
 
   it("admits a prefix entry only at a path, query, or fragment boundary", () => {
     const ok = [
-      "https://github.com/georgetown-mdi/jspsi",
-      "https://github.com/georgetown-mdi/jspsi#readme",
-      "https://github.com/georgetown-mdi/jspsi/blob/main/docs/CLI.md#recurring-exchange",
+      "https://github.com/georgetown-mdi/alcove",
+      "https://github.com/georgetown-mdi/alcove#readme",
+      "https://github.com/georgetown-mdi/alcove/blob/main/docs/CLI.md#recurring-exchange",
     ];
     for (const url of ok) expect(allowlistEntryFor(url)).toBeDefined();
 
     const rejected = [
-      "https://github.com/georgetown-mdi/jspsi-exfil",
-      "https://github.com/georgetown-mdi/jspsi.evil.example/x",
+      "https://github.com/georgetown-mdi/alcove-exfil",
+      "https://github.com/georgetown-mdi/alcove.evil.example/x",
       "https://github.com/georgetown-mdi/other/blob/main/README.md",
-      "https://gitlab.example/georgetown-mdi/jspsi/x",
+      "https://gitlab.example/georgetown-mdi/alcove/x",
     ];
     for (const url of rejected) expect(allowlistEntryFor(url)).toBeUndefined();
   });

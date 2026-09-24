@@ -35,7 +35,7 @@ import { relayForRun } from "../transport/ownRelaySetting";
 import { webrtcEndpointFromLocation } from "../invitation";
 
 import type { DataConnection } from "peerjs";
-import type { ExchangeSpec } from "@psilink/core";
+import type { ExchangeSpec } from "@alcove/core";
 import type Peer from "peerjs";
 
 import type { ManagedExchangeSide } from "./managedExchangeRecord";

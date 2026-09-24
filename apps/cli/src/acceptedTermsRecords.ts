@@ -9,7 +9,7 @@
  * Every entry point takes what it needs as arguments, so any command that
  * records consent to an invitation's terms drives the same derivation and the
  * same writes. A record these writes lose disables a check a later
- * `psilink exchange` makes, with no signal at run time, so a caller either
+ * `alcove exchange` makes, with no signal at run time, so a caller either
  * lets the write throw or takes {@link writeAcceptanceRecordReportingLoss},
  * which sets the persistence-loss exit code.
  */
@@ -22,7 +22,7 @@ import {
   redactAndSanitizeForDisplay,
   operatorSuppliedText,
   sanitizeErrorForDisplay,
-} from "@psilink/core";
+} from "@alcove/core";
 import type {
   ExchangeSpec,
   InvitationToken,
@@ -30,7 +30,7 @@ import type {
   Metadata,
   OutboundPayloadConsent,
   RelayLocator,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   diffLinkageTerms,
@@ -159,7 +159,7 @@ export function receivedCommitmentRemovalWarning(params: {
         recorded
           .map((column) => `  - ${redactAndSanitizeForDisplay(column)}`)
           .join("\n")) +
-    `\nWithout it the next 'psilink exchange' from this configuration ` +
+    `\nWithout it the next 'alcove exchange' from this configuration ` +
     `accepts whatever columns the partner transmits. To keep the check, ask ` +
     `the inviting party for an invitation that declares the columns it sends.`
   );
@@ -280,7 +280,7 @@ function acceptanceRecordLossNotice(
       return (
         `the exchange continues and the existing configuration at ` +
         `${configPath} stands, but recording the columns you ` +
-        `consented to receive in it failed; the next 'psilink ` +
+        `consented to receive in it failed; the next 'alcove ` +
         `exchange' holds the received payload to the set that ` +
         `configuration already records, and checks it against no ` +
         `consented set if it records none`
@@ -290,7 +290,7 @@ function acceptanceRecordLossNotice(
         `the exchange continues and the existing configuration at ` +
         `${configPath} stands, but recording your ` +
         `outbound-column confirmation in it failed; the next ` +
-        `'psilink exchange' compares against the previously ` +
+        `'alcove exchange' compares against the previously ` +
         `recorded set and will show the columns and ask again if ` +
         `they differ`
       );
@@ -299,7 +299,7 @@ function acceptanceRecordLossNotice(
         `the exchange continues and the existing configuration at ` +
         `${configPath} stands, but recording the duplicate ` +
         `matching your partner declared in it failed; the next ` +
-        `'psilink exchange' holds your partner to the value that ` +
+        `'alcove exchange' holds your partner to the value that ` +
         `configuration already records, and to no value if it records ` +
         `none`
       );

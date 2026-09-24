@@ -1,5 +1,5 @@
 [Unit]
-Description=Renew the psilink relay's TLS certificate daily
+Description=Renew the Alcove relay's TLS certificate daily
 
 [Timer]
 # Daily, because the ACME client renews only inside its window. The deploy hook

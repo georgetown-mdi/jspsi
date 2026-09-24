@@ -29,7 +29,7 @@ import {
   displayText,
   ruleSetCitation,
   sanitizeForDisplay,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { dateTimeLabel } from "@psi/formatting";
 import { recordFileStamp } from "@psi/runOutputs";
@@ -40,7 +40,7 @@ import type {
   ExchangeRecord,
   ExchangeRecordOutcome,
   RecordLinkageRuleSet,
-} from "@psilink/core";
+} from "@alcove/core";
 import type {
   DisclosureAccounting,
   StoredDisclosureAccounting,
@@ -488,7 +488,7 @@ export function disclosureAccountingCsv(
  * repeated exports accumulate rather than collide.
  */
 export function disclosureAccountingFileName(exportedAt: Date): string {
-  return `psilink-disclosures-${recordFileStamp(exportedAt.toISOString())}.csv`;
+  return `alcove-disclosures-${recordFileStamp(exportedAt.toISOString())}.csv`;
 }
 
 /** The MIME type of a stored-form export: the stored accounting as JSON. */
@@ -519,7 +519,7 @@ export function storedDisclosureAccountingDocument(
  * under one name.
  */
 export function storedDisclosureAccountingFileName(exportedAt: Date): string {
-  return `psilink-disclosures-stored-${recordFileStamp(exportedAt.toISOString())}.json`;
+  return `alcove-disclosures-stored-${recordFileStamp(exportedAt.toISOString())}.json`;
 }
 
 /** One run the accounting is short an entry for, as the surface shows it. */

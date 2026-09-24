@@ -157,7 +157,7 @@ describe("the CLI entry, driven against a fixture tree", () => {
 
   /** A minimal tree holding only packages/core/src/main.ts. */
   function fixtureTree(barrel) {
-    const root = mkdtempSync(join(tmpdir(), "psilink-core-barrel-wildcards-"));
+    const root = mkdtempSync(join(tmpdir(), "alcove-core-barrel-wildcards-"));
     roots.push(root);
     const barrelDirectory = join(root, "packages", "core", "src");
     mkdirSync(barrelDirectory, { recursive: true });

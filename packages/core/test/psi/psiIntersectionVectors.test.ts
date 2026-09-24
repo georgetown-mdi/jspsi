@@ -17,7 +17,7 @@ import { UNBOUNDED_PSI_ELEMENTS } from "../utils/psiElementBounds";
 // and pins both the intersection membership and the association/permutation mapping
 // back to original input rows, so a fork re-roll or an engine swap that silently
 // corrupts the mapping fails here. The empty-round and empty-key cases live only
-// here; psiParticipant.test.ts, psiLink.test.ts, and psiLinkForLinkageKeys.test.ts
+// here; psiParticipant.test.ts, link.test.ts, and linkForLinkageKeys.test.ts
 // exercise the rest from the API side. This is the CORRECTNESS anchor -- the
 // byte-for-byte anchor lives in psiEngineWireVectors.test.ts. Regenerate the fixture
 // with generate-psi-intersection-vectors.mjs.

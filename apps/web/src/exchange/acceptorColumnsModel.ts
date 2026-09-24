@@ -4,7 +4,7 @@ import {
   inferMetadata,
   overlongDisclosedColumnPositions,
   sanitizeForDisplay,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { CSV_DELIMITER_SINGLE_COLUMN_REMEDY } from "@components/csvDelimiterChoice";
 
@@ -35,7 +35,7 @@ import type {
   LinkageTerms,
   Metadata,
   Standardization,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import type { AcceptorDataEdits } from "@psi/acceptInvitation";
 import type { FieldStepOverride } from "@psi/standardizationAuthoring";

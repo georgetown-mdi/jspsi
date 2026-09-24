@@ -8,7 +8,7 @@ import {
   DirectoryListingBoundsError,
   FrameSizeExceededError,
   TimeoutError,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { LocalFSClient } from "../../../src/connection/localFSClient";
 import {
@@ -53,7 +53,7 @@ let dir: string;
 let client: LocalFSClient;
 
 beforeEach(async () => {
-  dir = await fs.mkdtemp(path.join(os.tmpdir(), "psilink-localfs-test-"));
+  dir = await fs.mkdtemp(path.join(os.tmpdir(), "alcove-localfs-test-"));
   client = new LocalFSClient();
 });
 

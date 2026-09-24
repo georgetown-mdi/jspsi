@@ -100,7 +100,7 @@ const STATUSES = Object.freeze({
 
 /** The control config written into the replicated tree, named so a stray copy
  * of it is recognizable. */
-const CONTROL_CONFIG = "psilink-image-subset-control.config.ts";
+const CONTROL_CONFIG = "alcove-image-subset-control.config.ts";
 
 /**
  * The COPY instructions of `dockerfileSource`'s builder stage, each as

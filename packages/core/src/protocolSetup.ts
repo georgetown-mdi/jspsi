@@ -162,7 +162,7 @@ export const PROTOCOL_VERSION = 1;
  * @internal exported for the protocol-version reconcile tests.
  */
 export const PROTOCOL_VERSION_MISMATCH_MESSAGE =
-  "the partner is running an incompatible psilink version; both parties must " +
+  "the partner is running an incompatible Alcove version; both parties must " +
   "run the same version";
 
 // The initiator's opening terms frame. Every field beside `linkageTerms` is

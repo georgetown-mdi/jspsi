@@ -13,7 +13,7 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-ENV_FILE="${PSILINK_DEMO_ENV:-$HERE/env}"
+ENV_FILE="${ALCOVE_DEMO_ENV:-$HERE/env}"
 
 die() { printf 'ABORTING: %s\n' "$*" >&2; exit 1; }
 log() { printf '[%s] %s\n' "$(date -u +%FT%TZ)" "$*" >&2; }
@@ -22,35 +22,35 @@ log() { printf '[%s] %s\n' "$(date -u +%FT%TZ)" "$*" >&2; }
 # shellcheck disable=SC1090
 . "$ENV_FILE"
 
-for required in PSILINK_DEMO_INSTANCE_ID PSILINK_DEMO_REGION PSILINK_DEMO_PROFILE; do
+for required in ALCOVE_DEMO_INSTANCE_ID ALCOVE_DEMO_REGION ALCOVE_DEMO_PROFILE; do
   eval "value=\${$required:-}"
   [ -n "$value" ] || die "$required is unset in $ENV_FILE; refusing to guess which instance to stop"
 done
 
 aws_demo() {
-  aws --profile "$PSILINK_DEMO_PROFILE" --region "$PSILINK_DEMO_REGION" "$@"
+  aws --profile "$ALCOVE_DEMO_PROFILE" --region "$ALCOVE_DEMO_REGION" "$@"
 }
 
-BEFORE="$(aws_demo ec2 describe-instances --instance-ids "$PSILINK_DEMO_INSTANCE_ID" \
+BEFORE="$(aws_demo ec2 describe-instances --instance-ids "$ALCOVE_DEMO_INSTANCE_ID" \
   --query 'Reservations[0].Instances[0].State.Name' --output text)" \
-  || die "could not read $PSILINK_DEMO_INSTANCE_ID in $PSILINK_DEMO_REGION"
+  || die "could not read $ALCOVE_DEMO_INSTANCE_ID in $ALCOVE_DEMO_REGION"
 
 case "$BEFORE" in
   stopped)
-    log "$PSILINK_DEMO_INSTANCE_ID is already stopped"
+    log "$ALCOVE_DEMO_INSTANCE_ID is already stopped"
     exit 0
     ;;
   stopping)
-    log "$PSILINK_DEMO_INSTANCE_ID is already stopping; waiting"
+    log "$ALCOVE_DEMO_INSTANCE_ID is already stopping; waiting"
     ;;
   running|pending)
-    log "stopping $PSILINK_DEMO_INSTANCE_ID"
-    aws_demo ec2 stop-instances --instance-ids "$PSILINK_DEMO_INSTANCE_ID" >/dev/null
+    log "stopping $ALCOVE_DEMO_INSTANCE_ID"
+    aws_demo ec2 stop-instances --instance-ids "$ALCOVE_DEMO_INSTANCE_ID" >/dev/null
     ;;
   *)
-    die "$PSILINK_DEMO_INSTANCE_ID is '$BEFORE'; stop it by hand or wait for it to settle"
+    die "$ALCOVE_DEMO_INSTANCE_ID is '$BEFORE'; stop it by hand or wait for it to settle"
     ;;
 esac
 
-aws_demo ec2 wait instance-stopped --instance-ids "$PSILINK_DEMO_INSTANCE_ID"
-log "$PSILINK_DEMO_INSTANCE_ID is stopped. Its root volume still bills; only the instance hours stop"
+aws_demo ec2 wait instance-stopped --instance-ids "$ALCOVE_DEMO_INSTANCE_ID"
+log "$ALCOVE_DEMO_INSTANCE_ID is stopped. Its root volume still bills; only the instance hours stop"

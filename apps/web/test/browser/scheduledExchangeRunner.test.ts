@@ -2,7 +2,7 @@
 
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { getLogger } from "@psilink/core";
+import { getLogger } from "@alcove/core";
 
 import { Fragment, createElement } from "react";
 

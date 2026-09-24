@@ -63,7 +63,7 @@ import { jobCreateIntentSchema } from "@jobs/intentSchemas";
  * identity answers `{ "reason": "signing-identity-in-rendezvous" }`, a
  * zero-setup sftp intent refused because the saved connection pins more than one
  * host-key fingerprint answers `{ "reason": "sftp-fingerprint-list" }`, and a
- * run of the opened configuration refused over the `.psilink.key` beside it
+ * run of the opened configuration refused over the `.alcove.key` beside it
  * answers `{ "reason": "mounted-key-file-absent" }` or
  * `{ "reason": "mounted-key-file-invalid" }`, and a signed run of it naming
  * unconverted signing paths answers

@@ -28,7 +28,7 @@ const readRootJson = (name) => JSON.parse(readRoot(name));
 
 /** A lockfile of the shape npm writes for this repository's workspaces. */
 function lockfile({ workspaces = ["apps/web"], packages = {} } = {}) {
-  const entries = { "": { name: "jspsi", version: "0.0.0" } };
+  const entries = { "": { name: "alcove-monorepo", version: "0.0.0" } };
   for (const workspace of workspaces) {
     entries[workspace] = { name: workspace, version: "0.1.0" };
   }
@@ -169,16 +169,16 @@ describe("the verdict", () => {
         lockfile({
           workspaces: ["apps/web", "packages/core"],
           packages: {
-            "node_modules/@psilink/core": {
+            "node_modules/@alcove/core": {
               resolved: "packages/core",
               link: true,
             },
-            "apps/web/node_modules/@psilink/core": { version: "0.0.9" },
+            "apps/web/node_modules/@alcove/core": { version: "0.0.9" },
           },
         }),
       ),
     ).toContain(
-      "apps/web/node_modules/@psilink/core installs 0.0.9 while node_modules/@psilink/core links packages/core",
+      "apps/web/node_modules/@alcove/core installs 0.0.9 while node_modules/@alcove/core links packages/core",
     );
   });
 

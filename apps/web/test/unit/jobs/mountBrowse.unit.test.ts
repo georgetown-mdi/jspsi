@@ -18,7 +18,7 @@ import {
 const dirs: Array<string> = [];
 
 function tempDir(label: string): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `psilink-${label}-`));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `alcove-${label}-`));
   dirs.push(dir);
   return dir;
 }

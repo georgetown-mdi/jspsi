@@ -1,7 +1,7 @@
-// Routes the SSH stack's own diagnostic lines into psilink's logger, so an
+// Routes the SSH stack's own diagnostic lines into Alcove's logger, so an
 // operator diagnosing a failed dial reads the peer's identification string, both
 // sides' algorithm offers, the negotiated algorithms and the packet flow from
-// psilink itself instead of from a separate `ssh -vvv`. ssh2 and
+// Alcove itself instead of from a separate `ssh -vvv`. ssh2 and
 // ssh2-sftp-client both emit through the one `debug` connect option, at a
 // per-packet volume, which is why the callback is withheld entirely below the
 // trace level rather than installed and filtered at the logger.
@@ -13,7 +13,7 @@
 
 import logLibrary from "loglevel";
 
-import { redactAndSanitizeForDisplay } from "@psilink/core";
+import { redactAndSanitizeForDisplay } from "@alcove/core";
 
 /**
  * Name of the logger the SSH stack's lines reach the operator under. One of its

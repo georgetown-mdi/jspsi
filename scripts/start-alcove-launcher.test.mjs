@@ -24,14 +24,14 @@ import { afterEach, describe, expect, it } from "vitest";
 // engine would receive them.
 //
 // What it cannot reach: the real image (nothing here pulls one), the browser,
-// and Windows. Start-Psilink.ps1's share of this ground is covered by the Pester
+// and Windows. Start-Alcove.ps1's share of this ground is covered by the Pester
 // suite the windows_resolution workflow runs.
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..");
 const LAUNCHER = resolve(
   repoRoot,
-  "support/windows-network-filedrop/start-psilink.sh",
+  "support/windows-network-filedrop/start-alcove.sh",
 );
 
 // Named absolutely for the one case that strips PATH down to a directory
@@ -39,7 +39,7 @@ const LAUNCHER = resolve(
 // PATH, so a bare "bash" would not be found there.
 const BASH = existsSync("/bin/bash") ? "/bin/bash" : "bash";
 
-const PLACEHOLDER_LINE = "PSILINK_IMAGE_DIGEST='@@PSILINK_IMAGE_DIGEST@@'";
+const PLACEHOLDER_LINE = "ALCOVE_IMAGE_DIGEST='@@ALCOVE_IMAGE_DIGEST@@'";
 const TEST_DIGEST = `sha256:${"a1b2c3d4".repeat(8)}`;
 
 // A container engine that records its argument vectors, answers the doctor from
@@ -50,7 +50,7 @@ const fs = require("node:fs");
 const net = require("node:net");
 const path = require("node:path");
 
-const dir = process.env.PSILINK_STUB_DIR;
+const dir = process.env.ALCOVE_STUB_DIR;
 const args = process.argv.slice(2);
 const engine = path.basename(process.argv[1]);
 fs.appendFileSync(path.join(dir, "calls.log"), engine + " " + args.join(" ") + "\\n");
@@ -88,7 +88,7 @@ process.exit(0);
 const workspaces = [];
 
 function makeWorkspace() {
-  const root = mkdtempSync(join(tmpdir(), "psilink-launcher-"));
+  const root = mkdtempSync(join(tmpdir(), "alcove-launcher-"));
   workspaces.push(root);
   const binDir = join(root, "bin");
   const stubDir = join(root, "stub");
@@ -154,8 +154,8 @@ function consoleArguments(workspace, folders, environment = {}) {
     .join("\n");
   const run = sourced(
     workspace,
-    `${assignments}\nPSILINK_CONTAINER_NAME=psilink-console-1\nPSILINK_PORT=3000\n` +
-      'psilink_build_console_arguments\nprintf "%s\\n" "${PSILINK_CONSOLE_ARGUMENTS[@]}"',
+    `${assignments}\nALCOVE_CONTAINER_NAME=alcove-console-1\nALCOVE_PORT=3000\n` +
+      'alcove_build_console_arguments\nprintf "%s\\n" "${ALCOVE_CONSOLE_ARGUMENTS[@]}"',
     environment,
   );
   expect(run.status).toBe(0);
@@ -194,10 +194,10 @@ function stampedLauncher(workspace) {
   const source = readFileSync(LAUNCHER, "utf8");
   const stamped = source.replace(
     PLACEHOLDER_LINE,
-    `PSILINK_IMAGE_DIGEST='${TEST_DIGEST}'`,
+    `ALCOVE_IMAGE_DIGEST='${TEST_DIGEST}'`,
   );
   expect(stamped).not.toBe(source);
-  const target = join(workspace.root, "start-psilink.sh");
+  const target = join(workspace.root, "start-alcove.sh");
   writeFileSync(target, stamped);
   chmodSync(target, 0o755);
   return target;
@@ -207,7 +207,7 @@ function launcherEnvironment(workspace, extra = {}) {
   const environment = {
     ...process.env,
     PATH: `${workspace.binDir}:${process.env.PATH}`,
-    PSILINK_STUB_DIR: workspace.stubDir,
+    ALCOVE_STUB_DIR: workspace.stubDir,
     ...extra,
   };
   // The launcher reads these to find the account a sudo run came from, so a
@@ -295,7 +295,7 @@ const FATAL = {
   ],
 };
 
-// The two verdicts `psilink doctor mount` returns for a folder that can be read
+// The two verdicts `alcove doctor mount` returns for a folder that can be read
 // and not written, and for one that cannot be read at all, as the real run
 // wrote them: the launcher's answer to the first is what separates the input
 // folder from the folders the console writes in.
@@ -315,7 +315,7 @@ const READABLE_NOT_WRITABLE = {
       id: "write_rename",
       status: "fail",
       meaning:
-        "the mount reached a folder but psilink cannot write in it. Either " +
+        "the mount reached a folder but Alcove cannot write in it. Either " +
         "the account this container runs as does not own the folder, or it " +
         "can open the folder but not create files in it, or the share is out " +
         "of space.",
@@ -382,7 +382,7 @@ describe("the release stamp", () => {
 
     expect(run.status).not.toBe(0);
     expect(run.stdout).toMatch(/did not come from a release/);
-    expect(run.stdout).toMatch(/github\.com\/georgetown-mdi\/jspsi\/releases/);
+    expect(run.stdout).toMatch(/github\.com\/georgetown-mdi\/alcove\/releases/);
     // Nothing ran: an unpinned launcher must not reach an engine at all.
     expect(engineCalls(workspace)).toBe("");
   });
@@ -391,7 +391,7 @@ describe("the release stamp", () => {
 describe("the sourcing contract", () => {
   it("defines the functions and runs nothing when sourced", () => {
     const workspace = makeWorkspace();
-    const run = sourced(workspace, "type -t psilink_json_load psilink_main");
+    const run = sourced(workspace, "type -t alcove_json_load alcove_main");
 
     expect(run.status).toBe(0);
     expect(run.stderr.trim()).toBe("");
@@ -407,7 +407,7 @@ describe("the sourcing contract", () => {
       workspace.dataDir,
     ]);
 
-    expect(run.stdout).toMatch(/psilink console/);
+    expect(run.stdout).toMatch(/Alcove console/);
     expect(run.status).not.toBe(0);
   });
 });
@@ -417,8 +417,8 @@ describe("the shared folder's name passed to the console", () => {
     // The container is shown /rendezvous whatever folder was picked, so the
     // folder's own name has to travel beside the mount.
     const args = consoleArguments(makeWorkspace(), {
-      PSILINK_DATA_ROOT: "/home/dana/psilink-work",
-      PSILINK_RENDEZVOUS_DIR: "/home/dana/Egnyte/agency-a-agency-b",
+      ALCOVE_DATA_ROOT: "/home/dana/alcove-work",
+      ALCOVE_RENDEZVOUS_DIR: "/home/dana/Egnyte/agency-a-agency-b",
     });
 
     expect(args).toContain("JOB_RENDEZVOUS_DIR=/rendezvous");
@@ -429,7 +429,7 @@ describe("the shared folder's name passed to the console", () => {
     // A single-folder console rendezvouses out of the data mount, which the
     // container sees as /data -- a name no partner could match.
     const args = consoleArguments(makeWorkspace(), {
-      PSILINK_DATA_ROOT: "/home/dana/county-exchange",
+      ALCOVE_DATA_ROOT: "/home/dana/county-exchange",
     });
 
     expect(args.join(" ")).not.toContain("JOB_RENDEZVOUS_DIR");
@@ -438,7 +438,7 @@ describe("the shared folder's name passed to the console", () => {
 
   it("keeps a folder name containing a space in one argument", () => {
     const args = consoleArguments(makeWorkspace(), {
-      PSILINK_DATA_ROOT: "/home/dana/Shared Drive/County Exchange/",
+      ALCOVE_DATA_ROOT: "/home/dana/Shared Drive/County Exchange/",
     });
 
     expect(args).toContain("JOB_RENDEZVOUS_NAME=County Exchange");
@@ -450,10 +450,10 @@ describe("the shared folder's name passed to the console", () => {
     // THIS launcher picked -- /data or /rendezvous -- and mint that as the name
     // the partner is told to look for.
     for (const folders of [
-      { PSILINK_DATA_ROOT: "/" },
+      { ALCOVE_DATA_ROOT: "/" },
       {
-        PSILINK_DATA_ROOT: "/home/dana/psilink-work",
-        PSILINK_RENDEZVOUS_DIR: "/",
+        ALCOVE_DATA_ROOT: "/home/dana/alcove-work",
+        ALCOVE_RENDEZVOUS_DIR: "/",
       },
     ]) {
       const args = consoleArguments(makeWorkspace(), folders);
@@ -477,7 +477,7 @@ describe("the account the container runs as", () => {
     stubUname(workspace, "Linux");
 
     const args = consoleArguments(workspace, {
-      PSILINK_DATA_ROOT: "/home/dana/psilink-work",
+      ALCOVE_DATA_ROOT: "/home/dana/alcove-work",
     });
 
     expect(args).toContain("--user");
@@ -489,9 +489,9 @@ describe("the account the container runs as", () => {
     stubUname(workspace, "Linux");
 
     const args = consoleArguments(workspace, {
-      PSILINK_DATA_ROOT: "/home/dana/work",
-      PSILINK_INPUT_DIR: "/home/dana/input",
-      PSILINK_RENDEZVOUS_DIR: "/home/dana/shared",
+      ALCOVE_DATA_ROOT: "/home/dana/work",
+      ALCOVE_INPUT_DIR: "/home/dana/input",
+      ALCOVE_RENDEZVOUS_DIR: "/home/dana/shared",
     });
 
     const override = args.find((value) =>
@@ -519,7 +519,7 @@ describe("the account the container runs as", () => {
     stubUname(workspace, "Darwin");
 
     const args = consoleArguments(workspace, {
-      PSILINK_DATA_ROOT: "/Users/dana/psilink-work",
+      ALCOVE_DATA_ROOT: "/Users/dana/alcove-work",
     });
 
     expect(args).not.toContain("--user");
@@ -527,7 +527,7 @@ describe("the account the container runs as", () => {
   });
 
   it("runs a sudo-invoked launcher as the account sudo came from", () => {
-    // `sudo ./start-psilink.sh` is the standard workaround for an account that
+    // `sudo ./start-alcove.sh` is the standard workaround for an account that
     // is not in the docker group, which this launcher's own message points at.
     // Root is not the account to run the container as: it would write the
     // operator's folders as root and hold privileges the image's posture says
@@ -538,14 +538,14 @@ describe("the account the container runs as", () => {
 
     const args = consoleArguments(
       workspace,
-      { PSILINK_DATA_ROOT: "/home/dana/psilink-work" },
+      { ALCOVE_DATA_ROOT: "/home/dana/alcove-work" },
       { SUDO_UID: "1000", SUDO_GID: "2000" },
     );
 
     expect(args).toContain("--user");
     expect(args[args.indexOf("--user") + 1]).toBe("1000:2000");
     expect(args).toContain(
-      "JOB_SFTP_CREDENTIAL_DIR=/tmp/psilink-sftp-credentials",
+      "JOB_SFTP_CREDENTIAL_DIR=/tmp/alcove-sftp-credentials",
     );
   });
 
@@ -576,7 +576,7 @@ describe("the account the container runs as", () => {
 
       const args = consoleArguments(
         workspace,
-        { PSILINK_DATA_ROOT: "/home/dana/psilink-work" },
+        { ALCOVE_DATA_ROOT: "/home/dana/alcove-work" },
         environment,
       );
 
@@ -614,9 +614,9 @@ describe("what the console may write through each mount", () => {
     // place; nothing is written back. The mount is what holds the console to
     // that, rather than the prose saying so.
     const args = consoleArguments(makeWorkspace(), {
-      PSILINK_DATA_ROOT: "/home/dana/work",
-      PSILINK_INPUT_DIR: "/home/dana/input",
-      PSILINK_RENDEZVOUS_DIR: "/home/dana/shared",
+      ALCOVE_DATA_ROOT: "/home/dana/work",
+      ALCOVE_INPUT_DIR: "/home/dana/input",
+      ALCOVE_RENDEZVOUS_DIR: "/home/dana/shared",
     });
 
     expect(volumeSpecs(args)).toEqual([
@@ -628,12 +628,12 @@ describe("what the console may write through each mount", () => {
 
   it("keeps a folder given as both input and rendezvous writable", () => {
     // The rendezvous is written by both sides, and it is bound separately: the
-    // read-only input view of that folder does not reach the writes psilink
+    // read-only input view of that folder does not reach the writes Alcove
     // makes through /rendezvous.
     const args = consoleArguments(makeWorkspace(), {
-      PSILINK_DATA_ROOT: "/home/dana/work",
-      PSILINK_INPUT_DIR: "/home/dana/shared",
-      PSILINK_RENDEZVOUS_DIR: "/home/dana/shared",
+      ALCOVE_DATA_ROOT: "/home/dana/work",
+      ALCOVE_INPUT_DIR: "/home/dana/shared",
+      ALCOVE_RENDEZVOUS_DIR: "/home/dana/shared",
     });
 
     expect(volumeSpecs(args)).toEqual([
@@ -668,7 +668,7 @@ describe("the verdict reader", () => {
   const read = (workspace, document, snippet) =>
     sourced(
       workspace,
-      `psilink_json_load ${JSON.stringify(document)} || { echo REFUSED; exit 0; }\n${snippet}`,
+      `alcove_json_load ${JSON.stringify(document)} || { echo REFUSED; exit 0; }\n${snippet}`,
     );
 
   it("reports an absent optional field as absent", () => {
@@ -677,9 +677,9 @@ describe("the verdict reader", () => {
       workspace,
       '{"version":1,"checks":[{"id":"a","status":"ok"}]}',
       [
-        'checks=$(psilink_json_member "$PSILINK_JSON_SKELETON" checks)',
-        'first=$(psilink_json_elements "$checks" | head -1)',
-        'psilink_json_member "$first" meaning >/dev/null && echo PRESENT || echo ABSENT',
+        'checks=$(alcove_json_member "$ALCOVE_JSON_SKELETON" checks)',
+        'first=$(alcove_json_elements "$checks" | head -1)',
+        'alcove_json_member "$first" meaning >/dev/null && echo PRESENT || echo ABSENT',
       ].join("\n"),
     );
 
@@ -692,9 +692,9 @@ describe("the verdict reader", () => {
       workspace,
       '{"version":1,"checks":[{"id":"a","status":"warn","action":null}]}',
       [
-        'checks=$(psilink_json_member "$PSILINK_JSON_SKELETON" checks)',
-        'first=$(psilink_json_elements "$checks" | head -1)',
-        'psilink_json_member "$first" action >/dev/null && echo PRESENT || echo ABSENT',
+        'checks=$(alcove_json_member "$ALCOVE_JSON_SKELETON" checks)',
+        'first=$(alcove_json_elements "$checks" | head -1)',
+        'alcove_json_member "$first" action >/dev/null && echo PRESENT || echo ABSENT',
       ].join("\n"),
     );
 
@@ -717,9 +717,9 @@ describe("the verdict reader", () => {
       workspace,
       document,
       [
-        'checks=$(psilink_json_member "$PSILINK_JSON_SKELETON" checks)',
-        'first=$(psilink_json_elements "$checks" | head -1)',
-        'psilink_json_text "$(psilink_json_member "$first" meaning)"',
+        'checks=$(alcove_json_member "$ALCOVE_JSON_SKELETON" checks)',
+        'first=$(alcove_json_elements "$checks" | head -1)',
+        'alcove_json_text "$(alcove_json_member "$first" meaning)"',
       ].join("\n"),
     );
 
@@ -738,9 +738,9 @@ describe("the verdict reader", () => {
       workspace,
       document,
       [
-        'checks=$(psilink_json_member "$PSILINK_JSON_SKELETON" checks)',
-        'first=$(psilink_json_elements "$checks" | head -1)',
-        'psilink_json_text "$(psilink_json_member "$first" meaning)" | cat -v',
+        'checks=$(alcove_json_member "$ALCOVE_JSON_SKELETON" checks)',
+        'first=$(alcove_json_elements "$checks" | head -1)',
+        'alcove_json_text "$(alcove_json_member "$first" meaning)" | cat -v',
       ].join("\n"),
     );
 
@@ -761,7 +761,7 @@ describe("the verdict reader", () => {
     // and left alone it rewrites the terminal line it lands on.
     const run = sourced(
       workspace,
-      `psilink_say_from_container "$(printf 'before\\rafter')" | cat -v`,
+      `alcove_say_from_container "$(printf 'before\\rafter')" | cat -v`,
     );
 
     expect(run.status).toBe(0);
@@ -781,8 +781,8 @@ describe("the verdict reader", () => {
       workspace,
       document,
       [
-        'checks=$(psilink_json_member "$PSILINK_JSON_SKELETON" checks)',
-        'psilink_show_checks_with_status "$checks" warn',
+        'checks=$(alcove_json_member "$ALCOVE_JSON_SKELETON" checks)',
+        'alcove_show_checks_with_status "$checks" warn',
       ].join("\n"),
     );
 
@@ -805,10 +805,10 @@ describe("the verdict reader", () => {
       workspace,
       document,
       [
-        'checks=$(psilink_json_member "$PSILINK_JSON_SKELETON" checks)',
-        'psilink_check_status "$checks" mount_readable',
+        'checks=$(alcove_json_member "$ALCOVE_JSON_SKELETON" checks)',
+        'alcove_check_status "$checks" mount_readable',
         "echo",
-        'psilink_check_status "$checks" marker || echo ABSENT',
+        'alcove_check_status "$checks" marker || echo ABSENT',
       ].join("\n"),
     );
 
@@ -1299,7 +1299,7 @@ describe("starting the console", () => {
     // pasted SFTP credential once it is no longer the image's own account.
     expect(serveRun).toContain(`--user ${OPERATOR_IDENTITY}`);
     expect(serveRun).toContain(
-      "--env JOB_SFTP_CREDENTIAL_DIR=/tmp/psilink-sftp-credentials",
+      "--env JOB_SFTP_CREDENTIAL_DIR=/tmp/alcove-sftp-credentials",
     );
     // With one folder for everything, the input and rendezvous directories are
     // left to fall back to JOB_DATA_ROOT rather than mounted a second time.

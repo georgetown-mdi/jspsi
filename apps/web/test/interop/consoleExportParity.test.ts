@@ -8,7 +8,7 @@ import {
   parseSensitiveJson,
   parseSensitiveYaml,
   serializeExchangeDocument,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   HANDOFF_CREDENTIAL_PATH_PLACEHOLDER,
@@ -34,17 +34,17 @@ import {
 
 import type { JobExchangeIntent, JobExchangeSide } from "@jobs/intentSchemas";
 import type { CliRun } from "./cliParty";
-import type { ExchangeSpec } from "@psilink/core";
+import type { ExchangeSpec } from "@alcove/core";
 import type { JobSftpServerEntry } from "@jobs/sftpServer";
 
 /**
  * The export leg of "use the GUI for the settings and the CLI for the work":
- * a configuration psilink itself wrote, opened in the console, run, and handed
+ * a configuration Alcove itself wrote, opened in the console, run, and handed
  * back as the file a scheduled command-line run loads.
  *
  * The comparison is against the REAL CLI's own bytes, which is why it lives
  * here rather than in the unit project: the fixtures below are written by the
- * built `psilink` (apps/cli must not be imported from apps/web -- apps consume
+ * built `alcove` (apps/cli must not be imported from apps/web -- apps consume
  * packages, not each other), the console reads them through the production load
  * and mapping, and the hand-off's template is compared to what the CLI left on
  * disk.
@@ -57,7 +57,7 @@ import type { JobSftpServerEntry } from "@jobs/sftpServer";
  *   loader would read out of it. That is the parity claim, and it fails on any
  *   setting the console loses, adds, or alters.
  * - Against the CLI's file as it sits on disk, the residual difference is key
- *   ORDER inside a block: `psilink invite` and `psilink accept` hand
+ *   ORDER inside a block: `alcove invite` and `alcove accept` hand
  *   `saveConfig` a spec they assembled, whose key order is the assembly's,
  *   while every document the console writes has been through the schema, whose
  *   key order is the declaration's. The whole-file line multiset is the
@@ -74,7 +74,7 @@ import type { JobSftpServerEntry } from "@jobs/sftpServer";
  * project's (test/unit/jobs/configExportParity.unit.test.ts).
  */
 
-/** A hard kill on one `psilink` invocation. Each is an offline `invite` or
+/** A hard kill on one `alcove` invocation. Each is an offline `invite` or
  * `accept` that writes a file and exits, so the budget bounds a hang rather
  * than sizing a wait. */
 const CLI_INVOCATION_TIMEOUT_MS = 120_000;
@@ -118,7 +118,7 @@ function scratchDir(label: string): string {
   return dir;
 }
 
-/** Run one `psilink` invocation, failing with everything it wrote. */
+/** Run one `alcove` invocation, failing with everything it wrote. */
 async function runCli(args: Array<string>, cwd: string): Promise<CliRun> {
   const run = await startCli({
     args,
@@ -132,7 +132,7 @@ async function runCli(args: Array<string>, cwd: string): Promise<CliRun> {
 /**
  * Replace the configuration's `connection` block, the step an offline
  * invitation tells the operator to take. A line-scoped rewrite rather than a
- * YAML round-trip: the file is one psilink just wrote, and re-emitting it
+ * YAML round-trip: the file is one Alcove just wrote, and re-emitting it
  * through a parser would rewrite every other block as a side effect of
  * replacing one.
  */
@@ -148,18 +148,18 @@ function fillInConnection(configPath: string, block: Array<string>): void {
   );
 }
 
-/** A configuration `psilink invite` wrote, with its connection block filled in
+/** A configuration `alcove invite` wrote, with its connection block filled in
  * as the operator's own step. */
 async function invitedConfiguration(block: Array<string>): Promise<string> {
   const dir = scratchDir("export-invite");
   fs.writeFileSync(path.join(dir, "input.csv"), FIXTURE_CSV);
   await runCli(["invite", "--identity", INVITER_IDENTITY, "input.csv"], dir);
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   fillInConnection(configPath, block);
   return configPath;
 }
 
-/** A configuration `psilink accept` wrote for the invitation above, with its
+/** A configuration `alcove accept` wrote for the invitation above, with its
  * connection block filled in the same way. */
 async function acceptedConfiguration(block: Array<string>): Promise<string> {
   const inviteDir = scratchDir("export-invite-for-accept");
@@ -183,7 +183,7 @@ async function acceptedConfiguration(block: Array<string>): Promise<string> {
     ],
     dir,
   );
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   fillInConnection(configPath, block);
   return configPath;
 }
@@ -291,7 +291,7 @@ function exportedConfiguration(
   return { exported: handoff.template.yaml, document };
 }
 
-/** The document a psilink loader reads out of a file, which is what the two
+/** The document an Alcove loader reads out of a file, which is what the two
  * sides of a parity assertion are compared as documents. */
 function loadedSpec(source: string): ExchangeSpec {
   return parseExchangeSpec(parseSensitiveYaml(source, "parity fixture"));
@@ -317,7 +317,7 @@ function sortedSettingLines(source: string): Array<string> {
   );
 }
 
-/** The comment block a psilink-written configuration opens with, above its
+/** The comment block an alcove-written configuration opens with, above its
  * connection block. */
 function guidanceHeaderOf(source: string): string {
   const lines = source.split("\n");
@@ -340,7 +340,7 @@ function addedLines(before: string, after: string): Array<string> {
   return added.sort();
 }
 
-/** The `.psilink.key` psilink wrote beside the configuration. */
+/** The `.alcove.key` Alcove wrote beside the configuration. */
 function keyFileBeside(keyPath: string): { sharedSecret: string } {
   const parsed = parseSensitiveJson(
     fs.readFileSync(keyPath, "utf8"),
@@ -352,31 +352,31 @@ function keyFileBeside(keyPath: string): { sharedSecret: string } {
   return { sharedSecret };
 }
 
-describe.skipIf(!cliIsBuilt)("a psilink-written configuration", () => {
+describe.skipIf(!cliIsBuilt)("an alcove-written configuration", () => {
   describe.each([
     {
       channel: "filedrop" as const,
-      label: "a file-drop configuration psilink accept wrote",
+      label: "a file-drop configuration alcove accept wrote",
       fixture: () => acceptedConfiguration(FILEDROP_CONNECTION_BLOCK),
     },
     {
       channel: "sftp" as const,
-      label: "an sftp configuration psilink invite wrote",
+      label: "an sftp configuration alcove invite wrote",
       fixture: () => invitedConfiguration(SFTP_CONNECTION_BLOCK),
     },
   ])("$label, opened in the console and exported", ({ channel, fixture }) => {
-    test("the export is what psilink writes for the document it would load", async () => {
+    test("the export is what Alcove writes for the document it would load", async () => {
       const configPath = await fixture();
       const written = fs.readFileSync(configPath, "utf8");
       const { exported } = exportedConfiguration(configPath, channel);
 
       // The parity claim, byte for byte: the console's export is the file
       // `saveConfig` writes (apps/cli/src/config.ts calls exactly this writer)
-      // for the document psilink's own loader reads out of its file.
+      // for the document Alcove's own loader reads out of its file.
       expect(exported).toBe(serializeExchangeDocument(loadedSpec(written)));
-      // ... and against the file as psilink left it, the residual is order.
+      // ... and against the file as Alcove left it, the residual is order.
       expect(sortedSettingLines(exported)).toEqual(sortedSettingLines(written));
-      // The guidance psilink wrote above its own connection block is in the
+      // The guidance Alcove wrote above its own connection block is in the
       // export too: one writer attaches it, and this is the file the operator
       // edits by hand from here on.
       expect(exported).toContain(guidanceHeaderOf(written));
@@ -416,7 +416,7 @@ describe.skipIf(!cliIsBuilt)("a psilink-written configuration", () => {
 
     test("no shared secret and no key-file value reaches the export", async () => {
       const configPath = await fixture();
-      const keyPath = path.join(path.dirname(configPath), ".psilink.key");
+      const keyPath = path.join(path.dirname(configPath), ".alcove.key");
       const { exported } = exportedConfiguration(configPath, channel);
       const key = keyFileBeside(keyPath);
       expect(exported).not.toContain(key.sharedSecret);

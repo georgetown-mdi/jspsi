@@ -10,7 +10,7 @@ import {
   operatorSuppliedText,
   redactAndRenderOperatorSuppliedText,
   sanitizeErrorForDisplay,
-} from "@psilink/core";
+} from "@alcove/core";
 
 const log = getLogger("file-utils");
 
@@ -299,7 +299,7 @@ function parseIcaclsAces(output: string, keyFilePath: string): string[] {
  * access.
  *
  * `symlinks` sets whether the strip follows a symlink at `targetPath`: pass
- * `"do-not-follow"` for psilink's own temp/work paths (opened `O_NOFOLLOW`,
+ * `"do-not-follow"` for Alcove's own temp/work paths (opened `O_NOFOLLOW`,
  * so a symlink there is a plant) and `"follow"` for an operator-supplied path
  * that the write itself resolves. `reportedPath` names the destination in a
  * failure message when it differs from `targetPath`.
@@ -922,7 +922,7 @@ export function createOwnerOnlyWriteStream(destPath: string): fs.WriteStream {
  * `<home>/x`. Any other form -- `~user` (another user's home; not resolved),
  * an embedded `~`, or `undefined` -- is returned unchanged. Node's `fs` does
  * not expand `~`, and a config-file path is never shell-expanded, so this
- * exists for `~/.psilink/...` in `psilink.yaml` or on the command line.
+ * exists for `~/.alcove/...` in `alcove.yaml` or on the command line.
  */
 export function expandTilde(p: string): string;
 export function expandTilde(p: string | undefined): string | undefined;

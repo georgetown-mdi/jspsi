@@ -5,8 +5,8 @@ import path from "node:path";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import yargs from "yargs";
 
-import { prepareForExchange } from "@psilink/core";
-import type { ExchangeSpec } from "@psilink/core";
+import { prepareForExchange } from "@alcove/core";
+import type { ExchangeSpec } from "@alcove/core";
 
 import {
   builder as exchangeBuilder,
@@ -79,7 +79,7 @@ let priorExitCode: typeof process.exitCode;
 
 beforeEach(() => {
   signalled.done = false;
-  work = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-teardown-signal-"));
+  work = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-teardown-signal-"));
   priorExitCode = process.exitCode;
   exitSpy = vi.spyOn(process, "exit").mockReturnValue(undefined as never);
   // The run states its disclosure terms on stderr whatever the log level; this
@@ -95,7 +95,7 @@ afterEach(() => {
 
 async function runCli(argv: string[]): Promise<void> {
   await yargs(argv)
-    .scriptName("psilink")
+    .scriptName("alcove")
     .command("exchange <input> [output]", "", exchangeBuilder, exchangeHandler)
     .exitProcess(false)
     // Raise a failing run to the caller instead of letting yargs print its
@@ -127,7 +127,7 @@ test(
       metadata: prepared.metadata,
     };
     fs.mkdirSync(path.join(work, "drop"));
-    saveConfig(path.join(work, "psilink.yaml"), spec);
+    saveConfig(path.join(work, "alcove.yaml"), spec);
     saveKeyFile(path.join(work, "a.key"), { sharedSecret: INITIAL_SECRET });
 
     const { lines } = await captureFd3(async () => {
@@ -138,7 +138,7 @@ test(
         path.join(work, "a-input.csv"),
         path.join(work, "a-out.csv"),
         "--config-file",
-        path.join(work, "psilink.yaml"),
+        path.join(work, "alcove.yaml"),
         "--key-file",
         path.join(work, "a.key"),
         "--identity",

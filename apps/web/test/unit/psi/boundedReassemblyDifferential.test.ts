@@ -6,14 +6,14 @@ import {
   MAX_WEBRTC_FRAME_BYTES,
   MAX_WEBRTC_STRING_BYTES,
   scanFrameStructure,
-} from "@psilink/core";
+} from "@alcove/core";
 
-import { normalizeBinary } from "@psilink/testkit/webrtcInboundFrames";
+import { normalizeBinary } from "@alcove/testkit/webrtcInboundFrames";
 
 import { boundChunkReassembly } from "../../../src/psi/transport/boundedReassembly.js";
 
 import type { Packable, Unpackable } from "peerjs-js-binarypack";
-import type { ConnectionError } from "@psilink/core";
+import type { ConnectionError } from "@alcove/core";
 import type { DataConnection } from "peerjs";
 
 // This suite is the differential counterpart to boundedReassembly.test.ts: rather

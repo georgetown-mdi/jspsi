@@ -2,8 +2,8 @@
 
 This is the setup script's job done one command at a time, by you. Use it if
 you would rather not run a script you downloaded, or if your PC will not let
-you run one. It ends in the same place: a Docker volume called `psilink-sync`
-that points at your file-drop folder, tested against the things psilink
+you run one. It ends in the same place: a Docker volume called `alcove-sync`
+that points at your file-drop folder, tested against the things Alcove
 actually needs. Allow half an hour rather than ten minutes.
 
 Nothing here installs anything on Windows. Every check runs inside a throwaway
@@ -17,7 +17,7 @@ start, because that choice is the awkward one to undo.
 **The parts and steps below are numbered to match the Command Prompt script.**
 So when [troubleshooting](troubleshooting.md) names a step, it is the one with
 that number here. The PowerShell script runs the checks that ship inside the
-psilink image, which name what they looked at rather than numbering it, and
+Alcove image, which name what they looked at rather than numbering it, and
 which ask the same questions in the same order. Every step names the section
 that covers its failure, and you can stop reading this page at that point.
 
@@ -178,7 +178,7 @@ exactly this -- and it is the most common cause by far. See
 ### Make the file step 6 will send
 
 ```text
-echo psilink write probe > /tmp/psilink-probe-check.tmp
+echo alcove write probe > /tmp/alcove-probe-check.tmp
 ```
 
 ### Step 3: do the credentials work?
@@ -255,19 +255,19 @@ is what an empty exchange folder looks like.
 does not extend to this folder. See
 [the share opens but the folder does not](troubleshooting.md#the-share-opens-but-the-folder-does-not).
 
-If `ls` shows more than about eight thousand files, psilink will not run here
+If `ls` shows more than about eight thousand files, Alcove will not run here
 at all; use a folder dedicated to the exchange.
 
 ### Step 6: can it write, rename and delete?
 
-Read access is not enough. psilink writes each message under a temporary name
+Read access is not enough. Alcove writes each message under a temporary name
 and renames it into place, then deletes it once the other side has read it, so
 all three have to work. Still at the `smb: \>` prompt, in your folder:
 
 ```text
-put /tmp/psilink-probe-check.tmp psilink-probe-check.tmp
-rename psilink-probe-check.tmp psilink-probe-check.tmp.renamed
-del psilink-probe-check.tmp.renamed
+put /tmp/alcove-probe-check.tmp alcove-probe-check.tmp
+rename alcove-probe-check.tmp alcove-probe-check.tmp.renamed
+del alcove-probe-check.tmp.renamed
 ```
 
 That is the file you made a moment ago being sent to the share, renamed, and
@@ -292,7 +292,7 @@ reach it another. Nothing so far proves those are the same folder. So leave a
 marker for part 4 to find:
 
 ```text
-put /tmp/psilink-probe-check.tmp psilink-setup-check.tmp
+put /tmp/alcove-probe-check.tmp alcove-setup-check.tmp
 quit
 exit
 ```
@@ -307,7 +307,7 @@ deletes. You are back in Windows.
 **If you have been here before,** remove the old volume first:
 
 ```text
-docker volume rm psilink-sync
+docker volume rm alcove-sync
 ```
 
 Creating a volume over a name that already exists succeeds and quietly keeps
@@ -325,13 +325,13 @@ docker volume create --driver local `
   --opt type=cifs `
   --opt 'device=//fs-04.agency.gov/exchange$/dropbox' `
   --opt 'o=username=yourname,password=YOURPASSWORD,uid=1000,gid=1000,domain=AGENCY' `
-  psilink-sync
+  alcove-sync
 ```
 
 **Command Prompt:**
 
 ```text
-docker volume create --driver local --opt type=cifs --opt "device=//fs-04.agency.gov/exchange$/dropbox" --opt "o=username=yourname,password=YOURPASSWORD,uid=1000,gid=1000,domain=AGENCY" psilink-sync
+docker volume create --driver local --opt type=cifs --opt "device=//fs-04.agency.gov/exchange$/dropbox" --opt "o=username=yourname,password=YOURPASSWORD,uid=1000,gid=1000,domain=AGENCY" alcove-sync
 ```
 
 Things to get right:
@@ -339,7 +339,7 @@ Things to get right:
 - **Forward slashes**, and the server, share and subfolder run together:
   `\\fs-04\exchange$\dropbox` becomes `//fs-04/exchange$/dropbox`.
 - **Drop `,domain=AGENCY`** if you have no domain.
-- **Keep `uid=1000,gid=1000`.** psilink runs in the container as an
+- **Keep `uid=1000,gid=1000`.** Alcove runs in the container as an
   unprivileged account numbered 1000, and a Windows file server serves no
   ownership the mount can read, so without these two the whole folder appears
   to belong to somebody else and every write is refused -- the check below
@@ -369,10 +369,10 @@ establish anything.
 ### Check it mounts, and opens the right folder
 
 ```text
-docker run --rm -v psilink-sync:/rz --entrypoint sh ghcr.io/georgetown-mdi/alcove:latest -c "ls -la /rz"
+docker run --rm -v alcove-sync:/rz --entrypoint sh ghcr.io/georgetown-mdi/alcove:latest -c "ls -la /rz"
 ```
 
-You are looking for **`psilink-setup-check.tmp`**, the marker you left at the
+You are looking for **`alcove-setup-check.tmp`**, the marker you left at the
 end of part 3.
 
 - **It is there.** The volume and the checks agree on which folder this is.
@@ -393,15 +393,15 @@ end of part 3.
   authentication and wants a Kerberos ticket the container cannot have. See
   [the share never asks for a password](troubleshooting.md#the-share-never-asks-for-a-password).
 
-### Check the behaviour psilink depends on
+### Check the behaviour Alcove depends on
 
-Two of psilink's rules about who goes first are not permissions but behaviour,
+Two of Alcove's rules about who goes first are not permissions but behaviour,
 and a share can pass everything above and still get them wrong. This has to run
 over the volume rather than through smbclient, which refuses some of these
 whatever the server would have allowed.
 
 ```text
-docker run --rm -it -v psilink-sync:/rz --entrypoint sh ghcr.io/georgetown-mdi/alcove:latest
+docker run --rm -it -v alcove-sync:/rz --entrypoint sh ghcr.io/georgetown-mdi/alcove:latest
 ```
 
 You are inside a container again, with your file drop mounted at `/rz`. Move
@@ -414,24 +414,24 @@ cd /rz
 First, renaming a file onto one that already exists:
 
 ```text
-echo a > psilink-probe-a.tmp
-echo b > psilink-probe-b.tmp
-mv -f psilink-probe-a.tmp psilink-probe-b.tmp && echo RENAME OK
-rm -f psilink-probe-a.tmp psilink-probe-b.tmp
+echo a > alcove-probe-a.tmp
+echo b > alcove-probe-b.tmp
+mv -f alcove-probe-a.tmp alcove-probe-b.tmp && echo RENAME OK
+rm -f alcove-probe-a.tmp alcove-probe-b.tmp
 ```
 
 Then refusing to create something that already exists. Here the **second**
 command is the one that has to fail:
 
 ```text
-mkdir psilink-probe-x.d
-mkdir psilink-probe-x.d
-rmdir psilink-probe-x.d
+mkdir alcove-probe-x.d
+mkdir alcove-probe-x.d
+rmdir alcove-probe-x.d
 ```
 
 You want `RENAME OK` from the first, and from the second `mkdir` a complaint
 that the directory already exists. Together they mean the share behaves the way
-psilink expects and there is nothing more to do.
+Alcove expects and there is nothing more to do.
 
 If either comes out the other way -- no `RENAME OK`, or the second `mkdir`
 quietly succeeding -- the share cannot arbitrate between two sides starting at
@@ -442,7 +442,7 @@ This is what a folder kept in step by a sync service usually looks like.
 Finally, clear up after yourself and leave:
 
 ```text
-rm -f psilink-setup-check.tmp
+rm -f alcove-setup-check.tmp
 exit
 ```
 
@@ -458,7 +458,7 @@ and you do not need to do any of this again unless the password changes.
 ```powershell
 docker run --rm `
   -v 'C:\path\to\your\work:/work' `
-  -v 'psilink-sync:/sync' `
+  -v 'alcove-sync:/sync' `
   ghcr.io/georgetown-mdi/alcove:latest `
   file:///sync input.csv matches.csv
 ```
@@ -466,7 +466,7 @@ docker run --rm `
 **Command Prompt:**
 
 ```text
-docker run --rm -v "C:\path\to\your\work:/work" -v "psilink-sync:/sync" ghcr.io/georgetown-mdi/alcove:latest file:///sync input.csv matches.csv
+docker run --rm -v "C:\path\to\your\work:/work" -v "alcove-sync:/sync" ghcr.io/georgetown-mdi/alcove:latest file:///sync input.csv matches.csv
 ```
 
 `C:\path\to\your\work` is a folder **on this PC** holding your input CSV;
@@ -483,12 +483,12 @@ Three things to know before the first run:
   with your partner who goes first. If a run fails and leaves files behind, see
   [running the exchange](troubleshooting.md#running-the-exchange).
 - **A second partner needs a second volume.** Give it another name in part 4 --
-  `psilink-partner-b` -- and use that name here.
+  `alcove-partner-b` -- and use that name here.
 
 ## When you are done with this partner
 
 ```text
-docker volume rm psilink-sync
+docker volume rm alcove-sync
 ```
 
 Then have the account switched off, or its password changed. That, rather than

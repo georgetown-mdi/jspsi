@@ -52,7 +52,7 @@ export default defineConfig([
     input: "src/main.ts",
     external: makeExternal(UMD_BUNDLED),
     output: {
-      name: "psi-link",
+      name: "alcove",
       file: pkg.browser,
       format: "umd",
       globals: {

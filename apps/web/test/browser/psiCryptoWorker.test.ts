@@ -9,7 +9,7 @@ import type {
   PsiCryptoWorker,
   SpawnPsiCryptoWorker,
 } from "@psi/workers/psiCryptoController";
-import type { PsiEngine } from "@psilink/core";
+import type { PsiEngine } from "@alcove/core";
 
 // The browser PSI crypto offload, exercised against the REAL Vite-native worker
 // running the REAL WASM engine in a real browser. The host-side

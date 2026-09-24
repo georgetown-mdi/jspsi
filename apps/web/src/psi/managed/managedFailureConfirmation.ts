@@ -103,7 +103,7 @@ export function composeConfirmationMessage(
     "",
     "1. Confirm it is really you -- say something only you and I would know, not just",
     "   reply to this message.",
-    "2. Tell me what your own psilink reported, and when. I need to know a real",
+    "2. Tell me what your own Alcove reported, and when. I need to know a real",
     "   failure happened on your side, not just that mine failed.",
     "3. Tell me whether you have run this exchange from more than one place -- a second",
     "   browser or profile, another device, or a restored backup. That can cause this",

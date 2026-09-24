@@ -11,8 +11,8 @@ import {
   stripInvitationWhitespace,
   TermsUpdateRefusedError,
   UsageError,
-} from "@psilink/core";
-import type { ExchangeSpec, TermsUpdate } from "@psilink/core";
+} from "@alcove/core";
+import type { ExchangeSpec, TermsUpdate } from "@alcove/core";
 
 import {
   deriveAcceptedInvitationTerms,
@@ -57,7 +57,7 @@ export function builder(cmd: Argv): Argv {
       })
       .usage(
         "Usage: $0 apply [options] UPDATE\n\n" +
-          "Apply a terms update your partner made with 'psilink update' to\n" +
+          "Apply a terms update your partner made with 'alcove update' to\n" +
           "this party's configuration. The update is checked against the\n" +
           "shared secret in the key file, its terms are shown, and nothing is\n" +
           "written unless you confirm. The key file and the connection block\n" +
@@ -100,13 +100,13 @@ function refusalOf(err: TermsUpdateRefusedError, keyPath: string): UsageError {
     case "format":
       return new UsageError(
         `the terms update could not be read: ${err.message}.${unchanged} ` +
-          "Ask your partner to run 'psilink update' again and send you its " +
+          "Ask your partner to run 'alcove update' again and send you its " +
           "whole output.",
       );
     case "partnership": {
       const message = messageWithOperatorText`the terms update was refused by the partnership check: it was made under a shared secret other than the one in ${operatorSuppliedText(
         keyPath,
-      )}, so it is for a different partnership, or an exchange between you has replaced the secret since it was made.${unchanged} Ask your partner to run 'psilink update' again from the configuration and key file they use with you.`;
+      )}, so it is for a different partnership, or an exchange between you has replaced the secret since it was made.${unchanged} Ask your partner to run 'alcove update' again from the configuration and key file they use with you.`;
       return keepOperatorSuppliedText(new UsageError(message.text), message);
     }
     case "authentication":
@@ -222,8 +222,8 @@ export async function handler(argv: Arguments): Promise<void> {
       assertNoUnknownOptions(positionals);
       if (positionals.length !== 1)
         throw new UsageError(
-          "psilink apply takes exactly one argument, the terms update; " +
-            "usage: psilink apply [options] UPDATE",
+          "alcove apply takes exactly one argument, the terms update; " +
+            "usage: alcove apply [options] UPDATE",
         );
       const configPath =
         (singleValue(argv, "config-file") as string | undefined) ??
@@ -300,7 +300,7 @@ export async function handler(argv: Arguments): Promise<void> {
           operatorSuppliedText(configPath),
         )}: its linkage terms and the records that follow from them were ` +
           "rewritten, and its connection block and the key file were not " +
-          "changed. Your next 'psilink exchange' with this partner runs on " +
+          "changed. Your next 'alcove exchange' with this partner runs on " +
           "the new terms.",
       );
     });

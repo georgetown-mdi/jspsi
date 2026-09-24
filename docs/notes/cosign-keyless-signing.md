@@ -96,7 +96,7 @@ What the runs established:
   v3.0.6, from the pinned `sigstore/cosign-installer`.
 - The certificate's identity is the workflow file's path plus the ref the run
   came from, verbatim: on a branch push,
-  `https://github.com/georgetown-mdi/jspsi/.github/workflows/<file>.yaml@refs/heads/<branch>`;
+  `https://github.com/georgetown-mdi/alcove/.github/workflows/<file>.yaml@refs/heads/<branch>`;
   on a tag push, the same with `@refs/tags/<tag>`. The tag form is the one a
   release produces, and it was driven, not inferred.
 - An anchored `--certificate-identity-regexp` over that identity verifies the

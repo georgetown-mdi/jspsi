@@ -8,7 +8,7 @@ import {
 import { delimiterRecheckFrom } from "./localDocumentFieldsModel";
 
 import type { DelimiterRecheck } from "./localDocumentFieldsModel";
-import type { ExchangeSpec } from "@psilink/core";
+import type { ExchangeSpec } from "@alcove/core";
 
 /**
  * Re-read the stored input file under a delimiter the operator has changed to,

@@ -25,7 +25,7 @@ import {
   linkageRuleSetVerdictNote,
   sanitizeForDisplay,
   unshownDeclaredNamesLine,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { InvitationTerms } from "@components/InvitationTerms";
 
@@ -41,7 +41,7 @@ import {
   hostileSource,
   hostileTerms,
   hostileVariants,
-} from "@psilink/core/testing";
+} from "@alcove/core/testing";
 import {
   openDisclosure,
   readyCollapse,
@@ -58,7 +58,7 @@ import type {
   ConnectionEndpoint,
   LinkageStrategy,
   LinkageTerms,
-} from "@psilink/core";
+} from "@alcove/core";
 
 // Terms with two linkage keys whose breadth differs -- an exact key and a
 // first-initial-truncated one -- plus a constrained field, payload columns, and a
@@ -304,7 +304,7 @@ describe("InvitationTerms: per-key matching disclosures", () => {
   test("the rule-set citation is always-visible, each half holding this build's verdict, and absent when none is cited", async () => {
     // The citation names the rules the collapsed list below enumerates, so it
     // stays outside the disclosure: an acceptor reads which set was cited, and
-    // what psilink found about it, without expanding. A disproved half must not
+    // what Alcove found about it, without expanding. A disproved half must not
     // be reachable only by opening the matching panel.
     await renderTerms(citingTerms, { perspective: "review" });
     await expect.element(toggle("Matching strategies")).toBeInTheDocument();
@@ -759,8 +759,8 @@ describe("InvitationTerms: a key disclosure stays mounted but hidden under a red
 describe("InvitationTerms: the counterparty identity is flagged unverified at consent", () => {
   // At the pre-consent review screen the displayed "Invitation from <name>" is a
   // free-text field the sender typed, included in an invitation accepted on a
-  // transcription checksum -- so psilink has not authenticated it. A terse marker
-  // keeps the acceptor from treating it as a psilink-verified fact; it is a small
+  // transcription checksum -- so Alcove has not authenticated it. A terse marker
+  // keeps the acceptor from treating it as an alcove-verified fact; it is a small
   // marker that does not overstate a self-asserted field, not a directive (parties
   // normally coordinate the first exchange out of band, so they already know the
   // counterparty). The inviter's "proposing" preview shows its OWN identity,
@@ -2672,7 +2672,7 @@ describe("InvitationTerms: a qualifying sentence sits at its headline's visibili
     );
   });
 
-  test("a sole-receiver deduplicating invitation states psilink presents the acceptor no grouping when the inviter alone receives", async () => {
+  test("a sole-receiver deduplicating invitation states Alcove presents the acceptor no grouping when the inviter alone receives", async () => {
     // The other output shape a deduplicating invitation can take. This party is
     // sent no result, so it is presented no grouping: the shared-result sentence
     // would state a disclosure this client does not make, and the sole-receiver

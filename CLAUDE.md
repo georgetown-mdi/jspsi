@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-psilink does Privacy Preserving Record Linkage (PPRL) via Private Set Intersection (PSI) between two parties over SFTP, file-drop, or WebRTC.
+Alcove does Privacy Preserving Record Linkage (PPRL) via Private Set Intersection (PSI) between two parties over SFTP, file-drop, or WebRTC.
 
 It is a npm workspaces monorepo (`packages/core`, `packages/peerjs-broker`, `apps/cli`, `apps/web`); apps consume packages, not the reverse.
 
@@ -8,10 +8,10 @@ It is a npm workspaces monorepo (`packages/core`, `packages/peerjs-broker`, `app
 
 ## Applications
 
-Three applications make up psilink's surface (full architecture: `docs/DESIGN.md`, Architecture):
+Three applications make up Alcove's surface (full architecture: `docs/DESIGN.md`, Architecture):
 
 - **Public web application** (`apps/web`, deployed to Elastic Beanstalk): conducts WebRTC exchanges only, all data handling in the browser (the server only delivers the code). It owns the recurring-exchange management interface -- recurring exchanges in browser storage, run on a schedule as a PWA.
-- **Command line application** (`apps/cli`, containerized): conducts SFTP, synced-folder (filedrop), and WebRTC exchanges. A CLI party and a browser party exchange over WebRTC through the shared peer-coordination server (`psilink exchange` on a `channel: webrtc` config). No WebSocket-to-TCP proxy is involved: that prerequisite is for a BROWSER reaching a TCP service (an SFTP server), not for the CLI, which opens sockets itself.
+- **Command line application** (`apps/cli`, containerized): conducts SFTP, synced-folder (filedrop), and WebRTC exchanges. A CLI party and a browser party exchange over WebRTC through the shared peer-coordination server (`alcove exchange` on a `channel: webrtc` config). No WebSocket-to-TCP proxy is involved: that prerequisite is for a BROWSER reaching a TCP service (an SFTP server), not for the CLI, which opens sockets itself.
 - **Console**: a local, single-owner PROTOTYPING GUI for the containerized CLI, repurposing the web application's machinery. It lowers the friction of the CLI -- writing a config and setting the right arguments -- so an operator authors and runs one exchange, conducted either by invoking the CLI or by the Node server running it directly. Its workflow is author-and-run once (test data, then maybe real data), then GRADUATE to the plain CLI plus cron/scheduler for the recurring production version. One machine, one person, authoring the connection and conducting the exchange: a web server, but not shared beyond the host. It operates on one mounted working directory holding a single exchange's config, secret, input, and results; only one exchange's resources are mounted at a time.
 
 The console is NOT a store of named connections, a recurring-exchange or scheduling interface (that lives in the public web app; the CLI schedules from the command line), a multi-exchange job manager, or a network-shared management service with an access-control perimeter over the operator. There is NO deploy-time provisioner: the operator authors the SFTP connection in-console. The operator is the machine's own user; the only untrusted input is the remote partner's invitation content, which the exchange protocol already protects. Because the operator is trusted, the console must not hard-block them for a defense-in-depth posture (e.g. a credential file in the single mount) -- it warns and guides toward the better practice instead. Warn-and-guide governs the operator's own choices; a control constraining only remote or browser-delivered content the operator cannot inspect is correctly a hard refusal.

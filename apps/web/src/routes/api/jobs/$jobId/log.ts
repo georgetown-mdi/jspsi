@@ -46,7 +46,7 @@ export const Route = createFileRoute("/api/jobs/$jobId/log")({
           status: 200,
           headers: {
             "Content-Type": "text/plain; charset=utf-8",
-            "Content-Disposition": `attachment; filename="psilink-run-${view.id}.log"`,
+            "Content-Disposition": `attachment; filename="alcove-run-${view.id}.log"`,
             "X-Content-Type-Options": "nosniff",
             ...JOB_RESPONSE_HEADERS,
           },

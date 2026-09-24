@@ -1,8 +1,8 @@
-import { sanitizeForDisplay, summarizeLinkageShortfall } from "@psilink/core";
+import { sanitizeForDisplay, summarizeLinkageShortfall } from "@alcove/core";
 
 import { CSV_DELIMITER_SINGLE_COLUMN_REMEDY } from "@components/csvDelimiterChoice";
 
-import type { LinkageField } from "@psilink/core";
+import type { LinkageField } from "@alcove/core";
 
 import type { AlertContent } from "@components/csvIntake";
 import type { LinkageRefusal } from "@psi/linkageRefusal";

@@ -4,9 +4,9 @@ import path from "node:path";
 
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import logLibrary from "loglevel";
-import { getLogger } from "@psilink/core";
-import type { PresentedHostKey } from "@psilink/core";
-import { reconcileHostKeyFingerprints } from "@psilink/core/testing";
+import { getLogger } from "@alcove/core";
+import type { PresentedHostKey } from "@alcove/core";
+import { reconcileHostKeyFingerprints } from "@alcove/core/testing";
 
 import { EVENT_STREAM_FD, type WarningEvent } from "../../../src/eventStream";
 import { openEventStreamWithFdWired } from "../../eventStreamTestSupport";
@@ -32,7 +32,7 @@ let tmpDir: string;
 let uid = 0;
 
 beforeEach(() => {
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-divergence-"));
+  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-divergence-"));
 });
 
 afterEach(() => {

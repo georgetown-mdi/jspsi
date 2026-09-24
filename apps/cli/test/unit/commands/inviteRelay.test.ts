@@ -18,8 +18,8 @@ import {
   MAX_RELAY_LOCATOR_URLS,
   mintRunRelayCredential,
   UsageError,
-} from "@psilink/core";
-import type { ExchangeSpec, WebRTCConnectionConfig } from "@psilink/core";
+} from "@alcove/core";
+import type { ExchangeSpec, WebRTCConnectionConfig } from "@alcove/core";
 
 import {
   builder as inviteBuilder,
@@ -59,7 +59,7 @@ afterEach(() => {
 });
 
 function scratch(): string {
-  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-relay-"));
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "alcove-invite-relay-"));
   tmpDirs.push(dir);
   return dir;
 }
@@ -69,8 +69,8 @@ function optionsIn(
   overrides: Partial<CommonBootstrapOptions> = {},
 ): CommonBootstrapOptions {
   return {
-    configFile: path.join(dir, "psilink.yaml"),
-    keyFile: path.join(dir, ".psilink.key"),
+    configFile: path.join(dir, "alcove.yaml"),
+    keyFile: path.join(dir, ".alcove.key"),
     identity: "Agency A",
     record: false,
     eventStream: false,
@@ -93,7 +93,7 @@ function writeWebRTCConfig(
   dir: string,
   connection: Partial<Omit<WebRTCConnectionConfig, "channel">>,
 ): string {
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   const spec: ExchangeSpec = {
     connection: {
       channel: "webrtc",
@@ -136,7 +136,7 @@ async function expectNoCredentialIn(
   const serialized = JSON.stringify(token);
   const relayKey = await deriveRelayKey(token.sharedSecret);
   const minted = await mintRunRelayCredential(token.sharedSecret, new Date());
-  for (const secret of [relayKey, minted.credential, ":psilink", ...extra]) {
+  for (const secret of [relayKey, minted.credential, ":alcove", ...extra]) {
     expect(serialized).not.toContain(secret);
     expect(invitation).not.toContain(secret);
   }

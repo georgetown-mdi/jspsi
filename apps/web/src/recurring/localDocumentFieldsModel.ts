@@ -12,7 +12,7 @@
  * (docs/spec/MANAGED_EXCHANGE_RECORD.md, "Local settings of the document").
  */
 
-import { DEFAULT_CSV_DELIMITER } from "@psilink/core";
+import { DEFAULT_CSV_DELIMITER } from "@alcove/core";
 
 import {
   CSV_DELIMITER_OPTIONS,
@@ -25,7 +25,7 @@ import { ownColumnsActionable } from "@psi/ownColumnsModel";
 import { retentionNoteValue } from "@exchange/manageOfferModel";
 
 import type { CsvDelimiterChoice } from "@components/csvDelimiterChoice";
-import type { ExchangeSpec } from "@psilink/core";
+import type { ExchangeSpec } from "@alcove/core";
 import type { ManagedExchangeLocalEdits } from "@psi/managed/managedExchangeRecord";
 import type { OwnColumnsChoice } from "@psi/ownColumnsModel";
 

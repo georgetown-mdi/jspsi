@@ -22,7 +22,7 @@ describe("what the confirmation asks the operator to attest", () => {
   });
 
   test("names the file to choose and why a run there changes it", () => {
-    expect(RETAKE_KEY_FILE_NOTE).toContain(".psilink.key");
+    expect(RETAKE_KEY_FILE_NOTE).toContain(".alcove.key");
     expect(RETAKE_KEY_FILE_NOTE).toMatch(/each run changes the shared secret/);
   });
 
@@ -31,7 +31,7 @@ describe("what the confirmation asks the operator to attest", () => {
     // the only check on which one is chosen: the copy has to say that the choice
     // replaces the stored secret, what that leaves behind, and where to take the
     // file from.
-    expect(RETAKE_KEY_FILE_NOTE).toMatch(/psilink\.yaml/);
+    expect(RETAKE_KEY_FILE_NOTE).toMatch(/alcove\.yaml/);
     expect(RETAKE_KEY_FILE_NOTE).toMatch(/same name/);
     expect(RETAKE_KEY_FILE_NOTE).toMatch(
       /replaces the only copy of the secret/,
@@ -72,7 +72,7 @@ describe("a take-back that wrote nothing", () => {
 
   test("a record no longer here points at the files, not at a retry", () => {
     const reason = managedRetakeRefusal("gone").reason;
-    expect(reason).toContain(".psilink.key");
+    expect(reason).toContain(".alcove.key");
     expect(reason).not.toMatch(/try again/i);
   });
 });

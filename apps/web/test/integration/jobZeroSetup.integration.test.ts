@@ -64,11 +64,11 @@ describe.skipIf(!hasBuild)(
     let port = 0;
 
     beforeAll(async () => {
-      dataRoot = mkdtempSync(join(tmpdir(), "psilink-zs-data-"));
-      rendezvousDir = mkdtempSync(join(tmpdir(), "psilink-zs-rdv-"));
+      dataRoot = mkdtempSync(join(tmpdir(), "alcove-zs-data-"));
+      rendezvousDir = mkdtempSync(join(tmpdir(), "alcove-zs-rdv-"));
       // The built server runs as an ordinary user here, so relocate the
       // pasted-credential scratch dir off the root-owned default it uses in-image.
-      scratchDir = mkdtempSync(join(tmpdir(), "psilink-zs-cred-"));
+      scratchDir = mkdtempSync(join(tmpdir(), "alcove-zs-cred-"));
 
       port = await getFreePort();
       const { child: proc, getLaunchError } = await spawnProdServer(port, {
@@ -108,8 +108,8 @@ describe.skipIf(!hasBuild)(
       const { id } = (await response.json()) as { id: string };
       expect(typeof id).toBe("string");
 
-      expect(existsSync(join(dataRoot, id, "psilink.yaml"))).toBe(false);
-      expect(existsSync(join(dataRoot, id, ".psilink.key"))).toBe(false);
+      expect(existsSync(join(dataRoot, id, "alcove.yaml"))).toBe(false);
+      expect(existsSync(join(dataRoot, id, ".alcove.key"))).toBe(false);
       expect(existsSync(join(dataRoot, id, "input.csv"))).toBe(true);
 
       // The terms mismatch shows as a failed job, and its error event replays

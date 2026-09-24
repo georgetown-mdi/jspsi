@@ -13,7 +13,7 @@ import {
   generateSharedSecret,
   getDefaultLinkageTerms,
   runExchange,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   CLOSE_OUTCOME_WARNINGS,
@@ -47,7 +47,7 @@ import type {
   ResolvedRunShape,
   RunExchangeOptions,
   WebRTCEndpoint,
-} from "@psilink/core";
+} from "@alcove/core";
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
 // runExchange, the open-handshake, and the authenticated key exchange are the
@@ -68,7 +68,7 @@ const logCapture = vi.hoisted(() => ({
   warnings: [] as Array<string>,
 }));
 
-vi.mock("@psilink/core", async (importOriginal) => {
+vi.mock("@alcove/core", async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
   return {
     ...actual,
@@ -213,9 +213,9 @@ const OUTPUTS = {
   resultsUrl: "blob:results",
   record: {
     recordUrl: "blob:record",
-    recordFileName: "psilink-record.json",
+    recordFileName: "alcove-record.json",
     keysUrl: "blob:keys",
-    keysFileName: "psilink-record.keys.json",
+    keysFileName: "alcove-record.keys.json",
   },
 } satisfies ExchangeOutputs;
 
@@ -558,7 +558,7 @@ describe("runExchangeLifecycle", () => {
             field === "host"
               ? WEBRTC_ENDPOINT_HOST_REFUSED
               : WEBRTC_ENDPOINT_PATH_REFUSED,
-          psilinkRecoveryHintEmitted: true,
+          alcoveRecoveryHintEmitted: true,
         }),
       });
       expect(mockedOpen).not.toHaveBeenCalled();

@@ -3,7 +3,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
-import type { getLogger } from "@psilink/core";
+import type { getLogger } from "@alcove/core";
 
 import { preflightKeyFilePath } from "../../src/keyFilePreflight";
 
@@ -24,7 +24,7 @@ function makeLogger(): { log: ReturnType<typeof getLogger>; infos: string[] } {
 let dir: string;
 
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-preflight-"));
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-preflight-"));
 });
 
 afterEach(() => {
@@ -316,13 +316,13 @@ test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
 
 test("sweeps stale probe files but spares look-alike names", () => {
   // The pre-flight unlinks leftover probe files from prior crashed runs,
-  // matching the exact `.psilink-write-probe-<pid>-<8 hex>` grammar. The
+  // matching the exact `.alcove-write-probe-<pid>-<8 hex>` grammar. The
   // anchored regex must not delete a user's file that merely shares the
   // prefix -- a broadened pattern would silently remove unrelated files.
   const { log } = makeLogger();
-  const stale = ".psilink-write-probe-99999-deadbeef"; // matches: swept
-  const lookAlikeBadSuffix = ".psilink-write-probe-12-zzzzzzzz"; // non-hex
-  const lookAlikeNoSuffix = ".psilink-write-probe-keep"; // no -<digits>-<hex>
+  const stale = ".alcove-write-probe-99999-deadbeef"; // matches: swept
+  const lookAlikeBadSuffix = ".alcove-write-probe-12-zzzzzzzz"; // non-hex
+  const lookAlikeNoSuffix = ".alcove-write-probe-keep"; // no -<digits>-<hex>
   const unrelated = "important.txt";
   for (const name of [stale, lookAlikeBadSuffix, lookAlikeNoSuffix, unrelated])
     fs.writeFileSync(path.join(dir, name), "");

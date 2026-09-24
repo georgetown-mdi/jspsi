@@ -1,5 +1,5 @@
 #!/bin/sh
-# Container-side checks for cmd_Setup-PsilinkFileDrop.cmd.
+# Container-side checks for cmd_Setup-AlcoveFileDrop.cmd.
 #
 # This runs inside a throwaway Alpine container, not on Windows. The setup
 # script feeds it on standard input through "tr -d '\r' | sh", so a checkout
@@ -9,7 +9,7 @@
 # Every value arrives in the environment rather than on a command line, so the
 # password is never an argument here.
 set -u
-AUTH=/tmp/psilink-auth
+AUTH=/tmp/alcove-auth
 LITTER=""
 TARGET=""
 LISTING=""
@@ -36,7 +36,7 @@ for required in SMB_SERVER SMB_SHARE SMB_USER; do
   [ -n "$supplied" ] && continue
   emit "FAIL: the setup script did not pass $required to the container."
   emit ""
-  emit "MEANING: this is a defect in cmd_Setup-PsilinkFileDrop.cmd rather than a"
+  emit "MEANING: this is a defect in cmd_Setup-AlcoveFileDrop.cmd rather than a"
   emit "         problem with your share or your credentials."
   emit "ACTION:  report it, with the command you ran."
   exit 10
@@ -147,7 +147,7 @@ else
   emit "        and run this script again giving the full name or the address"
   emit "        it prints:"
   emit ""
-  emit "          cmd_Setup-PsilinkFileDrop.cmd -Server <full-name-or-IP> -Share $SMB_SHARE"
+  emit "          cmd_Setup-AlcoveFileDrop.cmd -Server <full-name-or-IP> -Share $SMB_SHARE"
   emit ""
   emit "        See the troubleshooting page, 'The container cannot find"
   emit "        the server'."
@@ -181,7 +181,7 @@ if ! command -v smbclient >/dev/null 2>&1; then
   emit "      established about the credentials, the share, the folder, or"
   emit "      write access; steps 1 and 2 above stand."
   emit ""
-  emit "MEANING: this copy of the psilink image predates the checks. The image"
+  emit "MEANING: this copy of the Alcove image predates the checks. The image"
   emit "         is fetched only when it is missing, never to refresh one"
   emit "         already on the PC."
   emit ""
@@ -355,7 +355,7 @@ if [ -n "$STATUS" ]; then
       emit "         the folder in File Explorer, right-click, Properties, DFS"
       emit "         tab, and read the referral. Then run:"
       emit ""
-      emit "           cmd_Setup-PsilinkFileDrop.cmd -Server <server> -Share <share> -SubPath <folder>"
+      emit "           cmd_Setup-AlcoveFileDrop.cmd -Server <server> -Share <share> -SubPath <folder>"
       emit ""
       emit "         See the troubleshooting page, 'Reading the real path"
       emit "         from Windows'."
@@ -370,7 +370,7 @@ if [ -n "$STATUS" ]; then
 
   if [ -n "$SMB_PATH" ]; then
     # The ordinary shape of an agency grant is rights to your own folder and
-    # nothing above it. Listing the share root is not something psilink needs,
+    # nothing above it. Listing the share root is not something Alcove needs,
     # so a refusal here decides nothing; step 5 opens the folder that matters.
     emit "NOTE: the share root would not list."
     emit "      ($STATUS)"
@@ -441,7 +441,7 @@ if [ -n "$SMB_PATH" ]; then
   emit "OK: directory listed, $entries file(s) in it."
   if [ "$entries" -gt 8192 ]; then
     emit ""
-    emit "WARN: psilink will not read a rendezvous folder holding more than 8192"
+    emit "WARN: Alcove will not read a rendezvous folder holding more than 8192"
     emit "      entries, so an exchange here will fail however the permissions"
     emit "      come out. Use a folder dedicated to the exchange."
   fi
@@ -455,14 +455,14 @@ fi
 [ -n "$LISTING" ] && report_space "$LISTING"
 
 step "6. Write, rename, and delete"
-emit "psilink writes each message under a temporary name and renames it into"
+emit "Alcove writes each message under a temporary name and renames it into"
 emit "place, so read access alone is not enough."
 
 # Fixed names this setup can leave on the share, swept before the staged test
 # rather than after it. Left in place, one of them makes the rename stage fail
 # and the probe report a read-only share that is nothing of the kind -- a trap
 # that sustains itself once sprung, since the failed run litters again.
-STALE=$(smb_at -c "del psilink-probe-*.tmp*"); STALE_RC=$?
+STALE=$(smb_at -c "del alcove-probe-*.tmp*"); STALE_RC=$?
 if [ "$STALE_RC" -eq 0 ] && [ -z "$(status_of "$STALE")" ]; then
   emit "NOTE: removed probe files left behind by an earlier run."
 fi
@@ -478,9 +478,9 @@ fi
 # may be relying on right now, and deleting it turns their volume check into a
 # MARKER_MISSING verdict that blames their server for a wrong folder. The volume
 # check owns the marker's lifecycle.
-PROBE="psilink-probe-${SMB_TOKEN:-$$}.tmp"
+PROBE="alcove-probe-${SMB_TOKEN:-$$}.tmp"
 RENAMED="$PROBE.renamed"
-printf 'psilink write probe\n' > "/tmp/$PROBE"
+printf 'Alcove write probe\n' > "/tmp/$PROBE"
 
 LITTER="$PROBE $RENAMED"
 OUT=$(smb_at -c "put /tmp/$PROBE $PROBE"); RC=$?
@@ -516,7 +516,7 @@ if [ -n "$STATUS" ]; then
   indent "$OUT"
   emit ""
   emit "MEANING: creating files is allowed here and renaming them is not."
-  emit "         psilink renames every message into place, so this stops an"
+  emit "         Alcove renames every message into place, so this stops an"
   emit "         exchange even though the folder looks writable."
   emit ""
   emit "ACTION:  ask for full change rights on this folder rather than"
@@ -537,7 +537,7 @@ if [ -n "$STATUS" ]; then
   emit ""
   indent "$OUT"
   emit ""
-  emit "MEANING: psilink removes each message once the other side has read it."
+  emit "MEANING: Alcove removes each message once the other side has read it."
   emit "         Without delete rights the folder fills up and a second"
   emit "         exchange in it will not start."
   emit ""

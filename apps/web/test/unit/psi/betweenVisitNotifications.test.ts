@@ -3,7 +3,7 @@ import {
   generateSharedSecret,
   getDefaultLinkageTerms,
   getLogger,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   MANAGED_EXCHANGE_SCHEMA_VERSION,

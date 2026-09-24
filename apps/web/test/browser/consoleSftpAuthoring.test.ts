@@ -9,7 +9,7 @@ import { createElement } from "react";
 // Load Mantine's stylesheet so components render with their real geometry.
 import "@mantine/core/styles.css";
 
-import { decodeInvitation } from "@psilink/core";
+import { decodeInvitation } from "@alcove/core";
 
 import { InviterScreen } from "@exchange/InviterScreen";
 import { SftpCredentialWarnings } from "@console/SftpCredentialWarnings";
@@ -27,7 +27,7 @@ vi.mock("@tanstack/react-router", async () =>
 vi.mock("@utils/clientConfig", () => ({
   deploymentProfile: () => "console" as const,
   isConsoleBuild: () => true,
-  psilinkVersion: () => undefined,
+  alcoveVersion: () => undefined,
 }));
 
 vi.mock("@psi/transport/rendezvous", async () =>
@@ -729,7 +729,7 @@ describe("console SFTP connection authoring", () => {
     stubJobApi({
       putWarnings: [
         "The password credential file is inside the job data root, the folder " +
-          "psilink writes the exchange's working files and results into.",
+          "Alcove writes the exchange's working files and results into.",
       ],
     });
     app.render(createElement(InviterScreen));
@@ -1202,7 +1202,7 @@ describe("console SFTP connection authoring", () => {
       })
       .click();
     await expect
-      .element(page.getByText("run over SFTP in your own psilink command-line"))
+      .element(page.getByText("run over SFTP in your own Alcove command-line"))
       .toBeInTheDocument();
     // Create now routes to the save-exchange-file surface, not a live run.
     await expect

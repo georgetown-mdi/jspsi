@@ -1,12 +1,12 @@
 import { expect, test } from "vitest";
 
-import { HOST_KEY_FINGERPRINT_REGEX } from "@psilink/core";
+import { HOST_KEY_FINGERPRINT_REGEX } from "@alcove/core";
 
 import { probeHostKeyLines } from "../../src/commands/probeHostKey";
 import { sftpServer } from "../sftpServer/testContext";
 
 // Drives the production SSH2SFTPClientAdapter probe (the same path
-// `psilink probe-host-key --json` runs) with no credential. Host-key
+// `alcove probe-host-key --json` runs) with no credential. Host-key
 // verification happens before authentication, so reading the server's exact
 // fingerprint with no username or password shows authentication was never
 // attempted.

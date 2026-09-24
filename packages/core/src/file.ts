@@ -177,7 +177,7 @@ export async function assertLeadingLineWithinByteCeiling(
 
 /**
  * The Node-stream subset the byte-ceiling guard and the loaders' cleanup use,
- * duck-typed so `@psilink/core` needs no `node:stream` import -- which would pull
+ * duck-typed so `@alcove/core` needs no `node:stream` import -- which would pull
  * `node:stream` into the web bundle. A browser File/string lacks these members,
  * which is what makes the stream guard inert for it.
  */

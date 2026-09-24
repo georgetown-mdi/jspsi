@@ -1,4 +1,4 @@
-# Development container for psilink. Node 26 (the shipped runtime and the version
+# Development container for Alcove. Node 26 (the shipped runtime and the version
 # .nvmrc, CI, and the product image pin), running as the non-root `node` user.
 # It carries the OpenSSH server the native SFTP test backend spawns and the
 # iptables/ipset stack the egress firewall installs at startup, so the full suite
@@ -122,13 +122,13 @@ RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
 # profiles run both scripts -- the allowlist is what differs, and the infra
 # block below appends its own patterns to the file COPYed here.
 COPY init-firewall.sh init-egress-proxy.sh /usr/local/bin/
-COPY egress-allowlist /usr/local/share/psilink-egress-allowlist
+COPY egress-allowlist /usr/local/share/alcove-egress-allowlist
 USER root
 RUN chmod +x /usr/local/bin/init-firewall.sh /usr/local/bin/init-egress-proxy.sh && \
   useradd --system --no-create-home --shell /usr/sbin/nologin tinyproxy && \
   { \
   echo "node ALL=(root) NOPASSWD: /usr/local/bin/init-firewall.sh"; \
-  echo 'Defaults!/usr/local/bin/init-egress-proxy.sh env_keep += "PSILINK_EGRESS_EXTRA_HOSTS"'; \
+  echo 'Defaults!/usr/local/bin/init-egress-proxy.sh env_keep += "ALCOVE_EGRESS_EXTRA_HOSTS"'; \
   echo "node ALL=(root) NOPASSWD: /usr/local/bin/init-egress-proxy.sh"; \
   } > /etc/sudoers.d/node-firewall && \
   chmod 0440 /etc/sudoers.d/node-firewall && \
@@ -136,25 +136,25 @@ RUN chmod +x /usr/local/bin/init-firewall.sh /usr/local/bin/init-egress-proxy.sh
 USER node
 
 # Infrastructure profile, built by .devcontainer/infra/devcontainer.json with
-# PSILINK_INFRA=1: the AWS CLI, the Docker CLIENT, and the wider hostname
+# ALCOVE_INFRA=1: the AWS CLI, the Docker CLIENT, and the wider hostname
 # allowlist the proxy lane needs for work against AWS, Cloudflare, Let's
 # Encrypt, and a remote EC2 host -- destinations init-firewall.sh's IP allowlist
 # cannot express (EC2 in us-west-2 alone is 169 shared-tenant prefixes).
 #
 # The build arg is declared HERE, below every layer the default profile uses, so
-# a PSILINK_INFRA=0 build reproduces those layers from cache unchanged. The file
+# an ALCOVE_INFRA=0 build reproduces those layers from cache unchanged. The file
 # below is COPYed unconditionally -- a COPY cannot be made conditional -- to a
 # staging path the RUN either folds into the installed allowlist or deletes, so
-# a PSILINK_INFRA=0 image carries no path this block introduced and its lane
+# an ALCOVE_INFRA=0 image carries no path this block introduced and its lane
 # admits the default profile's hosts and nothing more.
 #
 # NO Docker daemon and NO socket mount, only the client, for `docker -H
 # ssh://user@host` against a remote daemon. The host's Docker socket is root on
 # the host, so mounting it would delete the container boundary that is layer 1
 # of the security model in README.md.
-COPY infra/egress-allowlist /usr/local/share/psilink-egress-allowlist-infra
+COPY infra/egress-allowlist /usr/local/share/alcove-egress-allowlist-infra
 
-ARG PSILINK_INFRA=0
+ARG ALCOVE_INFRA=0
 # Pinned, and both digests were taken from an archive whose detached signature
 # verified against the AWS CLI Team key FB5D B77F D5C1 18B8 0511  ADA8 A631
 # 0ACC 4672 475C. AWS publishes no checksum file, so the signature is the
@@ -166,15 +166,15 @@ ARG AWSCLI_SHA256_X86_64=1056bc30b892f4a80e65b05eac856fbf175d0c5aeda051d782450d2
 
 USER root
 RUN set -eu; \
-  if [ "$PSILINK_INFRA" != "1" ]; then \
-  rm -f /usr/local/share/psilink-egress-allowlist-infra; \
+  if [ "$ALCOVE_INFRA" != "1" ]; then \
+  rm -f /usr/local/share/alcove-egress-allowlist-infra; \
   else \
-  cat /usr/local/share/psilink-egress-allowlist-infra >> /usr/local/share/psilink-egress-allowlist; \
-  rm -f /usr/local/share/psilink-egress-allowlist-infra; \
+  cat /usr/local/share/alcove-egress-allowlist-infra >> /usr/local/share/alcove-egress-allowlist; \
+  rm -f /usr/local/share/alcove-egress-allowlist-infra; \
   case "$(dpkg --print-architecture)" in \
   arm64) awscli_arch=aarch64; awscli_sha="$AWSCLI_SHA256_AARCH64" ;; \
   amd64) awscli_arch=x86_64; awscli_sha="$AWSCLI_SHA256_X86_64" ;; \
-  *) echo "PSILINK_INFRA: unsupported architecture $(dpkg --print-architecture)"; exit 1 ;; \
+  *) echo "ALCOVE_INFRA: unsupported architecture $(dpkg --print-architecture)"; exit 1 ;; \
   esac; \
   curl -fsSL -o /tmp/awscliv2.zip "https://awscli.amazonaws.com/awscli-exe-linux-$awscli_arch-$AWSCLI_VERSION.zip"; \
   echo "$awscli_sha  /tmp/awscliv2.zip" | sha256sum -c -; \
@@ -201,7 +201,7 @@ RUN set -eu; \
   echo ''; \
   echo 'Host *'; \
   echo '  ProxyCommand nc -X connect -x 127.0.0.1:8888 %h %p'; \
-  } > /etc/ssh/ssh_config.d/psilink-egress-proxy.conf; \
-  chmod 0644 /etc/ssh/ssh_config.d/psilink-egress-proxy.conf; \
+  } > /etc/ssh/ssh_config.d/alcove-egress-proxy.conf; \
+  chmod 0644 /etc/ssh/ssh_config.d/alcove-egress-proxy.conf; \
   fi
 USER node

@@ -65,7 +65,7 @@ const fixtureHost = ({ imageUid = OWN_UID } = {}) => {
   );
   writeStub(join(bin, "chown"), `printf 'chown %s\\n' "$*" >> '${calls}'`);
   const envFile = join(root, "relay.env");
-  writeFileSync(envFile, `PSILINK_RELAY_IMAGE_UID=${imageUid}\n`);
+  writeFileSync(envFile, `ALCOVE_RELAY_IMAGE_UID=${imageUid}\n`);
   const crt = join(acme, "relay.example.crt");
   const key = join(acme, "relay.example.key");
   const dest = join(root, "certs");
@@ -83,18 +83,18 @@ const fixtureHost = ({ imageUid = OWN_UID } = {}) => {
         env: {
           ...process.env,
           PATH: `${bin}:${process.env.PATH}`,
-          PSILINK_RELAY_ENV_FILE: envFile,
-          PSILINK_RELAY_CERT_DIR: dest,
-          PSILINK_RELAY_CERT_SOURCE: crt,
-          PSILINK_RELAY_KEY_SOURCE: key,
+          ALCOVE_RELAY_ENV_FILE: envFile,
+          ALCOVE_RELAY_CERT_DIR: dest,
+          ALCOVE_RELAY_CERT_SOURCE: crt,
+          ALCOVE_RELAY_KEY_SOURCE: key,
         },
       });
       expect(result.status, `the hook failed with:\n${result.stderr}`).toBe(0);
       const lines = readFileSync(calls, "utf8").split("\n");
       return {
-        restarted: lines.includes("systemctl restart psilink-relay.service"),
+        restarted: lines.includes("systemctl restart alcove-relay.service"),
         registrarRestarted: lines.includes(
-          "systemctl try-restart psilink-relay-registrar.service",
+          "systemctl try-restart alcove-relay-registrar.service",
         ),
         stderr: result.stderr,
       };

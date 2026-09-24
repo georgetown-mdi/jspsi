@@ -35,7 +35,7 @@ import {
   ruleSetCitation,
   summarizeInvitation,
   unshownDeclaredNamesLine,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { ColumnChips } from "@components/ColumnChips";
 import { ColumnName } from "@components/ColumnName";
@@ -52,7 +52,7 @@ import type {
   ConnectionEndpoint,
   InvitationKeySummary,
   LinkageTerms,
-} from "@psilink/core";
+} from "@alcove/core";
 
 function yesNo(value: boolean): string {
   return value ? "Yes" : "No";
@@ -390,7 +390,7 @@ function MatchKeyDetails({ summary }: { summary: InvitationKeySummary }) {
  * as that headline, never one collapse-level down, so a reader can never see a
  * headline as in force while what qualifies it is hidden. Copy is read from
  * `CONSENT_FACTS`, `PROPOSED_NOT_APPLIED_NOTES`, and the deduplicate disclosure
- * statements in `@psilink/core`, which the CLI accept prompt renders too, so the
+ * statements in `@alcove/core`, which the CLI accept prompt renders too, so the
  * two surfaces cannot state one fact two ways.
  *
  * Result sharing is stated viewer-relative. The viewer's OWN non-receipt is
@@ -743,7 +743,7 @@ export function InvitationTerms({
             : `Invitation from ${summary.invitingParty}`)}
       </Title>
       {/* summary.invitingParty is a free-text field the sender typed, accepted on a
-          transcription checksum -- psilink has not authenticated it. This is a
+          transcription checksum -- Alcove has not authenticated it. This is a
           small honesty marker on that self-asserted field, not a directive to
           reassess trust. Review-only: it is a pre-consent decision-point marker,
           and the run's key exchange authenticates that the peer holds the
@@ -800,7 +800,7 @@ export function InvitationTerms({
               states the algorithm as the reason rather than the entitlement the
               block below reads -- under psi-c the partner may well receive the
               count, and a sentence reasoning from receipt would be answering a
-              different question. Read from `@psilink/core` like every other block
+              different question. Read from `@alcove/core` like every other block
               in this slot; fixed first-party copy, naming no column. */}
           {countOnly && (
             <Term label={outboundSendSlotLabel}>
@@ -813,7 +813,7 @@ export function InvitationTerms({
               slot ahead of every other block in it (see the precedence above).
               Rendered at normal weight, not dimmed: it sits beside the egress
               request, which must never read more prominently than what actually
-              leaves. Read from `@psilink/core`, one copy for every surface. */}
+              leaves. Read from `@alcove/core`, one copy for every surface. */}
           {outboundNoPayloadRenders && (
             <Term label={outboundSendSlotLabel}>
               <Text size="sm">{OUTBOUND_SEND_NO_PAYLOAD_SENTENCE}</Text>
@@ -946,7 +946,7 @@ export function InvitationTerms({
           </Text>
           {/* Where a count-only run entitles BOTH parties, only one computes the
               count and the other is sent that party's report, so one side's "Yes"
-              above is a number psilink did not check. Where exactly one party is
+              above is a number Alcove did not check. Where exactly one party is
               entitled, that party computes its own count, so no report exists to
               caveat. */}
           {countOnly && viewerReceivesResult && partnerReceivesResult && (
@@ -1320,9 +1320,9 @@ export function InvitationTerms({
           <Stack gap={2}>
             <Text size="sm">Reference: {summary.legalAgreement.reference}</Text>
             {/* "Stated purpose", not "Purpose": the value is partner-authored free
-                text, sanitized but never vetted by psilink (only byte-compared
+                text, sanitized but never vetted by Alcove (only byte-compared
                 against the partner's own copy at exchange time), so the label marks
-                it as partner-attested rather than an authorization psilink endorses
+                it as partner-attested rather than an authorization Alcove endorses
                 -- the same provenance-marking the allowed-character constraint
                 uses. */}
             <Text size="sm">

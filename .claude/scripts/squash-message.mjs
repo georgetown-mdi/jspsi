@@ -5,7 +5,7 @@
 // need at `gh pr create` time; this is the maintainer's side of it, run against
 // a pull request that already exists.
 //
-// psilink squash-merges, so the message GitHub proposes -- the PR title plus a
+// Alcove squash-merges, so the message GitHub proposes -- the PR title plus a
 // bullet list of commit subjects -- is what lands in the history unless someone
 // writes a better one. Writing that message is a fixed, repeated prompt, so it
 // is a script rather than a habit: one `claude -p` run, pinned to sonnet, over

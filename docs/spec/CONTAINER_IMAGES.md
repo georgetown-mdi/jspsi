@@ -466,9 +466,9 @@ instead is Table 8, which lists HKDF among the key-derivation algorithms
 non-approved below a 112-bit key -- a threshold a 256-bit key-derivation key is
 far above.
 
-**The AES-GCM condition decides psilink's AEAD, and the row's IV generation mode
+**The AES-GCM condition decides Alcove's AEAD, and the row's IV generation mode
 does not.** The row above lists `IV Generation Mode - 8.2.2` alone, while
-psilink's IV is a deterministic construction conformant to SP 800-38D section
+Alcove's IV is a deterministic construction conformant to SP 800-38D section
 8.2.1 ([CHANNEL_SECURITY.md](CHANNEL_SECURITY.md#iv-construction-and-sp-800-38d-conformance)).
 Neither reading reaches the calls, because every `crypto.subtle` AES-GCM call
 supplies the IV from outside the module, which Table 8 (Non-Approved, Not
@@ -532,7 +532,7 @@ reading of the build cannot reach any of them, however tightly
 ### The writable set
 
 Either image's container writes `/work` and
-`/run/psilink/sftp-credentials`, and no path under `/app`. The measurement
+`/run/alcove/sftp-credentials`, and no path under `/app`. The measurement
 creates a file in each of the two writable directories under the account the
 image runs as and requires the same write under `/app` to be refused; a write is
 what determines it, because a mode that is treated as writable over a layer that refuses
@@ -690,7 +690,7 @@ assertions and its end-to-end exchange among them.
 
 The Windows and POSIX file-drop scripts in `support/windows-network-filedrop/`
 delegate every check they make to a capability of the image: they hand a
-container a psilink argument vector, or they pipe one of their helper scripts
+container an Alcove argument vector, or they pipe one of their helper scripts
 into a shell in it and depend on the tools that shell resolves. That is a
 contract between two things nothing else in the repository connects, so
 `image_smoke.yaml` exercises it on both sides of publication.
@@ -700,7 +700,7 @@ reads it out of the scripts. An argument vector is a run of literal tokens
 beginning with a word the image's own dispatchers answer to -- the words
 `docker-entrypoint.sh` routes on, and the commands `apps/cli/src/cliParser.ts`
 registers -- on a line that also names the image or an argument-vector
-parameter. A helper script is one `cmd_Setup-PsilinkFileDrop.cmd` redirects into
+parameter. A helper script is one `cmd_Setup-AlcoveFileDrop.cmd` redirects into
 a shell in the image, with the environment and mounts that call site gives it. A
 call site added to a script changes the derived set, and a derived dependency
 with nothing to exercise it fails `npm run check:image-capabilities`, which
@@ -725,11 +725,11 @@ verdict document, whose `version` must be the one the shipped launchers read and
 stop past.
 
 **Two legs, asserting different things.** The build-time leg runs against the
-image the job just built. That is the right subject for `Start-Psilink.ps1` and
-`start-psilink.sh`, which ship stamped with a release's manifest digest and are
+image the job just built. That is the right subject for `Start-Alcove.ps1` and
+`start-alcove.sh`, which ship stamped with a release's manifest digest and are
 therefore locked to the commit they were built from, and it catches a support
 script that outran the source tree in the same pull request. It is the wrong
-subject for `Setup-PsilinkFileDrop.ps1`, which is fetched on its own and runs the
+subject for `Setup-AlcoveFileDrop.ps1`, which is fetched on its own and runs the
 floating tag, so a second leg runs against `ghcr.io/georgetown-mdi/alcove:latest` on the weekly
 schedule and on demand. That leg is not a merge gate: the commonest
 reading of a gap there is that the capability is on the default branch and no

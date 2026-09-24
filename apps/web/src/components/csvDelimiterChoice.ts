@@ -4,7 +4,7 @@ import {
   csvDelimiterRefusal,
   isCsvDelimiterChoice,
   normalizeCsvDelimiter,
-} from "@psilink/core";
+} from "@alcove/core";
 
 /**
  * The field-delimiter choice an intake surface offers beside its file picker, and

@@ -15,7 +15,7 @@ import type {
   SigningConfig,
   Standardization,
   WebRTCConnectionConfig,
-} from "@psilink/core";
+} from "@alcove/core";
 import {
   bareTermsValue,
   BUILT_IN_LINKAGE_RULE_SETS,
@@ -63,7 +63,7 @@ import {
   trimPartialControlCharacterMarker,
   UsageError,
   withRetainModeImplications,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { writeFileOwnerOnly } from "./fileUtils";
 import { parseSensitiveYaml, editSensitiveYamlDocument } from "./sensitiveFile";
@@ -75,7 +75,7 @@ import type { SensitiveFileLabel } from "./sensitiveFile";
  * the default the `exchange` command reads from, so a config written here is
  * found without an explicit `--config-file`.
  */
-export const DEFAULT_CONFIG_PATH = "./psilink.yaml";
+export const DEFAULT_CONFIG_PATH = "./alcove.yaml";
 
 /**
  * The server/credential overrides {@link applyConnectionOverrides} writes into a
@@ -324,7 +324,7 @@ export function applyConnectionOverrides(
       const message = validation.error.issues
         .map((i: { message: string }) => i.message)
         .join("; ");
-      // An invalid option combination (from psilink.yaml or a CLI override) is
+      // An invalid option combination (from alcove.yaml or a CLI override) is
       // invalid caller configuration: a UsageError so the CLI exits 64, not 69.
       throw new UsageError(message);
     }
@@ -442,7 +442,7 @@ export function assertRetainSweepGuard(
  */
 export interface ReconcileDiff {
   /**
-   * snake_case field path as it appears in `psilink.yaml` (e.g. `algorithm`,
+   * snake_case field path as it appears in `alcove.yaml` (e.g. `algorithm`,
    * `linkage_keys`, `connection.server.host`). First-party text: every producer
    * supplies a literal, and it is what the conflict line's own structure is
    * built from.
@@ -1298,7 +1298,7 @@ function fitBlockToRenderedCostClosingRuns(
 }
 
 /**
- * The refusal `psilink accept` raises when a pre-existing configuration
+ * The refusal `alcove accept` raises when a pre-existing configuration
  * disagrees with the invitation (and, online, the connection URL): what
  * disagreed, and what the operator does about it, composed to one display
  * link.
@@ -1353,7 +1353,7 @@ export function reconcileConflictMessage(params: {
 }
 
 /**
- * The refusal `psilink accept` raises for a configuration that disagrees with
+ * The refusal `alcove accept` raises for a configuration that disagrees with
  * the invitation, as the error the command throws: the message of
  * {@link reconcileConflictMessage}, marked so the display boundary shows the
  * conflict list and the recovery step on the lines the block is built from
@@ -1420,7 +1420,7 @@ function configFileRefusal(configPath: string, rest: string): UsageError {
 
 /**
  * Write (or overwrite) `connection.server.host_key_fingerprint` in an
- * existing `psilink.yaml`, used to persist a host-key pin established
+ * existing `alcove.yaml`, used to persist a host-key pin established
  * interactively on first use. Unlike {@link saveConfig}, this edits the file
  * in place through the YAML document model so the operator's comments, key
  * order, and formatting survive.
@@ -1496,7 +1496,7 @@ export function persistHostKeyFingerprint(
  */
 const PARTNER_FINGERPRINT_REMEDIES =
   "record signing.partner_fingerprint in that file by hand, from the value " +
-  "the partner's 'psilink fingerprint' prints, or mount the configuration " +
+  "the partner's 'alcove fingerprint' prints, or mount the configuration " +
   "writable for the run that records the pin";
 
 /**
@@ -1549,7 +1549,7 @@ const UNRECORDABLE_PIN_REMEDY =
   `before connecting. Either ${PARTNER_FINGERPRINT_REMEDIES}.`;
 
 /**
- * Write `signing.partner_fingerprint` into an existing `psilink.yaml`, used to
+ * Write `signing.partner_fingerprint` into an existing `alcove.yaml`, used to
  * record the pin an exchange adopted on its first authenticated contact with a
  * partner. Like {@link persistHostKeyFingerprint}, this edits the file in place
  * through the YAML document model so the operator's comments, key order, and
@@ -1662,8 +1662,8 @@ function partnerFingerprintRecorded(
 
 /**
  * Write, overwrite, or remove the top-level `disclosed_payload_columns` in
- * an existing `psilink.yaml`: the SEND-side disclosure commitment (this
- * party's own column namespace) that a later recurring `psilink exchange`
+ * an existing `alcove.yaml`: the SEND-side disclosure commitment (this
+ * party's own column namespace) that a later recurring `alcove exchange`
  * verifies its current metadata still discloses
  * ({@link assertDisclosureMatchesCommitment} in core).
  *
@@ -1709,8 +1709,8 @@ export function persistDisclosedPayloadColumns(
 
 /**
  * Write, overwrite, or remove the top-level `expected_payload_columns` in an
- * existing `psilink.yaml`: the RECEIVE-side consent commitment (the
- * PARTNER's column namespace) that a later recurring `psilink exchange`
+ * existing `alcove.yaml`: the RECEIVE-side consent commitment (the
+ * PARTNER's column namespace) that a later recurring `alcove exchange`
  * holds the received payload to ({@link reconcileReceivedPayload} in core).
  *
  * Used by both accept-reuse paths (offline, and the online hook's reuse
@@ -1755,9 +1755,9 @@ export function persistExpectedPayloadColumns(
 
 /**
  * Write, overwrite, or remove the top-level `outbound_payload_consent` in an
- * existing `psilink.yaml`: this party's consent to its OWN outbound set (or
+ * existing `alcove.yaml`: this party's consent to its OWN outbound set (or
  * the `pending` marker recorded when an acceptance could not resolve it
- * yet), which a later `psilink exchange` holds the transmitted set to
+ * yet), which a later `alcove exchange` holds the transmitted set to
  * ({@link assertOutboundPayloadConsented} in core).
  *
  * Used by the accept-reuse path and the run that resolves and confirms a
@@ -1799,9 +1799,9 @@ export function persistOutboundPayloadConsent(
 
 /**
  * Write or overwrite the top-level `expected_partner_deduplicate` in an
- * existing `psilink.yaml`: the TERMS-side consent commitment, the
+ * existing `alcove.yaml`: the TERMS-side consent commitment, the
  * `deduplicate` the accepted invitation declared for the inviting party's
- * own side, which a later `psilink exchange` holds the partner's presented
+ * own side, which a later `alcove exchange` holds the partner's presented
  * value to ({@link assertPresentedDeduplicateMatchesInvitation} in core),
  * refusing a contradiction before any key or payload moves.
  *
@@ -1848,7 +1848,7 @@ export interface TermsUpdateWrite {
 }
 
 /**
- * Replace `linkage_terms` in an existing `psilink.yaml` and refresh the
+ * Replace `linkage_terms` in an existing `alcove.yaml` and refresh the
  * records that follow from it -- `expected_payload_columns`,
  * `expected_partner_deduplicate`, `outbound_payload_consent`, and
  * `disclosed_payload_columns` -- in one write, so no record is left stating a
@@ -1856,7 +1856,7 @@ export interface TermsUpdateWrite {
  * included, keeps its values and its key order; the YAML round-trip may move
  * an inline comment onto its own line and normalize spacing.
  *
- * The edited document is read back through the same schema `psilink
+ * The edited document is read back through the same schema `alcove
  * exchange` loads it with before it is written; a document that would not
  * load is refused and the file is left unchanged.
  *
@@ -1927,7 +1927,7 @@ export type InvitationRelayRefresh = "set" | "removed" | "absent" | "notWebrtc";
 
 /**
  * Write, overwrite, or remove `connection.invitation_relay` in an existing
- * `psilink.yaml` from the invitation an acceptance has just consented to,
+ * `alcove.yaml` from the invitation an acceptance has just consented to,
  * leaving every other key of the connection block untouched. The field is
  * invitation-derived rather than the operator's own, so an acceptance that
  * keeps the configuration refreshes it: a relay a prior invitation named must
@@ -2174,8 +2174,8 @@ export type NamedRuleSetRules = "from-the-named-set" | "as-written";
  * Each of those three blocks is read through the entry point that refuses a
  * key its schema would drop rather than read, the rule `parseExchangeSpec`
  * holds over the whole file (docs/spec/EXCHANGE_FILE.md, "What a consumer does
- * with a setting it cannot honor"), so a file `psilink exchange` refuses is not
- * one `psilink invite` mints an invitation from.
+ * with a setting it cannot honor"), so a file `alcove exchange` refuses is not
+ * one `alcove invite` mints an invitation from.
  *
  * Every other defect is a {@link UsageError}: a config present at the path
  * is treated as intentional, so a broken one is reported for the user to
@@ -2238,7 +2238,7 @@ export function readConfigLinkageSource(
   // Read through the entry point whose refusals address the party who WROTE
   // the document: this block is the operator's own, and the file is open to
   // them, so a mistyped text param names the remedy rather than the type
-  // alone (@psilink/core, transformParamTypes.ts).
+  // alone (@alcove/core, transformParamTypes.ts).
   const result = safeParseLinkageTermsTheReaderWrote(terms);
   if (!result.success)
     throw configFileRefusal(
@@ -2300,7 +2300,7 @@ export function readConfigLinkageSource(
 /**
  * The config's `csv_delimiter`, resolved and graded here through core's own
  * spelling resolver and accepted-set rule -- the pair the exchange spec's
- * schema applies to the same key -- so this read and a later `psilink
+ * schema applies to the same key -- so this read and a later `alcove
  * exchange` over the same file take the same character and refuse the same
  * values. A value the rule refuses is a {@link UsageError}, like the invalid
  * blocks above: a command that read on past it would check the operator's
@@ -2709,7 +2709,7 @@ export function linkageTermsWithNamedRuleSetRules(
     throw configFileRefusal(
       configPath,
       `names the rule set ${cited} in linkage_terms.linkage_rule_set and ` +
-        `writes ${written} but no ${missing}. psilink takes both lists from ` +
+        `writes ${written} but no ${missing}. Alcove takes both lists from ` +
         `a named set or neither: remove ${written} to run the set's own ` +
         `rules, or write ${missing} out beside it.`,
     );
@@ -2849,8 +2849,8 @@ export type CitationDriftAlternative =
 
 /**
  * Whether an acceptance stands behind a loaded config's linkage terms, read
- * from `expected_partner_deduplicate`. `psilink accept` writes this field on
- * every config it writes or reuses, `psilink apply` on every config it applies
+ * from `expected_partner_deduplicate`. `alcove accept` writes this field on
+ * every config it writes or reuses, `alcove apply` on every config it applies
  * a terms update to, and nothing else writes one, so its presence is exactly
  * the mark of a config an acceptance stands behind (see
  * {@link persistExpectedPartnerDeduplicate}). Both values read the same
@@ -2872,7 +2872,7 @@ export function linkageTermsStandingOf(
  * exchange records claiming a provenance the rules no longer have.
  *
  * Only a half this build can RESOLVE is judged: a citation naming a set
- * psilink does not ship has no content here to compare the rules against,
+ * Alcove does not ship has no content here to compare the rules against,
  * so that half is passed over, and each half is judged separately so a
  * foreign half cannot buy the built-in half a pass.
  *

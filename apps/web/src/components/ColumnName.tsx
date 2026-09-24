@@ -1,4 +1,4 @@
-import { DISPLAY_TRUNCATION_MARKER, MAX_NAME_LENGTH } from "@psilink/core";
+import { DISPLAY_TRUNCATION_MARKER, MAX_NAME_LENGTH } from "@alcove/core";
 
 /**
  * How the acceptor's screens show one of the operator's column names: verbatim,

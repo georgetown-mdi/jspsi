@@ -25,7 +25,7 @@
 
 /** Namespace prefix for the Web Locks name, so a managed-exchange run lock cannot
  * collide with any other same-origin lock name. The record's id is appended. */
-const MANAGED_EXCHANGE_LOCK_PREFIX = "psilink-managed-exchange:";
+const MANAGED_EXCHANGE_LOCK_PREFIX = "alcove-managed-exchange:";
 
 /** The Web Locks name for a managed record's run+rotate critical section. */
 export function managedExchangeLockName(id: string): string {

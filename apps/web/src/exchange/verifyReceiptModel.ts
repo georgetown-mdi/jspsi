@@ -19,7 +19,7 @@ import {
   sanitizeForDisplay,
   signedRecordExpectations,
   verifyDualSignedRecord,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import type {
   AnchoredCertificateStatus,
@@ -46,7 +46,7 @@ import type {
   TermsHashStatus,
   UnanchoredCertificateClause,
   VerificationKeys,
-} from "@psilink/core";
+} from "@alcove/core";
 
 /**
  * The pure model behind the "Verify a receipt" console: it turns each supplied JSON
@@ -59,7 +59,7 @@ import type {
  * tamper, and the anchoring sentences an unanchored certificate does and does not
  * support -- is tested here directly rather than through the DOM.
  *
- * Both verdicts come from `@psilink/core` as-is. Neither the assignment of
+ * Both verdicts come from `@alcove/core` as-is. Neither the assignment of
  * anchoring values over the dual-signed record's two certificate slots nor the
  * verdict decided over it -- the tier each row holds, the clauses an unanchored
  * slot supports, the remediation a run has earned -- is re-derived here: this
@@ -130,22 +130,22 @@ const CERTIFICATE_LABEL = "the certificate file";
 
 const MALFORMED_RECORD_MESSAGE =
   "This is not a valid exchange record. Check that you loaded the " +
-  "psilink-record-<stamp>.json file (the shareable record), not the keys file " +
+  "alcove-record-<stamp>.json file (the shareable record), not the keys file " +
   "or another document.";
 
 const MALFORMED_KEYS_MESSAGE =
   "This is not a valid verification-keys file. Check that you loaded the " +
-  "psilink-record-<stamp>.keys.json file (the private keys), not the record " +
+  "alcove-record-<stamp>.keys.json file (the private keys), not the record " +
   "file or another document.";
 
 const MALFORMED_SIGNED_RECORD_MESSAGE =
   "This is not a valid dual-signed record. Check that you loaded the " +
-  "psilink-receipt-<stamp>.json file (the record both parties signed), not the " +
+  "alcove-receipt-<stamp>.json file (the record both parties signed), not the " +
   "exchange record or another document.";
 
 const MALFORMED_CERTIFICATE_MESSAGE =
   "This is not a usable signing certificate. Check that you loaded the " +
-  "certificate you exported with 'psilink fingerprint --export-certificate', " +
+  "certificate you exported with 'alcove fingerprint --export-certificate', " +
   "and that it has not been edited since -- its own self-signature must verify.";
 
 // The identity file is refused rather than mined for the certificate beside the
@@ -155,7 +155,7 @@ const MALFORMED_CERTIFICATE_MESSAGE =
 const SIGNING_IDENTITY_MESSAGE =
   "This is a signing identity file, which holds your private signing key. " +
   "Nothing here needs it and this page never uses one: export your public " +
-  "certificate with 'psilink fingerprint --export-certificate <path>' and load " +
+  "certificate with 'alcove fingerprint --export-certificate <path>' and load " +
   "that instead.";
 
 const RECOGNIZED_VERSIONS = {
@@ -174,7 +174,7 @@ function unrecognizedVersionMessage(
   const { what, version } = RECOGNIZED_VERSIONS[kind];
   return (
     `This ${what} file is a version this build does not recognize. It may come ` +
-    `from a newer or older psilink, or have been edited. This build recognizes ` +
+    `from a newer or older Alcove, or have been edited. This build recognizes ` +
     `${version}.`
   );
 }
@@ -310,7 +310,7 @@ export async function parseCertificateDocument(
 
 const MALFORMED_PIN_MESSAGE =
   "That is not a certificate fingerprint: it is an unpadded base64url SHA-256 " +
-  "digest, 43 characters. Your partner reads theirs from 'psilink fingerprint' " +
+  "digest, 43 characters. Your partner reads theirs from 'alcove fingerprint' " +
   "and gives it to you over a channel you already trust.";
 
 /**

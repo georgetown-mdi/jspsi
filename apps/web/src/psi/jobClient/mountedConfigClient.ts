@@ -45,7 +45,7 @@ export type MountedConfigurationAnswer =
 /** The refusal text a 400 carries, or the console's own wording when the body
  * held none: the operator is told the load stopped either way. */
 const UNNAMED_REFUSAL =
-  "The psilink.yaml in your working folder could not be opened. Check the " +
+  "The alcove.yaml in your working folder could not be opened. Check the " +
   "file, then open it again.";
 
 /** A list of setting names off a body field, or null for anything else: both
@@ -134,7 +134,7 @@ export async function fetchMountedConfiguration(
 
 /** What one hand-back of the opened configuration answers. */
 export type ConfigurationHandBackAnswer =
-  /** The console wrote the settings into the `psilink.yaml` in the folder. */
+  /** The console wrote the settings into the `alcove.yaml` in the folder. */
   | { kind: "written" }
   /** The console refused, in its own words: what stopped it and what to do. */
   | { kind: "refused"; error: string }
@@ -144,7 +144,7 @@ export type ConfigurationHandBackAnswer =
 
 /** The refusal text when a 400 carried none. */
 const UNNAMED_HAND_BACK_REFUSAL =
-  "The console did not save your changes to psilink.yaml. Check the " +
+  "The console did not save your changes to alcove.yaml. Check the " +
   "settings, then save again.";
 
 /**

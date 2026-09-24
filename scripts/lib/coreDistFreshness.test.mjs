@@ -36,11 +36,11 @@ function write(relPath, mtime) {
 }
 
 beforeEach(() => {
-  coreDir = mkdtempSync(join(tmpdir(), "psilink-core-dist-"));
+  coreDir = mkdtempSync(join(tmpdir(), "alcove-core-dist-"));
   writeFileSync(
     join(coreDir, "package.json"),
     JSON.stringify({
-      name: "@psilink/core",
+      name: "@alcove/core",
       exports: {
         ".": {
           import: "./dist/core.esm.js",

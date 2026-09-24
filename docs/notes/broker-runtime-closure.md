@@ -4,7 +4,7 @@ title: "Narrowing the signaling broker's runtime closure"
 
 # Narrowing the signaling broker's runtime closure
 
-_Status: decided and built. The broker reads `@psilink/core/untrusted-text`
+_Status: decided and built. The broker reads `@alcove/core/untrusted-text`
 rather than the package root, and takes the sink its diagnostics are written to
 from whoever builds it. This note records what the wide closure cost, why the
 logger did not ride the subpath with the escaping helpers, and what holds the
@@ -19,7 +19,7 @@ not restate them.
 
 `packages/peerjs-broker` is the one process here that listens on the internet
 with no application around it: the standalone runner is a broker and nothing
-else. Its runtime closure was `ws` alone until it took a `@psilink/core`
+else. Its runtime closure was `ws` alone until it took a `@alcove/core`
 dependency for the display and redaction helpers its diagnostics write through.
 
 The package root reaches everything core declares, so the broker's closure
@@ -30,12 +30,12 @@ point. A closure here is the packages it can reach at run time: the packages its
 built code actually loads and executes, as distinct from the packages its
 manifest declares. Narrowing it leaves the manifest and the tooling that reads
 it unchanged -- `packages/peerjs-broker/package.json` still declares
-`@psilink/core` as a runtime dependency, and `npm audit`, the SBOM, and
+`@alcove/core` as a runtime dependency, and `npm audit`, the SBOM, and
 Dependabot still resolve core's own dependencies under the broker.
 
 ## The subpath
 
-`@psilink/core/untrusted-text` is a third published entry point beside `.` and
+`@alcove/core/untrusted-text` is a third published entry point beside `.` and
 `./testing`, holding the two chokepoints the broker calls: escaping untrusted
 text for an operator, and parsing untrusted JSON under structural bounds. The
 mechanism has precedent in `./testing`, so it is a third entry rather than a new

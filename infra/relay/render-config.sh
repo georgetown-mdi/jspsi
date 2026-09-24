@@ -6,7 +6,7 @@
 # on a different public address unless one is held for it, and a config rendered
 # last week would advertise a candidate nobody can reach.
 #
-# The cloud seam is one variable. PSILINK_RELAY_EXTERNAL_IP_HELPER names an
+# The cloud seam is one variable. ALCOVE_RELAY_EXTERNAL_IP_HELPER names an
 # executable printing "<public>/<private>" on one line; aws/external-ip.sh is the
 # AWS implementation and nothing else here knows about a metadata endpoint.
 #
@@ -17,9 +17,9 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-ETC=/etc/psilink-relay
-ENV_FILE="${PSILINK_RELAY_ENV_FILE:-$ETC/relay.env}"
-TMPL="${PSILINK_RELAY_TEMPLATE:-$HERE/turnserver.conf.tmpl}"
+ETC=/etc/alcove-relay
+ENV_FILE="${ALCOVE_RELAY_ENV_FILE:-$ETC/relay.env}"
+TMPL="${ALCOVE_RELAY_TEMPLATE:-$HERE/turnserver.conf.tmpl}"
 
 die() { printf 'ABORTING: %s\n' "$*" >&2; exit 1; }
 
@@ -27,18 +27,18 @@ die() { printf 'ABORTING: %s\n' "$*" >&2; exit 1; }
 # shellcheck disable=SC1090
 . "$ENV_FILE"
 
-REALM="${PSILINK_RELAY_REALM:-}"
-[ -n "$REALM" ] || die "PSILINK_RELAY_REALM is unset in $ENV_FILE; refusing to guess a realm"
+REALM="${ALCOVE_RELAY_REALM:-}"
+[ -n "$REALM" ] || die "ALCOVE_RELAY_REALM is unset in $ENV_FILE; refusing to guess a realm"
 
-SECRET_FILE="${PSILINK_RELAY_SECRET_FILE:-$ETC/static-auth-secret}"
+SECRET_FILE="${ALCOVE_RELAY_SECRET_FILE:-$ETC/static-auth-secret}"
 
-MIN_PORT="${PSILINK_RELAY_MIN_PORT:-49152}"
-MAX_PORT="${PSILINK_RELAY_MAX_PORT:-49200}"
-USER_QUOTA="${PSILINK_RELAY_USER_QUOTA:-6}"
-TOTAL_QUOTA="${PSILINK_RELAY_TOTAL_QUOTA:-40}"
-MAX_BPS="${PSILINK_RELAY_MAX_BPS:-2000000}"
-HELPER="${PSILINK_RELAY_EXTERNAL_IP_HELPER:-$HERE/aws/external-ip.sh}"
-OUT="${PSILINK_RELAY_CONF:-$ETC/turnserver.conf}"
+MIN_PORT="${ALCOVE_RELAY_MIN_PORT:-49152}"
+MAX_PORT="${ALCOVE_RELAY_MAX_PORT:-49200}"
+USER_QUOTA="${ALCOVE_RELAY_USER_QUOTA:-6}"
+TOTAL_QUOTA="${ALCOVE_RELAY_TOTAL_QUOTA:-40}"
+MAX_BPS="${ALCOVE_RELAY_MAX_BPS:-2000000}"
+HELPER="${ALCOVE_RELAY_EXTERNAL_IP_HELPER:-$HERE/aws/external-ip.sh}"
+OUT="${ALCOVE_RELAY_CONF:-$ETC/turnserver.conf}"
 
 [ -x "$HELPER" ] || die "external-ip helper $HELPER is not executable"
 ADDRS="$("$HELPER")" || die "external-ip helper $HELPER failed"
@@ -111,8 +111,8 @@ fi
 mv "$TMP" "$OUT"
 trap - EXIT
 chmod 600 "$OUT"
-if [ -n "${PSILINK_RELAY_IMAGE_UID:-}" ]; then
-  chown "$PSILINK_RELAY_IMAGE_UID" "$OUT"
+if [ -n "${ALCOVE_RELAY_IMAGE_UID:-}" ]; then
+  chown "$ALCOVE_RELAY_IMAGE_UID" "$OUT"
 fi
 
 printf 'rendered %s (realm %s, external %s/%s, relay ports %s-%s, %s)\n' \

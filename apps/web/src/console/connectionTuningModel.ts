@@ -7,7 +7,7 @@ import {
   LOW_POLLING_FREQUENCY_WARN_MS,
   MAX_RECONNECT_ATTEMPTS,
   MAX_TIMEOUT_SECONDS,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import type { JobExchangeOptions } from "@jobs/intentSchemas";
 

@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { afterEach, beforeEach, expect, test } from "vitest";
 import logLibrary from "loglevel";
-import { getDiagnosticSink, getLogger, setDiagnosticSink } from "@psilink/core";
+import { getDiagnosticSink, getLogger, setDiagnosticSink } from "@alcove/core";
 
 import {
   configureLogFile,
@@ -27,7 +27,7 @@ let tmpDir: string;
 let uid = 0;
 
 beforeEach(() => {
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-logredact-"));
+  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-logredact-"));
 });
 
 afterEach(() => {

@@ -1195,8 +1195,8 @@ test("a partner presenting a deduplicate its invitation did not declare is refus
   // against the invitation this party holds, so the generic "retry without
   // re-inviting" line would prescribe a retry that repeats the refusal.
   expect(
-    (reason as { psilinkRecoveryHintEmitted?: unknown })
-      .psilinkRecoveryHintEmitted,
+    (reason as { alcoveRecoveryHintEmitted?: unknown })
+      .alcoveRecoveryHintEmitted,
   ).toBe(true);
 
   await connAcceptor.close();

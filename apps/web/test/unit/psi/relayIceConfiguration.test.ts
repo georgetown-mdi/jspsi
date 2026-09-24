@@ -7,7 +7,7 @@ import {
   deriveRelayKey,
   generateSharedSecret,
   mintRelayCredential,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   RELAY_CREDENTIAL_TTL_SECONDS,
@@ -22,7 +22,7 @@ import type { OwnRelayRead } from "../../../src/psi/transport/ownRelaySetting.js
 import type Peer from "peerjs";
 import type { PeerOptions } from "peerjs";
 import type { RelayLocator } from "../../../src/psi/transport/rendezvous.js";
-import type { WebRTCEndpoint } from "@psilink/core";
+import type { WebRTCEndpoint } from "@alcove/core";
 
 // The ICE configuration the browser's peer connection is built with: the
 // default STUN pair alone with no relay, and with a relay its own urls in
@@ -104,7 +104,7 @@ describe("buildIceServers", () => {
     const secret = generateSharedSecret();
     const expected = await mintRelayCredential({
       key: await deriveRelayKey(secret),
-      label: "psilink",
+      label: "alcove",
       ttlSeconds: RELAY_CREDENTIAL_TTL_SECONDS,
       now: NOW,
     });
@@ -215,7 +215,7 @@ describe.each([
     const secret = generateSharedSecret();
     const expected = await mintRelayCredential({
       key: await deriveRelayKey(secret),
-      label: "psilink",
+      label: "alcove",
       ttlSeconds: RELAY_CREDENTIAL_TTL_SECONDS,
       now: NOW,
     });

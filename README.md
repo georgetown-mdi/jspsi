@@ -1,6 +1,6 @@
-# psilink
+# Alcove
 
-psilink is an open-source tool that lets two organizations find the records (individuals) they have in common with the option of exchanging data about those shared records, without either organization revealing anything about the records they do not share. It performs privacy-preserving record linkage (PPRL) using a cryptographic protocol called private set intersection (PSI).
+Alcove is an open-source tool that lets two organizations find the records (individuals) they have in common with the option of exchanging data about those shared records, without either organization revealing anything about the records they do not share. It performs privacy-preserving record linkage (PPRL) using a cryptographic protocol called private set intersection (PSI).
 
 ## Key features
 
@@ -31,7 +31,7 @@ This repository includes two synthetic datasets you can use to try the tool with
 
 ## Web App Quickstart
 
-1. Clone this repository: `git clone https://github.com/georgetown-mdi/jspsi.git` and `cd` into it
+1. Clone this repository: `git clone https://github.com/georgetown-mdi/alcove.git` and `cd` into it
 2. Install Node.js and NPM
    * On a Mac: Install [Homebrew](https://brew.sh/) and execute `brew install node`
    * On Alpine Linux: `apk add nodejs npm`
@@ -80,7 +80,7 @@ docker run \
 
 Because the only content accessible to the container is what is in `WORK_PATH`, we recommend making a new directory and placing the file you wish to link in it.
 
-The container runs unprivileged, as uid 1000. Docker Desktop -- on Mac, Windows, or Linux -- arranges for the mounted directory to be reachable by it, so the commands above work as written. Under Docker Engine on Linux the directory keeps its own ownership, so give it to that uid once -- `sudo chown 1000:1000 WORK_PATH` -- if your account is not itself uid 1000. If an earlier psilink image has already written into that directory, the files it left belong to root, and the directory needs `sudo chown -R 1000:1000 WORK_PATH` to hand those over as well. See [The user the image runs as](docs/DEPLOYMENT.md#the-user-the-image-runs-as) for both, and for the alternative of running the container as your own account.
+The container runs unprivileged, as uid 1000. Docker Desktop -- on Mac, Windows, or Linux -- arranges for the mounted directory to be reachable by it, so the commands above work as written. Under Docker Engine on Linux the directory keeps its own ownership, so give it to that uid once -- `sudo chown 1000:1000 WORK_PATH` -- if your account is not itself uid 1000. If an earlier Alcove image has already written into that directory, the files it left belong to root, and the directory needs `sudo chown -R 1000:1000 WORK_PATH` to hand those over as well. See [The user the image runs as](docs/DEPLOYMENT.md#the-user-the-image-runs-as) for both, and for the alternative of running the container as your own account.
 
 The output file is a CSV giving the linkage between the two parties' records. See [Output](docs/spec/PROTOCOL.md#output) for the exact column layout and naming rules.
 
@@ -170,7 +170,7 @@ Paths can be given to Docker using standard Windows-style back-slashes. One exce
 Additionally, the line-continuation markers given in the examples (the `\` at the end of each line) above do not parse correctly. Put commands all on one line instead. For example:
 
 ```sh
-docker run --rm --mount type=bind,src='C:\Users\me\Documents\psi-link',dst=/work ghcr.io/georgetown-mdi/alcove:latest sftp://user:password@example.org/psi input.csv output.csv
+docker run --rm --mount type=bind,src='C:\Users\me\Documents\alcove',dst=/work ghcr.io/georgetown-mdi/alcove:latest sftp://user:password@example.org/psi input.csv output.csv
 ```
 
 ### Docker run background
@@ -181,7 +181,7 @@ The `docker run` command has two parts. The first is the Docker invocation, whic
 docker run --rm --mount type=bind,src=WORK_PATH,dst=/work ghcr.io/georgetown-mdi/alcove:latest
 ```
 
-The second part is the invocation of the psilink script and includes any command line options you wish to use. In the first example above it is:
+The second part is the invocation of the Alcove script and includes any command line options you wish to use. In the first example above it is:
 
 ```sh
 sftp://SFTP_USER:SFTP_PASSWORD@SFTP_HOST:SFTP_PORT/SFTP_PATH INPUT_FILE OUTPUT_FILE

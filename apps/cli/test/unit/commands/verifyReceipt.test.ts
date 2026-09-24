@@ -24,7 +24,7 @@ import {
   signReceiptContent,
   SIGNED_RECEIPT_VERSION,
   UsageError,
-} from "@psilink/core";
+} from "@alcove/core";
 import type {
   CommittedPayload,
   DualSignedRecord,
@@ -34,7 +34,7 @@ import type {
   ReceiptContent,
   RecordVerificationReport,
   SignedReceiptPartyReport,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   builder,
@@ -706,7 +706,7 @@ describe("formatSignedRecordReport", () => {
     const { lines } = formatSignedRecordReport(
       report({ outcome: "incomplete", termsHash: "not-checked" }),
       {
-        configFile: "/tmp/psilink.yaml",
+        configFile: "/tmp/alcove.yaml",
         localTerms: false,
         partnerTerms: true,
       },
@@ -789,7 +789,7 @@ describe("reading a dual-signed record", () => {
     const path = await writeSignedRecord(dir);
     const bumped = {
       ...JSON.parse(readFileSync(path, "utf8")),
-      version: "psilink-signed-receipt/v9",
+      version: "alcove-signed-receipt/v10",
     };
     const bumpedPath = join(dir, "bumped.json");
     writeFileSync(bumpedPath, JSON.stringify(bumped, null, 2));
@@ -827,7 +827,7 @@ describe("reading a dual-signed record", () => {
 
 describe("the config's signing block", () => {
   const writeConfig = (dir: string, body: string): string => {
-    const path = join(dir, "psilink.yaml");
+    const path = join(dir, "alcove.yaml");
     writeFileSync(path, body);
     return path;
   };
@@ -935,19 +935,19 @@ describe("readExchangeRecordFile / readVerificationKeysFile", () => {
     // whose absent binder leaves a receipt unpaired.
     const dir = tmp();
     const { record } = await buildExchangeRecord(baseInputs);
-    const bumped = { ...record, version: "psilink-exchange-record/v1" };
+    const bumped = { ...record, version: "alcove-exchange-record/v1" };
     const recPath = join(dir, "rec.json");
     writeFileSync(recPath, JSON.stringify(bumped, null, 2));
     expect(() => readExchangeRecordFile(recPath)).toThrow(UsageError);
     expect(() => readExchangeRecordFile(recPath)).toThrow(
-      /unrecognized version \(psilink-exchange-record\/v1\); this build recognizes psilink-exchange-record\/v8/,
+      /unrecognized version \(alcove-exchange-record\/v1\); this build recognizes alcove-exchange-record\/v9/,
     );
   });
 
   test("reject an unrecognized keys version with a clear error", async () => {
     const dir = tmp();
     const { keys } = await buildExchangeRecord(baseInputs);
-    const bumped = { ...keys, version: "psilink-exchange-keys/v2" };
+    const bumped = { ...keys, version: "alcove-exchange-keys/v3" };
     const keysPath = join(dir, "rec.keys.json");
     writeFileSync(keysPath, JSON.stringify(bumped, null, 2));
     expect(() => readVerificationKeysFile(keysPath)).toThrow(
@@ -1038,7 +1038,7 @@ describe("handler", () => {
 
   /** A YAML document in its own directory, for the files --config-file and
    * --partner-terms name. */
-  const writeYaml = (body: string, name = "psilink.yaml"): string => {
+  const writeYaml = (body: string, name = "alcove.yaml"): string => {
     const path = join(tmp(), name);
     writeFileSync(path, body);
     return path;
@@ -1644,7 +1644,7 @@ describe("handler", () => {
     const { recordPath, signedPath } = await exchangeArtifacts();
     const earlier = {
       ...readSignedRecordFile(signedPath),
-      version: "psilink-signed-receipt/v2",
+      version: "alcove-signed-receipt/v2",
     };
     writeFileSync(signedPath, JSON.stringify(earlier, null, 2) + "\n");
     const { stdout, stderr, exits } = await runVerify({
@@ -1652,9 +1652,7 @@ describe("handler", () => {
       "signed-record": signedPath,
     });
     expect(exits).toEqual([64]);
-    expect(stderr).toContain(
-      "unrecognized version (psilink-signed-receipt/v2)",
-    );
+    expect(stderr).toContain("unrecognized version (alcove-signed-receipt/v2)");
     expect(stderr).toContain(
       "verify that run from its exchange record, passing the partner's terms " +
         "with --partner-terms",
@@ -1955,7 +1953,7 @@ describe("handler", () => {
 
   test("with no identity path named, the own slot is unanchored at exit 0", async () => {
     // No --identity-file and no config, so nothing names this party's identity
-    // and psilink looks nowhere on its own. The verdict grades INCOMPLETE and
+    // and Alcove looks nowhere on its own. The verdict grades INCOMPLETE and
     // names the slot; it is not a refusal, since a verification run reaches a
     // verdict without an identity of its own.
     const { signedPath, pin } = await exchangeArtifacts();
@@ -1990,9 +1988,9 @@ describe("handler", () => {
       expect(stdout).toContain("SIGNED RECEIPT INCOMPLETE");
       const opened = readFile.mock.calls.map(([target]) => String(target));
       expect(opened).not.toContain(identityPath);
-      expect(
-        opened.filter((p) => /signing-identity|\.psilink/.test(p)),
-      ).toEqual([]);
+      expect(opened.filter((p) => /signing-identity|\.alcove/.test(p))).toEqual(
+        [],
+      );
     } finally {
       readFile.mockRestore();
     }
@@ -2000,11 +1998,11 @@ describe("handler", () => {
 
   test.each([
     ["absent", undefined],
-    ["a path that does not exist", join(tmpdir(), "psilink-no-such-home")],
+    ["a path that does not exist", join(tmpdir(), "alcove-no-such-home")],
   ])(
     "a HOME that is %s changes nothing about the verdict",
     async (_label, home) => {
-      // psilink resolves no identity out of the home directory, so neither an
+      // Alcove resolves no identity out of the home directory, so neither an
       // unset HOME nor one pointing nowhere can change what a run anchors. The
       // ephemeral-container case is exactly this: a home that is not the
       // operator's own must not be reached for at all.
@@ -2047,7 +2045,7 @@ describe("handler", () => {
       // beside it is written, so the whole directory can be mounted read-only.
       const { signedPath, identityPath, pin } = await exchangeArtifacts();
       const readOnlyDir = tmp();
-      const mounted = join(readOnlyDir, "psilink-signing-identity.json");
+      const mounted = join(readOnlyDir, "alcove-signing-identity.json");
       writeFileSync(mounted, readFileSync(identityPath, "utf8"), {
         mode: 0o600,
       });

@@ -34,7 +34,7 @@ describe("the process runner", () => {
     // The server, share, path, username, and domain are operator input and land
     // in these arguments; a shell-interpolated command line would execute what
     // is only meant to be a folder name.
-    const hostile = "q3;touch /tmp/psilink-doctor-should-not-exist";
+    const hostile = "q3;touch /tmp/alcove-doctor-should-not-exist";
     const result = await nodeCommandRunner.run(
       NODE,
       [...evaluate("process.stdout.write(process.argv[1])"), hostile],
@@ -45,7 +45,7 @@ describe("the process runner", () => {
 
   test("reports a binary that is not installed as a spawn failure, not an exit", async () => {
     const result = await nodeCommandRunner.run(
-      "psilink-no-such-binary-exists",
+      "alcove-no-such-binary-exists",
       [],
       { timeoutMs: RUN_TIMEOUT_MS },
     );

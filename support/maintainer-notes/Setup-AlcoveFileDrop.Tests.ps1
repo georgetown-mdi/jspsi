@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
     Pester suite over the path-resolution functions in
-    Setup-PsilinkFileDrop.ps1, the console command it closes on, and the
+    Setup-AlcoveFileDrop.ps1, the console command it closes on, and the
     image-capability question it turns an unusable image away on before it asks
     for a password -- and the single fetch that question makes before it gives
     up. Maintainer-facing: it lives outside the guide folder, and an operator
@@ -31,7 +31,7 @@
         that share. Built the way support/maintainer-notes/ci-resolution-rig.ps1
         measured to work on a windows-latest runner. Each half of the rig is
         built inside its own try/catch and reported through
-        $global:PsilinkRigPremises, which ci-resolution-tests.ps1 turns into
+        $global:AlcoveRigPremises, which ci-resolution-tests.ps1 turns into
         ::notice annotations -- so a runner that cannot build the rig is
         distinguishable from a script that resolves a path wrongly.
 
@@ -43,7 +43,7 @@
 BeforeAll {
     # -LoadFunctionsOnly is what keeps the prompts, the Docker calls and the
     # volume creation out of this session.
-    $setupScript = (Resolve-Path (Join-Path $PSScriptRoot '..\windows-network-filedrop\Setup-PsilinkFileDrop.ps1')).Path
+    $setupScript = (Resolve-Path (Join-Path $PSScriptRoot '..\windows-network-filedrop\Setup-AlcoveFileDrop.ps1')).Path
     . $setupScript -LoadFunctionsOnly
 
     # The dot-source above also sets $ErrorActionPreference to 'Stop', which is
@@ -156,7 +156,7 @@ Describe 'The -LoadFunctionsOnly guard' {
         $stdout | Should -Be 'LOADED' -Because $shape
     }
 
-    It 'defines the sequences Start-Psilink.ps1 dot-sources it for' {
+    It 'defines the sequences Start-Alcove.ps1 dot-sources it for' {
         # The launcher carries no copy of these: it calls them through the
         # dot-source, so each has to sit above the guard rather than in the flow
         # below it. A move past the guard leaves the launcher's network branch
@@ -187,7 +187,7 @@ Describe 'The -LoadFunctionsOnly guard' {
         }
 
         $run.TimedOut | Should -BeFalse
-        $run.Output | Should -Match 'psilink file-drop setup'
+        $run.Output | Should -Match 'Alcove file-drop setup'
         # A null exit must not satisfy "not zero": the guard would then pass
         # vacuously on the same helper fault the dot-source test caught.
         $run.Exit | Should -Not -BeNullOrEmpty
@@ -208,29 +208,29 @@ Describe 'Resolve-DropPath on paths that need no rig' {
     }
 
     It 'reports the subdirectory with forward slashes for the mount option' {
-        $resolved = Resolve-DropPath -Raw '\\fileserver\exchange\psilink\drop'
+        $resolved = Resolve-DropPath -Raw '\\fileserver\exchange\alcove\drop'
 
         $resolved.Share | Should -Be 'exchange'
-        $resolved.SubPath | Should -Be 'psilink/drop'
+        $resolved.SubPath | Should -Be 'alcove/drop'
         $resolved.Unc | Should -Be '\\fileserver\exchange'
-        $resolved.Full | Should -Be '\\fileserver\exchange\psilink\drop'
+        $resolved.Full | Should -Be '\\fileserver\exchange\alcove\drop'
     }
 
     It 'folds forward slashes before splitting the share off' {
-        $resolved = Resolve-DropPath -Raw '//fileserver/exchange/psilink'
+        $resolved = Resolve-DropPath -Raw '//fileserver/exchange/alcove'
 
         $resolved.Kind | Should -Be 'Network'
         $resolved.Server | Should -Be 'fileserver'
         $resolved.Share | Should -Be 'exchange'
-        $resolved.SubPath | Should -Be 'psilink'
+        $resolved.SubPath | Should -Be 'alcove'
     }
 
     It 'strips surrounding quotes and whitespace' {
-        $resolved = Resolve-DropPath -Raw '  "\\fileserver\exchange\psilink"  '
+        $resolved = Resolve-DropPath -Raw '  "\\fileserver\exchange\alcove"  '
 
         $resolved.Kind | Should -Be 'Network'
         $resolved.Share | Should -Be 'exchange'
-        $resolved.SubPath | Should -Be 'psilink'
+        $resolved.SubPath | Should -Be 'alcove'
     }
 
     It 'ignores a trailing separator' {
@@ -257,12 +257,12 @@ Describe 'Resolve-DropPath on paths that need no rig' {
     }
 
     It 'unwraps the \\?\UNC\ device prefix' {
-        $resolved = Resolve-DropPath -Raw '\\?\UNC\fileserver\exchange\psilink'
+        $resolved = Resolve-DropPath -Raw '\\?\UNC\fileserver\exchange\alcove'
 
         $resolved.Kind | Should -Be 'Network'
         $resolved.Server | Should -Be 'fileserver'
         $resolved.Share | Should -Be 'exchange'
-        $resolved.SubPath | Should -Be 'psilink'
+        $resolved.SubPath | Should -Be 'alcove'
     }
 
     It 'unwraps the \\.\ device prefix' {
@@ -294,7 +294,7 @@ Describe 'Resolve-DropPath on paths that need no rig' {
     }
 
     It 'refuses a relative path' {
-        (Resolve-DropPath -Raw 'exchange\psilink').Kind | Should -Be 'Unknown'
+        (Resolve-DropPath -Raw 'exchange\alcove').Kind | Should -Be 'Unknown'
     }
 }
 
@@ -302,9 +302,9 @@ Describe 'Drive-kind classification' {
     It 'reads the system drive as fixed and its paths as local' {
         Get-DriveKind -Letter 'C' | Should -Be 'Fixed'
 
-        $resolved = Resolve-DropPath -Raw 'C:\Exchange\psilink'
+        $resolved = Resolve-DropPath -Raw 'C:\Exchange\alcove'
         $resolved.Kind | Should -Be 'Local'
-        $resolved.LocalPath | Should -Be 'C:\Exchange\psilink'
+        $resolved.LocalPath | Should -Be 'C:\Exchange\alcove'
     }
 
     It 'reads a letter no drive holds as absent' {
@@ -406,9 +406,9 @@ Describe 'The shared folder name the console is told' {
 
 Describe 'The console command the closing screen prints' {
     It 'mounts the volume the run created, and the work folder beside it' {
-        $lines = @(Get-ConsoleCommandLines -VolumeName 'psilink-sync' -RendezvousName 'agency-b')
+        $lines = @(Get-ConsoleCommandLines -VolumeName 'alcove-sync' -RendezvousName 'agency-b')
 
-        ($lines -join "`n") | Should -Match "-v 'psilink-sync:/sync'"
+        ($lines -join "`n") | Should -Match "-v 'alcove-sync:/sync'"
         ($lines -join "`n") | Should -Match "-v 'C:\\path\\to\\your\\work:/data'"
         ($lines -join "`n") | Should -Match 'JOB_RENDEZVOUS_DIR=/sync'
     }
@@ -417,14 +417,14 @@ Describe 'The console command the closing screen prints' {
         # The whole path the closing screen takes, driven end to end: the share
         # and subfolder the run resolved reduce to one name, and that is what the
         # operator is told to pass.
-        $lines = @(Get-ConsoleCommandLines -VolumeName 'psilink-sync' `
+        $lines = @(Get-ConsoleCommandLines -VolumeName 'alcove-sync' `
             -RendezvousName (Get-RendezvousFolderName -Share 'exchange' -SubPath 'agency-a/agency-b'))
 
         ($lines -join "`n") | Should -Match "JOB_RENDEZVOUS_NAME=agency-b'"
     }
 
     It 'carries the share itself when the drop folder is the share root' {
-        $lines = @(Get-ConsoleCommandLines -VolumeName 'psilink-sync' `
+        $lines = @(Get-ConsoleCommandLines -VolumeName 'alcove-sync' `
             -RendezvousName (Get-RendezvousFolderName -Share 'exchange' -SubPath ''))
 
         ($lines -join "`n") | Should -Match "JOB_RENDEZVOUS_NAME=exchange'"
@@ -434,7 +434,7 @@ Describe 'The console command the closing screen prints' {
         # An omitted variable has the console name the folder after the mount
         # point THIS script picked -- sync -- and mint that as the name the
         # partner is told to look for.
-        $lines = @(Get-ConsoleCommandLines -VolumeName 'psilink-sync')
+        $lines = @(Get-ConsoleCommandLines -VolumeName 'alcove-sync')
 
         ($lines -join "`n") | Should -Match "JOB_RENDEZVOUS_NAME='"
         # The quote closes immediately: anything else between the = and it is a
@@ -445,7 +445,7 @@ Describe 'The console command the closing screen prints' {
     It 'ends every line but the last with the continuation that joins them' {
         # The command is pasted as printed: a line that lost its continuation
         # runs as a command of its own, and the rest as arguments to nothing.
-        $lines = @(Get-ConsoleCommandLines -VolumeName 'psilink-sync' -RendezvousName 'agency-b')
+        $lines = @(Get-ConsoleCommandLines -VolumeName 'alcove-sync' -RendezvousName 'agency-b')
 
         $lines.Count | Should -BeGreaterThan 1
         foreach ($line in $lines[0..($lines.Count - 2)]) {
@@ -530,7 +530,7 @@ Describe 'Hide-Secret' {
 
 Describe 'Invoke-Docker' {
     BeforeAll {
-        $script:EngineStubRoot = Join-Path $env:TEMP ('psilink-engine-stub-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+        $script:EngineStubRoot = Join-Path $env:TEMP ('alcove-engine-stub-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
         New-Item -ItemType Directory -Path $script:EngineStubRoot -Force | Out-Null
 
         # A native command that answers on both streams and exits non-zero,
@@ -566,11 +566,11 @@ Describe 'Invoke-Docker' {
         # guard is the case two below.
         & cmd /c exit 0
 
-        $result = Invoke-Docker -Engine 'psilink-no-such-engine' -DockerArgs @('version')
+        $result = Invoke-Docker -Engine 'alcove-no-such-engine' -DockerArgs @('version')
 
         $result.Ran | Should -Be $false
         $result.ExitCode | Should -Not -Be 0
-        $result.Output | Should -Match 'psilink-no-such-engine'
+        $result.Output | Should -Match 'alcove-no-such-engine'
     }
 
     It 'reports an empty engine name the same way' {
@@ -629,7 +629,7 @@ Describe 'Invoke-Docker' {
         $threw = $false
         $raised = ''
 
-        try { & 'psilink-no-such-engine' 'version' } catch {
+        try { & 'alcove-no-such-engine' 'version' } catch {
             $threw = $true
             $raised = $_.Exception.GetType().Name
         }
@@ -641,7 +641,7 @@ Describe 'Invoke-Docker' {
 
 Describe 'The image fetch both call sites make' {
     BeforeAll {
-        $script:FetchStubRoot = Join-Path $env:TEMP ('psilink-fetch-stub-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+        $script:FetchStubRoot = Join-Path $env:TEMP ('alcove-fetch-stub-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
         New-Item -ItemType Directory -Path $script:FetchStubRoot -Force | Out-Null
 
         # A pull that worked, recording the call it was given so the vector can
@@ -649,7 +649,7 @@ Describe 'The image fetch both call sites make' {
         $script:PullEngine = Join-Path $script:FetchStubRoot 'pull.cmd'
         Set-Content -LiteralPath $script:PullEngine -Encoding Ascii -Value @(
             '@echo off',
-            '>"%PSILINK_STUB_ARGS%" echo %*',
+            '>"%ALCOVE_STUB_ARGS%" echo %*',
             'exit /b 0')
 
         # And one that could not reach the registry, which is the arm whose
@@ -670,16 +670,16 @@ Describe 'The image fetch both call sites make' {
         # fetched, which is what lets one function carry the size-and-duration
         # notice for the first run and for the refresh below it.
         $argsFile = Join-Path $script:FetchStubRoot 'recorded-args.txt'
-        $previous = $env:PSILINK_STUB_ARGS
+        $previous = $env:ALCOVE_STUB_ARGS
         try {
-            $env:PSILINK_STUB_ARGS = $argsFile
+            $env:ALCOVE_STUB_ARGS = $argsFile
             $first = Invoke-ImageFetch -Image 'ghcr.io/georgetown-mdi/alcove:latest' -Engine $script:PullEngine
             $firstCall = ([string] (Get-Content -LiteralPath $argsFile -Raw)).Trim()
             $refresh = Invoke-ImageFetch -Image 'ghcr.io/georgetown-mdi/alcove:latest' -Engine $script:PullEngine -Refresh
             $refreshCall = ([string] (Get-Content -LiteralPath $argsFile -Raw)).Trim()
         } finally {
-            if ($null -eq $previous) { Remove-Item env:PSILINK_STUB_ARGS -ErrorAction SilentlyContinue }
-            else { $env:PSILINK_STUB_ARGS = $previous }
+            if ($null -eq $previous) { Remove-Item env:ALCOVE_STUB_ARGS -ErrorAction SilentlyContinue }
+            else { $env:ALCOVE_STUB_ARGS = $previous }
         }
 
         $first.ExitCode | Should -Be 0
@@ -700,7 +700,7 @@ Describe 'The image fetch both call sites make' {
 
 Describe 'The image capability check' {
     BeforeAll {
-        $script:CapabilityStubRoot = Join-Path $env:TEMP ('psilink-capability-stub-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+        $script:CapabilityStubRoot = Join-Path $env:TEMP ('alcove-capability-stub-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
         New-Item -ItemType Directory -Path $script:CapabilityStubRoot -Force | Out-Null
 
         # An engine standing in for a released image published before the doctor
@@ -711,21 +711,21 @@ Describe 'The image capability check' {
         $script:PreDoctorEngine = Join-Path $script:CapabilityStubRoot 'predoctor.cmd'
         Set-Content -LiteralPath $script:PreDoctorEngine -Encoding Ascii -Value @(
             '@echo off',
-            'echo psilink [command] [options]',
+            'echo alcove [command] [options]',
             'echo Usage:',
-            'echo   psilink [--save] [options] URL INPUT_FILE [OUTPUT_FILE]',
+            'echo   alcove [--save] [options] URL INPUT_FILE [OUTPUT_FILE]',
             'echo Commands:',
-            'echo   psilink init [args..]   Write a commented configuration template',
-            'echo   psilink exchange        Execute a recurring exchange',
+            'echo   alcove init [args..]   Write a commented configuration template',
+            'echo   alcove exchange        Execute a recurring exchange',
             'exit /b 0')
 
         $script:DoctorEngine = Join-Path $script:CapabilityStubRoot 'withdoctor.cmd'
         Set-Content -LiteralPath $script:DoctorEngine -Encoding Ascii -Value @(
             '@echo off',
-            'echo Usage: psilink doctor probe or doctor mount DIRECTORY',
+            'echo Usage: alcove doctor probe or doctor mount DIRECTORY',
             'echo Commands:',
-            'echo   psilink doctor probe   Check the file drop over the network',
-            'echo   psilink doctor mount   Check an already-mounted file-drop directory',
+            'echo   alcove doctor probe   Check the file drop over the network',
+            'echo   alcove doctor mount   Check an already-mounted file-drop directory',
             'exit /b 0')
 
         # Docker reserves 125 and above for its own failure to start a
@@ -742,8 +742,8 @@ Describe 'The image capability check' {
         $script:RecordingEngine = Join-Path $script:CapabilityStubRoot 'recorder.cmd'
         Set-Content -LiteralPath $script:RecordingEngine -Encoding Ascii -Value @(
             '@echo off',
-            '>"%PSILINK_STUB_ARGS%" echo %*',
-            'echo Usage: psilink doctor probe or doctor mount DIRECTORY',
+            '>"%ALCOVE_STUB_ARGS%" echo %*',
+            'echo Usage: alcove doctor probe or doctor mount DIRECTORY',
             'exit /b 0')
     }
 
@@ -785,14 +785,14 @@ Describe 'The image capability check' {
         # What makes this safe to run before the credentials are collected: it
         # names neither battery, so nothing it reports can be about the share.
         $argsFile = Join-Path $script:CapabilityStubRoot 'recorded-args.txt'
-        $previous = $env:PSILINK_STUB_ARGS
+        $previous = $env:ALCOVE_STUB_ARGS
         try {
-            $env:PSILINK_STUB_ARGS = $argsFile
+            $env:ALCOVE_STUB_ARGS = $argsFile
             $result = Test-DoctorCapableImage -Image 'ghcr.io/georgetown-mdi/alcove:latest' -Engine $script:RecordingEngine
             $result.Capable | Should -BeTrue
         } finally {
-            if ($null -eq $previous) { Remove-Item env:PSILINK_STUB_ARGS -ErrorAction SilentlyContinue }
-            else { $env:PSILINK_STUB_ARGS = $previous }
+            if ($null -eq $previous) { Remove-Item env:ALCOVE_STUB_ARGS -ErrorAction SilentlyContinue }
+            else { $env:ALCOVE_STUB_ARGS = $previous }
         }
 
         # Read defensively: a stub that wrote nothing must reach the assertions
@@ -816,17 +816,17 @@ Describe 'The setup flow, driven against a stub engine' {
         # of the shapes of `doctor --help`, with or without a fetch that can
         # change that answer -- or, for the last of them, refuses to run a
         # container at all -- and appends every call it was given to
-        # PSILINK_STUB_LOG, which is what lets a test assert what the flow did
+        # ALCOVE_STUB_LOG, which is what lets a test assert what the flow did
         # NOT go on to run.
         #
         # Labels rather than parenthesised blocks: a `)` anywhere in the help
         # text would close a block early, and the pre-doctor help is the real
         # CLI's, punctuation included.
-        $script:StaleEngineRoot = Join-Path $env:TEMP ('psilink-flow-stale-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
-        $script:SelfHealEngineRoot = Join-Path $env:TEMP ('psilink-flow-selfheal-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
-        $script:NoRegistryEngineRoot = Join-Path $env:TEMP ('psilink-flow-noregistry-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
-        $script:CapableEngineRoot = Join-Path $env:TEMP ('psilink-flow-capable-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
-        $script:NoRunEngineRoot = Join-Path $env:TEMP ('psilink-flow-norun-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+        $script:StaleEngineRoot = Join-Path $env:TEMP ('alcove-flow-stale-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+        $script:SelfHealEngineRoot = Join-Path $env:TEMP ('alcove-flow-selfheal-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+        $script:NoRegistryEngineRoot = Join-Path $env:TEMP ('alcove-flow-noregistry-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+        $script:CapableEngineRoot = Join-Path $env:TEMP ('alcove-flow-capable-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+        $script:NoRunEngineRoot = Join-Path $env:TEMP ('alcove-flow-norun-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
         New-Item -ItemType Directory -Path $script:StaleEngineRoot -Force | Out-Null
         New-Item -ItemType Directory -Path $script:SelfHealEngineRoot -Force | Out-Null
         New-Item -ItemType Directory -Path $script:NoRegistryEngineRoot -Force | Out-Null
@@ -835,7 +835,7 @@ Describe 'The setup flow, driven against a stub engine' {
 
         $engineHead = @(
             '@echo off',
-            '>>"%PSILINK_STUB_LOG%" echo %*',
+            '>>"%ALCOVE_STUB_LOG%" echo %*',
             'echo %*| findstr /C:"version --format" >nul',
             'if not errorlevel 1 goto engineversion',
             'echo %*| findstr /C:"image inspect" >nul',
@@ -865,9 +865,9 @@ Describe 'The setup flow, driven against a stub engine' {
             'if not errorlevel 1 goto doctorhelp') + $engineTail
         $pullWorks = @(':imagepull', 'exit /b 0', ':doctorhelp')
         $preDoctorHelp = @(
-            'echo psilink [command] [options]',
+            'echo alcove [command] [options]',
             'echo Usage:',
-            'echo   psilink [--save] [options] URL INPUT_FILE [OUTPUT_FILE]',
+            'echo   alcove [--save] [options] URL INPUT_FILE [OUTPUT_FILE]',
             'exit /b 0')
 
         # A registry copy no newer than the one on the PC: the pull succeeds and
@@ -881,11 +881,11 @@ Describe 'The setup flow, driven against a stub engine' {
         # so the stub needs no second file to keep.
         Set-Content -LiteralPath (Join-Path $script:SelfHealEngineRoot 'docker.cmd') `
             -Encoding Ascii -Value ($refreshHead + $pullWorks + @(
-            'findstr /C:"pull" "%PSILINK_STUB_LOG%" >nul',
+            'findstr /C:"pull" "%ALCOVE_STUB_LOG%" >nul',
             'if not errorlevel 1 goto freshimage') + $preDoctorHelp + @(
             ':freshimage',
-            'echo Usage: psilink doctor probe or doctor mount DIRECTORY',
-            'echo   psilink doctor probe   Check the file drop over the network',
+            'echo Usage: alcove doctor probe or doctor mount DIRECTORY',
+            'echo   alcove doctor probe   Check the file drop over the network',
             'exit /b 0'))
 
         # A registry the engine cannot reach at all, which leaves the copy on
@@ -899,9 +899,9 @@ Describe 'The setup flow, driven against a stub engine' {
             ':doctorhelp') + $preDoctorHelp)
 
         Set-Content -LiteralPath (Join-Path $script:CapableEngineRoot 'docker.cmd') -Encoding Ascii -Value ($prologue + @(
-            'echo Usage: psilink doctor probe or doctor mount DIRECTORY',
-            'echo   psilink doctor probe   Check the file drop over the network',
-            'echo   psilink doctor mount   Check an already-mounted file-drop directory',
+            'echo Usage: alcove doctor probe or doctor mount DIRECTORY',
+            'echo   alcove doctor probe   Check the file drop over the network',
+            'echo   alcove doctor mount   Check an already-mounted file-drop directory',
             'exit /b 0'))
 
         # The same engine with the doctor branch taken out, so it answers only
@@ -916,7 +916,7 @@ Describe 'The setup flow, driven against a stub engine' {
         # window, and the answer decides which reason the flow prints. Injected
         # above the guard line so that it replaces the script's own definition,
         # which is where the launcher's flow suite puts its credential answer.
-        $script:ElevatedSetupScript = Join-Path $script:CapableEngineRoot 'Setup-PsilinkFileDrop.ps1'
+        $script:ElevatedSetupScript = Join-Path $script:CapableEngineRoot 'Setup-AlcoveFileDrop.ps1'
         $setupSource = Get-Content -Raw -LiteralPath $setupScript
         $guardLine = "if (`$LoadFunctionsOnly) { return }"
         $answeredElevation = @(
@@ -947,9 +947,9 @@ Describe 'The setup flow, driven against a stub engine' {
 
             $log = Join-Path $EngineRoot ('calls-' + [guid]::NewGuid().ToString('N').Substring(0, 8) + '.log')
             $originalPath = $env:PATH
-            $originalLog = $env:PSILINK_STUB_LOG
+            $originalLog = $env:ALCOVE_STUB_LOG
             try {
-                $env:PSILINK_STUB_LOG = $log
+                $env:ALCOVE_STUB_LOG = $log
                 $env:PATH = @(
                     $EngineRoot,
                     (Join-Path $env:SystemRoot 'System32'),
@@ -961,8 +961,8 @@ Describe 'The setup flow, driven against a stub engine' {
                     $ScriptArguments) -InputLines $InputLines -TimeoutSeconds $TimeoutSeconds
             } finally {
                 $env:PATH = $originalPath
-                if ($null -eq $originalLog) { Remove-Item env:PSILINK_STUB_LOG -ErrorAction SilentlyContinue }
-                else { $env:PSILINK_STUB_LOG = $originalLog }
+                if ($null -eq $originalLog) { Remove-Item env:ALCOVE_STUB_LOG -ErrorAction SilentlyContinue }
+                else { $env:ALCOVE_STUB_LOG = $originalLog }
             }
 
             $calls = ''
@@ -1009,7 +1009,7 @@ Describe 'The setup flow, driven against a stub engine' {
         @([regex]::Matches($run.Calls, 'pull --quiet')).Count | Should -Be 1 -Because $run.Calls
         # The two things a 64 from the battery can honestly mean. This is
         # neither: it is the image, so neither may be printed here.
-        $run.Output | Should -Not -Match 'defect in Setup-PsilinkFileDrop.ps1' -Because $shape
+        $run.Output | Should -Not -Match 'defect in Setup-AlcoveFileDrop.ps1' -Because $shape
         $run.Output | Should -Not -Match 'refused the values' -Because $shape
         # And what the image itself answered, printed after the remedy. The
         # verdict is fixed, so this is the only thing an operator whose
@@ -1025,7 +1025,7 @@ Describe 'The setup flow, driven against a stub engine' {
         # server, because the flow asks Windows whether it can reach the path
         # on the way down, and no machine can ever answer to this one.
         $run = Invoke-SetupWithEngine -EngineRoot $script:StaleEngineRoot -SetupScript $setupScript -ScriptArguments @(
-            '-DropPath', '\\fs-04.invalid\exchange\psilink', '-SkipConfirm')
+            '-DropPath', '\\fs-04.invalid\exchange\alcove', '-SkipConfirm')
         $shape = "timedout=$($run.TimedOut) exit=$($run.Exit) calls=$($run.Calls)"
 
         $run.TimedOut | Should -BeFalse -Because $shape
@@ -1041,7 +1041,7 @@ Describe 'The setup flow, driven against a stub engine' {
         # above the path resolution fails this run rather than merely slowing
         # it.
         $run = Invoke-SetupWithEngine -EngineRoot $script:NoRunEngineRoot -SetupScript $setupScript -ScriptArguments @(
-            '-DropPath', 'C:\psilink-local-drop')
+            '-DropPath', 'C:\alcove-local-drop')
         $shape = "timedout=$($run.TimedOut) exit=$($run.Exit) calls=$($run.Calls)"
 
         $run.TimedOut | Should -BeFalse -Because $shape
@@ -1141,7 +1141,7 @@ Describe 'The setup flow, driven against a stub engine' {
         # engine serves no pull at all, so one made here reaches its
         # unexpected-call arm rather than passing unnoticed.
         $run.Calls | Should -Not -Match 'pull' -Because $shape
-        $output | Should -Not -Match 'Refreshing the psilink image' -Because $shape
+        $output | Should -Not -Match 'Refreshing the Alcove image' -Because $shape
         $output | Should -Not -Match 'unexpected engine call' -Because $shape
         # Held as a check rather than left to the reasoning above: a Windows
         # PowerShell that did answer the password prompt from a redirect would
@@ -1156,7 +1156,7 @@ Describe 'The setup flow, driven against a stub engine' {
         # stale-image case above gives: the flow asks Windows whether it can
         # reach the path on the way down.
         $run = Invoke-SetupWithEngine -EngineRoot $script:CapableEngineRoot -SetupScript $setupScript `
-            -ScriptArguments @('-DropPath', '\\fs-04.invalid\exchange\psilink') `
+            -ScriptArguments @('-DropPath', '\\fs-04.invalid\exchange\alcove') `
             -InputLines @('B', 'n') -TimeoutSeconds 60
         $output = [string] $run.Output
         $shape = "timedout=$($run.TimedOut) exit=$($run.Exit) tail=" +
@@ -1206,7 +1206,7 @@ Describe 'The setup flow, driven against a stub engine' {
 
 Describe 'Resolution over a live SMB rig' {
     BeforeAll {
-        $global:PsilinkRigPremises = [ordered]@{
+        $global:AlcoveRigPremises = [ordered]@{
             share  = [ordered]@{ state = 'not_reached' }
             mapped = [ordered]@{ state = 'not_reached' }
             dfs    = [ordered]@{ state = 'not_reached' }
@@ -1214,10 +1214,10 @@ Describe 'Resolution over a live SMB rig' {
 
         $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
         $suffix = [guid]::NewGuid().ToString('N').Substring(0, 8)
-        $dataShareName = "psilinkci$suffix"
-        $dfsShareName = "psilinkdfs$suffix"
-        $dataShareRoot = Join-Path $env:TEMP "psilink-ci-data-$suffix"
-        $dfsShareRoot = Join-Path $env:TEMP "psilink-ci-dfs-$suffix"
+        $dataShareName = "alcoveci$suffix"
+        $dfsShareName = "alcovedfs$suffix"
+        $dataShareRoot = Join-Path $env:TEMP "alcove-ci-data-$suffix"
+        $dfsShareRoot = Join-Path $env:TEMP "alcove-ci-dfs-$suffix"
         $dataUnc = "\\localhost\$dataShareName"
         # DFS names its targets by server, so the namespace link cannot be
         # pointed at the loopback form above.
@@ -1253,7 +1253,7 @@ Describe 'Resolution over a live SMB rig' {
             $serverServiceStatus = 'absent'
             if ($serverService) { $serverServiceStatus = [string] $serverService.Status }
 
-            $global:PsilinkRigPremises.share = [ordered]@{
+            $global:AlcoveRigPremises.share = [ordered]@{
                 state          = 'built'
                 server_service = $serverServiceStatus
                 share          = $dataShareName
@@ -1261,7 +1261,7 @@ Describe 'Resolution over a live SMB rig' {
                 write_through  = $landed
             }
         } catch {
-            $global:PsilinkRigPremises.share = [ordered]@{
+            $global:AlcoveRigPremises.share = [ordered]@{
                 state = 'FAILED'
                 share = $dataShareName
                 error = $_.Exception.Message
@@ -1274,7 +1274,7 @@ Describe 'Resolution over a live SMB rig' {
             $mapping = Invoke-Net -Arguments @('use', "${candidate}:", $dataUnc, '/persistent:no')
             if ($mapping.Exit -eq 0) { $mappedLetter = $candidate }
 
-            $global:PsilinkRigPremises.mapped = [ordered]@{
+            $global:AlcoveRigPremises.mapped = [ordered]@{
                 state       = $(if ($mappedLetter) { 'built' } else { 'FAILED' })
                 letter      = $mappedLetter
                 target      = $dataUnc
@@ -1282,7 +1282,7 @@ Describe 'Resolution over a live SMB rig' {
                 error       = $(if ($mappedLetter) { $null } else { $mapping.Output })
             }
         } catch {
-            $global:PsilinkRigPremises.mapped = [ordered]@{
+            $global:AlcoveRigPremises.mapped = [ordered]@{
                 state  = 'FAILED'
                 target = $dataUnc
                 error  = $_.Exception.Message
@@ -1318,7 +1318,7 @@ Describe 'Resolution over a live SMB rig' {
             $dfsMapping = Invoke-Net -Arguments @('use', "${candidate}:", $namespaceLink, '/persistent:no')
             if ($dfsMapping.Exit -eq 0) { $dfsLetter = $candidate }
 
-            $global:PsilinkRigPremises.dfs = [ordered]@{
+            $global:AlcoveRigPremises.dfs = [ordered]@{
                 state       = $(if ($dfsLetter) { 'built' } else { 'FAILED' })
                 dfs_service = $dfsServiceStatus
                 namespace   = $namespacePath
@@ -1329,7 +1329,7 @@ Describe 'Resolution over a live SMB rig' {
                 error       = $(if ($dfsLetter) { $null } else { $dfsMapping.Output })
             }
         } catch {
-            $global:PsilinkRigPremises.dfs = [ordered]@{
+            $global:AlcoveRigPremises.dfs = [ordered]@{
                 state     = 'FAILED'
                 namespace = $namespacePath
                 link      = $namespaceLink

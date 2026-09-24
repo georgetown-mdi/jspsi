@@ -27,7 +27,7 @@ export interface OperatorSuppliedText {
   readonly [operatorSuppliedBrand]: string;
 }
 
-const OPERATOR_SUPPLIED_VALUE = Symbol("psilink.display.operatorSuppliedText");
+const OPERATOR_SUPPLIED_VALUE = Symbol("alcove.display.operatorSuppliedText");
 
 /**
  * Mark one string as {@link OperatorSuppliedText}, at the site that composes
@@ -79,7 +79,7 @@ export interface MessageWithOperatorText {
  * wrote instead of escaping a path the operator typed.
  */
 const OPERATOR_SUPPLIED_SPANS = Symbol.for(
-  "psilink.errorDisplay.operatorSuppliedSpans",
+  "alcove.errorDisplay.operatorSuppliedSpans",
 );
 
 /**
@@ -240,7 +240,7 @@ export function keepOperatorSuppliedText<E extends Error>(
 /**
  * The spans {@link keepOperatorSuppliedText} left on `link` whose text joins
  * back to `message`, or `undefined` for a link that asked for no such
- * treatment -- which is every link psilink does not partition itself.
+ * treatment -- which is every link Alcove does not partition itself.
  *
  * The join is checked here rather than trusted: the renderer shows what the
  * spans hold, so spans that describe some other text would put a rendering out

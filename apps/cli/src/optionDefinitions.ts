@@ -8,8 +8,8 @@ import {
   LOW_POLLING_FREQUENCY_WARN_MS,
   MAX_RECONNECT_ATTEMPTS,
   UsageError,
-} from "@psilink/core";
-import type { ConnectionConfig } from "@psilink/core";
+} from "@alcove/core";
+import type { ConnectionConfig } from "@alcove/core";
 
 import { type ConnectionOverrides, DEFAULT_CONFIG_PATH } from "./config";
 import { DEFAULT_KEY_PATH } from "./keyFile";
@@ -66,13 +66,13 @@ export function hostKeyFingerprintFlag(argv: Arguments): string | undefined {
       "--server-host-key-fingerprint must be in OpenSSH SHA256 format: the " +
         "SHA256: prefix followed by 43 unpadded standard base64 characters " +
         "(the value ssh-keygen -lf prints, or the fingerprint shown by a " +
-        "prior interactive psilink run)",
+        "prior interactive Alcove run)",
     );
   return resolved;
 }
 
 /**
- * Add the `--log-level` / `--log-file` options, which every psilink command
+ * Add the `--log-level` / `--log-file` options, which every Alcove command
  * accepts with the same meaning. Declared once here and called from each
  * command's builder so the two flags keep one name, type, and description
  * across the whole CLI; {@link logLevelFlag} reads the first of them back.
@@ -159,13 +159,13 @@ export function addCommonBootstrapOptions(
       type: "string",
       describe:
         describe["config-file"] ??
-        `where to write psilink.yaml (default: ${DEFAULT_CONFIG_PATH})`,
+        `where to write alcove.yaml (default: ${DEFAULT_CONFIG_PATH})`,
     })
     .option("key-file", {
       type: "string",
       describe:
         describe["key-file"] ??
-        `where to write .psilink.key (default: ${DEFAULT_KEY_PATH})`,
+        `where to write .alcove.key (default: ${DEFAULT_KEY_PATH})`,
     })
     .option("identity", {
       type: "string",
@@ -223,7 +223,7 @@ export function addCommonBootstrapOptions(
         describe["server-host-key-fingerprint"] ??
         "pre-pin the server's SSH host-key fingerprint (OpenSSH SHA256 " +
           "format, e.g. SHA256:abc...xyz; the value ssh-keygen -lf prints, or " +
-          "the fingerprint shown by a prior interactive psilink run); use " +
+          "the fingerprint shown by a prior interactive Alcove run); use " +
           "@path to read from file. Lets an unattended (non-interactive) run " +
           "connect without the interactive trust prompt; a server presenting a " +
           "different key still fails closed",
@@ -276,7 +276,7 @@ export function addCommonBootstrapOptions(
     .option("record-file", {
       type: "string",
       describe:
-        "path for the audit record (default: ./psilink-record-<timestamp>." +
+        "path for the audit record (default: ./alcove-record-<timestamp>." +
         "json); the private verification keys are written alongside it as " +
         "<name>.keys.json",
     })
@@ -287,7 +287,7 @@ export function addCommonBootstrapOptions(
         "a supervising process. Exits 64 if fd 3 is not wired. No effect on " +
         "an offline invite or accept, which runs no exchange. stdout and " +
         "stderr are unchanged. Format: " +
-        "https://github.com/georgetown-mdi/jspsi/blob/main/docs/" +
+        "https://github.com/georgetown-mdi/alcove/blob/main/docs/" +
         "spec/CLI_EVENTS.md",
     })
     .option("lockless-rendezvous", {
@@ -652,8 +652,8 @@ export type WebRTCConnectionSource = "url" | "configuration";
  * the server is reached by location and its API key alone (the same remedy
  * {@link WEBRTC_URL_EXTRAS_REFUSED} gives for `server.key`). Where that location
  * came from is what `source` selects, so neither remedy points at a URL on the
- * caller that has none: `psilink invite` builds the connection from a
- * ws://wss:// URL, while `psilink exchange` runs one already written in the
+ * caller that has none: `alcove invite` builds the connection from a
+ * ws://wss:// URL, while `alcove exchange` runs one already written in the
  * configuration, where telling the operator to author a config and run exchange
  * would be circular.
  *
@@ -700,8 +700,8 @@ export function warnUnsupportedWebRTCServerFlags(
         "location and its API key alone. For a coordination server that " +
         "needs a key, " +
         (source === "url"
-          ? "author `channel: webrtc` (with `server.key`) in psilink.yaml and " +
-            "run 'psilink exchange'."
+          ? "author `channel: webrtc` (with `server.key`) in alcove.yaml and " +
+            "run 'alcove exchange'."
           : "set `connection.server.key` in the configuration this exchange " +
             "runs.") +
         " A username has no webrtc form and is never sent.",
@@ -801,7 +801,7 @@ export function warnLowPollingFrequency(
  * SFTP-only; on any other channel {@link warnUnsupportedFileSyncFlags} reports it
  * ignored instead, and `undefined` -- an unresolved zero-setup URL scheme -- is
  * likewise not `sftp`). Reads the EFFECTIVE merged values, not just the CLI flag,
- * so a wasteful pairing sitting in a loaded `psilink.yaml` still warns on every
+ * so a wasteful pairing sitting in a loaded `alcove.yaml` still warns on every
  * `exchange` run -- the mode's natural home is the persisted config for a
  * recurring slow-peer exchange, so a CLI-only scope would miss its main case. The
  * interpolated interval is the operator's own numeric value (non-secret), so
@@ -870,7 +870,7 @@ export type OfflineIgnoredServerOverrides = Pick<
  * `--server-port`, and `--outbound-path`) have no effect
  * on an OFFLINE invite/accept. Those paths write a placeholder (invite) or
  * invitation-endpoint-seeded (accept) connection block for the operator to edit
- * before `psilink exchange`, rather than building a connection from a URL the way
+ * before `alcove exchange`, rather than building a connection from a URL the way
  * the online and zero-setup paths do -- so they go through {@link
  * connectionFromEndpoint}, which applies no connection overrides, and these flags
  * would otherwise be parsed and silently dropped. The warning names exactly the
@@ -912,8 +912,8 @@ export function warnServerOverridesIgnoredOffline(
       "edit (a placeholder, or seeded from the invitation endpoint), not built " +
       "from a URL. Set the connection details directly in that block -- the " +
       "server host/port/credentials, or the inbound_path/outbound_path split " +
-      "directory -- before running 'psilink exchange', or pass these flags on " +
-      "an online invite/accept, the zero-setup exchange, or 'psilink exchange'.",
+      "directory -- before running 'alcove exchange', or pass these flags on " +
+      "an online invite/accept, the zero-setup exchange, or 'alcove exchange'.",
   );
 }
 
@@ -1012,8 +1012,8 @@ export function warnOptionsOverridesIgnoredOffline(
       "on an offline invite/accept: the connection block is written for you to " +
       "edit (a placeholder, or seeded from the invitation endpoint), and these " +
       "tuning options are not applied to it. Set them under connection.options " +
-      "in the written config before running 'psilink exchange', or pass these " +
-      "flags on an online invite/accept, the zero-setup exchange, or 'psilink " +
+      "in the written config before running 'alcove exchange', or pass these " +
+      "flags on an online invite/accept, the zero-setup exchange, or 'alcove " +
       "exchange'.",
   );
 }

@@ -1,5 +1,5 @@
 [Unit]
-Description=Verify the psilink relay daily
+Description=Verify the Alcove relay daily
 
 [Timer]
 # A standing relay is idle between exchanges, so nothing else notices that it

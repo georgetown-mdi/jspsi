@@ -5,7 +5,7 @@ import {
   connectionFromLocator,
   generateSharedSecret,
   getDefaultLinkageTerms,
-} from "@psilink/core";
+} from "@alcove/core";
 import { describe, expect, test } from "vitest";
 
 import {
@@ -44,7 +44,7 @@ import type {
   NewManagedExchange,
   RunnableManagedExchangeRecord,
 } from "@psi/managed/managedExchangeRecord";
-import type { WebRTCExchangeLocator } from "@psilink/core";
+import type { WebRTCExchangeLocator } from "@alcove/core";
 
 const linkageTerms = getDefaultLinkageTerms("County Health Dept");
 
@@ -281,13 +281,13 @@ describe("no-input-content invariant", () => {
 describe("parseManagedExchangeRecord reader-rejects-unknown", () => {
   test("rejects an unrecognized schemaVersion rather than migrating", () => {
     const record = buildManagedExchangeRecord(newExchange());
-    const future = { ...record, schemaVersion: "psilink-managed-exchange/v4" };
+    const future = { ...record, schemaVersion: "alcove-managed-exchange/v5" };
     const result = safeParseManagedExchangeRecord(future);
     expect(result.success).toBe(false);
     expect(() => parseManagedExchangeRecord(future)).toThrow();
   });
 
-  test("accepts the recognized v3 schemaVersion", () => {
+  test("accepts the recognized v4 schemaVersion", () => {
     const record = buildManagedExchangeRecord(newExchange());
     expect(safeParseManagedExchangeRecord(record).success).toBe(true);
   });
@@ -298,7 +298,7 @@ describe("parseManagedExchangeRecord reader-rejects-unknown", () => {
     // offering the fresh invitation the answer withholds.
     const stored = {
       ...buildManagedExchangeRecord(newExchange()),
-      schemaVersion: "psilink-managed-exchange/v2",
+      schemaVersion: "alcove-managed-exchange/v2",
     };
     expect(safeParseManagedExchangeRecord(stored).success).toBe(false);
   });
@@ -309,7 +309,7 @@ describe("parseManagedExchangeRecord reader-rejects-unknown", () => {
     // the field.
     const stored: Record<string, unknown> = {
       ...buildManagedExchangeRecord(newExchange()),
-      schemaVersion: "psilink-managed-exchange/v1",
+      schemaVersion: "alcove-managed-exchange/v1",
     };
     delete stored.standingCondition;
     expect(safeParseManagedExchangeRecord(stored).success).toBe(false);
@@ -1233,7 +1233,7 @@ describe("diagnoseManagedExchangeRecord", () => {
     expect(() =>
       diagnoseManagedExchangeRecord({
         ...record,
-        schemaVersion: "psilink-managed-exchange/v4",
+        schemaVersion: "alcove-managed-exchange/v5",
       }),
     ).toThrow();
   });
@@ -1291,7 +1291,7 @@ describe("partitionReadableManagedExchanges", () => {
     const good = buildManagedExchangeRecord(newExchange({ label: "Good" }));
     const read = partitionReadableManagedExchanges(
       ["future", good.id],
-      [{ ...good, schemaVersion: "psilink-managed-exchange/v4" }, good],
+      [{ ...good, schemaVersion: "alcove-managed-exchange/v5" }, good],
     );
 
     expect(read.records.map((record) => record.id)).toEqual([good.id]);

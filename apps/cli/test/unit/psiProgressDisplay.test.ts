@@ -1,7 +1,7 @@
 import { afterEach, expect, test, vi } from "vitest";
 import logLibrary from "loglevel";
 
-import type { PsiProgress } from "@psilink/core";
+import type { PsiProgress } from "@alcove/core";
 
 import {
   createPsiProgressDisplay,

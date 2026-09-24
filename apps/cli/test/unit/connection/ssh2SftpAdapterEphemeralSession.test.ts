@@ -3,7 +3,7 @@
 import { EventEmitter } from "node:events";
 
 import { describe, expect, test, vi } from "vitest";
-import { FileTransportClient, UsageError } from "@psilink/core";
+import { FileTransportClient, UsageError } from "@alcove/core";
 
 import { SSH2SFTPClientAdapter } from "../../../src/connection/ssh2SftpAdapter";
 import { SFTP_REDIAL_WARN_INTERVAL } from "../../../src/connection/sftpAdapterLedger";
@@ -307,7 +307,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
 
     // The re-dial passed ssh2 the identical connect options as the first dial
     // (host, credentials, and the enforcing host-key verifier), minus the
-    // psilink-specific maxReconnectAttempts connect() strips -- no re-prompt, no
+    // alcove-specific maxReconnectAttempts connect() strips -- no re-prompt, no
     // freshly-built options.
     expect(connect).toHaveBeenCalledTimes(2);
     expect(connect.mock.calls[1][0]).toEqual(connect.mock.calls[0][0]);

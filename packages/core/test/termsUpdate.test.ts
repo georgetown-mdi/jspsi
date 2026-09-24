@@ -143,7 +143,7 @@ describe("terms update", () => {
     const { hkdfDerive, hmacSha256 } = await import("../src/utils/crypto");
     const macKey = await hkdfDerive(
       fromBase64Url(secret),
-      "psilink-terms-update-v1:mac",
+      "alcove-terms-update-v2:mac",
       32,
     );
     const forged = `${toBase64Url(bytes)}.${toBase64Url(

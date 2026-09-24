@@ -14,7 +14,7 @@ import {
   redactAndRenderOperatorSuppliedText,
   redactAndSanitizeForDisplay,
   UsageError,
-} from "@psilink/core";
+} from "@alcove/core";
 import type {
   ConnectionConfig,
   ExchangeSpec,
@@ -22,7 +22,7 @@ import type {
   LinkageTerms,
   PreparedExchange,
   WebRTCConnectionConfig,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   applyConnectionOverrides,
@@ -193,7 +193,7 @@ export function resolveAcceptPositionals(positionals: Array<unknown>):
     positionals[0] !== undefined ? String(positionals[0]) : undefined;
   if (arg0 === undefined)
     throw new UsageError(
-      "an invitation is required; usage: psilink accept --identity IDENTITY " +
+      "an invitation is required; usage: alcove accept --identity IDENTITY " +
         "INVITATION [INPUT_FILE] [OUTPUT_FILE]",
     );
 
@@ -205,12 +205,12 @@ export function resolveAcceptPositionals(positionals: Array<unknown>):
     if (invitation === undefined || input === undefined)
       throw new UsageError(
         "online acceptance requires an invitation and an input file; usage: " +
-          "psilink accept --identity IDENTITY URL INVITATION INPUT_FILE " +
+          "alcove accept --identity IDENTITY URL INVITATION INPUT_FILE " +
           "[OUTPUT_FILE]",
       );
     if (positionals.length > 4)
       throw new UsageError(
-        "online acceptance takes at most four positionals; usage: psilink " +
+        "online acceptance takes at most four positionals; usage: alcove " +
           "accept --identity IDENTITY URL INVITATION INPUT_FILE [OUTPUT_FILE]",
       );
     const output =
@@ -220,7 +220,7 @@ export function resolveAcceptPositionals(positionals: Array<unknown>):
 
   if (positionals.length > 3)
     throw new UsageError(
-      "offline acceptance takes at most three positionals; usage: psilink " +
+      "offline acceptance takes at most three positionals; usage: alcove " +
         "accept --identity IDENTITY INVITATION [INPUT_FILE] [OUTPUT_FILE]",
     );
   return {
@@ -307,7 +307,7 @@ type AcceptReady = {
  *
  * The same object becomes the run's connection and the one the bootstrap
  * writes, so the live dial and the saved `connection.options.peer_timeout_ms`
- * hold the same budget and a later unattended `psilink exchange` inherits it.
+ * hold the same budget and a later unattended `alcove exchange` inherits it.
  * An absent flag applies no override and leaves the transport on its own
  * defaults.
  *
@@ -615,14 +615,14 @@ export async function validateAccept(params: {
         })
       : undefined;
   // The connection this acceptance can run the exchange on itself, rather than
-  // writing a configuration for a later `psilink exchange`: only a webrtc
+  // writing a configuration for a later `alcove exchange`: only a webrtc
   // connection is self-contained (the invitation's endpoint is the coordination
   // server, the role is stamped above, and the shared secret is the token's).
   // The other channels are not runnable here: their connection block is a
   // locator whose credentials the operator still supplies by hand.
   //
   // A kept configuration is excluded because it, not this acceptance, governs
-  // the exchange: `psilink exchange` resolves that file's own connection block
+  // the exchange: `alcove exchange` resolves that file's own connection block
   // (its `@path` references, `server.key`, `secure`) and dials what it says,
   // which may differ from the endpoint-built connection here.
   const runnableConnection =
@@ -652,7 +652,7 @@ export async function validateAccept(params: {
       "this acceptance keeps the existing configuration, so it writes the key " +
         "file and stops: the exchange is governed by that configuration's own " +
         "connection block rather than by the invitation's endpoint. Run " +
-        "'psilink exchange' with your input file once this command finishes.",
+        "'alcove exchange' with your input file once this command finishes.",
     );
   // The result destination belongs to a run; an acceptance that writes only a
   // configuration and key file has none to send there, so report the positional
@@ -661,7 +661,7 @@ export async function validateAccept(params: {
     log.warn(
       "the OUTPUT_FILE positional has no effect on this acceptance: it writes " +
         "the configuration and key file and runs no exchange, so there is no " +
-        "result to write. Pass the destination to 'psilink exchange' instead.",
+        "result to write. Pass the destination to 'alcove exchange' instead.",
     );
   if (rows !== undefined)
     checkLinkageSatisfiability(
@@ -753,7 +753,7 @@ export async function validateAccept(params: {
  * "handler: accept-reuse leaves the kept configuration's identity untouched"
  * test), only its consent record.
  *
- * Unlike `psilink invite`, which warns on any non-blank `--identity`, this
+ * Unlike `alcove invite`, which warns on any non-blank `--identity`, this
  * warns only where the flag differs from the stored label -- a flag naming
  * that label already describes what the run does. A blank flag (a scripted
  * `--identity "$ORG"` with `ORG` unset) names nothing and is silent on both
@@ -1228,7 +1228,7 @@ export async function handler(argv: Arguments): Promise<void> {
           eventStream: options.eventStream,
           reuseExistingConfig: ready.reuseExistingConfig,
           // Persist the consented received-column commitment so the later
-          // `psilink exchange` enforces it via reconcileReceivedPayload, the
+          // `alcove exchange` enforces it via reconcileReceivedPayload, the
           // online sibling of the offline path's expectedPayloadColumns write
           // below. The set is known up front from the token, so it rides the
           // acceptance hook's first write on a fresh config and refreshes the
@@ -1241,7 +1241,7 @@ export async function handler(argv: Arguments): Promise<void> {
             consentedColumns: ready.accepted.expectedPayloadColumns,
           },
           // Record this party's consent to its own outbound set in the same fresh
-          // write, so a later `psilink exchange` from this configuration is held to
+          // write, so a later `alcove exchange` from this configuration is held to
           // the columns just consented to here. The reuse path writes no fresh
           // config; the hook refreshes the kept config's record surgically instead,
           // with the record derived for the KEPT config's own output terms (the
@@ -1249,7 +1249,7 @@ export async function handler(argv: Arguments): Promise<void> {
           // on the fresh path, where the written config's terms are the mirror's.
           outboundPayloadConsent: reuseOutboundPayloadConsent,
           // Record the invitation's declared cardinality side in the same write,
-          // and refresh it in place under reuse, so a later `psilink exchange`
+          // and refresh it in place under reuse, so a later `alcove exchange`
           // from this configuration refuses a partner presenting a value this
           // acceptance did not consent to. The in-memory binding set on `prepared`
           // covers only this single run. Unlike the received-column commitment it
@@ -1271,7 +1271,7 @@ export async function handler(argv: Arguments): Promise<void> {
       const spec: ExchangeSpec = {
         connection: ready.connection,
         ...ready.dataSpec,
-        // Persist the consented received-column commitment so the later `psilink
+        // Persist the consented received-column commitment so the later `alcove
         // exchange` enforces it. Offline accept's enforcement happens at a separate
         // invocation, so it must be written here; the online path persists the same
         // set into its own fresh config (via runOnlineBootstrap above) in addition to
@@ -1283,7 +1283,7 @@ export async function handler(argv: Arguments): Promise<void> {
           ? { expectedPayloadColumns: ready.accepted.expectedPayloadColumns }
           : {}),
         // Persist the invitation's declared cardinality side so the later
-        // `psilink exchange` holds the partner's presented value to it
+        // `alcove exchange` holds the partner's presented value to it
         // (assertPresentedDeduplicateMatchesInvitation). The terms-side twin of
         // the received-column commitment above, needed here for the same reason:
         // offline accept's enforcement happens at a separate invocation, so a
@@ -1292,7 +1292,7 @@ export async function handler(argv: Arguments): Promise<void> {
         // the mirror's false and rides `linkageTerms` in the spread above.
         expectedPartnerDeduplicate: ready.accepted.expectedPartnerDeduplicate,
         // This party's consent to its own outbound set (see its derivation above),
-        // so the later `psilink exchange` sends exactly what was consented to here
+        // so the later `alcove exchange` sends exactly what was consented to here
         // or stops to ask. Omitted -- and the run left ungated -- only where nothing
         // is transmitted to the partner at all.
         ...(outboundPayloadConsent !== undefined
@@ -1348,7 +1348,7 @@ export async function handler(argv: Arguments): Promise<void> {
             operatorSuppliedText(configPath),
           )}, seeding the connection block from the ` +
             "invitation's endpoint; it needs no credentials of your own. Run " +
-            "'psilink exchange' with your input file to conduct the exchange.",
+            "'alcove exchange' with your input file to conduct the exchange.",
         );
       else if (ready.seeded)
         log.info(
@@ -1356,14 +1356,14 @@ export async function handler(argv: Arguments): Promise<void> {
             operatorSuppliedText(configPath),
           )}, seeding the connection block from the ` +
             "invitation's endpoint; review it and add your own credentials " +
-            `before running 'psilink exchange'. ${CONNECTION_BLOCK_NOTICE}`,
+            `before running 'alcove exchange'. ${CONNECTION_BLOCK_NOTICE}`,
         );
       else
         log.info(
           `wrote config to ${redactAndRenderOperatorSuppliedText(
             operatorSuppliedText(configPath),
           )}; fill in the connection block before ` +
-            `running 'psilink exchange'. ${CONNECTION_BLOCK_NOTICE}`,
+            `running 'alcove exchange'. ${CONNECTION_BLOCK_NOTICE}`,
         );
       log.info(
         `wrote key file to ${redactAndRenderOperatorSuppliedText(

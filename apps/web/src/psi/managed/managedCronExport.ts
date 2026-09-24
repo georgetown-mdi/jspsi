@@ -1,7 +1,7 @@
 /**
  * The command-line export of a managed (recurring) exchange: the record
- * composed into the two files `psilink exchange` opens -- `psilink.yaml` and
- * `.psilink.key` -- plus the command that runs them, letting an operator with
+ * composed into the two files `alcove exchange` opens -- `alcove.yaml` and
+ * `.alcove.key` -- plus the command that runs them, letting an operator with
  * a host scheduler move a managed exchange onto the CLI
  * (docs/MANAGED_EXCHANGE.md, "Who this is for").
  *
@@ -9,7 +9,7 @@
  *
  * - It SPLITS the export artifact rather than serializing a second format.
  *   The config text is core's {@link serializeExchangeDocument}, the writer
- *   psilink's own `saveConfig` uses, and the key fields are the artifact
+ *   Alcove's own `saveConfig` uses, and the key fields are the artifact
  *   module's {@link keyFileFieldsFromRecord}: the CLI's own file shapes
  *   (docs/spec/MANAGED_EXCHANGE_RECORD.md, "Export artifact"). This adds only
  *   the two files' framing and the two fields the artifact does not hold.
@@ -48,7 +48,7 @@
  * and any `expires` ride the key file alone.
  */
 
-import { ExchangeSpecSchema, serializeExchangeDocument } from "@psilink/core";
+import { ExchangeSpecSchema, serializeExchangeDocument } from "@alcove/core";
 
 import {
   connectionFieldsNotHeld,
@@ -57,22 +57,22 @@ import {
 } from "./managedCommandLineDocument";
 import { keyFileFieldsFromRecord } from "./managedExchangeArtifact";
 
-import type { ConnectionConfig, ExchangeSpec } from "@psilink/core";
+import type { ConnectionConfig, ExchangeSpec } from "@alcove/core";
 import type {
   ManagedExchangeKeyFields,
   ManagedExchangeRecord,
   RunnableManagedExchangeRecord,
 } from "./managedExchangeRecord";
 
-/** The config file name `psilink exchange` reads at its default config path
+/** The config file name `alcove exchange` reads at its default config path
  * (`DEFAULT_CONFIG_PATH`, `apps/cli/src/config.ts`), so a run in the folder
  * holding the exported files needs no `--config-file`. */
-export const CRON_EXPORT_CONFIG_FILE_NAME = "psilink.yaml";
+export const CRON_EXPORT_CONFIG_FILE_NAME = "alcove.yaml";
 
-/** The key file name `psilink exchange` reads at its default key path
+/** The key file name `alcove exchange` reads at its default key path
  * (`DEFAULT_KEY_PATH`, `apps/cli/src/keyFile.ts`), so a run in the folder holding
  * the exported files needs no `--key-file`. */
-export const CRON_EXPORT_KEY_FILE_NAME = ".psilink.key";
+export const CRON_EXPORT_KEY_FILE_NAME = ".alcove.key";
 
 /** The input CSV the emitted command links. Which of the operator's files to
  * link is the one value a record cannot supply, and it is a positional argument
@@ -89,7 +89,7 @@ export const CRON_EXPORT_OUTPUT_FILE_NAME = "results.csv";
  * document is the YAML the CLI's config loader reads. */
 export const CRON_EXPORT_CONFIG_MIME = "application/yaml";
 
-/** The media type the key half is written to disk under: `.psilink.key` is the
+/** The media type the key half is written to disk under: `.alcove.key` is the
  * JSON document the CLI's key-file reader parses. */
 export const CRON_EXPORT_KEY_MIME = "application/json";
 
@@ -105,7 +105,7 @@ interface ManagedCronExportFile {
 }
 
 /**
- * The configuration half of the command-line hand-off: the `psilink.yaml` the
+ * The configuration half of the command-line hand-off: the `alcove.yaml` the
  * CLI loads, and the invocation that runs it. The command names no path from
  * any machine -- the config and key are read at their defaults -- so it runs in
  * the folder the file is saved to, rather than a template with placeholders to
@@ -113,7 +113,7 @@ interface ManagedCronExportFile {
  * compose it: an sftp credential it names is an `@path` reference.
  */
 export interface ManagedCommandLineConfig {
-  /** The `psilink.yaml` half: the exchange-file document, with `role` injected
+  /** The `alcove.yaml` half: the exchange-file document, with `role` injected
    * and any max-age policy held, and no secret. */
   config: ManagedCronExportFile;
   /** The command to run in the folder holding that file, and the key file where
@@ -126,7 +126,7 @@ export interface ManagedCommandLineConfig {
  * line: the two files and the invocation.
  */
 export interface ManagedCronExport extends ManagedCommandLineConfig {
-  /** The `.psilink.key` half: the shared secret and any `expires`. A plaintext
+  /** The `.alcove.key` half: the shared secret and any `expires`. A plaintext
    * credential -- this is the file the handover's custody rules are about. */
   key: ManagedCronExportFile;
 }
@@ -147,13 +147,13 @@ function heldConnectionOrRefuse(exchangeFile: ExchangeSpec): ConnectionConfig {
       "a managed exchange is exported to the command line only from the " +
         `connection settings this app holds on ${connection.channel}; the ` +
         "stored connection carries field(s) outside them, which the exported " +
-        "psilink.yaml would republish for the CLI to resolve. Remove: " +
+        "alcove.yaml would republish for the CLI to resolve. Remove: " +
         outside.join(", "),
     );
   const literal = literalCredentialFields(connection);
   if (literal.length > 0)
     throw new Error(
-      "a managed exchange's exported psilink.yaml names a credential only as " +
+      "a managed exchange's exported alcove.yaml names a credential only as " +
         "an @path reference; the stored connection states one as a value. " +
         "Remove: " +
         literal.join(", "),
@@ -202,7 +202,7 @@ function assertNoStoredAuthentication(exchangeFile: ExchangeSpec): void {
  * Refuse a document holding a top-level field outside what a command-line
  * configuration holds ({@link fieldsOutsideComposableDocument}), so the
  * document spread cannot republish a field no import admitted into the
- * emitted psilink.yaml.
+ * emitted alcove.yaml.
  */
 function assertComposableDocumentFields(document: ExchangeSpec): void {
   const outside = fieldsOutsideComposableDocument(document);
@@ -211,7 +211,7 @@ function assertComposableDocumentFields(document: ExchangeSpec): void {
       "a managed exchange is exported to the command line only from the " +
         "document fields a command-line configuration holds here; the stored " +
         "document carries field(s) outside them, which the exported " +
-        "psilink.yaml would republish. Remove: " +
+        "alcove.yaml would republish. Remove: " +
         outside.join(", "),
     );
 }
@@ -248,7 +248,7 @@ function composeCronExportDocument(
 }
 
 /**
- * Serialize the key pair to the `.psilink.key` bytes the CLI reads: pretty-printed
+ * Serialize the key pair to the `.alcove.key` bytes the CLI reads: pretty-printed
  * JSON with a trailing newline, `camelCase` keys, matching the CLI's own key-file
  * write (`saveKeyFile`, `apps/cli/src/keyFile.ts`) so the exported file is
  * byte-shaped like one the CLI wrote itself.
@@ -258,12 +258,12 @@ function serializeKeyFile(fields: ManagedExchangeKeyFields): string {
 }
 
 /**
- * Compose a managed record's configuration half: the `psilink.yaml` file and
+ * Compose a managed record's configuration half: the `alcove.yaml` file and
  * the command that runs it. Pure, and available to every stored record --
  * including a configuration-only one, whose key file stayed with the machine
  * that runs it and which has no key half to compose.
  *
- * The emitted command is `psilink exchange`'s real invocation --
+ * The emitted command is `alcove exchange`'s real invocation --
  * `[options] INPUT_FILE [OUTPUT_FILE]`, with the config and key read at their
  * defaults (`apps/cli/src/commands/exchange.ts`).
  *
@@ -282,7 +282,7 @@ export function composeManagedCronExportConfig(
       mimeType: CRON_EXPORT_CONFIG_MIME,
     },
     command:
-      `psilink exchange ${CRON_EXPORT_INPUT_FILE_NAME} ` +
+      `alcove exchange ${CRON_EXPORT_INPUT_FILE_NAME} ` +
       CRON_EXPORT_OUTPUT_FILE_NAME,
   };
 }

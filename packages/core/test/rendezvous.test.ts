@@ -37,10 +37,10 @@ describe("deriveRendezvousPeerId", () => {
   // bumps). A surprise diff here is the guard against silent drift.
   test("matches the fixed contract vectors for the zero secret", async () => {
     expect(await deriveRendezvousPeerId(ZERO_SECRET, "inviter")).toBe(
-      "601d61e6cf24cc5fe9bd1e9d1d5e16a3",
+      "c560243e42578f65efd207df4039611e",
     );
     expect(await deriveRendezvousPeerId(ZERO_SECRET, "acceptor")).toBe(
-      "3beccb12918772b6056d128f58191506",
+      "df2e987f2bf566ef71b636ede2d5957e",
     );
   });
 
@@ -63,7 +63,7 @@ describe("deriveRendezvousPeerId", () => {
           name: "HKDF",
           hash: "SHA-256",
           salt: new Uint8Array(32),
-          info: new TextEncoder().encode(`psilink-webrtc-peerid-v1:${role}`),
+          info: new TextEncoder().encode(`alcove-webrtc-peerid-v2:${role}`),
         },
         key,
         16 * 8,

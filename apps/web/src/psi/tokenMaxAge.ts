@@ -1,4 +1,4 @@
-import { MAX_TOKEN_MAX_AGE_DAYS } from "@psilink/core";
+import { MAX_TOKEN_MAX_AGE_DAYS } from "@alcove/core";
 
 import { z } from "zod";
 

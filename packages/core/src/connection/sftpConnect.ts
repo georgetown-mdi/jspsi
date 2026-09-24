@@ -102,7 +102,7 @@ export const settleVerify = (
  * -- including ssh2's connection-target, credential, and
  * host-key-verification options, and any option a future ssh2 version adds
  * -- is dropped with a warning, so `providerOptions` can never override the
- * security-critical connect options psilink derives from
+ * security-critical connect options Alcove derives from
  * `connection.server`. This closes a latent injection sink: untrusted input
  * routed into `providerOptions` still could not redirect the host, swap
  * credentials, or disable host-key verification.
@@ -117,7 +117,7 @@ export const settleVerify = (
  * small, stable allowlist fails closed instead -- a forgotten benign key is
  * a visible functional gap, never a silent security regression.
  *
- * `readyTimeout` is excluded: psilink derives it from
+ * `readyTimeout` is excluded: Alcove derives it from
  * `serverConnectTimeoutMs`, and the structured value must win. `algorithms`
  * is permitted but filtered to its non-host-key sub-categories (see
  * {@link SftpSession.filterAlgorithms}). See docs/EXCHANGE_REFERENCE.md

@@ -14,7 +14,7 @@ import {
   MAX_NAME_LENGTH,
   encodeInvitation,
   generateSharedSecret,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { AcceptorScreen } from "@exchange/AcceptorScreen";
 import { InviterScreen } from "@exchange/InviterScreen";
@@ -23,7 +23,7 @@ import { isolatedColumnName } from "@components/ColumnName";
 
 import { createAppMount } from "./renderApp";
 
-import type { InvitationToken, LinkageTerms } from "@psilink/core";
+import type { InvitationToken, LinkageTerms } from "@alcove/core";
 
 // The recurring-save offer's refusal disables its own deposit, so it must not
 // outlive the exchange it was about. Each seat keeps one component instance

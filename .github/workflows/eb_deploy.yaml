@@ -28,7 +28,7 @@ on:
       - "packages/core/rollup.config.ts"
       - "packages/core/tsconfig.json"
       # Only the broker sources the deployed server bundles: the web app reaches
-      # this workspace through `@psilink/peerjs-broker`, whose "." export is
+      # this workspace through `@alcove/peerjs-broker`, whose "." export is
       # src/contrib/index.ts. Its sibling src/standalone.ts is the local
       # `npm start` entry, which no deployed import graph reaches -- an
       # assumption eb_build_and_test.yaml's deploy-trigger coverage step holds

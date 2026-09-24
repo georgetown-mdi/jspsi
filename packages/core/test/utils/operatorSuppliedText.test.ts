@@ -247,7 +247,7 @@ describe("a message partitioned by origin", () => {
     const error = new Error("could not read the input file");
     Object.defineProperty(
       error,
-      Symbol.for("psilink.errorDisplay.operatorSuppliedSpans"),
+      Symbol.for("alcove.errorDisplay.operatorSuppliedSpans"),
       { value: [{ text: "could not read the input file" }] },
     );
 
@@ -261,7 +261,7 @@ describe("a message partitioned by origin", () => {
     const error = new Error(`could not read ${WINDOWS_PATH}`);
     Object.defineProperty(
       error,
-      Symbol.for("psilink.errorDisplay.operatorSuppliedSpans"),
+      Symbol.for("alcove.errorDisplay.operatorSuppliedSpans"),
       {
         value: [
           { text: "could not read ", operatorSupplied: false },

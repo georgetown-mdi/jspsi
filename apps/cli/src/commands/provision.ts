@@ -6,8 +6,8 @@ import {
   messageWithOperatorText,
   operatorSuppliedText,
   UsageError,
-} from "@psilink/core";
-import type { ExchangeSpec } from "@psilink/core";
+} from "@alcove/core";
+import type { ExchangeSpec } from "@alcove/core";
 
 import { DEFAULT_CONFIG_PATH, saveConfig } from "../config";
 import { detectFileConflicts } from "../fileUtils";
@@ -19,9 +19,9 @@ import { DEFAULT_KEY_PATH, saveKeyFile, type KeyFile } from "../keyFile";
  * flags.
  */
 export interface ProvisionTargets {
-  /** Where to write `psilink.yaml`; defaults to {@link DEFAULT_CONFIG_PATH}. */
+  /** Where to write `alcove.yaml`; defaults to {@link DEFAULT_CONFIG_PATH}. */
   configPath?: string;
-  /** Where to write `.psilink.key`; defaults to {@link DEFAULT_KEY_PATH}. */
+  /** Where to write `.alcove.key`; defaults to {@link DEFAULT_KEY_PATH}. */
   keyPath?: string;
 }
 

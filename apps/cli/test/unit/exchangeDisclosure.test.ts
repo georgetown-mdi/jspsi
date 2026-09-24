@@ -16,15 +16,15 @@ import {
   SELF_AUTHORED_EXCHANGE_FACTS,
   setDiagnosticSink,
   UsageError,
-} from "@psilink/core";
+} from "@alcove/core";
 import type {
   ConsentFact,
   ExchangeDataSpec,
   LinkageTerms,
   Metadata,
-} from "@psilink/core";
+} from "@alcove/core";
 
-import { consentRepresentationProbes } from "@psilink/core/testing";
+import { consentRepresentationProbes } from "@alcove/core/testing";
 
 import { prepareDataset } from "../../src/commands/exchange";
 import { renderExchangeDisclosure } from "../../src/exchangeDisclosure";
@@ -100,8 +100,8 @@ let logged: string[];
 let promptWrites: string;
 
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-exchange-disclosure-"));
-  configFile = path.join(dir, "psilink.yaml");
+  dir = fs.mkdtempSync(path.join(tmpdir(), "alcove-exchange-disclosure-"));
+  configFile = path.join(dir, "alcove.yaml");
   input = path.join(dir, "in.csv");
   fs.writeFileSync(input, "first_name,last_name,diagnosis\nAda,Lovelace,A\n");
   logged = [];

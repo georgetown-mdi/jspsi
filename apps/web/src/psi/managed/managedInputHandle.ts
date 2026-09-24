@@ -36,7 +36,7 @@ import {
   assessManagedInputColumns,
 } from "./managedInputGuard";
 
-import type { ExchangeSpec } from "@psilink/core";
+import type { ExchangeSpec } from "@alcove/core";
 
 import type { CSVParseRows } from "../workers/csvParseController";
 

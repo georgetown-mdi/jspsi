@@ -13,12 +13,12 @@ import {
 } from "vitest";
 import YAML from "yaml";
 
-import { parseExchangeSpec } from "@psilink/core";
-import { loopbackTlsCert } from "@psilink/testkit/loopbackTlsCert";
+import { parseExchangeSpec } from "@alcove/core";
+import { loopbackTlsCert } from "@alcove/testkit/loopbackTlsCert";
 import {
   ALLOW_MISSING_PREREQUISITES_ENV,
   prerequisitesAreRequired,
-} from "@psilink/testkit/prerequisiteGate";
+} from "@alcove/testkit/prerequisiteGate";
 
 import { describeCliRun, startCli } from "../../cliProcess";
 import { loadKeyFile } from "../../../src/keyFile";
@@ -123,7 +123,7 @@ const parties: Array<RunningCli> = [];
 
 beforeAll(async () => {
   if (loopbackTlsCert === null) return;
-  suiteDir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-onecmd-suite-"));
+  suiteDir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-onecmd-suite-"));
   // The certificate reaches each party as a file, because that is what
   // NODE_EXTRA_CA_CERTS names: the party trusts this one certificate rather
   // than running with verification disabled.
@@ -134,7 +134,7 @@ beforeAll(async () => {
 }, 90_000);
 
 beforeEach(() => {
-  work = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-onecmd-"));
+  work = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-onecmd-"));
 });
 
 afterEach(async () => {
@@ -387,7 +387,7 @@ liveTest(
     expect(acceptSpec.connection.server.path).toBe(broker.path);
     expect(acceptSpec.connection.role).toBe("acceptor");
     // The budget this run dialed on is the one the configuration records, so a
-    // later unattended `psilink exchange` from it waits the same.
+    // later unattended `alcove exchange` from it waits the same.
     expect(acceptSpec.connection.options?.peerTimeoutMs).toBe(
       PARTY_RUN_BUDGET_MS,
     );

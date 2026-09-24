@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
-import { operatorSuppliedSpans, sanitizeErrorForDisplay } from "@psilink/core";
+import { operatorSuppliedSpans, sanitizeErrorForDisplay } from "@alcove/core";
 
 import { loadConfig } from "../../src/commands/exchange";
 import { readConfigHints } from "../../src/commands/fingerprint";
@@ -28,7 +28,7 @@ import { loadSigningIdentity } from "../../src/signingIdentityFile";
 let dir: string;
 
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-labels-"));
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-labels-"));
 });
 
 afterEach(() => {
@@ -43,8 +43,8 @@ const UNPARSEABLE_JSON = '{ "version": ';
 function backslashedPath(name: string): string {
   const full =
     process.platform === "win32"
-      ? path.join(dir, "psilink", name)
-      : path.join(dir, `C:\\psilink\\${name}`);
+      ? path.join(dir, "alcove", name)
+      : path.join(dir, `C:\\alcove\\${name}`);
   fs.mkdirSync(path.dirname(full), { recursive: true });
   return full;
 }
@@ -62,20 +62,20 @@ const LABELLED_READERS: ReadonlyArray<
 > = [
   [
     "the exchange config reader",
-    "psilink.yaml",
+    "alcove.yaml",
     UNPARSEABLE_YAML,
     (filePath) =>
       loadConfig({ configFile: filePath, keyFile: path.join(dir, "key.json") }),
   ],
   [
     "the fingerprint config reader",
-    "psilink.yaml",
+    "alcove.yaml",
     UNPARSEABLE_YAML,
     (filePath) => readConfigHints(filePath, true),
   ],
   [
     "the receipt-verification config reader",
-    "psilink.yaml",
+    "alcove.yaml",
     UNPARSEABLE_YAML,
     (filePath) => readConfigSigningBlock(filePath, true),
   ],
@@ -87,7 +87,7 @@ const LABELLED_READERS: ReadonlyArray<
   ],
   [
     "the key-file reader",
-    "psilink.key",
+    "alcove.key",
     UNPARSEABLE_JSON,
     (filePath) => loadKeyFile(filePath, { warnOnPermissive: false }),
   ],

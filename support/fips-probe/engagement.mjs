@@ -7,7 +7,7 @@
 // a measurement kept in two places drifts, and this surface has already been
 // bitten by exactly that.
 //
-// The question: does the environment this runs in serve psilink's own crypto
+// The question: does the environment this runs in serve Alcove's own crypto
 // calls out of a FIPS provider? It runs in whatever environment it is handed
 // and reports what that environment gave it, replacing nothing, so pointing it
 // at the FIPS variant image with no arguments and no environment overrides
@@ -26,7 +26,7 @@
 //     returns 1 with no module loaded anywhere.
 //   the product legs -- an AES-256-GCM round trip, an HKDF-SHA-256 derivation,
 //     an HMAC-SHA-256 signature, a SHA-256 digest and a P-256 ECDH derivation,
-//     each at the parameter shape psilink itself passes. On their own they
+//     each at the parameter shape Alcove itself passes. On their own they
 //     prove nothing: every one of them succeeds through the default provider
 //     too, and looks identical.
 //   md5, rsa1024 -- an MD5 digest and an RSA keygen below the FIPS minimum
@@ -42,7 +42,7 @@
 import { createHash, getFips } from "node:crypto";
 import { readFileSync } from "node:fs";
 
-// The parameter shapes psilink's own calls put on the wire:
+// The parameter shapes Alcove's own calls put on the wire:
 // packages/core/src/connection/encryptedMessageConnection.ts imports a raw
 // 256-bit AES-GCM key and a 12-byte IV, the four helpers in
 // packages/core/src/utils/crypto.ts derive 32 bytes with HKDF-SHA-256 under a
@@ -50,11 +50,11 @@ import { readFileSync } from "node:fs";
 // packages/core/src/kex.ts agrees a session key over P-256.
 const AES_KEY_BYTES = 32;
 const AES_IV_BYTES = 12;
-const AES_PLAINTEXT = "psilink fips image engagement";
+const AES_PLAINTEXT = "Alcove fips image engagement";
 const HKDF_IKM_BYTES = 32;
 const HKDF_SALT_BYTES = 32;
 const HKDF_OUTPUT_BITS = 256;
-const HKDF_INFO = "psilink fips image engagement v1";
+const HKDF_INFO = "Alcove fips image engagement v1";
 const HMAC_KEY_BYTES = 32;
 const ECDH_P256 = { name: "ECDH", namedCurve: "P-256" };
 // SEC1 uncompressed point `0x04 || X || Y` over P-256, the encoding kex.ts pins
@@ -117,7 +117,7 @@ async function aesGcmRoundTrip() {
 
 // The key schedule's own primitive. RFC 5869 builds HKDF out of HMAC, and this
 // call names SHA-256, so a provider serving it serves the extract and expand
-// steps psilink derives every session key through; the two legs below still run
+// steps Alcove derives every session key through; the two legs below still run
 // separately, because `crypto.subtle` reaches HMAC and SHA-256 through call
 // paths of their own that this one does not stand in for.
 async function hkdfDeriveBits() {
@@ -172,7 +172,7 @@ async function sha256Digest() {
 }
 
 // Key establishment's own primitive. The whole chain runs here rather than
-// deriveBits alone, because psilink's handshake needs all of it: an ephemeral
+// deriveBits alone, because Alcove's handshake needs all of it: an ephemeral
 // pair whose private key stays a platform handle, its own share raw-exported as
 // the point that goes on the wire, the peer's share raw-imported back, and then
 // the agreement. A provider serving the agreement while exporting or admitting
@@ -274,7 +274,7 @@ export async function measureEngagement() {
   for (const [key, description] of productLegs) {
     if (operations[key].ok) continue;
     failures.push(
-      `${description} failed (${operations[key].error}), so this configuration does not serve psilink's own call`,
+      `${description} failed (${operations[key].error}), so this configuration does not serve Alcove's own call`,
     );
   }
   if (!mapped) {

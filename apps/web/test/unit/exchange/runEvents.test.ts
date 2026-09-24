@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-import { ProcessState } from "@psilink/core";
+import { ProcessState } from "@alcove/core";
 
 import { initialRun, psiProgressLabel } from "@exchange/exchangeRun";
 import { JobApiRequestError } from "@psi/jobClient/serverJobExchangeDriver";

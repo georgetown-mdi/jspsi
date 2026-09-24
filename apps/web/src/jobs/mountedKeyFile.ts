@@ -1,6 +1,6 @@
 /**
  * The key file beside the configuration the operator mounted: the
- * `.psilink.key` a console run of an OPENED configuration runs under, so the
+ * `.alcove.key` a console run of an OPENED configuration runs under, so the
  * run continues the exchange that file established instead of needing a new
  * invitation.
  *
@@ -13,7 +13,7 @@
 
 import { z } from "zod";
 
-import { SHARED_SECRET_REGEX, parseSensitiveJson } from "@psilink/core";
+import { SHARED_SECRET_REGEX, parseSensitiveJson } from "@alcove/core";
 
 import { JOB_FILE_NAMES } from "./intentSchemas";
 import { readBoundedMountedFile } from "./boundedMountedFile";
@@ -47,7 +47,7 @@ export class MountedKeyFileRefusedError extends Error {
     super(
       fault === "absent"
         ? "the mounted working folder holds no key file beside the configuration"
-        : "the key file beside the mounted configuration is not one psilink can read",
+        : "the key file beside the mounted configuration is not one Alcove can read",
     );
     this.name = "MountedKeyFileRefusedError";
   }

@@ -90,7 +90,7 @@ test("--version prints the CLI's own package version, not yargs' walk-up guess",
   const { name, version } = JSON.parse(
     readFileSync(path.join(__dirname, "..", "..", "package.json"), "utf8"),
   ) as { name: string; version: string };
-  expect(name).toBe("psilink");
+  expect(name).toBe("alcove");
   expect(version).not.toBe("0.0.0");
 
   const { exit, stdout } = await parse(["--version"]);
@@ -100,7 +100,7 @@ test("--version prints the CLI's own package version, not yargs' walk-up guess",
 
 test("`doctor` on its own demands one of its checks rather than running", async () => {
   // It is registered with a builder and no handler, so the only thing standing
-  // between a bare `psilink doctor` and a silent no-op is this demand.
+  // between a bare `alcove doctor` and a silent no-op is this demand.
   const { exit, stderr } = await parse(["doctor"]);
   expect(exit).toBe("exit:64");
   expect(stderr).toContain("doctor probe");

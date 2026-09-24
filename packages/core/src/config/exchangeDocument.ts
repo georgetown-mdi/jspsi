@@ -5,8 +5,8 @@ import { annotateConnectionGuidance } from "./connectionGuidance.js";
 import type { ExchangeSpec } from "./exchangeSpec.js";
 
 /**
- * Serialize an {@link ExchangeSpec} into the snake_case YAML document psilink
- * writes as an operator's `psilink.yaml`, guidance comments included. The
+ * Serialize an {@link ExchangeSpec} into the snake_case YAML document Alcove
+ * writes as an operator's `alcove.yaml`, guidance comments included. The
  * caller's spec is not mutated.
  *
  * The shared secret and its expiration live only in the key file: they are

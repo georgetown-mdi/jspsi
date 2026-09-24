@@ -2,7 +2,7 @@
 // connection class's BinaryPack encode step so an outbound frame's element
 // count is bounded by memory rather than by the JavaScript stack. The encoder
 // itself -- and the byte-for-byte comparison against the pinned packer that
-// keeps the wire unchanged -- lives in `@psilink/core`
+// keeps the wire unchanged -- lives in `@alcove/core`
 // (connection/binaryPackEncode.ts), so both WebRTC transports put the same
 // bytes on the wire.
 //
@@ -12,7 +12,7 @@
 // compute. Chunking and buffering are left to PeerJS; only the encode step
 // changes (docs/spec/WEBRTC_TRANSPORT.md).
 
-import { encodeBinaryPackValue } from "@psilink/core";
+import { encodeBinaryPackValue } from "@alcove/core";
 
 import type { DataConnection } from "peerjs";
 
@@ -44,7 +44,7 @@ interface PackingDataConnection {
  * with nothing to tear down.
  *
  * The four are all the replacement needs: PeerJS's fifth send path,
- * `_send_blob`, is not probed because the replacement drops it. psilink sends
+ * `_send_blob`, is not probed because the replacement drops it. Alcove sends
  * no `Blob`, and one handed to the replacement is refused by the encoder
  * (docs/spec/DEPENDENCY_PINS.md).
  */

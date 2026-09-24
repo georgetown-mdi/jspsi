@@ -1,5 +1,5 @@
-// The supported entry point of @psilink/core: the names a consumer of the
-// published package may import from "@psilink/core". They are listed one at a
+// The supported entry point of @alcove/core: the names a consumer of the
+// published package may import from "@alcove/core". They are listed one at a
 // time rather than re-exported by module, so publishing a name is a decision
 // made here rather than a side effect of exporting it somewhere under src/.
 //
@@ -564,7 +564,7 @@ export {
   CsvLineByteCeilingError,
   CsvRowParseError,
 } from "./file";
-// The one accepted-value rule behind every CSV field delimiter psilink reads or
+// The one accepted-value rule behind every CSV field delimiter Alcove reads or
 // writes with: the default, the reserved detect choice, the spelling resolver,
 // the two predicates, the write-side resolution, the refusal the CLI flag and
 // the configuration schema both state, and the clause a column refusal adds for

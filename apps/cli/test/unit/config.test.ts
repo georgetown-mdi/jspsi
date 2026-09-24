@@ -26,8 +26,8 @@ import {
   StandardizedField,
   UsageError,
   validateCompatibility,
-} from "@psilink/core";
-import { controlCharacterMarker } from "@psilink/core/testing";
+} from "@alcove/core";
+import { controlCharacterMarker } from "@alcove/core/testing";
 import {
   applyConnectionOverrides,
   assertPartnerFingerprintRecordable,
@@ -69,7 +69,7 @@ import type {
   LinkageRuleSetReference,
   LinkageTerms,
   SFTPConnectionConfig,
-} from "@psilink/core";
+} from "@alcove/core";
 
 const baseSFTP: ConnectionConfig = {
   channel: "sftp",
@@ -86,7 +86,7 @@ const baseWebRTC: ConnectionConfig = {
 let dir: string;
 
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-config-"));
 });
 
 afterEach(() => {
@@ -768,7 +768,7 @@ test("outboundPath on a webrtc connection is rejected", () => {
 // --- saveConfig --------------------------------------------------------------
 
 test("saveConfig emits snake_case keys and round-trips through parseExchangeSpec", () => {
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   const spec: ExchangeSpec = {
     connection: { channel: "filedrop", path: "/mnt/share" },
     linkageTerms: getDefaultLinkageTerms("Agency A"),
@@ -807,7 +807,7 @@ test.skipIf(process.platform === "win32")(
   () => {
     // Windows uses a restricted ACL, not POSIX mode bits; fs.statSync reports a
     // synthetic mode there, so this assertion is Unix-only.
-    const configPath = path.join(dir, "psilink.yaml");
+    const configPath = path.join(dir, "alcove.yaml");
     // A spec with an inline SFTP credential is exactly why the config must
     // be owner-only: the 0600 mode is what keeps the password from other users.
     const spec: ExchangeSpec = {
@@ -824,7 +824,7 @@ test.skipIf(process.platform === "win32")(
 );
 
 test("saveConfig strips sharedSecret/expires and does not mutate the caller's spec", () => {
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   const token = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
   const spec = {
     connection: {
@@ -856,7 +856,7 @@ const FP_A = "SHA256:" + "A".repeat(43);
 const FP_B = "SHA256:" + "B".repeat(42) + "E";
 
 test("persistHostKeyFingerprint adds the pin and preserves comments and other fields", () => {
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   fs.writeFileSync(
     configPath,
     [
@@ -884,7 +884,7 @@ test("persistHostKeyFingerprint adds the pin and preserves comments and other fi
 });
 
 test("persistHostKeyFingerprint replaces an existing stored pin (the one-shot re-pin)", () => {
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   fs.writeFileSync(
     configPath,
     [
@@ -909,7 +909,7 @@ test("persistHostKeyFingerprint replaces an existing stored pin (the one-shot re
 test.skipIf(process.platform === "win32")(
   "persistHostKeyFingerprint writes the config owner-read-only (0600)",
   () => {
-    const configPath = path.join(dir, "psilink.yaml");
+    const configPath = path.join(dir, "alcove.yaml");
     fs.writeFileSync(
       configPath,
       "connection:\n  channel: sftp\n  server:\n    host: h\n",
@@ -920,7 +920,7 @@ test.skipIf(process.platform === "win32")(
 );
 
 test("persistHostKeyFingerprint throws (not silently) on a malformed config", () => {
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   // A clearly invalid mapping (a value with a bare ':' block-mapping conflict).
   fs.writeFileSync(configPath, "connection:\n  - a\n  b: c\n");
   expect(() => persistHostKeyFingerprint(configPath, FP_A)).toThrow(UsageError);
@@ -951,7 +951,7 @@ test.each(CREDENTIAL_LEAK_CHANNELS)(
   "persistHostKeyFingerprint reports the path only, never the source: $channel",
   ({ source, expected }) => {
     const SECRET = "S3cr3tSFTPPassw0rd";
-    const configPath = path.join(dir, "psilink.yaml");
+    const configPath = path.join(dir, "alcove.yaml");
     const original = source(SECRET);
     fs.writeFileSync(configPath, original);
     let caught: unknown;
@@ -976,7 +976,7 @@ test("persistHostKeyFingerprint raises a UsageError when connection.server is no
   // library error; the function must report it as the actionable UsageError its
   // contract promises, not an opaque stack trace, and must leave the original
   // file untouched (the throw precedes the write).
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   const original = "connection:\n  channel: sftp\n  server: nope\n";
   fs.writeFileSync(configPath, original);
   expect(() => persistHostKeyFingerprint(configPath, FP_A)).toThrow(UsageError);
@@ -1016,7 +1016,7 @@ test("persistHostKeyFingerprint rejects a non-sftp config and leaves the file un
     },
   ];
   for (const { source, expectInMessage } of fixtures) {
-    const configPath = path.join(dir, "psilink.yaml");
+    const configPath = path.join(dir, "alcove.yaml");
     fs.writeFileSync(configPath, source);
     let caught: unknown;
     try {
@@ -1042,7 +1042,7 @@ test("persistHostKeyFingerprint sanitizes the echoed channel for display", () =>
   // error is display-bound (it reaches a terminal/log), so the channel reaches
   // the operator escaped, never raw -- asserted at the rendered boundary, the
   // altitude that escape happens at.
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   // A double-quoted YAML scalar whose value decodes to x<ESC><LF>y.
   const source = 'connection:\n  channel: "x\\x1b\\ny"\n';
   fs.writeFileSync(configPath, source);
@@ -1069,7 +1069,7 @@ test("persistHostKeyFingerprint round-trips a fingerprint containing + and /", (
   // quote as needed so the value re-parses byte-for-byte -- a mis-quoted pin
   // would later fail to match and refuse every connection.
   const FP_SPECIAL = "SHA256:" + "a/b+c" + "D".repeat(38);
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   fs.writeFileSync(
     configPath,
     "connection:\n  channel: sftp\n  server:\n    host: h\n",
@@ -1082,7 +1082,7 @@ test("persistHostKeyFingerprint round-trips a fingerprint containing + and /", (
 });
 
 test("saveConfig round-trips provider_options verbatim in both directions", () => {
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   // provider_options is opaque: a literal camelCase key (ssh2's readyTimeout)
   // and a snake_case key must both survive the writer + reader unchanged. The
   // writer must not snakeize readyTimeout, and the reader must not camelize
@@ -1126,7 +1126,7 @@ test("saveConfig round-trips provider_options verbatim in both directions", () =
 });
 
 test("saveConfig round-trips webrtc provider_options verbatim", () => {
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   // providerOptions is opaque on webrtc as well as sftp; the writer/reader
   // key-normalization is channel-agnostic, so a literal camelCase key and a
   // snake_case key must both survive the round-trip byte-for-byte.
@@ -1157,7 +1157,7 @@ test("saveConfig round-trips webrtc provider_options verbatim", () => {
 });
 
 test("saveConfig preserves WebRTC connection.role and prunes the authentication block", () => {
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   const token = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
   const spec = {
     connection: {
@@ -1198,14 +1198,14 @@ function certificateModeConfigSource(pin?: string): string {
     "    username: alice",
     "signing:",
     "  mode: certificate # signed receipts",
-    "  identity_file: /run/signing/psilink-signing-identity.json",
+    "  identity_file: /run/signing/alcove-signing-identity.json",
     ...(pin === undefined ? [] : [`  partner_fingerprint: ${pin}`]),
     "",
   ].join("\n");
 }
 
 test("persistPartnerFingerprint records the pin and preserves comments and other fields", () => {
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   fs.writeFileSync(configPath, certificateModeConfigSource());
   persistPartnerFingerprint(configPath, PARTNER_FP_A);
   const raw = fs.readFileSync(configPath, "utf8");
@@ -1220,14 +1220,14 @@ test("persistPartnerFingerprint records the pin and preserves comments and other
   };
   expect(parsed.signing.partner_fingerprint).toBe(PARTNER_FP_A);
   expect(parsed.signing.identity_file).toBe(
-    "/run/signing/psilink-signing-identity.json",
+    "/run/signing/alcove-signing-identity.json",
   );
 });
 
 test.skipIf(process.platform === "win32")(
   "persistPartnerFingerprint writes the config owner-read-only (0600)",
   () => {
-    const configPath = path.join(dir, "psilink.yaml");
+    const configPath = path.join(dir, "alcove.yaml");
     fs.writeFileSync(configPath, certificateModeConfigSource());
     persistPartnerFingerprint(configPath, PARTNER_FP_A);
     expect(fs.statSync(configPath).mode & 0o777).toBe(0o600);
@@ -1239,7 +1239,7 @@ test("persistPartnerFingerprint never overwrites a pin already on file", () => {
   // partner's certificate is the anchor a receipt's attribution rests on, so a
   // divergent value is refused and the operator's file is left byte for byte
   // as it stands.
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   const original = certificateModeConfigSource(PARTNER_FP_A);
   fs.writeFileSync(configPath, original);
   expect(() => persistPartnerFingerprint(configPath, PARTNER_FP_B)).toThrow(
@@ -1283,7 +1283,7 @@ test("persistPartnerFingerprint refuses a document that is not in certificate mo
     },
   ];
   for (const { source, expectInMessage } of fixtures) {
-    const configPath = path.join(dir, "psilink.yaml");
+    const configPath = path.join(dir, "alcove.yaml");
     fs.writeFileSync(configPath, source);
     let caught: unknown;
     try {
@@ -1303,7 +1303,7 @@ test("persistPartnerFingerprint raises a UsageError when signing is not a mappin
   // UsageError its contract promises, not an opaque stack trace. The mode guard
   // reads through a scalar `signing` as absent, so the sequence form is what
   // reaches setIn.
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   const original = "signing:\n  - mode: certificate\n";
   fs.writeFileSync(configPath, original);
   expect(() => persistPartnerFingerprint(configPath, PARTNER_FP_A)).toThrow(
@@ -1313,7 +1313,7 @@ test("persistPartnerFingerprint raises a UsageError when signing is not a mappin
 });
 
 test("persistPartnerFingerprint throws (not silently) on a malformed config", () => {
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   fs.writeFileSync(configPath, "signing:\n  - a\n  b: c\n");
   expect(() => persistPartnerFingerprint(configPath, PARTNER_FP_A)).toThrow(
     UsageError,
@@ -1329,7 +1329,7 @@ test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
     // operator the value to record and both ways to record it.
     const readOnlyDir = path.join(dir, "readonly");
     fs.mkdirSync(readOnlyDir);
-    const configPath = path.join(readOnlyDir, "psilink.yaml");
+    const configPath = path.join(readOnlyDir, "alcove.yaml");
     const original = certificateModeConfigSource();
     fs.writeFileSync(configPath, original);
     fs.chmodSync(readOnlyDir, 0o555);
@@ -1347,7 +1347,7 @@ test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
     expect(message).toContain(configPath);
     expect(message).toContain(PARTNER_FP_A);
     expect(message).toContain("signing.partner_fingerprint");
-    expect(message).toContain("psilink fingerprint");
+    expect(message).toContain("alcove fingerprint");
     expect(message).toContain("mount the configuration writable");
     // The refusal leaves the file exactly as it stands: the atomic replace
     // never reached the destination.
@@ -1361,7 +1361,7 @@ test("assertPartnerFingerprintRecordable passes every block that records no pin"
   // Only a certificate-mode block with no pin on file ever writes here, so
   // every other shape is a no-op -- checked against a path that does not exist,
   // which would fail the access probe if the guard read it at all.
-  const absent = path.join(dir, "no-such-dir", "psilink.yaml");
+  const absent = path.join(dir, "no-such-dir", "alcove.yaml");
   for (const signing of [
     undefined,
     { mode: "none" } as const,
@@ -1378,7 +1378,7 @@ test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
   () => {
     const readOnlyDir = path.join(dir, "readonly");
     fs.mkdirSync(readOnlyDir);
-    const configPath = path.join(readOnlyDir, "psilink.yaml");
+    const configPath = path.join(readOnlyDir, "alcove.yaml");
     fs.writeFileSync(configPath, certificateModeConfigSource());
     fs.chmodSync(readOnlyDir, 0o555);
     let caught: unknown;
@@ -1400,7 +1400,7 @@ test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
     // The write renames a new file over the destination, and a rename needs no
     // write bit on what it replaces, so the file's own mode decides nothing --
     // refusing on it would cost the operator a run that could have pinned.
-    const configPath = path.join(dir, "psilink.yaml");
+    const configPath = path.join(dir, "alcove.yaml");
     fs.writeFileSync(configPath, certificateModeConfigSource());
     fs.chmodSync(configPath, 0o444);
     try {
@@ -1419,7 +1419,7 @@ test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
 );
 
 test("assertPartnerFingerprintRecordable passes a writable configuration", () => {
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   fs.writeFileSync(configPath, certificateModeConfigSource());
   expect(() =>
     assertPartnerFingerprintRecordable({ mode: "certificate" }, configPath),
@@ -1429,7 +1429,7 @@ test("assertPartnerFingerprintRecordable passes a writable configuration", () =>
 // --- persistDisclosedPayloadColumns ------------------------------------------
 
 test("persistDisclosedPayloadColumns adds the field and preserves comments and other fields", () => {
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   fs.writeFileSync(
     configPath,
     [
@@ -1456,7 +1456,7 @@ test("persistDisclosedPayloadColumns refreshes a stale value (the re-invite fix)
   // A config with an OLD commitment, re-minted over changed metadata: the
   // field must be overwritten to the new set, never left stale (else the next
   // exchange false-fires against a promise the partner no longer holds).
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   fs.writeFileSync(
     configPath,
     [
@@ -1479,7 +1479,7 @@ test("persistDisclosedPayloadColumns refreshes a stale value (the re-invite fix)
 test("persistDisclosedPayloadColumns removes the field when the commitment is undefined", () => {
   // A re-invite from a config whose metadata is unknown publishes no subset, so a
   // previously-recorded commitment must be cleared, not retained stale.
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   fs.writeFileSync(
     configPath,
     [
@@ -1508,7 +1508,7 @@ test("persistDisclosedPayloadColumns removes the field when the commitment is un
 test("persistDisclosedPayloadColumns writes an empty array verbatim (strict disclose-nothing)", () => {
   // Empty is a real commitment ("disclose nothing"), distinct from absent; it must
   // be written, not dropped.
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   fs.writeFileSync(
     configPath,
     "connection:\n  channel: sftp\n  server:\n    host: h\n",
@@ -1522,7 +1522,7 @@ test("persistDisclosedPayloadColumns writes an empty array verbatim (strict disc
 test.skipIf(process.platform === "win32")(
   "persistDisclosedPayloadColumns writes the config owner-read-only (0600)",
   () => {
-    const configPath = path.join(dir, "psilink.yaml");
+    const configPath = path.join(dir, "alcove.yaml");
     fs.writeFileSync(
       configPath,
       "connection:\n  channel: sftp\n  server:\n    host: h\n",
@@ -1533,7 +1533,7 @@ test.skipIf(process.platform === "win32")(
 );
 
 test("persistDisclosedPayloadColumns throws (not silently) on a malformed config", () => {
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   const original = "connection: [unbalanced\n";
   fs.writeFileSync(configPath, original);
   // Routed through the same sensitive-file chokepoint as persistHostKeyFingerprint,
@@ -1549,7 +1549,7 @@ test("persistDisclosedPayloadColumns throws (not silently) on a malformed config
 // --- persistExpectedPayloadColumns -------------------------------------------
 
 test("persistExpectedPayloadColumns adds the field and preserves comments and other fields", () => {
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   fs.writeFileSync(
     configPath,
     [
@@ -1577,7 +1577,7 @@ test("persistExpectedPayloadColumns refreshes a stale value (the accept-reuse fi
   // subset: the field must be overwritten to the newly-consented set, never left
   // stale (else the next recurring exchange false-aborts against a set the partner
   // no longer discloses).
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   fs.writeFileSync(
     configPath,
     [
@@ -1601,7 +1601,7 @@ test("persistExpectedPayloadColumns removes the field when the consented set is 
   // A re-accept whose invitation had no disclosed subset records no consented
   // set, so a previously-recorded commitment must be cleared, not retained stale --
   // the exchange then reconciles lazily.
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   fs.writeFileSync(
     configPath,
     [
@@ -1630,7 +1630,7 @@ test("persistExpectedPayloadColumns removes the field when the consented set is 
 test("persistExpectedPayloadColumns writes an empty array verbatim (strict receive-nothing)", () => {
   // Empty is a real consent ("receive nothing"), distinct from absent; it must be
   // written, not dropped.
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   fs.writeFileSync(
     configPath,
     "connection:\n  channel: sftp\n  server:\n    host: h\n",
@@ -1644,7 +1644,7 @@ test("persistExpectedPayloadColumns writes an empty array verbatim (strict recei
 test.skipIf(process.platform === "win32")(
   "persistExpectedPayloadColumns writes the config owner-read-only (0600)",
   () => {
-    const configPath = path.join(dir, "psilink.yaml");
+    const configPath = path.join(dir, "alcove.yaml");
     fs.writeFileSync(
       configPath,
       "connection:\n  channel: sftp\n  server:\n    host: h\n",
@@ -1655,7 +1655,7 @@ test.skipIf(process.platform === "win32")(
 );
 
 test("persistExpectedPayloadColumns throws (not silently) on a malformed config", () => {
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   const original = "connection: [unbalanced\n";
   fs.writeFileSync(configPath, original);
   // Same chokepoint routing as persistDisclosedPayloadColumns: a local usage error
@@ -1670,7 +1670,7 @@ test("persistExpectedPayloadColumns throws (not silently) on a malformed config"
 // --- persistInvitationRelay ---------------------------------------------------
 
 test("persistInvitationRelay sets the relay and keeps the rest of the connection block", () => {
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   fs.writeFileSync(
     configPath,
     [
@@ -1699,7 +1699,7 @@ test("persistInvitationRelay sets the relay and keeps the rest of the connection
 });
 
 test("persistInvitationRelay leaves a connection that is not webrtc as it is", () => {
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   const original = [
     "connection:",
     "  channel: sftp",
@@ -1722,7 +1722,7 @@ test("persistExpectedPartnerDeduplicate writes a boolean the spec schema reads b
   // The surgical one-field write, driven end to end rather than reasoned about:
   // the value must land as a YAML boolean the exchange-spec parse accepts, and
   // the operator's comments and other fields must survive it.
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   fs.writeFileSync(
     configPath,
     [
@@ -1751,7 +1751,7 @@ test("persistExpectedPartnerDeduplicate refreshes a stale declaration", () => {
   // invitation declaring the other value: the field is overwritten to what the
   // operator has just consented to, never left stale (a stale `true` would refuse
   // an honest partner now presenting `false`).
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   fs.writeFileSync(
     configPath,
     [
@@ -1771,7 +1771,7 @@ test("persistExpectedPartnerDeduplicate refreshes a stale declaration", () => {
 test.skipIf(process.platform === "win32")(
   "persistExpectedPartnerDeduplicate writes the config owner-read-only (0600)",
   () => {
-    const configPath = path.join(dir, "psilink.yaml");
+    const configPath = path.join(dir, "alcove.yaml");
     fs.writeFileSync(
       configPath,
       "connection:\n  channel: sftp\n  server:\n    host: h\n",
@@ -1782,7 +1782,7 @@ test.skipIf(process.platform === "win32")(
 );
 
 test("persistExpectedPartnerDeduplicate throws (not silently) on a malformed config", () => {
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   const original = "connection: [unbalanced\n";
   fs.writeFileSync(configPath, original);
   expect(() => persistExpectedPartnerDeduplicate(configPath, true)).toThrow(
@@ -1799,7 +1799,7 @@ function cloneTerms(terms: LinkageTerms): LinkageTerms {
   return structuredClone(terms);
 }
 
-// The message `psilink accept` composes when a kept config disagrees with the
+// The message `alcove accept` composes when a kept config disagrees with the
 // invitation, rendered the way the CLI's top-level handler renders a thrown
 // UsageError. Driven through the composer the command itself calls, with the
 // command's own first-party copy, so the tests that measure what survives that
@@ -1807,7 +1807,7 @@ function cloneTerms(terms: LinkageTerms): LinkageTerms {
 // reach the operator as line breaks, so the block's lines are read out of the
 // rendered refusal by splitting on one.
 const ACCEPT_RECONCILE_SOURCES = {
-  configPath: "./psilink.yaml",
+  configPath: "./alcove.yaml",
   against: "the invitation",
   retryWith: "the same invitation",
 };
@@ -1815,7 +1815,7 @@ const ACCEPT_RECONCILE_SOURCES = {
 // The online shape, whose first-party copy is the longer of the two and so
 // leaves the diff block the smaller share.
 const ONLINE_RECONCILE_SOURCES = {
-  configPath: "./psilink.yaml",
+  configPath: "./alcove.yaml",
   against: "the invitation and the connection URL",
   retryWith: "the same URL and invitation",
 };
@@ -3062,7 +3062,7 @@ test("a payload description at the free-text bound cannot crowd out the refusal"
 });
 
 test("a partner-chosen value cannot forge a conflict line's own structure", () => {
-  // Each line is first-party prose an operator reads as psilink's own -- field,
+  // Each line is first-party prose an operator reads as Alcove's own -- field,
   // then `existing X vs required Y` -- and a value spelling that clause is
   // printable ASCII throughout, so nothing at the display boundary rewrites it.
   // Delimiting is what answers it, and the doubling grammar is what makes the
@@ -3986,7 +3986,7 @@ test("loadConfigLinkageSource returns undefined when no file exists", () => {
 });
 
 test("loadConfigLinkageSource round-trips an explicit standardization block", () => {
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   const terms = getDefaultLinkageTerms("Agency A");
   const standardization = [
     {
@@ -4006,7 +4006,7 @@ test("loadConfigLinkageSource round-trips an explicit standardization block", ()
 });
 
 test("loadConfigLinkageSource round-trips an explicit metadata block", () => {
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   const terms = getDefaultLinkageTerms("Agency A");
   const metadata = [
     {
@@ -4026,7 +4026,7 @@ test("loadConfigLinkageSource round-trips an explicit metadata block", () => {
 });
 
 test("loadConfigLinkageSource rejects a config with an invalid metadata block", () => {
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   // Valid linkage_terms (so the metadata branch is reached) plus a metadata
   // entry with an unknown semantic type.
   const yaml = YAML.stringify({
@@ -4045,7 +4045,7 @@ test("loadConfigLinkageSource refuses an unread key the run path refuses", () =>
   // returns, while exchange reads the same file through parseExchangeSpec. A
   // key this read stripped would put the operator's own narrowed terms on an
   // invitation, over a file the next exchange refuses.
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   const document = {
     connection: { channel: "filedrop", path: "/mnt/share" },
     linkage_terms: {
@@ -4073,7 +4073,7 @@ test("loadConfigLinkageSource refuses an unread key the run path refuses", () =>
 });
 
 test("loadConfigLinkageSource rejects a config with no linkage_terms", () => {
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   fs.writeFileSync(
     configPath,
     "connection:\n  channel: filedrop\n  path: /x\n",
@@ -4088,7 +4088,7 @@ test("loadConfigLinkageSource rejects a config with no linkage_terms", () => {
 // attributes each in its own terms rather than reporting a broken invitation
 // source.
 test("readConfigLinkageSource tells a missing file from a config with no terms", () => {
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   fs.writeFileSync(configPath, "signing:\n  mode: certificate\n");
   expect(readConfigLinkageSource(path.join(dir, "absent.yaml"))).toEqual({
     status: "no-config-file",
@@ -4099,7 +4099,7 @@ test("readConfigLinkageSource tells a missing file from a config with no terms",
 });
 
 test("readConfigLinkageSource returns the source a config defines", () => {
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   const terms = getDefaultLinkageTerms("Agency A");
   saveConfig(configPath, {
     connection: { channel: "filedrop", path: "/mnt/share" },
@@ -4123,7 +4123,7 @@ test("readConfigLinkageSource returns the source a config defines", () => {
 // The spellings and the accepted set are core's own, shared with the schema the
 // run path parses the same key through.
 test("readConfigLinkageSource reads the config's csv_delimiter, tab and detect spellings and all", () => {
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   const terms = getDefaultLinkageTerms("Agency A");
   for (const [written, resolved] of [
     ["|", "|"],
@@ -4148,7 +4148,7 @@ test("readConfigLinkageSource reads the config's csv_delimiter, tab and detect s
 // input by a delimiter no run of this config will ever use would report a
 // verdict about a file nobody reads that way.
 test("readConfigLinkageSource refuses a csv_delimiter outside the accepted set", () => {
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   for (const written of ["::", '"', 9]) {
     fs.writeFileSync(
       configPath,
@@ -4166,12 +4166,12 @@ test("readConfigLinkageSource refuses a csv_delimiter outside the accepted set",
 });
 
 // A config writes its params in snake_case and the function library reads them
-// in camelCase, so the block is camelized on the way in, as the `psilink
+// in camelCase, so the block is camelized on the way in, as the `alcove
 // exchange` run path's own read of it (`parseExchangeSpec`) does. Without that
 // a declared `input_format` reaches no factory at all and the step runs as its
 // default: a date the operator wrote a day-first format for, read month-first.
 test("readConfigLinkageSource runs a snake_case standardization param as declared", () => {
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   fs.writeFileSync(
     configPath,
     [
@@ -4218,7 +4218,7 @@ test("readConfigLinkageSource runs a snake_case standardization param as declare
 // refused where the config is decoded, naming the param and what it got, rather
 // than running as the default.
 test("readConfigLinkageSource refuses a snake_case param the config mistyped", () => {
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   fs.writeFileSync(
     configPath,
     [
@@ -4245,7 +4245,7 @@ test("readConfigLinkageSource refuses a snake_case param the config mistyped", (
 // decode states bare names the remedy here. The bare wording is pinned on the
 // decode side (packages/core/test/config/linkageTermsSchema.test.ts).
 test("readConfigLinkageSource names the remedy for a mistyped linkage_terms param", () => {
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   const terms = structuredClone(getDefaultLinkageTerms("Agency A"));
   terms.linkageKeys[0].elements[0].transform = [
     { function: "pad_left", params: { length: 9, char: 0 } },
@@ -4263,7 +4263,7 @@ test("readConfigLinkageSource names the remedy for a mistyped linkage_terms para
 // is parsed, which is what keeps a still-placeholder connection from blocking an
 // invitation.
 test("readConfigLinkageSource reads retain mode off the connection block", () => {
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   const terms = getDefaultLinkageTerms("Agency A");
   saveConfig(configPath, {
     connection: {
@@ -4315,7 +4315,7 @@ test.each([
     "connection:\n  channel: webrtc\n  options:\n    retain_files: true\n",
   ],
 ])("readConfigLinkageSource declares no retain mode: %s", (_label, block) => {
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   const terms = getDefaultLinkageTerms("Agency A");
   // The nested keys stay camelCase: safeParseLinkageTerms camelizes on the way
   // in, so either spelling parses and the block under test is the connection.
@@ -4333,7 +4333,7 @@ test.each([
 // A defect in one of the blocks it does parse is still a refusal, not a status:
 // only the two absences are outcomes the caller decides.
 test("readConfigLinkageSource still refuses invalid linkage_terms", () => {
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   fs.writeFileSync(configPath, "linkage_terms:\n  identity: Agency A\n");
   expect(() => readConfigLinkageSource(configPath)).toThrow(UsageError);
   expect(() => readConfigLinkageSource(configPath)).toThrow(
@@ -4348,7 +4348,7 @@ test("readConfigLinkageSource still refuses invalid linkage_terms", () => {
 // if(!result.success) branch produces the helpful message rather than the throw
 // skipping straight past it. Still a UsageError (CLI exit 64).
 test("loadConfigLinkageSource file-names a linkage_terms camelize-bound trip", () => {
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   // Nest one level past the depth bound so camelizeKeys rejects before Zod.
   let deepTerms: unknown = { identity: "Agency A" };
   for (let i = 0; i < MAX_NESTING_DEPTH; i++) deepTerms = { nested: deepTerms };
@@ -4366,7 +4366,7 @@ test("loadConfigLinkageSource file-names a linkage_terms camelize-bound trip", (
 // camelize-bound-tripping metadata block shows the file-named "invalid
 // metadata" wrap rather than throwing the raw bound error.
 test("loadConfigLinkageSource file-names a metadata camelize-bound trip", () => {
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   let deepMetadata: unknown = { name: "X" };
   for (let i = 0; i < MAX_NESTING_DEPTH; i++)
     deepMetadata = { nested: deepMetadata };
@@ -4390,7 +4390,7 @@ test("loadConfigLinkageSource file-names a metadata camelize-bound trip", () => 
 // payload column list, or a record. U+0007 BEL, written as an escape so a
 // fixture about invisible characters is readable.
 test("loadConfigLinkageSource refuses a control character in a metadata name", () => {
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   fs.writeFileSync(
     configPath,
     YAML.stringify({
@@ -4414,7 +4414,7 @@ test("loadConfigLinkageSource refuses a control character in a metadata name", (
   // And the remedy for the configuration that reaches this refusal: the name
   // was written as the header was typed, so it names no column of the read file.
   expect(() => loadConfigLinkageSource(configPath)).toThrow(
-    "re-run psilink init over the input file, or delete the character from " +
+    "re-run alcove init over the input file, or delete the character from " +
       "the name",
   );
 });
@@ -4426,7 +4426,7 @@ test("loadConfigLinkageSource refuses a control character in a metadata name", (
 // camelize to `EvilKey`, so naming either would misname a key one of those
 // files does not contain.
 test("loadConfigLinkageSource stops a linkage_terms issue path at the params block", () => {
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   const terms = cloneTerms(getDefaultLinkageTerms("Agency A"));
   // An ESC-driven ANSI sequence and a right-to-left override (U+202E). The key
   // must exceed MAX_NAME_LENGTH so the record-key schema rejects it and Zod
@@ -4459,7 +4459,7 @@ test("loadConfigLinkageSource stops a linkage_terms issue path at the params blo
 // The name shape is what refuses this key, not its length: it sits well inside
 // MAX_NAME_LENGTH, which a length bound alone admits.
 test("loadConfigLinkageSource refuses a params key holding a control character", () => {
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   const terms = cloneTerms(getDefaultLinkageTerms("Agency A"));
   const badKey = "de\x1b[31m\u202elimiter-unrepeatable-key";
   expect(badKey.length).toBeLessThan(MAX_NAME_LENGTH);
@@ -4494,7 +4494,7 @@ test("loadConfigLinkageSource refuses a params key holding a control character",
 });
 
 test("loadConfigLinkageSource names no spelling of a params key it cannot invert", () => {
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   const terms = cloneTerms(getDefaultLinkageTerms("Agency A"));
   // Capitals the camelize pass leaves untouched, so the segment reaching the
   // formatter is the file's own spelling -- and is equally the spelling a file
@@ -4522,7 +4522,7 @@ test("loadConfigLinkageSource names no spelling of a params key it cannot invert
 });
 
 test("loadConfigLinkageSource leaves a schema-fixed linkage_terms issue path unescaped", () => {
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   const terms = cloneTerms(getDefaultLinkageTerms("Agency A"));
   // An empty name fails the linkage-key `name` min-length, locating the issue
   // at the schema-fixed path linkage_keys.0.name (field names + a numeric index).
@@ -4547,7 +4547,7 @@ test("loadConfigLinkageSource leaves a schema-fixed linkage_terms issue path une
 // the file the error names is one the CLI's own writer produced, so the key
 // it points at is literally in the bytes on disk.
 test("a nested linkage_terms schema error names its key as the file writes it", () => {
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   const terms = cloneTerms(getDefaultLinkageTerms("Agency A"));
   // A path with two segments whose spellings differ between the file and the
   // parsed shape, one of them under an array index: `linkage_fields.2.
@@ -4580,7 +4580,7 @@ test("a nested linkage_terms schema error names its key as the file writes it", 
 });
 
 test("a nested metadata schema error names its key as the file writes it", () => {
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   fs.writeFileSync(
     configPath,
     YAML.stringify({
@@ -4603,7 +4603,7 @@ test("a nested metadata schema error names its key as the file writes it", () =>
 });
 
 test("loadConfigLinkageSource rejects an invalid standardization block", () => {
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   const terms = getDefaultLinkageTerms("Agency A");
   // Valid linkage_terms but a standardization entry missing its required input.
   saveConfig(configPath, {
@@ -4621,7 +4621,7 @@ test("loadConfigLinkageSource rejects an invalid standardization block", () => {
 });
 
 test("loadConfigLinkageSource rejects malformed YAML", () => {
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   fs.writeFileSync(configPath, "linkage_terms: [unclosed\n");
   // The path-only message only the sensitive-parse chokepoint produces, so this is
   // also what pins that this reader routes through it rather than a raw parser --
@@ -4664,7 +4664,7 @@ test.each([
   "loadConfigLinkageSource does not echo a secret in a schema error: %s",
   (_, mk, expectedFragment, expectedPath) => {
     const SECRET = "S3cr3tSFTPPassw0rd";
-    const configPath = path.join(dir, "psilink.yaml");
+    const configPath = path.join(dir, "alcove.yaml");
     fs.writeFileSync(configPath, mk(SECRET));
     let caught: unknown;
     try {
@@ -4682,7 +4682,7 @@ test.each([
 );
 
 test("loadConfigLinkageSource rejects a non-mapping top-level value", () => {
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   // A top-level YAML array parses as an object in JS; it must be reported as a
   // malformed config, not misattributed to a missing linkage_terms block.
   fs.writeFileSync(configPath, "- a\n- b\n");
@@ -4701,7 +4701,7 @@ test("a setting this build does not edit survives a load, an edit, and a save", 
   // "What a consumer does with a setting it cannot honor"). The CLI has no
   // editor for any of these -- they are the operator's own lines -- so a save
   // after an edit elsewhere is what would lose them.
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   const written = {
     connection: { channel: "filedrop", path: "/mnt/share" },
     linkage_terms: getDefaultLinkageTerms("Agency A"),
@@ -4801,7 +4801,7 @@ test("connection.options.sweep_exchange_files is not a persistable config field 
   // The entry sweep is invocation-scoped: FileSyncOptionsSchema has no such
   // field, so a config naming it is refused at parse -- naming both lines -- and
   // the value never reaches the connection options open() reads.
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   const spec: ExchangeSpec = {
     connection: { channel: "filedrop", path: "/mnt/share" },
     linkageTerms: getDefaultLinkageTerms("Agency A"),
@@ -4836,7 +4836,7 @@ test("persistOutboundPayloadConsent removes the record on undefined, and no-ops 
   // The removal branch is what the accept-reuse and mint paths lean on: a record
   // that should not stand is deleted, never left stale -- and removing from a
   // config that has none must not rewrite the operator's file.
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   fs.writeFileSync(
     configPath,
     [
@@ -4865,7 +4865,7 @@ test("persistOutboundPayloadConsent writes a confirmed-empty set verbatim", () =
   // An empty confirmed set is a real confirmation that nothing is disclosed, not
   // an absence: it must survive to disk as `columns: []` and parse back as an
   // empty array, so a later run enforcing it refuses any disclosure at all.
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   fs.writeFileSync(
     configPath,
     ["connection:", "  channel: sftp", "  server:", "    host: h", ""].join(
@@ -4936,7 +4936,7 @@ function writeNamedRuleSetConfig(
   terms: Record<string, unknown>,
   alsoAtTopLevel: Record<string, unknown> = {},
 ): string {
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   fs.writeFileSync(
     configPath,
     YAML.stringify({
@@ -4974,7 +4974,7 @@ test("a config naming a non-default set runs on that set's rules", () => {
     connection: { channel: "filedrop", path: "/mnt/share" },
     linkage_terms: linkageTermsWithNamedRuleSetRules(
       namedRuleSetTerms(OTHER_RULE_SET.reference),
-      "psilink.yaml",
+      "alcove.yaml",
       OTHER_RULE_SETS,
     ),
   });
@@ -5013,7 +5013,7 @@ test("an unknown set is decided against the registry passed, not the default", (
   expect(() =>
     linkageTermsWithNamedRuleSetRules(
       namedRuleSetTerms(DEFAULT_LINKAGE_RULE_SET.reference),
-      "psilink.yaml",
+      "alcove.yaml",
       OTHER_RULE_SETS,
     ),
   ).toThrow('It ships "other-keys" 4.2.0 over "other-fields" 3.1.0.');
@@ -5026,7 +5026,7 @@ test("a citation is read in the camelCase spelling too", () => {
       version: "1.0.0",
       linkageRuleSet: { fieldSet: { ...fieldSet }, keySet: { ...keySet } },
     },
-    "psilink.yaml",
+    "alcove.yaml",
   ) as { linkageKeys: unknown };
   expect(filled.linkageKeys).toEqual(DEFAULT_LINKAGE_RULE_SET.linkageKeys);
 });
@@ -5037,14 +5037,14 @@ test("rules written out beside a citation are the rules, untouched", () => {
     linkage_fields: [{ name: "ssn", type: "ssn" }],
     linkage_keys: [{ name: "SSN", elements: [{ field: "ssn" }] }],
   };
-  expect(linkageTermsWithNamedRuleSetRules(written, "psilink.yaml")).toBe(
+  expect(linkageTermsWithNamedRuleSetRules(written, "alcove.yaml")).toBe(
     written,
   );
 });
 
 test("a citation of an unshipped set beside written rules is left alone", () => {
   // Terms imported from a partner keep the citation their author wrote,
-  // including one naming a set psilink does not ship. Nothing is resolved for
+  // including one naming a set Alcove does not ship. Nothing is resolved for
   // them, so nothing is refused either.
   const written = {
     ...namedRuleSetTerms({
@@ -5054,7 +5054,7 @@ test("a citation of an unshipped set beside written rules is left alone", () => 
     linkage_fields: [{ name: "ssn", type: "ssn" }],
     linkage_keys: [{ name: "SSN", elements: [{ field: "ssn" }] }],
   };
-  expect(linkageTermsWithNamedRuleSetRules(written, "psilink.yaml")).toBe(
+  expect(linkageTermsWithNamedRuleSetRules(written, "alcove.yaml")).toBe(
     written,
   );
 });
@@ -5065,7 +5065,7 @@ test("a named set beside one of the two rule lists is refused", () => {
     linkage_keys: [{ name: "SSN", elements: [{ field: "ssn" }] }],
   };
   expect(() =>
-    linkageTermsWithNamedRuleSetRules(halfWritten, "psilink.yaml"),
+    linkageTermsWithNamedRuleSetRules(halfWritten, "alcove.yaml"),
   ).toThrow("writes linkage_keys but no linkage_fields");
 });
 
@@ -5102,13 +5102,13 @@ test("both rule lists misplaced are named together in the refusal", () => {
     linkage_fields: [{ name: "ssn", type: "ssn" }],
     linkage_keys: [{ name: "SSN", elements: [{ field: "ssn" }] }],
   };
-  expect(() => configWithNamedRuleSetRules(raw, "psilink.yaml")).toThrow(
+  expect(() => configWithNamedRuleSetRules(raw, "alcove.yaml")).toThrow(
     "writes linkage_fields and linkage_keys at the top level of the file",
   );
 });
 
 test("a citation written in some other shape is left for the schema", () => {
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   fs.writeFileSync(
     configPath,
     YAML.stringify({
@@ -5128,7 +5128,7 @@ test("configWithNamedRuleSetRules fills the terms and leaves the rest", () => {
     connection: { channel: "filedrop", path: "/mnt/share" },
     linkage_terms: namedRuleSetTerms(DEFAULT_LINKAGE_RULE_SET.reference),
   };
-  const filled = configWithNamedRuleSetRules(raw, "psilink.yaml") as {
+  const filled = configWithNamedRuleSetRules(raw, "alcove.yaml") as {
     connection: unknown;
     linkage_terms: { linkageKeys: unknown };
   };
@@ -5142,7 +5142,7 @@ test("configWithNamedRuleSetRules fills the terms and leaves the rest", () => {
 
 test("a config with no linkage terms passes through untouched", () => {
   const raw = { connection: { channel: "filedrop", path: "/mnt/share" } };
-  expect(configWithNamedRuleSetRules(raw, "psilink.yaml")).toBe(raw);
+  expect(configWithNamedRuleSetRules(raw, "alcove.yaml")).toBe(raw);
 });
 
 // --- warnOnLinkageRuleSetCitationDrift ---------------------------------------
@@ -5159,7 +5159,7 @@ function citationWarnings(
   const warnings: string[] = [];
   warnOnLinkageRuleSetCitationDrift(
     terms,
-    "psilink.yaml",
+    "alcove.yaml",
     { warn: (message: string) => warnings.push(message) },
     standing,
     alternative,
@@ -5201,7 +5201,7 @@ function withAddedField(terms: LinkageTerms): LinkageTerms {
   };
 }
 
-test("an untouched psilink init config draws no citation warning", () => {
+test("an untouched alcove init config draws no citation warning", () => {
   expect(citationWarnings(getDefaultLinkageTerms("Agency A"))).toEqual([]);
 });
 
@@ -5225,7 +5225,7 @@ test("a reordered cascade under the built-in citation warns, naming linkage_keys
     withReorderedKeys(getDefaultLinkageTerms("Agency A")),
   );
   expect(warnings).toHaveLength(1);
-  expect(warnings[0]).toContain("psilink.yaml: linkage_terms.linkage_rule_set");
+  expect(warnings[0]).toContain("alcove.yaml: linkage_terms.linkage_rule_set");
   expect(warnings[0]).toContain(
     `"${DEFAULT_LINKAGE_RULE_SET.reference.keySet.name}" ` +
       DEFAULT_LINKAGE_RULE_SET.reference.keySet.version,
@@ -5306,7 +5306,7 @@ test("a citation of a set the registry does not hold stays unchecked", () => {
 
 test("a set name in the drift warning cannot forge the clause it is named in", () => {
   // The warning is first-party prose whose clause an operator reads as
-  // psilink's own -- `<name> <version> this build ships` -- and the set name is
+  // Alcove's own -- `<name> <version> this build ships` -- and the set name is
   // free text whoever authored the config chose. The escape does not reach a
   // forgery made of printable ASCII, so the name is delimited through the same
   // quoteTermsValue call core's own rule-set message uses; the doubling grammar
@@ -5508,7 +5508,7 @@ test("a drifted citation is reported under either standing", () => {
     const warnings = citationWarnings(drifted, standing);
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain(
-      "psilink.yaml: linkage_terms.linkage_rule_set cites",
+      "alcove.yaml: linkage_terms.linkage_rule_set cites",
     );
     expect(warnings[0]).toContain(
       "credits a source these rules did not come from",
@@ -5658,7 +5658,7 @@ test("no token of the reconcile refusal's or the drift warning's copy is bare-sh
 // --- linkageTermsStandingOf --------------------------------------------------
 
 test("the partner-deduplicate record is what marks an accepted config", () => {
-  // `psilink accept` records the invitation's declared cardinality on every
+  // `alcove accept` records the invitation's declared cardinality on every
   // config it writes and every config it reuses, and nothing else writes one, so
   // its presence -- either value -- is the mark of an acceptance.
   expect(linkageTermsStandingOf({})).toBe("held-alone");
@@ -5698,7 +5698,7 @@ test("readConfigLinkageSource reads the terms' standing off the loaded file", ()
 });
 
 // Both spellings are read, and the record's PRESENCE is what marks an
-// acceptance: a value `psilink accept` would not have written is an operator's
+// acceptance: a value `alcove accept` would not have written is an operator's
 // edit of a machine-written record, but the record still stands there, so it
 // is treated as an acceptance rather than as an error here (the commands that build
 // an exchange from the file refuse the value through core's schema). A key
@@ -5710,7 +5710,7 @@ test.each([
 ])(
   "readConfigLinkageSource reads an acceptance from %s: %j",
   (_label, block, accepted) => {
-    const configPath = path.join(dir, "psilink.yaml");
+    const configPath = path.join(dir, "alcove.yaml");
     const terms = getDefaultLinkageTerms("Agency A");
     fs.writeFileSync(
       configPath,
@@ -5768,8 +5768,8 @@ function refusalFrom(run: () => unknown): unknown {
 function backslashedConfigPath(): string {
   const configPath =
     process.platform === "win32"
-      ? path.join(dir, "psilink", "psilink.yaml")
-      : path.join(dir, "C:\\psilink\\psilink.yaml");
+      ? path.join(dir, "alcove", "alcove.yaml")
+      : path.join(dir, "C:\\alcove\\alcove.yaml");
   fs.mkdirSync(path.dirname(configPath), { recursive: true });
   return configPath;
 }
@@ -5973,7 +5973,7 @@ for (const [label, run, unmarkedCopy] of CONFIG_REFUSALS) {
 test.runIf(process.platform === "win32")(
   "a refusal names a Windows path as the operator typed it",
   () => {
-    const configPath = path.join(dir, "psilink", "psilink.yaml");
+    const configPath = path.join(dir, "alcove", "alcove.yaml");
     fs.mkdirSync(path.dirname(configPath), { recursive: true });
     fs.writeFileSync(configPath, "linkage_terms: 3\n");
 
@@ -5988,7 +5988,7 @@ test("a refusal escapes the value it quotes out of the document", () => {
   // The mark states who chose the bytes, per fragment: the path is the
   // operator's, and the channel quoted beside it is text nobody marked, which
   // keeps the escape every unmarked fragment takes.
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   fs.writeFileSync(configPath, "connection:\n  channel: 'file\\drop'\n");
 
   const err = refusalFrom(() =>
@@ -6016,7 +6016,7 @@ test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
   "the unrecordable-pin refusal names the configuration path as typed",
   () => {
     const configDir = fs.mkdtempSync(path.join(dir, "readonly-"));
-    const configPath = path.join(configDir, "C:\\psilink\\psilink.yaml");
+    const configPath = path.join(configDir, "C:\\alcove\\alcove.yaml");
     fs.chmodSync(configDir, 0o500);
     try {
       const err = refusalFrom(() =>

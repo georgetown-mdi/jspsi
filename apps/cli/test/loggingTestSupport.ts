@@ -5,7 +5,7 @@ import {
   getDiagnosticSink,
   setDiagnosticSink,
   type DiagnosticSink,
-} from "@psilink/core";
+} from "@alcove/core";
 
 /**
  * Register beforeEach/afterEach hooks that snapshot core's diagnostic sink
@@ -90,5 +90,5 @@ export function captureStdio(): {
  * @internal test-only
  */
 export function argv(extra: Record<string, unknown>): Arguments {
-  return { _: [], $0: "psilink", ...extra } as unknown as Arguments;
+  return { _: [], $0: "alcove", ...extra } as unknown as Arguments;
 }

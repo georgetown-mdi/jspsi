@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 
-import { ConnectionError } from "@psilink/core";
+import { ConnectionError } from "@alcove/core";
 
 import { BoundedInboundFrames } from "../../../src/connection/webrtc/inboundBounds";
 import {

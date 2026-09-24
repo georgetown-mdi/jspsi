@@ -6,7 +6,7 @@ import { page } from "vitest/browser";
 
 import { createElement } from "react";
 
-import { CONSENT_FACTS, generateSharedSecret } from "@psilink/core";
+import { CONSENT_FACTS, generateSharedSecret } from "@alcove/core";
 
 import { InvitationTerms } from "@components/InvitationTerms";
 
@@ -14,9 +14,9 @@ import { createAppMount } from "./renderApp";
 
 import type { ReactNode } from "react";
 
-import type * as PsilinkCore from "@psilink/core";
+import type * as AlcoveCore from "@alcove/core";
 
-import type { InvitationToken, LinkageTerms } from "@psilink/core";
+import type { InvitationToken, LinkageTerms } from "@alcove/core";
 
 // The two withholding flags the mocked summarizer answers with, read fresh on
 // every call so one test can drive both directions. Hoisted because vi.mock's
@@ -30,8 +30,8 @@ const forced = vi.hoisted(() => ({
 // contradicts those terms can only reach the screen by answering for the
 // summarizer. Every other export passes through, so the fixtures and the
 // asserted copy stay core's own.
-vi.mock("@psilink/core", async (importOriginal) => {
-  const actual = await importOriginal<typeof PsilinkCore>();
+vi.mock("@alcove/core", async (importOriginal) => {
+  const actual = await importOriginal<typeof AlcoveCore>();
   return {
     ...actual,
     summarizeInvitation: (token: InvitationToken) => ({
@@ -147,7 +147,7 @@ describe("InvitationTerms: the deduplicate variant's one input", () => {
     // verdict from the strategy and the payload request -- faithful to the
     // protocol rule until that rule grows a condition -- shows the other
     // sentence and fails.
-    const core = await vi.importActual<typeof PsilinkCore>("@psilink/core");
+    const core = await vi.importActual<typeof AlcoveCore>("@alcove/core");
 
     // Non-vacuity: each fixture contradicts the flag it renders under, so
     // neither case can pass by the two agreeing.
@@ -192,7 +192,7 @@ describe("InvitationTerms: the own-membership variant's one input", () => {
     // Both documents render under the OPPOSITE flag to the one their own terms
     // derive, so a screen re-deriving the verdict from the strategy and the
     // payload declaration shows the other sentence and fails.
-    const core = await vi.importActual<typeof PsilinkCore>("@psilink/core");
+    const core = await vi.importActual<typeof AlcoveCore>("@alcove/core");
 
     // Non-vacuity: each fixture contradicts the flag it renders under, so
     // neither case can pass by the two agreeing.
