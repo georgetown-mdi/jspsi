@@ -733,8 +733,10 @@ export interface JobExchangeIntentBase {
    * own resources. Read only beside `mountedConfigurationOpened`. Converted,
    * the hand-off states the console's shared folder and signing identity (as
    * placeholders) and no receipt file; unconverted, it states the paths the
-   * document read, and a certificate-mode run of a document stating a signing
-   * path is refused (see `createJob` in `./jobManager`).
+   * document read, including each sftp credential `@path` for the sign-in
+   * method the run used (an inline credential value never reaches the
+   * hand-off either way); and a certificate-mode run of a document stating a
+   * signing path is refused (see `createJob` in `./jobManager`).
    */
   mountedConfigurationConverted?: boolean;
   options?: JobExchangeOptions;
