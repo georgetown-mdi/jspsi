@@ -922,7 +922,8 @@ export function createOwnerOnlyWriteStream(destPath: string): fs.WriteStream {
  * `<home>/x`. Any other form -- `~user` (another user's home; not resolved),
  * an embedded `~`, or `undefined` -- is returned unchanged. Node's `fs` does
  * not expand `~`, and a config-file path is never shell-expanded, so this
- * exists for `~/.alcove/...` in `alcove.yaml` or on the command line.
+ * exists for the earlier default path under the home directory, given in
+ * `alcove.yaml` or on the command line.
  */
 export function expandTilde(p: string): string;
 export function expandTilde(p: string | undefined): string | undefined;

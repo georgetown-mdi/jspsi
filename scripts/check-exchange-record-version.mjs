@@ -35,7 +35,8 @@
 // pass the pin while deferring to nothing.
 //
 // RULE 2, THE RESET. EXCHANGE_RECORD_VERSION is an internal development counter.
-// It has cycled freely -- through alcove-exchange-record/v1 and on up -- because
+// It has cycled freely -- from the format's first v1 under the earlier
+// product name and on up -- because
 // no published artifact contains any of its literals: packages/core/src/records/exchangeRecord.ts
 // does not exist at v0.1.0, the only release this project has tagged. First
 // publication ships the counter reset to alcove-exchange-record/v1, and the
