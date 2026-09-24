@@ -92,6 +92,16 @@ export const MAX_PENDING_REMOTE_CANDIDATES = 128;
 export const DEFAULT_OFFER_RETRY_INTERVAL_MS = 1_000;
 
 /**
+ * How long a connection replaced by a renewal, or by an inviter following a new
+ * offer, stays open and negotiable after its replacement is offered or built.
+ * A browser inviter answers the first offer it receives and ignores later ones,
+ * and the vendored broker replays frames it held for a late registrant (about
+ * 5 s), so an answer to the old offer can arrive after the new one is sent. The
+ * window covers that replay plus one offer retry, with margin.
+ */
+export const RENEWAL_OVERLAP_MS = 15_000;
+
+/**
  * Total budget for the two parties to find each other. Human-timescale: one
  * operator's exchange may start well before the other's, and this is the same
  * ceiling the web app gives its own rendezvous wait.
@@ -289,6 +299,8 @@ export interface WebRtcPeerOptions {
   offerRetryIntervalMs?: number;
   rendezvousTimeoutMs?: number;
   channelOpenTimeoutMs?: number;
+  /** How long a replaced connection stays negotiable; see {@link RENEWAL_OVERLAP_MS}. */
+  renewalOverlapMs?: number;
   signal?: AbortSignal;
   /**
    * Constructs the peer connection; injected so a unit test can assert the
@@ -308,14 +320,16 @@ export interface WebRtcPeerOptions {
 /**
  * How a rendezvous replaces an ICE server list that expires: each `afterMs`
  * the partner has not yet sent a session description, the peer connection is
- * discarded and a new one built from `resolve()`'s list. The acceptor offers
- * again under a new connection id; the inviter, which has sent nothing yet,
- * only swaps the connection it will answer from. An inviter that answers a
+ * replaced by one built from `resolve()`'s list. The acceptor offers again
+ * under a new connection id, keeping the old offer answerable for
+ * {@link RENEWAL_OVERLAP_MS}; the inviter, which has sent nothing yet, only
+ * swaps the connection it will answer from. An inviter that answers a
  * partner's new offer also builds its replacement from `resolve()`.
  */
 export interface IceServerRenewal {
   afterMs: number;
-  resolve: () => Promise<RenewedIceServers>;
+  /** `waitedMs` is how long the run has waited for its partner so far. */
+  resolve: (waitedMs: number) => Promise<RenewedIceServers>;
 }
 
 /** A fresh ICE server list, and the line logged when a wait replaces the connection with it. */
@@ -529,9 +543,10 @@ export const RELAY_CREDENTIAL_RENEWAL_MS =
 
 /**
  * How often an inviter that has answered follows an OFFER naming a new
- * connection id by rebuilding its peer connection: once at any time, then once
- * more per interval. A partner renews at most this often, so a partner offering
- * new ids faster is broken, and the surplus offers are dropped.
+ * connection id by rebuilding its peer connection: once at any time, then at
+ * most once per interval, an unused interval not carrying over. A partner
+ * renews at most this often, so a partner offering new ids faster is broken,
+ * and the surplus offers are dropped.
  */
 export const MIN_NEW_OFFER_INTERVAL_MS = RELAY_CREDENTIAL_RENEWAL_MS;
 
@@ -552,23 +567,27 @@ export function relayCredentialRenewal(
 ): IceServerRenewal {
   return {
     afterMs: RELAY_CREDENTIAL_RENEWAL_MS,
-    resolve: async () => {
+    resolve: async (waitedMs) => {
       const credential = await mintRunRelayCredential(sharedSecret, now());
       return {
         iceServers: iceServersFromConnection(connection, credential),
-        notice: relayCredentialRenewalNotice(credential),
+        notice: relayCredentialRenewalNotice(credential, waitedMs),
       };
     },
   };
 }
 
-/** The line a run prints when a long wait for its partner renews the credential. */
+/**
+ * The line a run prints when a long wait for its partner renews the
+ * credential, `waitedMs` into the wait.
+ */
 export function relayCredentialRenewalNotice(
   credential: RelayCredential,
+  waitedMs: number,
 ): string {
   return (
     "the exchange partner has not connected within " +
-    `${RELAY_CREDENTIAL_RENEWAL_MS / 60_000} minutes, so the connection ` +
+    `${Math.round(waitedMs / 60_000)} minutes, so the connection ` +
     "attempt restarts with a new relay credential that expires at " +
     credential.expiresAt.toISOString()
   );
@@ -737,6 +756,7 @@ export async function openWebRtcPeerSession(
     offerRetryIntervalMs = DEFAULT_OFFER_RETRY_INTERVAL_MS,
     rendezvousTimeoutMs = DEFAULT_RENDEZVOUS_TIMEOUT_MS,
     channelOpenTimeoutMs = DEFAULT_CHANNEL_OPEN_TIMEOUT_MS,
+    renewalOverlapMs = RENEWAL_OVERLAP_MS,
     signal,
     peerConnectionFactory,
     socketFactory,
@@ -762,11 +782,11 @@ export async function openWebRtcPeerSession(
       ? await defaultPeerConnection(configuration)
       : peerConnectionFactory(configuration);
   };
-  const rebuildPeer = async (): Promise<RebuiltPeer> => {
+  const rebuildPeer = async (waitedMs: number): Promise<RebuiltPeer> => {
     // The first build already warned about this same list.
     if (iceServerRenewal === undefined)
       return { peer: await buildPeer(iceServers, () => {}) };
-    const renewed = await iceServerRenewal.resolve();
+    const renewed = await iceServerRenewal.resolve(waitedMs);
     return {
       peer: await buildPeer(renewed.iceServers),
       notice: renewed.notice,
@@ -782,6 +802,7 @@ export async function openWebRtcPeerSession(
     offerRetryIntervalMs,
     rendezvousTimeoutMs,
     channelOpenTimeoutMs,
+    renewalOverlapMs,
     iceTransportPolicy,
     rebuildPeer,
     ...(iceServerRenewal !== undefined && {
@@ -886,10 +907,11 @@ interface NegotiationOptions {
   offerRetryIntervalMs: number;
   rendezvousTimeoutMs: number;
   channelOpenTimeoutMs: number;
+  renewalOverlapMs: number;
   /** The policy the peer connection was built with; named in a failure. */
   iceTransportPolicy?: IceTransportPolicy;
   /** Builds a replacement for `peer` from the run's current ICE servers. */
-  rebuildPeer: () => Promise<RebuiltPeer>;
+  rebuildPeer: (waitedMs: number) => Promise<RebuiltPeer>;
   /** Replace `peer` each `renewalAfterMs` the partner has not engaged. */
   renewalAfterMs?: number;
   signal?: AbortSignal;
@@ -899,6 +921,44 @@ interface NegotiationOptions {
 interface RebuiltPeer {
   peer: RTCPeerConnection;
   notice?: string;
+}
+
+/**
+ * A connection a renewal or a followed offer replaced, still negotiable until
+ * {@link RENEWAL_OVERLAP_MS} ends: the partner's frames naming its id are
+ * routed to it, and the first to engage it makes it current again.
+ */
+interface RetiredConnection {
+  peer: RTCPeerConnection;
+  connectionId: string;
+  channel: RTCDataChannel | undefined;
+  localDescriptionSent: boolean;
+  remoteDescriptionSet: boolean;
+  sentLocalCandidates: Array<Record<string, unknown>>;
+  pendingRemoteCandidates: Array<Record<string, unknown>>;
+  timer: ReturnType<typeof setTimeout> | undefined;
+}
+
+/**
+ * Hold a remote candidate until a remote description can apply it. Bounded,
+ * and past the cap the surplus is dropped rather than failing the rendezvous:
+ * a legitimate late description still applies the ones held, and a peer that
+ * only floods candidates cannot grow this without bound. Dropping is silent --
+ * logging per candidate would itself be a log-flood vector, the same reason
+ * inboundBounds.ts evicts silently.
+ */
+function holdRemoteCandidate(
+  queue: Array<Record<string, unknown>>,
+  candidate: Record<string, unknown>,
+): void {
+  if (queue.length < MAX_PENDING_REMOTE_CANDIDATES) queue.push(candidate);
+}
+
+/** The connection id a broker payload names, if it names one. */
+function namedConnectionId(payload: unknown): string | undefined {
+  if (typeof payload !== "object" || payload === null) return undefined;
+  const named = (payload as { connectionId?: unknown }).connectionId;
+  return typeof named === "string" ? named : undefined;
 }
 
 /**
@@ -917,10 +977,12 @@ class Negotiation {
    * side's own until the inviter adopts the id of the offer it answers.
    */
   private connectionId = newConnectionId();
-  /** Bumped when the inviter follows a new offer; stale offer handling stops at it. */
+  /** The connection the current one replaced, while it is still negotiable. */
+  private retired: RetiredConnection | undefined;
+  /** Bumped when the inviter changes connection; stale offer handling stops at it. */
   private offerGeneration = 0;
-  private firstAnsweredAt: number | undefined;
-  private newOffersFollowed = 0;
+  private lastNewOfferFollowedAt: number | undefined;
+  private startedAt = 0;
   /** Local candidates gathered before this side's description reached the broker. */
   private readonly pendingLocalCandidates: Array<Record<string, unknown>> = [];
   /** Every local candidate sent so far, re-sent with each retried offer. */
@@ -976,7 +1038,10 @@ class Negotiation {
       }
     };
     if (this.options.role === "inviter")
-      peer.ondatachannel = ({ channel }) => this.watchChannel(channel);
+      peer.ondatachannel = ({ channel }) => {
+        this.dropRetired();
+        this.watchChannel(channel);
+      };
   }
 
   /** Open this side's data channel and offer it; the acceptor's opening move. */
@@ -1018,15 +1083,88 @@ class Negotiation {
   }
 
   /**
+   * Set the current connection aside as {@link retired}, still sending its own
+   * candidates and, for the inviter, taking the channel the partner opens on
+   * it. The caller installs the replacement and starts the overlap.
+   */
+  private retirePeer(): RetiredConnection {
+    const retired: RetiredConnection = {
+      peer: this.currentPeer,
+      connectionId: this.connectionId,
+      channel: this.channel,
+      localDescriptionSent: this.localDescriptionSent,
+      remoteDescriptionSet: this.remoteDescriptionSet,
+      sentLocalCandidates: [...this.sentLocalCandidates],
+      pendingRemoteCandidates: [...this.pendingRemoteCandidates],
+      timer: undefined,
+    };
+    this.discardPeer();
+    retired.peer.onicecandidate = ({ candidate }) => {
+      if (!candidate || !retired.localDescriptionSent) return;
+      const payload = candidateToPayload(candidate);
+      this.sendCandidate(payload, retired.connectionId);
+      retired.sentLocalCandidates.push(payload);
+    };
+    if (this.options.role === "inviter")
+      retired.peer.ondatachannel = ({ channel }) => {
+        if (this.retired !== retired || this.finished) return;
+        this.promoteRetired(retired);
+        this.watchChannel(channel);
+      };
+    this.retired = retired;
+    return retired;
+  }
+
+  private startOverlap(retired: RetiredConnection): void {
+    if (this.retired !== retired) return;
+    retired.timer = setTimeout(
+      () => this.dropRetired(retired),
+      this.options.renewalOverlapMs,
+    );
+  }
+
+  /** Close the retired connection, if it is still `expected` when one is named. */
+  private dropRetired(expected?: RetiredConnection): void {
+    const retired = this.retired;
+    if (retired === undefined) return;
+    if (expected !== undefined && retired !== expected) return;
+    this.retired = undefined;
+    clearTimeout(retired.timer);
+    retired.peer.onicecandidate = null;
+    retired.peer.ondatachannel = null;
+    void closePeer(retired.peer);
+  }
+
+  /** Make the retired connection current again, closing its replacement. */
+  private promoteRetired(retired: RetiredConnection): void {
+    this.retired = undefined;
+    clearTimeout(retired.timer);
+    this.offerGeneration += 1;
+    // An inviter still building the replacement has not installed it yet.
+    const replaced = this.discardPeer();
+    if (replaced !== retired.peer) void closePeer(replaced);
+    this.connectionId = retired.connectionId;
+    this.installPeer(retired.peer);
+    this.localDescriptionSent = retired.localDescriptionSent;
+    this.remoteDescriptionSet = retired.remoteDescriptionSet;
+    this.sentLocalCandidates.push(...retired.sentLocalCandidates);
+    this.pendingRemoteCandidates.push(...retired.pendingRemoteCandidates);
+    if (retired.channel !== undefined) this.watchChannel(retired.channel);
+  }
+
+  /**
    * Replace the peer connection with one built from a fresh ICE server list,
    * unless the partner engaged -- or the run settled -- while it was built.
-   * The acceptor offers again under a new connection id.
+   * The acceptor offers again under a new connection id, the old offer staying
+   * answerable until the overlap ends.
    */
   private async renew(): Promise<void> {
     if (this.renewing || this.partnerEngaged()) return;
     this.renewing = true;
     try {
-      const { peer: next, notice } = await this.options.rebuildPeer();
+      const { peer: next, notice } = await this.options.rebuildPeer(
+        Date.now() - this.startedAt,
+      );
       if (
         this.finished ||
         this.failure !== undefined ||
@@ -1035,13 +1173,18 @@ class Negotiation {
         await closePeer(next);
         return;
       }
-      const previous = this.discardPeer();
-      this.installPeer(next);
-      if (notice !== undefined) log.info(notice);
       if (this.options.role === "acceptor") {
+        this.dropRetired();
+        const retired = this.retirePeer();
+        this.installPeer(next);
+        if (notice !== undefined) log.info(notice);
         this.connectionId = newConnectionId();
-        await Promise.all([this.openAndOffer(), closePeer(previous)]);
+        await this.openAndOffer();
+        this.startOverlap(retired);
       } else {
+        const previous = this.discardPeer();
+        this.installPeer(next);
+        if (notice !== undefined) log.info(notice);
         await closePeer(previous);
       }
     } catch (err) {
@@ -1098,6 +1241,7 @@ class Negotiation {
 
   async run(broker: BrokerClient): Promise<RTCDataChannel> {
     this.broker = broker;
+    this.startedAt = Date.now();
     const { role, signal, renewalAfterMs } = this.options;
     this.attachPeer(this.currentPeer);
 
@@ -1155,6 +1299,7 @@ class Negotiation {
       this.finished = true;
       clearTimeout(rendezvousTimer);
       clearInterval(this.renewalTimer);
+      this.dropRetired();
       this.stopChannelOpenDeadline();
       this.stopOfferRetries();
       signal?.removeEventListener("abort", abort);
@@ -1222,7 +1367,6 @@ class Negotiation {
     );
     if (!this.answered) {
       this.answered = true;
-      this.firstAnsweredAt = Date.now();
       if (offeredId !== undefined) this.connectionId = offeredId;
     } else if (offeredId === undefined || offeredId === this.connectionId) {
       // The dialer re-offers until it is answered, so a repeat means its answer
@@ -1231,16 +1375,18 @@ class Negotiation {
       if (this.localDescriptionSent) this.resendAnswer();
       return;
     } else {
-      // A new id is the dialer's rebuilt connection: the one this side answered
-      // is gone on its end, and the answer to it is dropped there.
+      // A new id is the dialer's rebuilt connection. The answer already sent
+      // may still be taken during the dialer's overlap, so the connection it
+      // came from stays open through this side's own.
       if (!this.mayFollowNewOffer()) return;
       const generation = (this.offerGeneration += 1);
+      this.dropRetired();
+      const retired = this.retirePeer();
       this.connectionId = offeredId;
-      const previous = this.discardPeer();
-      const [{ peer: next }] = await Promise.all([
-        this.options.rebuildPeer(),
-        closePeer(previous),
-      ]);
+      this.startOverlap(retired);
+      const { peer: next } = await this.options.rebuildPeer(
+        Date.now() - this.startedAt,
+      );
       if (
         generation !== this.offerGeneration ||
         this.finished ||
@@ -1265,10 +1411,13 @@ class Negotiation {
 
   /** Whether the bound on following new offers admits one more, counting it if so. */
   private mayFollowNewOffer(): boolean {
-    const answeredForMs = Date.now() - (this.firstAnsweredAt ?? Date.now());
-    const allowed = 1 + Math.floor(answeredForMs / MIN_NEW_OFFER_INTERVAL_MS);
-    if (this.newOffersFollowed >= allowed) return false;
-    this.newOffersFollowed += 1;
+    const now = Date.now();
+    if (
+      this.lastNewOfferFollowedAt !== undefined &&
+      now - this.lastNewOfferFollowedAt < MIN_NEW_OFFER_INTERVAL_MS
+    )
+      return false;
+    this.lastNewOfferFollowedAt = now;
     return true;
   }
 
@@ -1279,9 +1428,17 @@ class Negotiation {
    */
   private namesOtherConnection(payload: unknown): boolean {
     if (this.options.role === "inviter" && !this.answered) return false;
-    if (typeof payload !== "object" || payload === null) return false;
-    const named = (payload as { connectionId?: unknown }).connectionId;
-    return typeof named === "string" && named !== this.connectionId;
+    const named = namedConnectionId(payload);
+    return named !== undefined && named !== this.connectionId;
+  }
+
+  /** The retired connection `payload` names, if it names that one. */
+  private retiredNamedBy(payload: unknown): RetiredConnection | undefined {
+    const retired = this.retired;
+    if (retired === undefined) return undefined;
+    return namedConnectionId(payload) === retired.connectionId
+      ? retired
+      : undefined;
   }
 
   private async onAnswer(message: BrokerMessage): Promise<void> {
@@ -1293,8 +1450,11 @@ class Negotiation {
       return;
     const description = sessionDescriptionFrom(message.payload);
     if (description === undefined || description.type !== "answer") return;
-    // An answer naming another connection answers an offer a renewal discarded.
-    if (this.namesOtherConnection(message.payload)) return;
+    // The first connection answered wins, so a partner that answered the
+    // offer a renewal replaced keeps it. Any other id answers a closed one.
+    const retired = this.retiredNamedBy(message.payload);
+    if (retired === undefined && this.namesOtherConnection(message.payload))
+      return;
     // Latch synchronously before the first await, mirroring onOffer's
     // `answered`. `remoteDescriptionSet` is only set after setRemoteDescription
     // resolves, so without this latch two ANSWERs delivered in one tick both
@@ -1303,6 +1463,8 @@ class Negotiation {
     // acceptor's rendezvous by answering twice.
     this.answerAccepted = true;
     this.stopOfferRetries();
+    if (retired === undefined) this.dropRetired();
+    else this.promoteRetired(retired);
     await this.currentPeer.setRemoteDescription({
       type: "answer",
       sdp: description.sdp,
@@ -1322,17 +1484,17 @@ class Negotiation {
 
   private async onCandidate(message: BrokerMessage): Promise<void> {
     const candidate = candidateFrom(message.payload);
-    if (candidate === undefined || this.namesOtherConnection(message.payload))
+    if (candidate === undefined) return;
+    const retired = this.retiredNamedBy(message.payload);
+    if (retired !== undefined) {
+      if (retired.remoteDescriptionSet)
+        await this.addRemoteCandidate(candidate, retired.peer);
+      else holdRemoteCandidate(retired.pendingRemoteCandidates, candidate);
       return;
+    }
+    if (this.namesOtherConnection(message.payload)) return;
     if (!this.remoteDescriptionSet) {
-      // Bounded, and past the cap the surplus is dropped rather than failing the
-      // rendezvous: a legitimate late description still applies the ones held,
-      // and a peer that only floods candidates cannot grow this without bound.
-      // Dropping is silent -- logging per candidate would itself be a log-flood
-      // vector, the same reason inboundBounds.ts evicts silently.
-      if (this.pendingRemoteCandidates.length < MAX_PENDING_REMOTE_CANDIDATES) {
-        this.pendingRemoteCandidates.push(candidate);
-      }
+      holdRemoteCandidate(this.pendingRemoteCandidates, candidate);
       return;
     }
     await this.addRemoteCandidate(candidate);
@@ -1353,9 +1515,10 @@ class Negotiation {
    */
   private async addRemoteCandidate(
     candidate: Record<string, unknown>,
+    peer: RTCPeerConnection = this.currentPeer,
   ): Promise<void> {
     try {
-      await this.currentPeer.addIceCandidate(candidate);
+      await peer.addIceCandidate(candidate);
     } catch {
       // Silent by design: logging per candidate would let a peer that sprays
       // malformed candidates drive the operator's console.
@@ -1366,6 +1529,8 @@ class Negotiation {
     const peer = this.currentPeer;
     const description = await peer.createOffer();
     await peer.setLocalDescription(description);
+    // A renewal or a promotion replaced the peer meanwhile; its own offer is sent.
+    if (peer !== this.currentPeer) return;
     const local = peer.localDescription;
     if (local === undefined || local === null) {
       throw new ConnectionError(
@@ -1471,14 +1636,17 @@ class Negotiation {
     }
   }
 
-  private sendCandidate(candidate: Record<string, unknown>): void {
+  private sendCandidate(
+    candidate: Record<string, unknown>,
+    connectionId: string = this.connectionId,
+  ): void {
     this.broker?.send({
       type: BROKER_MESSAGE.candidate,
       dst: this.options.remoteId,
       payload: {
         candidate,
         type: "data",
-        connectionId: this.connectionId,
+        connectionId,
       },
     });
   }

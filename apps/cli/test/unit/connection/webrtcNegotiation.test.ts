@@ -16,6 +16,7 @@ import { ICE_STATS_TIMEOUT_MS } from "../../../src/connection/webrtc/iceDiagnost
 import {
   MAX_CONNECTION_ID_LENGTH,
   MAX_PENDING_REMOTE_CANDIDATES,
+  MIN_NEW_OFFER_INTERVAL_MS,
   openWebRtcPeerSession,
 } from "../../../src/connection/webrtc/weriftPeer";
 
@@ -237,6 +238,7 @@ async function startRendezvous(options: {
   offerRetryIntervalMs?: number;
   rendezvousTimeoutMs?: number;
   channelOpenTimeoutMs?: number;
+  renewalOverlapMs?: number;
   iceTransportPolicy?: "all" | "relay";
   signal?: AbortSignal;
   /**
@@ -282,6 +284,7 @@ async function startRendezvous(options: {
     offerRetryIntervalMs: options.offerRetryIntervalMs ?? 60_000,
     rendezvousTimeoutMs: options.rendezvousTimeoutMs ?? 10_000,
     channelOpenTimeoutMs: options.channelOpenTimeoutMs ?? 10_000,
+    renewalOverlapMs: options.renewalOverlapMs,
     iceTransportPolicy: options.iceTransportPolicy,
     signal: options.signal,
     iceServerRenewal: options.iceServerRenewal,
@@ -1222,7 +1225,11 @@ function offeredConnectionIds(socket: ScriptedSocket): Array<string> {
 
 test("an acceptor whose partner stays away past the renewal offers again from a rebuilt connection", async () => {
   const lines = captureDiagnostics();
-  const resolve = vi.fn(renewedServers);
+  const waits: Array<number> = [];
+  const resolve = vi.fn((waitedMs: number) => {
+    waits.push(waitedMs);
+    return renewedServers();
+  });
   const { socket, peers, configurations, session, inviterId } =
     await startRendezvous({
       role: "acceptor",
@@ -1231,21 +1238,15 @@ test("an acceptor whose partner stays away past the renewal offers again from a 
   await until(() => peers.length === 2);
   const [first, second] = peers;
   expect(configurations[1].iceServers).toEqual(RENEWED_SERVERS);
-  expect(first.closeCalls).toBe(1);
+  expect(waits[0]).toBeGreaterThanOrEqual(60);
   await until(() => new Set(offeredConnectionIds(socket)).size === 2);
   const [staleId, freshId] = [...new Set(offeredConnectionIds(socket))];
   expect(second.channels.map((channel) => channel.label)).toEqual([freshId]);
   expect(lines.filter((line) => line.includes(RENEWAL_NOTICE))).toHaveLength(1);
+  // The replaced offer stays answerable through the overlap.
+  expect(first.closeCalls).toBe(0);
 
-  // An answer to the discarded offer is not applied to the rebuilt connection.
-  socket.deliver({
-    type: BROKER_MESSAGE.answer,
-    src: inviterId,
-    payload: {
-      sdp: { type: "answer", sdp: "v=0\r\nstale\r\n" },
-      connectionId: staleId,
-    },
-  });
+  // The new id answered first wins, and the replaced connection is closed.
   socket.deliver({
     type: BROKER_MESSAGE.answer,
     src: inviterId,
@@ -1255,6 +1256,16 @@ test("an acceptor whose partner stays away past the renewal offers again from a 
     },
   });
   await until(() => second.remoteDescriptions.length === 1);
+  expect(first.closeCalls).toBe(1);
+  socket.deliver({
+    type: BROKER_MESSAGE.answer,
+    src: inviterId,
+    payload: {
+      sdp: { type: "answer", sdp: "v=0\r\nstale\r\n" },
+      connectionId: staleId,
+    },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 20));
   expect(second.remoteDescriptions).toEqual([
     { type: "answer", sdp: "v=0\r\nanswer\r\n" },
   ]);
@@ -1488,34 +1499,38 @@ test("an acceptor that renews while its first answer is in flight still connects
   await until(() => new Set(offeredConnectionIds(acceptor.socket)).size === 2);
   const freshId = [...new Set(offeredConnectionIds(acceptor.socket))][1];
 
-  // The answer to the discarded offer lands after the renewal.
-  holdAnswers = false;
-  for (const frame of heldAnswers.splice(0)) acceptor.socket.deliver(frame);
-
-  await until(() => acceptor.peers[1].remoteDescriptions.length === 1);
+  // The inviter follows the new offer but keeps the connection it answered.
+  await until(() => answeredConnectionIds(inviter.socket).includes(freshId));
   const [oldInviterPeer, newInviterPeer] = inviter.peers;
-  expect(oldInviterPeer.closeCalls).toBe(1);
   expect(inviter.peers).toHaveLength(2);
   expect(inviterResolve).toHaveBeenCalledTimes(1);
   expect(inviter.configurations[1].iceServers).toEqual(RENEWED_SERVERS);
+  expect(oldInviterPeer.closeCalls).toBe(0);
   expect(oldInviterPeer.remoteDescriptions).toHaveLength(1);
   expect(newInviterPeer.remoteDescriptions).toHaveLength(1);
-  expect(answeredConnectionIds(inviter.socket).at(-1)).toBe(freshId);
-  expect(acceptor.peers[0].remoteDescriptions).toEqual([]);
 
-  // A stale-id candidate reaching the inviter is not applied to the new peer.
+  // The answer to the replaced offer lands inside the acceptor's overlap and
+  // wins: the acceptor returns to the connection it answers.
+  holdAnswers = false;
+  for (const frame of heldAnswers.splice(0)) acceptor.socket.deliver(frame);
+  await until(() => acceptor.peers[0].remoteDescriptions.length === 1);
+  await until(() => acceptor.peers[1].closeCalls === 1);
+  expect(acceptor.peers[1].remoteDescriptions).toEqual([]);
+
+  // A candidate naming the old id reaches the inviter's old connection.
   inviter.socket.deliver({
     type: BROKER_MESSAGE.candidate,
     src: acceptorId,
     payload: { candidate: CANDIDATE_A, connectionId: staleId },
   });
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await until(() => oldInviterPeer.remoteCandidates.length === 1);
   expect(newInviterPeer.remoteCandidates).toEqual([]);
 
-  const [acceptorChannel] = acceptor.peers[1].channels;
-  expect(acceptorChannel.label).toBe(freshId);
-  const inviterChannel = new FakeChannel(freshId);
-  newInviterPeer.ondatachannel?.({ channel: inviterChannel });
+  const [acceptorChannel] = acceptor.peers[0].channels;
+  expect(acceptorChannel.label).toBe(staleId);
+  const inviterChannel = new FakeChannel(staleId);
+  oldInviterPeer.ondatachannel?.({ channel: inviterChannel });
+  expect(newInviterPeer.closeCalls).toBe(1);
   acceptorChannel.open();
   inviterChannel.open();
   expect((await acceptor.session).channel).toBe(acceptorChannel);
@@ -1549,9 +1564,141 @@ test("an inviter follows one new offer id and drops a further one inside the int
     "dc_second",
   ]);
   expect(peers).toHaveLength(2);
-  expect(peers[0].closeCalls).toBe(1);
+  expect(peers[0].closeCalls).toBe(0);
   const channel = new FakeChannel("dc_second");
   peers[1].ondatachannel?.({ channel });
+  expect(peers[0].closeCalls).toBe(1);
   channel.open();
   expect((await session).channel).toBe(channel);
+});
+
+test("an unused follow interval does not carry over into a burst", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    const { socket, peers, acceptorId } = await startRendezvous({
+      role: "inviter",
+    });
+    const offer = (connectionId: string): void =>
+      socket.deliver({
+        type: BROKER_MESSAGE.offer,
+        src: acceptorId,
+        payload: {
+          sdp: { type: "offer", sdp: "v=0\r\noffer\r\n" },
+          connectionId,
+        },
+      });
+    offer("dc_first");
+    await until(() => answeredConnectionIds(socket).length === 1);
+    vi.setSystemTime(Date.now() + 2 * MIN_NEW_OFFER_INTERVAL_MS + 1);
+    offer("dc_second");
+    await until(() => answeredConnectionIds(socket).length === 2);
+    offer("dc_third");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(answeredConnectionIds(socket)).toEqual(["dc_first", "dc_second"]);
+    expect(peers).toHaveLength(2);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+/** Deliver an ANSWER naming `connectionId`, with `sdp` as its body. */
+function answer(
+  socket: ScriptedSocket,
+  inviterId: string,
+  connectionId: string,
+  sdp = "v=0\r\nanswer\r\n",
+): void {
+  socket.deliver({
+    type: BROKER_MESSAGE.answer,
+    src: inviterId,
+    payload: { sdp: { type: "answer", sdp }, connectionId },
+  });
+}
+
+/** Start an acceptor that renews once, resolving once both ids are offered. */
+async function renewedAcceptor(renewalOverlapMs?: number): Promise<
+  Awaited<ReturnType<typeof startRendezvous>> & {
+    staleId: string;
+    freshId: string;
+  }
+> {
+  const resolve = vi.fn((): Promise<RenewedIceServers> =>
+    resolve.mock.calls.length === 1
+      ? renewedServers()
+      : new Promise<RenewedIceServers>(() => {}),
+  );
+  const started = await startRendezvous({
+    role: "acceptor",
+    renewalOverlapMs,
+    iceServerRenewal: { afterMs: 60, resolve },
+  });
+  await until(() => new Set(offeredConnectionIds(started.socket)).size === 2);
+  const [staleId, freshId] = [...new Set(offeredConnectionIds(started.socket))];
+  return { ...started, staleId, freshId };
+}
+
+test("an answer to the replaced offer inside the overlap wins, and the channel opens on it", async () => {
+  const { socket, peers, session, inviterId, staleId, freshId } =
+    await renewedAcceptor();
+  const [first, second] = peers;
+  for (const [candidate, connectionId] of [
+    [CANDIDATE_A, staleId],
+    [CANDIDATE_B, freshId],
+  ] as const)
+    socket.deliver({
+      type: BROKER_MESSAGE.candidate,
+      src: inviterId,
+      payload: { candidate, connectionId },
+    });
+  answer(socket, inviterId, staleId, "v=0\r\nstale\r\n");
+  await until(() => first.remoteDescriptions.length === 1);
+  await until(() => second.closeCalls === 1);
+  expect(first.remoteDescriptions).toEqual([
+    { type: "answer", sdp: "v=0\r\nstale\r\n" },
+  ]);
+  await until(() => first.remoteCandidates.length === 1);
+  expect(first.remoteCandidates).toEqual([CANDIDATE_A]);
+  expect(second.remoteCandidates).toEqual([]);
+
+  // A later answer to the new id is dropped.
+  answer(socket, inviterId, freshId);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(second.remoteDescriptions).toEqual([]);
+  expect(first.remoteDescriptions).toHaveLength(1);
+
+  // Candidates for the winner now reach it; ones for the closed id do not.
+  socket.deliver({
+    type: BROKER_MESSAGE.candidate,
+    src: inviterId,
+    payload: { candidate: CANDIDATE_B, connectionId: staleId },
+  });
+  socket.deliver({
+    type: BROKER_MESSAGE.candidate,
+    src: inviterId,
+    payload: { candidate: CANDIDATE_A, connectionId: freshId },
+  });
+  await until(() => first.remoteCandidates.length === 2);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(first.remoteCandidates).toEqual([CANDIDATE_A, CANDIDATE_B]);
+  expect(second.remoteCandidates).toEqual([]);
+
+  const [channel] = first.channels;
+  expect(channel.label).toBe(staleId);
+  channel.open();
+  expect((await session).channel).toBe(channel);
+});
+
+test("after the overlap the replaced offer is closed and its answer refused", async () => {
+  const { socket, peers, session, inviterId, staleId, freshId } =
+    await renewedAcceptor(30);
+  const [first, second] = peers;
+  await until(() => first.closeCalls === 1);
+  answer(socket, inviterId, staleId, "v=0\r\nstale\r\n");
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(first.remoteDescriptions).toEqual([]);
+  expect(second.remoteDescriptions).toEqual([]);
+  answer(socket, inviterId, freshId);
+  await until(() => second.remoteDescriptions.length === 1);
+  second.channels[0].open();
+  expect((await session).channel).toBe(second.channels[0]);
 });

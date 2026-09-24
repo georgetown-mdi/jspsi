@@ -805,7 +805,10 @@ test("a minting run whose peer_timeout_ms outlasts the relay credential dials wi
   vi.useFakeTimers({ toFake: ["Date"], now: renewedAt });
   let renewed: Awaited<ReturnType<NonNullable<typeof renewal>["resolve"]>>;
   try {
-    renewed = (await renewal?.resolve()) ?? { iceServers: [], notice: "" };
+    renewed = (await renewal?.resolve(RELAY_CREDENTIAL_RENEWAL_MS)) ?? {
+      iceServers: [],
+      notice: "",
+    };
   } finally {
     vi.useRealTimers();
   }
@@ -818,6 +821,9 @@ test("a minting run whose peer_timeout_ms outlasts the relay credential dials wi
   );
   expect(renewed.notice).toContain(
     `expires at ${new Date(mintedExpirySeconds(servers) * 1000).toISOString()}`,
+  );
+  expect(renewed.notice).toContain(
+    `within ${RELAY_CREDENTIAL_RENEWAL_MS / 60_000} minutes`,
   );
   // Minting logs nothing: the notice is the negotiation's to log once the
   // rebuilt connection replaces the old one.

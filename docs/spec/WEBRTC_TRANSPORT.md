@@ -154,9 +154,11 @@ mapped host, so the two consumers agree on the server a locator names.
 
 The server stamps `src` itself from the connecting client's id, so an outbound
 frame contains only `type`, `payload`, and `dst`. Heartbeats (`HEARTBEAT`, no
-payload) go up every 5 s. The broker neither queues nor reports an undeliverable
-`OFFER` for a peer that has not registered yet, so the dialer re-offers on a
-timer until it is answered rather than waiting for a signal that never comes.
+payload) go up every 5 s. The broker does not report an undeliverable `OFFER`
+for a peer that has not registered yet: the vendored broker holds such frames
+for about 5 s and delivers them if the peer registers in that time, and drops
+them otherwise. The dialer therefore re-offers on a timer until it is answered
+rather than waiting for a signal that never comes.
 
 A CLI run presenting a TURN credential it minted replaces its peer connection
 each relay-credential renewal interval (table below) the partner has not yet
@@ -165,10 +167,11 @@ credential, so a rendezvous longer than the credential's lifetime still
 gathers a relay candidate. A partner that has sent its description keeps the
 connection it was negotiating with.
 
-- The acceptor's rebuilt connection offers under a new `connectionId`.
+- The acceptor's rebuilt connection offers under a new `connectionId`. The replaced connection stays open for the renewal overlap (table below), which starts when the new offer is first sent: during it the acceptor holds two live `connectionId`s, and the first one answered wins -- that connection proceeds and the other is closed and its id forgotten. When the overlap ends unanswered the replaced connection is closed and the new id is the only one. The overlap covers the broker's hold of frames for a late registrant plus one offer retry, since a browser inviter answers the first offer it receives and ignores later ones, and the replaced offer can reach it after the new one is sent.
 - The inviter has sent nothing before the partner's `OFFER`, so its replacement is not visible on the wire.
-- Each side holds one current `connectionId` -- the acceptor the one it offered last, the inviter the one of the `OFFER` it answered -- and drops an `ANSWER` or `CANDIDATE` naming another; one naming none, or reaching an inviter that has not answered yet, is taken as current. Every replacement drops the candidates queued for the discarded connection.
-- An inviter that has answered and receives an `OFFER` naming a new `connectionId` treats it as the acceptor's rebuilt connection, since its answer can cross that rebuild in flight: it closes its peer connection, builds a new one (with a freshly minted credential when the run mints one), and answers the new offer. It follows one new `connectionId` at any time and one more per renewal interval, and drops a surplus `OFFER`. An `OFFER` repeating the current `connectionId` is re-answered.
+- Each side drops an `ANSWER` or `CANDIDATE` naming a `connectionId` it does not hold -- the acceptor's live ids, the inviter's the one of the `OFFER` it answered plus, during its own overlap, the one it answered before -- and routes a `CANDIDATE` to the connection its id names. One naming none, or reaching an inviter that has not answered yet, is taken as current. A connection that is closed drops the candidates queued for it.
+- An inviter that has answered and receives an `OFFER` naming a new `connectionId` treats it as the acceptor's rebuilt connection, since its answer can cross that rebuild in flight: it builds a new peer connection (with a freshly minted credential when the run mints one) and answers the new offer, keeping the connection it answered before open for the renewal overlap, since the acceptor may take that earlier answer instead. Whichever connection the acceptor's data channel arrives on is kept and the other closed. It follows one new `connectionId` at any time and at most one more per renewal interval, an unused interval not carrying over, and drops a surplus `OFFER`. An `OFFER` repeating the current `connectionId` is re-answered.
+- A browser inviter whose answer to the replaced offer arrives after the overlap has ended is not followed: the acceptor refuses that answer, the browser does not answer the new offer, and that run fails at its own rendezvous timeout. A CLI inviter follows the new offer.
 - The renewal line an operator sees is printed once the rebuilt connection replaces the old one, and not for a rebuild abandoned because the partner sent its description meanwhile.
 
 Message types acted on: `OPEN`, `OFFER`, `ANSWER`, `CANDIDATE`, `LEAVE`,
@@ -548,6 +551,7 @@ condition holds.
 | Rendezvous | 10 min | Both parties finding each other; human-timescale, because one operator may start well before the other |
 | Offer retry interval | 1 s | How often the dialer re-offers while unanswered |
 | Relay credential renewal | 30 min | How long a CLI run presenting a minted TURN credential waits for the partner's session description before it rebuilds the peer connection with a new one; half the credential's one-hour lifetime |
+| Renewal overlap | 15 s | How long a connection replaced by a relay-credential renewal, or by an inviter following a new offer, stays open and answerable; above the broker's roughly 5 s hold of frames for a late registrant plus one offer retry |
 | Channel open | 30 s | The data channel opening once both descriptions are exchanged; reaching it means the peer is present but no candidate pair worked |
 | Parked receive | 1 h | Peer silence on an open channel; it bounds the peer's single-threaded PSI compute, which sends no keepalive while it runs |
 | Close drain | 5 min | The clean close's wait above -- the CLI's acknowledgement drain, the web's wait for the peer's close -- sized from the largest admissible frame and the measured send rate |
