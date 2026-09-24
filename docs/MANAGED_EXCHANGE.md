@@ -1188,7 +1188,7 @@ What the import accepts is what this app can hold:
   this browser runs a webrtc exchange and could not apply them. A filedrop
   connection holds its folders and `options`. An sftp connection is held whole
   -- host, port, username, folders, `options`, `host_key_fingerprint`,
-  `keyboard_interactive`, `proxy`, `provision`, and `provider_options` -- since
+  `keyboard_interactive`, `proxy`, and `provider_options` -- since
   nothing here runs it and each setting goes back into the file psilink runs.
 - **A `signing` block, held unchanged.** The mode, `identity_file`,
   `partner_fingerprint`, and `receipt_output` are kept exactly as the file
@@ -1197,7 +1197,7 @@ What the import accepts is what this app can hold:
   as the imported one did. The exchange runs with psilink.
 - **Credentials as `@path` references, never as values.** An sftp `password`,
   `private_key`, or `private_key_passphrase`, the `bearer` or `password` of a
-  `proxy` or `provision` block's `auth`, and a `password`, `passphrase`,
+  `proxy` block's `auth`, and a `password`, `passphrase`,
   `privateKey`, or `private_key` key in `provider_options`, in any letter case
   and at any depth, is held when the file writes it as `@` and a path, and
   refused, by field name, when the file writes any other value, a number or

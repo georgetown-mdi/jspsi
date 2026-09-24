@@ -615,11 +615,8 @@ test("HttpAuth with password but no username is rejected", () => {
 
 test("HttpAuth with bearer token is valid", () => {
   const result = safeParseConnectionConfig({
-    ...webrtcBase,
-    server: {
-      host: "api.peerjs.com",
-      provision: { host: "api.example.org", auth: { bearer: "tok" } },
-    },
+    ...sftpBase,
+    proxy: { host: "proxy.example.org", auth: { bearer: "tok" } },
   });
   expect(result.success).toBe(true);
 });

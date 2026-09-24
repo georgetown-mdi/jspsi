@@ -511,6 +511,40 @@ test("a config with an empty linkage_terms.identity is refused, not silently acc
   );
 });
 
+test.each([
+  ["sftp", { channel: "sftp" }],
+  ["webrtc", { channel: "webrtc", role: "acceptor" }],
+])(
+  "a %s config stating server.provision is refused naming the key",
+  (_, connection) => {
+    fs.writeFileSync(
+      configFile,
+      YAML.stringify({
+        connection: {
+          ...connection,
+          server: {
+            host: "server.example.org",
+            provision: { host: "wake.example.org" },
+          },
+        },
+        linkageTerms: minimalLinkageTerms,
+      }),
+    );
+    saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
+    let caught: unknown;
+    try {
+      loadConfig(baseOptions());
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(UsageError);
+    expect((caught as Error).message).toContain("is not a valid exchange spec");
+    expect((caught as Error).message).toContain(
+      'Unrecognized key: "provision"',
+    );
+  },
+);
+
 test("a config whose linkage_terms omit the identity loads, holding none", () => {
   // The third shape, and the admissible one: the field is optional, so this
   // config is accepted and its terms have no identity at all -- which is what

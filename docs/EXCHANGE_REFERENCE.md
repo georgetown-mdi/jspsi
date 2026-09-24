@@ -699,37 +699,6 @@ connection:
       - "SHA256:0PNQ1x9Pe3aaFqkPq0n8Uihhi8nN2nx2nKQ0gWqXm8s" # incoming
 ```
 
-#### On-demand server provisioning
-
-When the primary server is allocated on demand rather than always running, a `provision` sub-object can be added to `server`. It describes the endpoint that brings the server up before either party connects. There are two modes:
-
-**Lifecycle provisioning**: the server has a fixed, known address but is started on demand to avoid consuming resources between exchanges. The static `host` and other `server` fields are present alongside `provision` in both parties' configs; `provision` is the call that wakes the server. Both parties may call the same endpoint independently before connecting.
-
-**Address-returning provisioning**: the endpoint allocates a fresh resource and returns its address. Because the address is unknown until provisioning runs, this is asymmetric: the provisioning party (conventionally the inviter) calls the endpoint during exchange setup via the web application, and the resulting static `server` fields are written into the other party's config before either party runs the CLI. At run time the provisioning party's config retains `server.provision`; the other party's config has only static `server` fields.
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `host` | string | yes | Hostname of the provisioning API |
-| `port` | integer | no | Port; defaults to 443 |
-| `path` | string | no | API path |
-| `auth` | object | no | Authentication credentials (see [HTTP service authentication](#http-service-authentication-auth)) |
-
-> **Not yet implemented:** `server.provision` is accepted by the schema, and its `auth` credentials resolve their `@`-file references, but no connect path calls the endpoint. A config carrying it connects straight to the static `server` fields, so the server must already be running. Provision it out-of-band until the call is wired in.
-
-```yaml
-# Lifecycle provisioning: wake a serverless PeerJS instance before connecting
-connection:
-  channel: webrtc
-  server:
-    host: peerjs.example.org
-    port: 443
-    provision:
-      host: api.example.org
-      path: /peerjs/start
-      auth:
-        bearer: "@provision.key"
-```
-
 ### `connection.role`
 
 *Type:* string (`inviter` | `acceptor`)  
@@ -903,7 +872,7 @@ A WebSocket-to-TCP proxy that tunnels the SFTP connection through HTTPS. This fi
 
 ### HTTP service authentication (`auth`)
 
-The `server.provision`, `ice_provision`, and `proxy` objects each accept an optional `auth` sub-object. Exactly one authentication method may be specified. `username` and `password` must appear together; neither is valid alone.
+The `ice_provision` and `proxy` objects each accept an optional `auth` sub-object. Exactly one authentication method may be specified. `username` and `password` must appear together; neither is valid alone.
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -913,13 +882,13 @@ The `server.provision`, `ice_provision`, and `proxy` objects each accept an opti
 
 ```yaml
 connection:
+  channel: sftp
   server:
-    host: peerjs.example.org
-    provision:
-      host: api.example.org
-      path: /peerjs/start
-      auth:
-        bearer: "@/run/secrets/provision.key"
+    host: sftp.example.org
+  proxy:
+    host: proxy.example.org
+    auth:
+      bearer: "@/run/secrets/proxy.key"
 ```
 
 ### `connection.options`
@@ -1617,7 +1586,6 @@ The cells:
 | `connection.server.host_key_fingerprint` | authored | authored (a rotation list is entered separated by commas; a direct exchange takes one value) | not applicable |
 | `connection.server.certificate` | refused | refused | refused |
 | `connection.server.known_hosts` | refused | refused | refused |
-| `connection.server.provision` | carried (no effect yet) | refused | refused |
 | `connection.server.host`, `port`, `path` (webrtc) | authored | not applicable | carried |
 | `connection.server.secure` (webrtc) | authored | not applicable | refused |
 | `connection.server.key` (webrtc) | carried | not applicable | refused |

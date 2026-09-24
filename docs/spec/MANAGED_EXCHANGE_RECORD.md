@@ -246,16 +246,16 @@ schema admits: the locator subset (`server.host`, `server.port`,
 `server.username`, the `server` folder fields `path`, `inbound_path`, and
 `outbound_path`, and `options`) and, beyond it, `server.password`,
 `server.private_key`, `server.private_key_passphrase`,
-`server.keyboard_interactive`, `server.host_key_fingerprint`,
-`server.provision`, `proxy`, and `provider_options`. Nothing in this app runs an
-sftp record, so each of these is held unchanged for the file psilink runs
-(EXCHANGE_FILE.md, "What a consumer does with a setting it cannot honor"). A
-credential among them is held only as an `@path` reference, never as a value:
+`server.keyboard_interactive`, `server.host_key_fingerprint`, `proxy`, and
+`provider_options`. Nothing in this app runs an sftp record, so each of these
+is held unchanged for the file psilink runs (EXCHANGE_FILE.md, "What a consumer
+does with a setting it cannot honor"). A credential among them is held only as
+an `@path` reference, never as a value:
 
 - **Credential positions.** `server.password`, `server.private_key`,
-  `server.private_key_passphrase`, the `bearer` and `password` of
-  `server.provision.auth` and `proxy.auth`, and the value of every key, at any
-  depth under `provider_options`, that matches case-insensitively a key the SFTP
+  `server.private_key_passphrase`, the `bearer` and `password` of `proxy.auth`,
+  and the value of every key, at any depth under `provider_options`, that
+  matches case-insensitively a key the SFTP
   option passthrough names as a credential: `password`, `passphrase`,
   `privateKey`, or `private_key`
   ([EXCHANGE_REFERENCE.md](../EXCHANGE_REFERENCE.md#connectionprovider_options)),

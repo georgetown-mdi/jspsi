@@ -50,11 +50,10 @@ export interface JobSftpServerEntry {
 
 /**
  * The strict allowlist of fields the server block may hold -- stricter than
- * core's SFTP server schema, which is non-strict and admits blocks the console
- * must never see: `provision` (whose auth block holds inline HTTP credentials)
- * and the detected-but-rejected `certificate`/`known_hosts`. Any key outside
- * this list fails validation naming the key, so an operator cannot smuggle -- or
- * typo -- a field into the composed connection.
+ * core's SFTP server schema, which is non-strict and admits the
+ * detected-but-rejected `certificate`/`known_hosts`. Any key outside this list
+ * fails validation naming the key, so an operator cannot smuggle -- or typo -- a
+ * field into the composed connection.
  *
  * The split `inbound_path`/`outbound_path` pair IS admitted: a remote directory
  * layout on the partner's SFTP host, the same class of value as `path`, holding
