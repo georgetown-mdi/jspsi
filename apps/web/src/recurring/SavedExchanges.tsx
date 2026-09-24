@@ -48,6 +48,7 @@ import {
   alreadyHeldImportReason,
   importFailureReason,
   liveCopyImportReason,
+  liveCopyOpenLabel,
   otherExchangeRestoreReason,
   pairImportFailureReason,
 } from "./managedImportFailure";
@@ -727,8 +728,9 @@ const KEY_FILE_CHOOSER_NOTE =
  * operator on the imported exchange's own surface, so it is a way forward even
  * when the list read itself cannot be mended. A backup is reconciled against
  * the one exchange it holds, not against the list: one already running here
- * refuses, and one that may be it -- the same agreed terms and side -- is named
- * and added beside only on the operator's confirm ({@link liveCopyImportReason}).
+ * refuses, and those that may be it -- the same agreed terms and side -- are
+ * named together, the backup added beside them all only on the operator's one
+ * confirm ({@link liveCopyImportReason}).
  *
  * A file the import will not take is refused with the reason its failure has
  * ({@link importFailureReason}): a configuration this app cannot hold says what
@@ -755,8 +757,8 @@ function ImportExchangeFile() {
     useImportFile({
       maxBytes: MAX_IMPORT_FILE_BYTES,
       oversizeReason: UNREADABLE_IMPORT_REASON,
-      importFile: (source, besideId) =>
-        importManagedExchangeFile(source, undefined, besideOption(besideId)),
+      importFile: (source, besideIds) =>
+        importManagedExchangeFile(source, undefined, besideOption(besideIds)),
       failureAlert: importFailureAlert,
     });
 
@@ -843,9 +845,11 @@ function RestoreFromBackup({ id, label }: { id: string; label: string }) {
   );
 }
 
-/** The option naming the listed exchange a confirmed import goes beside. */
-function besideOption(besideId: string | undefined): { besideId?: string } {
-  return besideId === undefined ? {} : { besideId };
+/** The option naming the listed exchanges a confirmed import goes beside. */
+function besideOption(besideIds: ReadonlyArray<string> | undefined): {
+  besideIds?: ReadonlyArray<string>;
+} {
+  return besideIds === undefined ? {} : { besideIds };
 }
 
 /** What an import control shows once a file has been tried: a notice with the
@@ -853,9 +857,12 @@ function besideOption(besideId: string | undefined): { besideId?: string } {
 interface ImportOutcome {
   grantNotice?: { id: string; notice: ManagedImportGrantNotice };
   failure?: ImportFailureAlert;
-  /** The listed exchange a backup may be a copy of, and the file to import
-   * beside it on the operator's confirm. */
-  liveCopy?: { id: string; label: string; file: File };
+  /** The listed exchanges a backup may be a copy of, and the file to import
+   * beside them all on the operator's one confirm. */
+  liveCopy?: {
+    copies: ReadonlyArray<{ id: string; label: string }>;
+    file: File;
+  };
 }
 
 /** A refusal under the heading every file refusal takes. */
@@ -866,9 +873,9 @@ function fileRefusal(reason: string): ImportOutcome {
 }
 
 /** Read the chosen files and go to the imported exchange, or hold the notice or
- * refusal the control shows instead. A backup that may be a copy of a listed
- * exchange is held with that exchange's name until the operator confirms it,
- * which imports the file again beside that one, or dismisses it, which imports
+ * refusal the control shows instead. A backup that may be a copy of listed
+ * exchanges is held with their names until the operator confirms it, which
+ * imports the file again beside all of them, or dismisses it, which imports
  * nothing. One file goes through `importFile`; a
  * configuration with its key file through {@link importManagedCommandLinePair},
  * whichever control took them. A file over its cap -- `maxBytes` for the one
@@ -886,7 +893,7 @@ function useImportFile({
   oversizeReason: string;
   importFile: (
     source: string,
-    besideId?: string,
+    besideIds?: ReadonlyArray<string>,
   ) => Promise<ManagedImportResult>;
   failureAlert: (error: unknown) => ImportFailureAlert;
 }): {
@@ -932,7 +939,7 @@ function useImportFile({
   function runImport(
     primaryFile: File,
     keyFile: File | undefined,
-    besideId?: string,
+    besideIds?: ReadonlyArray<string>,
   ) {
     const refused =
       keyFile === undefined ? failureAlert : pairImportFailureAlert;
@@ -948,7 +955,7 @@ function useImportFile({
         void requestPersistentStorage();
         const { record, missingGrants, sameTermsAs } =
           keySource === undefined
-            ? await importFile(source, besideId)
+            ? await importFile(source, besideIds)
             : await importManagedCommandLinePair(source, keySource);
         const grantNotice =
           keySource === undefined
@@ -967,11 +974,7 @@ function useImportFile({
         setOutcome(
           error instanceof ManagedImportLiveCopyError
             ? {
-                liveCopy: {
-                  id: error.id,
-                  label: error.label,
-                  file: primaryFile,
-                },
+                liveCopy: { copies: error.copies, file: primaryFile },
               }
             : { failure: refused(error) },
         );
@@ -986,7 +989,11 @@ function useImportFile({
     const { liveCopy } = outcome;
     if (liveCopy === undefined || inFlight.current) return;
     setOutcome({});
-    runImport(liveCopy.file, undefined, liveCopy.id);
+    runImport(
+      liveCopy.file,
+      undefined,
+      liveCopy.copies.map(({ id }) => id),
+    );
   }
 
   return {
@@ -1012,23 +1019,24 @@ function ImportOutcomeAlerts({
 }) {
   const navigate = useNavigate();
   const { grantNotice, failure, liveCopy } = outcome;
+  const liveCopyLabels = liveCopy?.copies.map(({ label }) => label) ?? [];
   return (
     <>
       {liveCopy !== undefined && (
         <Alert color="yellow" title={LIVE_COPY_IMPORT_TITLE} mb="sm">
-          <p className={styles.small}>{liveCopyImportReason(liveCopy.label)}</p>
+          <p className={styles.small}>{liveCopyImportReason(liveCopyLabels)}</p>
           <div className={styles.savedRowActions}>
-            <Button
-              variant="default"
-              onClick={() =>
-                void navigate({
-                  to: "/saved/$id",
-                  params: { id: liveCopy.id },
-                })
-              }
-            >
-              Open the listed exchange
-            </Button>
+            {liveCopy.copies.map(({ id }, index) => (
+              <Button
+                key={id}
+                variant="default"
+                onClick={() =>
+                  void navigate({ to: "/saved/$id", params: { id } })
+                }
+              >
+                {liveCopyOpenLabel(liveCopyLabels, index)}
+              </Button>
+            ))}
             <Button variant="default" onClick={onConfirmLiveCopy}>
               {LIVE_COPY_IMPORT_CONFIRM}
             </Button>

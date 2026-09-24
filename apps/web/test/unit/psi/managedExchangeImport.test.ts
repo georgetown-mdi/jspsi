@@ -405,11 +405,13 @@ describe("a backup reconciles against the exchange it holds", () => {
     expect(deps.markImported).not.toHaveBeenCalled();
   });
 
-  test("a live copy by terms and side names that record, installing nothing", async () => {
+  test("live copies by terms and side are named together, installing nothing", async () => {
     const deps = recordingDeps({
       kind: "live-copy",
-      id: "listed-id",
-      label: "Riverbend quarterly",
+      copies: [
+        { id: "listed-id", label: "Riverbend quarterly" },
+        { id: "second-id", label: "" },
+      ],
     });
 
     await expect(
@@ -417,22 +419,27 @@ describe("a backup reconciles against the exchange it holds", () => {
     ).rejects.toBeInstanceOf(ManagedImportLiveCopyError);
     await expect(
       importManagedExchangeFile(goodBytes(), deps),
-    ).rejects.toMatchObject({ id: "listed-id", label: "Riverbend quarterly" });
+    ).rejects.toMatchObject({
+      copies: [
+        { id: "listed-id", label: "Riverbend quarterly" },
+        { id: "second-id", label: "" },
+      ],
+    });
     expect(deps.installed).toHaveLength(0);
     expect(deps.markImported).not.toHaveBeenCalled();
   });
 
-  test("a confirmed import passes the named record on as the one to go beside", async () => {
+  test("a confirmed import passes the named records on as the ones to go beside", async () => {
     const deps = recordingDeps();
 
     await importManagedExchangeFile(goodBytes(), deps, {
-      besideId: "listed-id",
+      besideIds: ["listed-id", "second-id"],
     });
 
     expect(deps.reviveSpent).toHaveBeenCalledWith(
       expect.anything(),
       "2026-07-14T12:00:00.000Z",
-      { besideId: "listed-id" },
+      { besideIds: ["listed-id", "second-id"] },
     );
     expect(deps.installed).toHaveLength(1);
   });

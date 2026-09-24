@@ -1641,20 +1641,22 @@ installs a runnable record to call; the list's backup import asks on it, a
 scoped restore reports it after reviving (below), and the command-line pair
 import matches on the secret alone:
 
-**A live record whose agreed terms and `side` equal the imported record's names
-that record, and the import installs nothing unless the operator confirms
-installing beside it.** A live record is one no hand-off and no migration has
+**Every live record whose agreed terms and `side` equal the imported record's
+is named, and the import installs nothing unless the operator confirms
+installing beside them.** A live record is one no hand-off and no migration has
 spent. The agreed terms are the part of the linkage terms a partner refuses an
 exchange over when its copy differs -- every field but this party's own
 `identity` and the terms' `date` (`partnerBoundTerms`, `@psilink/core`) --
 compared in canonical form. A record with no `side` matches nothing. The code:
-`findLiveCopyByTermsAndSide` (`apps/web/src/psi/managed/managedLiveCopyMatch.ts`).
+`findLiveCopiesByTermsAndSide` (`apps/web/src/psi/managed/managedLiveCopyMatch.ts`).
 
 Equal terms and side is a heuristic: two separate exchanges with one partner
 can share both. So the match is a question, never a refusal. The operator is
-shown the record's name and chooses to open it, to cancel (nothing is written),
-or to install the backup beside it. A confirmed import names the record it goes
-beside, and a second record matching the rule is asked about in turn.
+shown every matching record's name in one question and chooses to open one of
+them, to cancel (nothing is written), or to install the backup beside them. The
+matches are named together and acknowledged by one confirm: a confirmed import
+names every record it goes beside, and only a match that confirm did not name
+-- one added since the question -- is asked about again.
 
 #### Restoring a migration-spent record from its backup
 

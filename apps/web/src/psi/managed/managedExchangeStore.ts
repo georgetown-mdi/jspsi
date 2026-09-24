@@ -39,7 +39,7 @@ import {
   safeParseManagedExchangeRecord,
   standingCompromiseResponse,
 } from "./managedExchangeRecord";
-import { findLiveCopyByTermsAndSide } from "./managedLiveCopyMatch";
+import { findLiveCopiesByTermsAndSide } from "./managedLiveCopyMatch";
 import { foldElapsedWindowsUnderResponse } from "./managedSchedule";
 import { parseManagedLocalState } from "./managedLocalStateShape";
 
@@ -1329,9 +1329,10 @@ export async function persistManagedExchangeOutputDirectory(
  * - `"held"` -- a LIVE record holds the artifact's secret already. The caller
  *   refuses the import, naming that record's `label`.
  * - `"live-copy"` -- an import not scoped to a record found no live record
- *   holding the artifact's secret, and one with its agreed terms and side
- *   ({@link findLiveCopyByTermsAndSide}). The caller names that record and
- *   imports only on the operator's word, passing its `id` back as `besideId`.
+ *   holding the artifact's secret, and one or more with its agreed terms and
+ *   side not yet acknowledged ({@link findLiveCopiesByTermsAndSide}), listed
+ *   in `copies`. The caller names them all and imports only on the operator's
+ *   word, passing every `id` back in `besideIds`.
  * - `"other-exchange"` -- a restore scoped to one record found the artifact is
  *   not that record's backup: it does not hold the secret that migration-spent
  *   record holds.
@@ -1346,16 +1347,19 @@ export type ManagedReviveOutcome =
   | { kind: "handed-off"; handoff: ManagedSpentHandoff; label: string }
   | { kind: "custody-unreadable"; label: string }
   | { kind: "held"; label: string }
-  | { kind: "live-copy"; id: string; label: string }
+  | {
+      kind: "live-copy";
+      copies: ReadonlyArray<{ id: string; label: string }>;
+    }
   | { kind: "other-exchange" }
   | { kind: "no-match" };
 
 /** What a backup import asks of the reconciliation beyond the artifact itself. */
 export interface ManagedReviveOptions {
-  /** The live record the operator confirmed installing beside, which the
+  /** The live records the operator confirmed installing beside, which the
    * terms-and-side rule then passes over. Unused by a scoped restore, which
    * never asks. */
-  besideId?: string;
+  besideIds?: ReadonlyArray<string>;
   /** The migration-spent record a scoped restore brings back: the artifact must
    * hold that record's secret, and any other file is `"other-exchange"`. The
    * operator chose that record, so no live record is named for them to decide
@@ -1379,10 +1383,11 @@ export interface ManagedReviveOptions {
  * 3. A scoped restore whose artifact is not `restoreInto`'s refuses.
  * 4. A LIVE match refuses: it is this exchange, and a second live copy of one
  *    secret splits at the first rotation either side makes.
- * 5. On an import not scoped by `restoreInto`, a live record with the
- *    artifact's agreed terms and side, other than `besideId`, is named for the
- *    operator to decide on ({@link findLiveCopyByTermsAndSide}): its secret may
- *    have rotated past the artifact's. A scoped restore skips this step: the
+ * 5. On an import not scoped by `restoreInto`, the live records with the
+ *    artifact's agreed terms and side, other than those in `besideIds`, are
+ *    named together for the operator to decide on
+ *    ({@link findLiveCopiesByTermsAndSide}): a secret may have rotated past
+ *    the artifact's. A scoped restore skips this step: the
  *    operator chose the record, and the secret match confirms it.
  * 6. A match spent by the DEVICE MIGRATION is revived in place: the record's
  *    fields are updated from the artifact (keeping its own `id` and any
@@ -1593,16 +1598,15 @@ async function reconcileImportedSecret(
             return;
           }
           if (source === "backup" && options.restoreInto === undefined) {
-            const liveCopy = findLiveCopyByTermsAndSide(
+            const liveCopies = findLiveCopiesByTermsAndSide(
               liveRecords,
               reconstructed,
-              options.besideId,
+              options.besideIds,
             );
-            if (liveCopy !== undefined) {
+            if (liveCopies.length > 0) {
               outcome = {
                 kind: "live-copy",
-                id: liveCopy.id,
-                label: liveCopy.label,
+                copies: liveCopies.map(({ id, label }) => ({ id, label })),
               };
               return;
             }
@@ -1643,7 +1647,7 @@ async function reconcileImportedSecret(
           const sameTerms =
             options.restoreInto === undefined
               ? undefined
-              : findLiveCopyByTermsAndSide(liveRecords, revived);
+              : findLiveCopiesByTermsAndSide(liveRecords, revived)[0];
           outcome = {
             kind: "revived",
             record: revived,

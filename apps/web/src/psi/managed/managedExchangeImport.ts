@@ -180,24 +180,22 @@ export class ManagedImportAlreadyHeldError extends Error {
 
 /**
  * Raised when a backup import stops to ask: no record holds the artifact's
- * secret, but a live one has its agreed terms and side, so it may be the same
- * exchange run past the backup. Nothing is written. Holds that record's `id`,
- * which an import the operator confirms passes back as `besideId`, and its
- * label (which may be empty) so the surface can name it.
+ * secret, but one or more live ones have its agreed terms and side, so one may
+ * be the same exchange run past the backup. Nothing is written. Holds every
+ * such record's `id`, which an import the operator confirms passes back in
+ * `besideIds`, and its label (which may be empty) so the surface can name it.
  */
 export class ManagedImportLiveCopyError extends Error {
-  /** The live record the backup may be an older copy of. */
-  readonly id: string;
-  /** Its operator label; empty when the operator named nothing. */
-  readonly label: string;
+  /** The live records the backup may be an older copy of, each with its
+   * operator label (empty when the operator named nothing). */
+  readonly copies: ReadonlyArray<{ id: string; label: string }>;
 
-  constructor(id: string, label: string) {
+  constructor(copies: ReadonlyArray<{ id: string; label: string }>) {
     super(
       "a managed exchange with this backup's terms and side already runs in this browser, so the import waits for confirmation",
     );
     this.name = "ManagedImportLiveCopyError";
-    this.id = id;
-    this.label = label;
+    this.copies = copies;
   }
 }
 
@@ -290,9 +288,10 @@ function grantsMissingHere(
  * before any write), then reconciles it per exchange: revives a migration-spent
  * match in place (already marked imported and backed-up in the same transaction);
  * refuses a match handed off by a route of its own, one whose saved state cannot
- * be read, and a live match; stops to ask where a live record has the artifact's
- * agreed terms and side, unless `options.besideId` names it; otherwise installs
- * a fresh record and marks it imported and backed-up as of the import instant.
+ * be read, and a live match; stops to ask where live records have the artifact's
+ * agreed terms and side, unless `options.besideIds` names them all; otherwise
+ * installs a fresh record and marks it imported and backed-up as of the import
+ * instant.
  * Returns the revived or installed record, with the grants it does not hold that
  * its source did.
  *
@@ -317,7 +316,7 @@ function grantsMissingHere(
  * @throws {ManagedImportAlreadyHeldError} if a live record holds the artifact's
  *   secret; nothing is written.
  * @throws {ManagedImportLiveCopyError} if the import is not scoped and a live
- *   record other than `besideId` has the artifact's agreed terms and side;
+ *   record not in `besideIds` has the artifact's agreed terms and side;
  *   nothing is written.
  * @throws {ManagedImportOtherExchangeError} if `restoreInto` is set and the
  *   artifact is not that record's backup; nothing is written.
@@ -348,7 +347,7 @@ export async function importManagedExchange(
   if (reconciled.kind === "held")
     throw new ManagedImportAlreadyHeldError(reconciled.label);
   if (reconciled.kind === "live-copy")
-    throw new ManagedImportLiveCopyError(reconciled.id, reconciled.label);
+    throw new ManagedImportLiveCopyError(reconciled.copies);
   if (reconciled.kind === "other-exchange")
     throw new ManagedImportOtherExchangeError();
   const installed = await deps.install(reconstructed);
@@ -442,13 +441,13 @@ export class ManagedImportBackupNotConfigurationError extends Error {
  * @throws {ManagedConfigurationRefusedError} if a configuration fails the
  *   exchange-file schema, or is one this app cannot hold.
  * @throws Every refusal {@link importManagedExchange} raises, on the backup leg;
- *   `options.besideId` reaches that leg alone.
+ *   `options.besideIds` reaches that leg alone.
  * @throws {ZodError} if the backup file fails its schema, or the install does.
  */
 export async function importManagedExchangeFile(
   source: string,
   deps: ManagedImportDeps = defaultDeps,
-  options: Pick<ManagedReviveOptions, "besideId"> = {},
+  options: Pick<ManagedReviveOptions, "besideIds"> = {},
 ): Promise<ManagedImportResult> {
   if (managedImportFileKind(source) === "backup")
     return importManagedExchange(source, deps, options);

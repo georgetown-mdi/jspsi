@@ -163,21 +163,52 @@ export const LIVE_COPY_IMPORT_TITLE =
   "This may be an exchange you already have";
 
 /**
- * What a backup import says when it stops to ask: a listed exchange has the
- * same agreed terms and side, and a different secret, which is what an older
- * backup of that exchange looks like once it has run since. Two exchanges can
- * share both, so the operator decides; nothing is imported until they do.
+ * What a backup import says when it stops to ask: one or more listed exchanges
+ * have the same agreed terms and side, and a different secret, which is what
+ * an older backup of one of them looks like once it has run since. Two
+ * exchanges can share both, so the operator decides; nothing is imported until
+ * they do. `labels` holds each listed exchange's label, empty where unnamed.
  */
-export function liveCopyImportReason(label: string): string {
-  const named = label === "" ? "An exchange in the list" : `"${label}"`;
+export function liveCopyImportReason(labels: ReadonlyArray<string>): string {
+  if (labels.length === 1) {
+    const [label] = labels;
+    const named = label === "" ? "An exchange in the list" : `"${label}"`;
+    return (
+      `${named} has the same terms and the same side as this backup, with a ` +
+      "different secret -- an older backup of it would look like this. " +
+      "Nothing was imported. If it is the same exchange, open it from the " +
+      "list instead: a second copy falls behind the first time either one " +
+      "runs, and then cannot connect to your partner. If it is a separate " +
+      "exchange with the same terms, add this backup beside it."
+    );
+  }
+  const names = labels.filter((label) => label !== "").map((l) => `"${l}"`);
+  const unnamed = labels.length - names.length;
+  const listed =
+    names.length === 0
+      ? ""
+      : ` (${names.join(", ")}${unnamed === 0 ? "" : `, and ${unnamed} with no name`})`;
   return (
-    `${named} has the same terms and the same side as this backup, with a ` +
-    "different secret -- an older backup of it would look like this. Nothing " +
-    "was imported. If it is the same exchange, open it from the list instead: " +
-    "a second copy falls behind the first time either one runs, and then " +
-    "cannot connect to your partner. If it is a separate exchange with the " +
-    "same terms, add this backup beside it."
+    `${labels.length} exchanges in the list${listed} have the same terms and ` +
+    "the same side as this backup, with different secrets -- an older backup " +
+    "of one of them would look like this. Nothing was imported. If it is one " +
+    "of these exchanges, open that one from the list instead: a second copy " +
+    "falls behind the first time either one runs, and then cannot connect to " +
+    "your partner. If it is a separate exchange with the same terms, add this " +
+    "backup beside them."
   );
+}
+
+/** The button opening the listed exchange at `index` of `labels` from
+ * {@link liveCopyImportReason}'s alert: one button when one exchange is
+ * listed, else one per exchange, named by its label or its place in the list. */
+export function liveCopyOpenLabel(
+  labels: ReadonlyArray<string>,
+  index: number,
+): string {
+  if (labels.length === 1) return "Open the listed exchange";
+  const label = labels[index];
+  return label === "" ? `Open listed exchange ${index + 1}` : `Open "${label}"`;
 }
 
 /** The confirm on {@link liveCopyImportReason}'s alert. */

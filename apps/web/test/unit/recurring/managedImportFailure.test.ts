@@ -22,6 +22,7 @@ import {
   alreadyHeldBackupImportReason,
   importFailureReason,
   liveCopyImportReason,
+  liveCopyOpenLabel,
   otherExchangeRestoreReason,
 } from "@recurring/managedImportFailure";
 import {
@@ -259,7 +260,7 @@ describe("the artifact this build writes", () => {
  * listed exchange is involved. */
 const LISTED_EXCHANGE_REASONS: Array<[string, string]> = [
   ["already held", alreadyHeldBackupImportReason("Riverbend quarterly")],
-  ["a possible live copy", liveCopyImportReason("Riverbend quarterly")],
+  ["a possible live copy", liveCopyImportReason(["Riverbend quarterly"])],
   ["a scoped restore", otherExchangeRestoreReason("Riverbend quarterly")],
 ];
 
@@ -268,15 +269,40 @@ describe("what a backup import says about an exchange already listed", () => {
     for (const [, reason] of LISTED_EXCHANGE_REASONS)
       expect(reason).toContain('"Riverbend quarterly"');
     expect(alreadyHeldBackupImportReason("")).toMatch(/^That exchange /);
-    expect(liveCopyImportReason("")).toMatch(/^An exchange in the list /);
+    expect(liveCopyImportReason([""])).toMatch(/^An exchange in the list /);
     expect(otherExchangeRestoreReason("")).toContain("this exchange");
   });
 
   test("the possible live copy states nothing was imported and both ways on", () => {
-    const reason = liveCopyImportReason("Riverbend quarterly");
+    const reason = liveCopyImportReason(["Riverbend quarterly"]);
     expect(reason).toContain("Nothing was imported.");
     expect(reason).toContain("open it from the list");
     expect(reason).toContain("add this backup beside it");
+  });
+
+  test("several possible live copies are named in one reason", () => {
+    const reason = liveCopyImportReason(["Riverbend quarterly", "", "Weekly"]);
+    expect(reason).toMatch(/^3 exchanges in the list /);
+    expect(reason).toContain(
+      '"Riverbend quarterly", "Weekly", and 1 with no name',
+    );
+    expect(reason).toContain("Nothing was imported.");
+    expect(reason).toContain("add this backup beside them");
+    expect(liveCopyImportReason(["", ""])).toMatch(
+      /^2 exchanges in the list have /,
+    );
+  });
+
+  test("one open button for one copy, one per copy for several", () => {
+    expect(liveCopyOpenLabel(["Riverbend quarterly"], 0)).toBe(
+      "Open the listed exchange",
+    );
+    expect(liveCopyOpenLabel(["Riverbend quarterly", ""], 0)).toBe(
+      'Open "Riverbend quarterly"',
+    );
+    expect(liveCopyOpenLabel(["Riverbend quarterly", ""], 1)).toBe(
+      "Open listed exchange 2",
+    );
   });
 
   test("no reason advises clearing the list to import", () => {

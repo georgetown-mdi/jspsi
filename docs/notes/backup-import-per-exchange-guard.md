@@ -24,9 +24,9 @@ A backup holds one exchange, so the guard is a lookup against that exchange rath
 The missing live-copy check is two checks:
 
 - **By secret**: a live record holding the backup's secret is this exchange, and the import refuses, naming it -- the rule the command-line pair import already had.
-- **By agreed terms and side**, for a live copy whose secret has rotated past the file's: the import names the record and installs nothing unless the operator confirms installing beside it.
+- **By agreed terms and side**, for a live copy whose secret has rotated past the file's: the import names every such record in one question and installs nothing unless the operator confirms, once, installing beside them.
 
-Equal terms and side is a heuristic -- two separate exchanges with one partner can share both -- so the second check asks rather than refuses, the warn-and-guide stance `CLAUDE.md` sets for the operator's own choices. The rule is stated once in the spec and implemented once (`findLiveCopyByTermsAndSide`), so the pair import can apply it to a stored exchange its key file no longer matches.
+Equal terms and side is a heuristic -- two separate exchanges with one partner can share both -- so the second check asks rather than refuses, the warn-and-guide stance `CLAUDE.md` sets for the operator's own choices. The rule is stated once in the spec and implemented once (`findLiveCopiesByTermsAndSide`), so the pair import can apply it to a stored exchange its key file no longer matches.
 
 ## Options weighed
 

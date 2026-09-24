@@ -48,19 +48,24 @@ export function sameAgreedTermsAndSide(
 }
 
 /**
- * The first of `liveRecords` that {@link sameAgreedTermsAndSide} matches
- * `imported` to, other than the record `besideId` names: the one the operator
- * already confirmed installing beside. The caller passes only live records --
- * none a hand-off or a migration spent -- and settles a secret match before
- * asking, since a secret match is the same exchange by construction.
+ * Every one of `liveRecords` that {@link sameAgreedTermsAndSide} matches
+ * `imported` to, in store order, other than those `acknowledgedIds` names: the
+ * ones the operator already confirmed installing beside. The caller passes
+ * only live records -- none a hand-off or a migration spent -- and settles a
+ * secret match before asking, since a secret match is the same exchange by
+ * construction.
  */
-export function findLiveCopyByTermsAndSide(
+export function findLiveCopiesByTermsAndSide(
   liveRecords: Iterable<ManagedExchangeRecord>,
   imported: ManagedExchangeRecord,
-  besideId?: string,
-): ManagedExchangeRecord | undefined {
+  acknowledgedIds: ReadonlyArray<string> = [],
+): Array<ManagedExchangeRecord> {
+  const copies: Array<ManagedExchangeRecord> = [];
   for (const record of liveRecords)
-    if (record.id !== besideId && sameAgreedTermsAndSide(record, imported))
-      return record;
-  return undefined;
+    if (
+      !acknowledgedIds.includes(record.id) &&
+      sameAgreedTermsAndSide(record, imported)
+    )
+      copies.push(record);
+  return copies;
 }

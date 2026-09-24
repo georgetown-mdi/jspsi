@@ -21,6 +21,7 @@ import {
   spendManagedExchangeIfCurrent,
 } from "@psi/managed/managedExchangeStore";
 import {
+  ManagedImportLiveCopyError,
   ManagedImportOtherExchangeError,
   importManagedExchange,
   restoreManagedExchangeFromBackup,
@@ -758,8 +759,7 @@ describe("a backup reconciles per exchange, whatever else is listed", () => {
 
     await expect(importManagedExchange(bytes)).rejects.toMatchObject({
       name: "ManagedImportLiveCopyError",
-      id: live.id,
-      label: live.label,
+      copies: [{ id: live.id, label: live.label }],
     });
     expect(await listManagedExchanges()).toEqual(before);
     expect(await getManagedLocalState(live.id)).toBeUndefined();
@@ -775,7 +775,7 @@ describe("a backup reconciles per exchange, whatever else is listed", () => {
     const before = await getManagedExchange(live.id);
 
     const { record } = await importManagedExchange(bytes, undefined, {
-      besideId: live.id,
+      besideIds: [live.id],
     });
 
     expect(record.id).not.toBe(live.id);
@@ -783,7 +783,43 @@ describe("a backup reconciles per exchange, whatever else is listed", () => {
     expect(await listManagedExchanges()).toHaveLength(2);
   });
 
-  test("a confirm for one copy does not pass over a second", async () => {
+  test("two copies are named together, and one confirm installs beside both", async () => {
+    const live = await createRunnableExchange(newExchange());
+    const second = await createRunnableExchange(
+      newExchange({ label: "Riverbend again" }),
+    );
+    const bytes = serializeManagedExchangeArtifact(
+      encodeManagedExchangeArtifact(
+        runnableManagedExchangeOrRefuse({
+          ...live,
+          sharedSecret: generateSharedSecret(),
+        }),
+      ),
+    );
+
+    const asked: unknown = await importManagedExchange(bytes).catch(
+      (error: unknown) => error,
+    );
+    expect(asked).toBeInstanceOf(ManagedImportLiveCopyError);
+    expect((asked as ManagedImportLiveCopyError).copies).toHaveLength(2);
+    expect((asked as ManagedImportLiveCopyError).copies).toEqual(
+      expect.arrayContaining([
+        { id: live.id, label: live.label },
+        { id: second.id, label: second.label },
+      ]),
+    );
+    expect(await listManagedExchanges()).toHaveLength(2);
+
+    const { record } = await importManagedExchange(bytes, undefined, {
+      besideIds: [live.id, second.id],
+    });
+
+    expect((await listManagedExchanges()).map(({ id }) => id).sort()).toEqual(
+      [live.id, second.id, record.id].sort(),
+    );
+  });
+
+  test("a confirm naming one copy does not pass over a second", async () => {
     const live = await createRunnableExchange(newExchange());
     const second = await createRunnableExchange(
       newExchange({ label: "Riverbend again" }),
@@ -798,10 +834,10 @@ describe("a backup reconciles per exchange, whatever else is listed", () => {
     );
 
     await expect(
-      importManagedExchange(bytes, undefined, { besideId: live.id }),
+      importManagedExchange(bytes, undefined, { besideIds: [live.id] }),
     ).rejects.toMatchObject({
       name: "ManagedImportLiveCopyError",
-      id: second.id,
+      copies: [{ id: second.id, label: second.label }],
     });
     expect(await listManagedExchanges()).toHaveLength(2);
   });

@@ -1962,11 +1962,11 @@ happens depends on that one exchange (the rules:
   refusal names the take-back on that exchange's page.
 
 An exchange that has run since the backup was taken has a newer secret than the
-file, so the secret no longer finds it. When a listed exchange has the same
-agreed terms and the same side as the backup, the import stops and names it:
-open that entry if it is the same exchange -- a second copy falls behind the
-first time either one runs -- or add the backup beside it if it is a separate
-exchange with the same terms. Nothing is imported until you choose.
+file, so the secret no longer finds it. When listed exchanges have the same
+agreed terms and the same side as the backup, the import stops and names them
+all at once: open an entry if it is the same exchange -- a second copy falls
+behind the first time either one runs -- or add the backup beside them if it is
+a separate exchange with the same terms. Nothing is imported until you choose.
 
 **A refused file says why it was refused.** The artifact's schema
 rejects an unknown key and an unknown version outright (see

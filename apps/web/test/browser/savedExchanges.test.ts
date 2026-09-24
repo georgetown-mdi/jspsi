@@ -920,6 +920,52 @@ describe("saved list route: a backup reconciles against the exchange it holds", 
     expect(await getManagedExchange(listed.id)).toEqual(rotated);
   });
 
+  test("two copies with the backup's terms are named together; one confirm adds it beside both", async () => {
+    const listed = await createRunnableExchange(newExchange());
+    const bytes = backupOf(listed);
+    await persistManagedExchangeRotation(listed.id, {
+      sharedSecret: generateSharedSecret(),
+      expires: null,
+    });
+    const second = await createRunnableExchange(
+      newExchange({ label: "Riverbend again" }),
+    );
+    const before = await listManagedExchanges();
+    app.render(createElement(SavedExchanges));
+    await expect
+      .element(page.getByRole("button", { name: "Import a file" }))
+      .toBeInTheDocument();
+
+    await chooseIn(LIST_IMPORT, bytes);
+    await expect
+      .element(page.getByText(LIVE_COPY_IMPORT_TITLE))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("2 exchanges in the list", { exact: false }))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByRole("button", { name: 'Open "Riverbend quarterly"' }))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByRole("button", { name: 'Open "Riverbend again"' }))
+      .toBeInTheDocument();
+
+    await page.getByRole("button", { name: "Cancel" }).click();
+    expect(page.getByText(LIVE_COPY_IMPORT_TITLE).query()).toBeNull();
+    expect(await listManagedExchanges()).toEqual(before);
+
+    await chooseIn(LIST_IMPORT, bytes);
+    await page.getByRole("button", { name: LIVE_COPY_IMPORT_CONFIRM }).click();
+    await expect
+      .poll(async () => (await listManagedExchanges()).length)
+      .toBe(3);
+    expect(page.getByText(LIVE_COPY_IMPORT_TITLE).query()).toBeNull();
+    expect(await getManagedExchange(listed.id)).toEqual(
+      before.find(({ id }) => id === listed.id),
+    );
+    expect(await getManagedExchange(second.id)).toEqual(second);
+  });
+
   test("a moved row restores from its own backup in place", async () => {
     const moved = await createRunnableExchange(newExchange());
     const bytes = backupOf(moved);
